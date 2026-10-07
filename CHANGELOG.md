@@ -8,6 +8,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Features
 
+- **The coverage bot** keeps one comment on every pull request: the coverage of its tests against that of `main`, and every file whose coverage changes, from the reports that the checks keep. It never runs the code of a pull request. A Nextcloud app keeps its report now too.
 - **Every repository records the decisions that shape it** in `docs/decisions/`, from a template, with an index and a first record; they belong to the project. The blueprint records its own there, such as Copier with an update bot, the curated changelog, the settings as code, Renovate and the beta channel.
 - **Every release carries its SBOM as CycloneDX too,** the format that many tools of companies read, beside SPDX, and **an OpenVEX document** that states every advisory that `osv-scanner.toml` accepts, with its reason, as one that doesn't affect the release, so that the scanners of the users stop reporting it. The release check verifies both.
 - **The flaky-test bot:** when the tests or end-to-end tests fail for the first time, their failed jobs run once more. A job that passes then is flaky; the bot lists it in one issue, *Flaky tests*, so that its test gets fixed, and the pull request is no longer blocked by chance. A job that fails again stays red.
