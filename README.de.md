@@ -33,7 +33,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 | Art | Stack | Prüfungen | Auslieferung |
 | --- | --- | --- | --- |
 | Home-Assistant-Integration | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, Tests, HACS, hassfest | ein Zip-Asset für HACS |
-| Nextcloud-App | PHP 8.2, Composer | php-cs-fixer, Psalm, PHPUnit | signiertes Paket in den App Store |
+| Nextcloud-App | PHP 8.2, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, PHPUnit mit jeder Zeile abgedeckt | signiertes Paket in den App Store |
 | GitHub Action | Python 3.12 des Runners, Composite Action | Ruff, mypy, Tests, ein Lauf der Action | Release-Tags und ein mitwandernder Major-Tag |
 | Python-Paket | Python 3.12, Hatchling | Ruff, mypy, Tests, Build | PyPI, Trusted Publishing |
 | Node-Paket | Node 24, TypeScript | tsc, node:test mit voller Abdeckung, Pack | npm mit Provenance |

@@ -769,3 +769,8 @@ def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
     assert bot.index('if [[ "$ahead" == 0 ]]; then') < bot.index("--method DELETE")
     for kept in ("release-please--*", "renovate/*", "dependabot/*"):
         assert kept in bot, kept
+
+
+def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "vendor/bin/psalm --taint-analysis" in check
