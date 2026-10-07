@@ -41,6 +41,10 @@ allow-licenses:
 # Test-only dependencies of the platforms in stacks/, which no project ships: the
 # public API of Nextcloud and the cloud parts of Home Assistant's test base.
 allow-dependencies-licenses:
+  # The tools of the blueprint bot: Copier's Jinja filters (GPL-3.0-only) and
+  # typing-extensions, whose license the review reads wrongly.
+  - pkg:pypi/jinja2-ansible-filters
+  - pkg:pypi/typing-extensions
   - pkg:composer/nextcloud/ocp
   - pkg:pypi/hass-nabucasa
   - pkg:pypi/snitun

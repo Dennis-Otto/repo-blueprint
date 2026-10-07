@@ -740,3 +740,10 @@ def test_the_settings_of_the_project_join_the_checks(root: Path) -> None:
         item["context"] for item in checks["parameters"]["required_status_checks"]
     ]
     assert contexts == ["check (python)", "reuse", "e2e"]
+
+
+def test_the_output_is_utf8_where_it_can_be(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A StringIO has no reconfigure; a console of Windows gets UTF-8 for the marks.
+    monkeypatch.setattr("sys.stdout", io.StringIO())
+    monkeypatch.setattr("sys.stderr", io.StringIO())
+    blueprint.utf8_output()
