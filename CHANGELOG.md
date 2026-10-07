@@ -6,6 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **Every repository gets a documentation website:** MkDocs with the Material theme makes the pages of `docs/` a website with search and a light and a dark theme, German pages under `docs/de/` included, and the new Docs workflow publishes it on GitHub Pages with every change of `main`. Every pull request builds it strictly, as the new required check `docs`, so that a broken link or a page outside the menu fails; a repository without a website passes it. The settings bot turns GitHub Pages on from the new table `[pages]` of the settings as code. `mkdocs.yml` belongs to the project, and a page can include a file of the repository, such as the README, with `--8<--`, so that nothing is written twice.
+- **The blueprint's own website** is its documentation now, and [the dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) moved to `dashboard/` of it.
+
 ## [0.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.4.0...v0.5.0) (2026-10-07)
 
 ### Features
@@ -20,8 +25,6 @@ the next release, or lists the pull requests when there is none.
 - **A beta channel:** where the repository variable `BETA_CHANNEL` is true, every `feat`, `fix` or `perf` that reaches `main` becomes a beta of the next release, such as `1.3.0-beta.2`, with the text of Unreleased as its notes. It is built, signed and verified like a release and published as a prerelease, which HACS, npm and PyPI offer only to those who ask for betas, and it announces nothing.
 - **The Markdown of every document is linted** by markdownlint, as the new required check `markdown` of the Lint workflow. The rules of the blueprint are in `.github/markdownlint.jsonc`; a project changes them in its own `.markdownlint.jsonc`.
 - **Every release is announced in the discussions,** in their category Announcements, with its notes; prereleases are not. New repositories have discussions, with forms for questions and ideas that belong to the project; an existing repository turns them on with `copier update --data discussions=true`.
-- **Every repository gets a documentation website:** MkDocs with the Material theme makes the pages of `docs/` a website with search and a light and a dark theme, German pages under `docs/de/` included, and the new Docs workflow publishes it on GitHub Pages with every change of `main`. Every pull request builds it strictly, as the new required check `docs`, so that a broken link or a page outside the menu fails; a repository without a website passes it. The settings bot turns GitHub Pages on from the new table `[pages]` of the settings as code. `mkdocs.yml` belongs to the project, and a page can include a file of the repository, such as the README, with `--8<--`, so that nothing is written twice.
-- **The blueprint's own website** is its documentation now, and [the dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) moved to `dashboard/` of it.
 
 ### Bug fixes
 
