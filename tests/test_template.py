@@ -747,3 +747,11 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
     )
     assert settings["pages"] == {"build_type": "workflow"}
     assert "docs" in settings["branch"]["required_checks"]
+
+
+def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
+    bot = (ROOT / ".github/workflows/cleanup.yml").read_text(encoding="utf-8")
+    # Only a branch that main holds completely goes.
+    assert bot.index('if [[ "$ahead" == 0 ]]; then') < bot.index("--method DELETE")
+    for kept in ("release-please--*", "renovate/*", "dependabot/*"):
+        assert kept in bot, kept
