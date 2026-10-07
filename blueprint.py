@@ -30,6 +30,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 CONFIG = Path(".github/repository.toml")
 # The GitHub Actions app, which reports the checks of the workflows.
@@ -1024,6 +1025,86 @@ def third_party_notices(version: str, sbom: Json) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ------------------------------------------------------------------------- coverage
+
+COVERAGE_MARKER = "<!-- coverage-bot -->"
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """The lines of each file that the tests run, from a Cobertura report."""
+
+    files: dict[str, tuple[int, int]]
+
+    @classmethod
+    def parse(cls, report: str) -> Coverage:
+        files: dict[str, tuple[int, int]] = {}
+        for element in ElementTree.fromstring(report).iter("class"):
+            name = element.get("filename", "")
+            lines = element.findall("./lines/line")
+            covered = sum(1 for line in lines if int(line.get("hits", "0")) > 0)
+            have = files.get(name, (0, 0))
+            files[name] = (have[0] + covered, have[1] + len(lines))
+        return cls(files)
+
+    @property
+    def total(self) -> tuple[int, int]:
+        return (
+            sum(covered for covered, _ in self.files.values()),
+            sum(lines for _, lines in self.files.values()),
+        )
+
+
+def percent(covered: int, lines: int) -> float:
+    return 100.0 if lines == 0 else 100 * covered / lines
+
+
+def coverage_comment(head: Coverage, base: Coverage | None) -> str:
+    """The comment of the coverage bot: the coverage of a pull request, compared with
+    that of main, and every file whose coverage differs."""
+    covered, lines = head.total
+    now = percent(covered, lines)
+    rows = [
+        COVERAGE_MARKER,
+        "### Coverage",
+        "",
+        "| | Lines | Covered |",
+        "| --- | ---: | ---: |",
+        f"| This pull request | {lines} | {now:.2f} % |",
+    ]
+    if base is None:
+        rows += ["", "main has no coverage report yet to compare with."]
+        return "\n".join([*rows, ""])
+    before = percent(*base.total)
+    rows.append(f"| main | {base.total[1]} | {before:.2f} % ({now - before:+.2f}) |")
+    changed = []
+    for name in sorted(set(head.files) | set(base.files)):
+        old = base.files.get(name)
+        new = head.files.get(name)
+        old_text = "new" if old is None else f"{percent(*old):.2f} %"
+        new_text = "removed" if new is None else f"{percent(*new):.2f} %"
+        if old_text != new_text:
+            changed.append(f"| `{name}` | {old_text} | {new_text} |")
+    if changed:
+        rows += ["", "| File | main | This pull request |", "| --- | ---: | ---: |"]
+        rows += changed
+    else:
+        rows += ["", "No file changes its coverage."]
+    return "\n".join([*rows, ""])
+
+
+def coverage_command(arguments: argparse.Namespace) -> int:
+    head = Coverage.parse(Path(arguments.head).read_text(encoding="utf-8"))
+    base_file = Path(arguments.base)
+    base = (
+        Coverage.parse(base_file.read_text(encoding="utf-8"))
+        if base_file.is_file()
+        else None
+    )
+    sys.stdout.write(coverage_comment(head, base))
+    return 0
+
+
 # ----------------------------------------------------------------------------- vex
 
 OPENVEX = "https://openvex.dev/ns/v0.2.0"
@@ -1135,6 +1216,14 @@ def main(
         "version", help="the version of the beta, such as 1.3.0-beta.2"
     )
     beta_parser.add_argument("--file", default="CHANGELOG.md")
+    coverage_parser = commands.add_parser(
+        "coverage",
+        help="the comment of the coverage bot: a Cobertura report against that of main",
+    )
+    coverage_parser.add_argument("head", help="the report of the pull request")
+    coverage_parser.add_argument(
+        "base", nargs="?", default="", help="the report of main, if there is one"
+    )
     vex_parser = commands.add_parser(
         "vex",
         help="the OpenVEX document of a release from osv-scanner.toml, for the release "
@@ -1151,6 +1240,12 @@ def main(
     notices_parser.add_argument("sbom", help="the SBOM of GitHub's dependency graph")
     arguments = parser.parse_args(argv)
 
+    if arguments.command == "coverage":
+        try:
+            return coverage_command(arguments)
+        except (OSError, ElementTree.ParseError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
     if arguments.command in ("changelog", "unreleased", "beta", "vex", "notices"):
         try:
             return changelog_command(arguments)

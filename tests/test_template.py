@@ -684,3 +684,14 @@ def test_every_project_records_its_decisions(
         if record.name != "0000-template.md":
             assert f"]({record.name})" in index, record.name
     assert (decisions / "0000-template.md").is_file()
+
+
+def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
+    bot = (ROOT / ".github/workflows/coverage.yml").read_text(encoding="utf-8")
+    watched = set(re.findall(r"^      - (CI .+)$", bot, re.MULTILINE))
+    for path in (ROOT / ".github/workflows").glob("ci-*.yml"):
+        ci = path.read_text(encoding="utf-8")
+        if "name: coverage\n" in ci:
+            name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
+            assert name, path
+            assert name[1] in watched, name[1]
