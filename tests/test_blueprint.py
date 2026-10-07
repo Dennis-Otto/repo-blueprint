@@ -104,6 +104,11 @@ class FakeGitHub:
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
         self.environments: dict[str, dict[str, Any]] = {}
         self.og_image = False
+        self.community: dict[str, Any] = {
+            "health_percentage": 100,
+            "description": "A demo",
+            "files": {"readme": {"url": "x"}, "contributing": {"url": "x"}},
+        }
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
             "spare": {"color": "ffffff", "description": "Not in the configuration"},
@@ -164,12 +169,16 @@ class FakeGitHub:
                 self.branch_policy,
             ),
             (r"/environments/([\w-]+)/secrets", self.secrets),
+            (r"/community/profile", self.community_profile),
         ):
             match = re.fullmatch(pattern, path)
             if match:
                 result: tuple[int, Any] = handler(method, body, *match.groups())
                 return result
         raise AssertionError(f"unexpected request {method} {path}")
+
+    def community_profile(self, method: str, body: Any) -> tuple[int, Any]:
+        return 200, self.community
 
     def repository(self, method: str, body: Any) -> tuple[int, Any]:
         if method == "PATCH":
@@ -747,3 +756,36 @@ def test_the_output_is_utf8_where_it_can_be(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr("sys.stdout", io.StringIO())
     monkeypatch.setattr("sys.stderr", io.StringIO())
     blueprint.utf8_output()
+
+
+def test_a_gap_in_the_community_profile_is_reported(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.community = {
+        "health_percentage": 71,
+        "description": None,
+        "files": {
+            "readme": {"url": "x"},
+            "code_of_conduct": None,
+            "issue_template": None,
+        },
+    }
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    assert "community profile: GitHub has 71, the configuration wants 100" in out
+    assert (
+        "add code_of_conduct, issue_template, description: "
+        "https://github.com/Dennis-Otto/demo/community" in out
+    )
+
+
+def test_a_profile_without_its_files_names_what_it_counts(github: FakeGitHub) -> None:
+    github.community = {"health_percentage": 85, "description": "A demo"}
+
+    (drift,) = blueprint.check_community(blueprint.Api(github), REPO)
+
+    assert drift.manual == (
+        "add what the profile counts: https://github.com/Dennis-Otto/demo/community"
+    )

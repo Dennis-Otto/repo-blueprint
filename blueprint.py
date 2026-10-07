@@ -482,6 +482,32 @@ def apply_environments(api: Api, repo: str, drift: list[Drift]) -> None:
             )
 
 
+# --------------------------------------------------------------------------- community
+
+
+def check_community(api: Api, repo: str) -> list[Drift]:
+    """GitHub's community standards: every file that the profile of the repository
+    counts. The blueprint brings them all, so a gap is one that a person made."""
+    profile = api.get(f"repos/{repo}/community/profile") or {}
+    health = profile.get("health_percentage", 0)
+    if health == 100:
+        return []
+    missing = sorted(
+        name for name, file in (profile.get("files") or {}).items() if file is None
+    )
+    if not profile.get("description"):
+        missing.append("description")
+    what = ", ".join(missing) or "what the profile counts"
+    return [
+        Drift(
+            "community profile",
+            100,
+            health,
+            manual=f"add {what}: https://github.com/{repo}/community",
+        )
+    ]
+
+
 # --------------------------------------------------------------------------- labels
 
 
@@ -601,6 +627,7 @@ def check(api: Api, repo: str, settings: Settings) -> list[Drift]:
         + check_variables(api, repo, settings.variables)
         + check_environments(api, repo, settings.environments)
         + check_labels(api, repo, settings.labels)
+        + check_community(api, repo)
     )
 
 
