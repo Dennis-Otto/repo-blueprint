@@ -12,6 +12,13 @@ the next release, or lists the pull requests when there is none.
 - **An existing repository keeps out the samples of the template:** `copier update` brought back the sample code and tests that an adopted repository had deleted. The new question `sample_code`, which an existing repository answers with no, leaves them out.
 - The link check leaves out the badges of workflows, which GitHub serves only once a workflow is on `main`.
 
+## [0.3.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.0...v0.3.1) (2026-10-07)
+
+
+### Bug fixes
+
+* keep release notes when rebuilding, and keep samples out of existing repositories ([#34](https://github.com/Dennis-Otto/repo-blueprint/issues/34)) ([bba4521](https://github.com/Dennis-Otto/repo-blueprint/commit/bba4521c8f41c5fbe68835abebb8a28525f0e499))
+
 ## [0.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.2.0...v0.3.0) (2026-10-07)
 
 ### Features
