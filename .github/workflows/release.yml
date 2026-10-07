@@ -9,8 +9,9 @@ name: Release
 # as a draft, with its tag. The jobs below attach the package, its SBOM and its
 # signed provenance, write the notes, make the release public, and then deliver it
 # where the repository variable PUBLISH_TO says: pypi, npm, ghcr, hacs,
-# nextcloud-appstore, github-action or none. A release that only updates
-# dependencies merges itself once its checks pass.
+# nextcloud-appstore, github-action or none. Last, verify-release.yml checks the
+# release as its users can. A release that only updates dependencies merges itself
+# once its checks pass.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -510,3 +511,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -fa "$MAJOR" -m "$TAG" "$TAG^{commit}"
           git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "refs/tags/$MAJOR"
+
+  verify:
+    name: verify
+    needs: [release-please, publish, pypi, npm, ghcr, nextcloud-appstore, github-action]
+    # After the delivery, whichever of them ran: the release as its users check it.
+    if: always() && needs.publish.result == 'success'
+    permissions:
+      attestations: read
+      contents: read
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag }}
