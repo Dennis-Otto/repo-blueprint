@@ -19,6 +19,20 @@ the next release, or lists the pull requests when there is none.
 - The release pull request shows its introduction as text above a line, not as a large heading: Markdown read the line under it as the underline of a heading.
 - The pin of `shivammathur/setup-php` names its tag as it is, `2.37.2`, so that zizmor no longer reports the comment as a mismatch and the Findings workflow passes.
 
+## [0.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.2...v0.4.0) (2026-10-07)
+
+
+### Features
+
+* add OSV-Scanner, area labels, a changelog check and licence notices ([#42](https://github.com/Dennis-Otto/repo-blueprint/issues/42)) ([4ba381a](https://github.com/Dennis-Otto/repo-blueprint/commit/4ba381a3ff34f900b03fc782a0a6bde60f5411d0))
+* let the settings bot apply the settings as code ([#41](https://github.com/Dennis-Otto/repo-blueprint/issues/41)) ([6ecc139](https://github.com/Dennis-Otto/repo-blueprint/commit/6ecc1392f7b2cd4dc6db84806da73565dd11d565))
+
+
+### Bug fixes
+
+* name the tag of setup-php as it is ([#38](https://github.com/Dennis-Otto/repo-blueprint/issues/38)) ([9be7086](https://github.com/Dennis-Otto/repo-blueprint/commit/9be70869ee8d02a61889507bf37337e166dc6164))
+* show the introduction of the release pull request as text ([#40](https://github.com/Dennis-Otto/repo-blueprint/issues/40)) ([4d6574f](https://github.com/Dennis-Otto/repo-blueprint/commit/4d6574f222f51c2791f50bf0d472cb1d6d37c792))
+
 ## [0.3.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.1...v0.3.2) (2026-10-07)
 
 ### Bug fixes
