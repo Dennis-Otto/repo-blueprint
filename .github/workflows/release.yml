@@ -96,12 +96,18 @@ jobs:
           # as main requires, and it starts the checks.
           GH_TOKEN: ${{ steps.app.outputs.token }}
           GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.release.outputs.pr }}
         run: |
           set -euo pipefail
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
           raw=(-H "Accept: application/vnd.github.raw+json")
-          gh pr list --state open --label "autorelease: pending" --json headRefName --jq '.[].headRefName' |
+          # The open release pull requests; one that release-please has just created may
+          # not carry its label yet, so its own output counts as well.
+          {
+            gh pr list --state open --label "autorelease: pending" --json headRefName --jq '.[].headRefName'
+            if [[ -n "$PR" ]]; then jq -r .headBranchName <<<"$PR"; fi
+          } | sort -u |
             while read -r branch; do
               head="$(gh api "repos/$GH_REPO/git/ref/heads/$branch" --jq .object.sha)"
               version="$(gh api "${raw[@]}" "repos/$GH_REPO/contents/.release-please-manifest.json?ref=$head" | jq -r '.["."]')"
