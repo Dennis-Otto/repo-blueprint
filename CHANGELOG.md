@@ -6,6 +6,44 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.0...v0.4.0) (2026-10-07)
+
+
+### Features
+
+* attach the provenance of a release as in-toto JSON lines too ([#28](https://github.com/Dennis-Otto/repo-blueprint/issues/28)) ([fb73981](https://github.com/Dennis-Otto/repo-blueprint/commit/fb7398127309095aa47bc98dd881b225dd9a2718))
+* catch the merges of workflows, report conflicts, welcome and guard pushes ([#9](https://github.com/Dennis-Otto/repo-blueprint/issues/9)) ([e5b8b03](https://github.com/Dennis-Otto/repo-blueprint/commit/e5b8b0356724058af231ede805eeb8fde3466c6a))
+* check workflow security, links, licenses and settings ([#10](https://github.com/Dennis-Otto/repo-blueprint/issues/10)) ([2066a37](https://github.com/Dennis-Otto/repo-blueprint/commit/2066a374ea8a671a681632464b7a6e56b86663e8))
+* fuzz the Python projects with Atheris and the Node packages with fast-check ([#3](https://github.com/Dennis-Otto/repo-blueprint/issues/3)) ([81c1359](https://github.com/Dennis-Otto/repo-blueprint/commit/81c1359be5591d9289902d892c5b8e30e6184f57))
+* give every project a dev container for VS Code and Codespaces ([#19](https://github.com/Dennis-Otto/repo-blueprint/issues/19)) ([25abe0a](https://github.com/Dennis-Otto/repo-blueprint/commit/25abe0af955971e23c6dbaa9bb664e3d6309a2a7))
+* keep pull requests that wait for auto-merge up to date ([#6](https://github.com/Dennis-Otto/repo-blueprint/issues/6)) ([a7ad6a3](https://github.com/Dennis-Otto/repo-blueprint/commit/a7ad6a34f6941ab6543804216bce2bfe692ee0f1))
+* leave the action test to the project, check the newest Python and sign every commit ([#13](https://github.com/Dennis-Otto/repo-blueprint/issues/13)) ([a0118dd](https://github.com/Dennis-Otto/repo-blueprint/commit/a0118dd4330673cae950e7a2f244f94b1394e7f5))
+* leave the issue forms to the project and start them richer ([#17](https://github.com/Dennis-Otto/repo-blueprint/issues/17)) ([1d0ab5c](https://github.com/Dennis-Otto/repo-blueprint/commit/1d0ab5cab167d98be93c2c7e1db61c08819f7882))
+* let a project add its own settings and copyright holders ([#12](https://github.com/Dennis-Otto/repo-blueprint/issues/12)) ([b05400d](https://github.com/Dennis-Otto/repo-blueprint/commit/b05400d0886a700549f01e9dba9e44b716c468a1))
+* raise max-version of a Nextcloud app with every new major version of Nextcloud ([#27](https://github.com/Dennis-Otto/repo-blueprint/issues/27)) ([e38bd79](https://github.com/Dennis-Otto/repo-blueprint/commit/e38bd79a52db501710dd2280dedead1f2716f223))
+* record the network traffic of every job with Harden-Runner ([#20](https://github.com/Dennis-Otto/repo-blueprint/issues/20)) ([ebc7d85](https://github.com/Dennis-Otto/repo-blueprint/commit/ebc7d85d83a77b7f2fbe1ff49ab378b6cf903097))
+* register a Nextcloud app in the App Store with a workflow of the app ([#30](https://github.com/Dennis-Otto/repo-blueprint/issues/30)) ([dce379a](https://github.com/Dennis-Otto/repo-blueprint/commit/dce379ab53a7be539f2339aa98c1c1558ee0a445))
+* **settings:** create the labels of labels.toml with the settings ([#5](https://github.com/Dennis-Otto/repo-blueprint/issues/5)) ([5f76ffb](https://github.com/Dennis-Otto/repo-blueprint/commit/5f76ffbf3184297048995751fd1a247c7e191d18))
+* show every repository on a dashboard ([#26](https://github.com/Dennis-Otto/repo-blueprint/issues/26)) ([1c7e86f](https://github.com/Dennis-Otto/repo-blueprint/commit/1c7e86f56d08d9018590e44746f58d6c1acf7093))
+* start the blueprint ([d6bad3b](https://github.com/Dennis-Otto/repo-blueprint/commit/d6bad3b0663a89975c0e5334d939cb87dd67dd08))
+* test properties every night, show the coverage and suit HACS ([#11](https://github.com/Dennis-Otto/repo-blueprint/issues/11)) ([b53ec72](https://github.com/Dennis-Otto/repo-blueprint/commit/b53ec72929909b0ca97d2186218732f98119ecf1))
+* verify every release as its users can ([#21](https://github.com/Dennis-Otto/repo-blueprint/issues/21)) ([612e634](https://github.com/Dennis-Otto/repo-blueprint/commit/612e63420683205fcf16b1a08149d7d58b1cf71b))
+* write the release changelog from Unreleased and keep the release pull request current ([#15](https://github.com/Dennis-Otto/repo-blueprint/issues/15)) ([b20402f](https://github.com/Dennis-Otto/repo-blueprint/commit/b20402f3a263bde2f2ecef0f8f7760e714c45c8f))
+
+
+### Bug fixes
+
+* **deps-dev:** Bump typescript from 5.9.3 to 7.0.2 in /stacks/node in the node-stack group ([#8](https://github.com/Dennis-Otto/repo-blueprint/issues/8)) ([c55cc32](https://github.com/Dennis-Otto/repo-blueprint/commit/c55cc32967df8f4a456e7a27d6de06fc33f69808))
+* **deps:** Bump alpine from 3.22 to 3.24 in /stacks/container ([#1](https://github.com/Dennis-Otto/repo-blueprint/issues/1)) ([3d44918](https://github.com/Dennis-Otto/repo-blueprint/commit/3d44918eaafa8f7a98e0f53af210c065fc40ad12))
+* **deps:** Bump the dev-container-features group across 2 directories with 2 updates ([#32](https://github.com/Dennis-Otto/repo-blueprint/issues/32)) ([6ccda81](https://github.com/Dennis-Otto/repo-blueprint/commit/6ccda81c2cecd3b8feb054ac07f607ef81cf2e54))
+* **deps:** keep the version of each dev container and move only its digest ([#25](https://github.com/Dennis-Otto/repo-blueprint/issues/25)) ([028a4db](https://github.com/Dennis-Otto/repo-blueprint/commit/028a4db5b3112021943545c144a9282ff306760a))
+* give Nextcloud apps the checks and package rules that the existing apps have ([#29](https://github.com/Dennis-Otto/repo-blueprint/issues/29)) ([d9b0e60](https://github.com/Dennis-Otto/repo-blueprint/commit/d9b0e602746adad79cb0c821884b7837d81ad15c))
+* leave the fuzz targets and their requirements to the project ([#7](https://github.com/Dennis-Otto/repo-blueprint/issues/7)) ([82455ec](https://github.com/Dennis-Otto/repo-blueprint/commit/82455ecb75ce267848a99e4813e8538a24f3fce3))
+* let updates reach every file of the blueprint, and give dev containers Docker and Node ([#31](https://github.com/Dennis-Otto/repo-blueprint/issues/31)) ([1674ee0](https://github.com/Dennis-Otto/repo-blueprint/commit/1674ee01bfa52dd35906bf5909f104cfca45de82))
+* **settings:** accept rulesets whose bypass list the release app can't see ([#24](https://github.com/Dennis-Otto/repo-blueprint/issues/24)) ([e91116b](https://github.com/Dennis-Otto/repo-blueprint/commit/e91116bb5d0ad85602ba84cc2349a459994fb1c0))
+* tag the license choice for REUSE and quote a path in the variants ([9385ca5](https://github.com/Dennis-Otto/repo-blueprint/commit/9385ca5a5b8e41ec27d095a2c59fd3e04ca014c2))
+* write the changelog into a release pull request that was just created ([#18](https://github.com/Dennis-Otto/repo-blueprint/issues/18)) ([d45caad](https://github.com/Dennis-Otto/repo-blueprint/commit/d45caadb5d55b4ac8b57c2caeb2b2c3d78d4d93b))
+
 ## [0.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.2.0...v0.3.0) (2026-10-07)
 
 ### Features
