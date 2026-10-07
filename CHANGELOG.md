@@ -22,6 +22,7 @@ the next release, or lists the pull requests when there is none.
 - **Nextcloud apps** check more on every change: `composer validate` and `composer audit`, `appinfo/info.xml` against the schema of the App Store, the PHP of `templates/`, and the package that krankerl builds, with the project's `scripts/check-package.sh`, which the release runs before and after signing as well. Lines of `info.xml` marked `x-release-please-version`, such as screenshot URLs at a tag, follow each release.
 - The dev container has Docker for every project, for the end-to-end tests and the social preview, and Node for a Home Assistant integration or a Nextcloud app with a frontend; its Features are locked and kept current by Dependabot. The CI of a Home Assistant integration with a `package.json` sets up Node for the tests of its frontend.
 - The README describes how an existing repository takes the blueprint.
+- Every `.gitignore` leaves out the local settings of Claude Code, and `.gitattributes` marks the lock files as generated, so that GitHub folds them in diffs.
 
 ### Bug fixes
 
