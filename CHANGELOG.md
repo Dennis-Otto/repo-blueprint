@@ -1,5 +1,22 @@
 # Changelog
 
+All notable changes, by release. Each pull request that changes something for
+users describes it under Unreleased. The release bot makes that text the section of
+the next release, or lists the pull requests when there is none.
+
+## Unreleased
+
+### Features
+
+- **The release bot writes the changelog that the pull requests write.** What they describe under `## Unreleased` of `CHANGELOG.md` becomes the section of the next release, and its notes show that text followed by every pull request. Without a text, the section lists the pull requests as before. The version still follows from their titles (`fix` a patch, `feat` a minor, `!` a major version), decided anew with every merge, and the release pull request says so.
+- **The release pull request stays up to date with `main`**, also after merges that change none of its notes, such as `docs:` or `chore:` pull requests.
+- **Prereleases:** a version such as `2.0.0-beta.1`, set with a line `Release-As: 2.0.0-beta.1` in a pull request, becomes a prerelease. It keeps the text of Unreleased for the release that follows, leaves the major tag of an action where it is, and goes to the tag `next` on npm.
+
+### Bug fixes
+
+- The first release no longer drops the introduction of the changelog.
+- `LICENSE` ends with one line break, also for the SPDX texts that end with a blank line, such as MIT.
+
 ## [0.2.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.1.0...v0.2.0) (2026-10-07)
 
 
