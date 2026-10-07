@@ -304,6 +304,8 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/pull_request_template.md",
         ".github/ISSUE_TEMPLATE/config.yml",
         ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/DISCUSSION_TEMPLATE/q-a.yml",
+        ".github/DISCUSSION_TEMPLATE/ideas.yml",
         ".github/social-preview/Dockerfile",
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
@@ -553,3 +555,37 @@ def test_every_project_starts_with_area_rules(
     rules = (projects[kind] / ".github/labeler.yml").read_text(encoding="utf-8")
     # No areas yet: an empty mapping, which the labeler accepts.
     assert rules.rstrip().endswith("{}")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_releases_are_announced_in_the_discussions(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    for form in ("q-a.yml", "ideas.yml"):
+        assert (project / ".github/DISCUSSION_TEMPLATE" / form).is_file(), form
+    release = workflows(project)["release.yml"]
+    publish = release[release.index("  publish:") :]
+    publish = publish[: publish.index("\n  pypi:")]
+    assert "discussions: write" in publish
+    # Only a release for everybody, not a prerelease, is announced.
+    assert publish.index("exit 0") < publish.index("--discussion-category")
+    assert "has_discussions = true" in (project / ".github/repository.toml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_a_project_without_discussions(tmp_path: Path) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="generic",
+        discussions=False,
+    )
+
+    assert not (project / ".github/DISCUSSION_TEMPLATE").exists()
+    assert "discussions" not in (project / "SUPPORT.md").read_text(encoding="utf-8")
+    assert "has_discussions = false" in (project / ".github/repository.toml").read_text(
+        encoding="utf-8"
+    )
