@@ -43,6 +43,9 @@ jobs:
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          # Only what the update of a branch, its label and its comment need.
+          permission-contents: write
+          permission-pull-requests: write
       - name: Bring the pull requests that wait for auto-merge up to date
         if: steps.app.outputs.token != ''
         env:

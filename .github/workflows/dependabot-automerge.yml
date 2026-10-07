@@ -21,7 +21,6 @@ jobs:
     name: Queue verified routine update
     if: >-
       !github.event.repository.fork &&
-      github.actor == 'dependabot[bot]' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:

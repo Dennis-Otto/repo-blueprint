@@ -292,7 +292,6 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         "LICENSE",
         "SECURITY.md",
         "SUPPORT.md",
-        "pyproject.toml",
         "release-please-config.json",
         "scripts/check.sh",
         ".github/CODEOWNERS",
@@ -304,7 +303,6 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/social-preview/Dockerfile",
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
-        ".github/dependency-review.yml",
     ):
         assert (ROOT / name).read_text(encoding="utf-8") == (project / name).read_text(
             encoding="utf-8"
@@ -324,3 +322,12 @@ def test_python_projects_are_fuzzed(projects: dict[str, Path], kind: str) -> Non
     assert "FuzzingID" not in (project / ".github/findings.toml").read_text(
         encoding="utf-8"
     )
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_gets_the_settings_tool(
+    projects: dict[str, Path], kind: str
+) -> None:
+    copy = (projects[kind] / ".github/blueprint.py").read_text(encoding="utf-8")
+
+    assert copy == (ROOT / "blueprint.py").read_text(encoding="utf-8")
