@@ -925,9 +925,18 @@ def current_repo(api: Api) -> str:
     return result.stdout.strip()
 
 
+def utf8_output() -> None:
+    """Windows consoles default to a code page without the marks of the checklist."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
+
 def main(
     argv: Sequence[str] | None = None, api: Api | None = None, root: Path = Path()
 ) -> int:
+    utf8_output()
     parser = argparse.ArgumentParser(
         prog="blueprint.py", description=__doc__.split("\n\n")[0]
     )
