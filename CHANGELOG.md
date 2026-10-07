@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **The dashboard shows the health of every repository:** the line coverage and the share of mutants that the tests catch, from the reports of the last runs on `main`, the stable releases and the median time to the first answer to a new issue over 90 days, and the median time of the CI, each with an arrow when it moved since a week ago. The history of one entry a day lives in the published dashboard itself, in `history.json`.
+
 ### Bug fixes
 
 - The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.

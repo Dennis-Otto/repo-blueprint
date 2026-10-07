@@ -121,7 +121,7 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 
 ## Dashboard
 
-[The dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) shows every public repository of the owner at a glance: the release of the blueprint it is on, its latest release and the pull request of the next one, its open pull requests and those in conflict, the last run of its main workflows on `main`, and its OpenSSF Scorecard. The Dashboard workflow builds it with `dashboard.py` every six hours and publishes it on GitHub Pages, under the website of the blueprint, which is this documentation. It shows only what is public anyway, no finding of code scanning and no alert of Dependabot.
+[The dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) shows every public repository of the owner at a glance: the release of the blueprint it is on, its latest release and the pull request of the next one, its open pull requests and those in conflict, the last run of its main workflows on `main`, and its OpenSSF Scorecard; a second table shows the health of each: the line coverage and the share of mutants that the tests catch, the stable releases and the median time to the first answer to an issue over 90 days, and the median time of the CI, each with an arrow when it moved since a week ago, from the history that the published dashboard keeps. The Dashboard workflow builds it with `dashboard.py` every six hours and publishes it on GitHub Pages, under the website of the blueprint, which is this documentation. It shows only what is public anyway, no finding of code scanning and no alert of Dependabot.
 
 ## How the blueprint works
 
