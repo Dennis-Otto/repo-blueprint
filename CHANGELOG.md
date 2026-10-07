@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
+
 ### Features
 
 - **SLSA Build Level 3:** a release is built in a reusable workflow of its own, `build-release.yml`, isolated from the rest of the release workflow, and the signed provenance of every asset names it as the build. The release check verifies that; releases from before are accepted by its weekly run only.
