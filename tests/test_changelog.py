@@ -237,3 +237,31 @@ def test_the_command_line_adds_an_entry(tmp_path: Path) -> None:
         blueprint.main(["unreleased", "Changed", "- c", "--file", str(tmp_path / "x")])
         == 2
     )
+
+
+def test_a_beta_shows_what_main_holds() -> None:
+    notes = blueprint.beta_notes("1.3.0-beta.2", main_changelog())
+
+    assert notes.startswith("A beta of the next release, 1.3.0, ")
+    assert CURATED.strip() in notes
+    assert notes.endswith("\n")
+
+
+def test_a_beta_without_text_says_so() -> None:
+    notes = blueprint.beta_notes("1.3.0-beta.1", main_changelog(unreleased=""))
+
+    assert "not described yet" in notes
+    assert blueprint.beta_notes("1.3.0-beta.1", PREAMBLE) == notes
+
+
+def test_the_command_line_writes_the_notes_of_a_beta(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(main_changelog(), encoding="utf-8")
+
+    assert blueprint.main(["beta", "1.3.0-beta.1", "--file", str(changelog)]) == 0
+
+    assert capsys.readouterr().out == blueprint.beta_notes(
+        "1.3.0-beta.1", main_changelog()
+    )

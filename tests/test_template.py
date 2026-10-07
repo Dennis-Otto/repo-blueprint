@@ -647,3 +647,15 @@ def test_renovate_runs_one_release_everywhere() -> None:
 def test_the_branch_bot_leaves_the_branches_of_renovate_alone() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
     assert 'startswith("renovate/") | not' in text
+
+
+def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    job = release[release.index("  release-please:") : release.index("\n  assets:")]
+    assert "vars.BETA_CHANNEL == 'true'" in job
+    assert "github.event_name == 'push'" in job
+    assert "steps.release.outputs.release_created != 'true'" in job
+    # Dependency updates make no beta; the outputs carry a beta like a release.
+    assert '"${BASH_REMATCH[3]}" == deps*' in job
+    assert "steps.release.outputs.tag_name || steps.beta.outputs.tag" in job
+    assert 'gh release create "v$version" --draft --prerelease' in job

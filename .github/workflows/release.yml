@@ -43,10 +43,11 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    # A release, or a beta of the next one; the jobs below handle both alike.
     outputs:
-      created: ${{ steps.release.outputs.release_created }}
-      tag: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      created: ${{ steps.release.outputs.release_created == 'true' || steps.beta.outputs.tag != '' }}
+      tag: ${{ steps.release.outputs.tag_name || steps.beta.outputs.tag }}
+      version: ${{ steps.release.outputs.version || steps.beta.outputs.version }}
       major: ${{ steps.release.outputs.major }}
     steps:
       - name: Record the network traffic of the job
@@ -163,6 +164,49 @@ jobs:
             exit 0
           fi
           gh pr merge --repo "$GITHUB_REPOSITORY" --auto --squash "$number"
+      - name: Publish a beta of the next release
+        id: beta
+        # Where the repository variable BETA_CHANNEL is true, every change for users
+        # that reaches main, a feat, fix or perf, becomes a beta of the next release,
+        # such as 1.3.0-beta.2, for the testers who take prereleases. The jobs below
+        # build and publish it as a prerelease, which announces nothing.
+        if: >-
+          vars.BETA_CHANNEL == 'true' && github.event_name == 'push' &&
+          steps.release.outputs.release_created != 'true' && steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          subject="${MESSAGE%%$'\n'*}"
+          pattern='^(feat|fix|perf)(\(([a-z0-9._/-]+)\))?(!)?: '
+          if [[ ! "$subject" =~ $pattern || "${BASH_REMATCH[3]}" == deps* ]]; then
+            echo "No change for users, so no beta." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          branch="$(gh pr list --state open --label "autorelease: pending" --json headRefName --jq '.[0].headRefName // ""')"
+          if [[ -z "$branch" ]]; then
+            echo "No release pull request, so no beta." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          next="$(gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/$GH_REPO/contents/.release-please-manifest.json?ref=$branch" | jq -r '.["."]')"
+          if [[ "$next" == *-* ]]; then
+            echo "The next release, $next, is a prerelease itself, so no beta." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          last="$(gh release list --limit 100 --json tagName --jq '.[].tagName' |
+            sed -n "s/^v$next-beta\.\([0-9]*\)$/\1/p" | sort -n | tail -n 1)"
+          version="$next-beta.$(( ${last:-0} + 1 ))"
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" beta "$version" > "$RUNNER_TEMP/beta.md"
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/v$version" -f sha="$GITHUB_SHA" --silent
+          gh release create "v$version" --draft --prerelease --verify-tag \
+            --title "v$version" --notes-file "$RUNNER_TEMP/beta.md"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "The beta v$version of $next is on its way." >> "$GITHUB_STEP_SUMMARY"
 
   assets:
     name: release assets
