@@ -769,3 +769,20 @@ def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
     assert bot.index('if [[ "$ahead" == 0 ]]; then') < bot.index("--method DELETE")
     for kept in ("release-please--*", "renovate/*", "dependabot/*"):
         assert kept in bot, kept
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_code_of_a_project_meets_mutants_every_week(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    mutation = project / ".github/workflows/mutation.yml"
+    tools = project / ".github/mutation-requirements.txt"
+    if kind in ("home-assistant", "python-package", "github-action"):
+        assert mutation.is_file()
+        assert "mutmut==" in tools.read_text(encoding="utf-8")
+    elif kind == "nextcloud-app":
+        assert mutation.is_file()
+        assert not tools.exists()
+    else:
+        assert not mutation.exists()
