@@ -1,8 +1,9 @@
 # The development tools of the blueprint: Copier for the tests of the template, the
-# tests, coverage, type checks and lint. Dependabot keeps this list and the
-# hash-pinned requirements-dev.txt current.
+# tests and their properties (Hypothesis), coverage, type checks and lint. Dependabot
+# keeps this list and the hash-pinned requirements-dev.txt current.
 copier
 coverage
+hypothesis
 mypy
 pytest
 ruff

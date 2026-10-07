@@ -1,12 +1,16 @@
 name: Release
 
-# The release bot. release-please keeps a pull request for the next release: the
-# version and the changelog from the Conventional Commit titles merged since the
-# last release. Merging it creates the release as a draft, with its tag. The jobs
-# below attach the package, its SBOM and its signed provenance, make the release
-# public, and then deliver it where the repository variable PUBLISH_TO says:
-# pypi, npm, ghcr, hacs, nextcloud-appstore, github-action or none. A release that
-# only updates dependencies merges itself once its checks pass.
+# The release bot. release-please keeps a pull request for the next release, up to
+# date with main. Its version follows from the Conventional Commit titles merged
+# since the last release (fix: a patch, feat: a minor, ! or BREAKING CHANGE: a major
+# version) and is decided anew with every merge. What the pull requests wrote under
+# "## Unreleased" of CHANGELOG.md becomes the section of the release; without it,
+# the section lists the pull requests. Merging the pull request creates the release
+# as a draft, with its tag. The jobs below attach the package, its SBOM and its
+# signed provenance, write the notes, make the release public, and then deliver it
+# where the repository variable PUBLISH_TO says: pypi, npm, ghcr, hacs,
+# nextcloud-appstore, github-action or none. A release that only updates
+# dependencies merges itself once its checks pass.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -54,6 +58,28 @@ jobs:
           # Only what the release pull request and its merge need.
           permission-contents: write
           permission-pull-requests: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Have the release pull request rebuilt on the current main
+        if: steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # release-please rebuilds its pull request only when its notes change, so a
+          # merge of a hidden type, such as docs or chore, would leave it behind main.
+          # Another description makes it rebuild the pull request on main.
+          set -euo pipefail
+          gh pr list --state open --label "autorelease: pending" --json number,headRefName \
+            --jq '.[] | "\(.number) \(.headRefName)"' |
+            while read -r number branch; do
+              behind="$(gh api "repos/$GH_REPO/compare/main...$branch" --jq .behind_by)"
+              if [[ "$behind" != 0 ]]; then
+                echo "#$number is $behind commit(s) behind main; release-please rebuilds it."
+                gh pr edit "$number" --body "The release bot rebuilds this pull request on the current main."
+              fi
+            done
       - name: Update the release pull request, or create the release
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -63,6 +89,46 @@ jobs:
           token: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Write the text of Unreleased into the release pull request
+        if: steps.app.outputs.token != ''
+        env:
+          # The commit goes through GitHub's API as the release app: GitHub signs it,
+          # as main requires, and it starts the checks.
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          raw=(-H "Accept: application/vnd.github.raw+json")
+          # The open release pull requests; one that release-please has just created may
+          # not carry its label yet, so its own output counts as well.
+          {
+            gh pr list --state open --label "autorelease: pending" --json headRefName --jq '.[].headRefName'
+            if [[ -n "$PR" ]]; then jq -r .headBranchName <<<"$PR"; fi
+          } | sort -u |
+            while read -r branch; do
+              head="$(gh api "repos/$GH_REPO/git/ref/heads/$branch" --jq .object.sha)"
+              version="$(gh api "${raw[@]}" "repos/$GH_REPO/contents/.release-please-manifest.json?ref=$head" | jq -r '.["."]')"
+              gh api "${raw[@]}" "repos/$GH_REPO/contents/CHANGELOG.md?ref=$head" > "$RUNNER_TEMP/branch.md"
+              python3 "$script" changelog release "$version" CHANGELOG.md "$RUNNER_TEMP/branch.md" > "$RUNNER_TEMP/release.md"
+              if cmp -s "$RUNNER_TEMP/release.md" "$RUNNER_TEMP/branch.md"; then
+                echo "The changelog of $version is up to date."
+                continue
+              fi
+              echo "Writing the changelog of $version into $branch."
+              jq --null-input --arg repo "$GH_REPO" --arg branch "$branch" --arg head "$head" \
+                --arg headline "chore: write the changelog of $version" \
+                --rawfile contents <(base64 --wrap=0 "$RUNNER_TEMP/release.md") \
+                '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+                  variables: {input: {
+                    branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                    expectedHeadOid: $head,
+                    message: {headline: $headline},
+                    fileChanges: {additions: [{path: "CHANGELOG.md", contents: $contents}]}}}}' |
+                gh api graphql --input - --jq .data.createCommitOnBranch.commit.oid
+            done
       - name: Merge a release of dependency updates once its checks pass
         if: steps.release.outputs.pr != '' && steps.app.outputs.token != ''
         env:
@@ -214,6 +280,17 @@ jobs:
           cp "$BUNDLE_PATH" "$ASSETS/provenance.sigstore.json"
           gh release upload "$TAG" "$ASSETS"/* --clobber --repo "$GITHUB_REPOSITORY"
 
+      - name: Write the notes, the section of the changelog with every pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/pull-requests.md"
+          python3 "$script" changelog notes "$VERSION" CHANGELOG.md "$RUNNER_TEMP/pull-requests.md" > "$RUNNER_TEMP/notes.md"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+
   publish:
     name: publish the release
     needs: [release-please, assets]
@@ -226,7 +303,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag }}
-        run: gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+        run: |
+          # A version such as 2.0.0-beta.1 is a prerelease, which HACS, npm and the
+          # like only offer to those who ask for one.
+          if [[ "$TAG" == *-* ]]; then
+            gh release edit "$TAG" --draft=false --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
+          else
+            gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+          fi
 
   pypi:
     name: deliver to PyPI
@@ -273,7 +357,10 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag }}
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.tgz'
-          npm publish ./*.tgz --provenance --access public
+          # A prerelease goes to the tag next, so that npm install keeps the release.
+          channel=latest
+          [[ "$TAG" == *-* ]] && channel=next
+          npm publish ./*.tgz --provenance --access public --tag "$channel"
 
   ghcr:
     name: deliver to GHCR
@@ -370,7 +457,8 @@ jobs:
   github-action:
     name: move the major tag
     needs: [release-please, publish]
-    if: vars.PUBLISH_TO == 'github-action'
+    # A prerelease leaves the major tag at the last release.
+    if: vars.PUBLISH_TO == 'github-action' && !contains(needs.release-please.outputs.tag, '-')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
