@@ -194,6 +194,13 @@ updates:
     open-pull-requests-limit: 3
     cooldown:
       default-days: 7
+    # The dev containers keep the Python, PHP or Node of their kind, as the CI does;
+    # only their digest moves.
+    ignore:
+      - dependency-name: "devcontainers/*"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
     commit-message:
       prefix: fix
       include: scope
