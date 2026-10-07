@@ -1,10 +1,13 @@
 # What krankerl leaves out of the app package of a release.
 .copier-answers.yml
+/.devcontainer
 .editorconfig
 .git
 .gitattributes
 .github
 .gitignore
+/.githooks
+/.lycheeignore
 .nextcloudignore
 .php-cs-fixer.cache
 .php-cs-fixer.dist.php
@@ -14,10 +17,12 @@
 /composer.lock
 /docs
 /krankerl.toml
+/lychee.toml
 /phpunit.xml
 /psalm.xml
 /release-please-config.json
 /REUSE.toml
+/screenshots
 /scripts
 /tests
 /vendor

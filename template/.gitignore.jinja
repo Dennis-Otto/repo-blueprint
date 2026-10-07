@@ -6,6 +6,18 @@ Thumbs.db
 
 # The context folder of the issue assistant
 /.issue-assistant/
+
+# Secrets, which never belong in the repository; the secret scan checks every push too.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+auth.json
+credentials*.json
+/secrets/
 [% if stack in ['python', 'home-assistant'] %]
 # Python
 __pycache__/

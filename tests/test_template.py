@@ -412,3 +412,46 @@ def test_every_project_has_a_dev_container(
         assert f"-r {requirements[kind]}" in setup
         assert (project / requirements[kind]).exists()
         assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]
+
+
+def test_a_nextcloud_app_packages_only_what_it_needs(
+    projects: dict[str, Path],
+) -> None:
+    project = projects["nextcloud-app"]
+    ignored = (project / ".nextcloudignore").read_text(encoding="utf-8").split("\n")
+    for path in (
+        ".devcontainer",
+        ".githooks",
+        ".lycheeignore",
+        "lychee.toml",
+        "screenshots",
+    ):
+        assert f"/{path}" in ignored, path
+    config = json.loads(
+        (project / "release-please-config.json").read_text(encoding="utf-8")
+    )["packages"]["."]
+    # Lines of info.xml with the version elsewhere, such as screenshots at a tag.
+    assert {"type": "generic", "path": "appinfo/info.xml"} in config["extra-files"]
+    review = (project / ".github/dependency-review.yml").read_text(encoding="utf-8")
+    assert "pkg:composer/netresearch/jsonmapper" in review
+
+
+def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
+    pins = [
+        dict(
+            re.findall(
+                r"(KRANKERL_(?:VERSION|SHA256)): (\S+)",
+                (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"),
+            )
+        )
+        for name in ("ci-php.yml", "release.yml")
+    ]
+    assert len(pins[0]) == 2
+    assert pins[0] == pins[1]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_secrets_stay_out_of_git(projects: dict[str, Path], kind: str) -> None:
+    ignored = (projects[kind] / ".gitignore").read_text(encoding="utf-8").split("\n")
+    for pattern in (".env", "*.pem", "*.key", "auth.json", "!.env.example"):
+        assert pattern in ignored, pattern

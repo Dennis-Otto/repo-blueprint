@@ -245,6 +245,10 @@ jobs:
           echo "$KRANKERL_SHA256  $RUNNER_TEMP/krankerl.deb" | sha256sum --check --strict
           sudo dpkg --install "$RUNNER_TEMP/krankerl.deb"
           krankerl package
+          # The project's own checks of what its package holds, before and after signing.
+          if [[ -f scripts/check-package.sh ]]; then
+            bash scripts/check-package.sh "build/artifacts/$app_id.tar.gz" unsigned
+          fi
           umask 077
           printf '%s' "$APP_PRIVATE_KEY" > "$RUNNER_TEMP/app.key"
           curl --fail --location --silent --show-error --output "$RUNNER_TEMP/app.crt" \
@@ -260,6 +264,9 @@ jobs:
             --path="$RUNNER_TEMP/signing/$app_id"
           test -s "$RUNNER_TEMP/signing/$app_id/appinfo/signature.json"
           tar --create --gzip --file "$ASSETS/$app_id.tar.gz" --directory "$RUNNER_TEMP/signing" "$app_id"
+          if [[ -f scripts/check-package.sh ]]; then
+            bash scripts/check-package.sh "$ASSETS/$app_id.tar.gz" signed
+          fi
           openssl dgst -sha512 -sign "$RUNNER_TEMP/app.key" -out "$ASSETS/$app_id.tar.gz.sig" "$ASSETS/$app_id.tar.gz"
           openssl x509 -in "$RUNNER_TEMP/app.crt" -pubkey -noout > "$RUNNER_TEMP/app.pub"
           openssl dgst -sha512 -verify "$RUNNER_TEMP/app.pub" -signature "$ASSETS/$app_id.tar.gz.sig" "$ASSETS/$app_id.tar.gz"

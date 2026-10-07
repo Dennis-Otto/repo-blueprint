@@ -17,9 +17,13 @@ the next release, or lists the pull requests when there is none.
 - **The issue forms belong to the project** after the first copy, like its labels, because their areas and fields are its own. They start richer: an introduction with what happens with an issue and where vulnerabilities go, steps to reproduce, an area for feature requests too, and a checklist.
 - **A dev container** for VS Code and GitHub Codespaces in every project: the image of its kind by digest, which Dependabot keeps current, the tools of the checks and the pre-push hook set up once it is created.
 - Every project gets the `docker` label, for the Dependabot updates of the image of its social preview.
+- **Nextcloud apps** check more on every change: `composer validate` and `composer audit`, `appinfo/info.xml` against the schema of the App Store, the PHP of `templates/`, and the package that krankerl builds, with the project's `scripts/check-package.sh`, which the release runs before and after signing as well. Lines of `info.xml` marked `x-release-please-version`, such as screenshot URLs at a tag, follow each release.
 
 ### Bug fixes
 
+- A Nextcloud app keeps its icons in `img/`, and its package leaves out the dev container, the hooks, the link check and `screenshots/`. psalm's JSON mapper (OSL-3.0) passes the dependency review as a tool of the checks.
+- Every `.gitignore` keeps secrets out: `.env`, keys, certificates and credential files.
+- The weekly release verification waits for the next release when the latest one is older than the release workflow of the blueprint.
 - The first release no longer drops the introduction of the changelog.
 - The settings bot no longer fails on the bypass list of the rulesets: the token of the release app gets the rulesets without it.
 - `LICENSE` ends with one line break, also for the SPDX texts that end with a blank line, such as MIT.
@@ -52,8 +56,3 @@ the next release, or lists the pull requests when there is none.
 * **deps:** Bump alpine from 3.22 to 3.24 in /stacks/container ([#1](https://github.com/Dennis-Otto/repo-blueprint/issues/1)) ([3d44918](https://github.com/Dennis-Otto/repo-blueprint/commit/3d44918eaafa8f7a98e0f53af210c065fc40ad12))
 * leave the fuzz targets and their requirements to the project ([#7](https://github.com/Dennis-Otto/repo-blueprint/issues/7)) ([82455ec](https://github.com/Dennis-Otto/repo-blueprint/commit/82455ecb75ce267848a99e4813e8538a24f3fce3))
 * tag the license choice for REUSE and quote a path in the variants ([9385ca5](https://github.com/Dennis-Otto/repo-blueprint/commit/9385ca5a5b8e41ec27d095a2c59fd3e04ca014c2))
-
-## Changelog
-
-All notable changes, by release. The release bot writes each section from the
-titles of the merged pull requests.
