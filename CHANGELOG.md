@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.4.0...v0.5.0) (2026-10-07)
+
 ### Features
 
 - **The coverage bot** keeps one comment on every pull request: the coverage of its tests against that of `main`, and every file whose coverage changes, from the reports that the checks keep. It never runs the code of a pull request. A Nextcloud app keeps its report now too.
@@ -22,27 +24,6 @@ the next release, or lists the pull requests when there is none.
 ### Bug fixes
 
 - The release check of a Nextcloud app looks for the release on the page of the app in the App Store, which links its signed package at once; the list of all apps, which it read before, shows a new release only hours later, so the check failed after every release.
-
-## [0.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.4.0...v0.5.0) (2026-10-07)
-
-
-### Features
-
-* announce every release in the discussions ([#43](https://github.com/Dennis-Otto/repo-blueprint/issues/43)) ([28b3bd4](https://github.com/Dennis-Otto/repo-blueprint/commit/28b3bd45fd2b7fb48ca05e648bebbd69db0369b0))
-* attach the SBOM as CycloneDX and the accepted advisories as OpenVEX ([#49](https://github.com/Dennis-Otto/repo-blueprint/issues/49)) ([5750cf7](https://github.com/Dennis-Otto/repo-blueprint/commit/5750cf7749f3cbc50aaebf24495f4fe815e8d831))
-* comment the coverage of every pull request against that of main ([#54](https://github.com/Dennis-Otto/repo-blueprint/issues/54)) ([24fbbe3](https://github.com/Dennis-Otto/repo-blueprint/commit/24fbbe307580a8d3ce3cb5df2353f31bd694a4e4))
-* cover every line of a Nextcloud app with its tests ([#47](https://github.com/Dennis-Otto/repo-blueprint/issues/47)) ([d5cb77c](https://github.com/Dennis-Otto/repo-blueprint/commit/d5cb77c362c921067560f46f7f34d532bf63da99))
-* keep every repository current with Renovate ([#46](https://github.com/Dennis-Otto/repo-blueprint/issues/46)) ([f706c36](https://github.com/Dennis-Otto/repo-blueprint/commit/f706c365d41065973c4ca7722ba6cb9c5d6d3cbf))
-* keep the community profile of every repository at 100 % ([#52](https://github.com/Dennis-Otto/repo-blueprint/issues/52)) ([6a0cba8](https://github.com/Dennis-Otto/repo-blueprint/commit/6a0cba8629dbf341387f5d6409c368bc515439d3))
-* lint the Markdown of every document ([#44](https://github.com/Dennis-Otto/repo-blueprint/issues/44)) ([baa543d](https://github.com/Dennis-Otto/repo-blueprint/commit/baa543d367784acb7b9ad9bbd1a3916027ae8238))
-* publish a beta of the next release after every change for users ([#48](https://github.com/Dennis-Otto/repo-blueprint/issues/48)) ([ee6b75d](https://github.com/Dennis-Otto/repo-blueprint/commit/ee6b75d43983b5b325b2b869af2982380d132561))
-* record the decisions that shape every repository ([#51](https://github.com/Dennis-Otto/repo-blueprint/issues/51)) ([2334c54](https://github.com/Dennis-Otto/repo-blueprint/commit/2334c54842c8c1668fc55ec36d31db21d42313db))
-* run failed tests once more and report the flaky ones ([#50](https://github.com/Dennis-Otto/repo-blueprint/issues/50)) ([100a97c](https://github.com/Dennis-Otto/repo-blueprint/commit/100a97cfeb83847fdd93f2c2e8346492fbd7a39c))
-
-
-### Bug fixes
-
-* find a new release of a Nextcloud app on the page of the app ([#53](https://github.com/Dennis-Otto/repo-blueprint/issues/53)) ([3830b8e](https://github.com/Dennis-Otto/repo-blueprint/commit/3830b8e626fcc5a20d501ab4d23ce6f06810fbb4))
 
 ## [0.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.2...v0.4.0) (2026-10-07)
 
