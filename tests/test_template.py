@@ -310,6 +310,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
         ".github/markdownlint.jsonc",
+        ".github/renovate-blueprint.json5",
         ".markdownlint-cli2.jsonc",
         ".markdownlint.jsonc",
         ".devcontainer/devcontainer.json",
@@ -601,3 +602,48 @@ def test_a_nextcloud_app_covers_every_line(projects: dict[str, Path]) -> None:
     )
     ci = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
     assert "coverage: pcov" in ci
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_renovate_keeps_every_project_current(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    entry = (project / ".github/renovate.json5").read_text(encoding="utf-8")
+    # The project's file extends the blueprint's, so that its own rules come last.
+    assert '"local>Dennis-Otto/demo-project//.github/renovate-blueprint.json5"' in entry
+    rules = (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    for setting in (
+        'minimumReleaseAge: "7 days"',
+        "platformAutomerge: true",
+        "minimumReleaseAge: null",
+        "copier: { enabled: false }",
+        "devcontainer: { enabled: false }",
+    ):
+        assert setting in rules, setting
+    # Dependabot keeps only the Features of the dev container and their lock file.
+    dependabot = (project / ".github/dependabot.yml").read_text(encoding="utf-8")
+    assert re.findall(r"package-ecosystem: (\S+)", dependabot) == ["devcontainers"]
+    settings = (project / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "dependabot_security_updates = false" in settings
+
+
+def test_renovate_runs_one_release_everywhere() -> None:
+    pins = set()
+    for name in ("renovate.yml", "variants.yml"):
+        text = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+        pins |= set(
+            re.findall(
+                r"ghcr\.io/renovatebot/renovate:[\w.]+@sha256:[0-9a-f]{64}", text
+            )
+        )
+        pins |= {
+            f"ghcr.io/renovatebot/renovate:{version}"
+            for version in re.findall(r"renovate-version: (\S+)", text)
+        }
+    assert len(pins) == 1, pins
+
+
+def test_the_branch_bot_leaves_the_branches_of_renovate_alone() -> None:
+    text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
+    assert 'startswith("renovate/") | not' in text

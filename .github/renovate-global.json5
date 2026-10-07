@@ -1,0 +1,19 @@
+// The settings of the Renovate bot itself, for the Renovate workflow. The rules of
+// the updates are in the .github/renovate.json5 of each repository.
+// https://docs.renovatebot.com/self-hosted-configuration/
+{
+  platform: "github",
+  // Every repository of the owner that has a .github/renovate.json5, which the
+  // blueprint brings; nothing else, and no onboarding pull request.
+  autodiscover: true,
+  autodiscoverFilter: ["Dennis-Otto/*"],
+  onboarding: false,
+  requireConfig: "required",
+  // Commits through the API, which GitHub signs, as main requires signed commits.
+  platformCommit: "enabled",
+  username: "dennis-otto-release-automation[bot]",
+  gitAuthor: "dennis-otto-release-automation[bot] <321826887+dennis-otto-release-automation[bot]@users.noreply.github.com>",
+  // The package managers write the lock files with their scripts switched off.
+  allowScripts: false,
+  binarySource: "install",
+}

@@ -108,13 +108,19 @@ jobs:
       - name: Lint the workflows of the project
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/repo" --workdir /repo \
-            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       # The markdownlint-cli2 of the action of the Lint workflow, in its image.
       - name: Lint the Markdown of the project
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/workdir" \
-            davidanson/markdownlint-cli2@sha256:839558fd0d36c46da0e01ea84fd1d20a2822b5a8a60c16dc9708f0bb7c9e903b \
+            davidanson/markdownlint-cli2:v0.23.2@sha256:839558fd0d36c46da0e01ea84fd1d20a2822b5a8a60c16dc9708f0bb7c9e903b \
             "**/*.md"
+      # The Renovate of the Renovate workflow, which reads the rules of every project.
+      - name: Validate the rules of Renovate of the project
+        run: |
+          docker run --rm --volume "$PWD/$PROJECT:/usr/src/app" --workdir /usr/src/app \
+            ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435 \
+            renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5
       - name: Validate the integration with hassfest
         if: matrix.kind == 'home-assistant'
         # Home Assistant's current image on purpose, as in the CI of the integrations:

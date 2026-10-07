@@ -1,6 +1,6 @@
 # The questions of the blueprint and how it renders. Files of the template are in
 # template/; workflows, dependency manifests and other shared files come from this
-# repository itself, where they run and Dependabot keeps them current.
+# repository itself, where they run and Renovate keeps them current.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 _min_copier_version: "9.4"
@@ -26,7 +26,7 @@ _envops:
 # left out, with everything inside.
 
 # After the first copy, these belong to the project: an update never overwrites
-# them. The project's Dependabot keeps its own dependency manifests current. The
+# them. Renovate keeps the dependency manifests of the project current. The
 # patterns follow .gitignore: those without a slash would match at any depth, so
 # the files of the root start with one.
 _skip_if_exists:
@@ -43,6 +43,7 @@ _skip_if_exists:
   - .github/labels.toml
   - .github/labeler.yml
   - /.markdownlint.jsonc
+  - .github/renovate.json5
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html

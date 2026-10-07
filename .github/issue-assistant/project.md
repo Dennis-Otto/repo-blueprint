@@ -4,7 +4,7 @@ Where things are:
 
 - `copier.yml` holds the questions; `template/` holds the files of a new repository, whose names carry their conditions, such as `[% if stack == 'php' %]composer.json[% endif %]`.
 - `.github/workflows/` holds the workflows of this repository, which are also the templates of the workflows of new repositories; `ci-<stack>.yml` are the checks of each kind of project.
-- `stacks/` holds the dependency manifests and lock files of each kind of project, which Dependabot keeps current.
+- `stacks/` holds the dependency manifests and lock files of each kind of project, which Renovate keeps current.
 - `blueprint.py` applies and checks the settings of `.github/repository.toml` and shows the checklist of a repository; `tests/` holds its tests and those of the template.
 - `README.md` is the documentation; `CHANGELOG.md` lists the changes of every release.
 

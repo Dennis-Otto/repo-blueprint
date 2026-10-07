@@ -1,0 +1,54 @@
+// Renovate for the blueprint: the rules of the blueprint in
+// .github/renovate-blueprint.json5, then its own below. What new repositories copy,
+// or what reaches every repository through the blueprint bot, is committed as
+// fix(deps) and leads to a patch release that merges itself once every check
+// passes: the actions of the workflows, the images, Copier and the tools of each
+// kind of project in stacks/. The tools of the blueprint's own tests stay
+// chore(deps) and wait for the next release.
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["local>Dennis-Otto/repo-blueprint//.github/renovate-blueprint.json5"],
+  packageRules: [
+    {
+      // The Renovate of the Renovate workflow, pinned by digest, follows the line
+      // "# renovate:" above it rather than the action's own reading of the input.
+      matchManagers: ["github-actions"],
+      matchDepNames: ["ghcr.io/renovatebot/renovate"],
+      enabled: false,
+    },
+    {
+      matchFileNames: ["**"],
+      semanticCommitType: "fix",
+    },
+    {
+      matchFileNames: ["requirements-dev.txt"],
+      semanticCommitType: "chore",
+      groupName: "the tools of the blueprint's tests",
+    },
+    {
+      matchFileNames: ["stacks/copier/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Copier",
+    },
+    {
+      matchFileNames: ["stacks/python/**", "stacks/fuzz/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "the tools of the Python packages",
+    },
+    {
+      matchFileNames: ["stacks/home-assistant/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "the tools of the Home Assistant integrations",
+    },
+    {
+      matchFileNames: ["stacks/php/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "the tools of the Nextcloud apps",
+    },
+    {
+      matchFileNames: ["stacks/node/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "the tools of the Node packages",
+    },
+  ],
+}

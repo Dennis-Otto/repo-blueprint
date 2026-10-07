@@ -38,7 +38,7 @@ php occ app:install {= nextcloud_app_id =}
     name: World
 ```
 
-Pin the action to the commit hash of a [release](https://github.com/{= repo =}/releases); Dependabot then keeps it current.
+Pin the action to the commit hash of a [release](https://github.com/{= repo =}/releases); Dependabot or Renovate then keeps it current.
 [% elif project_type == 'python-package' %]
 ```sh
 pip install {= project_slug =}
