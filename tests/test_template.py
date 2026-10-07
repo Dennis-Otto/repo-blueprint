@@ -9,6 +9,7 @@ import tomllib
 import warnings
 from pathlib import Path
 
+import pathspec
 import pytest
 from copier import run_copy
 
@@ -307,6 +308,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
         ".devcontainer/devcontainer.json",
+        ".devcontainer/devcontainer-lock.json",
         ".devcontainer/Dockerfile",
         ".devcontainer/setup.sh",
     ):
@@ -397,6 +399,21 @@ def test_every_project_has_a_dev_container(
     setup = (project / ".devcontainer/setup.sh").read_text(encoding="utf-8")
 
     assert config["postCreateCommand"] == "bash .devcontainer/setup.sh"
+    # Every Feature is locked; Docker for all, Node for the projects with a frontend.
+    lock = json.loads(
+        (project / ".devcontainer/devcontainer-lock.json").read_text(encoding="utf-8")
+    )
+    assert set(config["features"]) == set(lock["features"])
+    node = "ghcr.io/devcontainers/features/node:2" in config["features"]
+    assert node == (kind in ("home-assistant", "nextcloud-app"))
+    if node:
+        # The Features that Dependabot keeps current in the blueprint.
+        watched = json.loads(
+            (ROOT / "stacks/devcontainer/.devcontainer/devcontainer.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert watched["features"] == config["features"]
     assert re.search(
         r"^FROM mcr\.microsoft\.com/devcontainers/\S+@sha256:[0-9a-f]{64}$",
         dockerfile,
@@ -457,3 +474,34 @@ def test_secrets_stay_out_of_git(projects: dict[str, Path], kind: str) -> None:
     ignored = (projects[kind] / ".gitignore").read_text(encoding="utf-8").split("\n")
     for pattern in (".env", "*.pem", "*.key", "auth.json", "!.env.example"):
         assert pattern in ignored, pattern
+
+
+def test_updates_reach_every_file_of_the_blueprint() -> None:
+    # Copier matches _skip_if_exists like .gitignore; a pattern without a slash
+    # would match at any depth and keep the blueprint's files from their updates.
+    config = (ROOT / "copier.yml").read_text(encoding="utf-8")
+    block = config.split("_skip_if_exists:", 1)[1].split("\n\n", 1)[0]
+    skip = re.findall(r'^  - "?([^"\n]+?)"?$', block, re.MULTILINE)
+    assert "/*.py" in skip
+    # The patterns as Copier reads them.
+    matcher = pathspec.PathSpec.from_lines("gitignore", skip)
+    for owned in (
+        "README.md",
+        "CHANGELOG.md",
+        "issue_assistant.py",
+        "Dockerfile",
+        "img/app.svg",
+        "tests/test_demo.py",
+        "custom_components/demo/__init__.py",
+        ".github/labels.toml",
+    ):
+        assert matcher.match_file(owned), owned
+    for updated in (
+        ".github/blueprint.py",
+        ".devcontainer/Dockerfile",
+        ".github/social-preview/Dockerfile",
+        ".github/workflows/ci.yml",
+        "docs/README.md",
+        "scripts/check.sh",
+    ):
+        assert not matcher.match_file(updated), updated

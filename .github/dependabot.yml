@@ -204,3 +204,22 @@ updates:
     commit-message:
       prefix: fix
       include: scope
+
+  # The Features of the dev containers, locked in their devcontainer-lock.json: the
+  # blueprint's own and those of the projects with Node.
+  - package-ecosystem: devcontainers
+    directories:
+      - /
+      - /stacks/devcontainer
+    schedule:
+      interval: monthly
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    groups:
+      dev-container-features:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: fix
+      include: scope

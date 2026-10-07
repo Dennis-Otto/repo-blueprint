@@ -26,12 +26,14 @@ _envops:
 # left out, with everything inside.
 
 # After the first copy, these belong to the project: an update never overwrites
-# them. The project's Dependabot keeps its own dependency manifests current.
+# them. The project's Dependabot keeps its own dependency manifests current. The
+# patterns follow .gitignore: those without a slash would match at any depth, so
+# the files of the root start with one.
 _skip_if_exists:
-  - README.md
-  - CHANGELOG.md
-  - version.txt
-  - .release-please-manifest.json
+  - /README.md
+  - /CHANGELOG.md
+  - /version.txt
+  - /.release-please-manifest.json
   - .github/issue-assistant/project.md
   - .github/ISSUE_TEMPLATE/bug_report.yml
   - .github/ISSUE_TEMPLATE/feature_request.yml
@@ -42,31 +44,31 @@ _skip_if_exists:
   - .github/social-preview.html
   - .github/repository.project.toml
   - .github/workflows/action-test.yml
-  - .lycheeignore
-  - pyproject.toml
-  - requirements-dev.in
-  - requirements-dev.txt
-  - requirements-test.in
-  - requirements-test.txt
-  - requirements-fuzz.in
-  - requirements-fuzz.txt
-  - fuzz
-  - composer.json
-  - composer.lock
-  - package.json
-  - package-lock.json
-  - Dockerfile
-  - action.yml
-  - hacs.json
-  - src
-  - lib
-  - app
-  - appinfo
-  - img
-  - custom_components
-  - tests
-  - test
-  - "*.py"
+  - /.lycheeignore
+  - /pyproject.toml
+  - /requirements-dev.in
+  - /requirements-dev.txt
+  - /requirements-test.in
+  - /requirements-test.txt
+  - /requirements-fuzz.in
+  - /requirements-fuzz.txt
+  - /fuzz
+  - /composer.json
+  - /composer.lock
+  - /package.json
+  - /package-lock.json
+  - /Dockerfile
+  - /action.yml
+  - /hacs.json
+  - /src
+  - /lib
+  - /app
+  - /appinfo
+  - /img
+  - /custom_components
+  - /tests
+  - /test
+  - "/*.py"
 
 _message_after_copy: |
   {= project_name =} is ready. Next:
