@@ -12,6 +12,10 @@ name: Release
 on:
   push:
     branches: [main]
+  # Merges that auto-merge does with the token of a workflow, such as those of
+  # Dependabot's updates, start no workflow; so the release bot looks every hour too.
+  schedule:
+    - cron: "25 * * * *"
   workflow_dispatch:
 
 permissions: {}

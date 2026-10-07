@@ -26,6 +26,12 @@ python3 -m venv .venv
 . .venv/bin/activate && bash scripts/check.sh
 ```
 
+To run them before every push on its own, turn on the hook of the repository once:
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ## Releases
 
 The release bot keeps a pull request titled `chore: release x.y.z` with the next version and the changelog. Merging it creates the release with its package, SBOM and signed provenance. New repositories copy the blueprint from its release tags, and the blueprint bot brings every repository made from it up to the new release. A release of dependency updates merges and publishes itself.
