@@ -870,6 +870,22 @@ def release_notes(version: str, changelog: str, generated: str) -> str:
     return "\n".join([*lines, ""])
 
 
+def beta_notes(version: str, changelog: str) -> str:
+    """The notes of a beta of the next release: what main holds, from the text of
+    Unreleased, for the testers who take prereleases."""
+    release = version.split("-", 1)[0]
+    log = Changelog.parse(changelog)
+    found = log.find(UNRELEASED)
+    text = "" if found is None else log.sections[found][1].strip("\n")
+    lines = [
+        f"A beta of the next release, {release}, with what `main` holds now, for the "
+        "testers who take prereleases. The release itself follows when it is ready.",
+        "",
+        text or "The changes of this beta are not described yet.",
+    ]
+    return "\n".join([*lines, ""])
+
+
 def add_unreleased(changelog: str, heading: str, entry: str) -> str:
     """The changelog with the entry under its heading in Unreleased; both are added
     when they are missing, and an entry that is there already stays once."""
@@ -902,6 +918,10 @@ def changelog_command(arguments: argparse.Namespace) -> int:
         path.write_text(
             add_unreleased(text, arguments.heading, arguments.entry), encoding="utf-8"
         )
+        return 0
+    if arguments.command == "beta":
+        text = Path(arguments.file).read_text(encoding="utf-8")
+        sys.stdout.write(beta_notes(arguments.version, text))
         return 0
     if arguments.command == "notices":
         sbom = json.loads(Path(arguments.sbom).read_text(encoding="utf-8"))
@@ -1040,6 +1060,13 @@ def main(
     unreleased_parser.add_argument("heading", help="such as Changed, without ###")
     unreleased_parser.add_argument("entry", help="the line, such as '- Supports ...'")
     unreleased_parser.add_argument("--file", default="CHANGELOG.md")
+    beta_parser = commands.add_parser(
+        "beta", help="the notes of a beta of the next release, for the release bot"
+    )
+    beta_parser.add_argument(
+        "version", help="the version of the beta, such as 1.3.0-beta.2"
+    )
+    beta_parser.add_argument("--file", default="CHANGELOG.md")
     notices_parser = commands.add_parser(
         "notices", help="the third-party components and their licenses, for releases"
     )
@@ -1047,7 +1074,7 @@ def main(
     notices_parser.add_argument("sbom", help="the SBOM of GitHub's dependency graph")
     arguments = parser.parse_args(argv)
 
-    if arguments.command in ("changelog", "unreleased", "notices"):
+    if arguments.command in ("changelog", "unreleased", "beta", "notices"):
         try:
             return changelog_command(arguments)
         except OSError as error:
