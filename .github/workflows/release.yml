@@ -8,10 +8,10 @@ name: Release
 # the section lists the pull requests. Merging the pull request creates the release
 # as a draft, with its tag. The jobs below attach the package, its SBOM, the licenses
 # of its third-party components and its signed provenance, write the notes, make the
-# release public, and then deliver it where the repository variable PUBLISH_TO says:
-# pypi, npm, ghcr, hacs, nextcloud-appstore, github-action or none. Last,
-# verify-release.yml checks the release as its users can. A release that only updates
-# dependencies merges itself once its checks pass.
+# release public, announce it in the discussions, and then deliver it where the
+# repository variable PUBLISH_TO says: pypi, npm, ghcr, hacs, nextcloud-appstore,
+# github-action or none. Last, verify-release.yml checks the release as its users
+# can. A release that only updates dependencies merges itself once its checks pass.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -333,6 +333,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      discussions: write
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -347,9 +348,17 @@ jobs:
           # like only offer to those who ask for one.
           if [[ "$TAG" == *-* ]]; then
             gh release edit "$TAG" --draft=false --prerelease --latest=false --repo "$GITHUB_REPOSITORY"
-          else
-            gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+            exit 0
           fi
+          # A release for everybody is announced in the category Announcements of the
+          # discussions, when the repository has them, with its notes and a link.
+          announce=()
+          categories="$(gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}"             -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { discussionCategories(first: 50) { nodes { name } } } }'             --jq '.data.repository.discussionCategories.nodes[].name')"
+          if grep -qx Announcements <<<"$categories"; then
+            announce=(--discussion-category Announcements)
+            echo "The release is announced in the discussions." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          gh release edit "$TAG" --draft=false --latest "${announce[@]}" --repo "$GITHUB_REPOSITORY"
 
   pypi:
     name: deliver to PyPI
