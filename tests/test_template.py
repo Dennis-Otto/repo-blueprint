@@ -672,3 +672,15 @@ def test_the_flaky_test_bot_watches_every_test_workflow() -> None:
     assert names
     assert names <= watched, names - watched
     assert "github.event.workflow_run.run_attempt == 1" in flaky
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_records_its_decisions(
+    projects: dict[str, Path], kind: str
+) -> None:
+    decisions = projects[kind] / "docs/decisions"
+    index = (decisions / "README.md").read_text(encoding="utf-8")
+    for record in sorted(decisions.glob("0*.md")):
+        if record.name != "0000-template.md":
+            assert f"]({record.name})" in index, record.name
+    assert (decisions / "0000-template.md").is_file()

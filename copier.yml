@@ -35,6 +35,7 @@ _skip_if_exists:
   - /version.txt
   - /.release-please-manifest.json
   - .github/issue-assistant/project.md
+  - /docs/decisions
   - .github/ISSUE_TEMPLATE/bug_report.yml
   - .github/ISSUE_TEMPLATE/feature_request.yml
   - .github/ISSUE_TEMPLATE/config.yml
