@@ -6,6 +6,7 @@ and the changelog of its releases.
     python3 blueprint.py settings apply     make GitHub match .github/repository.toml
     python3 blueprint.py checklist          the steps outside the API, and which are done
     python3 blueprint.py changelog ...      the changelog of a release (the release bot)
+    python3 blueprint.py unreleased ...     an entry under Unreleased (the other bots)
 
 Run it in the root of a repository made from the blueprint, with the GitHub CLI `gh`
 signed in as an administrator. It needs Python 3.12 and nothing else. It never reads,
@@ -866,7 +867,39 @@ def release_notes(version: str, changelog: str, generated: str) -> str:
     return "\n".join([*lines, "", "</details>", ""])
 
 
+def add_unreleased(changelog: str, heading: str, entry: str) -> str:
+    """The changelog with the entry under its heading in Unreleased; both are added
+    when they are missing, and an entry that is there already stays once."""
+    log = Changelog.parse(changelog)
+    found = log.find(UNRELEASED)
+    if found is None:
+        log.sections.insert(0, ("## Unreleased", block("")))
+        found = 0
+    lines = log.sections[found][1].strip("\n").split("\n")
+    if entry in lines:
+        return changelog
+    title = f"### {heading}"
+    if title not in lines:
+        lines += ["", title]
+    start = lines.index(title) + 1
+    end = start
+    while end < len(lines) and not lines[end].startswith("### "):
+        end += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    lines[end:end] = [entry] if end > start else ["", entry]
+    log.sections[found] = (log.sections[found][0], block("\n".join(lines)))
+    return log.render()
+
+
 def changelog_command(arguments: argparse.Namespace) -> int:
+    if arguments.command == "unreleased":
+        path = Path(arguments.file)
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            add_unreleased(text, arguments.heading, arguments.entry), encoding="utf-8"
+        )
+        return 0
     read = [Path(name).read_text(encoding="utf-8") for name in arguments.files]
     if arguments.action == "release":
         sys.stdout.write(release_changelog(arguments.version, *read))
@@ -930,9 +963,15 @@ def main(
         help="release: the changelog of main and that of the release branch; "
         "notes: the changelog of the release and the notes of release-please",
     )
+    unreleased_parser = commands.add_parser(
+        "unreleased", help="add an entry under Unreleased in the changelog, for bots"
+    )
+    unreleased_parser.add_argument("heading", help="such as Changed, without ###")
+    unreleased_parser.add_argument("entry", help="the line, such as '- Supports ...'")
+    unreleased_parser.add_argument("--file", default="CHANGELOG.md")
     arguments = parser.parse_args(argv)
 
-    if arguments.command == "changelog":
+    if arguments.command in ("changelog", "unreleased"):
         try:
             return changelog_command(arguments)
         except OSError as error:
