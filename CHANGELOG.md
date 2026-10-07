@@ -11,6 +11,13 @@ the next release, or lists the pull requests when there is none.
 - The tools of the blueprint bot pass the dependency review of every project: Copier's Jinja filters (GPL-3.0-only) and typing-extensions, whose license the review reads wrongly, are no part of any release.
 - `blueprint.py` writes UTF-8, so that its checklist shows its marks in a console of Windows too.
 
+## [0.3.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.1...v0.3.2) (2026-10-07)
+
+
+### Bug fixes
+
+* let the tools of the blueprint bot pass the dependency review, and write UTF-8 ([#36](https://github.com/Dennis-Otto/repo-blueprint/issues/36)) ([6a2e116](https://github.com/Dennis-Otto/repo-blueprint/commit/6a2e116127656dde354485a3e976839f13ae77e0))
+
 ## [0.3.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.0...v0.3.1) (2026-10-07)
 
 ### Bug fixes
