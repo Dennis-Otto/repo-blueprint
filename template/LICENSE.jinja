@@ -1,10 +1,13 @@
-[#- The license text. The short licenses get the year and the holder in the places of
-    their SPDX texts; the others stay verbatim, appendix included. -#]
+[#- The license text. The short licenses get one copyright line per holder of the
+    answer copyright, in the places of their SPDX texts; the others stay verbatim,
+    appendix included. -#]
 [%- set text -%][% include "LICENSES/" ~ license ~ ".txt" %][%- endset -%]
+[%- set holders = copyright.split(';') | map('trim') | select | list -%]
 [%- if license in ['MIT', 'MIT-0', 'BSD-3-Clause'] -%]
-{= text | replace('[year]', copyright_year) | replace('[fullname]', author)
-   | replace('<YEAR>', copyright_year) | replace('<COPYRIGHT HOLDER>', author)
-   | replace('<year>', copyright_year) | replace('<owner>', author) =}
+{= text
+   | replace('Copyright (c) [year] [fullname]', holders | map('regex_replace', '^', 'Copyright (c) ') | join('\n'))
+   | replace('Copyright <YEAR> <COPYRIGHT HOLDER>', holders | map('regex_replace', '^', 'Copyright ') | join('\n'))
+   | replace('Copyright (c) <year> <owner>. ', holders | map('regex_replace', '^', 'Copyright (c) ') | map('regex_replace', '$', '.') | join('\n')) =}
 [%- else -%]
 {= text =}
 [%- endif -%]

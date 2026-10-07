@@ -536,6 +536,21 @@ def load_labels(path: Path) -> dict[str, dict[str, str]]:
 # --------------------------------------------------------------------------- settings
 
 
+def merge(base: dict[str, Json], extra: dict[str, Json]) -> dict[str, Json]:
+    """Extra settings on top of base: tables merge, lists gain the new items, and
+    values replace."""
+    result = dict(base)
+    for key, value in extra.items():
+        current = result.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            result[key] = merge(current, value)
+        elif isinstance(current, list) and isinstance(value, list):
+            result[key] = current + [item for item in value if item not in current]
+        else:
+            result[key] = value
+    return result
+
+
 @dataclass(frozen=True)
 class Settings:
     repository: dict[str, Json]
@@ -549,6 +564,11 @@ class Settings:
     @classmethod
     def load(cls, path: Path) -> Settings:
         config = tomllib.loads(path.read_text(encoding="utf-8"))
+        # The settings of this project alone, on top of those the blueprint keeps
+        # current: its own checks, environments, secrets and variables.
+        project = path.with_name("repository.project.toml")
+        if project.exists():
+            config = merge(config, tomllib.loads(project.read_text(encoding="utf-8")))
         checks = config.get("branch", {}).get("required_checks", [])
         return cls(
             repository=config.get("repository", {}),
