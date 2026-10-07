@@ -734,7 +734,9 @@ def checklist(
         ),
         "nextcloud-appstore": (
             "App certificate requested and the app registered in the App Store",
-            "https://nextcloudappstore.readthedocs.io/en/latest/developer.html",
+            "Request the certificate: "
+            "https://nextcloudappstore.readthedocs.io/en/latest/developer.html\n"
+            "then run Actions -> Register the app with the id of the app.",
         ),
     }
     if target in delivery:

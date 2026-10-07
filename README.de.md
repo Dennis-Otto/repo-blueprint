@@ -20,6 +20,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 | **Einstellungen** | die Einstellungen des Repositorys als Code: Merges, Rulesets, Sicherheit, Actions, Environments, Variablen | `.github/repository.toml` und `blueprint.py` |
 | **Entwicklung** | ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prüfungen, und ein Hook, der sie vor jedem Push ausführt | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | jede Woche führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request | `blueprint-update.yml` |
+| **App Store** | für eine Nextcloud-App: die Registrierung ihrer ID mit ihrem Zertifikat, einmal, von Hand | `register-app.yml` |
 | **Upstream** | für eine Nextcloud-App, jede Woche: hat Nextcloud eine neue Hauptversion, hebt ein Pull Request `max-version` an und merged sich selbst, sobald jede Prüfung, auch die End-to-End-Tests, dagegen besteht | `upstream.yml` |
 | **Branches** | nach jeder Änderung an `main` bringt der Branch-Bot jeden Pull Request, der auf Auto-Merge wartet, auf den neuesten Stand, damit er nach grünen Prüfungen merged | `update-branches.yml` |
 
