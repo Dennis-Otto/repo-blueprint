@@ -287,6 +287,9 @@ jobs:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: |
           cp "$BUNDLE_PATH" "$ASSETS/provenance.sigstore.json"
+          # The signed statement also as in-toto JSON lines, the format of SLSA, which
+          # OpenSSF Scorecard and other tools look for.
+          jq -c .dsseEnvelope "$BUNDLE_PATH" > "$ASSETS/provenance.intoto.jsonl"
           gh release upload "$TAG" "$ASSETS"/* --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Write the notes, the section of the changelog with every pull request
