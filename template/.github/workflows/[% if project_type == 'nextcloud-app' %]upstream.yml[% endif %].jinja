@@ -1,0 +1,1 @@
+[% set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" %][% filter replace(guard, "") %][% include ".github/workflows/upstream.yml" %][% endfilter -%]

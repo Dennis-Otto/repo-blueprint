@@ -189,3 +189,52 @@ def test_the_command_line_names_a_missing_file(
     missing = str(tmp_path / "missing.md")
     assert blueprint.main(["changelog", "notes", "1.3.0", missing, missing]) == 2
     assert "missing.md" in capsys.readouterr().err
+
+
+def test_a_bot_adds_an_entry_under_its_heading() -> None:
+    main = main_changelog(unreleased="### Changed\n\n- a\n\n### Fixed\n\n- b\n")
+    result = blueprint.add_unreleased(main, "Changed", "- Supports Nextcloud 36.")
+    assert (
+        "### Changed\n\n- a\n- Supports Nextcloud 36.\n\n### Fixed\n\n- b\n" in result
+    )
+    assert result.endswith(OLDER)
+    # A second run adds nothing.
+    assert (
+        blueprint.add_unreleased(result, "Changed", "- Supports Nextcloud 36.")
+        == result
+    )
+
+
+def test_a_bot_adds_the_heading_and_unreleased_when_they_are_missing() -> None:
+    fixed = main_changelog(unreleased="### Fixed\n\n- b\n")
+    assert "- b\n\n### Changed\n\n- c\n\n## 1.2.2" in blueprint.add_unreleased(
+        fixed, "Changed", "- c"
+    )
+    empty = main_changelog(unreleased="")
+    assert (
+        "## Unreleased\n\n### Changed\n\n- c\n\n## 1.2.2"
+        in blueprint.add_unreleased(empty, "Changed", "- c")
+    )
+    heading_alone = main_changelog(unreleased="### Changed\n")
+    assert (
+        "## Unreleased\n\n### Changed\n\n- c\n\n## 1.2.2"
+        in blueprint.add_unreleased(heading_alone, "Changed", "- c")
+    )
+    without = f"{PREAMBLE}{OLDER}"
+    assert blueprint.add_unreleased(without, "Changed", "- c") == (
+        f"{PREAMBLE}## Unreleased\n\n### Changed\n\n- c\n\n{OLDER}"
+    )
+
+
+def test_the_command_line_adds_an_entry(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(main_changelog(unreleased=""), encoding="utf-8")
+
+    assert (
+        blueprint.main(["unreleased", "Changed", "- c", "--file", str(changelog)]) == 0
+    )
+    assert "### Changed\n\n- c\n" in changelog.read_text(encoding="utf-8")
+    assert (
+        blueprint.main(["unreleased", "Changed", "- c", "--file", str(tmp_path / "x")])
+        == 2
+    )
