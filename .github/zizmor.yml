@@ -18,3 +18,9 @@ rules:
     ignore:
       # The test run of the action uses it the way its documentation shows, ./
       - ci-github-action.yml
+  github-app:
+    ignore:
+      # The token action has no input for the Variables permission that the settings
+      # check reads, so its token has all permissions of the installation; the job
+      # runs only the read-only check of blueprint.py.
+      - settings.yml
