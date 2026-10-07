@@ -31,7 +31,7 @@ PINNED = re.compile(
 )
 
 
-def render(destination: Path, **data: str) -> Path:
+def render(destination: Path, **data: str | bool) -> Path:
     with warnings.catch_warnings():
         # Uncommitted changes of the blueprint render too, with a warning.
         warnings.simplefilter("ignore")
@@ -505,3 +505,30 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "scripts/check.sh",
     ):
         assert not matcher.match_file(updated), updated
+
+
+@pytest.mark.parametrize("kind", ["github-action", "home-assistant", "nextcloud-app"])
+def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) -> None:
+    # An update would bring the samples back that an adopted repository deleted.
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type=kind,
+        sample_code=False,
+    )
+    for sample in (
+        "tests",
+        "fuzz",
+        "src",
+        "lib",
+        "custom_components",
+        "action.yml",
+        "demo.py",
+    ):
+        assert not (project / sample).exists(), sample
+    assert (project / "scripts/check.sh").exists()
+    assert (project / ".github/workflows/ci.yml").exists()
+    assert "sample_code: false" in (project / ".copier-answers.yml").read_text(
+        encoding="utf-8"
+    )
