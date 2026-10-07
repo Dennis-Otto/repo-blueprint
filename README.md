@@ -25,6 +25,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | **Community** | README, contributing guide, code of conduct, security policy, support, governance, issue forms, pull request template, sponsor button, social preview | |
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables | `.github/repository.toml` and `blueprint.py` |
 | **Updates** | every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
+| **Branches** | after every change of `main`, the branch bot brings each pull request that waits for auto-merge up to date, so that it merges once its checks pass | `update-branches.yml` |
 
 ## Kinds of projects
 
