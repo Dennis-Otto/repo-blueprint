@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.3.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.1...v0.3.2) (2026-10-07)
+
 ### Bug fixes
 
 - The tools of the blueprint bot pass the dependency review of every project: Copier's Jinja filters (GPL-3.0-only) and typing-extensions, whose license the review reads wrongly, are no part of any release.
