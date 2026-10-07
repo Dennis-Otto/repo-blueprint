@@ -100,7 +100,9 @@ class FakeGitHub:
         if arguments[0] == "repo":
             return subprocess.CompletedProcess(arguments, 0, f"{REPO}\n", "")
         if arguments[1] == "graphql":
-            answer = {"data": {"repository": {"usesCustomOpenGraphImage": self.og_image}}}
+            answer = {
+                "data": {"repository": {"usesCustomOpenGraphImage": self.og_image}}
+            }
             return subprocess.CompletedProcess(arguments, 0, json.dumps(answer), "")
         method, path = arguments[3], arguments[4]
         self.calls.append((method, path))
