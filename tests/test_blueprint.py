@@ -505,6 +505,20 @@ def test_output_without_a_status_line() -> None:
         blueprint.Api(runner).get("repos/x")
 
 
+def test_a_deeply_nested_answer_is_text() -> None:
+    def runner(
+        arguments: Sequence[str], body: str | None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            arguments, 0, "HTTP/2.0 200 OK\n\n" + "[" * 100_000, ""
+        )
+
+    response = blueprint.Api(runner).request("GET", "repos/x")
+
+    assert response.status == 200
+    assert response.data.startswith("[[[")
+
+
 def test_a_failing_graphql_query() -> None:
     def runner(
         arguments: Sequence[str], body: str | None

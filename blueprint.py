@@ -81,7 +81,7 @@ class Api:
             raise GitHubError(0, (result.stderr or result.stdout).strip()) from None
         try:
             data = json.loads(text) if text.strip() else None
-        except ValueError:
+        except (ValueError, RecursionError):
             data = text
         if status >= 400 and status != 404:
             message = data.get("message", "") if isinstance(data, dict) else text

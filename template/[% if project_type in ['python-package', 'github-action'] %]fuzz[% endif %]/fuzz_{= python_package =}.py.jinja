@@ -1,0 +1,53 @@
+"""Coverage-guided fuzzing of {= python_package =}, with Atheris.
+
+The tests try chosen and random values; the fuzzer follows the branches of the code
+to find the input that breaks it. Point it at the code that reads input from outside.
+
+    pip install --require-hashes -r requirements-fuzz.txt
+    python fuzz/fuzz_{= python_package =}.py -max_total_time=60
+
+The Fuzzing workflow runs every target in fuzz/ on every change and longer every week.
+"""
+
+import sys
+from pathlib import Path
+
+import atheris
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1][% if project_type == 'python-package' %] / "src"[% endif %]))
+
+with atheris.instrument_imports():
+    import {= python_package =}
+
+
+def test_one_input(data: bytes) -> None:
+[%- if project_type == 'python-package' %]
+    name = atheris.FuzzedDataProvider(data).ConsumeUnicodeNoSurrogates(256)
+    try:
+        greeting = {= python_package =}.greet(name)
+    except ValueError:
+        if name.strip():
+            raise
+        return
+    if name.strip() not in greeting:
+        raise AssertionError(f"{greeting!r} lacks {name!r}")
+[%- else %]
+    value = atheris.FuzzedDataProvider(data).ConsumeUnicodeNoSurrogates(4096)
+    try:
+        text = {= python_package =}.output_text("greeting", value)
+    except ValueError:
+        return
+    first, rest = text.split("\n", 1)
+    delimiter = first.removeprefix("greeting<<")
+    if rest != f"{value}\n{delimiter}\n":
+        raise AssertionError(f"the output of {value!r} is {text!r}")
+[%- endif %]
+
+
+def main() -> None:
+    atheris.Setup(sys.argv, test_one_input)
+    atheris.Fuzz()
+
+
+if __name__ == "__main__":
+    main()

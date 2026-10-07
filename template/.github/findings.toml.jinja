@@ -20,10 +20,16 @@ tool = "Scorecard"
 rule = "MaintainedID"
 reason = "won't fix"
 comment = "Scorecard counts a repository younger than 90 days as unmaintained; this one gets commits every week."
-[% if stack in ['php', 'container', 'generic'] %]
+[% if stack in ['php', 'container', 'generic', 'home-assistant'] %]
 [[accept]]
 tool = "Scorecard"
 rule = "FuzzingID"
 reason = "won't fix"
-comment = "Scorecard detects no fuzzing for this kind of project. Its tests run on every change."
+[%- if stack == 'home-assistant' %]
+comment = "Scorecard counts only Atheris as fuzzing of Python, and Atheris doesn't support the Python of Home Assistant. Property tests with Hypothesis run on every change."
+[%- elif stack == 'php' %]
+comment = "Scorecard detects no fuzzing of PHP. The tests run on every change."
+[%- else %]
+comment = "Scorecard detects no fuzzing for this kind of project. Its checks run on every change."
+[%- endif %]
 [% endif -%]
