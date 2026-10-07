@@ -12,6 +12,9 @@ repo_name: {= owner =}/{= project_slug =}
 # The pencil on every page opens it for editing on GitHub.
 edit_uri: edit/main/docs/
 copyright: {= ('© ' ~ copyright) | to_json(ensure_ascii=False) =}
+# Every page is a file next to the others, as on GitHub, so that a relative path in
+# HTML, such as <img src="images/card.png">, leads to the same file in both places.
+use_directory_urls: false
 
 theme:
   name: material
@@ -95,9 +98,10 @@ nav:
   - Home: index.md
   - Decisions: decisions/README.md
 
-# The records of the decisions are in the menu through their table.
+# The decision records are in the menu through their table, decisions/README.md;
+# so is a new one, which its pull request adds there.
 not_in_nav: |
-  /decisions/0*.md
+  /decisions/
 
 # extra:
 #   alternate:

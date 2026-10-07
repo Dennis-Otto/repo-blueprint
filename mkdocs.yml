@@ -14,6 +14,9 @@ site_url: https://dennis-otto.github.io/repo-blueprint/
 repo_url: https://github.com/Dennis-Otto/repo-blueprint
 repo_name: Dennis-Otto/repo-blueprint
 copyright: "© 2026 Dennis Otto"
+# Every page is a file next to the others, as on GitHub, so that a relative path in
+# HTML, such as <img src="images/card.png">, leads to the same file in both places.
+use_directory_urls: false
 
 theme:
   name: material
@@ -99,9 +102,10 @@ nav:
   - Deutsch:
       - de/index.md
 
-# The records of the decisions are in the menu through their table.
+# The decision records are in the menu through their table, decisions/README.md;
+# so is a new one, which its pull request adds there.
 not_in_nav: |
-  /decisions/0*.md
+  /decisions/
 
 extra:
   alternate:
