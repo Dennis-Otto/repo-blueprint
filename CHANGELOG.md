@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
+
 ### Features
 
 - **Mutation tests every week:** mutmut for Python and Infection for the PHP of a Nextcloud app change the code in thousands of small ways and run the tests against each change. The summary shows the share of mutants that a test notices and the first that survive; a low score fails nothing.
