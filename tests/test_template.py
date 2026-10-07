@@ -589,3 +589,15 @@ def test_a_project_without_discussions(tmp_path: Path) -> None:
     assert "has_discussions = false" in (project / ".github/repository.toml").read_text(
         encoding="utf-8"
     )
+
+
+def test_a_nextcloud_app_covers_every_line(projects: dict[str, Path]) -> None:
+    project = projects["nextcloud-app"]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "--coverage-cobertura build/coverage.xml" in check
+    assert '["line-rate"]' in check
+    assert "<directory>lib</directory>" in (project / "phpunit.xml").read_text(
+        encoding="utf-8"
+    )
+    ci = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    assert "coverage: pcov" in ci
