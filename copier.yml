@@ -62,6 +62,7 @@ _skip_if_exists:
   - lib
   - app
   - appinfo
+  - img
   - custom_components
   - tests
   - test

@@ -114,8 +114,26 @@ ls "$dist"
 [%- endif %]
 [%- if stack == 'php' %]
 
+step "Composer"
+composer validate --strict
+composer audit
+
+step "App metadata"
+xsd="$(mktemp)"
+schema=https://apps.nextcloud.com/schema/apps/info.xsd
+if curl --fail --location --silent --show-error --max-time 30 --output "$xsd" "$schema"; then
+  # This is PHP code, not a shell expression.
+  # shellcheck disable=SC2016
+  php -r '$info = new DOMDocument(); $info->load("appinfo/info.xml"); exit($info->schemaValidate($argv[1]) ? 0 : 1);' "$xsd"
+  echo "appinfo/info.xml follows the schema of the App Store."
+else
+  echo "The schema of the App Store is out of reach here; the CI checks it."
+fi
+rm -f "$xsd"
+
 step "PHP syntax"
-find appinfo lib tests -name '*.php' -print0 | xargs -0 -n 1 php --syntax-check >/dev/null
+mapfile -t folders < <(find appinfo lib templates tests -maxdepth 0 -type d 2>/dev/null)
+find "${folders[@]}" -name '*.php' -print0 | xargs -0 -n 1 php --syntax-check >/dev/null
 echo "Every PHP file parses."
 
 step "Coding standard"
@@ -126,6 +144,21 @@ vendor/bin/psalm --threads=1 --no-cache
 
 step "Tests"
 vendor/bin/phpunit
+
+step "Package"
+if command -v krankerl >/dev/null 2>&1; then
+  krankerl package
+  # This is PHP code, not a shell expression.
+  # shellcheck disable=SC2016
+  app_id="$(php -r 'echo simplexml_load_file("appinfo/info.xml")->id;')"
+  # The project's own checks of what its package holds, if it has them.
+  if [[ -f scripts/check-package.sh ]]; then
+    bash scripts/check-package.sh "build/artifacts/$app_id.tar.gz" unsigned
+  fi
+  echo "The package build/artifacts/$app_id.tar.gz builds."
+else
+  echo "krankerl is not installed here; the CI builds the package."
+fi
 [%- endif %]
 [%- if stack == 'node' %]
 
