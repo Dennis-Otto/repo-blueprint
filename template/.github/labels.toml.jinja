@@ -208,10 +208,10 @@ name = "javascript"
 color = "168700"
 description = "Pull requests that update javascript code"
 group = "dependabot"
-[% elif stack == 'container' %]
+[% endif %]
+[#- Every project has the Dockerfile of its social preview. #]
 [[label]]
 name = "docker"
 color = "21ceff"
 description = "Pull requests that update docker code"
 group = "dependabot"
-[% endif -%]

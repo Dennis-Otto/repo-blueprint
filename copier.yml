@@ -33,6 +33,9 @@ _skip_if_exists:
   - version.txt
   - .release-please-manifest.json
   - .github/issue-assistant/project.md
+  - .github/ISSUE_TEMPLATE/bug_report.yml
+  - .github/ISSUE_TEMPLATE/feature_request.yml
+  - .github/ISSUE_TEMPLATE/config.yml
   - .github/labels.toml
   - .github/findings.toml
   - .github/dependency-review.yml

@@ -2,15 +2,33 @@ name: Feature request
 description: Suggest an idea or an improvement.
 labels: [enhancement, needs-triage]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Within a few minutes, the issue assistant posts a first analysis; the maintainer reads every issue as well ([what happens with your issue](https://github.com/Dennis-Otto/repo-blueprint/blob/main/SUPPORT.md#what-happens-with-your-issue)).
   - type: textarea
     id: problem
     attributes:
       label: What problem would it solve?
+      description: Describe the situation and what is missing today, not only the solution.
     validations:
       required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Other
   - type: textarea
     id: proposal
     attributes:
       label: What do you suggest?
     validations:
       required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched the existing issues and the documentation.
+          required: true
