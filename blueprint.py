@@ -51,7 +51,9 @@ class Response:
 Runner = Callable[[Sequence[str], str | None], subprocess.CompletedProcess[str]]
 
 
-def run_gh(arguments: Sequence[str], body: str | None) -> subprocess.CompletedProcess[str]:
+def run_gh(
+    arguments: Sequence[str], body: str | None
+) -> subprocess.CompletedProcess[str]:
     """Run the GitHub CLI; the tests replace this with a simulated GitHub."""
     return subprocess.run(  # pragma: no cover - the tests simulate gh
         ["gh", *arguments], input=body, capture_output=True, text=True, check=False
@@ -173,7 +175,11 @@ def read_security(api: Api, repo: str) -> dict[str, bool]:
 
 def check_security(api: Api, repo: str, want: dict[str, bool]) -> list[Drift]:
     have = read_security(api, repo)
-    return [Drift(f"security.{key}", value, have.get(key)) for key, value in want.items() if have.get(key) != value]
+    return [
+        Drift(f"security.{key}", value, have.get(key))
+        for key, value in want.items()
+        if have.get(key) != value
+    ]
 
 
 def apply_security(api: Api, repo: str, drift: list[Drift]) -> None:
@@ -185,7 +191,9 @@ def apply_security(api: Api, repo: str, drift: list[Drift]) -> None:
     }
     analysis = {}
     # Alerts come before the security updates, which need them.
-    for item in sorted(drift, key=lambda item: item.setting != "security.dependabot_alerts"):
+    for item in sorted(
+        drift, key=lambda item: item.setting != "security.dependabot_alerts"
+    ):
         key = item.setting.removeprefix("security.")
         if key in switches:
             if item.want:
@@ -203,20 +211,32 @@ def apply_security(api: Api, repo: str, drift: list[Drift]) -> None:
 
 def check_actions(api: Api, repo: str, want: dict[str, Json]) -> list[Drift]:
     have = dict(api.get(f"repos/{repo}/actions/permissions/workflow") or {})
-    have["sha_pinning_required"] = (api.get(f"repos/{repo}/actions/permissions") or {}).get("sha_pinning_required", False)
-    approval = api.get(f"repos/{repo}/actions/permissions/fork-pr-contributor-approval") or {}
+    have["sha_pinning_required"] = (
+        api.get(f"repos/{repo}/actions/permissions") or {}
+    ).get("sha_pinning_required", False)
+    approval = (
+        api.get(f"repos/{repo}/actions/permissions/fork-pr-contributor-approval") or {}
+    )
     have["fork_pr_approval"] = approval.get("approval_policy")
-    return [Drift(f"actions.{key}", value, have.get(key)) for key, value in want.items() if have.get(key) != value]
+    return [
+        Drift(f"actions.{key}", value, have.get(key))
+        for key, value in want.items()
+        if have.get(key) != value
+    ]
 
 
-def apply_actions(api: Api, repo: str, want: dict[str, Json], drift: list[Drift]) -> None:
+def apply_actions(
+    api: Api, repo: str, want: dict[str, Json], drift: list[Drift]
+) -> None:
     keys = {item.setting.removeprefix("actions.") for item in drift}
     if keys & {"default_workflow_permissions", "can_approve_pull_request_reviews"}:
         api.put(
             f"repos/{repo}/actions/permissions/workflow",
             {
                 "default_workflow_permissions": want["default_workflow_permissions"],
-                "can_approve_pull_request_reviews": want["can_approve_pull_request_reviews"],
+                "can_approve_pull_request_reviews": want[
+                    "can_approve_pull_request_reviews"
+                ],
             },
         )
     if "sha_pinning_required" in keys:
@@ -230,7 +250,10 @@ def apply_actions(api: Api, repo: str, want: dict[str, Json], drift: list[Drift]
             },
         )
     if "fork_pr_approval" in keys:
-        api.put(f"repos/{repo}/actions/permissions/fork-pr-contributor-approval", {"approval_policy": want["fork_pr_approval"]})
+        api.put(
+            f"repos/{repo}/actions/permissions/fork-pr-contributor-approval",
+            {"approval_policy": want["fork_pr_approval"]},
+        )
 
 
 # --------------------------------------------------------------------------- rulesets
@@ -264,7 +287,10 @@ def main_ruleset(checks: list[str]) -> dict[str, Json]:
                 "parameters": {
                     "do_not_enforce_on_create": True,
                     "strict_required_status_checks_policy": True,
-                    "required_status_checks": [{"context": check, "integration_id": ACTIONS_APP} for check in checks],
+                    "required_status_checks": [
+                        {"context": check, "integration_id": ACTIONS_APP}
+                        for check in checks
+                    ],
                 },
             },
         ],
@@ -279,14 +305,24 @@ def tag_ruleset() -> dict[str, Json]:
         "enforcement": "active",
         "bypass_actors": [],
         "conditions": {"ref_name": {"include": ["refs/tags/v*.*.*"], "exclude": []}},
-        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "update"}],
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {"type": "update"},
+        ],
     }
 
 
 def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[str]:
     """What differs between two rulesets, in the parts this tool manages."""
-    differences = [key for key in ("target", "enforcement", "bypass_actors", "conditions") if want[key] != have.get(key)]
-    have_rules = {rule["type"]: rule.get("parameters", {}) for rule in have.get("rules", [])}
+    differences = [
+        key
+        for key in ("target", "enforcement", "bypass_actors", "conditions")
+        if want[key] != have.get(key)
+    ]
+    have_rules = {
+        rule["type"]: rule.get("parameters", {}) for rule in have.get("rules", [])
+    }
     for rule in want["rules"]:
         parameters = have_rules.pop(rule["type"], None)
         if parameters is None:
@@ -304,7 +340,9 @@ def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[st
 
 
 def rulesets(api: Api, repo: str) -> dict[str, Json]:
-    return {item["name"]: item["id"] for item in api.get(f"repos/{repo}/rulesets") or []}
+    return {
+        item["name"]: item["id"] for item in api.get(f"repos/{repo}/rulesets") or []
+    }
 
 
 def check_rulesets(api: Api, repo: str, wanted: list[dict[str, Json]]) -> list[Drift]:
@@ -317,11 +355,17 @@ def check_rulesets(api: Api, repo: str, wanted: list[dict[str, Json]]) -> list[D
         have = api.get(f"repos/{repo}/rulesets/{existing[want['name']]}") or {}
         differences = ruleset_differences(want, have)
         if differences:
-            drift.append(Drift(f"ruleset {want['name']}", "as configured", ", ".join(differences)))
+            drift.append(
+                Drift(
+                    f"ruleset {want['name']}", "as configured", ", ".join(differences)
+                )
+            )
     return drift
 
 
-def apply_rulesets(api: Api, repo: str, wanted: list[dict[str, Json]], drift: list[Drift]) -> None:
+def apply_rulesets(
+    api: Api, repo: str, wanted: list[dict[str, Json]], drift: list[Drift]
+) -> None:
     existing = rulesets(api, repo)
     names = {item.setting.removeprefix("ruleset ") for item in drift}
     for want in wanted:
@@ -350,9 +394,14 @@ def apply_variables(api: Api, repo: str, drift: list[Drift]) -> None:
     for item in drift:
         name = item.setting.removeprefix("variable ")
         if item.have is None:
-            api.post(f"repos/{repo}/actions/variables", {"name": name, "value": item.want})
+            api.post(
+                f"repos/{repo}/actions/variables", {"name": name, "value": item.want}
+            )
         else:
-            api.patch(f"repos/{repo}/actions/variables/{name}", {"name": name, "value": item.want})
+            api.patch(
+                f"repos/{repo}/actions/variables/{name}",
+                {"name": name, "value": item.want},
+            )
 
 
 # --------------------------------------------------------------------------- environments
@@ -360,7 +409,9 @@ def apply_variables(api: Api, repo: str, drift: list[Drift]) -> None:
 MAIN_ONLY = {"protected_branches": False, "custom_branch_policies": True}
 
 
-def check_environments(api: Api, repo: str, want: dict[str, dict[str, Json]]) -> list[Drift]:
+def check_environments(
+    api: Api, repo: str, want: dict[str, dict[str, Json]]
+) -> list[Drift]:
     drift = []
     for name, config in want.items():
         environment = api.get(f"repos/{repo}/environments/{name}")
@@ -368,30 +419,56 @@ def check_environments(api: Api, repo: str, want: dict[str, dict[str, Json]]) ->
             drift.append(Drift(f"environment {name}", "main only", "missing"))
         else:
             policy = environment.get("deployment_branch_policy")
-            branches = api.get(f"repos/{repo}/environments/{name}/deployment-branch-policies") or {}
-            names = sorted(f"{item.get('type', 'branch')}:{item['name']}" for item in branches.get("branch_policies", []))
+            branches = (
+                api.get(f"repos/{repo}/environments/{name}/deployment-branch-policies")
+                or {}
+            )
+            names = sorted(
+                f"{item.get('type', 'branch')}:{item['name']}"
+                for item in branches.get("branch_policies", [])
+            )
             if policy != MAIN_ONLY or names != ["branch:main"]:
                 drift.append(Drift(f"environment {name}", "main only", names or policy))
-        present = {item["name"] for item in (api.get(f"repos/{repo}/environments/{name}/secrets") or {}).get("secrets", [])}
+        present = {
+            item["name"]
+            for item in (
+                api.get(f"repos/{repo}/environments/{name}/secrets") or {}
+            ).get("secrets", [])
+        }
         for secret in config.get("secrets", []):
             if secret not in present:
                 command = f"gh secret set {secret} --env {name} --repo {repo}"
-                drift.append(Drift(f"secret {secret} of {name}", "set", "missing", manual=command))
+                drift.append(
+                    Drift(
+                        f"secret {secret} of {name}", "set", "missing", manual=command
+                    )
+                )
     return drift
 
 
 def apply_environments(api: Api, repo: str, drift: list[Drift]) -> None:
     for item in drift:
         name = item.setting.removeprefix("environment ")
-        api.put(f"repos/{repo}/environments/{name}", {"deployment_branch_policy": MAIN_ONLY})
-        policies = api.get(f"repos/{repo}/environments/{name}/deployment-branch-policies") or {}
+        api.put(
+            f"repos/{repo}/environments/{name}", {"deployment_branch_policy": MAIN_ONLY}
+        )
+        policies = (
+            api.get(f"repos/{repo}/environments/{name}/deployment-branch-policies")
+            or {}
+        )
         for policy in policies.get("branch_policies", []):
             if (policy.get("type", "branch"), policy["name"]) != ("branch", "main"):
-                api.delete(f"repos/{repo}/environments/{name}/deployment-branch-policies/{policy['id']}")
+                api.delete(
+                    f"repos/{repo}/environments/{name}/deployment-branch-policies/{policy['id']}"
+                )
         if not any(
-            (policy.get("type", "branch"), policy["name"]) == ("branch", "main") for policy in policies.get("branch_policies", [])
+            (policy.get("type", "branch"), policy["name"]) == ("branch", "main")
+            for policy in policies.get("branch_policies", [])
         ):
-            api.post(f"repos/{repo}/environments/{name}/deployment-branch-policies", {"name": "main", "type": "branch"})
+            api.post(
+                f"repos/{repo}/environments/{name}/deployment-branch-policies",
+                {"name": "main", "type": "branch"},
+            )
 
 
 # --------------------------------------------------------------------------- settings
@@ -465,7 +542,9 @@ class Step:
     how: str = ""
 
 
-def reuse_compliant(repo: str, opener: Callable[[str], Any] = urllib.request.urlopen) -> bool:
+def reuse_compliant(
+    repo: str, opener: Callable[[str], Any] = urllib.request.urlopen
+) -> bool:
     try:
         with opener(REUSE_API + repo) as response:
             return bool(json.load(response).get("status") == "compliant")
@@ -474,11 +553,21 @@ def reuse_compliant(repo: str, opener: Callable[[str], Any] = urllib.request.url
 
 
 def checklist(
-    api: Api, repo: str, settings: Settings, root: Path, reuse: Callable[[str], bool] | None = None
+    api: Api,
+    repo: str,
+    settings: Settings,
+    root: Path,
+    reuse: Callable[[str], bool] | None = None,
 ) -> list[Step]:
     owner, name = repo.split("/", 1)
-    data = api.graphql(f'{{ repository(owner: "{owner}", name: "{name}") {{ usesCustomOpenGraphImage }} }}')
-    readme = (root / "README.md").read_text(encoding="utf-8") if (root / "README.md").exists() else ""
+    data = api.graphql(
+        f'{{ repository(owner: "{owner}", name: "{name}") {{ usesCustomOpenGraphImage }} }}'
+    )
+    readme = (
+        (root / "README.md").read_text(encoding="utf-8")
+        if (root / "README.md").exists()
+        else ""
+    )
     drift = check(api, repo, settings)
     secrets_missing = [item for item in drift if item.manual]
     target = settings.variables.get("PUBLISH_TO", "none")
@@ -506,7 +595,13 @@ def checklist(
         ),
     ]
     if (root / ".github/FUNDING.yml").exists():
-        steps.append(Step("Settings → General → Features: Sponsorships on", None, f"https://github.com/{repo}/settings"))
+        steps.append(
+            Step(
+                "Settings → General → Features: Sponsorships on",
+                None,
+                f"https://github.com/{repo}/settings",
+            )
+        )
     steps += [
         Step(
             "Social preview uploaded (bash scripts/social-preview.sh renders it)",
@@ -525,10 +620,22 @@ def checklist(
         ),
     ]
     delivery = {
-        "pypi": ("Trusted publisher on PyPI: workflow release.yml, environment pypi", "https://pypi.org/manage/account/publishing/"),
-        "npm": ("Trusted publisher on npm: workflow release.yml, environment npm", "https://www.npmjs.com/settings/~/packages"),
-        "ghcr": ("After the first release: the package of the image is public", f"https://github.com/{repo}/pkgs/container/{name}"),
-        "hacs": ("Submitted to the HACS default repositories", "https://github.com/hacs/default"),
+        "pypi": (
+            "Trusted publisher on PyPI: workflow release.yml, environment pypi",
+            "https://pypi.org/manage/account/publishing/",
+        ),
+        "npm": (
+            "Trusted publisher on npm: workflow release.yml, environment npm",
+            "https://www.npmjs.com/settings/~/packages",
+        ),
+        "ghcr": (
+            "After the first release: the package of the image is public",
+            f"https://github.com/{repo}/pkgs/container/{name}",
+        ),
+        "hacs": (
+            "Submitted to the HACS default repositories",
+            "https://github.com/hacs/default",
+        ),
         "nextcloud-appstore": (
             "App certificate requested and the app registered in the App Store",
             "https://nextcloudappstore.readthedocs.io/en/latest/developer.html",
@@ -554,20 +661,40 @@ def describe_steps(steps: list[Step]) -> str:
 
 
 def current_repo(api: Api) -> str:
-    result = api.runner(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], None)
+    result = api.runner(
+        ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], None
+    )
     if result.returncode != 0:
-        raise GitHubError(0, "this folder is no GitHub repository the CLI knows; pass --repo OWNER/NAME")
+        raise GitHubError(
+            0,
+            "this folder is no GitHub repository the CLI knows; pass --repo OWNER/NAME",
+        )
     return result.stdout.strip()
 
 
-def main(argv: Sequence[str] | None = None, api: Api | None = None, root: Path = Path()) -> int:
-    parser = argparse.ArgumentParser(prog="blueprint.py", description=__doc__.split("\n\n")[0])
-    parser.add_argument("--repo", help="OWNER/NAME; by default the repository of this folder")
-    parser.add_argument("--config", type=Path, default=CONFIG, help="the settings, by default %(default)s")
+def main(
+    argv: Sequence[str] | None = None, api: Api | None = None, root: Path = Path()
+) -> int:
+    parser = argparse.ArgumentParser(
+        prog="blueprint.py", description=__doc__.split("\n\n")[0]
+    )
+    parser.add_argument(
+        "--repo", help="OWNER/NAME; by default the repository of this folder"
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=CONFIG,
+        help="the settings, by default %(default)s",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    settings_parser = commands.add_parser("settings", help="compare or apply the settings as code")
+    settings_parser = commands.add_parser(
+        "settings", help="compare or apply the settings as code"
+    )
     settings_parser.add_argument("action", choices=["check", "apply"])
-    commands.add_parser("checklist", help="the steps outside the API, and which are done")
+    commands.add_parser(
+        "checklist", help="the steps outside the API, and which are done"
+    )
     arguments = parser.parse_args(argv)
 
     api = api or Api()
