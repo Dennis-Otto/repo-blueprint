@@ -923,6 +923,13 @@ def changelog_command(arguments: argparse.Namespace) -> int:
         text = Path(arguments.file).read_text(encoding="utf-8")
         sys.stdout.write(beta_notes(arguments.version, text))
         return 0
+    if arguments.command == "vex":
+        accepted = Path(arguments.file)
+        text = accepted.read_text(encoding="utf-8") if accepted.is_file() else ""
+        document = openvex(arguments.repo, arguments.tag, arguments.timestamp, text)
+        if document is not None:
+            sys.stdout.write(document)
+        return 0
     if arguments.command == "notices":
         sbom = json.loads(Path(arguments.sbom).read_text(encoding="utf-8"))
         sys.stdout.write(third_party_notices(arguments.version, sbom))
@@ -988,6 +995,40 @@ def third_party_notices(version: str, sbom: Json) -> str:
     if not groups:
         lines += ["", "The repository uses no third-party components."]
     return "\n".join(lines) + "\n"
+
+
+# ----------------------------------------------------------------------------- vex
+
+OPENVEX = "https://openvex.dev/ns/v0.2.0"
+
+
+def openvex(repo: str, tag: str, timestamp: str, accepted: str) -> str | None:
+    """An OpenVEX document of the release: every advisory that osv-scanner.toml
+    accepts, each with its reason, is not one that affects the release. None when it
+    accepts none."""
+    entries = tomllib.loads(accepted).get("IgnoredVulns", [])
+    if not entries:
+        return None
+    product = f"pkg:github/{repo}@{tag}"
+    name = repo.rsplit("/", 1)[-1]
+    document = {
+        "@context": OPENVEX,
+        "@id": f"https://github.com/{repo}/releases/download/{tag}/{name}.openvex.json",
+        "author": f"The release bot of {repo}",
+        "timestamp": timestamp,
+        "version": 1,
+        "statements": [
+            {
+                "vulnerability": {"name": entry["id"]},
+                "products": [{"@id": product}],
+                "status": "not_affected",
+                "impact_statement": entry.get("reason", "").strip()
+                or "The project accepts this advisory; see its osv-scanner.toml.",
+            }
+            for entry in entries
+        ],
+    }
+    return json.dumps(document, indent=2, ensure_ascii=False) + "\n"
 
 
 # --------------------------------------------------------------------------- command line
@@ -1067,6 +1108,15 @@ def main(
         "version", help="the version of the beta, such as 1.3.0-beta.2"
     )
     beta_parser.add_argument("--file", default="CHANGELOG.md")
+    vex_parser = commands.add_parser(
+        "vex",
+        help="the OpenVEX document of a release from osv-scanner.toml, for the release "
+        "bot; nothing when it accepts no advisory",
+    )
+    vex_parser.add_argument("repo", help="owner/name")
+    vex_parser.add_argument("tag", help="the tag of the release")
+    vex_parser.add_argument("timestamp", help="when the release is made, RFC 3339")
+    vex_parser.add_argument("--file", default="osv-scanner.toml")
     notices_parser = commands.add_parser(
         "notices", help="the third-party components and their licenses, for releases"
     )
@@ -1074,7 +1124,7 @@ def main(
     notices_parser.add_argument("sbom", help="the SBOM of GitHub's dependency graph")
     arguments = parser.parse_args(argv)
 
-    if arguments.command in ("changelog", "unreleased", "beta", "notices"):
+    if arguments.command in ("changelog", "unreleased", "beta", "vex", "notices"):
         try:
             return changelog_command(arguments)
         except OSError as error:
