@@ -37,6 +37,7 @@ _skip_if_exists:
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html
+  - .github/repository.project.toml
   - .lycheeignore
   - pyproject.toml
   - requirements-dev.in
@@ -107,6 +108,11 @@ author:
   type: str
   help: The maintainer, named in the license and the governance
   default: Dennis Otto
+
+copyright:
+  type: str
+  help: The copyright of the license, years and holder; several separated by semicolons
+  default: "{= '%Y' | strftime =} {= author =}"
 
 license:
   type: str

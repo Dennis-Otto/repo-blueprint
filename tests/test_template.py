@@ -355,3 +355,25 @@ def test_python_projects_run_property_tests_every_night(
         ).read_text(encoding="utf-8")
     else:
         assert not workflow.exists()
+
+
+def test_several_copyright_holders(tmp_path: Path) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="generic",
+        copyright="2024 Example contributors; 2026 Dennis Otto",
+    )
+
+    lines = (project / "LICENSE").read_text(encoding="utf-8").splitlines()
+    assert lines[2:4] == [
+        "Copyright (c) 2024 Example contributors",
+        "Copyright (c) 2026 Dennis Otto",
+    ]
+    reuse = tomllib.loads((project / "REUSE.toml").read_text(encoding="utf-8"))
+    assert reuse["annotations"][0]["SPDX-FileCopyrightText"] == [
+        "2024 Example contributors",
+        "2026 Dennis Otto",
+        "Contributors to Demo",
+    ]

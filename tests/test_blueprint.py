@@ -694,3 +694,37 @@ def test_a_repository_without_labels_toml(tmp_path: Path) -> None:
     (tmp_path / "repository.toml").write_text(CONFIG, encoding="utf-8")
 
     assert blueprint.Settings.load(tmp_path / "repository.toml").labels == {}
+
+
+def test_merge_adds_the_settings_of_the_project() -> None:
+    base: dict[str, Any] = {
+        "branch": {"required_checks": ["a", "b"]},
+        "variables": {"X": "1"},
+    }
+    extra = {
+        "branch": {"required_checks": ["b", "c"]},
+        "variables": {"X": "2", "Y": "3"},
+        "environments": {"deploy": {"secrets": ["KEY"]}},
+    }
+
+    assert blueprint.merge(base, extra) == {
+        "branch": {"required_checks": ["a", "b", "c"]},
+        "variables": {"X": "2", "Y": "3"},
+        "environments": {"deploy": {"secrets": ["KEY"]}},
+    }
+    assert base["branch"]["required_checks"] == ["a", "b"]
+
+
+def test_the_settings_of_the_project_join_the_checks(root: Path) -> None:
+    (root / ".github/repository.project.toml").write_text(
+        '[branch]\nrequired_checks = ["e2e"]\n', encoding="utf-8"
+    )
+
+    settings = blueprint.Settings.load(root / ".github/repository.toml")
+
+    main = settings.rulesets[0]["rules"]
+    checks = next(rule for rule in main if rule["type"] == "required_status_checks")
+    contexts = [
+        item["context"] for item in checks["parameters"]["required_status_checks"]
+    ]
+    assert contexts == ["check (python)", "reuse", "e2e"]

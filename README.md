@@ -82,6 +82,16 @@ The blueprint bot (`blueprint-update.yml`) runs `copier update` every week. With
 
 The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the dependency manifests and lock files (the project's Dependabot keeps them current), the code and the tests, the labels and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
+## What belongs to a project
+
+The blueprint keeps the shared parts of every repository equal; a project adds its own without forking them:
+
+- **Changes in the blueprint's files survive updates:** `copier update` merges the changes of the blueprint with those of the repository, line by line, and marks a conflict only where both changed the same lines.
+- **Settings of the project alone** go into `.github/repository.project.toml`, such as the checks of its end-to-end tests or an environment with its secrets. `blueprint.py` and the settings bot add them to `.github/repository.toml`.
+- **Checks of the project alone** go into `scripts/check-project.sh`, which `scripts/check.sh` runs last; **workflows of the project alone** are workflow files of their own.
+- **Several copyright holders,** such as the authors of a fork, are the answer `copyright`, separated by semicolons; LICENSE and REUSE.toml name each of them.
+- **Files under another license,** such as third-party artwork, get a `.license` file next to them, as REUSE describes.
+
 ## Tools in every repository
 
 - `bash scripts/check.sh`: the checks of the CI, locally.
