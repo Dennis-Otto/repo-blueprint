@@ -8,9 +8,10 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Dennis Otto and contributors"
 SPDX-License-Identifier = "MIT-0"
 
-# The license of a new repository is one of these texts, as its maintainer chooses.
+# The license of a new repository is one of these texts, as its maintainer chooses;
+# REUSE.toml.jinja names it. (REUSE itself ignores LICENSE files and LICENSES folders.)
 [[annotations]]
-path = ["template/LICENSE.jinja", "template/LICENSES/**"]
+path = ["template/REUSE.toml.jinja", "template/LICENSE.jinja", "template/LICENSES/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Dennis Otto and contributors"
 SPDX-License-Identifier = "MIT OR MIT-0 OR BSD-3-Clause OR Apache-2.0 OR GPL-3.0-or-later OR AGPL-3.0-or-later"

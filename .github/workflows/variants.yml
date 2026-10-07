@@ -63,9 +63,9 @@ jobs:
         if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
         working-directory: ${{ env.PROJECT }}
         run: |
-          requirements=requirements-dev.txt
+          requirements="requirements-dev.txt"
           if [[ -f requirements-test.txt ]]; then
-            requirements=requirements-test.txt
+            requirements="requirements-test.txt"
           fi
           pip install --require-hashes -r "$requirements"
 
