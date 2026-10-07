@@ -54,7 +54,6 @@ jobs:
       - name: Update to the latest release of the blueprint
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          APP_SLUG: ${{ steps.app.outputs.app-slug }}
           AUTOMERGE: ${{ vars.BLUEPRINT_AUTOMERGE }}
         run: |
           set -euo pipefail
@@ -68,16 +67,54 @@ jobs:
           fi
           conflicts="$(git grep -l -E '^<{7} ' -- . || true)"
 
-          # The commit belongs to the release app, whose pull requests the DCO check accepts.
-          user_id="$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id)"
-          git config user.name "${APP_SLUG}[bot]"
-          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          # The commit goes through GitHub's API as the release app: GitHub signs it, as
+          # main requires, and the DCO check accepts the pull requests of the app.
           branch="blueprint/update"
-          git switch --force-create "$branch"
+          base="$(git rev-parse HEAD)"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" \
+              -f sha="$base" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$branch" -f sha="$base" >/dev/null
+          fi
           git add --all
-          git commit --quiet --message "chore: update to the blueprint $after" \
-            --message "The changes of the blueprint from $before to $after: https://github.com/Dennis-Otto/repo-blueprint/releases/tag/$after"
-          git push --force --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+          python3 - "$branch" "$base" "$before" "$after" > "$RUNNER_TEMP/commit.json" <<'PYTHON'
+          import base64
+          import json
+          import os
+          import subprocess
+          import sys
+
+          branch, base, before, after = sys.argv[1:]
+          entries = subprocess.run(
+              ["git", "diff", "--cached", "--name-status", "--no-renames", "-z", "HEAD"],
+              capture_output=True, check=True,
+          ).stdout.decode().split("\0")
+          additions, deletions = [], []
+          for status, path in zip(entries[0::2], entries[1::2]):
+              if status == "D":
+                  deletions.append({"path": path})
+              else:
+                  with open(path, "rb") as file:
+                      contents = base64.b64encode(file.read()).decode()
+                  additions.append({"path": path, "contents": contents})
+          release = f"https://github.com/Dennis-Otto/repo-blueprint/releases/tag/{after}"
+          print(json.dumps({
+              "query": "mutation($input: CreateCommitOnBranchInput!) "
+                       "{ createCommitOnBranch(input: $input) { commit { oid } } }",
+              "variables": {"input": {
+                  "branch": {"repositoryNameWithOwner": os.environ["GITHUB_REPOSITORY"], "branchName": branch},
+                  "expectedHeadOid": base,
+                  "message": {
+                      "headline": f"chore: update to the blueprint {after}",
+                      "body": f"The changes of the blueprint from {before} to {after}: {release}",
+                  },
+                  "fileChanges": {"additions": additions, "deletions": deletions},
+              }},
+          }))
+          PYTHON
+          gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid
 
           body="$(printf '%s\n' \
             "Brings the repository from the blueprint's $before to [$after](https://github.com/Dennis-Otto/repo-blueprint/releases/tag/$after) with \`copier update\`." \

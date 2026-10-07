@@ -272,6 +272,8 @@ def main_ruleset(checks: list[str]) -> dict[str, Json]:
             {"type": "deletion"},
             {"type": "non_fast_forward"},
             {"type": "required_linear_history"},
+            # Every commit signed: the maintainer's and those that bots make through the API.
+            {"type": "required_signatures"},
             {
                 "type": "pull_request",
                 "parameters": {
