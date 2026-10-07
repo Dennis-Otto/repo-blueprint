@@ -164,12 +164,22 @@ jobs:
               app_id="$(gh api -H "Accept: application/vnd.github.raw+json" \
                 "repos/$GH_REPO/contents/appinfo/info.xml?ref=$TAG" |
                 python3 -c 'import sys, xml.etree.ElementTree as t; print(t.parse(sys.stdin).getroot().findtext("id"))')"
-              if curl --fail --silent --show-error https://apps.nextcloud.com/api/v1/apps.json |
-                jq -e --arg id "$app_id" --arg version "$version" \
-                  'any(.[]; .id == $id and any(.releases[]; .version == $version))' >/dev/null; then
-                pass "The Nextcloud App Store has $app_id $version."
+              # The page of the app shows a new release at once and links its signed
+              # package; the list of all apps follows up to hours later.
+              package="https://github.com/$GH_REPO/releases/download/$TAG/$app_id.tar.gz"
+              offered=false
+              for attempt in 1 2 3 4 5 6; do
+                if curl --fail --silent --show-error --max-time 60 "https://apps.nextcloud.com/apps/$app_id" |
+                  grep -qF "href=\"$package\""; then
+                  offered=true
+                  break
+                fi
+                [[ "$attempt" == 6 ]] || sleep 30
+              done
+              if [[ "$offered" == true ]]; then
+                pass "The Nextcloud App Store offers the package of $app_id $version."
               else
-                fail "The Nextcloud App Store doesn't have $app_id $version."
+                fail "The Nextcloud App Store doesn't offer the package of $app_id $version."
               fi
               ;;
             github-action)
