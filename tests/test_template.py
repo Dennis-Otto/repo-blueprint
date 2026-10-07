@@ -761,3 +761,11 @@ def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
             name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
             assert name, path
             assert name[1] in watched, name[1]
+
+
+def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
+    bot = (ROOT / ".github/workflows/cleanup.yml").read_text(encoding="utf-8")
+    # Only a branch that main holds completely goes.
+    assert bot.index('if [[ "$ahead" == 0 ]]; then') < bot.index("--method DELETE")
+    for kept in ("release-please--*", "renovate/*", "dependabot/*"):
+        assert kept in bot, kept
