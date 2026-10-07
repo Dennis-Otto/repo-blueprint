@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **The settings bot applies the settings as code itself,** after every change of `repository.toml`, `repository.project.toml` or `labels.toml` on `main` and every week, as the release app, which may now write the administration of the repositories. So a new required check of a blueprint update is in place without anyone running `settings apply`; only a missing secret still waits for the maintainer, with the command that sets it.
+
 ### Bug fixes
 
 - The pin of `shivammathur/setup-php` names its tag as it is, `2.37.2`, so that zizmor no longer reports the comment as a mismatch and the Findings workflow passes.
