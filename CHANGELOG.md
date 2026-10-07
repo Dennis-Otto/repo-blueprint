@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.2.0...v0.3.0) (2026-10-07)
+
 ### Features
 
 - **The release bot writes the changelog that the pull requests write.** What they describe under `## Unreleased` of `CHANGELOG.md` becomes the section of the next release, and its notes show that text followed by every pull request. Without a text, the section lists the pull requests as before. The version still follows from their titles (`fix` a patch, `feat` a minor, `!` a major version), decided anew with every merge, and the release pull request says so.
@@ -35,31 +37,6 @@ the next release, or lists the pull requests when there is none.
 - The first release no longer drops the introduction of the changelog.
 - The settings bot no longer fails on the bypass list of the rulesets: the token of the release app gets the rulesets without it.
 - `LICENSE` ends with one line break, also for the SPDX texts that end with a blank line, such as MIT.
-
-## [0.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.2.0...v0.3.0) (2026-10-07)
-
-
-### Features
-
-* attach the provenance of a release as in-toto JSON lines too ([#28](https://github.com/Dennis-Otto/repo-blueprint/issues/28)) ([fb73981](https://github.com/Dennis-Otto/repo-blueprint/commit/fb7398127309095aa47bc98dd881b225dd9a2718))
-* give every project a dev container for VS Code and Codespaces ([#19](https://github.com/Dennis-Otto/repo-blueprint/issues/19)) ([25abe0a](https://github.com/Dennis-Otto/repo-blueprint/commit/25abe0af955971e23c6dbaa9bb664e3d6309a2a7))
-* leave the issue forms to the project and start them richer ([#17](https://github.com/Dennis-Otto/repo-blueprint/issues/17)) ([1d0ab5c](https://github.com/Dennis-Otto/repo-blueprint/commit/1d0ab5cab167d98be93c2c7e1db61c08819f7882))
-* raise max-version of a Nextcloud app with every new major version of Nextcloud ([#27](https://github.com/Dennis-Otto/repo-blueprint/issues/27)) ([e38bd79](https://github.com/Dennis-Otto/repo-blueprint/commit/e38bd79a52db501710dd2280dedead1f2716f223))
-* record the network traffic of every job with Harden-Runner ([#20](https://github.com/Dennis-Otto/repo-blueprint/issues/20)) ([ebc7d85](https://github.com/Dennis-Otto/repo-blueprint/commit/ebc7d85d83a77b7f2fbe1ff49ab378b6cf903097))
-* register a Nextcloud app in the App Store with a workflow of the app ([#30](https://github.com/Dennis-Otto/repo-blueprint/issues/30)) ([dce379a](https://github.com/Dennis-Otto/repo-blueprint/commit/dce379ab53a7be539f2339aa98c1c1558ee0a445))
-* show every repository on a dashboard ([#26](https://github.com/Dennis-Otto/repo-blueprint/issues/26)) ([1c7e86f](https://github.com/Dennis-Otto/repo-blueprint/commit/1c7e86f56d08d9018590e44746f58d6c1acf7093))
-* verify every release as its users can ([#21](https://github.com/Dennis-Otto/repo-blueprint/issues/21)) ([612e634](https://github.com/Dennis-Otto/repo-blueprint/commit/612e63420683205fcf16b1a08149d7d58b1cf71b))
-* write the release changelog from Unreleased and keep the release pull request current ([#15](https://github.com/Dennis-Otto/repo-blueprint/issues/15)) ([b20402f](https://github.com/Dennis-Otto/repo-blueprint/commit/b20402f3a263bde2f2ecef0f8f7760e714c45c8f))
-
-
-### Bug fixes
-
-* **deps:** Bump the dev-container-features group across 2 directories with 2 updates ([#32](https://github.com/Dennis-Otto/repo-blueprint/issues/32)) ([6ccda81](https://github.com/Dennis-Otto/repo-blueprint/commit/6ccda81c2cecd3b8feb054ac07f607ef81cf2e54))
-* **deps:** keep the version of each dev container and move only its digest ([#25](https://github.com/Dennis-Otto/repo-blueprint/issues/25)) ([028a4db](https://github.com/Dennis-Otto/repo-blueprint/commit/028a4db5b3112021943545c144a9282ff306760a))
-* give Nextcloud apps the checks and package rules that the existing apps have ([#29](https://github.com/Dennis-Otto/repo-blueprint/issues/29)) ([d9b0e60](https://github.com/Dennis-Otto/repo-blueprint/commit/d9b0e602746adad79cb0c821884b7837d81ad15c))
-* let updates reach every file of the blueprint, and give dev containers Docker and Node ([#31](https://github.com/Dennis-Otto/repo-blueprint/issues/31)) ([1674ee0](https://github.com/Dennis-Otto/repo-blueprint/commit/1674ee01bfa52dd35906bf5909f104cfca45de82))
-* **settings:** accept rulesets whose bypass list the release app can't see ([#24](https://github.com/Dennis-Otto/repo-blueprint/issues/24)) ([e91116b](https://github.com/Dennis-Otto/repo-blueprint/commit/e91116bb5d0ad85602ba84cc2349a459994fb1c0))
-* write the changelog into a release pull request that was just created ([#18](https://github.com/Dennis-Otto/repo-blueprint/issues/18)) ([d45caad](https://github.com/Dennis-Otto/repo-blueprint/commit/d45caadb5d55b4ac8b57c2caeb2b2c3d78d4d93b))
 
 ## [0.2.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.1.0...v0.2.0) (2026-10-07)
 
