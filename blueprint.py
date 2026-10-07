@@ -272,8 +272,6 @@ def main_ruleset(checks: list[str]) -> dict[str, Json]:
             {"type": "deletion"},
             {"type": "non_fast_forward"},
             {"type": "required_linear_history"},
-            # The squash commits that GitHub makes are signed by GitHub.
-            {"type": "required_signatures"},
             {
                 "type": "pull_request",
                 "parameters": {
