@@ -17,7 +17,7 @@ rules:
   self-repository:
     ignore:
       # The test run of the action uses it the way its documentation shows, ./
-      - ci-github-action.yml
+      - action-test.yml
   github-app:
     ignore:
       # The token action has no input for the Variables permission that the settings
