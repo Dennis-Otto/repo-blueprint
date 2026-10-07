@@ -29,7 +29,7 @@ If a fix needs longer, for example because the cause lies in an upstream project
 - Actions are pinned to commit hashes, tokens get the least permissions they need, and Dependabot keeps actions and dependencies current.
 - OSV-Scanner checks every lock file against the OSV database of known vulnerabilities, on every pull request and every week.
 - Harden-Runner records the network traffic of every job of the workflows, so that a connection that doesn't belong there shows.
-- Releases carry an SBOM and signed build provenance, are immutable once published, and are verified as their users can after every release and every week.
+- Releases carry an SBOM, the licenses of their third-party components (`THIRD_PARTY_NOTICES.md`) and signed build provenance, are immutable once published, and are verified as their users can after every release and every week.
 
 ## Findings of code scanning
 
