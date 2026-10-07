@@ -331,3 +331,27 @@ def test_every_repository_gets_the_settings_tool(
     copy = (projects[kind] / ".github/blueprint.py").read_text(encoding="utf-8")
 
     assert copy == (ROOT / "blueprint.py").read_text(encoding="utf-8")
+
+
+def test_the_readme_of_an_integration_works_in_hacs(projects: dict[str, Path]) -> None:
+    # HACS shows the README outside GitHub, where relative links lead nowhere.
+    readme = (projects["home-assistant"] / "README.md").read_text(encoding="utf-8")
+
+    for target in re.findall(r"\]\(([^)\s]+)\)", readme):
+        assert target.startswith(("https://", "#")), target
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_python_projects_run_property_tests_every_night(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    workflow = project / ".github/workflows/properties.yml"
+
+    if kind in ("home-assistant", "python-package", "github-action"):
+        assert workflow.exists()
+        assert 'settings.register_profile("local"' in (
+            project / "tests/conftest.py"
+        ).read_text(encoding="utf-8")
+    else:
+        assert not workflow.exists()
