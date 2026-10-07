@@ -66,6 +66,16 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 
 `checklist` prints the `gh secret set` commands; the value is typed into the prompt of the GitHub CLI and never appears anywhere else.
 
+### An existing repository
+
+An existing repository takes the blueprint on a branch, in one pull request:
+
+1. `copier copy --overwrite --vcs-ref vX.Y.Z gh:Dennis-Otto/repo-blueprint .` with the answers that fit the repository, such as its description, topics and homepage as they are on GitHub, so that `settings apply` changes nothing there. The files of the project (README, changelog, code, tests, manifests, labels, issue forms, icons) stay as they are.
+2. Look at the diff of every file of the blueprint and put back what belongs to the project only: sections of SECURITY.md or CONTRIBUTING.md, ecosystems of `dependabot.yml`, hosts of the issue assistant, ignore rules. `copier update` keeps these changes from then on.
+3. Write the version of the latest release into `version.txt` and `.release-please-manifest.json`, start `CHANGELOG.md` with `## Unreleased`, and give `.github/labels.toml` the labels of the bots (`autorelease: pending`, `autorelease: tagged`, `merge-conflict`, `maintenance`, `docker`).
+4. Put the checks of the project alone, such as its end-to-end tests, into `.github/repository.project.toml` and `scripts/check-project.sh`; remove the workflows, scripts and tests that the blueprint replaces, and delete files of the template that the project doesn't need, such as a sample test.
+5. Open the pull request. Once its new checks pass, `blueprint.py settings apply` switches the required checks, the variables and the labels, and the pull request can merge.
+
 ## Settings as code
 
 `.github/repository.toml` holds the settings of a repository; `blueprint.py settings check` compares them with GitHub and `settings apply` makes GitHub match:

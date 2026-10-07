@@ -3,6 +3,10 @@
 {
   "name": {= project_name | to_json(ensure_ascii=False) =},
   "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {}[% if stack in ['home-assistant', 'php'] %],
+    "ghcr.io/devcontainers/features/node:2": { "version": "24" }[% endif %]
+  },
   "postCreateCommand": "bash .devcontainer/setup.sh",[% if stack in ['python', 'home-assistant'] %]
   "remoteEnv": { "PATH": "${containerWorkspaceFolder}/.venv/bin:${containerEnv:PATH}" },[% endif %]
   "customizations": {

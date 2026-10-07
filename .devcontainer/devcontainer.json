@@ -1,6 +1,9 @@
 {
   "name": "Repo Blueprint",
   "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {}
+  },
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "remoteEnv": { "PATH": "${containerWorkspaceFolder}/.venv/bin:${containerEnv:PATH}" },
   "customizations": {

@@ -1,0 +1,4 @@
+[#- The locked Features: Docker for every project, Node for those with a frontend. -#]
+[% if stack in ['home-assistant', 'php'] %][% include "stacks/devcontainer/.devcontainer/devcontainer-lock.json" -%]
+[% else %][% include ".devcontainer/devcontainer-lock.json" -%]
+[% endif -%]

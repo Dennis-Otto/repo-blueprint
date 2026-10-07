@@ -13,5 +13,11 @@ composer install
 [%- elif stack == 'node' %]
 npm ci
 [%- endif %]
+[%- if stack in ['home-assistant', 'php'] %]
+# The frontend, if the project has one.
+if [[ -f package.json ]]; then
+  npm ci --ignore-scripts
+fi
+[%- endif %]
 git config core.hooksPath .githooks
 echo "Ready: bash scripts/check.sh runs the checks of the CI."

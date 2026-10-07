@@ -20,9 +20,13 @@ the next release, or lists the pull requests when there is none.
 - **A dev container** for VS Code and GitHub Codespaces in every project: the image of its kind by digest, which Dependabot keeps current, the tools of the checks and the pre-push hook set up once it is created.
 - Every project gets the `docker` label, for the Dependabot updates of the image of its social preview.
 - **Nextcloud apps** check more on every change: `composer validate` and `composer audit`, `appinfo/info.xml` against the schema of the App Store, the PHP of `templates/`, and the package that krankerl builds, with the project's `scripts/check-package.sh`, which the release runs before and after signing as well. Lines of `info.xml` marked `x-release-please-version`, such as screenshot URLs at a tag, follow each release.
+- The dev container has Docker for every project, for the end-to-end tests and the social preview, and Node for a Home Assistant integration or a Nextcloud app with a frontend; its Features are locked and kept current by Dependabot. The CI of a Home Assistant integration with a `package.json` sets up Node for the tests of its frontend.
+- The README describes how an existing repository takes the blueprint.
 
 ### Bug fixes
 
+- **Updates reach every file of the blueprint again:** the patterns of the files that belong to a project matched at any depth, so that `.github/blueprint.py`, the Dockerfile of the dev container and that of the social preview never changed with an update.
+- A release follows only from changes for users: pull requests of the type `docs` no longer make one on their own; what they wrote under Unreleased comes with the next release.
 - A Nextcloud app keeps its icons in `img/`, and its package leaves out the dev container, the hooks, the link check, `screenshots/` and `LICENSES/`, whose text `LICENSE` carries. psalm's JSON mapper (OSL-3.0) passes the dependency review as a tool of the checks. Dependabot leaves the major version of `nextcloud/ocp`, which follows the min-version of the app, to the maintainer and groups the major updates of composer.
 - Every `.gitignore` keeps secrets out: `.env`, keys, certificates and credential files.
 - The weekly release verification waits for the next release when the latest one is older than the release workflow of the blueprint.

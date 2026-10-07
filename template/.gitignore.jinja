@@ -33,6 +33,10 @@ __pycache__/
 /build/
 /dist/
 *.egg-info/
+/coverage.xml
+[% endif %][% if stack == 'home-assistant' %]
+# The frontend
+/node_modules/
 [% endif %][% if stack == 'php' %]
 # PHP
 /vendor/

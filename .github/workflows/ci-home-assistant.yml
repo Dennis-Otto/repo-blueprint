@@ -42,6 +42,16 @@ jobs:
           cache-dependency-path: requirements-test.txt
       - name: Install the hash-pinned test tools
         run: pip install --require-hashes -r requirements-test.txt
+      # The frontend of the integration, such as its cards, if it has one; its tests
+      # belong in scripts/check-project.sh.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: hashFiles('package.json') != ''
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install the locked packages of the frontend
+        if: hashFiles('package.json') != ''
+        run: npm ci --ignore-scripts
       - name: Run the checks
         run: bash scripts/check.sh
       - name: Show the coverage
