@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **The clean-up bot** deletes every week the branches that `main` holds completely and that no open pull request uses, and the caches of closed pull requests. A branch with commits that `main` doesn't have stays and is listed in its summary after a month without a pull request.
+
 ## [0.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.4.0...v0.5.0) (2026-10-07)
 
 ### Features

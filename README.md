@@ -26,6 +26,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide, code of conduct, security policy, support, governance, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels, and every file of the community standards of GitHub; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
+| **Clean-up** | every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month | `cleanup.yml` |
 | **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
