@@ -20,6 +20,7 @@ the next release, or lists the pull requests when there is none.
 ### Bug fixes
 
 - The first release no longer drops the introduction of the changelog.
+- The settings bot no longer fails on the bypass list of the rulesets: the token of the release app gets the rulesets without it.
 - `LICENSE` ends with one line break, also for the SPDX texts that end with a blank line, such as MIT.
 
 ## [0.2.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.1.0...v0.2.0) (2026-10-07)
