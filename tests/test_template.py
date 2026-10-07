@@ -95,6 +95,10 @@ def test_the_workflows_are_the_blueprints_own(
             source = source.replace(
                 "stacks/fuzz/requirements.txt", "requirements-fuzz.txt"
             )
+        if name == "docs.yml":
+            source = source.replace(
+                "stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"
+            )
         if name == "codeql.yml":
             source = re.sub(
                 r"        # The languages of this repository.*\n        language: \[.*\]\n",
@@ -494,6 +498,8 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
     for owned in (
         "README.md",
         "CHANGELOG.md",
+        "mkdocs.yml",
+        "docs/index.md",
         "issue_assistant.py",
         "Dockerfile",
         "img/app.svg",
@@ -507,6 +513,8 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         ".devcontainer/Dockerfile",
         ".github/social-preview/Dockerfile",
         ".github/workflows/ci.yml",
+        ".github/workflows/docs.yml",
+        ".github/docs-requirements.txt",
         "docs/README.md",
         "scripts/check.sh",
     ):
@@ -526,6 +534,7 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     for sample in (
         "tests",
         "fuzz",
+        "docs/index.md",
         "src",
         "lib",
         "custom_components",
@@ -535,6 +544,8 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         assert not (project / sample).exists(), sample
     assert (project / "scripts/check.sh").exists()
     assert (project / ".github/workflows/ci.yml").exists()
+    # The website waits for the pages of the project; the check docs passes until then.
+    assert (project / "mkdocs.yml").exists()
     assert "sample_code: false" in (project / ".copier-answers.yml").read_text(
         encoding="utf-8"
     )
@@ -695,3 +706,44 @@ def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
             name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
             assert name, path
             assert name[1] in watched, name[1]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> None:
+    project = projects[kind]
+    config = (project / "mkdocs.yml").read_text(encoding="utf-8")
+
+    for line in (
+        'site_name: "Demo Project"',
+        f'site_description: "A {kind} of the tests, with \\"quotes\\" and Ümlauts."',
+        "site_url: https://dennis-otto.github.io/demo-project/",
+        "repo_url: https://github.com/Dennis-Otto/demo-project",
+        "edit_uri: edit/main/docs/",
+        "  name: material",
+        "  - Home: index.md",
+        # German pages follow the pattern of the comments.
+        "#       link: /demo-project/de/",
+    ):
+        assert f"\n{line}\n" in config, line
+    assert (
+        (project / "docs/index.md")
+        .read_text(encoding="utf-8")
+        .startswith("# Demo Project\n")
+    )
+    # The tools of the Docs workflow are the blueprint's, which it keeps current.
+    tools = (project / ".github/docs-requirements.txt").read_text(encoding="utf-8")
+    assert tools == (ROOT / "stacks/docs/requirements-docs.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "mkdocs-material==" in tools
+    docs = workflows(project)["docs.yml"]
+    assert "pip install --require-hashes -r .github/docs-requirements.txt" in docs
+    # Only the blueprint leaves the publishing to its Dashboard workflow.
+    assert "repo-blueprint" not in docs.replace(
+        "https://github.com/Dennis-Otto/repo-blueprint", ""
+    )
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert settings["pages"] == {"build_type": "workflow"}
+    assert "docs" in settings["branch"]["required_checks"]
