@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.3.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.0...v0.3.1) (2026-10-07)
+
 ### Bug fixes
 
 - **The release bot no longer loses a release:** its step that has the release pull request rebuilt on `main` could replace the description of a pull request that had just been merged, and without its notes release-please made no release of it. The step now checks that the pull request is still open and only adds a marker at the end of the description.
