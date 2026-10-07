@@ -457,6 +457,13 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         "LICENSES",
     ):
         assert f"/{path}" in ignored, path
+    # Every other file of the repository stays out of the package, also a new one.
+    shipped = {"appinfo", "lib", "templates", "js", "css", "img", "l10n", "LICENSE"}
+    shipped |= {"README.md", "CHANGELOG.md"}
+    for entry in project.iterdir():
+        assert entry.name in shipped or {entry.name, f"/{entry.name}"} & set(ignored), (
+            entry.name
+        )
     config = json.loads(
         (project / "release-please-config.json").read_text(encoding="utf-8")
     )["packages"]["."]

@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
+
 ### Features
 
 - **Every repository gets a documentation website:** MkDocs with the Material theme makes the pages of `docs/` a website with search and a light and a dark theme, German pages under `docs/de/` included, and the new Docs workflow publishes it on GitHub Pages with every change of `main`. Every pull request builds it strictly, as the new required check `docs`, so that a link or an anchor that leads nowhere fails; a repository without a website passes it. The settings bot turns GitHub Pages on from the new table `[pages]` of the settings as code. `mkdocs.yml` belongs to the project, and a page can include a file of the repository, such as the README, with `--8<--`, so that nothing is written twice.
