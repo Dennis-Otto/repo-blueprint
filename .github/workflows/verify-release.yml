@@ -60,6 +60,13 @@ jobs:
           fi
           echo "### The release $TAG" >> "$GITHUB_STEP_SUMMARY"
           release="$(gh api "repos/$GH_REPO/releases/tags/$TAG")"
+          # A release from before the release workflow of the blueprint has none of
+          # what it attaches; the weekly run waits for the next release instead.
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]] &&
+            ! jq -e 'any(.assets[]; .name == "provenance.sigstore.json")' <<<"$release" >/dev/null; then
+            echo "The release $TAG was made before the release workflow of the blueprint; the next one is verified in full." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [[ "$(jq -r .immutable <<<"$release")" == true ]]; then
             pass "The release is immutable."
           else

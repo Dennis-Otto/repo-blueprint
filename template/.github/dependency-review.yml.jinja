@@ -48,10 +48,12 @@ allow-licenses:
   - AGPL-3.0-or-later
 [%- endif %]
 [%- endif %]
-[%- if stack == 'php' and license != 'AGPL-3.0-or-later' %]
-# The public API of Nextcloud, which the tests need and the app never ships.
+[%- if stack == 'php' %]
+# Tools of the checks that the app never ships: psalm's JSON mapper[% if license != 'AGPL-3.0-or-later' %] and the public
+# API of Nextcloud, which the tests need[% endif %].
 allow-dependencies-licenses:
-  - pkg:composer/nextcloud/ocp
+  - pkg:composer/netresearch/jsonmapper[% if license != 'AGPL-3.0-or-later' %]
+  - pkg:composer/nextcloud/ocp[% endif %]
 [%- elif stack == 'home-assistant' %]
 # The cloud parts of Home Assistant's test base, which the integration never ships.
 allow-dependencies-licenses:

@@ -96,10 +96,20 @@ updates:
         update-types:
           - minor
           - patch
+      composer-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
     commit-message:
       prefix: fix
       prefix-development: chore
       include: scope
+    ignore:
+      # The public API of Nextcloud follows the min-version of appinfo/info.xml.
+      - dependency-name: nextcloud/ocp
+        update-types:
+          - version-update:semver-major
 [% endif %][% if stack == 'node' %]
   - package-ecosystem: npm
     directory: /

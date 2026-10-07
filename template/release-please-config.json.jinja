@@ -30,7 +30,8 @@
         { "type": "json", "path": "custom_components/{= ha_domain =}/manifest.json", "jsonpath": "$.version" }
       ][% elif project_type == 'nextcloud-app' %],
       "extra-files": [
-        { "type": "xml", "path": "appinfo/info.xml", "xpath": "//info/version" }
+        { "type": "xml", "path": "appinfo/info.xml", "xpath": "//info/version" },
+        { "type": "generic", "path": "appinfo/info.xml" }
       ][% elif project_type == 'container' %],
       "extra-files": [
         { "type": "generic", "path": "Dockerfile" }
