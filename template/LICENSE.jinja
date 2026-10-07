@@ -2,6 +2,8 @@
     answer copyright, in the places of their SPDX texts; the others stay verbatim,
     appendix included. -#]
 [%- set text -%][% include "LICENSES/" ~ license ~ ".txt" %][%- endset -%]
+[#- Some SPDX texts end with a blank line, which LICENSE leaves out. -#]
+[%- set text = text.rstrip() -%]
 [%- set holders = copyright.split(';') | map('trim') | select | list -%]
 [%- if license in ['MIT', 'MIT-0', 'BSD-3-Clause'] -%]
 {= text
@@ -10,4 +12,4 @@
    | replace('Copyright (c) <year> <owner>. ', holders | map('regex_replace', '^', 'Copyright (c) ') | map('regex_replace', '$', '.') | join('\n')) =}
 [%- else -%]
 {= text =}
-[%- endif -%]
+[%- endif %]

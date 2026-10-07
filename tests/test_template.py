@@ -242,6 +242,9 @@ def test_the_license(
     source = (ROOT / "LICENSES" / f"{license_id}.txt").read_text(encoding="utf-8")
 
     assert first_line in text.split("\n", 1)[0]
+    # One line break at the end, also where the SPDX text has a blank line there.
+    assert text.endswith("\n")
+    assert not text.endswith("\n\n")
     assert (project / "LICENSES" / f"{license_id}.txt").read_text(
         encoding="utf-8"
     ) == source
@@ -256,7 +259,7 @@ def test_the_license(
         )
     else:
         # Long licenses stay verbatim, appendix included.
-        assert text == source
+        assert text == source.rstrip("\n") + "\n"
 
 
 def test_a_project_without_a_sponsor(tmp_path: Path) -> None:
