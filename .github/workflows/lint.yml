@@ -74,7 +74,8 @@ jobs:
             fi
             echo "::error::Commit $commit lacks the sign-off 'Signed-off-by: $author'. Commit with git commit -s."
             exit 1
-          done < <(git rev-list --reverse "$BASE_SHA..$HEAD_SHA")
+          # Merge commits only bring main into the branch, such as those of the branch bot.
+          done < <(git rev-list --reverse --no-merges "$BASE_SHA..$HEAD_SHA")
           echo "Checked the sign-off of $count commit(s)."
 
   issue-assistant:

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -81,7 +82,7 @@ class Api:
             raise GitHubError(0, (result.stderr or result.stdout).strip()) from None
         try:
             data = json.loads(text) if text.strip() else None
-        except ValueError:
+        except (ValueError, RecursionError):
             data = text
         if status >= 400 and status != 404:
             message = data.get("message", "") if isinstance(data, dict) else text
@@ -471,6 +472,67 @@ def apply_environments(api: Api, repo: str, drift: list[Drift]) -> None:
             )
 
 
+# --------------------------------------------------------------------------- labels
+
+
+def check_labels(api: Api, repo: str, want: dict[str, dict[str, str]]) -> list[Drift]:
+    """Every label of .github/labels.toml, with its color and description.
+
+    The Labels workflow keeps them current later; a new repository needs them before
+    its first pull request, whose title check sets one.
+    """
+    have = {
+        item["name"]: item
+        for item in api.get(f"repos/{repo}/labels?per_page=100") or []
+    }
+    drift = []
+    for name, label in want.items():
+        current = have.get(name)
+        wanted = f"#{label['color'].lower()} {label['description']}"
+        if current is None:
+            drift.append(Drift(f"label {name}", wanted, None))
+        elif (
+            f"#{current['color'].lower()} {current.get('description') or ''}" != wanted
+        ):
+            drift.append(
+                Drift(
+                    f"label {name}",
+                    wanted,
+                    f"#{current['color']} {current.get('description') or ''}",
+                )
+            )
+    return drift
+
+
+def apply_labels(
+    api: Api, repo: str, want: dict[str, dict[str, str]], drift: list[Drift]
+) -> None:
+    for item in drift:
+        name = item.setting.removeprefix("label ")
+        body = {
+            "name": name,
+            "color": want[name]["color"].lower(),
+            "description": want[name]["description"],
+        }
+        if item.have is None:
+            api.post(f"repos/{repo}/labels", body)
+        else:
+            api.patch(f"repos/{repo}/labels/{urllib.parse.quote(name, safe='')}", body)
+
+
+def load_labels(path: Path) -> dict[str, dict[str, str]]:
+    if not path.exists():
+        return {}
+    labels = tomllib.loads(path.read_text(encoding="utf-8")).get("label", [])
+    return {
+        label["name"]: {
+            "color": label["color"],
+            "description": label.get("description", ""),
+        }
+        for label in labels
+    }
+
+
 # --------------------------------------------------------------------------- settings
 
 
@@ -482,6 +544,7 @@ class Settings:
     rulesets: list[dict[str, Json]]
     variables: dict[str, str]
     environments: dict[str, dict[str, Json]]
+    labels: dict[str, dict[str, str]]
 
     @classmethod
     def load(cls, path: Path) -> Settings:
@@ -494,6 +557,8 @@ class Settings:
             rulesets=[main_ruleset(checks), tag_ruleset()],
             variables=config.get("variables", {}),
             environments=config.get("environments", {}),
+            # The labels of the issue assistant, next to the settings.
+            labels=load_labels(path.parent / "labels.toml"),
         )
 
 
@@ -505,6 +570,7 @@ def check(api: Api, repo: str, settings: Settings) -> list[Drift]:
         + check_rulesets(api, repo, settings.rulesets)
         + check_variables(api, repo, settings.variables)
         + check_environments(api, repo, settings.environments)
+        + check_labels(api, repo, settings.labels)
     )
 
 
@@ -518,6 +584,7 @@ def apply(api: Api, repo: str, settings: Settings, drift: list[Drift]) -> None:
     apply_rulesets(api, repo, settings.rulesets, part("ruleset "))
     apply_variables(api, repo, part("variable "))
     apply_environments(api, repo, part("environment "))
+    apply_labels(api, repo, settings.labels, part("label "))
 
 
 def describe(drift: list[Drift]) -> str:

@@ -97,6 +97,21 @@ updates:
       prefix: fix
       include: scope
 
+  # Atheris, the fuzzer of the Python packages, the GitHub Actions and the blueprint.
+  - package-ecosystem: pip
+    directory: /stacks/fuzz
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: fix
+      include: scope
+
   # The test tools of the Home Assistant integrations, with Home Assistant itself.
   - package-ecosystem: pip
     directory: /stacks/home-assistant
@@ -147,6 +162,10 @@ updates:
     open-pull-requests-limit: 3
     cooldown:
       default-days: 7
+    ignore:
+      # The types follow the Node version of .nvmrc, not the newest Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       node-stack:
         patterns:

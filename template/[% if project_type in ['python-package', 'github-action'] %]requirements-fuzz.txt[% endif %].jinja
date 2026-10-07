@@ -1,0 +1,1 @@
+[% filter replace('--output-file=requirements.txt', '--output-file=requirements-fuzz.txt') | replace('--strip-extras requirements.in', '--strip-extras requirements-fuzz.in') %][% include "stacks/fuzz/requirements.txt" %][% endfilter -%]
