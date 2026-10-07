@@ -1,0 +1,21 @@
+"""Fixtures and settings of the tests."""
+
+import os
+[% if stack == 'home-assistant' %]
+import pytest
+[%- endif %]
+from hypothesis import settings
+
+# Property tests try fixed inputs in the CI, so that a run repeats exactly, and new
+# random ones locally and in the nightly Property tests workflow, which can replay a
+# seed.
+settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True)
+settings.register_profile("local", deadline=None)
+settings.load_profile("ci" if os.environ.get("CI") else "local")
+[%- if stack == 'home-assistant' %]
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
+    """Let Home Assistant load the integration from custom_components."""
+[%- endif %]

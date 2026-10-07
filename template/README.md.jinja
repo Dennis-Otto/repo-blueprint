@@ -1,11 +1,13 @@
 [%- set repo = owner ~ '/' ~ project_slug -%]
+[#- HACS shows the README outside GitHub, where only absolute links work. -#]
+[%- set base = 'https://github.com/' ~ repo ~ '/blob/main/' if project_type == 'home-assistant' else '' -%]
 # {= project_name =}
 
 [![CI](https://github.com/{= repo =}/actions/workflows/ci.yml/badge.svg)](https://github.com/{= repo =}/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/{= repo =}/actions/workflows/codeql.yml/badge.svg)](https://github.com/{= repo =}/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{= repo =}/badge)](https://scorecard.dev/viewer/?uri=github.com/{= repo =})
 [![REUSE](https://api.reuse.software/badge/github.com/{= repo =})](https://api.reuse.software/info/github.com/{= repo =})
-[![License: {= license =}](https://img.shields.io/badge/license-{= license | replace('-', '--') =}-blue)](LICENSE)
+[![License: {= license =}](https://img.shields.io/badge/license-{= license | replace('-', '--') =}-blue)]({= base =}LICENSE)
 [%- if sponsor %]
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/{= sponsor =})
 [%- endif %]
@@ -66,16 +68,16 @@ Every change goes through a pull request whose title follows [Conventional Commi
 bash scripts/check.sh
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules.
+[CONTRIBUTING.md]({= base =}CONTRIBUTING.md) explains the set-up and the rules.
 
 ## Releases
 
-The release bot keeps a pull request for the next release open, with the version and the changelog from the merged pull requests. Merging it publishes the release, with its SBOM and a signed provenance; [CHANGELOG.md](CHANGELOG.md) lists every change.
+The release bot keeps a pull request for the next release open, with the version and the changelog from the merged pull requests. Merging it publishes the release, with its SBOM and a signed provenance; [CHANGELOG.md]({= base =}CHANGELOG.md) lists every change.
 
 ## Support and security
 
-Questions and problems: see [SUPPORT.md](SUPPORT.md). Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes.
+Questions and problems: see [SUPPORT.md]({= base =}SUPPORT.md). Report vulnerabilities privately, as [SECURITY.md]({= base =}SECURITY.md) describes.
 
 ## License
 
-{= license =}; see [LICENSE](LICENSE). Every file names its license in the machine-readable form of [REUSE](https://reuse.software).
+{= license =}; see [LICENSE]({= base =}LICENSE). Every file names its license in the machine-readable form of [REUSE](https://reuse.software).
