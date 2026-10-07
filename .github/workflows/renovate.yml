@@ -80,7 +80,9 @@ jobs:
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          # Every repository of the installation, on purpose: the app is installed on
+          # exactly the repositories that Renovate keeps current.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
           # Only what updates need, and no administration: the package managers
           # that write the lock files can't change a setting with it.
           permission-contents: write
