@@ -1,0 +1,25 @@
+[#- A dev container for VS Code and GitHub Codespaces: the tools of the checks, set up
+    once the container is created. -#]
+{
+  "name": {= project_name | to_json(ensure_ascii=False) =},
+  "build": { "dockerfile": "Dockerfile" },
+  "postCreateCommand": "bash .devcontainer/setup.sh",[% if stack in ['python', 'home-assistant'] %]
+  "remoteEnv": { "PATH": "${containerWorkspaceFolder}/.venv/bin:${containerEnv:PATH}" },[% endif %]
+  "customizations": {
+    "vscode": {[% if stack in ['python', 'home-assistant'] %]
+      "settings": { "python.defaultInterpreterPath": ".venv/bin/python" },[% endif %]
+      "extensions": [
+        "editorconfig.editorconfig",
+        "github.vscode-github-actions",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "timonwong.shellcheck"[% if stack in ['python', 'home-assistant'] %],
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker"[% elif stack == 'php' %],
+        "bmewburn.vscode-intelephense-client"[% elif stack == 'container' %],
+        "ms-azuretools.vscode-docker"[% endif %]
+      ]
+    }
+  }
+}

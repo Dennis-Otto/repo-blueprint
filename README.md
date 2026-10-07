@@ -24,6 +24,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide, code of conduct, security policy, support, governance, issue forms, pull request template, sponsor button, social preview | |
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables | `.github/repository.toml` and `blueprint.py` |
+| **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **Branches** | after every change of `main`, the branch bot brings each pull request that waits for auto-merge up to date, so that it merges once its checks pass | `update-branches.yml` |
 

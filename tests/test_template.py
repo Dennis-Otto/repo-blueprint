@@ -306,6 +306,9 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/social-preview/Dockerfile",
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
+        ".devcontainer/devcontainer.json",
+        ".devcontainer/Dockerfile",
+        ".devcontainer/setup.sh",
     ):
         assert (ROOT / name).read_text(encoding="utf-8") == (project / name).read_text(
             encoding="utf-8"
@@ -380,3 +383,32 @@ def test_several_copyright_holders(tmp_path: Path) -> None:
         "2026 Dennis Otto",
         "Contributors to Demo",
     ]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_has_a_dev_container(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    config = json.loads(
+        (project / ".devcontainer/devcontainer.json").read_text(encoding="utf-8")
+    )
+    dockerfile = (project / ".devcontainer/Dockerfile").read_text(encoding="utf-8")
+    setup = (project / ".devcontainer/setup.sh").read_text(encoding="utf-8")
+
+    assert config["postCreateCommand"] == "bash .devcontainer/setup.sh"
+    assert re.search(
+        r"^FROM mcr\.microsoft\.com/devcontainers/\S+@sha256:[0-9a-f]{64}$",
+        dockerfile,
+        re.M,
+    )
+    assert "git config core.hooksPath .githooks" in setup
+    requirements = {
+        "home-assistant": "requirements-test.txt",
+        "python-package": "requirements-dev.txt",
+        "github-action": "requirements-dev.txt",
+    }
+    if kind in requirements:
+        assert f"-r {requirements[kind]}" in setup
+        assert (project / requirements[kind]).exists()
+        assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]

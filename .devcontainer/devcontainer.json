@@ -1,0 +1,21 @@
+{
+  "name": "Repo Blueprint",
+  "build": { "dockerfile": "Dockerfile" },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "remoteEnv": { "PATH": "${containerWorkspaceFolder}/.venv/bin:${containerEnv:PATH}" },
+  "customizations": {
+    "vscode": {
+      "settings": { "python.defaultInterpreterPath": ".venv/bin/python" },
+      "extensions": [
+        "editorconfig.editorconfig",
+        "github.vscode-github-actions",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "timonwong.shellcheck",
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker"
+      ]
+    }
+  }
+}
