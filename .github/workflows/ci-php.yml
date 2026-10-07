@@ -36,7 +36,7 @@ jobs:
         with:
           php-version: "8.2"
           extensions: dom, libxml, mbstring, xml
-          coverage: none
+          coverage: pcov
           tools: composer:v2
       - name: Install the locked tools
         run: composer install --no-interaction --prefer-dist --no-progress

@@ -8,6 +8,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Features
 
+- **A Nextcloud app covers every line of `lib/` with its tests:** `scripts/check.sh` measures the coverage with pcov in the CI and Xdebug in the dev container, and fails below 100 %, as the other kinds of projects do.
 - **The Markdown of every document is linted** by markdownlint, as the new required check `markdown` of the Lint workflow. The rules of the blueprint are in `.github/markdownlint.jsonc`; a project changes them in its own `.markdownlint.jsonc`.
 - **Every release is announced in the discussions,** in their category Announcements, with its notes; prereleases are not. New repositories have discussions, with forms for questions and ideas that belong to the project; an existing repository turns them on with `copier update --data discussions=true`.
 

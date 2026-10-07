@@ -78,7 +78,7 @@ jobs:
         with:
           php-version: "8.2"
           extensions: dom, libxml, mbstring, xml
-          coverage: none
+          coverage: pcov
           tools: composer:v2
       - name: Install the locked tools of the app
         if: matrix.kind == 'nextcloud-app'
