@@ -45,6 +45,7 @@ _skip_if_exists:
   - .github/labels.toml
   - .github/labeler.yml
   - /.markdownlint.jsonc
+  - .github/cspell-words.txt
   - .github/renovate.json5
   - .github/findings.toml
   - .github/dependency-review.yml

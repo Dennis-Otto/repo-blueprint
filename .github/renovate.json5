@@ -21,6 +21,12 @@
       semanticCommitType: "fix",
     },
     {
+      // The tools of the prose check, which every repository gets from here.
+      matchFileNames: [".github/prose/**"],
+      enabled: true,
+      groupName: "the tools of the prose check",
+    },
+    {
       matchFileNames: ["requirements-dev.txt"],
       semanticCommitType: "chore",
       groupName: "the tools of the blueprint's tests",
