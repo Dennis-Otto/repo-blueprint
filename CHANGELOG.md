@@ -21,7 +21,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Bug fixes
 
-- A Nextcloud app keeps its icons in `img/`, and its package leaves out the dev container, the hooks, the link check and `screenshots/`. psalm's JSON mapper (OSL-3.0) passes the dependency review as a tool of the checks.
+- A Nextcloud app keeps its icons in `img/`, and its package leaves out the dev container, the hooks, the link check and `screenshots/`. psalm's JSON mapper (OSL-3.0) passes the dependency review as a tool of the checks. Dependabot leaves the major version of `nextcloud/ocp`, which follows the min-version of the app, to the maintainer and groups the major updates of composer.
 - Every `.gitignore` keeps secrets out: `.env`, keys, certificates and credential files.
 - The weekly release verification waits for the next release when the latest one is older than the release workflow of the blueprint.
 - The first release no longer drops the introduction of the changelog.
