@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
+
 ### Features
 
 - **A Nextcloud app runs the taint analysis of Psalm** in `scripts/check.sh`: input from a request or a user that reaches HTML, SQL, a shell, a file or a header without escaping fails the check, as CodeQL does for the other languages, which has no PHP.
