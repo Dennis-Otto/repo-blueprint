@@ -40,6 +40,7 @@ _skip_if_exists:
   - .github/ISSUE_TEMPLATE/config.yml
   - .github/labels.toml
   - .github/labeler.yml
+  - /.markdownlint.jsonc
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html

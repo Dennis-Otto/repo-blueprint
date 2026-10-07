@@ -50,6 +50,7 @@ required_checks = [
   "variant (generic)",
   "workflow-lint",
   "reuse",
+  "markdown",
   "dco",
   "issue-assistant",
   "conventional title",
