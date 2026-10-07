@@ -17,7 +17,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 | **Abhängigkeiten** | Dependabot mit einer Woche Wartezeit; Routine-Updates und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind | `dependabot.yml`, `dependabot-automerge.yml` |
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, Beitragsleitfaden, Verhaltenskodex, Sicherheitsrichtlinie, Support, Governance, Issue-Formulare, Pull-Request-Vorlage, Sponsor-Button, Social Preview | |
-| **Einstellungen** | die Einstellungen des Repositorys als Code: Merges, Rulesets, Sicherheit, Actions, Environments, Variablen | `.github/repository.toml` und `blueprint.py` |
+| **Einstellungen** | die Einstellungen des Repositorys als Code: Merges, Rulesets, Sicherheit, Actions, Environments, Variablen, Labels; der Settings-Bot wendet sie nach jeder Änderung und jede Woche an | `.github/repository.toml` und `blueprint.py` |
 | **Entwicklung** | ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prüfungen, und ein Hook, der sie vor jedem Push ausführt | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | jede Woche führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request | `blueprint-update.yml` |
 | **App Store** | für eine Nextcloud-App: die Registrierung ihrer ID mit ihrem Zertifikat, einmal, von Hand | `register-app.yml` |
@@ -55,7 +55,7 @@ Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, 
 
 ### Einmal pro Repository
 
-- **Die Release-App** öffnet die Release- und Update-Pull-Requests, damit ihre Prüfungen laufen. Installiere sie auf dem Repository und hinterlege ihren privaten Schlüssel als Secret `RELEASE_AUTOMATION_PRIVATE_KEY` im Environment `release`. Die App braucht die Berechtigungen *Contents*, *Pull requests* und *Workflows* (Lesen und Schreiben).
+- **Die Release-App** öffnet die Release- und Update-Pull-Requests, damit ihre Prüfungen laufen. Installiere sie auf dem Repository und hinterlege ihren privaten Schlüssel als Secret `RELEASE_AUTOMATION_PRIVATE_KEY` im Environment `release`. Die App braucht die Berechtigungen *Administration*, *Contents*, *Pull requests* und *Workflows* (Lesen und Schreiben) sowie *Actions*, *Environments*, *Secrets* und *Variables* (Lesen), damit der Settings-Bot die Einstellungen als Code anwenden kann.
 - **Der Issue-Assistent** braucht `CLAUDE_CODE_OAUTH_TOKEN` im Environment `issue-assistant`.
 - **Auslieferung:** Trusted Publishing auf PyPI oder npm, das App-Zertifikat einer Nextcloud-App oder die Einreichung bei HACS, wie es die Checkliste sagt.
 

@@ -23,7 +23,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | **Dependencies** | Dependabot with a week of cooldown; routine updates and releases of dependency updates merge themselves once every check passes | `dependabot.yml`, `dependabot-automerge.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide, code of conduct, security policy, support, governance, issue forms, pull request template, sponsor button, social preview | |
-| **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables | `.github/repository.toml` and `blueprint.py` |
+| **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
 | **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
@@ -61,7 +61,7 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 
 ### Once per repository
 
-- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Contents*, *Pull requests* and *Workflows* (read and write).
+- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Administration*, *Contents*, *Pull requests* and *Workflows* (read and write), and *Actions*, *Environments*, *Secrets* and *Variables* (read), so that the settings bot can apply the settings as code.
 - **The issue assistant** needs `CLAUDE_CODE_OAUTH_TOKEN` in the environment `issue-assistant`.
 - **Delivery:** trusted publishing on PyPI or npm, the app certificate of a Nextcloud app, or the HACS submission, as the checklist says.
 
