@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import urllib.error
+import urllib.parse
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,21 @@ secrets = []
 """
 
 
+LABELS = """
+[[label]]
+name = "release"
+color = "5319E7"
+description = "The release PR"
+group = "release"
+
+[[label]]
+name = "good first issue"
+color = "7057ff"
+description = "Good for newcomers"
+group = "decision"
+"""
+
+
 class FakeGitHub:
     """The parts of GitHub's API that blueprint.py uses, kept in memory."""
 
@@ -88,6 +104,10 @@ class FakeGitHub:
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
         self.environments: dict[str, dict[str, Any]] = {}
         self.og_image = False
+        self.labels: dict[str, dict[str, str]] = {
+            "good first issue": {"color": "000000", "description": "Old"},
+            "spare": {"color": "ffffff", "description": "Not in the configuration"},
+        }
         self.next_id = 1
         self.calls: list[tuple[str, str]] = []
         self.fail: dict[tuple[str, str], int] = {}
@@ -138,6 +158,7 @@ class FakeGitHub:
             (r"/rulesets(?:/(\d+))?", self.ruleset),
             (r"/actions/variables(?:/(\w+))?", self.variable),
             (r"/environments/([\w-]+)", self.environment),
+            (r"/labels(?:/([^?]+))?(?:\?per_page=100)?", self.label),
             (
                 r"/environments/([\w-]+)/deployment-branch-policies(?:/(\d+))?",
                 self.branch_policy,
@@ -244,6 +265,17 @@ class FakeGitHub:
         self.next_id += 1
         return 200, None
 
+    def label(self, method: str, body: Any, quoted: str | None) -> tuple[int, Any]:
+        if method == "GET":
+            return 200, [{"name": name, **label} for name, label in self.labels.items()]
+        if method == "PATCH":
+            assert quoted == urllib.parse.quote(body["name"], safe="")
+        self.labels[body["name"]] = {
+            "color": body["color"],
+            "description": body["description"],
+        }
+        return 200, body
+
     def secrets(self, method: str, body: Any, name: str) -> tuple[int, Any]:
         if name not in self.environments:
             return 404, {"message": "Not Found"}
@@ -269,6 +301,7 @@ def offline(monkeypatch: pytest.MonkeyPatch) -> None:
 def root(tmp_path: Path) -> Path:
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github/repository.toml").write_text(CONFIG, encoding="utf-8")
+    (tmp_path / ".github/labels.toml").write_text(LABELS, encoding="utf-8")
     return tmp_path
 
 
@@ -303,6 +336,8 @@ def test_check_reports_every_difference(
         "variable RELEASE_AUTOMATION_CLIENT_ID",
         "environment release",
         "secret RELEASE_AUTOMATION_PRIVATE_KEY of release",
+        "label release",
+        "label good first issue",
     ):
         assert setting in out
     assert (
@@ -331,6 +366,16 @@ def test_apply_sets_everything_but_the_secrets(
         "sha_pinning_required": True,
     }
     assert github.fork_approval == "all_external_contributors"
+    assert github.labels["release"] == {
+        "color": "5319e7",
+        "description": "The release PR",
+    }
+    assert github.labels["good first issue"] == {
+        "color": "7057ff",
+        "description": "Good for newcomers",
+    }
+    # A label of GitHub that the configuration doesn't name stays.
+    assert "spare" in github.labels
     assert [
         (item["name"], item["type"]) for item in github.environments["pypi"]["branches"]
     ] == [("main", "branch")]
@@ -640,3 +685,9 @@ def test_the_reuse_status(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not blueprint.reuse_compliant(REPO, opener(b'{"status": "non-compliant"}'))
     assert not blueprint.reuse_compliant(REPO, opener(b"<html>"))
     assert not blueprint.reuse_compliant(REPO, opener(urllib.error.URLError("offline")))
+
+
+def test_a_repository_without_labels_toml(tmp_path: Path) -> None:
+    (tmp_path / "repository.toml").write_text(CONFIG, encoding="utf-8")
+
+    assert blueprint.Settings.load(tmp_path / "repository.toml").labels == {}
