@@ -353,6 +353,8 @@ jobs:
           # A release for everybody is announced in the category Announcements of the
           # discussions, when the repository has them, with its notes and a link.
           announce=()
+          # The variables of the query are GraphQL's, not the shell's.
+          # shellcheck disable=SC2016
           categories="$(gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}"             -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { discussionCategories(first: 50) { nodes { name } } } }'             --jq '.data.repository.discussionCategories.nodes[].name')"
           if grep -qx Announcements <<<"$categories"; then
             announce=(--discussion-category Announcements)
