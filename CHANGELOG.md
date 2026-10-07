@@ -8,6 +8,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Features
 
+- **SLSA Build Level 3:** a release is built in a reusable workflow of its own, `build-release.yml`, isolated from the rest of the release workflow, and the signed provenance of every asset names it as the build. The release check verifies that; releases from before are accepted by its weekly run only.
 - **The clean-up bot** deletes every week the branches that `main` holds completely and that no open pull request uses, and the caches of closed pull requests. A branch with commits that `main` doesn't have stays and is listed in its summary after a month without a pull request.
 - **Every repository documents what the Silver level of the OpenSSF Best Practices badge asks for.** SECURITY.md says how to verify a release with the GitHub CLI and gives the assurance case of the repository and its releases: the threat model, the trust boundaries, the secure design principles and how the OWASP Top 10 CI/CD security risks are countered. A new repository starts with `docs/security.md`, the security design of its software, which belongs to the project from then on. GOVERNANCE.md names the roles and their responsibilities and says honestly how the project continues with one maintainer, and CONTRIBUTING.md the coding standards of each kind of project and the rule that new functionality and every fix come with tests.
 

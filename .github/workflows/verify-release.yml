@@ -116,16 +116,25 @@ jobs:
               fail "$vex is no OpenVEX document with statements."
             fi
           done
-          signer="$GH_REPO/.github/workflows/release.yml"
+          # The provenance names the isolated build, build-release.yml (SLSA Build
+          # Level 3); a release made before it names the release workflow, which only
+          # the weekly run accepts.
+          provenance() {
+            gh attestation verify "$1" --repo "$GH_REPO" --signer-workflow "$2" >/dev/null &&
+              { [[ ! -f provenance.sigstore.json ]] ||
+                gh attestation verify "$1" --repo "$GH_REPO" --signer-workflow "$2" \
+                  --bundle provenance.sigstore.json >/dev/null; }
+          }
+          build="$GH_REPO/.github/workflows/build-release.yml"
+          older="$GH_REPO/.github/workflows/release.yml"
           for asset in *; do
             [[ "$asset" == provenance.sigstore.json || "$asset" == *.intoto.jsonl ]] && continue
-            if gh attestation verify "$asset" --repo "$GH_REPO" --signer-workflow "$signer" >/dev/null &&
-              { [[ ! -f provenance.sigstore.json ]] ||
-                gh attestation verify "$asset" --repo "$GH_REPO" --signer-workflow "$signer" \
-                  --bundle provenance.sigstore.json >/dev/null; }; then
-              pass "$asset carries the signed provenance of the release workflow."
+            if provenance "$asset" "$build"; then
+              pass "$asset carries the signed provenance of the isolated build."
+            elif [[ "$GITHUB_EVENT_NAME" == schedule ]] && provenance "$asset" "$older"; then
+              pass "$asset carries the signed provenance of the release workflow, from before the isolated build."
             else
-              fail "$asset has no valid provenance of the release workflow."
+              fail "$asset has no valid provenance of the isolated build."
             fi
           done
 
