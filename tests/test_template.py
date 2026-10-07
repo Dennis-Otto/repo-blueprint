@@ -500,6 +500,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "tests/test_demo.py",
         "custom_components/demo/__init__.py",
         ".github/labels.toml",
+        "docs/security.md",
     ):
         assert matcher.match_file(owned), owned
     for updated in (
@@ -511,6 +512,71 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "scripts/check.sh",
     ):
         assert not matcher.match_file(updated), updated
+
+
+def test_copying_runs_no_code_of_the_blueprint() -> None:
+    # Without tasks, migrations or Jinja extensions, Copier only renders the template
+    # in its sandbox and needs no --trust; docs/security.md promises it.
+    config = (ROOT / "copier.yml").read_text(encoding="utf-8")
+    for key in ("_tasks", "_migrations", "_jinja_extensions"):
+        assert not re.search(rf"^{key}:", config, re.MULTILINE), key
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_documents_its_security_and_its_roles(
+    projects: dict[str, Path], kind: str
+) -> None:
+    def lines(name: str) -> list[str]:
+        return (projects[kind] / name).read_text(encoding="utf-8").splitlines()
+
+    security = lines("SECURITY.md")
+    for heading in (
+        "## Verify a release",
+        "## Assurance case",
+        "### Threat model",
+        "### Trust boundaries",
+        "### Secure design principles",
+        "### Common weaknesses",
+    ):
+        assert heading in security, heading
+    assert "gh release verify vX.Y.Z --repo Dennis-Otto/demo-project" in security
+    # The assurance case leads to the security design of the software, which the
+    # project keeps after the first copy.
+    assert "(docs/security.md)" in "\n".join(security)
+    design = lines("docs/security.md")
+    for heading in (
+        "## What you can expect",
+        "## Trust boundaries",
+        "## Threats and countermeasures",
+        "## Residual risks",
+    ):
+        # Every section has its content for the kind of project.
+        index = design.index(heading)
+        assert design[index + 1] == "", heading
+        assert design[index + 2].startswith(("- ", "1. ", "| ")), heading
+    governance = lines("GOVERNANCE.md")
+    assert "## Roles and responsibilities" in governance
+    assert "the bus factor of the project is 1" in "\n".join(governance)
+    assert "A successor is planned" in "\n".join(governance)
+    contributing = lines("CONTRIBUTING.md")
+    assert contributing[contributing.index("## Coding standards") + 2].startswith(
+        "- **"
+    )
+    # A project with code requires tests for every new function and every fix.
+    assert ("## Tests" in contributing) == (kind != "generic")
+
+
+def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
+    def security(kind: str) -> str:
+        return (projects[kind] / "SECURITY.md").read_text(encoding="utf-8")
+
+    assert "gh attestation verify demo_project.zip" in security("home-assistant")
+    nextcloud = security("nextcloud-app")
+    assert "gh attestation verify demo_project.tar.gz" in nextcloud
+    assert "app-certificate-requests/master/demo_project/demo_project.crt" in nextcloud
+    assert "gh attestation verify ./*.whl" in security("python-package")
+    assert "npm audit signatures" in security("node-package")
+    assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
 
 
 @pytest.mark.parametrize("kind", ["github-action", "home-assistant", "nextcloud-app"])
