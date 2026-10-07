@@ -39,6 +39,7 @@ _skip_if_exists:
   - .github/ISSUE_TEMPLATE/feature_request.yml
   - .github/ISSUE_TEMPLATE/config.yml
   - .github/labels.toml
+  - .github/labeler.yml
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html

@@ -532,3 +532,21 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     assert "sample_code: false" in (project / ".copier-answers.yml").read_text(
         encoding="utf-8"
     )
+
+
+def test_the_area_labels_of_pull_requests_exist() -> None:
+    labels = tomllib.loads((ROOT / ".github/labels.toml").read_text(encoding="utf-8"))
+    defined = {label["name"] for label in labels["label"]}
+    rules = (ROOT / ".github/labeler.yml").read_text(encoding="utf-8")
+    used = set(re.findall(r'^"([^"]+)":$', rules, re.MULTILINE))
+    assert used
+    assert used <= defined, used - defined
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_starts_with_area_rules(
+    projects: dict[str, Path], kind: str
+) -> None:
+    rules = (projects[kind] / ".github/labeler.yml").read_text(encoding="utf-8")
+    # No areas yet: an empty mapping, which the labeler accepts.
+    assert rules.rstrip().endswith("{}")
