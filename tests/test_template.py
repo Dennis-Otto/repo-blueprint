@@ -425,6 +425,8 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         ".lycheeignore",
         "lychee.toml",
         "screenshots",
+        # LICENSE carries the license text; LICENSES/ serves REUSE in the repository.
+        "LICENSES",
     ):
         assert f"/{path}" in ignored, path
     config = json.loads(

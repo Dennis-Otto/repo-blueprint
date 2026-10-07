@@ -17,6 +17,7 @@
 /composer.lock
 /docs
 /krankerl.toml
+/LICENSES
 /lychee.toml
 /phpunit.xml
 /psalm.xml
