@@ -44,6 +44,7 @@ jobs:
         env:
           SECONDS_TO_FUZZ: ${{ github.event_name == 'schedule' && '900' || '60' }}
         run: |
+          shopt -s nullglob
           for target in fuzz/fuzz_*.py; do
             echo "::group::$target"
             corpus="$RUNNER_TEMP/corpus/$(basename "$target" .py)"

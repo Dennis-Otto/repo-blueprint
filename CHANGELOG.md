@@ -6,6 +6,12 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **The release bot no longer loses a release:** its step that has the release pull request rebuilt on `main` could replace the description of a pull request that had just been merged, and without its notes release-please made no release of it. The step now checks that the pull request is still open and only adds a marker at the end of the description.
+- **An existing repository keeps out the samples of the template:** `copier update` brought back the sample code and tests that an adopted repository had deleted. The new question `sample_code`, which an existing repository answers with no, leaves them out.
+- The link check leaves out the badges of workflows, which GitHub serves only once a workflow is on `main`.
+
 ## [0.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.2.0...v0.3.0) (2026-10-07)
 
 ### Features

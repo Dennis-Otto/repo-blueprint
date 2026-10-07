@@ -201,6 +201,11 @@ sponsor:
   validator: >-
     [% if sponsor and not (sponsor | regex_search('^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$')) %]Name a GitHub account, or leave it empty.[% endif %]
 
+sample_code:
+  type: bool
+  help: Start with sample code and tests; an existing repository that takes the blueprint answers no
+  default: true
+
 # Derived from the answers; never asked and not stored.
 
 stack:
