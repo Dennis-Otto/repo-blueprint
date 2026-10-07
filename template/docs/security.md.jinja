@@ -1,0 +1,85 @@
+# Security design
+
+<!-- The blueprint wrote this page once; from now on it belongs to the project. Keep it true to the software: what it protects, what it trusts, the threats and how the code counters them, and what remains. -->
+
+What {= project_name =} protects, what it trusts and which risks remain. [SECURITY.md](../SECURITY.md) says how to report a vulnerability and how to verify a release, and argues why the repository and its releases are safe.
+
+## What you can expect
+[% if stack == 'home-assistant' %]
+- Credentials of the device or service, such as passwords, tokens and keys, stay in the config entry of Home Assistant. They are never logged, shown in an entity or included in the diagnostics.
+- Every answer of the device or service is checked before it reaches an entity; what doesn't fit reads as unknown instead of raising an error.
+- Actions that change something need a login to Home Assistant, like every action.
+- The integration opens no port of its own.
+[% elif stack == 'php' %]
+- Every request to the app passes Nextcloud's login and its CSRF check; settings and actions that affect every user are for administrators only.
+- Secrets, such as API tokens, are stored in Nextcloud's credentials manager and never returned to the browser.
+- The app reads and writes files only through Nextcloud's file API, with the permissions of the user it acts for.
+- Requests to other servers go through Nextcloud's HTTP client, which checks TLS certificates.
+[% elif project_type == 'github-action' %]
+- The action runs with the token and the permissions that the workflow grants it, never more.
+- The content of issues, pull requests and the repository is data: the action never runs it as code or as a command.
+- Every input is checked before it is used; an invalid one stops the action with an error.
+- Secrets that the workflow passes to the action are never printed; GitHub masks them in the logs as well.
+[% elif project_type == 'python-package' or stack == 'node' %]
+- Every public function checks its arguments and rejects invalid ones with an error, instead of guessing.
+- The package never runs its input as code and opens no network connection or file that its documentation doesn't name.
+- It has no secrets of its own; credentials that a caller passes in are never logged.
+[% elif stack == 'container' %]
+- The image runs as an unprivileged user, never as root; its self-test fails otherwise.
+- It is built on a base image pinned by its digest, and holds only what the program needs.
+- It has no secrets of its own; credentials come from the environment or a mounted file at run time, never from the image.
+[% else %]
+- The repository holds documents and scripts; nothing of it runs on its own.
+- The scripts run with the permissions of whoever starts them, check their arguments and change nothing outside the folder they are given.
+[% endif %]
+## Trust boundaries
+[% if stack == 'home-assistant' %]
+1. **Device or service → integration.** Every answer is untrusted input.
+2. **Integration → Home Assistant.** Entities and events, which the frontend shows as text.
+3. **Users and automations → integration.** Actions, after Home Assistant has checked the login.
+[% elif stack == 'php' %]
+1. **Browser → app.** Requests pass Nextcloud's login, its CSRF check and, for settings, the check of the administrator; the app checks every parameter.
+2. **App → other services.** Their answers are untrusted input.
+3. **App → files.** Only through Nextcloud's file API, with the permissions of the user.
+[% elif project_type == 'github-action' %]
+1. **Events and the repository → action.** Issues, pull requests, comments and files are untrusted input.
+2. **Workflow → action.** The inputs and the token that the workflow grants.
+3. **Action → GitHub.** Only with that token.
+[% elif project_type == 'python-package' or stack == 'node' %]
+1. **Caller → package.** Every argument of a public function is untrusted input.
+2. **Package → files and network.** Only those the caller names.
+[% elif stack == 'container' %]
+1. **Network and volumes → container.** Requests and files are untrusted input.
+2. **Container → host.** Only through what the user maps into it: ports, volumes and variables.
+[% else %]
+1. **Repository → user.** Documents and scripts reach the user through a release, whose signatures [SECURITY.md](../SECURITY.md#verify-a-release) explains.
+[% endif %]
+## Threats and countermeasures
+
+| Threat | Countermeasure |
+| --- | --- |[% if stack == 'home-assistant' %]
+| A secret reaches a log, an entity or the diagnostics | The diagnostics redact the secrets, and nothing logs them |
+| Malformed or hostile data of the device breaks the integration | Every value is checked for its type and range before use |
+| A name of the device runs as script in the browser | Entities and events carry text, which the frontend escapes |[% elif stack == 'php' %]
+| Another site uses the session of an administrator | Nextcloud's CSRF check on every request of the app |
+| A secret reaches the browser or a log | The credentials manager keeps it; no response of the app contains it |
+| A crafted parameter reaches a file path or a query | Every parameter is checked against what it may be; files only through Nextcloud's file API |
+| The answer of another service runs as script in the browser | The templates escape every value |[% elif project_type == 'github-action' %]
+| The text of an issue or a pull request runs as a command | Inputs reach the code through environment variables, never through the `run:` script |
+| An output smuggles in another output | Every output is written with a random delimiter |
+| A secret reaches the log | Secrets are never printed, and GitHub masks them |[% elif project_type == 'python-package' or stack == 'node' %]
+| Invalid input leads to wrong results | Every public function rejects it with an error |
+| Input runs as code | The package evaluates no input |[% elif stack == 'container' %]
+| A flaw of the program takes over the host | The image runs as an unprivileged user, with only what the user maps into it |
+| A base image is replaced | The base image is pinned by its digest |[% else %]
+| A script changes more than it should | Scripts check their arguments and stay in the folder they are given |
+| A tampered release | Releases are signed, as [SECURITY.md](../SECURITY.md#verify-a-release) shows |[% endif %]
+
+## Residual risks
+[% if stack == 'home-assistant' %]
+- The integration is as safe as Home Assistant and the network that it and the device run in.[% elif stack == 'php' %]
+- The app is as safe as Nextcloud, its configuration and the services that the app connects to.[% elif project_type == 'github-action' %]
+- The action is as safe as the workflow that runs it: a workflow that grants more permissions than the action needs grants them to the action too.[% elif project_type == 'python-package' or stack == 'node' %]
+- The package is as safe as the program that uses it and the arguments that this program passes in.[% elif stack == 'container' %]
+- The container is as safe as the host and the ports, volumes and variables that the user maps into it.[% else %]
+- Whoever runs a script trusts it with their permissions; read it before running it.[% endif %]

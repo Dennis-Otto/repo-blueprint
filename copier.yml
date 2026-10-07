@@ -34,6 +34,7 @@ _skip_if_exists:
   - /CHANGELOG.md
   - /version.txt
   - /.release-please-manifest.json
+  - /docs/security.md
   - .github/issue-assistant/project.md
   - /docs/decisions
   - .github/ISSUE_TEMPLATE/bug_report.yml
