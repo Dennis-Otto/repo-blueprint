@@ -1,0 +1,3 @@
+# Atheris, the coverage-guided fuzzer of the targets in fuzz/; the Fuzzing workflow
+# installs it from the hash-pinned requirements.
+atheris

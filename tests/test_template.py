@@ -90,6 +90,10 @@ def test_the_workflows_are_the_blueprints_own(
             assert flavor, "ci.yml names its flavor"
             source_name = f"ci-{flavor.group(1)}.yml"
         source = (sources / source_name).read_text(encoding="utf-8").replace(GUARD, "")
+        if name == "fuzz.yml":
+            source = source.replace(
+                "stacks/fuzz/requirements.txt", "requirements-fuzz.txt"
+            )
         if name == "codeql.yml":
             source = re.sub(
                 r"        # The languages of this repository.*\n        language: \[.*\]\n",
@@ -305,3 +309,18 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         assert (ROOT / name).read_text(encoding="utf-8") == (project / name).read_text(
             encoding="utf-8"
         ), name
+
+
+@pytest.mark.parametrize("kind", ["python-package", "github-action"])
+def test_python_projects_are_fuzzed(projects: dict[str, Path], kind: str) -> None:
+    project = projects[kind]
+
+    assert (project / "fuzz/fuzz_demo_project.py").read_text(encoding="utf-8").count(
+        "import atheris"
+    ) == 1
+    assert "atheris==" in (project / "requirements-fuzz.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "FuzzingID" not in (project / ".github/findings.toml").read_text(
+        encoding="utf-8"
+    )
