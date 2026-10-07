@@ -121,10 +121,9 @@ def test_the_notes_show_the_text_and_then_every_pull_request() -> None:
     changelog = blueprint.release_changelog("1.3.0", main, branch_changelog(main))
     notes = blueprint.release_notes("1.3.0", changelog, GENERATED)
     assert notes.startswith(CURATED)
-    assert "<summary>Every pull request of this release</summary>" in notes
+    assert "\n## Every pull request of this release\n\n### Features\n" in notes
     assert "### Features\n\n* start a game by voice" in notes
-    assert f"[Compare with the previous release]({COMPARE})" in notes
-    assert notes.endswith("</details>\n")
+    assert notes.endswith(f"[Compare with the previous release]({COMPARE})\n")
     # A second run of the release job leaves the notes as they are.
     assert blueprint.release_notes("1.3.0", changelog, notes) == notes
 

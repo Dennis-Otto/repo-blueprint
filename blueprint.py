@@ -763,7 +763,8 @@ def describe_steps(steps: list[Step]) -> str:
 HEADING = re.compile(r"^## .*$", re.MULTILINE)
 UNRELEASED = re.compile(r"^## \[?unreleased\]?\s*$", re.IGNORECASE)
 COMPARE = re.compile(r"\((https://\S+/compare/\S+?)\)")
-PULL_REQUESTS = "<summary>Every pull request of this release</summary>"
+# Plain Markdown, which also the update dialogs of Home Assistant and the like show.
+PULL_REQUESTS = "## Every pull request of this release"
 
 
 def block(text: str) -> str:
@@ -857,14 +858,13 @@ def release_notes(version: str, changelog: str, generated: str) -> str:
     lines = [
         log.sections[found][1].strip("\n"),
         "",
-        "<details>",
         PULL_REQUESTS,
         "",
         pulls.strip("\n"),
     ]
     if compare:
         lines += ["", f"[Compare with the previous release]({compare.group(1)})"]
-    return "\n".join([*lines, "", "</details>", ""])
+    return "\n".join([*lines, ""])
 
 
 def add_unreleased(changelog: str, heading: str, entry: str) -> str:
