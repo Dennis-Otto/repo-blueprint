@@ -37,11 +37,15 @@ _skip_if_exists:
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html
+  - .lycheeignore
   - pyproject.toml
   - requirements-dev.in
   - requirements-dev.txt
   - requirements-test.in
   - requirements-test.txt
+  - requirements-fuzz.in
+  - requirements-fuzz.txt
+  - fuzz
   - composer.json
   - composer.lock
   - package.json

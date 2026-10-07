@@ -12,6 +12,10 @@ name: Release
 on:
   push:
     branches: [main]
+  # Merges that auto-merge does with the token of a workflow, such as those of
+  # Dependabot's updates, start no workflow; so the release bot looks every hour too.
+  schedule:
+    - cron: "25 * * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -47,6 +51,9 @@ jobs:
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          # Only what the release pull request and its merge need.
+          permission-contents: write
+          permission-pull-requests: write
       - name: Update the release pull request, or create the release
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0

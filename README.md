@@ -74,7 +74,7 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 - **Rulesets:** *Protect main* (pull requests only, squashed, linear history, every required check, no deletion or force push) and *Release tags* (`v*.*.*` never moves).
 - **Variables and environments:** `PUBLISH_TO`, the release app, and environments that only `main` may use, with the secrets they need.
 
-`blueprint.py` needs Python 3.12 and the GitHub CLI signed in as an administrator, and nothing else. It never reads or prints the value of a secret.
+`blueprint.py` needs Python 3.12 and the GitHub CLI signed in as an administrator, and nothing else. It never reads or prints the value of a secret. Every repository has a copy in `.github/blueprint.py`, and the settings bot (`settings.yml`) compares its settings with the settings as code every week and after every change of them, so that no repository drifts.
 
 ## Updates
 
