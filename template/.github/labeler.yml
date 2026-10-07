@@ -1,0 +1,7 @@
+# The area labels of pull requests by the files they change, for the Area labels
+# workflow; each label is an area of .github/labels.toml. For example:
+#
+# "area: settings":
+#   - changed-files:
+#       - any-glob-to-any-file: ["lib/Settings/**", "js/settings.js"]
+{}

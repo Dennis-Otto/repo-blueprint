@@ -1,0 +1,14 @@
+# The area labels of pull requests by the files they change, for the Area labels
+# workflow; each label is an area of .github/labels.toml.
+"area: template":
+  - changed-files:
+      - any-glob-to-any-file: ["template/**", "copier.yml"]
+"area: workflows":
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**"]
+"area: settings":
+  - changed-files:
+      - any-glob-to-any-file: ["blueprint.py", "tests/test_blueprint.py", ".github/repository.toml"]
+"area: stacks":
+  - changed-files:
+      - any-glob-to-any-file: ["stacks/**"]
