@@ -1,0 +1,4 @@
+[% if stack == 'python' %][% include ".devcontainer/Dockerfile" -%]
+[% elif stack in ['home-assistant', 'php', 'node'] %][% include "stacks/" ~ stack ~ "/devcontainer/Dockerfile" -%]
+[% else %][% include "stacks/generic/devcontainer/Dockerfile" -%]
+[% endif -%]
