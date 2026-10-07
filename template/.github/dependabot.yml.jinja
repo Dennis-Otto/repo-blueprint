@@ -41,6 +41,13 @@ updates:
       timezone: Europe/Berlin
     cooldown:
       default-days: 7
+    # The dev container keeps the Python, PHP or Node of the project, as the CI does;
+    # only its digest moves.
+    ignore:
+      - dependency-name: "devcontainers/*"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
     commit-message:
       prefix: chore
       include: scope
