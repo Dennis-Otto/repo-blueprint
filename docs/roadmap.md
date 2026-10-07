@@ -8,7 +8,8 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 
 - **0.1 to 0.3:** seven kinds of projects, the settings as code, the security checks of the workflows, fuzzing and property tests, the release bot with the changelog that the pull requests write, the verification of every release, prereleases, the dev container, the dashboard and Harden-Runner.
 - **0.4:** the settings bot that applies the settings as code itself, OSV-Scanner, area labels, the changelog check and the licenses of the third-party components in every release.
-- **The next release:** what the section *Unreleased* of the changelog lists, among it Renovate instead of Dependabot, a beta channel, the records of decisions, the coverage of every pull request and the documents that the Silver level of the OpenSSF Best Practices badge asks for.
+- **0.5:** Renovate instead of Dependabot, a beta channel, the records of decisions, the coverage of every pull request, the flaky-test bot, the SBOM as CycloneDX with an OpenVEX document, the Markdown lint and the announcement of every release.
+- **The next release:** what the section *Unreleased* of the changelog lists, among it the documents that the Silver level of the OpenSSF Best Practices badge asks for.
 
 ## Next
 
