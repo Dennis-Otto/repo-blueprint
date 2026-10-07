@@ -37,6 +37,7 @@ _skip_if_exists:
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html
+  - .lycheeignore
   - pyproject.toml
   - requirements-dev.in
   - requirements-dev.txt
