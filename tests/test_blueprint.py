@@ -490,6 +490,18 @@ def test_ruleset_differences_name_each_part() -> None:
     ]
 
 
+def test_a_ruleset_without_its_bypass_list_matches() -> None:
+    # A token without the administration write permission, such as the release
+    # app's in the Settings workflow, gets the rulesets without bypass_actors.
+    want = blueprint.main_ruleset(["a"])
+    have = json.loads(json.dumps(want))
+    del have["bypass_actors"]
+    assert blueprint.ruleset_differences(want, have) == []
+
+    have["bypass_actors"] = [{"actor_type": "OrganizationAdmin"}]
+    assert blueprint.ruleset_differences(want, have) == ["bypass_actors"]
+
+
 def test_the_tag_ruleset_leaves_major_tags_free() -> None:
     ruleset = blueprint.tag_ruleset()
 
