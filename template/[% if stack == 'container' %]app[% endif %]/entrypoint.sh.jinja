@@ -1,0 +1,16 @@
+#!/bin/sh
+# The entry point of the image: the starting point of the project; replace the
+# greeting with the real program. scripts/check.sh runs it with --self-test, which
+# checks what the image needs and ends.
+set -eu
+
+if [ "${1:-}" = "--self-test" ]; then
+  if [ "$(id -u)" = "0" ]; then
+    echo "The image runs as root." >&2
+    exit 1
+  fi
+  echo "The self-test passed."
+  exit 0
+fi
+
+echo "Hello from {= project_name | replace('"', '') | replace('$', '') | replace('`', '') =}!"

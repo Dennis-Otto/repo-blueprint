@@ -1,0 +1,37 @@
+# Editors and systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# The context folder of the issue assistant
+/.issue-assistant/
+[% if stack in ['python', 'home-assistant'] %]
+# Python
+__pycache__/
+*.py[cod]
+/.venv/
+/.coverage
+/.coverage.*
+/htmlcov/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+/.hypothesis/
+/build/
+/dist/
+*.egg-info/
+[% endif %][% if stack == 'php' %]
+# PHP
+/vendor/
+/build/
+/.php-cs-fixer.cache
+/.phpunit.cache/
+/.phpunit.result.cache
+[% endif %][% if stack == 'node' %]
+# Node
+/node_modules/
+/dist/
+/coverage/
+*.tgz
+[% endif -%]

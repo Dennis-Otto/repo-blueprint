@@ -1,0 +1,24 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/stubs/Emitter.php';
+require_once __DIR__ . '/../vendor/autoload.php';
+
+// The public API of Nextcloud from the package nextcloud/ocp, without a server.
+$ocpRoot = __DIR__ . '/../vendor/nextcloud/ocp/';
+spl_autoload_register(static function (string $class) use ($ocpRoot): void {
+	foreach (['OCP\\' => 'OCP/', 'NCU\\' => 'NCU/'] as $prefix => $directory) {
+		if (!str_starts_with($class, $prefix)) {
+			continue;
+		}
+
+		$relativeClass = substr($class, strlen($prefix));
+		$file = $ocpRoot . $directory . str_replace('\\', '/', $relativeClass) . '.php';
+		if (is_file($file)) {
+			require_once $file;
+		}
+
+		return;
+	}
+});

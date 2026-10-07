@@ -1,0 +1,23 @@
+"""The config flow of {= project_name =}."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+
+from .const import DOMAIN
+
+
+class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
+    """Set up {= project_name =} from the user interface."""
+
+    VERSION = 1
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for confirmation; the manifest allows a single entry."""
+        if user_input is not None:
+            return self.async_create_entry(title={= project_name | to_json(ensure_ascii=False) =}, data={})
+        return self.async_show_form(step_id="user")

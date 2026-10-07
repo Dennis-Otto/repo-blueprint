@@ -1,0 +1,41 @@
+"""{= project_name =}: {= description =}
+
+The code of the action, which action.yml runs with the runner's Python. It reads
+its inputs from the environment and writes its outputs to the file GITHUB_OUTPUT
+names. The starting point of the action; replace the greeting with the real work.
+"""
+
+from __future__ import annotations
+
+import os
+import secrets
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+
+
+def greet(name: str) -> str:
+    """Return a greeting for name."""
+    return f"Hello, {name}!"
+
+
+def output_text(name: str, value: str) -> str:
+    """An output in the form that keeps line breaks in its value."""
+    delimiter = f"EOF_{secrets.token_hex(16)}"
+    if delimiter in value:
+        raise ValueError(f"the value of {name} holds the delimiter of its output")
+    return f"{name}<<{delimiter}\n{value}\n{delimiter}\n"
+
+
+def main(environ: Mapping[str, str]) -> int:
+    """Run the action with the inputs of environ."""
+    greeting = greet(environ.get("INPUT_NAME", "").strip() or "World")
+    print(greeting)
+    if output := environ.get("GITHUB_OUTPUT"):
+        with Path(output).open("a", encoding="utf-8") as file:
+            file.write(output_text("greeting", greeting))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(os.environ))

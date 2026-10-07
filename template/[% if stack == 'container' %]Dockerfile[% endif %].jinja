@@ -1,0 +1,19 @@
+[%- set registry -%][% include "stacks/container/Dockerfile" %][%- endset -%]
+# The image of {= project_name =}. scripts/check.sh builds it and runs its self-test;
+# the release bot publishes it to the GitHub Container Registry.
+[% for line in registry.splitlines() if line.startswith('FROM ') -%]
+{= line =}
+[% endfor %]
+# x-release-please-start-version
+LABEL org.opencontainers.image.version="0.0.0"
+# x-release-please-end
+LABEL org.opencontainers.image.title="{= project_name | replace('"', "'") =}" \
+      org.opencontainers.image.description="{= description | replace('"', "'") =}" \
+      org.opencontainers.image.source="https://github.com/{= owner =}/{= project_slug =}" \
+      org.opencontainers.image.licenses="{= license =}"
+
+COPY --chmod=0755 app/entrypoint.sh /usr/local/bin/{= project_slug =}
+
+# The image needs no root.
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/{= project_slug =}"]

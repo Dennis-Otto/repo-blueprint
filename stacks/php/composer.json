@@ -1,0 +1,40 @@
+{
+	"name": "blueprint/nextcloud-app",
+	"description": "Development tools of the Nextcloud apps of the blueprint",
+	"type": "nextcloud-app",
+	"license": "AGPL-3.0-or-later",
+	"autoload": {
+		"psr-4": {
+			"OCA\\Blueprint\\": "lib/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"OCA\\Blueprint\\Tests\\": "tests/"
+		}
+	},
+	"require": {
+		"php": "^8.2"
+	},
+	"require-dev": {
+		"nextcloud/coding-standard": "^1.5",
+		"nextcloud/ocp": "^33.0",
+		"phpunit/phpunit": "^11.5",
+		"vimeo/psalm": "^6.0"
+	},
+	"scripts": {
+		"check": "bash scripts/check.sh",
+		"cs:fix": "php-cs-fixer fix",
+		"psalm": "psalm --threads=1 --no-cache",
+		"test": "phpunit"
+	},
+	"config": {
+		"allow-plugins": {
+			"composer/installers": true
+		},
+		"platform": {
+			"php": "8.2.27"
+		},
+		"sort-packages": true
+	}
+}

@@ -1,0 +1,81 @@
+[% if project_type == 'python-package' -%]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{= project_slug =}"
+version = "0.0.0"
+description = {= description | to_json(ensure_ascii=False) =}
+readme = "README.md"
+license = "{= license =}"
+license-files = ["LICENSE", "LICENSES/*.txt"]
+authors = [{ name = {= author | to_json(ensure_ascii=False) =} }]
+requires-python = ">={= python_version =}"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/{= owner =}/{= project_slug =}"
+Issues = "https://github.com/{= owner =}/{= project_slug =}/issues"
+Changelog = "https://github.com/{= owner =}/{= project_slug =}/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/{= python_package =}"]
+[%- else -%]
+# The settings of the tools that scripts/check.sh runs.
+[%- endif %]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["[% if project_type == 'python-package' %]src[% else %].[% endif %]"]
+addopts = ["--strict-markers", "--strict-config"]
+xfail_strict = true
+[%- if stack == 'home-assistant' %]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# A hanging test fails instead of blocking the run, locally as in the CI.
+timeout = 30
+# Warnings of the integration's own code are errors.
+filterwarnings = ['error:::custom_components\.{= ha_domain =}']
+[%- else %]
+filterwarnings = ["error"]
+[%- endif %]
+
+[tool.coverage.run]
+branch = true
+source = ["[% if project_type == 'python-package' %]src[% elif project_type == 'github-action' %]{= python_package =}[% else %]custom_components/{= ha_domain =}[% endif %]"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_covered = true
+exclude_also = ['if __name__ == "__main__":']
+
+[tool.ruff]
+target-version = "py{= python_version | replace('.', '') =}"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "PT", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "{= python_version =}"
+strict = true
+[%- if project_type == 'python-package' %]
+files = ["src", "tests"]
+mypy_path = "src"
+[%- elif project_type == 'github-action' %]
+files = ["{= python_package =}.py", "tests"]
+[%- else %]
+files = ["custom_components/{= ha_domain =}"]
+
+# Home Assistant re-exports helpers without __all__.
+[[tool.mypy.overrides]]
+module = ["homeassistant.*"]
+implicit_reexport = true
+[%- endif %]

@@ -1,0 +1,174 @@
+# Dependabot keeps the blueprint current. What new repositories copy or what reaches
+# every repository through the blueprint bot is committed as fix(deps) and leads to a
+# patch release that merges itself once every check passes: the actions of the
+# workflows, Copier, and the tools of each kind of project in stacks/. The tools of
+# the blueprint's own tests are chore(deps) and wait for the next release.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:20"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    # Let a fresh release settle for a week; security updates skip the wait.
+    cooldown:
+      default-days: 7
+    groups:
+      actions-routine:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+    commit-message:
+      prefix: fix
+      include: scope
+
+  # The tools of the blueprint's own tests.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      python-routine:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      python-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # Copier, which the blueprint bot of every repository runs.
+  - package-ecosystem: pip
+    directory: /stacks/copier
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      copier:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: fix
+      include: scope
+
+  # The tools of the Python packages and GitHub Actions.
+  - package-ecosystem: pip
+    directory: /stacks/python
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      python-stack:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: fix
+      include: scope
+
+  # The test tools of the Home Assistant integrations, with Home Assistant itself.
+  - package-ecosystem: pip
+    directory: /stacks/home-assistant
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      home-assistant-stack:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: fix
+      include: scope
+
+  # The tools of the Nextcloud apps.
+  - package-ecosystem: composer
+    directory: /stacks/php
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      php-stack:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: fix
+      prefix-development: fix
+      include: scope
+
+  # The tools of the Node packages.
+  - package-ecosystem: npm
+    directory: /stacks/node
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      node-stack:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: fix
+      prefix-development: fix
+      include: scope
+
+  # The base image of the container images, and the browser of the social preview.
+  - package-ecosystem: docker
+    directories:
+      - /stacks/container
+      - /.github/social-preview
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: fix
+      include: scope

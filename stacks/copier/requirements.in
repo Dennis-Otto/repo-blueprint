@@ -1,0 +1,3 @@
+# Copier, which renders and updates the repositories of the blueprint. The blueprint
+# bot of every repository installs it from the hash-pinned requirements.txt.
+copier

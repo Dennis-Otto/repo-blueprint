@@ -1,0 +1,42 @@
+[%- set registry -%][% include "stacks/node/package.json" %][%- endset -%]
+[%- set stack_manifest = registry | from_json -%]
+{
+  "name": "{= project_slug =}",
+  "version": "0.0.0",
+  "description": {= description | to_json(ensure_ascii=False) =},
+  "homepage": "https://github.com/{= owner =}/{= project_slug =}#readme",
+  "bugs": {
+    "url": "https://github.com/{= owner =}/{= project_slug =}/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/{= owner =}/{= project_slug =}.git"
+  },
+  "license": "{= license =}",
+  "author": {= author | to_json(ensure_ascii=False) =},
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+[%- for name, version in stack_manifest.engines.items() %]
+    {= name | to_json(ensure_ascii=False) =}: {= version | to_json(ensure_ascii=False) =}[% if not loop.last %],[% endif %]
+[%- endfor %]
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 \"test/**/*.test.ts\""
+  },
+  "devDependencies": {
+[%- for name, version in stack_manifest.devDependencies.items() %]
+    {= name | to_json(ensure_ascii=False) =}: {= version | to_json(ensure_ascii=False) =}[% if not loop.last %],[% endif %]
+[%- endfor %]
+  }
+}

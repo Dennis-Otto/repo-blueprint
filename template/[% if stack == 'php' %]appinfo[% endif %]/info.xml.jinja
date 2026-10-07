@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	  xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>{= nextcloud_app_id =}</id>
+	<name>{= project_name | e =}</name>
+	<summary>{= description | e =}</summary>
+	<description><![CDATA[
+{= description =}
+]]></description>
+	<version>0.0.0</version>
+	<licence>{= license =}</licence>
+	<author homepage="https://github.com/{= owner =}">{= author | e =}</author>
+	<namespace>{= nextcloud_namespace =}</namespace>
+	<documentation>
+		<user>https://github.com/{= owner =}/{= project_slug =}#readme</user>
+	</documentation>
+	<category>tools</category>
+	<website>https://github.com/{= owner =}/{= project_slug =}</website>
+	<bugs>https://github.com/{= owner =}/{= project_slug =}/issues</bugs>
+	<repository type="git">https://github.com/{= owner =}/{= project_slug =}.git</repository>
+	<dependencies>
+		<php min-version="8.2"/>
+		<nextcloud min-version="33" max-version="35"/>
+	</dependencies>
+</info>

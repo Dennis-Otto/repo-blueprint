@@ -1,0 +1,68 @@
+"""Tests of {= python_package =}."""
+[% if project_type == 'python-package' %]
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from {= python_package =} import greet
+
+
+def test_greet_names_the_person() -> None:
+    assert greet(" Ada ") == "Hello, Ada!"
+
+
+def test_greet_refuses_an_empty_name() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        greet("  ")
+
+
+@given(st.text().filter(str.strip))
+def test_greet_keeps_every_name(name: str) -> None:
+    assert name.strip() in greet(name)
+[%- else %]
+from pathlib import Path
+
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+import {= python_package =} as action
+
+
+def test_main_greets_and_writes_the_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "output"
+
+    assert action.main({"INPUT_NAME": " Ada ", "GITHUB_OUTPUT": str(output)}) == 0
+
+    assert capsys.readouterr().out == "Hello, Ada!\n"
+    start, value, end = output.read_text(encoding="utf-8").splitlines()
+    assert start == f"greeting<<{end}"
+    assert value == "Hello, Ada!"
+
+
+def test_main_greets_the_world_without_inputs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert action.main({}) == 0
+
+    assert capsys.readouterr().out == "Hello, World!\n"
+
+
+@given(st.text())
+def test_an_output_keeps_its_value_whole(value: str) -> None:
+    first, rest = action.output_text("greeting", value).split("\n", 1)
+
+    delimiter = first.removeprefix("greeting<<")
+    assert rest == f"{value}\n{delimiter}\n"
+
+
+def test_a_value_that_holds_the_delimiter_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("secrets.token_hex", lambda _: "fixed")
+
+    with pytest.raises(ValueError, match="delimiter"):
+        action.output_text("greeting", "EOF_fixed")
+[%- endif %]

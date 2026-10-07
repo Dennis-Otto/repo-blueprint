@@ -1,0 +1,92 @@
+name: Blueprint update
+
+# The blueprint bot. Every week, and on demand, it brings the repository up to the
+# latest release of the blueprint with `copier update` and opens a pull request as
+# the release app, so that its checks run. Without conflicts, the pull request merges
+# itself once every check passes; conflicts stay in it as markers for the maintainer.
+# The repository variable BLUEPRINT_AUTOMERGE set to off makes every update wait.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  schedule:
+    - cron: "40 4 * * 2"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: blueprint-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: blueprint update
+    # Not in the blueprint itself; generated repositories don't have this line.
+    if: github.repository != 'Dennis-Otto/repo-blueprint'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The environment holds the private key of the release app; only main may use it.
+    environment:
+      name: release
+      deployment: false
+    permissions:
+      contents: read
+    steps:
+      - name: Create a token of the release app
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the hash-pinned Copier
+        run: pip install --require-hashes -r .github/copier-requirements.txt
+      - name: Update to the latest release of the blueprint
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          AUTOMERGE: ${{ vars.BLUEPRINT_AUTOMERGE }}
+        run: |
+          set -euo pipefail
+          before="$(sed -n 's/^_commit: //p' .copier-answers.yml)"
+          copier update --defaults --conflict inline
+          after="$(sed -n 's/^_commit: //p' .copier-answers.yml)"
+          changed="$(git status --porcelain | cut -c4-)"
+          if [[ -z "$changed" || "$changed" == ".copier-answers.yml" ]]; then
+            echo "The release $after of the blueprint changes nothing in this repository."
+            exit 0
+          fi
+          conflicts="$(git grep -l -E '^<{7} ' -- . || true)"
+
+          # The commit belongs to the release app, whose pull requests the DCO check accepts.
+          user_id="$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          branch="blueprint/update"
+          git switch --force-create "$branch"
+          git add --all
+          git commit --quiet --message "chore: update to the blueprint $after" \
+            --message "The changes of the blueprint from $before to $after: https://github.com/Dennis-Otto/repo-blueprint/releases/tag/$after"
+          git push --force --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
+
+          body="$(printf '%s\n' \
+            "Brings the repository from the blueprint's $before to [$after](https://github.com/Dennis-Otto/repo-blueprint/releases/tag/$after) with \`copier update\`." \
+            "" \
+            "${conflicts:+The update conflicts with changes of this repository in these files; resolve the markers, then merge:}" \
+            "${conflicts}")"
+          number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$number" ]]; then
+            gh pr edit "$number" --repo "$GITHUB_REPOSITORY" --title "chore: update to the blueprint $after" --body "$body"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
+              --title "chore: update to the blueprint $after" --body "$body"
+          fi
+          if [[ -z "$conflicts" && "$AUTOMERGE" != "off" ]]; then
+            gh pr merge "$branch" --repo "$GITHUB_REPOSITORY" --auto --squash
+          fi

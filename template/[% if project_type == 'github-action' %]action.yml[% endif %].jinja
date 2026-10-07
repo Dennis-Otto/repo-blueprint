@@ -1,0 +1,29 @@
+# The action itself: a composite action that runs {= python_package =}.py with the
+# runner's Python, without anything to install.
+name: {= project_name | to_json(ensure_ascii=False) =}
+description: {= description | to_json(ensure_ascii=False) =}
+author: {= author | to_json(ensure_ascii=False) =}
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  name:
+    description: Whom to greet; the starting point of the action's inputs
+    required: false
+    default: World
+
+outputs:
+  greeting:
+    description: The greeting
+    value: ${{ steps.run.outputs.greeting }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run the action
+      id: run
+      shell: bash
+      env:
+        INPUT_NAME: ${{ inputs.name }}
+      run: python3 "$GITHUB_ACTION_PATH/{= python_package =}.py"

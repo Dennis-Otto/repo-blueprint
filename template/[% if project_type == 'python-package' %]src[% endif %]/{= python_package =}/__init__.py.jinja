@@ -1,0 +1,13 @@
+"""{= project_name =}: {= description =}"""
+
+__all__ = ["greet"]
+
+
+def greet(name: str) -> str:
+    """Return a greeting for name.
+
+    The starting point of the package; replace it with the real code.
+    """
+    if not name.strip():
+        raise ValueError("name is empty")
+    return f"Hello, {name.strip()}!"

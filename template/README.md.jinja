@@ -1,0 +1,81 @@
+[%- set repo = owner ~ '/' ~ project_slug -%]
+# {= project_name =}
+
+[![CI](https://github.com/{= repo =}/actions/workflows/ci.yml/badge.svg)](https://github.com/{= repo =}/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/{= repo =}/actions/workflows/codeql.yml/badge.svg)](https://github.com/{= repo =}/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{= repo =}/badge)](https://scorecard.dev/viewer/?uri=github.com/{= repo =})
+[![REUSE](https://api.reuse.software/badge/github.com/{= repo =})](https://api.reuse.software/info/github.com/{= repo =})
+[![License: {= license =}](https://img.shields.io/badge/license-{= license | replace('-', '--') =}-blue)](LICENSE)
+[%- if sponsor %]
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/{= sponsor =})
+[%- endif %]
+
+{= description =}
+[%- if sponsor %]
+
+<sub>💛 If {= project_name =} is useful to you, you can [support its development](https://github.com/sponsors/{= sponsor =}).</sub>
+[%- endif %]
+
+## Installation
+[% if project_type == 'home-assistant' %]
+[![Open the repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner={= owner =}&repository={= project_slug =}&category=integration)
+
+1. In HACS, add `https://github.com/{= repo =}` as a custom repository of the type *Integration*, or use the button above.
+2. Download **{= project_name =}** and restart Home Assistant.
+3. Add the integration under *Settings → Devices & services → Add integration*.
+[% elif project_type == 'nextcloud-app' %]
+Install **{= project_name =}** from the [Nextcloud App Store](https://apps.nextcloud.com/apps/{= nextcloud_app_id =}): as an administrator, under *Apps*, or with
+
+```sh
+php occ app:install {= nextcloud_app_id =}
+```
+[% elif project_type == 'github-action' %]
+```yaml
+- uses: {= repo =}@<commit-hash> # vX.Y.Z
+  with:
+    name: World
+```
+
+Pin the action to the commit hash of a [release](https://github.com/{= repo =}/releases); Dependabot then keeps it current.
+[% elif project_type == 'python-package' %]
+```sh
+pip install {= project_slug =}
+```
+[% elif project_type == 'node-package' %]
+```sh
+npm install {= project_slug =}
+```
+[% elif project_type == 'container' %]
+```sh
+docker run --rm ghcr.io/{= repo | lower =}:latest
+```
+
+Every image carries its SBOM and a signed provenance attestation:
+
+```sh
+gh attestation verify oci://ghcr.io/{= repo | lower =}:latest --owner {= owner =}
+```
+[% else %]
+Describe here how to use the project.
+[% endif %]
+## Development
+
+Every change goes through a pull request whose title follows [Conventional Commits](https://www.conventionalcommits.org/), with signed-off commits (`git commit -s`). The checks of the CI run locally with
+
+```sh
+bash scripts/check.sh
+```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules.
+
+## Releases
+
+The release bot keeps a pull request for the next release open, with the version and the changelog from the merged pull requests. Merging it publishes the release, with its SBOM and a signed provenance; [CHANGELOG.md](CHANGELOG.md) lists every change.
+
+## Support and security
+
+Questions and problems: see [SUPPORT.md](SUPPORT.md). Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes.
+
+## License
+
+{= license =}; see [LICENSE](LICENSE). Every file names its license in the machine-readable form of [REUSE](https://reuse.software).

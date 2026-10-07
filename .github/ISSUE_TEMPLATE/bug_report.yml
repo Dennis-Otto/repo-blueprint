@@ -1,0 +1,42 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for reporting! The issue assistant posts a first analysis within a few
+        minutes; the maintainer reads every issue. Never post tokens, keys or personal data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Template and questions
+        - Workflows and bots
+        - Settings and checklist (blueprint.py)
+        - A kind of project (stack)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you use.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines of the log, without secrets.
+      render: text

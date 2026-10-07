@@ -1,0 +1,8 @@
+[#- The composer.json of a Nextcloud app: the blueprint's stack with the app's name,
+    description, license and namespace. composer.json and composer.lock both use it. -#]
+[%- filter replace('"name": "blueprint/nextcloud-app"', '"name": "' ~ (owner | lower) ~ '/' ~ project_slug ~ '"')
+    | replace('"description": "Development tools of the Nextcloud apps of the blueprint"', '"description": ' ~ (description | to_json(ensure_ascii=False)))
+    | replace('"license": "AGPL-3.0-or-later"', '"license": "' ~ license ~ '"')
+    | replace('OCA\\\\Blueprint', 'OCA\\\\' ~ nextcloud_namespace) -%]
+[% include "stacks/php/composer.json" %]
+[%- endfilter -%]

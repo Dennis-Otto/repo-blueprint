@@ -1,0 +1,74 @@
+name: CI (home-assistant)
+
+# Home Assistant integration: the hash-pinned test tools of requirements-test.txt and
+# the checks of scripts/check.sh, plus the validation of HACS and of hassfest.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # HACS and hassfest apply new rules without a release of this repository.
+    - cron: "30 4 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check (home-assistant)
+    # Not in the blueprint itself; generated repositories don't have this line.
+    if: github.repository != 'Dennis-Otto/repo-blueprint'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+      - name: Install the hash-pinned test tools
+        run: pip install --require-hashes -r requirements-test.txt
+      - name: Run the checks
+        run: bash scripts/check.sh
+
+  hacs:
+    name: hacs
+    # Not in the blueprint itself; generated repositories don't have this line.
+    if: github.repository != 'Dennis-Otto/repo-blueprint'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate the HACS metadata
+        # The action runs HACS' moving ghcr.io/hacs/action:main image on purpose: it
+        # always validates against the rules HACS applies to new submissions today.
+        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
+        with:
+          category: integration
+          comment: false
+
+  hassfest:
+    name: hassfest
+    # Not in the blueprint itself; generated repositories don't have this line.
+    if: github.repository != 'Dennis-Otto/repo-blueprint'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # hassfest runs Home Assistant's current image, for the same reason.
+      - name: Validate the integration
+        uses: home-assistant/actions/hassfest@06749dd8c0b54f350bc69c8752456cee498808a3 # master

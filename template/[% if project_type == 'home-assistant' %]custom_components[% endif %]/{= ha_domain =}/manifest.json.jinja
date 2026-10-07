@@ -1,0 +1,13 @@
+{
+  "domain": "{= ha_domain =}",
+  "name": {= project_name | to_json(ensure_ascii=False) =},
+  "codeowners": ["@{= owner =}"],
+  "config_flow": true,
+  "documentation": "https://github.com/{= owner =}/{= project_slug =}",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/{= owner =}/{= project_slug =}/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.0.0"
+}

@@ -1,0 +1,10 @@
+[#- The license text. The short licenses get the year and the holder in the places of
+    their SPDX texts; the others stay verbatim, appendix included. -#]
+[%- set text -%][% include "LICENSES/" ~ license ~ ".txt" %][%- endset -%]
+[%- if license in ['MIT', 'MIT-0', 'BSD-3-Clause'] -%]
+{= text | replace('[year]', copyright_year) | replace('[fullname]', author)
+   | replace('<YEAR>', copyright_year) | replace('<COPYRIGHT HOLDER>', author)
+   | replace('<year>', copyright_year) | replace('<owner>', author) =}
+[%- else -%]
+{= text =}
+[%- endif -%]

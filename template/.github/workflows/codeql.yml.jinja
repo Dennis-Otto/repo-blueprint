@@ -1,0 +1,1 @@
+[% set languages = "        # The languages of this repository; the blueprint sets them for each kind of project.\n        language: [python, actions]\n" %][% filter replace(languages, "        language: " ~ codeql_languages ~ "\n") %][% include ".github/workflows/codeql.yml" %][% endfilter -%]

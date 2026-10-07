@@ -1,0 +1,248 @@
+# The questions of the blueprint and how it renders. Files of the template are in
+# template/; workflows, dependency manifests and other shared files come from this
+# repository itself, where they run and Dependabot keeps them current.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+_min_copier_version: "9.4"
+_subdirectory: template
+_templates_suffix: .jinja
+_answers_file: .copier-answers.yml
+
+# Delimiters that no workflow, script or manifest contains: the ${{ }} of GitHub
+# Actions, the [[ ]] of Bash and TOML and the {% %} of other templates stay as they
+# are, also in the files the templates include from this repository.
+_envops:
+  block_start_string: "[%"
+  block_end_string: "%]"
+  variable_start_string: "{="
+  variable_end_string: "=}"
+  comment_start_string: "[#"
+  comment_end_string: "#]"
+  keep_trailing_newline: true
+
+# Each kind of project gets the files of its stack and its way of delivery: the
+# files and folders of template/ carry their condition in their name, such as
+# "[% if stack == 'php' %]composer.json[% endif %]". A name that renders empty is
+# left out, with everything inside.
+
+# After the first copy, these belong to the project: an update never overwrites
+# them. The project's Dependabot keeps its own dependency manifests current.
+_skip_if_exists:
+  - README.md
+  - CHANGELOG.md
+  - version.txt
+  - .release-please-manifest.json
+  - .github/issue-assistant/project.md
+  - .github/labels.toml
+  - .github/findings.toml
+  - .github/dependency-review.yml
+  - .github/social-preview.html
+  - pyproject.toml
+  - requirements-dev.in
+  - requirements-dev.txt
+  - requirements-test.in
+  - requirements-test.txt
+  - composer.json
+  - composer.lock
+  - package.json
+  - package-lock.json
+  - Dockerfile
+  - action.yml
+  - hacs.json
+  - src
+  - lib
+  - app
+  - appinfo
+  - custom_components
+  - tests
+  - test
+  - "*.py"
+
+_message_after_copy: |
+  {= project_name =} is ready. Next:
+
+    1. Create the repository and push:  gh repo create {= owner =}/{= project_slug =} --public --source . --push
+    2. Apply the settings as code:      python3 <blueprint>/blueprint.py settings apply
+    3. Follow the checklist:            python3 <blueprint>/blueprint.py checklist
+
+project_name:
+  type: str
+  help: The name of the project, such as "Paperless Sync"
+  validator: "[% if not project_name.strip() %]Name the project.[% endif %]"
+
+project_slug:
+  type: str
+  help: The name of the repository
+  default: "{= project_name | lower | regex_replace('[^a-z0-9]+', '-') | trim('-') =}"
+  validator: >-
+    [% if not (project_slug | regex_search('^[a-z0-9][a-z0-9-]*[a-z0-9]$')) %]Use lowercase letters, digits and hyphens.[% endif %]
+
+description:
+  type: str
+  help: One sentence that says what the project does
+  validator: "[% if not description.strip() %]Describe the project in one sentence.[% endif %]"
+
+project_type:
+  type: str
+  help: The kind of project
+  choices:
+    Home Assistant integration (Python, HACS): home-assistant
+    Nextcloud app (PHP, App Store): nextcloud-app
+    GitHub Action (Python, composite): github-action
+    Python package (PyPI): python-package
+    Node package (TypeScript, npm): node-package
+    Container image (GHCR): container
+    Repository without a build (docs, configuration, scripts): generic
+
+owner:
+  type: str
+  help: The GitHub account or organization of the repository
+  default: Dennis-Otto
+
+author:
+  type: str
+  help: The maintainer, named in the license and the governance
+  default: Dennis Otto
+
+license:
+  type: str
+  help: The license
+  default: "[% if project_type == 'nextcloud-app' %]AGPL-3.0-or-later[% else %]MIT[% endif %]"
+  choices:
+    MIT: MIT
+    MIT No Attribution (MIT-0): MIT-0
+    BSD 3-Clause: BSD-3-Clause
+    Apache 2.0: Apache-2.0
+    GPL 3.0 or later: GPL-3.0-or-later
+    AGPL 3.0 or later: AGPL-3.0-or-later
+
+python_package:
+  type: str
+  help: The name of the Python package or module
+  default: "{= project_slug | replace('-', '_') =}"
+  when: "{= project_type in ['python-package', 'github-action', 'home-assistant'] =}"
+  validator: >-
+    [% if not (python_package | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
+
+ha_domain:
+  type: str
+  help: The domain of the integration in Home Assistant
+  default: "{= python_package =}"
+  when: "{= project_type == 'home-assistant' =}"
+  validator: >-
+    [% if not (ha_domain | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
+
+nextcloud_app_id:
+  type: str
+  help: The id of the Nextcloud app
+  default: "{= project_slug | replace('-', '_') =}"
+  when: "{= project_type == 'nextcloud-app' =}"
+  validator: >-
+    [% if not (nextcloud_app_id | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
+
+nextcloud_namespace:
+  type: str
+  help: The PHP namespace of the app, under OCA
+  default: "{= project_name | title | regex_replace('[^A-Za-z0-9]', '') =}"
+  when: "{= project_type == 'nextcloud-app' =}"
+
+languages:
+  type: yaml
+  multiselect: true
+  help: The languages of the code, which CodeQL analyzes (it has no PHP)
+  choices:
+    Python: python
+    JavaScript or TypeScript: javascript-typescript
+    Go: go
+    Java or Kotlin: java-kotlin
+    Ruby: ruby
+    Rust: rust
+  default: >-
+    [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
+    [%- elif project_type == 'node-package' -%][javascript-typescript]
+    [%- else -%][][%- endif -%]
+
+discussions:
+  type: bool
+  help: Use GitHub Discussions for questions and ideas
+  default: false
+
+homepage:
+  type: str
+  help: The homepage, if not the repository
+  default: ""
+
+topics:
+  type: str
+  help: Topics of the repository, separated by commas
+  default: ""
+
+sponsor:
+  type: str
+  help: The GitHub Sponsors account of the sponsor button; empty for none
+  default: "{= owner =}"
+  validator: >-
+    [% if sponsor and not (sponsor | regex_search('^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$')) %]Name a GitHub account, or leave it empty.[% endif %]
+
+# Derived from the answers; never asked and not stored.
+
+stack:
+  type: str
+  when: false
+  default: >-
+    [%- if project_type == 'home-assistant' -%]home-assistant
+    [%- elif project_type == 'nextcloud-app' -%]php
+    [%- elif project_type in ['github-action', 'python-package'] -%]python
+    [%- elif project_type == 'node-package' -%]node
+    [%- elif project_type == 'container' -%]container
+    [%- else -%]generic[%- endif -%]
+
+publish_to:
+  type: str
+  when: false
+  default: >-
+    [%- if project_type == 'home-assistant' -%]hacs
+    [%- elif project_type == 'nextcloud-app' -%]nextcloud-appstore
+    [%- elif project_type == 'github-action' -%]github-action
+    [%- elif project_type == 'python-package' -%]pypi
+    [%- elif project_type == 'node-package' -%]npm
+    [%- elif project_type == 'container' -%]ghcr
+    [%- else -%]none[%- endif -%]
+
+# The languages CodeQL analyzes, besides the workflows; it has no PHP.
+codeql_languages:
+  type: str
+  when: false
+  default: >-
+    [%- set found = [] -%]
+    [%- for language in ['python', 'javascript-typescript', 'go', 'java-kotlin', 'ruby', 'rust'] if language in languages -%]
+    [%- set _ = found.append(language) -%]
+    [%- endfor -%]
+    [{= (found + ['actions']) | join(', ') =}]
+
+# The workflow of the checks: the stack's, or one with the action's own test run.
+ci_workflow:
+  type: str
+  when: false
+  default: "[% if project_type == 'github-action' %]github-action[% else %]{= stack =}[% endif %]"
+
+# Home Assistant needs the newest Python; actions run on the runner's Python 3.12.
+python_version:
+  type: str
+  when: false
+  default: "[% if stack == 'home-assistant' %]3.14[% else %]3.12[% endif %]"
+
+# How the release bot finds the version: Python and Node in their manifests, the
+# others in version.txt, with the version in other files kept equal.
+release_type:
+  type: str
+  when: false
+  default: >-
+    [%- if project_type == 'python-package' -%]python
+    [%- elif stack == 'node' -%]node
+    [%- else -%]simple[%- endif -%]
+
+copyright_year:
+  type: str
+  when: false
+  default: "{= '%Y' | strftime =}"

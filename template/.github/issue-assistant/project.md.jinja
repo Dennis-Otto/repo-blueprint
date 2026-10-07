@@ -1,0 +1,9 @@
+{= project_name =}: {= description =}
+
+Where things are:
+
+- [% if stack == 'home-assistant' %]The integration is in `custom_components/{= ha_domain =}/`, its manifest and version in `custom_components/{= ha_domain =}/manifest.json`, the HACS metadata in `hacs.json`[% elif stack == 'php' %]The app is in `lib/`, its metadata, version and supported Nextcloud versions in `appinfo/info.xml`[% elif project_type == 'github-action' %]The action is defined in `action.yml` and runs `{= python_package =}.py`[% elif project_type == 'python-package' %]The package is in `src/{= python_package =}/`, its metadata and version in `pyproject.toml`[% elif stack == 'node' %]The package is in `src/`, its metadata and version in `package.json`[% elif stack == 'container' %]The image is built from `Dockerfile`, with the application in `app/`[% else %]The content of the repository is described in `README.md`[% endif %].
+- `README.md` documents installation, configuration and use; `CHANGELOG.md` lists the changes of every release.[% if stack != 'generic' %]
+- The tests are in `[% if stack == 'node' %]test/[% else %]tests/[% endif %]`; `scripts/check.sh` runs every check.[% endif %]
+
+What matters in a bug report: the release, the set-up and the relevant lines of the log, without tokens, keys or private URLs.

@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# The checks of {= project_name =}, the same ones its CI runs. Run them before every
+# push:  bash scripts/check.sh
+[%- if stack == 'python' %]
+# The tools come from:  pip install --require-hashes -r requirements-dev.txt
+[%- elif stack == 'home-assistant' %]
+# The tools come from:  pip install --require-hashes -r requirements-test.txt
+[%- elif stack == 'php' %]
+# The tools come from:  composer install
+[%- elif stack == 'node' %]
+# The tools come from:  npm ci
+[%- elif stack == 'container' %]
+# It needs Docker; hadolint and shellcheck run when they are installed.
+[%- endif %]
+#
+# The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
+# Checks of this project alone belong in scripts/check-project.sh, which runs last.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+step() {
+  printf '\n== %s\n' "$1"
+}
+
+files() {
+  git ls-files -z --cached --others --exclude-standard "$@"
+}
+
+step "Text files"
+problems=0
+while IFS= read -r -d '' file; do
+  case "$file" in
+    LICENSE | LICENSES/*) continue ;;
+  esac
+  # Leave out deleted, empty and binary files.
+  if [[ ! -s "$file" ]] || ! grep -Iq . "$file"; then
+    continue
+  fi
+  if grep -q $'\r' "$file"; then
+    echo "$file: has CRLF line endings"
+    problems=$((problems + 1))
+  fi
+  if grep -qE '[[:blank:]]$' "$file"; then
+    echo "$file: has trailing whitespace"
+    problems=$((problems + 1))
+  fi
+  if [[ -n "$(tail -c 1 "$file")" ]]; then
+    echo "$file: lacks the line break at its end"
+    problems=$((problems + 1))
+  fi
+done < <(files)
+if ((problems > 0)); then
+  echo "Fix the $problems problem(s) above; .editorconfig sets up most editors for it."
+  exit 1
+fi
+echo "Every text file is clean."
+
+step "Version"
+# The release bot writes the version of each release into these files.
+release="$(grep -oE '"\.": *"[^"]+"' .release-please-manifest.json | grep -oE '[0-9][^"]*')"
+version_in() {
+  local found
+  found="$(grep -oE -m 1 "$2" "$1" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^"<]*' | head -n 1 || true)"
+  if [[ "$found" != "$release" ]]; then
+    echo "$1 has version ${found:-none}; the manifest of the release bot has $release."
+    exit 1
+  fi
+}
+[%- if release_type == 'simple' %]
+version_in version.txt '^[0-9][^[:space:]]*'
+[%- endif %]
+[%- if project_type == 'python-package' %]
+version_in pyproject.toml '^version = "[^"]+"'
+[%- elif stack == 'node' %]
+version_in package.json '"version": "[^"]+"'
+version_in package-lock.json '"version": "[^"]+"'
+[%- elif project_type == 'home-assistant' %]
+version_in custom_components/{= ha_domain =}/manifest.json '"version": "[^"]+"'
+[%- elif stack == 'php' %]
+version_in appinfo/info.xml '<version>[^<]+</version>'
+[%- elif stack == 'container' %]
+version_in Dockerfile 'org\.opencontainers\.image\.version="[^"]+"'
+[%- endif %]
+echo "Every file has version $release."
+
+step "Shell scripts"
+mapfile -d '' scripts < <(files '*.sh')
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "shellcheck is not installed here; the CI runs it."
+elif ((${#scripts[@]} > 0)); then
+  shellcheck "${scripts[@]}"
+  echo "shellcheck found nothing in ${#scripts[@]} script(s)."
+fi
+[%- if stack in ['python', 'home-assistant'] %]
+
+step "Ruff"
+ruff format --check --diff .
+ruff check .
+
+step "Mypy"
+mypy
+
+step "Tests, with every line and branch covered"
+coverage run -m pytest
+coverage report
+[%- endif %]
+[%- if project_type == 'python-package' %]
+
+step "Package"
+dist="$(mktemp -d)"
+trap 'rm -rf "$dist"' EXIT
+python -m build --no-isolation --outdir "$dist" .
+ls "$dist"
+[%- endif %]
+[%- if stack == 'php' %]
+
+step "PHP syntax"
+find appinfo lib tests -name '*.php' -print0 | xargs -0 -n 1 php --syntax-check >/dev/null
+echo "Every PHP file parses."
+
+step "Coding standard"
+vendor/bin/php-cs-fixer fix --dry-run --diff
+
+step "Psalm"
+vendor/bin/psalm --threads=1 --no-cache
+
+step "Tests"
+vendor/bin/phpunit
+[%- endif %]
+[%- if stack == 'node' %]
+
+step "Types"
+npm run --silent typecheck
+
+step "Tests, with every line, branch and function covered"
+npm test
+
+step "Package"
+npm run --silent build
+npm pack --dry-run
+[%- endif %]
+[%- if stack == 'container' %]
+
+step "Dockerfile"
+if command -v hadolint >/dev/null 2>&1; then
+  hadolint Dockerfile
+else
+  echo "hadolint is not installed here; the CI runs it."
+fi
+
+step "Image"
+docker build --tag {= project_slug =}:check .
+
+step "Self-test of the image"
+docker run --rm {= project_slug =}:check --self-test
+[%- endif %]
+
+if [[ -f scripts/check-project.sh ]]; then
+  step "Checks of this project"
+  bash scripts/check-project.sh
+fi
+
+printf '\nEvery check passed.\n'

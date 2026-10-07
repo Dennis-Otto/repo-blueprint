@@ -1,0 +1,12 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "The integration is already set up; it allows a single entry."
+    },
+    "step": {
+      "user": {
+        "description": "Do you want to set up the integration?"
+      }
+    }
+  }
+}

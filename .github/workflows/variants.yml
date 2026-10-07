@@ -1,0 +1,112 @@
+name: Variants
+
+# Renders every kind of project from this commit and runs what a new repository of
+# that kind runs from its first commit: scripts/check.sh with the tools of its stack,
+# the lint of its workflows, and hassfest or Hadolint where they apply. Every week as
+# well, since the tools and Home Assistant move on their own.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "10 5 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  variant:
+    name: variant (${{ matrix.kind }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, container, generic]
+    env:
+      KIND: ${{ matrix.kind }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install the hash-pinned Copier
+        run: pip install --require-hashes -r requirements-dev.txt
+      - name: Render the project from this commit
+        run: |
+          project="$RUNNER_TEMP/project"
+          copier copy --defaults --vcs-ref HEAD \
+            --data project_name="Demo Project" \
+            --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts." \
+            --data project_type="$KIND" \
+            . "$project"
+          git -C "$project" init --quiet
+          git -C "$project" add --all
+          echo "PROJECT=$project" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
+        with:
+          python-version-file: ${{ env.PROJECT }}/.python-version
+      - name: Install the hash-pinned tools of the project
+        if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          requirements=requirements-dev.txt
+          if [[ -f requirements-test.txt ]]; then
+            requirements=requirements-test.txt
+          fi
+          pip install --require-hashes -r "$requirements"
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        if: matrix.kind == 'nextcloud-app'
+        with:
+          php-version: "8.2"
+          extensions: dom, libxml, mbstring, xml
+          coverage: none
+          tools: composer:v2
+      - name: Install the locked tools of the app
+        if: matrix.kind == 'nextcloud-app'
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          composer validate --strict
+          composer install --no-interaction --prefer-dist --no-progress
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: matrix.kind == 'node-package'
+        with:
+          node-version-file: ${{ env.PROJECT }}/.nvmrc
+      - name: Install the locked packages
+        if: matrix.kind == 'node-package'
+        working-directory: ${{ env.PROJECT }}
+        run: npm ci --ignore-scripts
+
+      - name: Lint the Dockerfile
+        if: matrix.kind == 'container'
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: ${{ env.PROJECT }}/Dockerfile
+
+      - name: Run the checks of the project
+        working-directory: ${{ env.PROJECT }}
+        run: bash scripts/check.sh
+      - name: Lint the workflows of the project
+        run: |
+          docker run --rm --volume "$PROJECT:/repo" --workdir /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      - name: Validate the integration with hassfest
+        if: matrix.kind == 'home-assistant'
+        # Home Assistant's current image on purpose, as in the CI of the integrations:
+        # it validates against the rules that apply today.
+        run: docker run --rm --volume "$PROJECT:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
