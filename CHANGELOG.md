@@ -9,6 +9,7 @@ the next release, or lists the pull requests when there is none.
 ### Bug fixes
 
 - The tools of the blueprint bot pass the dependency review of every project: Copier's Jinja filters (GPL-3.0-only) and typing-extensions, whose license the review reads wrongly, are no part of any release.
+- The pin of `shivammathur/setup-php` names its tag as it is, `2.37.2`, so that zizmor no longer reports the comment as a mismatch.
 - `blueprint.py` writes UTF-8, so that its checklist shows its marks in a console of Windows too.
 
 ## [0.3.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.0...v0.3.1) (2026-10-07)
