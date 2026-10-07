@@ -10,6 +10,7 @@ the next release, or lists the pull requests when there is none.
 
 - **The coverage bot** keeps one comment on every pull request: the coverage of its tests against that of `main`, and every file whose coverage changes, from the reports that the checks keep. It never runs the code of a pull request. A Nextcloud app keeps its report now too.
 - **Every repository records the decisions that shape it** in `docs/decisions/`, from a template, with an index and a first record; they belong to the project. The blueprint records its own there, such as Copier with an update bot, the curated changelog, the settings as code, Renovate and the beta channel.
+- **The settings bot keeps the community profile at 100 %:** when GitHub's community standards miss a file of a repository, its run fails and names what to add, with the link to the profile.
 - **Every release carries its SBOM as CycloneDX too,** the format that many tools of companies read, beside SPDX, and **an OpenVEX document** that states every advisory that `osv-scanner.toml` accepts, with its reason, as one that doesn't affect the release, so that the scanners of the users stop reporting it. The release check verifies both.
 - **The flaky-test bot:** when the tests or end-to-end tests fail for the first time, their failed jobs run once more. A job that passes then is flaky; the bot lists it in one issue, *Flaky tests*, so that its test gets fixed, and the pull request is no longer blocked by chance. A job that fails again stays red.
 - **A Nextcloud app covers every line of `lib/` with its tests:** `scripts/check.sh` measures the coverage with pcov in the CI and Xdebug in the dev container, and fails below 100 %, as the other kinds of projects do.
@@ -17,6 +18,10 @@ the next release, or lists the pull requests when there is none.
 - **A beta channel:** where the repository variable `BETA_CHANNEL` is true, every `feat`, `fix` or `perf` that reaches `main` becomes a beta of the next release, such as `1.3.0-beta.2`, with the text of Unreleased as its notes. It is built, signed and verified like a release and published as a prerelease, which HACS, npm and PyPI offer only to those who ask for betas, and it announces nothing.
 - **The Markdown of every document is linted** by markdownlint, as the new required check `markdown` of the Lint workflow. The rules of the blueprint are in `.github/markdownlint.jsonc`; a project changes them in its own `.markdownlint.jsonc`.
 - **Every release is announced in the discussions,** in their category Announcements, with its notes; prereleases are not. New repositories have discussions, with forms for questions and ideas that belong to the project; an existing repository turns them on with `copier update --data discussions=true`.
+
+### Bug fixes
+
+- The release check of a Nextcloud app looks for the release on the page of the app in the App Store, which links its signed package at once; the list of all apps, which it read before, shows a new release only hours later, so the check failed after every release.
 
 ## [0.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.2...v0.4.0) (2026-10-07)
 
