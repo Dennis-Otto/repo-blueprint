@@ -180,6 +180,12 @@ updates:
     directories:
       - /stacks/container
       - /.github/social-preview
+      # The dev containers of the kinds of projects.
+      - /.devcontainer
+      - /stacks/home-assistant/devcontainer
+      - /stacks/php/devcontainer
+      - /stacks/node/devcontainer
+      - /stacks/generic/devcontainer
     schedule:
       interval: weekly
       day: monday
