@@ -659,3 +659,16 @@ def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
     assert '"${BASH_REMATCH[3]}" == deps*' in job
     assert "steps.release.outputs.tag_name || steps.beta.outputs.tag" in job
     assert 'gh release create "v$version" --draft --prerelease' in job
+
+
+def test_the_flaky_test_bot_watches_every_test_workflow() -> None:
+    flaky = (ROOT / ".github/workflows/flaky.yml").read_text(encoding="utf-8")
+    watched = set(re.findall(r"^      - (.+)$", flaky, re.MULTILINE))
+    names = set()
+    for path in (ROOT / ".github/workflows").glob("ci-*.yml"):
+        name = re.search(r"^name: (.+)$", path.read_text(encoding="utf-8"), re.M)
+        assert name, path
+        names.add(name[1])
+    assert names
+    assert names <= watched, names - watched
+    assert "github.event.workflow_run.run_attempt == 1" in flaky
