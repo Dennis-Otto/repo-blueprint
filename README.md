@@ -20,7 +20,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | **Lint** | the workflows (actionlint), the license of every file (REUSE), the Markdown of every document (markdownlint), the sign-off of every commit (DCO), the title of every pull request (Conventional Commits), an entry under *Unreleased* for every change for users | `lint.yml`, `pull-request-title.yml` |
 | **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOM, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and signed provenance, delivers it, and then verifies it as its users can, also every week | release-please, the release app, immutable releases, `verify-release.yml` |
-| **Dependencies** | Dependabot with a week of cooldown; routine updates and releases of dependency updates merge themselves once every check passes | `dependabot.yml`, `dependabot-automerge.yml` |
+| **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and an update that fixes a vulnerability at once; routine updates and releases of dependency updates merge themselves once every check passes. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide, code of conduct, security policy, support, governance, issue forms, pull request template, discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
@@ -62,7 +62,7 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 
 ### Once per repository
 
-- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Administration*, *Contents*, *Pull requests* and *Workflows* (read and write), and *Actions*, *Environments*, *Secrets* and *Variables* (read), so that the settings bot can apply the settings as code.
+- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests* and *Workflows* (read and write), and *Actions*, *Dependabot alerts*, *Environments*, *Secrets* and *Variables* (read): with them the settings bot applies the settings as code and Renovate updates the dependencies. Renovate gets a token without *Administration*.
 - **The issue assistant** needs `CLAUDE_CODE_OAUTH_TOKEN` in the environment `issue-assistant`.
 - **Delivery:** trusted publishing on PyPI or npm, the app certificate of a Nextcloud app, or the HACS submission, as the checklist says.
 
@@ -73,7 +73,7 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 An existing repository takes the blueprint on a branch, in one pull request:
 
 1. `copier copy --overwrite --vcs-ref vX.Y.Z --data sample_code=false gh:Dennis-Otto/repo-blueprint .` with the answers that fit the repository, without the sample code and tests of a new one, such as its description, topics and homepage as they are on GitHub, so that `settings apply` changes nothing there. The files of the project (README, changelog, code, tests, manifests, labels, issue forms, icons) stay as they are.
-2. Look at the diff of every file of the blueprint and put back what belongs to the project only: sections of SECURITY.md or CONTRIBUTING.md, ecosystems of `dependabot.yml`, hosts of the issue assistant, ignore rules. `copier update` keeps these changes from then on.
+2. Look at the diff of every file of the blueprint and put back what belongs to the project only: sections of SECURITY.md or CONTRIBUTING.md, rules of Renovate (in `.github/renovate.json5`), hosts of the issue assistant, ignore rules. `copier update` keeps these changes from then on.
 3. Write the version of the latest release into `version.txt` and `.release-please-manifest.json`, start `CHANGELOG.md` with `## Unreleased`, and give `.github/labels.toml` the labels of the bots (`autorelease: pending`, `autorelease: tagged`, `merge-conflict`, `maintenance`, `docker`).
 4. Put the checks of the project alone, such as its end-to-end tests, into `.github/repository.project.toml` and `scripts/check-project.sh`; remove the workflows, scripts and tests that the blueprint replaces, and delete files of the template that the project doesn't need, such as a sample test.
 5. Open the pull request. Once its new checks pass, `blueprint.py settings apply` switches the required checks, the variables and the labels, and the pull request can merge.
@@ -83,7 +83,7 @@ An existing repository takes the blueprint on a branch, in one pull request:
 `.github/repository.toml` holds the settings of a repository; `blueprint.py settings check` compares them with GitHub and `settings apply` makes GitHub match:
 
 - **Repository:** squash merges with the title of the pull request, auto-merge, branch updates, deleted branches, signed-off web commits, no wiki or projects.
-- **Security:** immutable releases, private vulnerability reporting, Dependabot alerts and security updates, secret scanning with push protection.
+- **Security:** immutable releases, private vulnerability reporting, Dependabot alerts with the security updates of Renovate, secret scanning with push protection.
 - **Actions:** read-only tokens by default, no approvals by workflows, actions pinned to commit hashes, approval for the workflows of every outside contributor.
 - **Rulesets:** *Protect main* (pull requests only, squashed, linear history, every required check, no deletion or force push) and *Release tags* (`v*.*.*` never moves).
 - **Variables and environments:** `PUBLISH_TO`, the release app, and environments that only `main` may use, with the secrets they need.
@@ -94,7 +94,7 @@ An existing repository takes the blueprint on a branch, in one pull request:
 
 The blueprint bot (`blueprint-update.yml`) runs `copier update` every week. Without conflicts its pull request merges itself once every check passes; conflicts stay in it as markers for the maintainer. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
 
-The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the dependency manifests and lock files (the project's Dependabot keeps them current), the code and the tests, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
+The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
 ## What belongs to a project
 
@@ -120,8 +120,8 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 ## How the blueprint works
 
 - `copier.yml` holds the questions. `template/` holds the files of a new repository; a file or folder name such as `[% if stack == 'php' %]composer.json[% endif %]` carries its condition, and a name that renders empty is left out. The delimiters `{= =}` and `[% %]` appear in no workflow, script or manifest, so `${{ }}` of GitHub Actions and `[[ ]]` of Bash and TOML stay as they are.
-- The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Dependabot keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.
-- `stacks/` holds the dependency manifests and lock files of each kind of project, which Dependabot keeps current; a new project starts from them.
+- The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Renovate keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.
+- `stacks/` holds the dependency manifests and lock files of each kind of project, which Renovate keeps current; a new project starts from them.
 - `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools.
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions and problems: [SUPPORT.md](SUPPORT.md). Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) describes.
