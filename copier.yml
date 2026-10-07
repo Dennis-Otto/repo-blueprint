@@ -42,6 +42,9 @@ _skip_if_exists:
   - requirements-dev.txt
   - requirements-test.in
   - requirements-test.txt
+  - requirements-fuzz.in
+  - requirements-fuzz.txt
+  - fuzz
   - composer.json
   - composer.lock
   - package.json
