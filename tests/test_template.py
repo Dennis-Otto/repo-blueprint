@@ -813,6 +813,13 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
     )
     assert settings["pages"] == {"build_type": "workflow"}
     assert "docs" in settings["branch"]["required_checks"]
+    # A link out of docs/ leads nowhere on the website; such links go to GitHub.
+    pages = (project / "docs").resolve()
+    for page in pages.rglob("*.md"):
+        text = page.read_text(encoding="utf-8")
+        for target in re.findall(r"\]\(([^)\s#]+)", text):
+            if "://" not in target:
+                assert (page.parent / target).resolve().is_relative_to(pages), target
 
 
 def test_the_clean_up_bot_keeps_the_work_of_others() -> None:

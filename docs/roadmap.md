@@ -4,7 +4,7 @@ Where the blueprint is heading in the next twelve months, until October 2027, an
 
 ## Done
 
-The [changelog](../CHANGELOG.md) names every change of every release. The larger steps so far:
+The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELOG.md) names every change of every release. The larger steps so far:
 
 - **0.1 to 0.3:** seven kinds of projects, the settings as code, the security checks of the workflows, fuzzing and property tests, the release bot with the changelog that the pull requests write, the verification of every release, prereleases, the dev container, the dashboard and Harden-Runner.
 - **0.4:** the settings bot that applies the settings as code itself, OSV-Scanner, area labels, the changelog check and the licenses of the third-party components in every release.
@@ -14,7 +14,7 @@ The [changelog](../CHANGELOG.md) names every change of every release. The larger
 
 | Topic | What it brings |
 | --- | --- |
-| **OpenSSF Best Practices Silver** | Every repository of the blueprint meets the Silver level; what is still missing is a second maintainer, see [GOVERNANCE.md](../GOVERNANCE.md#continuity) |
+| **OpenSSF Best Practices Silver** | Every repository of the blueprint meets the Silver level; what is still missing is a second maintainer, see [GOVERNANCE.md](https://github.com/Dennis-Otto/repo-blueprint/blob/main/GOVERNANCE.md#continuity) |
 | **Documentation sites** | The documentation of a repository as a website on GitHub Pages, built and checked with every change |
 | **Mutation tests** | Tests that check the tests: small changes of the code that the tests must notice |
 | **A screenshot bot** | Screenshots of a project that renew themselves when its interface changes |

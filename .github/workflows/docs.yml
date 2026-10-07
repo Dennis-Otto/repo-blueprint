@@ -1,11 +1,11 @@
 name: Docs
 
 # The documentation website. MkDocs with the Material theme builds it from mkdocs.yml
-# and the pages in docs/, strictly, so that a broken link or a page outside the menu
+# and the pages in docs/, strictly, so that a link or an anchor that leads nowhere
 # fails: in every pull request as the check docs, and on main for GitHub Pages. A
 # repository without mkdocs.yml or a home page in docs/ has no website, and the
-# check passes, so that it can be required everywhere. The tools are the hash-pinned ones of
-# stacks/docs/requirements-docs.txt, which the blueprint keeps current.
+# check passes, so that it can be required everywhere. The tools are the hash-pinned
+# ones of stacks/docs/requirements-docs.txt, which the blueprint keeps current.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:

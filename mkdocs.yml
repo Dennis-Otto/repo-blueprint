@@ -84,10 +84,10 @@ markdown_extensions:
       custom_checkbox: true
   - pymdownx.tilde
 
-# A link or an anchor that leads nowhere, and a page outside the menu, fail the
-# build; not_in_nav names the pages that are outside on purpose.
+# A link or an anchor that leads nowhere fails the build. A page outside the menu
+# is still on the website, so that a page that the blueprint brings, such as a
+# decision record, fails nothing.
 validation:
-  omitted_files: warn
   absolute_links: warn
   unrecognized_links: warn
   anchors: warn
@@ -96,16 +96,13 @@ validation:
 # the language switch of extra.alternate below leads to.
 nav:
   - Home: index.md
+  - Roadmap: roadmap.md
+  - Security design: security.md
   - Decisions: decisions/README.md
   - Changelog: changelog.md
   - Dashboard: https://dennis-otto.github.io/repo-blueprint/dashboard/
   - Deutsch:
       - de/index.md
-
-# The decision records are in the menu through their table, decisions/README.md;
-# so is a new one, which its pull request adds there.
-not_in_nav: |
-  /decisions/
 
 extra:
   alternate:
