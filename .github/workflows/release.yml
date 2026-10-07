@@ -6,8 +6,9 @@ name: Release
 # version) and is decided anew with every merge. What the pull requests wrote under
 # "## Unreleased" of CHANGELOG.md becomes the section of the release; without it,
 # the section lists the pull requests. Merging the pull request creates the release
-# as a draft, with its tag. The jobs below attach the package, its SBOM, the licenses
-# of its third-party components and its signed provenance, write the notes, make the
+# as a draft, with its tag. The jobs below attach the package, its SBOMs (SPDX and
+# CycloneDX), the licenses of its third-party components, the advisories that don't
+# affect it (OpenVEX) and its signed provenance, write the notes, make the
 # release public, announce it in the discussions, and then deliver it where the
 # repository variable PUBLISH_TO says: pypi, npm, ghcr, hacs, nextcloud-appstore,
 # github-action or none. Last, verify-release.yml checks the release as its users
@@ -332,6 +333,30 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
           syft-version: v1.52.0
+
+      # The same components as CycloneDX, the format that many tools of companies read.
+      - name: Generate the SBOM as CycloneDX
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: ${{ runner.temp }}/assets/${{ github.event.repository.name }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+          syft-version: v1.52.0
+
+      # Every advisory that osv-scanner.toml accepts, with its reason, as an OpenVEX
+      # statement that it does not affect the release, for the scanners of the users.
+      - name: Write the advisories that don't affect the release
+        env:
+          NAME: ${{ github.event.repository.name }}
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" vex "$GITHUB_REPOSITORY" "$TAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/vex.json"
+          if [[ -s "$RUNNER_TEMP/vex.json" ]]; then
+            mv "$RUNNER_TEMP/vex.json" "$ASSETS/$NAME.openvex.json"
+          fi
 
       - name: Write the licenses of the third-party components
         env:
