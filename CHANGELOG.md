@@ -8,7 +8,6 @@ the next release, or lists the pull requests when there is none.
 
 ## [0.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.0...v0.4.0) (2026-10-07)
 
-
 ### Features
 
 * attach the provenance of a release as in-toto JSON lines too ([#28](https://github.com/Dennis-Otto/repo-blueprint/issues/28)) ([fb73981](https://github.com/Dennis-Otto/repo-blueprint/commit/fb7398127309095aa47bc98dd881b225dd9a2718))
