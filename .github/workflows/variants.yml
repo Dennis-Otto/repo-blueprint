@@ -32,6 +32,8 @@ jobs:
         kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, container, generic]
     env:
       KIND: ${{ matrix.kind }}
+      # Inside the workspace, where actions such as setup-node look for their files.
+      PROJECT: variant
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,15 +47,13 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.txt
       - name: Render the project from this commit
         run: |
-          project="$RUNNER_TEMP/project"
           copier copy --defaults --vcs-ref HEAD \
             --data project_name="Demo Project" \
             --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts." \
             --data project_type="$KIND" \
-            . "$project"
-          git -C "$project" init --quiet
-          git -C "$project" add --all
-          echo "PROJECT=$project" >> "$GITHUB_ENV"
+            . "$PROJECT"
+          git -C "$PROJECT" init --quiet
+          git -C "$PROJECT" add --all
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
@@ -103,10 +103,10 @@ jobs:
         run: bash scripts/check.sh
       - name: Lint the workflows of the project
         run: |
-          docker run --rm --volume "$PROJECT:/repo" --workdir /repo \
+          docker run --rm --volume "$PWD/$PROJECT:/repo" --workdir /repo \
             rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       - name: Validate the integration with hassfest
         if: matrix.kind == 'home-assistant'
         # Home Assistant's current image on purpose, as in the CI of the integrations:
         # it validates against the rules that apply today.
-        run: docker run --rm --volume "$PROJECT:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
+        run: docker run --rm --volume "$PWD/$PROJECT:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
