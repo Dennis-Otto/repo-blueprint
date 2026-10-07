@@ -12,6 +12,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Bug fixes
 
+- The release pull request shows its introduction as text above a line, not as a large heading: Markdown read the line under it as the underline of a heading.
 - The pin of `shivammathur/setup-php` names its tag as it is, `2.37.2`, so that zizmor no longer reports the comment as a mismatch and the Findings workflow passes.
 
 ## [0.3.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.3.1...v0.3.2) (2026-10-07)
