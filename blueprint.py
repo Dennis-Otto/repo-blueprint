@@ -320,11 +320,14 @@ def tag_ruleset() -> dict[str, Json]:
 
 
 def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[str]:
-    """What differs between two rulesets, in the parts this tool manages."""
+    """What differs between two rulesets, in the parts this tool manages. A token that
+    may only read the administration, such as the release app's, gets the rulesets
+    without bypass_actors; then nothing can be said about them."""
     differences = [
         key
         for key in ("target", "enforcement", "bypass_actors", "conditions")
         if want[key] != have.get(key)
+        and not (key == "bypass_actors" and key not in have)
     ]
     have_rules = {
         rule["type"]: rule.get("parameters", {}) for rule in have.get("rules", [])
