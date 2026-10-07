@@ -109,6 +109,12 @@ jobs:
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/repo" --workdir /repo \
             rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      # The markdownlint-cli2 of the action of the Lint workflow, in its image.
+      - name: Lint the Markdown of the project
+        run: |
+          docker run --rm --volume "$PWD/$PROJECT:/workdir" \
+            davidanson/markdownlint-cli2@sha256:839558fd0d36c46da0e01ea84fd1d20a2822b5a8a60c16dc9708f0bb7c9e903b \
+            "**/*.md"
       - name: Validate the integration with hassfest
         if: matrix.kind == 'home-assistant'
         # Home Assistant's current image on purpose, as in the CI of the integrations:
