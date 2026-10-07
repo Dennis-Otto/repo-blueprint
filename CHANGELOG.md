@@ -9,6 +9,10 @@ the next release, or lists the pull requests when there is none.
 ### Features
 
 - **The settings bot applies the settings as code itself,** after every change of `repository.toml`, `repository.project.toml` or `labels.toml` on `main` and every week, as the release app, which may now write the administration of the repositories. So a new required check of a blueprint update is in place without anyone running `settings apply`; only a missing secret still waits for the maintainer, with the command that sets it.
+- **OSV-Scanner** checks every lock file against the OSV database of known vulnerabilities: on every pull request the ones it brings in, on `main` and every week all of them. Its findings go to code scanning, where the Findings workflow keeps them fixed or accepted.
+- **Area labels:** a bot labels every pull request with the areas whose files it changes, by the paths in `.github/labeler.yml`, which each repository fills with its own areas.
+- **The changelog check** asks every `feat`, `fix` or `perf` pull request for its entry under Unreleased, so that the notes of a release are always written; bots and dependency updates are exempt. It is a new required check, `changelog`.
+- **Every release carries the licenses of its third-party components** as `THIRD_PARTY_NOTICES.md`, from the dependency graph of GitHub, grouped by license.
 
 ### Bug fixes
 
