@@ -473,8 +473,11 @@ def test_ruleset_differences_name_each_part() -> None:
     want = blueprint.main_ruleset(["a", "b"])
     have = json.loads(json.dumps(want))
     have["enforcement"] = "evaluate"
-    have["rules"][3]["parameters"]["required_approving_review_count"] = 1
-    have["rules"][4]["parameters"]["required_status_checks"] = [{"context": "a"}]
+    rules = {rule["type"]: rule for rule in have["rules"]}
+    rules["pull_request"]["parameters"]["required_approving_review_count"] = 1
+    rules["required_status_checks"]["parameters"]["required_status_checks"] = [
+        {"context": "a"}
+    ]
     del have["rules"][0]
     have["rules"].append({"type": "update"})
 
