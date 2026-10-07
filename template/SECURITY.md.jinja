@@ -27,6 +27,7 @@ If a fix needs longer, for example because the cause lies in an upstream project
 
 - Every pull request and every push to `main` runs CodeQL, a Gitleaks secret scan and, for changed dependencies, a review against known vulnerabilities. OpenSSF Scorecard checks the practices of the repository every week.
 - Actions are pinned to commit hashes, tokens get the least permissions they need, and Dependabot keeps actions and dependencies current.
+- Harden-Runner records the network traffic of every job of the workflows, so that a connection that doesn't belong there shows.
 - Releases carry an SBOM and signed build provenance.
 
 ## Findings of code scanning

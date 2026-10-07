@@ -18,7 +18,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | --- | --- | --- |
 | **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging | the tools of each kind of project, hash-pinned |
 | **Lint** | the workflows (actionlint), the license of every file (REUSE), the sign-off of every commit (DCO), the title of every pull request (Conventional Commits) | `lint.yml`, `pull-request-title.yml` |
-| **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOM, findings watcher | every action pinned to a commit hash |
+| **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOM, findings watcher, the security audit of the workflows (zizmor), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and signed provenance, then delivers it | release-please, the release app, immutable releases |
 | **Dependencies** | Dependabot with a week of cooldown; routine updates and releases of dependency updates merge themselves once every check passes | `dependabot.yml`, `dependabot-automerge.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
@@ -81,7 +81,7 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 
 The blueprint bot (`blueprint-update.yml`) runs `copier update` every week. Without conflicts its pull request merges itself once every check passes; conflicts stay in it as markers for the maintainer. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
 
-The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the dependency manifests and lock files (the project's Dependabot keeps them current), the code and the tests, the labels and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
+The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the dependency manifests and lock files (the project's Dependabot keeps them current), the code and the tests, the issue forms, the labels and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
 ## What belongs to a project
 

@@ -12,7 +12,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 | --- | --- | --- |
 | **Prüfungen** | `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint, Paketbau | die Werkzeuge der jeweiligen Projektart, per Hash gepinnt |
 | **Lint** | Workflows (actionlint), Lizenz jeder Datei (REUSE), Sign-off jedes Commits (DCO), Titel jedes Pull Requests (Conventional Commits) | `lint.yml`, `pull-request-title.yml` |
-| **Sicherheit** | CodeQL, OpenSSF Scorecard, Dependency Review, Secret Scan, SBOM, Findings-Wächter | jede Action auf einen Commit-Hash gepinnt |
+| **Sicherheit** | CodeQL, OpenSSF Scorecard, Dependency Review, Secret Scan, SBOM, Findings-Wächter, die Sicherheitsprüfung der Workflows (zizmor), der Netzwerkverkehr jedes Jobs (Harden-Runner) | jede Action auf einen Commit-Hash gepinnt |
 | **Releases** | ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major), und dem Text von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und signierter Provenance und liefert es aus | release-please, die Release-App, unveränderliche Releases |
 | **Abhängigkeiten** | Dependabot mit einer Woche Wartezeit; Routine-Updates und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind | `dependabot.yml`, `dependabot-automerge.yml` |
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
@@ -75,7 +75,7 @@ Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, 
 
 Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus. Ohne Konflikte merged sich sein Pull Request selbst, sobald alle Prüfungen grün sind; Konflikte bleiben als Markierungen für den Maintainer darin. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
 
-Dem Blueprint gehören die Workflows, `scripts/check.sh` und die Community-Dateien: ihre Änderungen kommen mit den Updates. Dateien des Projekts werden nie überschrieben: README, Changelog, Manifeste und Lock-Dateien der Abhängigkeiten (die pflegt Dependabot des Projekts), Code und Tests, Labels und akzeptierte Findings. Prüfungen, die nur ein Projekt braucht, gehören in `scripts/check-project.sh`, das `scripts/check.sh` zuletzt ausführt.
+Dem Blueprint gehören die Workflows, `scripts/check.sh` und die Community-Dateien: ihre Änderungen kommen mit den Updates. Dateien des Projekts werden nie überschrieben: README, Changelog, Manifeste und Lock-Dateien der Abhängigkeiten (die pflegt Dependabot des Projekts), Code und Tests, Issue-Formulare, Labels und akzeptierte Findings. Prüfungen, die nur ein Projekt braucht, gehören in `scripts/check-project.sh`, das `scripts/check.sh` zuletzt ausführt.
 
 ## Was einem Projekt gehört
 
