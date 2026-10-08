@@ -35,4 +35,4 @@ python_version = "3.12"
 strict = true
 # The package, not the script that starts it: mypy would find the module blueprint
 # twice. A test runs the script.
-files = ["blueprint", "dashboard.py", "weekly.py", ".github/mkdocs_blueprint.py", "tests"]
+files = ["blueprint", "dashboard.py", "weekly.py", ".github/mkdocs_blueprint.py", ".github/mkdocs_project.py", "tests"]

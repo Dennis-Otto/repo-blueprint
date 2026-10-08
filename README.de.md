@@ -65,6 +65,8 @@ python3 ../repo-blueprint/blueprint.py checklist
 
 Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, der Lizenz (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later oder AGPL-3.0-or-later) und ein paar Details der Art. `settings apply` setzt alles, was die API setzen kann; `checklist` zeigt, was noch eine Person erledigen muss, etwa die Secrets, und welche Schritte schon erledigt sind.
 
+![copier copy im Terminal: Copier klont den Blueprint und fragt nach dem Namen Paperless Sync, dem Repository, einer Beschreibung und der Art des Projekts, Python-Paket, übernimmt für den Rest die Vorgaben, schreibt die Dateien und nennt die nächsten Schritte; das neue Repository hat seine Community-Dateien, seine Prüfungen und seine Workflows](docs/images/copier-copy.gif)
+
 <!-- --8<-- [end:quick-start] -->
 
 ### Einmal pro Repository
@@ -122,6 +124,8 @@ Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt
 - `bash scripts/social-preview.sh`: rendert `.github/social-preview.html` in das 1280×640-Bild, das GitHub bei Links auf das Repository zeigt; hochladen unter *Settings → Social preview*.
 
 ## Dashboard
+
+![Das Dashboard: eine Tabelle mit jedem öffentlichen Repository des Besitzers, seiner Art, dem Release des Blueprints, auf dem es steht, seinem Release, seinem nächsten Release, seinen Pull Requests und dem Zustand von CI, CodeQL, Release, Prüfung, Einstellungen, Findings und Links mit seinem Scorecard, und eine zweite Tabelle mit der Gesundheit jedes Repositorys: Abdeckung, gefangene Mutanten, Releases in 90 Tagen, die erste Antwort auf ein Issue und die Dauer der CI](docs/images/dashboard.png)
 
 [Das Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) zeigt jedes öffentliche Repository des Besitzers auf einen Blick: das Release des Blueprints, auf dem es steht, sein letztes Release und den Pull Request des nächsten, seine offenen Pull Requests und die mit Konflikten, den letzten Lauf seiner wichtigsten Workflows auf `main` und sein OpenSSF Scorecard; eine zweite Tabelle zeigt die Gesundheit jedes Repositorys: die Zeilenabdeckung und den Anteil der Mutanten, die die Tests fangen, die stabilen Releases und die mittlere Zeit bis zur ersten Antwort auf ein Issue über 90 Tage und die mittlere Dauer der CI, jeweils mit einem Pfeil, wenn sich der Wert seit einer Woche bewegt hat, aus dem Verlauf, den das veröffentlichte Dashboard aufbewahrt. Der Dashboard-Workflow baut es alle sechs Stunden mit `dashboard.py` und veröffentlicht es auf GitHub Pages, unter der Website des Blueprints, die diese Dokumentation ist. Es zeigt nur, was ohnehin öffentlich ist, keine Findings des Code Scannings und keine Alerts von Dependabot.
 

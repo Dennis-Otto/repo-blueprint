@@ -18,6 +18,7 @@ on:
       - mkdocs.yml
       - .github/mkdocs-blueprint.yml
       - .github/mkdocs_blueprint.py
+      - .github/mkdocs_project.py
       - docs/**
       # The pages of the documentation include them.
       - README.md
