@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- GitHub no longer asks the maintainer to review every pull request of a bot: the blueprint brings no `.github/CODEOWNERS`, which named the owner of every file and so requested their review on every pull request of someone else, although no rule asks for one. A repository whose update keeps the file can delete it.
+
 ## [0.6.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.1...v0.6.2) (2026-10-08)
 
 ### Bug fixes
