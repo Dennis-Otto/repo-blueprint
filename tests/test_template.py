@@ -289,6 +289,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         project_type="github-action",
         python_package="blueprint",
         license="MIT-0",
+        successor=True,
     )
     for name in (
         ".editorconfig",
@@ -652,6 +653,23 @@ def test_every_project_starts_with_area_rules(
     rules = (projects[kind] / ".github/labeler.yml").read_text(encoding="utf-8")
     # No areas yet: an empty mapping, which the labeler accepts.
     assert rules.rstrip().endswith("{}")
+
+
+def test_a_designated_successor_continues_the_project(tmp_path: Path) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="An app with a successor.",
+        project_type="nextcloud-app",
+        successor=True,
+    )
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+
+    assert "GitHub's account successor setting" in governance
+    assert "the bus factor of the project is 2" in governance
+    assert "don't pass with the repository" in governance
+    assert "A successor is planned" not in governance
+    assert "bus factor of the project is 1" not in governance
 
 
 @pytest.mark.parametrize("kind", KINDS)

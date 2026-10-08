@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **A designated successor:** the new answer `successor` says that the owner has designated a successor through GitHub's account successor setting. GOVERNANCE.md then says how the successor can carry the project on, with a bus factor of 2, and what doesn't pass with the repository, such as an app in the Nextcloud App Store. An existing repository turns it on with `copier update --data successor=true`.
+
 ### Bug fixes
 
 - GitHub no longer asks the maintainer to review every pull request of a bot: the blueprint brings no `.github/CODEOWNERS`, which named the owner of every file and so requested their review on every pull request of someone else, although no rule asks for one. A repository whose update keeps the file can delete it.

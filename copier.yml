@@ -194,6 +194,11 @@ discussions:
   help: Use GitHub Discussions for questions, ideas and the announcements of releases
   default: true
 
+successor:
+  type: bool
+  help: The owner has designated a successor through GitHub's account successor setting, who can take over the repository
+  default: false
+
 homepage:
   type: str
   help: The homepage, if not the repository
