@@ -290,6 +290,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         python_package="blueprint",
         license="MIT-0",
         successor=True,
+        homepage="https://dennis-otto.github.io/repo-blueprint/",
     )
     for name in (
         ".editorconfig",
@@ -670,6 +671,22 @@ def test_the_website_of_the_owner_lives_at_the_root(tmp_path: Path) -> None:
     assert (
         "\nrepo_url: https://github.com/Dennis-Otto/dennis-otto.github.io\n" in config
     )
+
+
+def test_the_issue_forms_point_to_the_documentation(tmp_path: Path) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A project with a website.",
+        project_type="generic",
+        homepage="https://dennis-otto.github.io/demo-project/",
+    )
+    config = (project / ".github/ISSUE_TEMPLATE/config.yml").read_text(encoding="utf-8")
+
+    assert config.index("name: Documentation") < config.index(
+        "name: Security vulnerability"
+    )
+    assert "url: https://dennis-otto.github.io/demo-project/" in config
 
 
 def test_a_designated_successor_continues_the_project(tmp_path: Path) -> None:

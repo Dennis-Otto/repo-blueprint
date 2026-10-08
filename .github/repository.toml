@@ -4,7 +4,7 @@
 
 [repository]
 description = "A Copier template for GitHub repositories, with tests, releases, security checks and bots built in, for seven kinds of projects."
-homepage = ""
+homepage = "https://dennis-otto.github.io/repo-blueprint/"
 topics = ["copier", "copier-template", "repository-template", "github-actions", "release-automation", "supply-chain-security", "openssf", "dependabot"]
 has_issues = true
 has_discussions = true
