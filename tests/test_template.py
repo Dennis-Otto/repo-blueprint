@@ -319,6 +319,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/prose/package-lock.json",
         ".github/cspell-words.txt",
         ".vale.ini",
+        ".github/sign-tag.sh",
         ".github/renovate-blueprint.json5",
         ".markdownlint-cli2.jsonc",
         ".markdownlint.jsonc",
@@ -842,3 +843,21 @@ def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
     assert bot.index('if [[ "$ahead" == 0 ]]; then') < bot.index("--method DELETE")
     for kept in ("release-please--*", "renovate/*", "dependabot/*"):
         assert kept in bot, kept
+
+
+def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
+    sign = (ROOT / ".github/sign-tag.sh").read_text(encoding="utf-8")
+    verify = (ROOT / ".github/workflows/verify-release.yml").read_text(encoding="utf-8")
+    version = re.search(r"^version=(\S+)$", sign, re.MULTILINE)
+    digest = re.search(r"^sha256=([0-9a-f]{64})$", sign, re.MULTILINE)
+    assert version
+    assert digest
+    assert f"GITSIGN_VERSION: {version[1]}" in verify
+    assert f"GITSIGN_SHA256: {digest[1]}" in verify
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    job = release[release.index("  release-please:") : release.index("\n  assets:")]
+    assert "id-token: write" in job
+    # The signed tag is there before release-please creates the release on it.
+    assert job.index('bash .github/sign-tag.sh "$tag"') < job.index(
+        "googleapis/release-please-action"
+    )
