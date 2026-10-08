@@ -6,16 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.0...v0.6.1) (2026-10-08)
+
 ### Bug fixes
 
 - The settings bot applies every part of the settings even when GitHub refuses one, and names the permission of the release app that a refusal points to. Before, a missing permission for the repository variables kept GitHub Pages and the labels from being set.
-
-## [0.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.0...v0.6.1) (2026-10-08)
-
-
-### Bug fixes
-
-* apply every part of the settings when GitHub refuses one ([#71](https://github.com/Dennis-Otto/repo-blueprint/issues/71)) ([a418621](https://github.com/Dennis-Otto/repo-blueprint/commit/a41862146b8e9f30a640e759ab77ddbdf608a7a2))
 
 ## [0.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.5.0...v0.6.0) (2026-10-08)
 
