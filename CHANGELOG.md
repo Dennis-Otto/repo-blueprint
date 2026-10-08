@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **The language switch finds its sitemap on every page:** on a page in a folder, such as a decision record in `docs/decisions/`, the switch of Material asked for the sitemap in the folder of the page in each language, such as `decisions/sitemap.xml` and `de/decisions/sitemap.xml`, and the browser logged two errors. The hook of the blueprint now copies the sitemap into every folder that holds a page. The switch already led to the same page in the other language.
+
 ## [0.8.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.1...v0.8.2) (2026-10-08)
 
 ### Changes

@@ -13,18 +13,19 @@ from typing import Any
 
 
 def on_post_build(config: Any) -> None:
-    """Give every further language of the website the sitemap.
+    """Copy the sitemap of a website in several languages into every folder of pages.
 
-    The language switch of Material looks up a page in the sitemap next to the pages
-    of the other language, such as de/sitemap.xml. The i18n plugin writes a single
-    sitemap with every language at the root, so each further language gets a copy.
+    The language switch of Material asks for sitemap.xml in the folder of the page in
+    each language: decisions/ and de/decisions/ on decisions/0006-beta-channel.html.
+    The i18n plugin writes a single sitemap with every language at the root, so every
+    other folder that holds a page gets a copy.
     """
     plugin = config.plugins.get("i18n")
-    sitemap = Path(config.site_dir) / "sitemap.xml"
+    site = Path(config.site_dir)
+    sitemap = site / "sitemap.xml"
     if plugin is None or not sitemap.is_file():
         return
-    for language in plugin.config.languages:
-        if language.build and not language.default:
-            folder = sitemap.parent / language.locale
-            folder.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(sitemap, folder / "sitemap.xml")
+    if not any(lang.build and not lang.default for lang in plugin.config.languages):
+        return
+    for folder in {page.parent for page in site.rglob("*.html")} - {site}:
+        shutil.copyfile(sitemap, folder / "sitemap.xml")
