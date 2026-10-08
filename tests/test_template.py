@@ -494,6 +494,11 @@ def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
     assert pins[0] == pins[1]
 
 
+def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "vendor/bin/psalm --taint-analysis" in check
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_secrets_stay_out_of_git(projects: dict[str, Path], kind: str) -> None:
     ignored = (projects[kind] / ".gitignore").read_text(encoding="utf-8").split("\n")

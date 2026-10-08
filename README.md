@@ -42,7 +42,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 | Kind | Stack | Checks | Delivery |
 | --- | --- | --- | --- |
 | Home Assistant integration | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, tests, HACS, hassfest | a zip asset for HACS |
-| Nextcloud app | PHP 8.2, Composer | php-cs-fixer, Psalm, PHPUnit | signed package to the App Store |
+| Nextcloud app | PHP 8.2, Composer | php-cs-fixer, Psalm with its taint analysis, PHPUnit with every line covered | signed package to the App Store |
 | GitHub Action | Python 3.12 of the runner, composite action | Ruff, mypy, tests, a run of the action | release tags and a moving major tag |
 | Python package | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
 | Node package | Node 24, TypeScript | tsc, node:test with full coverage, pack | npm with provenance |
