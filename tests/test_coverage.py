@@ -50,6 +50,33 @@ def test_classes_of_one_file_add_up() -> None:
     assert Coverage.parse(text).files == {"a.php": (2, 3)}
 
 
+def with_sources(text: str, *sources: Path | str) -> str:
+    listed = "".join(f"<source>{source}</source>" for source in sources)
+    return text.replace("<coverage>", f"<coverage><sources>{listed}</sources>", 1)
+
+
+def test_one_source_under_the_root_names_every_file_from_the_root(
+    tmp_path: Path,
+) -> None:
+    # Such as PHPUnit's lib/, or the one folder that coverage.py measures.
+    text = with_sources(report(**{"AppInfo/Application": (1, 2)}), tmp_path / "lib")
+
+    assert Coverage.parse(text, tmp_path).files == {
+        "lib/AppInfo/Application.py": (1, 2)
+    }
+
+
+@pytest.mark.parametrize("sources", [["."], ["lib", "src"], ["/elsewhere/lib"]])
+def test_the_root_several_sources_or_another_place_keep_the_names(
+    tmp_path: Path, sources: list[str]
+) -> None:
+    # An absolute folder, such as /elsewhere/lib, lies outside tmp_path.
+    text = with_sources(report(a=(1, 1)), *(tmp_path / source for source in sources))
+
+    assert Coverage.parse(text, tmp_path).files == {"a.py": (1, 1)}
+    assert Coverage.parse(text).files == {"a.py": (1, 1)}
+
+
 def test_the_comment_shows_the_change_of_every_file() -> None:
     head = Coverage.parse(report(a=(4, 4), b=(1, 2), new=(1, 1)))
     base = Coverage.parse(report(a=(4, 4), b=(2, 2), gone=(1, 1)))
@@ -94,6 +121,20 @@ def test_the_command_line_writes_the_comment(
 
     assert cli.main(["coverage", str(head)]) == 0
     assert "main has no coverage report yet" in capsys.readouterr().out
+
+
+def test_the_command_line_names_the_paths_from_where_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    head = tmp_path / "head.xml"
+    head.write_text(with_sources(report(a=(1, 2)), tmp_path / "lib"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["coverage", str(head)]) == 0
+    assert "| This pull request | 2 | 50.00 % |" in capsys.readouterr().out
+    assert Coverage.parse(head.read_text(encoding="utf-8"), Path.cwd()).files == {
+        "lib/a.py": (1, 2)
+    }
 
 
 def test_the_command_line_names_a_broken_report(
