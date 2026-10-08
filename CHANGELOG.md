@@ -6,10 +6,6 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
-### Features
-
-- **The dashboard shows the health of every repository:** the line coverage and the share of mutants that the tests catch, from the reports of the last runs on `main`, the stable releases and the median time to the first answer to a new issue over 90 days, and the median time of the CI, each with an arrow when it moved since a week ago. The history of one entry a day lives in the published dashboard itself, in `history.json`.
-
 ### Bug fixes
 
 - The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
@@ -18,6 +14,7 @@ the next release, or lists the pull requests when there is none.
 
 - **Every repository gets a documentation website:** MkDocs with the Material theme makes the pages of `docs/` a website with search and a light and a dark theme, German pages under `docs/de/` included, and the new Docs workflow publishes it on GitHub Pages with every change of `main`. Every pull request builds it strictly, as the new required check `docs`, so that a link or an anchor that leads nowhere fails; a repository without a website passes it. The settings bot turns GitHub Pages on from the new table `[pages]` of the settings as code. `mkdocs.yml` belongs to the project, and a page can include a file of the repository, such as the README, with `--8<--`, so that nothing is written twice.
 - **The blueprint's own website** is its documentation now, and [the dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) moved to `dashboard/` of it.
+- **The dashboard shows the health of every repository:** the line coverage and the share of mutants that the tests catch, from the reports of the last runs on `main`, the stable releases and the median time to the first answer to a new issue over 90 days, and the median time of the CI, each with an arrow when it moved since a week ago. The history of one entry a day lives in the published dashboard itself, in `history.json`.
 - **Signed release tags:** the tag of every release and beta is an annotated tag, signed without a key by the release workflow with gitsign: Sigstore certifies the identity of the workflow, and the release check verifies it. There is no key to keep secret.
 - **The clean-up bot** deletes every week the branches that `main` holds completely and that no open pull request uses, and the caches of closed pull requests. A branch with commits that `main` doesn't have stays and is listed in its summary after a month without a pull request.
 - **Every repository documents what the Silver level of the OpenSSF Best Practices badge asks for.** SECURITY.md says how to verify a release with the GitHub CLI and gives the assurance case of the repository and its releases: the threat model, the trust boundaries, the secure design principles and how the OWASP Top 10 CI/CD security risks are countered. A new repository starts with `docs/security.md`, the security design of its software, which belongs to the project from then on. GOVERNANCE.md names the roles and their responsibilities and says honestly how the project continues with one maintainer, and CONTRIBUTING.md the coding standards of each kind of project and the rule that new functionality and every fix come with tests.
