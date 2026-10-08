@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import sys
 import tomllib
 import warnings
 from pathlib import Path
@@ -28,6 +30,18 @@ LEFTOVER = re.compile(r"\{=|=\}|\[%|%\]")
 GUARD = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n"
 PINNED = re.compile(
     r"uses: (?:\./|docker://[^@\s]+@sha256:[0-9a-f]{64}|[\w.-]+/[\w./-]+@[0-9a-f]{40})"
+)
+# The settings tool, which every repository gets in .github/: the script that starts
+# it and every file of its package.
+TOOL = sorted(
+    [
+        "blueprint.py",
+        *(
+            f"blueprint/{path.name}"
+            for path in (ROOT / "blueprint").iterdir()
+            if path.is_file()
+        ),
+    ]
 )
 
 
@@ -360,9 +374,47 @@ def test_python_projects_are_fuzzed(projects: dict[str, Path], kind: str) -> Non
 def test_every_repository_gets_the_settings_tool(
     projects: dict[str, Path], kind: str
 ) -> None:
-    copy = (projects[kind] / ".github/blueprint.py").read_text(encoding="utf-8")
+    github = projects[kind] / ".github"
+    copies = sorted(
+        path.relative_to(github).as_posix()
+        for path in [github / "blueprint.py", *(github / "blueprint").iterdir()]
+        if path.is_file()
+    )
 
-    assert copy == (ROOT / "blueprint.py").read_text(encoding="utf-8")
+    assert copies == TOOL
+    for name in TOOL:
+        copy = (github / name).read_text(encoding="utf-8")
+        assert copy == (ROOT / name).read_text(encoding="utf-8"), name
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_settings_tool_runs_in_every_repository(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # As the workflows run it: the script imports the package next to it.
+    result = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "--help"],
+        cwd=projects[kind],
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("usage: blueprint.py")
+    assert "The settings of a repository as code" in result.stdout
+    # Like the single file it was, the tool leaves no __pycache__ in the repository.
+    assert not (projects[kind] / ".github/blueprint/__pycache__").exists()
+
+
+def test_the_settings_tool_keeps_the_ruff_settings_of_the_blueprint() -> None:
+    # Ruff uses the closest configuration of each file and no other: in a repository,
+    # .github/blueprint/ keeps these settings, not those of the project.
+    own = tomllib.loads((ROOT / "blueprint/ruff.toml").read_text(encoding="utf-8"))
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert own.pop("src") == [".."]
+    assert own == pyproject["tool"]["ruff"]
 
 
 def test_the_readme_of_an_integration_works_in_hacs(projects: dict[str, Path]) -> None:
@@ -538,7 +590,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
     ):
         assert matcher.match_file(owned), owned
     for updated in (
-        ".github/blueprint.py",
+        *(f".github/{name}" for name in TOOL),
         ".devcontainer/Dockerfile",
         ".github/social-preview/Dockerfile",
         ".github/workflows/ci.yml",

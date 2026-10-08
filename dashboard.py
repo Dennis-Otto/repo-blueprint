@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-from blueprint import Api, GitHubError
+from blueprint.github import Api, GitHubError
 
 BLUEPRINT = "Dennis-Otto/repo-blueprint"
 SCORECARD_API = "https://api.scorecard.dev/projects/github.com/"

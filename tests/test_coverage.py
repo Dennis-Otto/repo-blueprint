@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-import blueprint
+from blueprint import cli
+from blueprint.coverage_comment import (
+    COVERAGE_MARKER,
+    Coverage,
+    coverage_comment,
+    percent,
+)
 
 
 def report(**files: tuple[int, int]) -> str:
@@ -26,11 +32,11 @@ def report(**files: tuple[int, int]) -> str:
 
 
 def test_a_report_counts_the_lines_of_each_file() -> None:
-    coverage = blueprint.Coverage.parse(report(a=(3, 4), b=(0, 0)))
+    coverage = Coverage.parse(report(a=(3, 4), b=(0, 0)))
 
     assert coverage.files == {"a.py": (3, 4), "b.py": (0, 0)}
     assert coverage.total == (3, 4)
-    assert blueprint.percent(0, 0) == 100.0
+    assert percent(0, 0) == 100.0
 
 
 def test_classes_of_one_file_add_up() -> None:
@@ -41,16 +47,16 @@ def test_classes_of_one_file_add_up() -> None:
         "</classes></package></packages></coverage>"
     )
 
-    assert blueprint.Coverage.parse(text).files == {"a.php": (2, 3)}
+    assert Coverage.parse(text).files == {"a.php": (2, 3)}
 
 
 def test_the_comment_shows_the_change_of_every_file() -> None:
-    head = blueprint.Coverage.parse(report(a=(4, 4), b=(1, 2), new=(1, 1)))
-    base = blueprint.Coverage.parse(report(a=(4, 4), b=(2, 2), gone=(1, 1)))
+    head = Coverage.parse(report(a=(4, 4), b=(1, 2), new=(1, 1)))
+    base = Coverage.parse(report(a=(4, 4), b=(2, 2), gone=(1, 1)))
 
-    comment = blueprint.coverage_comment(head, base)
+    comment = coverage_comment(head, base)
 
-    assert comment.startswith(blueprint.COVERAGE_MARKER)
+    assert comment.startswith(COVERAGE_MARKER)
     assert "| This pull request | 7 | 85.71 % |" in comment
     assert "| main | 7 | 100.00 % (-14.29) |" in comment
     assert "| `b.py` | 100.00 % | 50.00 % |" in comment
@@ -60,18 +66,16 @@ def test_the_comment_shows_the_change_of_every_file() -> None:
 
 
 def test_without_a_change_the_comment_says_so() -> None:
-    coverage = blueprint.Coverage.parse(report(a=(2, 2)))
+    coverage = Coverage.parse(report(a=(2, 2)))
 
-    comment = blueprint.coverage_comment(coverage, coverage)
+    comment = coverage_comment(coverage, coverage)
 
     assert "(+0.00)" in comment
     assert "No file changes its coverage." in comment
 
 
 def test_without_a_report_of_main_the_comment_shows_the_pull_request() -> None:
-    comment = blueprint.coverage_comment(
-        blueprint.Coverage.parse(report(a=(1, 2))), None
-    )
+    comment = coverage_comment(Coverage.parse(report(a=(1, 2))), None)
 
     assert "| This pull request | 2 | 50.00 % |" in comment
     assert "main has no coverage report yet" in comment
@@ -85,10 +89,10 @@ def test_the_command_line_writes_the_comment(
     head.write_text(report(a=(1, 2)), encoding="utf-8")
     base.write_text(report(a=(2, 2)), encoding="utf-8")
 
-    assert blueprint.main(["coverage", str(head), str(base)]) == 0
+    assert cli.main(["coverage", str(head), str(base)]) == 0
     assert "| `a.py` | 100.00 % | 50.00 % |" in capsys.readouterr().out
 
-    assert blueprint.main(["coverage", str(head)]) == 0
+    assert cli.main(["coverage", str(head)]) == 0
     assert "main has no coverage report yet" in capsys.readouterr().out
 
 
@@ -98,5 +102,5 @@ def test_the_command_line_names_a_broken_report(
     broken = tmp_path / "broken.xml"
     broken.write_text("<coverage>", encoding="utf-8")
 
-    assert blueprint.main(["coverage", str(broken)]) == 2
+    assert cli.main(["coverage", str(broken)]) == 2
     assert "blueprint.py:" in capsys.readouterr().err

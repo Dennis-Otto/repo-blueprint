@@ -1,4 +1,4 @@
-"""Coverage-guided fuzzing of how blueprint.py reads the answers of GitHub, with Atheris.
+"""Coverage-guided fuzzing of how blueprint/github.py reads the answers of GitHub, with Atheris.
 
 Whatever the GitHub CLI prints, reading it either gives a response or raises
 GitHubError; no other exception may escape and stop a run of the settings.
@@ -19,7 +19,7 @@ import atheris
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 with atheris.instrument_imports():
-    import blueprint
+    from blueprint.github import Api, GitHubError
 
 
 def test_one_input(data: bytes) -> None:
@@ -37,8 +37,8 @@ def test_one_input(data: bytes) -> None:
         return subprocess.CompletedProcess(arguments, 1, stdout, "error")
 
     try:
-        response = blueprint.Api(runner).request("GET", "repos/owner/name")
-    except blueprint.GitHubError:
+        response = Api(runner).request("GET", "repos/owner/name")
+    except GitHubError:
         return
     if response.status >= 400 and response.status != 404:
         raise AssertionError(f"status {response.status} passed as a response")

@@ -14,7 +14,24 @@ from typing import Any
 
 import pytest
 
-import blueprint
+import blueprint.checklist
+from blueprint import cli
+from blueprint.checklist import checklist, reuse_compliant
+from blueprint.github import Api, GitHubError
+from blueprint.settings import (
+    MAIN_ONLY,
+    Drift,
+    Settings,
+    apply_pages,
+    check_actions,
+    check_community,
+    check_environments,
+    check_pages,
+    main_ruleset,
+    merge,
+    ruleset_differences,
+    tag_ruleset,
+)
 
 REPO = "Dennis-Otto/demo"
 CONFIG = """
@@ -321,7 +338,7 @@ def github() -> FakeGitHub:
 @pytest.fixture(autouse=True)
 def offline(monkeypatch: pytest.MonkeyPatch) -> None:
     """The checklist asks the REUSE API; the tests stay offline."""
-    monkeypatch.setattr(blueprint, "reuse_compliant", lambda repo: False)
+    monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: False)
 
 
 @pytest.fixture
@@ -333,7 +350,7 @@ def root(tmp_path: Path) -> Path:
 
 
 def run(github: FakeGitHub, root: Path, *arguments: str) -> int:
-    return blueprint.main(list(arguments), api=blueprint.Api(github), root=root)
+    return cli.main(list(arguments), api=Api(github), root=root)
 
 
 def set_secrets(github: FakeGitHub) -> None:
@@ -520,15 +537,13 @@ def test_only_sha_pinning_changes(github: FakeGitHub, root: Path) -> None:
 
 def test_a_repository_without_permissions_data(github: FakeGitHub, root: Path) -> None:
     github.fail[("GET", f"repos/{REPO}/actions/permissions")] = 404
-    drift = blueprint.check_actions(
-        blueprint.Api(github), REPO, {"sha_pinning_required": True}
-    )
+    drift = check_actions(Api(github), REPO, {"sha_pinning_required": True})
 
-    assert drift == [blueprint.Drift("actions.sha_pinning_required", True, False)]
+    assert drift == [Drift("actions.sha_pinning_required", True, False)]
 
 
 def test_ruleset_differences_name_each_part() -> None:
-    want = blueprint.main_ruleset(["a", "b"])
+    want = main_ruleset(["a", "b"])
     have = json.loads(json.dumps(want))
     have["enforcement"] = "evaluate"
     rules = {rule["type"]: rule for rule in have["rules"]}
@@ -539,7 +554,7 @@ def test_ruleset_differences_name_each_part() -> None:
     del have["rules"][0]
     have["rules"].append({"type": "update"})
 
-    assert blueprint.ruleset_differences(want, have) == [
+    assert ruleset_differences(want, have) == [
         "enforcement",
         "rule deletion is missing",
         "pull_request.required_approving_review_count",
@@ -551,37 +566,37 @@ def test_ruleset_differences_name_each_part() -> None:
 def test_a_ruleset_without_its_bypass_list_matches() -> None:
     # A token without the administration write permission, such as the release
     # app's in the Settings workflow, gets the rulesets without bypass_actors.
-    want = blueprint.main_ruleset(["a"])
+    want = main_ruleset(["a"])
     have = json.loads(json.dumps(want))
     del have["bypass_actors"]
-    assert blueprint.ruleset_differences(want, have) == []
+    assert ruleset_differences(want, have) == []
 
     have["bypass_actors"] = [{"actor_type": "OrganizationAdmin"}]
-    assert blueprint.ruleset_differences(want, have) == ["bypass_actors"]
+    assert ruleset_differences(want, have) == ["bypass_actors"]
 
 
 def test_the_tag_ruleset_leaves_major_tags_free() -> None:
-    ruleset = blueprint.tag_ruleset()
+    ruleset = tag_ruleset()
 
     assert ruleset["conditions"]["ref_name"]["include"] == ["refs/tags/v*.*.*"]
 
 
 def test_an_environment_without_main_drifts(github: FakeGitHub) -> None:
     github.environments["release"] = {
-        "policy": blueprint.MAIN_ONLY,
+        "policy": MAIN_ONLY,
         "branches": [{"id": 5, "name": "main"}],
         "secrets": [],
     }
-    api = blueprint.Api(github)
+    api = Api(github)
 
-    assert blueprint.check_environments(api, REPO, {"release": {}}) == []
+    assert check_environments(api, REPO, {"release": {}}) == []
     github.environments["release"]["policy"] = {
         "protected_branches": True,
         "custom_branch_policies": False,
     }
     github.environments["release"]["branches"] = []
-    assert blueprint.check_environments(api, REPO, {"release": {}}) == [
-        blueprint.Drift(
+    assert check_environments(api, REPO, {"release": {}}) == [
+        Drift(
             "environment release",
             "main only",
             {"protected_branches": True, "custom_branch_policies": False},
@@ -606,17 +621,17 @@ def test_pages_that_build_from_a_branch_switch_to_the_workflow(
 
 def test_pages_that_match_stay_as_they_are(github: FakeGitHub) -> None:
     github.pages = {"build_type": "workflow", "html_url": "https://x/"}
-    api = blueprint.Api(github)
+    api = Api(github)
 
-    assert blueprint.check_pages(api, REPO, {"build_type": "workflow"}) == []
-    blueprint.apply_pages(api, REPO, {"build_type": "workflow"}, [])
+    assert check_pages(api, REPO, {"build_type": "workflow"}) == []
+    apply_pages(api, REPO, {"build_type": "workflow"}, [])
     assert all(method == "GET" for method, _ in github.calls)
 
 
 def test_a_repository_without_pages_settings_leaves_them_alone(
     github: FakeGitHub,
 ) -> None:
-    assert blueprint.check_pages(blueprint.Api(github), REPO, {}) == []
+    assert check_pages(Api(github), REPO, {}) == []
     assert github.calls == []
 
 
@@ -640,8 +655,8 @@ def test_an_error_without_json() -> None:
             arguments, 1, "HTTP/2.0 502 Bad Gateway\n\n<html>", ""
         )
 
-    with pytest.raises(blueprint.GitHubError, match="502"):
-        blueprint.Api(runner).get("repos/x")
+    with pytest.raises(GitHubError, match="502"):
+        Api(runner).get("repos/x")
 
 
 def test_output_without_a_status_line() -> None:
@@ -650,8 +665,8 @@ def test_output_without_a_status_line() -> None:
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(arguments, 1, "", "gh: not logged in")
 
-    with pytest.raises(blueprint.GitHubError, match="not logged in"):
-        blueprint.Api(runner).get("repos/x")
+    with pytest.raises(GitHubError, match="not logged in"):
+        Api(runner).get("repos/x")
 
 
 def test_a_deeply_nested_answer_is_text() -> None:
@@ -662,7 +677,7 @@ def test_a_deeply_nested_answer_is_text() -> None:
             arguments, 0, "HTTP/2.0 200 OK\n\n" + "[" * 100_000, ""
         )
 
-    response = blueprint.Api(runner).request("GET", "repos/x")
+    response = Api(runner).request("GET", "repos/x")
 
     assert response.status == 200
     assert response.data.startswith("[[[")
@@ -676,8 +691,8 @@ def test_a_failing_graphql_query() -> None:
             arguments, 1, "", "GraphQL: Could not resolve"
         )
 
-    with pytest.raises(blueprint.GitHubError, match="Could not resolve"):
-        blueprint.Api(runner).graphql("{ viewer { login } }")
+    with pytest.raises(GitHubError, match="Could not resolve"):
+        Api(runner).graphql("{ viewer { login } }")
 
 
 def test_a_folder_without_a_repository(
@@ -688,9 +703,7 @@ def test_a_folder_without_a_repository(
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(arguments, 1, "", "no git remotes")
 
-    assert (
-        blueprint.main(["settings", "check"], api=blueprint.Api(runner), root=root) == 2
-    )
+    assert cli.main(["settings", "check"], api=Api(runner), root=root) == 2
     assert "--repo OWNER/NAME" in capsys.readouterr().err
 
 
@@ -735,7 +748,7 @@ def test_the_checklist_of_a_finished_repository(
     (root / "README.md").write_text(
         "[![Best](https://www.bestpractices.dev/projects/1/badge)]\n", encoding="utf-8"
     )
-    monkeypatch.setattr(blueprint, "reuse_compliant", lambda repo: True)
+    monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
     capsys.readouterr()
 
     assert run(github, root, "checklist") == 0
@@ -759,12 +772,10 @@ def test_the_checklist_of_a_finished_repository(
 def test_the_checklist_names_the_delivery(
     github: FakeGitHub, root: Path, target: str, text: str | None
 ) -> None:
-    settings = blueprint.Settings.load(root / ".github/repository.toml")
+    settings = Settings.load(root / ".github/repository.toml")
     settings.variables["PUBLISH_TO"] = target
 
-    steps = blueprint.checklist(
-        blueprint.Api(github), REPO, settings, root, reuse=lambda repo: False
-    )
+    steps = checklist(Api(github), REPO, settings, root, reuse=lambda repo: False)
 
     texts = [step.text for step in steps]
     if text is None:
@@ -785,16 +796,16 @@ def opener(body: bytes | Exception) -> Callable[[str], Any]:
 
 def test_the_reuse_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.undo()
-    assert blueprint.reuse_compliant(REPO, opener(b'{"status": "compliant"}'))
-    assert not blueprint.reuse_compliant(REPO, opener(b'{"status": "non-compliant"}'))
-    assert not blueprint.reuse_compliant(REPO, opener(b"<html>"))
-    assert not blueprint.reuse_compliant(REPO, opener(urllib.error.URLError("offline")))
+    assert reuse_compliant(REPO, opener(b'{"status": "compliant"}'))
+    assert not reuse_compliant(REPO, opener(b'{"status": "non-compliant"}'))
+    assert not reuse_compliant(REPO, opener(b"<html>"))
+    assert not reuse_compliant(REPO, opener(urllib.error.URLError("offline")))
 
 
 def test_a_repository_without_labels_toml(tmp_path: Path) -> None:
     (tmp_path / "repository.toml").write_text(CONFIG, encoding="utf-8")
 
-    assert blueprint.Settings.load(tmp_path / "repository.toml").labels == {}
+    assert Settings.load(tmp_path / "repository.toml").labels == {}
 
 
 def test_merge_adds_the_settings_of_the_project() -> None:
@@ -808,7 +819,7 @@ def test_merge_adds_the_settings_of_the_project() -> None:
         "environments": {"deploy": {"secrets": ["KEY"]}},
     }
 
-    assert blueprint.merge(base, extra) == {
+    assert merge(base, extra) == {
         "branch": {"required_checks": ["a", "b", "c"]},
         "variables": {"X": "2", "Y": "3"},
         "environments": {"deploy": {"secrets": ["KEY"]}},
@@ -821,7 +832,7 @@ def test_the_settings_of_the_project_join_the_checks(root: Path) -> None:
         '[branch]\nrequired_checks = ["e2e"]\n', encoding="utf-8"
     )
 
-    settings = blueprint.Settings.load(root / ".github/repository.toml")
+    settings = Settings.load(root / ".github/repository.toml")
 
     main = settings.rulesets[0]["rules"]
     checks = next(rule for rule in main if rule["type"] == "required_status_checks")
@@ -835,7 +846,7 @@ def test_the_output_is_utf8_where_it_can_be(monkeypatch: pytest.MonkeyPatch) -> 
     # A StringIO has no reconfigure; a console of Windows gets UTF-8 for the marks.
     monkeypatch.setattr("sys.stdout", io.StringIO())
     monkeypatch.setattr("sys.stderr", io.StringIO())
-    blueprint.utf8_output()
+    cli.utf8_output()
 
 
 def test_a_gap_in_the_community_profile_is_reported(
@@ -864,7 +875,7 @@ def test_a_gap_in_the_community_profile_is_reported(
 def test_a_profile_without_its_files_names_what_it_counts(github: FakeGitHub) -> None:
     github.community = {"health_percentage": 85, "description": "A demo"}
 
-    (drift,) = blueprint.check_community(blueprint.Api(github), REPO)
+    (drift,) = check_community(Api(github), REPO)
 
     assert drift.manual == (
         "add what the profile counts: https://github.com/Dennis-Otto/demo/community"
