@@ -15,8 +15,8 @@ Several repositories of one owner need the same checks, release bot, security wo
 
 ## Decision
 
-Option 3. Copier keeps what a project changed in a file of the blueprint, and `_skip_if_exists` leaves the files of the project alone. The blueprint bot of each repository runs `copier update` on every release of the blueprint and opens a pull request that merges itself once every check passes.
+Option 3. Copier keeps what a project changed in a file of the blueprint, and `_skip_if_exists` leaves the files of the project alone. The blueprint bot of each repository runs `copier update` every week, on Tuesday morning, and on demand, and opens a pull request with the latest release that merges itself once every check passes. Once a week is enough: the releases of a week arrive as one pull request instead of one each, and a release that can't wait is brought in by running the bot by hand.
 
 ## Consequences
 
-Every change for the repositories is a change of the template, released and rolled out like a dependency. A project change of a file of the blueprint survives updates, but the blueprint owns the file. An adopted repository answers `sample_code` with no.
+Every change for the repositories is a change of the template, released and rolled out like a dependency: within a week of its release, every repository has its pull request. A project change of a file of the blueprint survives updates, but the blueprint owns the file. An adopted repository answers `sample_code` with no.
