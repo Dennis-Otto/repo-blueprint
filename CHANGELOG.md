@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Changes
+
+- **The code of `.github/blueprint.py` is in modules:** the tool keeps its commands, and its code is now in `.github/blueprint/`, one module for each task. The folder brings its own Ruff settings, so that those of a project don't apply to it.
+
 ### Bug fixes
 
 - `blueprint.py settings check` and `settings apply` name the settings as `.github/repository.toml` on Windows too, as the documentation does, instead of `.github\repository.toml`.
