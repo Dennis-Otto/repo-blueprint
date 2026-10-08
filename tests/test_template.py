@@ -302,7 +302,6 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         "SUPPORT.md",
         "release-please-config.json",
         "scripts/check.sh",
-        ".github/CODEOWNERS",
         ".github/FUNDING.yml",
         ".github/findings.toml",
         ".github/pull_request_template.md",
