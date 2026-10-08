@@ -94,10 +94,10 @@ project_name:
 
 project_slug:
   type: str
-  help: The name of the repository
+  help: The name of the repository; owner.github.io, such as dennis-otto.github.io, for the website of the owner itself
   default: "{= project_name | lower | regex_replace('[^a-z0-9]+', '-') | trim('-') =}"
   validator: >-
-    [% if not (project_slug | regex_search('^[a-z0-9][a-z0-9-]*[a-z0-9]$')) %]Use lowercase letters, digits and hyphens.[% endif %]
+    [% if not (project_slug | regex_search('^[a-z0-9][a-z0-9-]*[a-z0-9]$') or (project_slug.endswith('.github.io') and project_slug[:-10] | regex_search('^[a-z0-9][a-z0-9-]*[a-z0-9]$'))) %]Use lowercase letters, digits and hyphens, or the name of the website of an owner, such as dennis-otto.github.io.[% endif %]
 
 description:
   type: str

@@ -656,6 +656,22 @@ def test_every_project_starts_with_area_rules(
     assert rules.rstrip().endswith("{}")
 
 
+def test_the_website_of_the_owner_lives_at_the_root(tmp_path: Path) -> None:
+    project = render(
+        tmp_path,
+        project_name="Dennis Otto",
+        project_slug="dennis-otto.github.io",
+        description="The projects of the owner.",
+        project_type="generic",
+    )
+    config = (project / "mkdocs.yml").read_text(encoding="utf-8")
+
+    assert "\nsite_url: https://dennis-otto.github.io/\n" in config
+    assert (
+        "\nrepo_url: https://github.com/Dennis-Otto/dennis-otto.github.io\n" in config
+    )
+
+
 def test_a_designated_successor_continues_the_project(tmp_path: Path) -> None:
     project = render(
         tmp_path,

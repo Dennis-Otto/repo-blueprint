@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **The website of the owner itself:** a repository named like `dennis-otto.github.io` may use the blueprint, and its documentation website lives at the root of the owner's address, such as `https://dennis-otto.github.io/`.
+
 ## [0.7.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.2...v0.7.0) (2026-10-08)
 
 ### Bug fixes
