@@ -6,20 +6,14 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.2...v0.8.3) (2026-10-08)
+
 ### Bug fixes
 
 - **No labels and no merge step for the updates that Dependabot no longer makes:** Renovate keeps the actions, the dependencies and the images current, so Dependabot updates only the Features of the dev container and sets just the label `dependencies`, and Renovate sets none. New projects no longer get the labels `github_actions`, `python`, `php`, `javascript` and `docker`, and the workflow *Dependabot maintenance* loses its step for updates of the HACS and hassfest actions to a new commit, which Renovate brings and merges itself. An existing project removes the group *Dependabot* from its `.github/labels.toml`, which updates leave alone. The Labels workflow never deletes a label, so the project deletes them on GitHub as well, each with `gh label delete github_actions --yes`, and with them those that Dependabot created itself, such as `devcontainers_package_manager`.
 - **The social preview names Renovate** instead of Dependabot. An existing project changes it in its `.github/social-preview.html`, renders it again with `bash scripts/social-preview.sh` and uploads it.
 - **The language switch finds its sitemap on every page:** on a page in a folder, such as a decision record in `docs/decisions/`, the switch of Material asked for the sitemap in the folder of the page in each language, such as `decisions/sitemap.xml` and `de/decisions/sitemap.xml`, and the browser logged two errors. The hook of the blueprint now copies the sitemap into every folder that holds a page. The switch already led to the same page in the other language.
 - **The 404 page stays in the default language:** on a website in more than one language, the build of each further language wrote `404.html` at the root again, so a missing page showed the header of the German website, and its language switch led to the page built last, such as a decision record. The hook of the blueprint now keeps the 404 page of the default language, whose switch leads to the start page of each language.
-
-## [0.8.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.2...v0.8.3) (2026-10-08)
-
-
-### Bug fixes
-
-* **docs:** give every folder of pages its sitemap, and keep the 404 page in the default language ([#104](https://github.com/Dennis-Otto/repo-blueprint/issues/104)) ([b2c4cfa](https://github.com/Dennis-Otto/repo-blueprint/commit/b2c4cfa1d11810ecdfae477390837444e6cf2844))
-* drop the labels and the merge step of updates that Dependabot no longer makes ([#105](https://github.com/Dennis-Otto/repo-blueprint/issues/105)) ([817f7b5](https://github.com/Dennis-Otto/repo-blueprint/commit/817f7b5e806c972cdb63f03497bb9385167c99db))
 
 ## [0.8.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.1...v0.8.2) (2026-10-08)
 
