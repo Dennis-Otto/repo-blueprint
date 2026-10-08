@@ -911,6 +911,16 @@ def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
             assert name[1] in watched, name[1]
 
 
+def test_the_coverage_report_of_the_blueprint_names_every_file_by_its_path() -> None:
+    # Each folder under source becomes a source of the report, relative to which it
+    # names the files, such as cli.py for blueprint/cli.py; with several, the coverage
+    # comment can't tell them apart. Packages and modules by name keep one, the root.
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    run = config["tool"]["coverage"]["run"]
+    assert "source" not in run
+    assert "blueprint" in run["source_pkgs"]
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> None:
     project = projects[kind]

@@ -12,6 +12,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Bug fixes
 
+- **The coverage comment names every file by its path from the root of the repository,** such as `lib/AppInfo/Application.php` instead of `AppInfo/Application.php`, where the report has one source folder, as the report of PHPUnit and of a project that measures one folder with coverage.py have. A project that measures several folders names its packages under `source_pkgs` instead of `source` in `[tool.coverage.run]`, as the blueprint does now, since such a report doesn't say which folder holds a file.
 - `blueprint.py settings check` and `settings apply` name the settings as `.github/repository.toml` on Windows too, as the documentation does, instead of `.github\repository.toml`.
 
 ## [0.8.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.0...v0.8.1) (2026-10-08)
