@@ -4,6 +4,7 @@ and of main."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from xml.etree import ElementTree
 
 COVERAGE_MARKER = "<!-- coverage-bot -->"
@@ -16,10 +17,21 @@ class Coverage:
     files: dict[str, tuple[int, int]]
 
     @classmethod
-    def parse(cls, report: str) -> Coverage:
+    def parse(cls, report: str, root: Path | None = None) -> Coverage:
+        """A report names each file relative to the source that holds it, such as lib/
+        of PHPUnit or a folder that coverage.py measures. With one source under root,
+        every path starts at root; with several, the report doesn't say which source a
+        file belongs to, and the names stay as they are."""
+        tree = ElementTree.fromstring(report)
+        sources = [Path(source.text or "") for source in tree.iter("source")]
+        folder = ""
+        if root is not None and len(sources) == 1 and sources[0].is_relative_to(root):
+            folder = sources[0].relative_to(root).as_posix()
         files: dict[str, tuple[int, int]] = {}
-        for element in ElementTree.fromstring(report).iter("class"):
+        for element in tree.iter("class"):
             name = element.get("filename", "")
+            if folder not in ("", "."):
+                name = f"{folder}/{name}"
             lines = element.findall("./lines/line")
             covered = sum(1 for line in lines if int(line.get("hits", "0")) > 0)
             have = files.get(name, (0, 0))

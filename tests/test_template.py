@@ -120,6 +120,11 @@ def test_the_workflows_are_the_blueprints_own(
                 source,
             )
             text = re.sub(r"        language: \[.*\]\n", "", text)
+        if name == "after-checks.yml":
+            # The workflows it watches; the bots after the checks test them.
+            watched = r"    # The (?:workflows of the )?checks of this repository.*\n    workflows: \[.*\]\n"
+            source = re.sub(watched, "", source)
+            text = re.sub(watched, "", text)
         assert text == source, name
 
 
@@ -875,17 +880,36 @@ def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
     assert 'gh release create "v$version" --draft --prerelease' in job
 
 
-def test_the_flaky_test_bot_watches_every_test_workflow() -> None:
-    flaky = (ROOT / ".github/workflows/flaky.yml").read_text(encoding="utf-8")
-    watched = set(re.findall(r"^      - (.+)$", flaky, re.MULTILINE))
-    names = set()
-    for path in (ROOT / ".github/workflows").glob("ci-*.yml"):
+def watched_after_the_checks(workflow: str) -> set[str]:
+    watched = re.search(r"^    workflows: \[(.+)\]$", workflow, re.MULTILINE)
+    assert watched
+    return set(watched[1].split(", "))
+
+
+def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
+    # The checks of every kind of project are only templates here, whose jobs skip.
+    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    assert watched_after_the_checks(after) == {"CI (python)", "Variants"}
+    assert "github.event.workflow_run.run_attempt == 1" in after
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    workflows = projects[kind] / ".github/workflows"
+    after = (workflows / "after-checks.yml").read_text(encoding="utf-8")
+    watched = watched_after_the_checks(after)
+    names = {"Docker E2E"}
+    for path in workflows.glob("*.yml"):
         name = re.search(r"^name: (.+)$", path.read_text(encoding="utf-8"), re.M)
         assert name, path
-        names.add(name[1])
-    assert names
-    assert names <= watched, names - watched
-    assert "github.event.workflow_run.run_attempt == 1" in flaky
+        if path.name in ("ci.yml", "action-test.yml"):
+            names.add(name[1])
+    assert watched == names
+    assert "the blueprint sets them" not in after
+    assert not (workflows / "flaky.yml").exists()
+    assert not (workflows / "coverage.yml").exists()
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -901,14 +925,29 @@ def test_every_project_records_its_decisions(
 
 
 def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
-    bot = (ROOT / ".github/workflows/coverage.yml").read_text(encoding="utf-8")
-    watched = set(re.findall(r"^      - (CI .+)$", bot, re.MULTILINE))
+    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    bot = after[after.index("\n  coverage:\n") :]
+    listed = re.search(
+        r"contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)", bot
+    )
+    assert listed
+    watched = set(json.loads(listed[1]))
     for path in (ROOT / ".github/workflows").glob("ci-*.yml"):
         ci = path.read_text(encoding="utf-8")
         if "name: coverage\n" in ci:
             name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
             assert name, path
             assert name[1] in watched, name[1]
+
+
+def test_the_coverage_report_of_the_blueprint_names_every_file_by_its_path() -> None:
+    # Each folder under source becomes a source of the report, relative to which it
+    # names the files, such as cli.py for blueprint/cli.py; with several, the coverage
+    # comment can't tell them apart. Packages and modules by name keep one, the root.
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    run = config["tool"]["coverage"]["run"]
+    assert "source" not in run
+    assert "blueprint" in run["source_pkgs"]
 
 
 @pytest.mark.parametrize("kind", KINDS)

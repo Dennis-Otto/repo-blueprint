@@ -57,10 +57,12 @@ def changelog_command(arguments: argparse.Namespace) -> int:
 
 
 def coverage_command(arguments: argparse.Namespace) -> int:
-    head = Coverage.parse(Path(arguments.head).read_text(encoding="utf-8"))
+    # The coverage bot runs in the checkout at the path where the checks ran.
+    root = Path.cwd()
+    head = Coverage.parse(Path(arguments.head).read_text(encoding="utf-8"), root)
     base_file = Path(arguments.base)
     base = (
-        Coverage.parse(base_file.read_text(encoding="utf-8"))
+        Coverage.parse(base_file.read_text(encoding="utf-8"), root)
         if base_file.is_file()
         else None
     )
