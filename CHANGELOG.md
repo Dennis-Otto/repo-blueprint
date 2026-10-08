@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.0...v0.8.1) (2026-10-08)
+
 ### Bug fixes
 
 - **The language switch finds its sitemap:** on a website in more than one language, the switch of Material asked for a sitemap next to the pages of each further language, such as `de/sitemap.xml`, and got nothing. A hook of the blueprint now copies the sitemap there. A project with hooks of its own adds `.github/mkdocs_blueprint.py` to its `hooks` in `mkdocs.yml`.
