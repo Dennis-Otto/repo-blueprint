@@ -1,0 +1,3 @@
+# mutmut, the mutation testing of the Python projects, for the weekly Mutation
+# workflow. https://github.com/Dennis-Otto/repo-blueprint
+mutmut==3.8.0

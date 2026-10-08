@@ -95,6 +95,11 @@
       enabled: false,
     },
     {
+      // The tools of the prose check belong to the blueprint, which keeps them current.
+      matchFileNames: [".github/prose/**"],
+      enabled: false,
+    },
+    {
       matchDatasources: ["docker"],
       matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest"],
       groupName: "the images",
