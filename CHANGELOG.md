@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.1...v0.8.2) (2026-10-08)
+
 ### Changes
 
 - **The code of `.github/blueprint.py` is in modules:** the tool keeps its commands, and its code is now in `.github/blueprint/`, one module for each task. The folder brings its own Ruff settings, so that those of a project don't apply to it.
