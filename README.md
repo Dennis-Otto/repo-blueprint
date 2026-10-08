@@ -154,6 +154,8 @@ python3 ../repo-blueprint/blueprint.py checklist
 
 Copier asks for the name, a one-sentence description, the kind of project, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later) and a few details of the kind. `settings apply` sets everything the API can set; `checklist` shows what is left for a person, such as the secrets, and which steps are done.
 
+![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description and the kind of project, Python package, takes the defaults for the rest, writes the files and names the next steps; the new repository has its community files, its checks and its workflows](docs/images/copier-copy.gif)
+
 <!-- --8<-- [end:quick-start] -->
 
 ### Once per repository
@@ -298,6 +300,8 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 - `bash scripts/social-preview.sh`: renders `.github/social-preview.html` into the 1280×640 image that GitHub shows for links to the repository; upload it under *Settings → Social preview*.
 
 ## Dashboard
+
+![The dashboard: a table with every public repository of the owner, its kind, the release of the blueprint it is on, its release, its next release, its pull requests and the state of its CI, CodeQL, release, verification, settings, findings and links with its Scorecard, and a second table with the health of each one: coverage, mutants caught, releases in 90 days, the first answer to an issue and the time of the CI](docs/images/dashboard.png)
 
 [The dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) shows every public repository of the owner at a glance: the release of the blueprint it is on, its latest release and the pull request of the next one, its open pull requests and those in conflict, the last run of its main workflows on `main`, and its OpenSSF Scorecard; a second table shows the health of each: the line coverage and the share of mutants that the tests catch, the stable releases and the median time to the first answer to an issue over 90 days, and the median time of the CI, each with an arrow when it moved since a week ago, from the history that the published dashboard keeps. The Dashboard workflow builds it with `dashboard.py` every six hours and publishes it on GitHub Pages, under the website of the blueprint, which is this documentation. It shows only what is public anyway, no finding of code scanning and no alert of Dependabot.
 

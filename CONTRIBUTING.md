@@ -85,6 +85,12 @@ python3 -m venv .venv-docs
 .venv-docs/bin/mkdocs serve
 ```
 
+Pictures make the documentation easier to follow:
+
+- **Diagrams** are Mermaid in a `mermaid` block of the Markdown, which GitHub and the website both draw. They run from top to bottom (`flowchart TB`), so that they keep their size in the column of a page, and have `accTitle` and `accDescr` for screen readers. Their colors are tints that read in the light and the dark theme: blue (`#526cfe`) the blueprint and its bots, orange (`#f59e0b`) you and what is yours, green (`#16a34a`) what comes out. A diagram in a README comes in English and in German.
+- **Pictures** are files in `docs/images/`. A page of `docs/` names one as `images/…`, a README as `docs/images/…`, and a hook of the website (`.github/mkdocs_project.py`) shows it there too.
+- **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker: run it again after the questions of `copier.yml`, the output of Copier or the dashboard change.
+
 ## Releases
 
 The release bot keeps a pull request titled `chore: release x.y.z` with the next version, up to date with `main` and decided anew with every merge. Its section of the changelog is the text of Unreleased; without one, it lists the pull requests. Merging it creates the release with its package, SBOM and signed provenance. New repositories copy the blueprint from its release tags, and the blueprint bot brings every repository made from it up to the new release. A release of dependency updates merges and publishes itself.
