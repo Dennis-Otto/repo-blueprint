@@ -20,16 +20,23 @@ def hooks() -> ModuleType:
     return module
 
 
-def config(site: Path, *locales: tuple[str, bool, bool]) -> SimpleNamespace:
-    """The parts of a MkDocs configuration that the hook reads: the i18n plugin with
-    its languages as (locale, default, build), or no such plugin."""
+def config(
+    site: Path, *locales: tuple[str, bool, bool], building: str = ""
+) -> SimpleNamespace:
+    """The parts of a MkDocs configuration that the hooks read: the i18n plugin with
+    its languages as (locale, default, build) and the language it builds, the default
+    one unless named, or no such plugin."""
     plugins: dict[str, SimpleNamespace] = {}
     if locales:
         languages = [
             SimpleNamespace(locale=locale, default=default, build=build)
             for locale, default, build in locales
         ]
-        plugins["i18n"] = SimpleNamespace(config=SimpleNamespace(languages=languages))
+        default = next(language.locale for language in languages if language.default)
+        plugins["i18n"] = SimpleNamespace(
+            config=SimpleNamespace(languages=languages),
+            is_default_language_build=building in ("", default),
+        )
     return SimpleNamespace(site_dir=str(site), plugins=plugins)
 
 
@@ -100,3 +107,23 @@ def test_without_a_sitemap_nothing_is_copied(tmp_path: Path) -> None:
     hooks().on_post_build(config(tmp_path, ("en", True, True), ("de", False, True)))
 
     assert sitemaps(tmp_path) == []
+
+
+def test_a_further_language_leaves_the_404_page_to_the_default_one(
+    tmp_path: Path,
+) -> None:
+    languages = (("en", True, True), ("de", False, True))
+    page = '<html lang="de">'
+
+    further = config(tmp_path, *languages, building="de")
+    default = config(tmp_path, *languages, building="en")
+
+    assert hooks().on_post_template(page, "404.html", further) == ""
+    assert hooks().on_post_template(page, "404.html", default) == page
+    assert hooks().on_post_template(page, "sitemap.xml", further) == page
+
+
+def test_a_website_in_one_language_keeps_its_404_page(tmp_path: Path) -> None:
+    page = '<html lang="en">'
+
+    assert hooks().on_post_template(page, "404.html", config(tmp_path)) == page

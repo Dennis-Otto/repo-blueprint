@@ -29,3 +29,15 @@ def on_post_build(config: Any) -> None:
         return
     for folder in {page.parent for page in site.rglob("*.html")} - {site}:
         shutil.copyfile(sitemap, folder / "sitemap.xml")
+
+
+def on_post_template(output_content: str, template_name: str, config: Any) -> str:
+    """Keep the 404 page of the default language at the root.
+
+    The i18n plugin builds every further language into the same folder, and that
+    build would write 404.html at the root again: in the further language, and with
+    the language switch of the page that was built last. MkDocs writes no empty page.
+    """
+    plugin = config.plugins.get("i18n")
+    further = plugin is not None and not plugin.is_default_language_build
+    return "" if template_name == "404.html" and further else output_content
