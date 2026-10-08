@@ -2,7 +2,7 @@
 
 <!-- The blueprint wrote this page once; from now on it belongs to the project. Keep it true to the software: what it protects, what it trusts, the threats and how the code counters them, and what remains. -->
 
-What {= project_name =} protects, what it trusts and which risks remain. [SECURITY.md](../SECURITY.md) says how to report a vulnerability and how to verify a release, and argues why the repository and its releases are safe.
+What {= project_name =} protects, what it trusts and which risks remain. [SECURITY.md](https://github.com/{= owner =}/{= project_slug =}/blob/main/SECURITY.md) says how to report a vulnerability and how to verify a release, and argues why the repository and its releases are safe.
 
 ## What you can expect
 [% if stack == 'home-assistant' %]
@@ -52,7 +52,7 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 1. **Network and volumes → container.** Requests and files are untrusted input.
 2. **Container → host.** Only through what the user maps into it: ports, volumes and variables.
 [% else %]
-1. **Repository → user.** Documents and scripts reach the user through a release, whose signatures [SECURITY.md](../SECURITY.md#verify-a-release) explains.
+1. **Repository → user.** Documents and scripts reach the user through a release, whose signatures [SECURITY.md](https://github.com/{= owner =}/{= project_slug =}/blob/main/SECURITY.md#verify-a-release) explains.
 [% endif %]
 ## Threats and countermeasures
 
@@ -73,7 +73,7 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 | A flaw of the program takes over the host | The image runs as an unprivileged user, with only what the user maps into it |
 | A base image is replaced | The base image is pinned by its digest |[% else %]
 | A script changes more than it should | Scripts check their arguments and stay in the folder they are given |
-| A tampered release | Releases are signed, as [SECURITY.md](../SECURITY.md#verify-a-release) shows |[% endif %]
+| A tampered release | Releases are signed, as [SECURITY.md](https://github.com/{= owner =}/{= project_slug =}/blob/main/SECURITY.md#verify-a-release) shows |[% endif %]
 
 ## Residual risks
 [% if stack == 'home-assistant' %]

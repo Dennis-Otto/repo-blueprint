@@ -1,10 +1,13 @@
 name: Dashboard
 
-# The dashboard of the owner's public repositories on GitHub Pages: the release of
-# the blueprint each one is on, its releases, its open pull requests, the last runs
-# of its main workflows and its OpenSSF Scorecard (dashboard.py). Every six hours and
-# after every change of the dashboard. Everything it shows is public anyway, so the
-# job's own token reads it. This workflow belongs to the blueprint alone.
+# The website of the blueprint on GitHub Pages: its documentation, which MkDocs builds
+# from mkdocs.yml and docs/ as in every repository, and under dashboard/ the
+# dashboard of the owner's public repositories: the release of the blueprint each one
+# is on, its releases, its open pull requests, the last runs of its main workflows and
+# its OpenSSF Scorecard (dashboard.py). Every six hours and after every change of
+# either. Everything it shows is public anyway, so the job's own token reads it. This
+# workflow belongs to the blueprint alone; the Docs workflow checks the documentation
+# in every pull request and publishes the website of every other repository.
 
 on:
   push:
@@ -12,6 +15,12 @@ on:
     paths:
       - dashboard.py
       - .github/workflows/dashboard.yml
+      - mkdocs.yml
+      - docs/**
+      # The pages of the documentation include them.
+      - README.md
+      - README.de.md
+      - stacks/docs/requirements-docs.txt
   schedule:
     - cron: "5 */6 * * *"
   workflow_dispatch:
@@ -22,9 +31,14 @@ concurrency:
   group: dashboard
   cancel-in-progress: true
 
+env:
+  # The Material theme warns about MkDocs 2.0 in every run; it keeps MkDocs below 2.0
+  # itself, so the warning says nothing about this website.
+  NO_MKDOCS_2_WARNING: "true"
+
 jobs:
   build:
-    name: build the dashboard
+    name: build the website
     if: ${{ !github.event.repository.fork }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -38,17 +52,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install the hash-pinned tools of the website
+        run: pip install --require-hashes -r stacks/docs/requirements-docs.txt
+      - name: Build the documentation
+        run: mkdocs build --strict
       - name: Collect the state of every repository
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER: ${{ github.repository_owner }}
-        run: python3 dashboard.py --owner "$OWNER" --out site/index.html
+        run: python3 dashboard.py --owner "$OWNER" --out site/dashboard/index.html
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
 
   deploy:
-    name: publish the dashboard
+    name: publish the website
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -56,13 +77,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     permissions:
-      id-token: write
-      pages: write
+      id-token: write # proves to GitHub Pages which workflow publishes
+      pages: write # publishes the website
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
-      - name: Publish the page on GitHub Pages
+      - name: Publish the website on GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

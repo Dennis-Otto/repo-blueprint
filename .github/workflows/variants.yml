@@ -2,8 +2,8 @@ name: Variants
 
 # Renders every kind of project from this commit and runs what a new repository of
 # that kind runs from its first commit: scripts/check.sh with the tools of its stack,
-# the lint of its workflows, and hassfest or Hadolint where they apply. Every week as
-# well, since the tools and Home Assistant move on their own.
+# the build of its website, the lint of its workflows, and hassfest or Hadolint where
+# they apply. Every week as well, since the tools and Home Assistant move on their own.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -58,6 +58,16 @@ jobs:
             . "$PROJECT"
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all
+      # The website of the Docs workflow, with the tools the project gets, in an
+      # environment of its own and the Python they are compiled for.
+      - name: Build the website of the project
+        working-directory: ${{ env.PROJECT }}
+        env:
+          NO_MKDOCS_2_WARNING: "true"
+        run: |
+          python -m venv "$RUNNER_TEMP/docs"
+          "$RUNNER_TEMP/docs/bin/pip" install --require-hashes -r .github/docs-requirements.txt
+          "$RUNNER_TEMP/docs/bin/mkdocs" build --strict --site-dir "$RUNNER_TEMP/site"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)

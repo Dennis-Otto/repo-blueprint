@@ -56,5 +56,10 @@
       matchUpdateTypes: ["minor", "patch"],
       groupName: "the tools of the Node packages",
     },
+    {
+      matchFileNames: ["stacks/docs/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "the tools of the websites",
+    },
   ],
 }

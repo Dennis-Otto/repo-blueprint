@@ -24,6 +24,10 @@ auth.json
 credentials*.json
 /secrets/
 
+# The website that MkDocs builds, and the tools of its preview
+/site/
+/.venv-docs/
+
 # Python
 __pycache__/
 *.py[cod]
