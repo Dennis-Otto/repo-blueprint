@@ -13,6 +13,10 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
 ![Die Social Preview des Blueprints: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](https://raw.githubusercontent.com/Dennis-Otto/repo-blueprint/main/.github/social-preview.png)
 
+## Wie sich ein Repository selbst pflegt
+
+--8<-- "README.de.md:loop"
+
 ## Was ein neues Repository bekommt
 
 <div class="grid cards" markdown>

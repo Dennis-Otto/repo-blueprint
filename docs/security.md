@@ -20,6 +20,43 @@ What the blueprint protects, what it trusts and which risks remain. [SECURITY.md
 
 ## Trust boundaries
 
+```mermaid
+flowchart TB
+    accTitle: The trust boundaries of the blueprint
+    accDescr: Five boundaries. 1, this repository to every repository made from it, through the blueprint bot and the checks of each repository. 2, the template to Copier on your machine, as data for its sandboxed Jinja. 3, blueprint.py to GitHub, with the login of whoever starts it, reading every answer as untrusted. 4, Renovate to every repository, through pull requests without administration. 5, the dashboard to the public, with every value escaped.
+
+    subgraph blueprint ["This repository"]
+        template["Template"]
+        renovate(["Renovate"])
+        dashboard(["Dashboard"])
+    end
+
+    subgraph machine ["Your machine"]
+        copier(["Copier"])
+        tool(["<code>blueprint.py</code>"])
+    end
+
+    subgraph repos ["Each repository"]
+        updater(["Blueprint bot"])
+        checks{"Its checks"}
+        main["main"]
+    end
+
+    github[("GitHub API")]
+    public(["The public"])
+
+    template -- "2 · data for the<br>sandboxed Jinja" --> copier
+    template -- "1 · a release tag" --> updater --> checks --> main
+    renovate -- "4 · pull requests<br>no administration" --> checks
+    tool -- "3 · your login<br>answers untrusted" --> github
+    dashboard -- "5 · public data<br>every value escaped" --> public
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    class renovate,updater,dashboard bot
+    class copier,tool person
+```
+
 1. **This repository → every repository made from it.** The blueprint bot of each repository runs `copier update` to the latest release tag of the blueprint and opens a pull request there. The checks of that repository decide whether it merges; a conflict, or the repository variable `BLUEPRINT_AUTOMERGE` set to `off`, makes it wait for the maintainer.
 2. **The template → Copier on your machine.** The template is data for Copier's sandboxed Jinja; the answers of the questions are checked by their validators.
 3. **`blueprint.py` → GitHub.** It runs the GitHub CLI with the login of whoever starts it, or with the token of the settings bot, and treats every answer of GitHub as untrusted: an answer it can't read stops the run with an error.

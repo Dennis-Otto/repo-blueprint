@@ -4,6 +4,28 @@ Where the blueprint is heading in the next twelve months, until October 2027, an
 
 ## Done
 
+```mermaid
+flowchart TB
+    accTitle: The larger steps of the blueprint
+    accDescr: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags. Next comes a screenshot bot.
+
+    subgraph done ["Done"]
+        direction LR
+        early["<b>0.1 – 0.3</b><br>seven kinds of projects<br>settings as code<br>release bot"]
+        middle["<b>0.4 – 0.5</b><br>settings bot<br>Renovate<br>beta channel"]
+        late["<b>0.6 – 0.8</b><br>websites<br>SLSA Build Level 3<br>signed tags"]
+        early --> middle --> late
+    end
+
+    next(["<b>Next</b><br>a screenshot bot"])
+    done --> next
+
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    classDef plan fill:#526cfe2e,stroke:#526cfe,stroke-width:2px,stroke-dasharray:6 4
+    class early,middle,late done
+    class next plan
+```
+
 The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELOG.md) names every change of every release. The larger steps so far:
 
 - **0.1 to 0.3:** seven kinds of projects, the settings as code, the security checks of the workflows, fuzzing and property tests, the release bot with the changelog that the pull requests write, the verification of every release, prereleases, the dev container, the dashboard and Harden-Runner.
