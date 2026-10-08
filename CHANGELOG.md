@@ -16,6 +16,15 @@ the next release, or lists the pull requests when there is none.
 - `blueprint.py settings check` and `settings apply` name the settings as `.github/repository.toml` on Windows too, as the documentation does, instead of `.github\repository.toml`.
 - **One run after the checks, not two:** the coverage bot and the flaky-test bot share the new workflow *After the checks*, `after-checks.yml`, which replaces `coverage.yml` and `flaky.yml`. A run of the checks starts one run after it instead of two that mostly had nothing to do, the coverage bot no longer starts for checks that were skipped or cancelled, and the workflow watches only the checks of the repository. A project that added a workflow of its own to the list of `flaky.yml` adds it to `after-checks.yml`.
 
+## [0.8.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.1...v0.8.2) (2026-10-08)
+
+
+### Bug fixes
+
+* name every file of the coverage comment by its path from the root ([#99](https://github.com/Dennis-Otto/repo-blueprint/issues/99)) ([f2302d5](https://github.com/Dennis-Otto/repo-blueprint/commit/f2302d55cb6541a017ca26bc0387221ac6bd494c))
+* name the settings with slashes on Windows too, and bring the roadmap up to 0.8 ([#93](https://github.com/Dennis-Otto/repo-blueprint/issues/93)) ([066cd89](https://github.com/Dennis-Otto/repo-blueprint/commit/066cd895d5f66c21cab1e93a2afac4af97fac96c))
+* start one run after the checks, not two that mostly have nothing to do ([#95](https://github.com/Dennis-Otto/repo-blueprint/issues/95)) ([592e618](https://github.com/Dennis-Otto/repo-blueprint/commit/592e61829db7c63ef4b2fc7799a6ea6fe0af7314))
+
 ## [0.8.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.0...v0.8.1) (2026-10-08)
 
 ### Bug fixes
