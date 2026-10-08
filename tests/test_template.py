@@ -194,6 +194,18 @@ def test_every_area_of_the_forms_has_a_label(
         assert option in mapped or option == "Other", option
 
 
+def test_someone_sets_every_label(projects: dict[str, Path]) -> None:
+    for project in (ROOT, *projects.values()):
+        text = (project / ".github/labels.toml").read_text(encoding="utf-8")
+        setters = set(re.findall(r"^#   (\w+) ", text, re.MULTILINE))
+        labels = tomllib.loads(text)["label"]
+        assert {label["group"] for label in labels} <= setters, project
+        # Dependabot updates one ecosystem and so sets no label of an ecosystem, only
+        # dependencies; Renovate sets none.
+        assert "dependencies" in {label["name"] for label in labels}, project
+        assert "dependabot" not in setters, project
+
+
 def test_the_composer_lock_belongs_to_the_composer_json(
     projects: dict[str, Path],
 ) -> None:
