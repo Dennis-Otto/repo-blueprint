@@ -48,6 +48,12 @@ plugins:
           Decisions: Entscheidungen
           Changelog: Änderungen
 
+# The hooks of every website, and those of this one: the pictures of the READMEs,
+# named from the root of the repository, show on the website too.
+hooks:
+  - .github/mkdocs_blueprint.py
+  - .github/mkdocs_project.py
+
 # The menu, the same in both languages, with the titles of nav_translations above on
 # the German website.
 nav:

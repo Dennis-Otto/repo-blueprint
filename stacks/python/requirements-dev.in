@@ -1,5 +1,5 @@
 # The development tools: tests, coverage, property tests, type checks, lint and
-# the packaging with its build backend. Dependabot keeps this list and the
+# the packaging with its build backend. Renovate keeps this list and the
 # hash-pinned requirements-dev.txt current.
 build
 coverage
