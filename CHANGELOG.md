@@ -9,6 +9,7 @@ the next release, or lists the pull requests when there is none.
 ### Bug fixes
 
 - The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
+- Renovate updates an image of a script also where a variable holds it in quotes, such as `IMAGE="name:tag@sha256:…"`; it found only an image after a space before.
 
 ### Features
 

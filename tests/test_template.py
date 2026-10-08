@@ -718,6 +718,19 @@ def test_renovate_keeps_every_project_current(
         "devcontainer: { enabled: false }",
     ):
         assert setting in rules, setting
+    # The images of the scripts, also in a variable with quotes.
+    pattern = re.search(r'^\s*"(\(\?:\^\|.*sha256.*)",$', rules, re.MULTILINE)
+    assert pattern
+    images = re.compile(json.loads(f'"{pattern[1]}"').replace("(?<", "(?P<"))
+    digest = "sha256:" + "0" * 64
+    for line in (
+        f"  image: ghcr.io/owner/tool:v1.2.3@{digest}",
+        f'IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble@{digest}"',
+        f"IMAGE=docker.io/library/python:3.14@{digest}",
+    ):
+        found = images.search(line)
+        assert found, line
+        assert found["currentDigest"] == digest
     # Dependabot keeps only the Features of the dev container and their lock file.
     dependabot = (project / ".github/dependabot.yml").read_text(encoding="utf-8")
     assert re.findall(r"package-ecosystem: (\S+)", dependabot) == ["devcontainers"]
