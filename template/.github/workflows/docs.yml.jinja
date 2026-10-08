@@ -1,0 +1,1 @@
+[% set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" %][% filter replace(guard, "") | replace('stacks/docs/requirements-docs.txt', '.github/docs-requirements.txt') %][% include ".github/workflows/docs.yml" %][% endfilter -%]

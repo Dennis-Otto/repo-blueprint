@@ -1,0 +1,6 @@
+# MkDocs with the Material theme, which builds the documentation website of every
+# repository from its mkdocs.yml and docs/: the Docs workflow, and the Dashboard
+# workflow for the blueprint's own. Every repository gets the hash-pinned
+# requirements-docs.txt as .github/docs-requirements.txt, and Renovate keeps both
+# current here.
+mkdocs-material
