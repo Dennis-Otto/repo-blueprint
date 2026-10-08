@@ -314,6 +314,11 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
         ".github/markdownlint.jsonc",
+        ".github/prose/cspell.json",
+        ".github/prose/package.json",
+        ".github/prose/package-lock.json",
+        ".github/cspell-words.txt",
+        ".vale.ini",
         ".github/sign-tag.sh",
         ".github/renovate-blueprint.json5",
         ".markdownlint-cli2.jsonc",
@@ -472,6 +477,7 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
     assert {"type": "generic", "path": "appinfo/info.xml"} in config["extra-files"]
     review = (project / ".github/dependency-review.yml").read_text(encoding="utf-8")
     assert "pkg:composer/netresearch/jsonmapper" in review
+    assert "pkg:npm/%40cspell/dict-django" in review
 
 
 def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
@@ -482,7 +488,7 @@ def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
                 (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"),
             )
         )
-        for name in ("ci-php.yml", "release.yml")
+        for name in ("ci-php.yml", "build-release.yml")
     ]
     assert len(pins[0]) == 2
     assert pins[0] == pins[1]
@@ -837,6 +843,19 @@ def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
     assert bot.index('if [[ "$ahead" == 0 ]]; then') < bot.index("--method DELETE")
     for kept in ("release-please--*", "renovate/*", "dependabot/*"):
         assert kept in bot, kept
+
+
+def test_a_release_is_built_in_isolation() -> None:
+    workflows_dir = ROOT / ".github/workflows"
+    release = (workflows_dir / "release.yml").read_text(encoding="utf-8")
+    build = (workflows_dir / "build-release.yml").read_text(encoding="utf-8")
+    assets = release[release.index("  assets:") : release.index("\n  publish:")]
+    assert "uses: ./.github/workflows/build-release.yml" in assets
+    # The build gets the tag and version as inputs, nothing else of the caller.
+    assert "needs." not in build
+    assert "workflow_call:" in build
+    verify = (workflows_dir / "verify-release.yml").read_text(encoding="utf-8")
+    assert 'build="$GH_REPO/.github/workflows/build-release.yml"' in verify
 
 
 def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
