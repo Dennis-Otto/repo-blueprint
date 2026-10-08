@@ -42,6 +42,8 @@ jobs:
       deployment: false
     permissions:
       contents: write
+      # The keyless signature of the release tags (gitsign).
+      id-token: write
       issues: write
       pull-requests: write
     # A release, or a beta of the next one; the jobs below handle both alike.
@@ -68,6 +70,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The merge of the release pull request: its tag comes first, signed, and
+      # release-please creates the release on it.
+      - name: Sign the tag of the release that this merge makes
+        if: github.event_name == 'push' && steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          subject="${MESSAGE%%$'\n'*}"
+          if [[ "$subject" != "chore: release "* ]]; then
+            echo "No release pull request was merged."
+            exit 0
+          fi
+          tag="v$(jq -r '.["."]' .release-please-manifest.json)"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
+            echo "The tag $tag exists already."
+            exit 0
+          fi
+          bash .github/sign-tag.sh "$tag"
+          echo "The tag $tag is signed." >> "$GITHUB_STEP_SUMMARY"
       - name: Have the release pull request rebuilt on the current main
         if: steps.app.outputs.token != ''
         env:
@@ -202,7 +224,7 @@ jobs:
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" beta "$version" > "$RUNNER_TEMP/beta.md"
-          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/v$version" -f sha="$GITHUB_SHA" --silent
+          bash .github/sign-tag.sh "v$version"
           gh release create "v$version" --draft --prerelease --verify-tag \
             --title "v$version" --notes-file "$RUNNER_TEMP/beta.md"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"

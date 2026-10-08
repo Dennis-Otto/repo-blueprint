@@ -51,6 +51,9 @@ secrets = ["RELEASE_AUTOMATION_PRIVATE_KEY"]
 
 [environments.pypi]
 secrets = []
+
+[pages]
+build_type = "workflow"
 """
 
 
@@ -109,6 +112,8 @@ class FakeGitHub:
             "description": "A demo",
             "files": {"readme": {"url": "x"}, "contributing": {"url": "x"}},
         }
+        # Off, as in a new repository.
+        self.pages: dict[str, Any] | None = None
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
             "spare": {"color": "ffffff", "description": "Not in the configuration"},
@@ -170,6 +175,7 @@ class FakeGitHub:
             ),
             (r"/environments/([\w-]+)/secrets", self.secrets),
             (r"/community/profile", self.community_profile),
+            (r"/pages", self.pages_site),
         ):
             match = re.fullmatch(pattern, path)
             if match:
@@ -285,6 +291,18 @@ class FakeGitHub:
         }
         return 200, body
 
+    def pages_site(self, method: str, body: Any) -> tuple[int, Any]:
+        if method == "POST":
+            assert self.pages is None
+            self.pages = {"build_type": body["build_type"], "html_url": "https://x/"}
+            return 201, self.pages
+        if self.pages is None:
+            return 404, {"message": "Not Found"}
+        if method == "PUT":
+            self.pages.update(body)
+            return 204, None
+        return 200, self.pages
+
     def secrets(self, method: str, body: Any, name: str) -> tuple[int, Any]:
         if name not in self.environments:
             return 404, {"message": "Not Found"}
@@ -349,6 +367,7 @@ def test_check_reports_every_difference(
         "label good first issue",
     ):
         assert setting in out
+    assert 'pages: GitHub has "off", the configuration wants "on"' in out
     assert (
         "gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo Dennis-Otto/demo"
         in out
@@ -388,6 +407,8 @@ def test_apply_sets_everything_but_the_secrets(
     assert [
         (item["name"], item["type"]) for item in github.environments["pypi"]["branches"]
     ] == [("main", "branch")]
+    assert github.pages is not None
+    assert github.pages["build_type"] == "workflow"
     # Alerts before the security updates, which need them.
     puts = [path for method, path in github.calls if method == "PUT"]
     assert puts.index(f"repos/{REPO}/vulnerability-alerts") < puts.index(
@@ -538,6 +559,37 @@ def test_an_environment_without_main_drifts(github: FakeGitHub) -> None:
             {"protected_branches": True, "custom_branch_policies": False},
         )
     ]
+
+
+def test_pages_that_build_from_a_branch_switch_to_the_workflow(
+    github: FakeGitHub, root: Path
+) -> None:
+    # A site of the old kind, built by GitHub from a branch, publishes no website of
+    # the Docs workflow.
+    github.pages = {"build_type": "legacy", "source": {"branch": "gh-pages"}}
+
+    assert run(github, root, "settings", "check") == 1
+    run(github, root, "settings", "apply")
+
+    assert github.pages["build_type"] == "workflow"
+    assert ("PUT", f"repos/{REPO}/pages") in github.calls
+    assert ("POST", f"repos/{REPO}/pages") not in github.calls
+
+
+def test_pages_that_match_stay_as_they_are(github: FakeGitHub) -> None:
+    github.pages = {"build_type": "workflow", "html_url": "https://x/"}
+    api = blueprint.Api(github)
+
+    assert blueprint.check_pages(api, REPO, {"build_type": "workflow"}) == []
+    blueprint.apply_pages(api, REPO, {"build_type": "workflow"}, [])
+    assert all(method == "GET" for method, _ in github.calls)
+
+
+def test_a_repository_without_pages_settings_leaves_them_alone(
+    github: FakeGitHub,
+) -> None:
+    assert blueprint.check_pages(blueprint.Api(github), REPO, {}) == []
+    assert github.calls == []
 
 
 # --------------------------------------------------------------------------- the API
