@@ -16,7 +16,7 @@ All changes reach the protected `main` branch through pull requests that pass ev
 
 New functionality comes with tests in the automated test suite, in the same pull request, and so does every change of behavior. A bug fix comes with a test that fails without the fix, so that the bug can't return unnoticed. `scripts/check.sh` fails when a line or a branch of the code runs in no test. A pull request without the tests it needs is not merged.
 
-A change of the template comes with a test in `tests/test_template.py` that renders it, and the Variants workflow runs the checks of every kind of project with its real tools.
+A change of the template comes with a test in `tests/test_template.py` that renders it, and the Variants workflow runs the checks of every kind of project with its real tools, for a new repository and for one that the update brings from the latest release. A change that the files of a project must follow, which an update never touches, says in the changelog how an existing project makes it.
 
 ## Coding standards
 

@@ -30,8 +30,8 @@ What the blueprint protects, what it trusts and which risks remain. [SECURITY.md
 
 | Threat | Countermeasure | Evidence |
 | --- | --- | --- |
-| A harmful change of the template reaches every repository | Pull requests with every required check here; every kind rendered and checked with its real tools; a release that is not only dependency updates waits for the maintainer; in each repository, the update passes its own checks | the Variants workflow, `tests/test_template.py` |
-| Copying the blueprint runs code on the user's machine | No tasks, migrations or Jinja extensions in `copier.yml` | `test_copying_runs_no_code_of_the_blueprint` in `tests/test_template.py` |
+| A harmful change of the template reaches every repository | Pull requests with every required check here; every kind rendered and checked with its real tools, also after an update from the latest release; a release that is not only dependency updates waits for the maintainer; in each repository, the update passes its own checks | the Variants workflow, `tests/test_template.py` |
+| Copying or updating the blueprint runs code on the user's machine | No tasks, migrations or Jinja extensions in `copier.yml`, so Copier needs no `--trust` | `test_copying_runs_no_code_of_the_blueprint` in `tests/test_template.py`; the Variants workflow updates every kind without `--trust` |
 | A rendered workflow loses its pins or runs with more permissions | Every action pinned to a commit hash; the workflows of a new repository are the blueprint's own, which zizmor and actionlint audit | `test_every_action_is_pinned_to_a_commit`, `test_the_workflows_are_the_blueprints_own` |
 | `blueprint.py` leaks a secret | It never reads the value of a secret; it only names the missing ones | `test_apply_sets_everything_but_the_secrets` in `tests/test_blueprint.py` |
 | An unexpected answer of GitHub makes `blueprint.py` apply wrong settings | Every answer is read strictly; anything else stops the run with an error before a change | `test_errors_of_github_stop_the_run`; coverage-guided fuzzing with Atheris in `fuzz/fuzz_blueprint.py` |
