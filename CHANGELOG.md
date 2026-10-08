@@ -6,12 +6,13 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **One heading for each kind of change:** when two pull requests each start a heading such as *Features* under *Unreleased*, the release puts their entries under one heading, in the changelog and in the notes.
+
 ### Features
 
 - **The issue forms point to the documentation:** with a `homepage`, the first link of the forms leads to it, so that a question finds its answer before it becomes an issue. The blueprint's own homepage is its website now.
-
-### Features
-
 - **The website of the owner itself:** a repository named like `dennis-otto.github.io` may use the blueprint, and its documentation website lives at the root of the owner's address, such as `https://dennis-otto.github.io/`.
 
 ## [0.7.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.2...v0.7.0) (2026-10-08)

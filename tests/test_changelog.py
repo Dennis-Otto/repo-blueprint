@@ -99,7 +99,7 @@ def test_a_section_of_the_version_on_main_is_replaced() -> None:
 @given(
     st.lists(
         st.text(alphabet="abc xyz-*.#()", min_size=1, max_size=20).filter(
-            lambda line: not line.startswith("## ")
+            lambda line: not line.startswith(("## ", "### "))
         ),
         max_size=6,
     )
@@ -114,6 +114,41 @@ def test_the_text_of_unreleased_reaches_the_release_once(lines: list[str]) -> No
     if text.strip():
         assert release.sections[1][1].strip("\n") == text.strip("\n")
     assert once.endswith(OLDER)
+
+
+def test_a_kind_of_change_that_two_pull_requests_start_is_one_heading() -> None:
+    unreleased = (
+        "### Features\n\n- **Voices:** start a game by voice (#12).\n\n"
+        "### Bug fixes\n\n- A fix (#13).\n\n"
+        "### Features\n\n- **Cards:** a new card (#14).\n"
+    )
+    main = main_changelog(unreleased=unreleased)
+    result = blueprint.release_changelog("1.3.0", main, branch_changelog(main))
+
+    assert result.count("### Features") == 1
+    assert (
+        "### Features\n\n- **Voices:** start a game by voice (#12).\n"
+        "- **Cards:** a new card (#14).\n\n### Bug fixes\n\n- A fix (#13).\n\n## 1.2.2"
+    ) in result
+    assert blueprint.release_changelog("1.3.0", main, result) == result
+
+
+def test_merged_headings_keep_an_introduction_and_paragraphs() -> None:
+    text = (
+        "A word first.\n\n### Notes\n\nA paragraph.\n\n"
+        "### Empty\n\n### Notes\n\nAnother one.\n\n### Empty\n"
+    )
+
+    assert blueprint.merge_headings(text) == (
+        "A word first.\n\n### Notes\n\nA paragraph.\n\nAnother one.\n\n### Empty\n"
+    )
+
+
+def test_a_beta_shows_each_kind_of_change_once() -> None:
+    unreleased = "### Features\n\n- One (#1).\n\n### Features\n\n- Two (#2).\n"
+    notes = blueprint.beta_notes("1.3.0-beta.1", main_changelog(unreleased=unreleased))
+
+    assert "### Features\n\n- One (#1).\n- Two (#2).\n" in notes
 
 
 def test_the_notes_show_the_text_and_then_every_pull_request() -> None:
