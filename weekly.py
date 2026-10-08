@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from blueprint import Api, GitHubError
+from blueprint.github import Api, GitHubError
 from dashboard import WORKFLOWS, repositories
 
 # The titles of updates of dependencies, as Renovate and Dependabot write them.

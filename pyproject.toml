@@ -9,9 +9,10 @@ filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
+# blueprint is the package blueprint/; the script blueprint.py only starts it.
 source = ["blueprint", "dashboard", "weekly", ".github"]
-# The tests render the template, and Jinja runs its include of blueprint.py as a
-# template of the same name in a temporary clone; that is no code of the tool.
+# The tests render the template, and Jinja runs its includes of the tool as
+# templates of the same names in a temporary clone; that is no code of the tool.
 omit = ["*/copier._vcs.clone*/*"]
 
 [tool.coverage.report]
@@ -20,6 +21,8 @@ show_missing = true
 skip_covered = true
 exclude_also = ['if __name__ == "__main__":']
 
+# The tool has the same settings in blueprint/ruff.toml, which it brings into every
+# repository; a test keeps the two equal.
 [tool.ruff]
 target-version = "py312"
 
@@ -30,4 +33,6 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["blueprint.py", "dashboard.py", "weekly.py", ".github/mkdocs_blueprint.py", "tests"]
+# The package, not the script that starts it: mypy would find the module blueprint
+# twice. A test runs the script.
+files = ["blueprint", "dashboard.py", "weekly.py", ".github/mkdocs_blueprint.py", "tests"]

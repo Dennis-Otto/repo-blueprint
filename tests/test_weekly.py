@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-import blueprint
 import weekly
+from blueprint.github import Api
 
 NOW = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
 DAY = "2026-10-05"
@@ -94,7 +94,7 @@ ROUTES: dict[str, tuple[int, Any]] = {
 }
 
 
-def simulated(routes: dict[str, tuple[int, Any]]) -> blueprint.Api:
+def simulated(routes: dict[str, tuple[int, Any]]) -> Api:
     def runner(
         arguments: Sequence[str], body: str | None
     ) -> subprocess.CompletedProcess[str]:
@@ -102,7 +102,7 @@ def simulated(routes: dict[str, tuple[int, Any]]) -> blueprint.Api:
         answer = f"HTTP/2.0 {status} X\n\n{json.dumps(data)}"
         return subprocess.CompletedProcess(arguments, 0, answer, "")
 
-    return blueprint.Api(runner)
+    return Api(runner)
 
 
 def test_the_week_of_a_busy_repository() -> None:

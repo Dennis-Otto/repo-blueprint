@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-import blueprint
+from blueprint import cli
+from blueprint.vex import OPENVEX, openvex
 
 ACCEPTED = """\
 # Advisories that OSV-Scanner should not report.
@@ -23,9 +24,7 @@ id = "GHSA-2gx3-rcp4-g85q"
 
 
 def document() -> Any:
-    text = blueprint.openvex(
-        "Dennis-Otto/demo", "v1.3.0", "2026-10-08T03:00:00Z", ACCEPTED
-    )
+    text = openvex("Dennis-Otto/demo", "v1.3.0", "2026-10-08T03:00:00Z", ACCEPTED)
     assert text is not None
     assert text.endswith("\n")
     return json.loads(text)
@@ -34,7 +33,7 @@ def document() -> Any:
 def test_every_accepted_advisory_does_not_affect_the_release() -> None:
     vex = document()
 
-    assert vex["@context"] == blueprint.OPENVEX
+    assert vex["@context"] == OPENVEX
     assert vex["timestamp"] == "2026-10-08T03:00:00Z"
     assert vex["@id"] == (
         "https://github.com/Dennis-Otto/demo/releases/download/v1.3.0/demo.openvex.json"
@@ -62,7 +61,7 @@ def test_the_reason_becomes_the_statement_of_its_impact() -> None:
 
 @pytest.mark.parametrize("accepted", ["", "# Nothing accepted.\n"])
 def test_without_accepted_advisories_there_is_no_document(accepted: str) -> None:
-    assert blueprint.openvex("o/r", "v1.0.0", "2026-10-08T03:00:00Z", accepted) is None
+    assert openvex("o/r", "v1.0.0", "2026-10-08T03:00:00Z", accepted) is None
 
 
 def test_the_command_line_writes_the_document(
@@ -72,9 +71,9 @@ def test_the_command_line_writes_the_document(
     accepted.write_text(ACCEPTED, encoding="utf-8")
     arguments = ["vex", "Dennis-Otto/demo", "v1.3.0", "2026-10-08T03:00:00Z"]
 
-    assert blueprint.main([*arguments, "--file", str(accepted)]) == 0
+    assert cli.main([*arguments, "--file", str(accepted)]) == 0
     assert json.loads(capsys.readouterr().out) == document()
 
     # Without the file, nothing is written.
-    assert blueprint.main([*arguments, "--file", str(tmp_path / "missing.toml")]) == 0
+    assert cli.main([*arguments, "--file", str(tmp_path / "missing.toml")]) == 0
     assert capsys.readouterr().out == ""

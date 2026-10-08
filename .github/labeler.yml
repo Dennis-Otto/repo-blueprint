@@ -8,7 +8,7 @@
       - any-glob-to-any-file: [".github/workflows/**"]
 "area: settings":
   - changed-files:
-      - any-glob-to-any-file: ["blueprint.py", "tests/test_blueprint.py", ".github/repository.toml"]
+      - any-glob-to-any-file: ["blueprint.py", "blueprint/**", "tests/test_blueprint.py", ".github/repository.toml"]
 "area: stacks":
   - changed-files:
       - any-glob-to-any-file: ["stacks/**"]
