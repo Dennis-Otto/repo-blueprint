@@ -16,6 +16,20 @@ the next release, or lists the pull requests when there is none.
 - **The issue forms point to the documentation:** with a `homepage`, the first link of the forms leads to it, so that a question finds its answer before it becomes an issue. The blueprint's own homepage is its website now.
 - **The website of the owner itself:** a repository named like `dennis-otto.github.io` may use the blueprint, and its documentation website lives at the root of the owner's address, such as `https://dennis-otto.github.io/`.
 
+## [0.8.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.7.0...v0.8.0) (2026-10-08)
+
+
+### Features
+
+* let the website of the owner itself use the blueprint ([#82](https://github.com/Dennis-Otto/repo-blueprint/issues/82)) ([332d68e](https://github.com/Dennis-Otto/repo-blueprint/commit/332d68e6720cf707931b2c4583b949888d09245a))
+* point the issue forms to the documentation ([#84](https://github.com/Dennis-Otto/repo-blueprint/issues/84)) ([7e5aa0d](https://github.com/Dennis-Otto/repo-blueprint/commit/7e5aa0d28ed433b77ab478f68fb1e6a4cd684293))
+
+
+### Bug fixes
+
+* let websites in more than one language build ([#86](https://github.com/Dennis-Otto/repo-blueprint/issues/86)) ([fa3f960](https://github.com/Dennis-Otto/repo-blueprint/commit/fa3f96071c6e7586f92a350d21abf360759282fa))
+* one heading for each kind of change in a release ([#85](https://github.com/Dennis-Otto/repo-blueprint/issues/85)) ([733e5a1](https://github.com/Dennis-Otto/repo-blueprint/commit/733e5a1c5c603be2a6f408d39fe43cba1e07ae1a))
+
 ## [0.7.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.2...v0.7.0) (2026-10-08)
 
 ### Bug fixes
