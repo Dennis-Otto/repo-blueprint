@@ -321,7 +321,7 @@ STYLE = """
   --head: #151b23; } }
 body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 1200px; margin: 0 auto; }
+main { max-width: 1400px; margin: 0 auto; }
 h1 { font-size: 24px; margin: 0 0 4px; }
 h2 { font-size: 18px; margin: 32px 0 4px; }
 p { color: var(--muted); margin: 0 0 20px; }
