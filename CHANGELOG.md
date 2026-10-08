@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- GitHub no longer asks the maintainer to review every pull request of a bot: the blueprint brings no `.github/CODEOWNERS`, which named the owner of every file and so requested their review on every pull request of someone else, although no rule asks for one. A repository whose update keeps the file can delete it.
+
 ### Features
 
 - **The settings that every website shares come from the blueprint.** `.github/mkdocs-blueprint.yml` holds the theme, the plugins and the Markdown of the documentation website, and the `mkdocs.yml` of a project inherits it (`INHERIT`), so that the updates of the blueprint bring the website new features. It adds tabs for the sections of the menu and the path above a page, fonts and pictures served with the website instead of from other servers (privacy plugin), a preview card of every page for where a link to it is shared (social plugin), pictures that open enlarged (glightbox), the date of the last change of a page, tabs on a page, tooltips, and the plugin for a website in more than one language with a switch in the header (mkdocs-static-i18n). An existing project puts `INHERIT: .github/mkdocs-blueprint.yml` at the top of its `mkdocs.yml` and removes what the file now holds; its dependency review allows the license MIT-CMU of Pillow.
