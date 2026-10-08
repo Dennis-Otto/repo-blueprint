@@ -9,6 +9,7 @@ the next release, or lists the pull requests when there is none.
 ### Bug fixes
 
 - `blueprint.py settings check` and `settings apply` name the settings as `.github/repository.toml` on Windows too, as the documentation does, instead of `.github\repository.toml`.
+- **One run after the checks, not two:** the coverage bot and the flaky-test bot share the new workflow *After the checks*, `after-checks.yml`, which replaces `coverage.yml` and `flaky.yml`. A run of the checks starts one run after it instead of two that mostly had nothing to do, the coverage bot no longer starts for checks that were skipped or cancelled, and the workflow watches only the checks of the repository. A project that added a workflow of its own to the list of `flaky.yml` adds it to `after-checks.yml`.
 
 ## [0.8.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.0...v0.8.1) (2026-10-08)
 
