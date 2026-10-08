@@ -1,5 +1,5 @@
 # The test tools of the integration; the test plugin pins Home Assistant itself.
-# Dependabot keeps this list and the hash-pinned requirements-test.txt current.
+# Renovate keeps this list and the hash-pinned requirements-test.txt current.
 coverage
 hypothesis
 mypy
