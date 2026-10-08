@@ -12,8 +12,8 @@ branch = true
 # By the names of the modules, not by folders, so that the coverage report names
 # every file by its path from the root, such as blueprint/cli.py, not cli.py: blueprint
 # is the package blueprint/, which the script blueprint.py only starts, and
-# mkdocs_blueprint the hooks of the website in .github/.
-source_pkgs = ["blueprint", "dashboard", "weekly", "mkdocs_blueprint"]
+# mkdocs_blueprint and mkdocs_project the hooks of the website in .github/.
+source_pkgs = ["blueprint", "dashboard", "weekly", "mkdocs_blueprint", "mkdocs_project"]
 # The tests render the template, and Jinja runs its includes of the tool as
 # templates of the same names in a temporary clone; that is no code of the tool.
 omit = ["*/copier._vcs.clone*/*"]
