@@ -39,13 +39,13 @@ Bots do the routine work, each with the least permissions it needs:
 
 If the maintainer can no longer maintain the project, the preferred outcome is a transparent handover to a trusted active contributor, announced in the repository. Until then, the repository should be archived rather than presented as actively maintained.
 
-Today, the maintainer is the only person with access to the repository[% if publish_to == 'nextcloud-appstore' %] and to the app in the Nextcloud App Store with its certificate[% elif publish_to == 'pypi' %] and to the project on PyPI[% elif publish_to == 'npm' %] and to the package on npm[% endif %], so the bus factor of the project is 1. Until a second person has that access, these keep the project able to continue:
+[% if successor %]The owner has designated a successor through [GitHub's account successor setting](https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-access-to-your-personal-repositories/maintaining-ownership-continuity-of-your-personal-accounts-repositories). Should the owner die, the successor can, once GitHub has confirmed it, transfer the repository to their own account or to an organization and carry it on there with administrator access, or archive it. With the maintainer and the successor, the bus factor of the project is 2.[% if publish_to == 'nextcloud-appstore' %] The app in the Nextcloud App Store and its certificate don't pass with the repository: for them the successor needs the maintainer or the App Store.[% elif publish_to == 'pypi' %] The project on PyPI doesn't pass with the repository: for it the successor needs the maintainer or PyPI.[% elif publish_to == 'npm' %] The package on npm doesn't pass with the repository: for it the successor needs the maintainer or npm.[% endif %] These keep the project able to continue as well:[% else %]Today, the maintainer is the only person with access to the repository[% if publish_to == 'nextcloud-appstore' %] and to the app in the Nextcloud App Store with its certificate[% elif publish_to == 'pypi' %] and to the project on PyPI[% elif publish_to == 'npm' %] and to the package on npm[% endif %], so the bus factor of the project is 1. Until a second person has that access, these keep the project able to continue:[% endif %]
 
 - Everything that builds, tests, releases and protects the project is in this repository: the code and its tests, the workflows, the settings as code and the documentation. Anyone can fork it under its license and carry on.
 - The bots keep the dependencies current and publish releases of dependency updates, as long as every check passes.
-
+[% if not successor %]
 A successor is planned: a second person with administrator access to the repository[% if publish_to == 'nextcloud-appstore' %] and to the app in the Nextcloud App Store[% elif publish_to == 'pypi' %] and to the project on PyPI[% elif publish_to == 'npm' %] and to the package on npm[% endif %], who can close issues, accept pull requests and publish releases within a week once the maintainer can no longer do so. They are named in the table of maintainers once they have agreed.
-
+[% endif %]
 ## Security
 
 Potential vulnerabilities follow [SECURITY.md](SECURITY.md) and are handled privately until a fix and a coordinated disclosure are ready.
