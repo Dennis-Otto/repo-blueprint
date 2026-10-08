@@ -7,9 +7,10 @@
 #   pip install --require-hashes -r .github/docs-requirements.txt && mkdocs serve
 # https://squidfunk.github.io/mkdocs-material/
 #
-# The blueprint's own website: its pages include the READMEs and the changelog, and
-# the Dashboard workflow publishes it with the dashboard under dashboard/. Preview it
-# with the tools of stacks/docs/requirements-docs.txt.
+# The blueprint's own website: a start page in English and German, the guide, which
+# includes the READMEs, and the changelog, and the Dashboard workflow publishes it
+# with the dashboard under dashboard/. Preview it with the tools of
+# stacks/docs/requirements-docs.txt.
 INHERIT: .github/mkdocs-blueprint.yml
 site_name: "Repo Blueprint"
 site_description: "A Copier template for GitHub repositories, with tests, releases, security checks and bots built in, for seven kinds of projects."
@@ -17,30 +18,43 @@ site_url: https://dennis-otto.github.io/repo-blueprint/
 repo_url: https://github.com/Dennis-Otto/repo-blueprint
 repo_name: Dennis-Otto/repo-blueprint
 copyright: "© 2026 Dennis Otto"
-# No pencil to edit a page: the pages only include the READMEs and the changelog.
+# No pencil to edit a page: the guide and the changelog only include the READMEs and
+# CHANGELOG.md.
 edit_uri: ""
 
 plugins:
   search:
     lang: [en, de]
+  # English and German. A German page sits next to its English one, named like it
+  # with .de, such as index.de.md next to index.md, and makes the German website in
+  # de/, with a switch between the languages in the header. A page without a German
+  # version, such as the roadmap, is shown in English there.
+  # https://ultrabug.github.io/mkdocs-static-i18n/
+  i18n:
+    enabled: true
+    languages:
+      - locale: en
+        name: English
+        default: true
+        build: true
+      - locale: de
+        name: Deutsch
+        build: true
+        site_description: "Eine Copier-Vorlage für GitHub-Repositories, mit Tests, Releases, Sicherheitsprüfungen und Bots, für sieben Arten von Projekten."
+        nav_translations:
+          Home: Start
+          Guide: Anleitung
+          Security design: Sicherheitsdesign
+          Decisions: Entscheidungen
+          Changelog: Änderungen
 
-# The menu. German pages live under docs/de/ and form the section "Deutsch", which
-# the language switch of extra.alternate below leads to.
+# The menu, the same in both languages, with the titles of nav_translations above on
+# the German website.
 nav:
   - Home: index.md
+  - Guide: guide.md
   - Roadmap: roadmap.md
   - Security design: security.md
   - Decisions: decisions/README.md
   - Changelog: changelog.md
   - Dashboard: https://dennis-otto.github.io/repo-blueprint/dashboard/
-  - Deutsch:
-      - de/index.md
-
-extra:
-  alternate:
-    - name: English
-      link: /repo-blueprint/
-      lang: en
-    - name: Deutsch
-      link: /repo-blueprint/de/
-      lang: de
