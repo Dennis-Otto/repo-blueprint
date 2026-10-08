@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- `blueprint.py settings check` and `settings apply` name the settings as `.github/repository.toml` on Windows too, as the documentation does, instead of `.github\repository.toml`.
+
 ## [0.8.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.0...v0.8.1) (2026-10-08)
 
 ### Bug fixes

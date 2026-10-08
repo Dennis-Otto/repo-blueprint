@@ -9,15 +9,16 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 - **0.1 to 0.3:** seven kinds of projects, the settings as code, the security checks of the workflows, fuzzing and property tests, the release bot with the changelog that the pull requests write, the verification of every release, prereleases, the dev container, the dashboard and Harden-Runner.
 - **0.4:** the settings bot that applies the settings as code itself, OSV-Scanner, area labels, the changelog check and the licenses of the third-party components in every release.
 - **0.5:** Renovate instead of Dependabot, a beta channel, the records of decisions, the coverage of every pull request, the flaky-test bot, the SBOM as CycloneDX with an OpenVEX document, the Markdown lint and the announcement of every release.
-- **The next release:** what the section *Unreleased* of the changelog lists, among it the documents that the Silver level of the OpenSSF Best Practices badge asks for.
+- **0.6:** a documentation website for every repository, the build of every release in an isolated workflow (SLSA Build Level 3), release tags signed without a key, mutation tests every week, the taint analysis of Psalm for a Nextcloud app, hints at the spelling and the style of the documents, the clean-up bot, the weekly report, the health of every repository on the dashboard and the documents that the Silver level of the OpenSSF Best Practices badge asks for.
+- **0.7:** the settings that every website shares, from the blueprint, and a successor that the owner designated on GitHub, who can carry the project on.
+- **0.8:** websites in more than one language, issue forms that point to the documentation, and the website of the owner itself made from the blueprint.
+- **OpenSSF Best Practices:** the blueprint holds [the Silver level](https://www.bestpractices.dev/projects/15284) of the badge.
+- **The next release:** what the section *Unreleased* of the changelog lists.
 
 ## Next
 
 | Topic | What it brings |
 | --- | --- |
-| **OpenSSF Best Practices Silver** | Every repository of the blueprint meets the Silver level; what is still missing is a second maintainer, see [GOVERNANCE.md](https://github.com/Dennis-Otto/repo-blueprint/blob/main/GOVERNANCE.md#continuity) |
-| **Documentation sites** | The documentation of a repository as a website on GitHub Pages, built and checked with every change |
-| **Mutation tests** | Tests that check the tests: small changes of the code that the tests must notice |
 | **A screenshot bot** | Screenshots of a project that renew themselves when its interface changes |
 
 ## Always
