@@ -29,6 +29,11 @@ A change of the template comes with a test in `tests/test_template.py` that rend
 ## Workflow
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: The way of a contribution
     accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry under Unreleased, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.

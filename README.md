@@ -25,6 +25,11 @@ The [website of the blueprint](https://dennis-otto.github.io/repo-blueprint/) ha
 Every change, yours or a bot's, is a pull request that merges once every check passes, and the release bot makes a signed release of what reaches `main`; three bots keep the repository current on their own. In the pictures, blue is the blueprint and its bots, orange is you and what is yours, and green is what comes out.
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: How a repository looks after itself
     accDescr: copier copy makes a repository from the blueprint. Every change, yours or a bot's, is a pull request that merges once every check passes, and the release bot makes a signed release of what reaches main. Renovate, the blueprint bot and the settings bot keep the repository current on their own.
@@ -87,6 +92,11 @@ flowchart TB
 The title of a pull request decides the next version, and merging the release pull request does the rest:
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: From a change to a release
     accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it builds the release in isolation, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
@@ -167,6 +177,11 @@ An existing repository takes the blueprint on a branch, in one pull request:
 ## Settings as code
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: The settings as code
     accDescr: The settings of a repository live in .github/repository.toml, with those of the project alone and the labels. blueprint.py settings apply, run by an administrator, and the settings bot, after every change and every week, make GitHub match them; settings check shows what differs.
@@ -200,6 +215,11 @@ flowchart TB
 ## Updates
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: How an update of the blueprint arrives
     accDescr: Every week the blueprint bot runs copier update to the latest release of the blueprint and opens a pull request. With conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
@@ -235,6 +255,11 @@ The blueprint owns the workflows, `scripts/check.sh` and the community files: th
 ## What belongs to a project
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: What belongs to the blueprint and what to the project
     accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings and workflows of its own beside those of the blueprint.
@@ -281,6 +306,11 @@ Every Monday, the Weekly report workflow posts in the [discussions](https://gith
 ## How the blueprint works
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: How the blueprint works
     accDescr: Copier renders a new repository from the questions in copier.yml and the files in template/, which take in the workflows of .github/workflows/, the manifests of stacks/ and blueprint.py. Renovate keeps the workflows and the stacks current.

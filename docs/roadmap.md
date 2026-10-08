@@ -5,6 +5,11 @@ Where the blueprint is heading in the next twelve months, until October 2027, an
 ## Done
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: The larger steps of the blueprint
     accDescr: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags. Next comes a screenshot bot.

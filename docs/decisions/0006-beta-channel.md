@@ -17,6 +17,11 @@ Testers of a Home Assistant integration want the changes before a release, in HA
 Option 2, switched on by the repository variable `BETA_CHANNEL`. The beta takes the version of the release pull request with `-beta.N`, is built, signed and verified like a release, and is published as a prerelease that announces nothing. release-please finds its last release by the version of its manifest, so the betas change neither the next version nor its notes.
 
 ```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
 flowchart TB
     accTitle: A beta after every change for users
     accDescr: On main, after the release 1.2.0, a feat and a fix each become a beta of 1.3.0, a docs change does not, and merging the release pull request then makes 1.3.0.
