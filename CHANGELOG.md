@@ -6,6 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- The isolated build of a release gets the secrets of the environment *release* again, so a Nextcloud app is signed: since 0.6.0 its release stopped at the build for want of the signing key.
+- A release that a failed run left as a draft, with its signed tag, is built and published by starting the Release workflow by hand.
+
 ## [0.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.0...v0.6.1) (2026-10-08)
 
 ### Bug fixes
