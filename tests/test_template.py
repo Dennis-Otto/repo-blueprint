@@ -871,7 +871,8 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         "INHERIT: .github/mkdocs-blueprint.yml",
         "  - Home: index.md",
         # German pages follow the pattern of the comments.
-        "#     docs_structure: suffix",
+        "#   i18n:",
+        "#     enabled: true",
     ):
         assert f"\n{line}\n" in config, line
     # What every website shares is the blueprint's, which it keeps current; plugins
@@ -892,6 +893,11 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
     ):
         assert f"\n{line}\n" in base, line
     assert "\n  - " not in base.split("\nplugins:\n")[1].split("\n\n")[0]
+    # The languages come before the dates, which fail the build otherwise, and are off
+    # until a project names its own; instant loading would break the language switch.
+    assert "\n  i18n:\n    enabled: false\n    docs_structure: suffix\n" in base
+    assert base.index("\n  i18n:\n") < base.index("\n  git-revision-date-localized:\n")
+    assert "navigation.instant" not in base
     assert "/.cache/" in (project / ".gitignore").read_text(encoding="utf-8").split(
         "\n"
     )

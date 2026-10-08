@@ -8,6 +8,7 @@ the next release, or lists the pull requests when there is none.
 
 ### Bug fixes
 
+- **Websites in more than one language build:** the dates of the pages no longer stop the build of a website that turns on its German pages, and the language switch leads to the same page in the other language. A website turns them on with `enabled: true` under `i18n` in `mkdocs.yml`; pages load with a full reload now.
 - **One heading for each kind of change:** when two pull requests each start a heading such as *Features* under *Unreleased*, the release puts their entries under one heading, in the changelog and in the notes.
 
 ### Features
