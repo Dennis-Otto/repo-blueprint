@@ -13,6 +13,10 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
 ![The social preview of the blueprint: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](https://raw.githubusercontent.com/Dennis-Otto/repo-blueprint/main/.github/social-preview.png)
 
+## How a repository looks after itself
+
+--8<-- "README.md:loop"
+
 ## What a new repository gets
 
 <div class="grid cards" markdown>
