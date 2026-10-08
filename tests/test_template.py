@@ -323,6 +323,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/sign-tag.sh",
         ".github/renovate-blueprint.json5",
         ".github/mkdocs-blueprint.yml",
+        ".github/mkdocs_blueprint.py",
         ".markdownlint-cli2.jsonc",
         ".markdownlint.jsonc",
         ".devcontainer/devcontainer.json",
@@ -888,6 +889,7 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         "  social: {}",
         "  glightbox: {}",
         "  git-revision-date-localized:",
+        "  - .github/mkdocs_blueprint.py",
         "    strict: false",
         "  admonition: {}",
     ):
