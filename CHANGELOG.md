@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.7.0...v0.8.0) (2026-10-08)
+
 ### Bug fixes
 
 - **Websites in more than one language build:** the dates of the pages no longer stop the build of a website that turns on its German pages, and the language switch leads to the same page in the other language. A website turns them on with `enabled: true` under `i18n` in `mkdocs.yml`; pages load with a full reload now.
