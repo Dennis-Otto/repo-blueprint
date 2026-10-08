@@ -1,5 +1,5 @@
 # The development tools of the blueprint: Copier for the tests of the template, the
-# tests and their properties (Hypothesis), coverage, type checks and lint. Dependabot
+# tests and their properties (Hypothesis), coverage, type checks and lint. Renovate
 # keeps this list and the hash-pinned requirements-dev.txt current.
 copier
 coverage
