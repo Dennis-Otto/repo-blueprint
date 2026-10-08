@@ -55,6 +55,11 @@ allow-dependencies-licenses:
   # filters (GPL-3.0-only) and typing-extensions, whose license the review reads wrongly.
   - pkg:pypi/jinja2-ansible-filters
   - pkg:pypi/typing-extensions
+  # The dictionaries of cspell, the spell check of the prose in .github/prose/, which
+  # only the checks run: Django's words (WTFPL) and the common misspellings
+  # (CC-BY-SA-4.0).
+  - pkg:npm/%40cspell/dict-django
+  - pkg:npm/%40cspell/dict-en-common-misspellings
 [%- if stack == 'php' %]
   # psalm's JSON mapper, a tool of the checks[% if license != 'AGPL-3.0-or-later' %], and the public API of Nextcloud, which the tests need[% endif %].
   - pkg:composer/netresearch/jsonmapper[% if license != 'AGPL-3.0-or-later' %]
