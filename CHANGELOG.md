@@ -10,6 +10,13 @@ the next release, or lists the pull requests when there is none.
 
 - **The language switch finds its sitemap:** on a website in more than one language, the switch of Material asked for a sitemap next to the pages of each further language, such as `de/sitemap.xml`, and got nothing. A hook of the blueprint now copies the sitemap there. A project with hooks of its own adds `.github/mkdocs_blueprint.py` to its `hooks` in `mkdocs.yml`.
 
+## [0.8.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.0...v0.8.1) (2026-10-08)
+
+
+### Bug fixes
+
+* give every language of a website its sitemap ([#90](https://github.com/Dennis-Otto/repo-blueprint/issues/90)) ([5f3a2e4](https://github.com/Dennis-Otto/repo-blueprint/commit/5f3a2e4381d257344a2ae1f8db31181a63d0547c))
+
 ## [0.8.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.7.0...v0.8.0) (2026-10-08)
 
 ### Bug fixes
