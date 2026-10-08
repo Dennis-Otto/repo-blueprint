@@ -4,6 +4,12 @@ name: Variants
 # that kind runs from its first commit: scripts/check.sh with the tools of its stack,
 # the build of its website, the lint of its workflows, and hassfest or Hadolint where
 # they apply. Every week as well, since the tools and Home Assistant move on their own.
+#
+# The same again for a repository of each kind that starts from the latest release
+# and that the blueprint bot brings to this commit with `copier update`: the update
+# must give every file of the blueprint as a new repository has it, without a
+# conflict and without --trust, and the files of the project, which it keeps, must
+# still pass the checks of this commit.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -23,13 +29,15 @@ concurrency:
 
 jobs:
   variant:
-    name: variant (${{ matrix.kind }})
+    # A new repository (variant) and one updated from the latest release (update).
+    name: ${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, container, generic]
+        start: [new, update]
     env:
       KIND: ${{ matrix.kind }}
       # Inside the workspace, where actions such as setup-node look for their files.
@@ -39,8 +47,10 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      # With every tag, for the latest release.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -50,6 +60,7 @@ jobs:
       - name: Install the hash-pinned Copier
         run: pip install --require-hashes -r requirements-dev.txt
       - name: Render the project from this commit
+        if: matrix.start == 'new'
         run: |
           copier copy --defaults --vcs-ref HEAD \
             --data project_name="Demo Project" \
@@ -58,6 +69,87 @@ jobs:
             . "$PROJECT"
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all
+      - name: Render the project from the latest release and update it to this commit
+        if: matrix.start == 'update'
+        run: |
+          data=(
+            --data project_name="Demo Project"
+            --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts."
+            --data project_type="$KIND"
+          )
+          # The latest release before this commit; HEAD^ of a release is the one before.
+          latest="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD^)"
+          # The commit, not HEAD: Copier would take the rendered project, which isn't
+          # part of the blueprint, for a change of the template.
+          commit="$(git rev-parse HEAD)"
+          copier copy --defaults --vcs-ref "$latest" "${data[@]}" "$GITHUB_WORKSPACE" "$PROJECT"
+          git -C "$PROJECT" init --quiet
+          git -C "$PROJECT" add --all
+          git -C "$PROJECT" -c user.name=Variants -c user.email=variants@users.noreply.github.com \
+            commit --quiet --message "chore: start from the blueprint $latest"
+          # As the blueprint bot does it, without --trust: updating runs no code of the blueprint.
+          (cd "$PROJECT" && copier update --defaults --conflict inline --vcs-ref "$commit")
+          git -C "$PROJECT" add --all
+          echo "The $KIND from $latest, updated to ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
+
+          # A new repository from this commit, whose files the update must give.
+          copier copy --defaults --vcs-ref "$commit" "${data[@]}" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/new"
+          python3 - "$PROJECT" "$RUNNER_TEMP/new" <<'PYTHON'
+          import difflib
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          import pathspec
+          import yaml
+
+          updated, new = (Path(argument) for argument in sys.argv[1:3])
+          config = yaml.safe_load(Path("copier.yml").read_text(encoding="utf-8"))
+          # The files of the project, which an update keeps as they are.
+          owned = pathspec.PathSpec.from_lines("gitignore", config["_skip_if_exists"])
+
+
+          def files(root: Path) -> set[str]:
+              return {
+                  path.relative_to(root).as_posix()
+                  for path in root.rglob("*")
+                  if path.is_file() and ".git" not in path.relative_to(root).parts
+              }
+
+
+          def lines(path: Path) -> list[str]:
+              return path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+
+
+          problems, kept = [], []
+          for name in sorted(files(updated) | files(new)):
+              have, want = updated / name, new / name
+              if have.is_file() and re.search(rb"^<{7} ", have.read_bytes(), re.MULTILINE):
+                  problems.append(f"{name}: the update left a conflict in it")
+              elif owned.match_file(name):
+                  if want.is_file() and not (have.is_file() and have.read_bytes() == want.read_bytes()):
+                      kept.append(name)
+              elif not want.is_file():
+                  problems.append(f"{name}: the update leaves it, a new repository doesn't have it")
+              elif not have.is_file():
+                  problems.append(f"{name}: a new repository has it, the update doesn't bring it")
+              elif have.read_bytes() != want.read_bytes():
+                  problems.append(f"{name}: the update gives it another content than a new repository has")
+                  sys.stdout.writelines(difflib.unified_diff(lines(want), lines(have), f"new/{name}", f"updated/{name}"))
+
+          if kept:
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write(
+                      "\nThese files belong to the project: the update keeps them as the latest release made "
+                      "them, and a new repository gets them otherwise. If the files of the blueprint need a "
+                      "change of them, the changelog says how an existing project makes it.\n\n"
+                  )
+                  summary.writelines(f"- `{name}`\n" for name in kept)
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PYTHON
       # The website of the Docs workflow, with the tools the project gets, in an
       # environment of its own and the Python they are compiled for.
       - name: Build the website of the project
