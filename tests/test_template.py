@@ -874,3 +874,20 @@ def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
     assert job.index('bash .github/sign-tag.sh "$tag"') < job.index(
         "googleapis/release-please-action"
     )
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_code_of_a_project_meets_mutants_every_week(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    mutation = project / ".github/workflows/mutation.yml"
+    tools = project / ".github/mutation-requirements.txt"
+    if kind in ("home-assistant", "python-package", "github-action"):
+        assert mutation.is_file()
+        assert "mutmut==" in tools.read_text(encoding="utf-8")
+    elif kind == "nextcloud-app":
+        assert mutation.is_file()
+        assert not tools.exists()
+    else:
+        assert not mutation.exists()
