@@ -1367,10 +1367,12 @@ def main(
             drift = check(api, repo, settings)
         for reason in refused:
             print(f"blueprint.py: {reason}", file=sys.stderr)
+        # The path as the documentation writes it, with slashes on Windows too.
+        config = arguments.config.as_posix()
         if not drift:
-            print(f"The settings of {repo} match {arguments.config}.")
+            print(f"The settings of {repo} match {config}.")
             return 0
-        print(f"The settings of {repo} differ from {arguments.config}:")
+        print(f"The settings of {repo} differ from {config}:")
         print(describe(drift))
         if arguments.action == "check":
             print("python3 blueprint.py settings apply sets what the API can set.")
