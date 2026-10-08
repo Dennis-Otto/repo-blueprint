@@ -420,6 +420,34 @@ def test_apply_sets_everything_but_the_secrets(
     assert "match .github/repository.toml" in capsys.readouterr().out
 
 
+def test_a_refused_part_does_not_stop_the_others(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    variable = f"repos/{REPO}/actions/variables/RELEASE_AUTOMATION_CLIENT_ID"
+    github.fail[("PATCH", variable)] = 403
+
+    assert run(github, root, "settings", "apply") == 2
+
+    # The parts after the refused one are applied all the same.
+    assert github.pages is not None
+    assert github.labels["release"]["color"] == "5319e7"
+    err = capsys.readouterr().err
+    assert "the variables could not be applied: GitHub answered 403" in err
+    assert "the permission Variables (read and write)" in err
+
+
+def test_a_refused_part_without_a_permission_hint(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.fail[("POST", f"repos/{REPO}/pages")] = 422
+
+    assert run(github, root, "settings", "apply") == 2
+
+    err = capsys.readouterr().err
+    assert "the pages could not be applied: GitHub answered 422" in err
+    assert "permission" not in err
+
+
 def test_apply_without_drift_changes_nothing(github: FakeGitHub, root: Path) -> None:
     run(github, root, "settings", "apply")
     set_secrets(github)
