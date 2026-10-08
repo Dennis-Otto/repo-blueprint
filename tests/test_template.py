@@ -321,6 +321,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".vale.ini",
         ".github/sign-tag.sh",
         ".github/renovate-blueprint.json5",
+        ".github/mkdocs-blueprint.yml",
         ".markdownlint-cli2.jsonc",
         ".markdownlint.jsonc",
         ".devcontainer/devcontainer.json",
@@ -817,13 +818,33 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         f'site_description: "A {kind} of the tests, with \\"quotes\\" and Ümlauts."',
         "site_url: https://dennis-otto.github.io/demo-project/",
         "repo_url: https://github.com/Dennis-Otto/demo-project",
-        "edit_uri: edit/main/docs/",
-        "  name: material",
+        "INHERIT: .github/mkdocs-blueprint.yml",
         "  - Home: index.md",
         # German pages follow the pattern of the comments.
-        "#       link: /demo-project/de/",
+        "#     docs_structure: suffix",
     ):
         assert f"\n{line}\n" in config, line
+    # What every website shares is the blueprint's, which it keeps current; plugins
+    # and Markdown extensions are mappings, so that those of a project merge with them.
+    base = (project / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+    assert base == (ROOT / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+    for line in (
+        "edit_uri: edit/main/docs/",
+        "  name: material",
+        "    - navigation.tabs",
+        "  search: {}",
+        "  privacy: {}",
+        "  social: {}",
+        "  glightbox: {}",
+        "  git-revision-date-localized:",
+        "    strict: false",
+        "  admonition: {}",
+    ):
+        assert f"\n{line}\n" in base, line
+    assert "\n  - " not in base.split("\nplugins:\n")[1].split("\n\n")[0]
+    assert "/.cache/" in (project / ".gitignore").read_text(encoding="utf-8").split(
+        "\n"
+    )
     assert (
         (project / "docs/index.md")
         .read_text(encoding="utf-8")

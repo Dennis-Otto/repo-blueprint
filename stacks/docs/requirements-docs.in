@@ -2,5 +2,12 @@
 # repository from its mkdocs.yml and docs/: the Docs workflow, and the Dashboard
 # workflow for the blueprint's own. Every repository gets the hash-pinned
 # requirements-docs.txt as .github/docs-requirements.txt, and Renovate keeps both
-# current here.
-mkdocs-material
+# current here. The plugins are those of .github/mkdocs-blueprint.yml:
+# - mkdocs-material[imaging]: the preview card of every page for social media
+# - mkdocs-glightbox: images that open enlarged
+# - mkdocs-git-revision-date-localized-plugin: the date of the last change of a page
+# - mkdocs-static-i18n: a website in more than one language, with a switch
+mkdocs-material[imaging]
+mkdocs-glightbox
+mkdocs-git-revision-date-localized-plugin
+mkdocs-static-i18n
