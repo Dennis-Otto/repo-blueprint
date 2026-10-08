@@ -25,6 +25,28 @@ the next release, or lists the pull requests when there is none.
 - **Every repository documents what the Silver level of the OpenSSF Best Practices badge asks for.** SECURITY.md says how to verify a release with the GitHub CLI and gives the assurance case of the repository and its releases: the threat model, the trust boundaries, the secure design principles and how the OWASP Top 10 CI/CD security risks are countered. A new repository starts with `docs/security.md`, the security design of its software, which belongs to the project from then on. GOVERNANCE.md names the roles and their responsibilities and says honestly how the project continues with one maintainer, and CONTRIBUTING.md the coding standards of each kind of project and the rule that new functionality and every fix come with tests.
 - **Hints at the prose** of the documents that a pull request changes: the spelling in English and German (cspell, with the words of the project in `.github/cspell-words.txt`) and the style of the English (Vale, with write-good and proselint), as warnings next to the lines, never as a failure. The dependency review allows the two dictionaries of cspell whose licenses it would reject, since only the checks use them; an existing repository adds them to its own `.github/dependency-review.yml`, which the update doesn't change.
 
+## [0.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.5.0...v0.6.0) (2026-10-08)
+
+
+### Features
+
+* build every release in an isolated workflow ([#65](https://github.com/Dennis-Otto/repo-blueprint/issues/65)) ([6c177e0](https://github.com/Dennis-Otto/repo-blueprint/commit/6c177e0ffaa839b0e4a5d8b5c8baf898112a5c27))
+* clean up merged branches and the caches of closed pull requests ([#55](https://github.com/Dennis-Otto/repo-blueprint/issues/55)) ([e5d1c50](https://github.com/Dennis-Otto/repo-blueprint/commit/e5d1c5014b9b63a6ccda5b779d4a52519fa70d19))
+* document what the OpenSSF Silver level asks for ([#56](https://github.com/Dennis-Otto/repo-blueprint/issues/56)) ([6bae327](https://github.com/Dennis-Otto/repo-blueprint/commit/6bae327ec52d41ccb83873d53870131eadfbe405))
+* follow untrusted input through the PHP of a Nextcloud app ([#66](https://github.com/Dennis-Otto/repo-blueprint/issues/66)) ([297ef77](https://github.com/Dennis-Otto/repo-blueprint/commit/297ef775ab6173d2948e0af87869a6ed764715f7))
+* give every repository a documentation website ([#58](https://github.com/Dennis-Otto/repo-blueprint/issues/58)) ([c4d795e](https://github.com/Dennis-Otto/repo-blueprint/commit/c4d795eb6e046d18a39527e621a5dee3886b6961))
+* hint at the spelling and the style of the changed documents ([#57](https://github.com/Dennis-Otto/repo-blueprint/issues/57)) ([f7691f2](https://github.com/Dennis-Otto/repo-blueprint/commit/f7691f299cd04ce3c94b4226d5f14614701fd7be))
+* post a weekly report of every repository in the discussions ([#67](https://github.com/Dennis-Otto/repo-blueprint/issues/67)) ([0285fa4](https://github.com/Dennis-Otto/repo-blueprint/commit/0285fa466f3e5686ab65e3c00fb0f1ccc825272d))
+* run mutation tests every week ([#64](https://github.com/Dennis-Otto/repo-blueprint/issues/64)) ([8f29e21](https://github.com/Dennis-Otto/repo-blueprint/commit/8f29e214cfb7ca45d925d9b8554d62b620f399b5))
+* show the health of every repository on the dashboard ([#68](https://github.com/Dennis-Otto/repo-blueprint/issues/68)) ([aab4406](https://github.com/Dennis-Otto/repo-blueprint/commit/aab4406c23f820d292824b4a61c6814efc8a98dd))
+* sign the tag of every release without a key ([#63](https://github.com/Dennis-Otto/repo-blueprint/issues/63)) ([81abf36](https://github.com/Dennis-Otto/repo-blueprint/commit/81abf36d8df0e2a24e7b8364f468ab26caf977d3))
+
+
+### Bug fixes
+
+* leave the files of the Markdown lint out of the package of a Nextcloud app ([#60](https://github.com/Dennis-Otto/repo-blueprint/issues/60)) ([1da3365](https://github.com/Dennis-Otto/repo-blueprint/commit/1da336539066cdabd3566c3bf098a4dda4cca784))
+* let Renovate find the image of a script in a quoted variable ([#69](https://github.com/Dennis-Otto/repo-blueprint/issues/69)) ([e1fd22c](https://github.com/Dennis-Otto/repo-blueprint/commit/e1fd22cfd6685a59e2f9863ac15997bafb9fcb32))
+
 ## [0.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.4.0...v0.5.0) (2026-10-07)
 
 ### Features
