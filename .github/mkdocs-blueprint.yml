@@ -107,7 +107,7 @@ markdown_extensions:
     custom_checkbox: true
   pymdownx.tilde: {}
 
-# What the plugins leave to do, such as the sitemap of every language. A project
+# What the plugins leave to do, such as the sitemap in every folder. A project
 # with hooks of its own lists this file there too: its list replaces this one.
 hooks:
   - .github/mkdocs_blueprint.py
