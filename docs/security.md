@@ -1,6 +1,6 @@
 # Security design
 
-What the blueprint protects, what it trusts and which risks remain. [SECURITY.md](../SECURITY.md) says how to report a vulnerability and how to verify a release, and argues why the repositories and their releases are safe; this page covers the blueprint itself: the template, `blueprint.py`, the bots that run from this repository and the dashboard.
+What the blueprint protects, what it trusts and which risks remain. [SECURITY.md](https://github.com/Dennis-Otto/repo-blueprint/blob/main/SECURITY.md) says how to report a vulnerability and how to verify a release, and argues why the repositories and their releases are safe; this page covers the blueprint itself: the template, `blueprint.py`, the bots that run from this repository and the dashboard.
 
 ## What you can expect
 
