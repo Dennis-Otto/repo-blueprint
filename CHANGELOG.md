@@ -15,6 +15,19 @@ the next release, or lists the pull requests when there is none.
 - **The settings that every website shares come from the blueprint.** `.github/mkdocs-blueprint.yml` holds the theme, the plugins and the Markdown of the documentation website, and the `mkdocs.yml` of a project inherits it (`INHERIT`), so that the updates of the blueprint bring the website new features. It adds tabs for the sections of the menu and the path above a page, fonts and pictures served with the website instead of from other servers (privacy plugin), a preview card of every page for where a link to it is shared (social plugin), pictures that open enlarged (glightbox), the date of the last change of a page, tabs on a page, tooltips, and the plugin for a website in more than one language with a switch in the header (mkdocs-static-i18n). An existing project puts `INHERIT: .github/mkdocs-blueprint.yml` at the top of its `mkdocs.yml` and removes what the file now holds; its dependency review allows the license MIT-CMU of Pillow.
 - **A designated successor:** the new answer `successor` says that the owner has designated a successor through GitHub's account successor setting. GOVERNANCE.md then says how the successor can carry the project on, with a bus factor of 2, and what doesn't pass with the repository, such as an app in the Nextcloud App Store. An existing repository turns it on with `copier update --data successor=true`.
 
+## [0.7.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.2...v0.7.0) (2026-10-08)
+
+
+### Features
+
+* describe a successor that the owner designated on GitHub ([#80](https://github.com/Dennis-Otto/repo-blueprint/issues/80)) ([3a69859](https://github.com/Dennis-Otto/repo-blueprint/commit/3a6985996719a59fa25c3c2977929b2cee0f2c99))
+* share the settings of every website through the blueprint, with modern features ([#78](https://github.com/Dennis-Otto/repo-blueprint/issues/78)) ([178a743](https://github.com/Dennis-Otto/repo-blueprint/commit/178a743383521f02d7a75f6a56723a2629f446b3))
+
+
+### Bug fixes
+
+* stop asking the maintainer to review every pull request of a bot ([#77](https://github.com/Dennis-Otto/repo-blueprint/issues/77)) ([939c860](https://github.com/Dennis-Otto/repo-blueprint/commit/939c860749db3f63eded8acff742855976b8f1aa))
+
 ## [0.6.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.1...v0.6.2) (2026-10-08)
 
 ### Bug fixes
