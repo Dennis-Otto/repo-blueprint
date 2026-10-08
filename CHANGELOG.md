@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.6.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.6.1...v0.6.2) (2026-10-08)
+
 ### Bug fixes
 
 - The isolated build of a release gets the secrets of the environment *release* again, so a Nextcloud app is signed: since 0.6.0 its release stopped at the build for want of the signing key.
