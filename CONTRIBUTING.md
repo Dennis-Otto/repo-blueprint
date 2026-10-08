@@ -28,6 +28,31 @@ A change of the template comes with a test in `tests/test_template.py` that rend
 
 ## Workflow
 
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The way of a contribution
+    accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry under Unreleased, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.
+
+    issue["Issue<br>for anything larger"]
+    branch["Branch from <code>main</code>"]
+    change["The change with its tests<br>an entry under <i>Unreleased</i><br>every commit signed off"]
+    pr["Pull request<br><code>feat: …</code> · <code>fix: …</code> · <code>feat!: …</code>"]
+    checks{"Every required<br>check passes?"}
+    main["Squashed into <code>main</code><br>the title decides<br>the next version"]
+
+    issue --> branch --> change --> pr --> checks
+    checks -- "yes" --> main
+    checks -- "no: fix and push" --> change
+
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class main done
+```
+
 1. Open an issue first for anything larger than a small fix, so we can agree on the approach.
 2. Create a branch from `main`.
 3. Describe what changes for users under `## Unreleased` in `CHANGELOG.md`, in the words of a user; the check *changelog* asks for it in every `feat`, `fix` or `perf` pull request.

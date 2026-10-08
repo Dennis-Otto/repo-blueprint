@@ -4,11 +4,58 @@
 
 [English version](https://github.com/Dennis-Otto/repo-blueprint/blob/main/README.md)
 
+![Repo Blueprint für GitHub-Repositories: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](https://raw.githubusercontent.com/Dennis-Otto/repo-blueprint/main/.github/social-preview.png)
+
 Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, die sich selbst pflegen: Tests bei jeder Änderung, ein Release-Bot, Sicherheitsprüfungen, ein Issue-Assistent und die Einstellungen des Repositorys als Code, für sieben Arten von Projekten. Ein Bot bringt jedes Repository, das aus der Vorlage entstanden ist, auf jede neue Version des Blueprints.
 
 Die [Website des Blueprints](https://dennis-otto.github.io/repo-blueprint/de/) zeigt diese Anleitung auf Deutsch und Englisch, zusammen mit der Roadmap, dem Sicherheitsdesign, den Entscheidungen und dem Dashboard.
 
 <sub>💛 Wenn dir der Blueprint hilft, kannst du [seine Entwicklung unterstützen](https://github.com/sponsors/Dennis-Otto).</sub>
+
+## Wie sich ein Repository selbst pflegt
+
+<!-- --8<-- [start:loop] -->
+
+Jede Änderung, deine oder die eines Bots, ist ein Pull Request, der merged, sobald alle Prüfungen grün sind, und der Release-Bot macht aus dem, was auf `main` ankommt, ein signiertes Release; drei Bots halten das Repository von selbst aktuell. In den Bildern ist Blau der Blueprint mit seinen Bots, Orange bist du mit allem, was dir gehört, und Grün ist das Ergebnis.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie sich ein Repository selbst pflegt
+    accDescr: copier copy legt aus dem Blueprint ein Repository an. Jede Änderung, deine oder die eines Bots, ist ein Pull Request, der merged, sobald alle Prüfungen grün sind, und der Release-Bot macht aus dem, was auf main ankommt, ein signiertes Release. Renovate, der Blueprint-Bot und der Settings-Bot halten das Repository von selbst aktuell.
+
+    blueprint[("Repo Blueprint")]
+    you(["Du"])
+    renovate(["Renovate<br>alle 2 Stunden"])
+    updater(["Blueprint-Bot<br>jede Woche"])
+    settings(["Settings-Bot<br>jede Woche"])
+
+    subgraph repo ["Dein Repository"]
+        pr["Pull Request"] --> checks{"Alle Prüfungen<br>grün?"}
+        checks -- "ja" --> main["main"]
+        main -- "Release-Bot" --> release["Signiertes Release"]
+    end
+
+    blueprint -- "copier copy" --> repo
+    blueprint -. "ein neues Release" .-> updater
+    you -- "eine Änderung" --> pr
+    renovate -- "Updates" --> pr
+    updater -- "copier update" --> pr
+    settings -- "die Einstellungen als Code" --> repo
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class renovate,updater,settings bot
+    class you person
+    class release done
+```
+
+<!-- --8<-- [end:loop] -->
 
 ## Was ein neues Repository bekommt
 
@@ -33,6 +80,42 @@ Die [Website des Blueprints](https://dennis-otto.github.io/repo-blueprint/de/) z
 | **Upstream** | für eine Nextcloud-App, jede Woche: hat Nextcloud eine neue Hauptversion, hebt ein Pull Request `max-version` an und merged sich selbst, sobald jede Prüfung, auch die End-to-End-Tests, dagegen besteht | `upstream.yml` |
 | **Bereichs-Labels** | jeder Pull Request bekommt die Labels der Bereiche, deren Dateien er ändert, nach den Pfaden in `.github/labeler.yml`, die dem Projekt gehört | `area-labels.yml` |
 | **Branches** | nach jeder Änderung an `main` bringt der Branch-Bot jeden Pull Request, der auf Auto-Merge wartet, auf den neuesten Stand, damit er nach grünen Prüfungen merged | `update-branches.yml` |
+
+### Von einer Änderung zum Release
+
+Der Titel eines Pull Requests bestimmt die nächste Version, und der Merge des Release-Pull-Requests erledigt den Rest:
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Von einer Änderung zum Release
+    accDescr: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text von Unreleased. Sein Merge baut das Release isoliert, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.
+
+    pr["Pull Request<br><code>fix:</code> · <code>feat:</code> · <code>feat!:</code>"]
+    main["main"]
+    rpr["Release-Pull-Request<br><code>chore: release x.y.z</code><br>Notes aus <i>Unreleased</i>"]
+    beta["Beta <code>x.y.z-beta.N</code><br>für Tester"]
+    build["Isolierter Build<br>SLSA Build Level 3"]
+    release["Release<br>Paket · SBOMs<br>Provenance · signierter Tag"]
+    deliver["Auslieferung<br>PyPI · npm · GHCR<br>App Store · HACS"]
+    verify["Geprüft wie von Nutzern<br>sofort und jede Woche"]
+
+    pr -- "alle Prüfungen grün" --> main
+    main -- "Release-Bot" --> rpr
+    main -. "<code>BETA_CHANNEL</code>" .-> beta
+    rpr -- "gemergt" --> build --> release
+    release --> deliver
+    release --> verify
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class rpr bot
+    class release done
+```
 
 ## Arten von Projekten
 
@@ -89,6 +172,31 @@ Ein bestehendes Repository übernimmt den Blueprint auf einem Branch, in einem P
 
 ## Einstellungen als Code
 
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Die Einstellungen als Code
+    accDescr: Die Einstellungen eines Repositorys stehen in .github/repository.toml, mit denen nur dieses Projekts und den Labels. blueprint.py settings apply, ausgeführt von einem Administrator, und der Settings-Bot, nach jeder Änderung und jede Woche, gleichen GitHub an sie an; settings check zeigt, was abweicht.
+
+    files[".github/repository.toml<br>repository.project.toml<br>labels.toml"]
+    apply(["<code>settings apply</code><br>durch einen Administrator"])
+    bot(["Settings-Bot<br>nach jeder Änderung<br>und jede Woche"])
+    github["GitHub<br>Merges · Rulesets · Sicherheit<br>Actions · Environments<br>Variablen · Labels · Pages"]
+
+    files --> apply --> github
+    files --> bot --> github
+    github -. "<code>settings check</code><br>zeigt, was abweicht" .-> files
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    class bot bot
+    class apply person
+```
+
 `.github/repository.toml` enthält die Einstellungen eines Repositorys; `blueprint.py settings check` vergleicht sie mit GitHub, `settings apply` gleicht GitHub an:
 
 - **Repository:** Squash-Merges mit dem Titel des Pull Requests, Auto-Merge, Branch-Updates, gelöschte Branches, Sign-off auch für Commits im Web, kein Wiki, keine Projects.
@@ -102,11 +210,73 @@ Ein bestehendes Repository übernimmt den Blueprint auf einem Branch, in einem P
 
 ## Updates
 
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Update des Blueprints ankommt
+    accDescr: Jede Woche führt der Blueprint-Bot copier update auf das neueste Release des Blueprints aus und öffnet einen Pull Request. Mit Konflikten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
+
+    bot(["Blueprint-Bot<br>jede Woche"])
+    pr["Pull Request<br>mit den Änderungen"]
+    conflicts{"Konflikte?"}
+    off{"Automerge<br>abgeschaltet?"}
+    checks{"Alle Prüfungen<br>grün?"}
+    merged["Merged sich selbst"]
+    wait(["Wartet auf<br>den Maintainer"])
+
+    bot -- "<code>copier update</code><br>auf das neueste Release" --> pr --> conflicts
+    conflicts -- "nein" --> off
+    off -- "nein" --> checks
+    checks -- "ja" --> merged
+    conflicts -- "ja, in den Dateien<br>markiert" --> wait
+    off -- "ja" --> wait
+    checks -- "nein" --> wait
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot bot
+    class wait person
+    class merged done
+```
+
 Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus. Ohne Konflikte merged sich sein Pull Request selbst, sobald alle Prüfungen grün sind; Konflikte bleiben als Markierungen für den Maintainer darin. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
 
 Dem Blueprint gehören die Workflows, `scripts/check.sh` und die Community-Dateien: ihre Änderungen kommen mit den Updates. Dateien des Projekts werden nie überschrieben: README, Changelog, das Sicherheitsdesign in `docs/security.md`, Manifeste und Lock-Dateien der Abhängigkeiten (die hält Renovate aktuell), Code und Tests, `mkdocs.yml` und die Seiten der Website, Issue-Formulare, Labels und akzeptierte Findings. Prüfungen, die nur ein Projekt braucht, gehören in `scripts/check-project.sh`, das `scripts/check.sh` zuletzt ausführt.
 
 ## Was einem Projekt gehört
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Was dem Blueprint gehört und was dem Projekt
+    accDescr: copier update bringt die Änderungen der Dateien des Blueprints, Zeile für Zeile mit den Änderungen des Repositorys zusammengeführt, und überschreibt nie die Dateien des Projekts. Ein Projekt ergänzt eigene Prüfungen, Einstellungen und Workflows neben denen des Blueprints.
+
+    blueprint[("Repo Blueprint")]
+
+    subgraph repo ["Dein Repository"]
+        theirs["<b>Die Dateien des Blueprints</b><br>Workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>Community-Dateien"]
+        mine["<b>Die Dateien des Projekts</b><br>README · CHANGELOG · <code>docs/</code><br>Code und Tests<br>Manifeste und Lock-Dateien<br>Issue-Formulare · Labels"]
+        adds["<b>Was das Projekt ergänzt</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br>eigene Workflows"]
+    end
+
+    blueprint -- "<code>copier update</code><br>Zeile für Zeile zusammengeführt" --> theirs
+    blueprint -. "nie überschrieben" .-x mine
+    theirs -- "ergänzt durch" --- adds
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    class theirs bot
+    class mine,adds person
+```
 
 Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt ergänzt seine eigenen, ohne sie abzuspalten:
 
@@ -132,6 +302,44 @@ Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt
 Jeden Montag veröffentlicht der Workflow Weekly report in den [Discussions](https://github.com/Dennis-Otto/repo-blueprint/discussions), was die öffentlichen Repositorys des Besitzers in der Woche veröffentlicht, gemergt und behoben haben: ihre Releases, gemergten Pull Requests und die Updates darunter, geöffnete und geschlossene Issues, fehlgeschlagene Läufe auf `main` und die mittlere Dauer ihrer CI (`weekly.py`). Wie das Dashboard berichtet er nur, was öffentlich ist.
 
 ## Wie der Blueprint funktioniert
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie der Blueprint funktioniert
+    accDescr: Copier rendert ein neues Repository aus den Fragen in copier.yml und den Dateien in template/, die die Workflows aus .github/workflows/, die Manifeste aus stacks/ und blueprint.py aufnehmen. Renovate hält die Workflows und die Stacks aktuell.
+
+    renovate(["Renovate"])
+
+    subgraph here ["Dieses Repository"]
+        workflows["<code>.github/workflows/</code><br>laufen hier und sind<br>die Vorlagen"]
+        stacks["<code>stacks/</code><br>Manifeste und<br>Lock-Dateien"]
+        tool["<code>blueprint.py</code><br>Einstellungen · Checkliste<br>Bots"]
+        template["<code>template/</code><br>die Dateien eines<br>neuen Repositorys"]
+        questions["<code>copier.yml</code><br>die Fragen"]
+    end
+
+    copier(["Copier"])
+    repo["Ein neues Repository"]
+
+    renovate -. "hält aktuell" .-> workflows
+    renovate -.-> stacks
+    workflows --> template
+    stacks --> template
+    tool --> template
+    template --> copier
+    questions --> copier
+    copier --> repo
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class renovate bot
+    class repo done
+```
 
 - `copier.yml` enthält die Fragen. `template/` enthält die Dateien eines neuen Repositorys; ein Datei- oder Ordnername wie `[% if stack == 'php' %]composer.json[% endif %]` trägt seine Bedingung, und ein Name, der leer gerendert wird, entfällt. Die Trennzeichen `{= =}` und `[% %]` kommen in keinem Workflow, Skript oder Manifest vor; so bleiben `${{ }}` von GitHub Actions und `[[ ]]` von Bash und TOML unverändert.
 - Die Workflows in `.github/workflows/` laufen in diesem Repository und sind zugleich die Vorlagen der Workflows jedes neuen Repositorys: actionlint prüft sie, und Renovate hält ihre Actions hier aktuell. Eine Zeile mit *Not in the blueprint itself* schaltet einen Job in diesem Repository ab und fehlt in neuen.
