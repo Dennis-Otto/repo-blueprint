@@ -123,8 +123,8 @@ def render(weeks: list[Week], owner: str, since: datetime, now: datetime) -> str
     lines += [
         "",
         "<sub>The Weekly report workflow of the blueprint writes this every Monday; "
-        "the [dashboard](https://dennis-otto.github.io/repo-blueprint/) shows the "
-        "current state.</sub>",
+        "the [dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) "
+        "shows the current state.</sub>",
     ]
     return "\n".join([*lines, ""])
 

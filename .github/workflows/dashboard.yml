@@ -63,7 +63,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER: ${{ github.repository_owner }}
-        run: python3 dashboard.py --owner "$OWNER" --out site/dashboard/index.html
+        run: |
+          python3 dashboard.py --owner "$OWNER" --out site/dashboard/index.html \
+            --history https://dennis-otto.github.io/repo-blueprint/dashboard/history.json
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
