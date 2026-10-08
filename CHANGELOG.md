@@ -6,10 +6,6 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
-### Features
-
-- **The weekly report:** every Monday, the blueprint posts in its discussions what the public repositories of the owner released, merged and fixed in the week, from public data alone (`weekly.py`, Weekly report workflow).
-
 ### Bug fixes
 
 - The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
@@ -17,6 +13,7 @@ the next release, or lists the pull requests when there is none.
 ### Features
 
 - **Every repository gets a documentation website:** MkDocs with the Material theme makes the pages of `docs/` a website with search and a light and a dark theme, German pages under `docs/de/` included, and the new Docs workflow publishes it on GitHub Pages with every change of `main`. Every pull request builds it strictly, as the new required check `docs`, so that a link or an anchor that leads nowhere fails; a repository without a website passes it. The settings bot turns GitHub Pages on from the new table `[pages]` of the settings as code. `mkdocs.yml` belongs to the project, and a page can include a file of the repository, such as the README, with `--8<--`, so that nothing is written twice.
+- **The weekly report:** every Monday, the blueprint posts in its discussions what the public repositories of the owner released, merged and fixed in the week, from public data alone (`weekly.py`, Weekly report workflow).
 - **The blueprint's own website** is its documentation now, and [the dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) moved to `dashboard/` of it.
 - **Signed release tags:** the tag of every release and beta is an annotated tag, signed without a key by the release workflow with gitsign: Sigstore certifies the identity of the workflow, and the release check verifies it. There is no key to keep secret.
 - **The clean-up bot** deletes every week the branches that `main` holds completely and that no open pull request uses, and the caches of closed pull requests. A branch with commits that `main` doesn't have stays and is listed in its summary after a month without a pull request.
