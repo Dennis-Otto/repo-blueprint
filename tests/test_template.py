@@ -874,6 +874,25 @@ def test_a_release_is_built_in_isolation() -> None:
     assert "workflow_call:" in build
     verify = (workflows_dir / "verify-release.yml").read_text(encoding="utf-8")
     assert 'build="$GH_REPO/.github/workflows/build-release.yml"' in verify
+    # The build signs a Nextcloud app with the key of the environment release, which a
+    # called workflow sees only with the secrets of its caller.
+    assert "secrets: inherit" in assets
+    assert "environment:\n      name: release" in build
+
+
+def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    job = release[release.index("  release-please:") : release.index("\n  assets:")]
+    step = job[
+        job.index("id: resume") : job.index("- name: Write the text of Unreleased")
+    ]
+    assert "github.event_name == 'workflow_dispatch'" in step
+    assert "--json isDraft" in step
+    for output in ("created", "tag", "version", "major"):
+        line = next(
+            line for line in job.splitlines() if line.strip().startswith(f"{output}:")
+        )
+        assert "steps.resume.outputs." in line, output
 
 
 def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
