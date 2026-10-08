@@ -6,6 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **No labels and no merge step for the updates that Dependabot no longer makes:** Renovate keeps the actions, the dependencies and the images current, so Dependabot updates only the Features of the dev container and sets just the label `dependencies`, and Renovate sets none. New projects no longer get the labels `github_actions`, `python`, `php`, `javascript` and `docker`, and the workflow *Dependabot maintenance* loses its step for updates of the HACS and hassfest actions to a new commit, which Renovate brings and merges itself. An existing project removes the group *Dependabot* from its `.github/labels.toml`, which updates leave alone. The Labels workflow never deletes a label, so the project deletes them on GitHub as well, each with `gh label delete github_actions --yes`, and with them those that Dependabot created itself, such as `devcontainers_package_manager`.
+- **The social preview names Renovate** instead of Dependabot. An existing project changes it in its `.github/social-preview.html`, renders it again with `bash scripts/social-preview.sh` and uploads it.
+
 ## [0.8.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.1...v0.8.2) (2026-10-08)
 
 ### Changes
