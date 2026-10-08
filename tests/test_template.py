@@ -314,6 +314,11 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/actionlint.yaml",
         ".github/egress-firewall.yaml",
         ".github/markdownlint.jsonc",
+        ".github/prose/cspell.json",
+        ".github/prose/package.json",
+        ".github/prose/package-lock.json",
+        ".github/cspell-words.txt",
+        ".vale.ini",
         ".github/sign-tag.sh",
         ".github/renovate-blueprint.json5",
         ".markdownlint-cli2.jsonc",
@@ -472,6 +477,7 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
     assert {"type": "generic", "path": "appinfo/info.xml"} in config["extra-files"]
     review = (project / ".github/dependency-review.yml").read_text(encoding="utf-8")
     assert "pkg:composer/netresearch/jsonmapper" in review
+    assert "pkg:npm/%40cspell/dict-django" in review
 
 
 def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
