@@ -9,7 +9,8 @@
 INHERIT: .github/mkdocs-blueprint.yml
 site_name: {= project_name | to_json(ensure_ascii=False) =}
 site_description: {= description | to_json(ensure_ascii=False) =}
-site_url: https://{= owner | lower =}.github.io/{= project_slug =}/
+# The website of the owner itself lives at the root of its address.
+site_url: https://{= owner | lower =}.github.io/[% if project_slug != (owner | lower) ~ '.github.io' %]{= project_slug =}/[% endif %]
 repo_url: https://github.com/{= owner =}/{= project_slug =}
 repo_name: {= owner =}/{= project_slug =}
 copyright: {= ('© ' ~ copyright) | to_json(ensure_ascii=False) =}
