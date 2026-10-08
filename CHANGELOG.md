@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.5.0...v0.6.0) (2026-10-08)
+
 ### Bug fixes
 
 - The package of a Nextcloud app leaves out the files of the Markdown lint, `.markdownlint-cli2.jsonc` and `.markdownlint.jsonc`, which its package check rejected, and the style rules `.vale.ini`. A test checks every file of the repository against the package now.
