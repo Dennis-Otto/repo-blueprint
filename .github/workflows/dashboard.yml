@@ -16,6 +16,8 @@ on:
       - dashboard.py
       - .github/workflows/dashboard.yml
       - mkdocs.yml
+      - .github/mkdocs-blueprint.yml
+      - .github/mkdocs_blueprint.py
       - docs/**
       # The pages of the documentation include them.
       - README.md

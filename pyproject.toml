@@ -9,7 +9,7 @@ filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
-source = ["blueprint", "dashboard", "weekly"]
+source = ["blueprint", "dashboard", "weekly", ".github"]
 # The tests render the template, and Jinja runs its include of blueprint.py as a
 # template of the same name in a temporary clone; that is no code of the tool.
 omit = ["*/copier._vcs.clone*/*"]
@@ -30,4 +30,4 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["blueprint.py", "dashboard.py", "weekly.py", "tests"]
+files = ["blueprint.py", "dashboard.py", "weekly.py", ".github/mkdocs_blueprint.py", "tests"]
