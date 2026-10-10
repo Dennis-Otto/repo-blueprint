@@ -6,16 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.5...v0.8.6) (2026-10-10)
+
 ### Bug fixes
 
 - **The blueprint bot no longer fails now and then:** since version 2.47, Git starts its maintenance in the background after a commit, and `copier update` deletes the repositories it commits to right away, so an update failed at times with `Directory not empty: '/tmp/copier._main.new_copy…/.git'`. The bot now runs Copier with `maintenance.auto` off.
-
-## [0.8.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.5...v0.8.6) (2026-10-10)
-
-
-### Bug fixes
-
-* run copier update without the maintenance of git in the background ([#117](https://github.com/Dennis-Otto/repo-blueprint/issues/117)) ([b5fbb88](https://github.com/Dennis-Otto/repo-blueprint/commit/b5fbb8852e8e4e2c6038fb989252c3a33a989ef8))
 
 ## [0.8.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.4...v0.8.5) (2026-10-10)
 
