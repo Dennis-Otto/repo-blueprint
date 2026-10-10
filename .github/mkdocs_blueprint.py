@@ -8,8 +8,57 @@ https://github.com/Dennis-Otto/repo-blueprint
 from __future__ import annotations
 
 import shutil
+import sys
+import time
 from pathlib import Path
 from typing import Any
+
+# The plugins of Material that download from other servers while the website is
+# built: privacy the fonts and scripts that the pages use, social the fonts of the
+# preview cards.
+DOWNLOADING = ("material/privacy", "material/social")
+# How often a download is tried before the plugin gets its error.
+ATTEMPTS = 3
+
+
+class Retrying:
+    """The requests of a plugin, whose get tries a download again, after a second
+    and then two, when the network or the server fails."""
+
+    def __init__(self, requests: Any) -> None:
+        self.requests = requests
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.requests, name)
+
+    def get(self, url: str, **kwargs: Any) -> Any:
+        transient = (self.requests.ConnectionError, self.requests.Timeout)
+        for attempt in range(1, ATTEMPTS):
+            try:
+                response = self.requests.get(url, **kwargs)
+            except transient:
+                pass
+            else:
+                if response.status_code < 500:
+                    return response
+            time.sleep(attempt)
+        return self.requests.get(url, **kwargs)
+
+
+def on_config(config: Any) -> None:
+    """Let the plugins of Material try a download again before they give up.
+
+    They try every file once: the privacy plugin warns when a font of Google Fonts
+    doesn't come within 5 seconds, which fails a strict build, and the social plugin
+    fails on any error of the network.
+    """
+    for name in DOWNLOADING:
+        plugin = config.plugins.get(name)
+        if plugin is None:
+            continue
+        module: Any = sys.modules[type(plugin).__module__]
+        if not isinstance(module.requests, Retrying):
+            module.requests = Retrying(module.requests)
 
 
 def on_post_build(config: Any) -> None:

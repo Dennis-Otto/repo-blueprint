@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -127,3 +132,132 @@ def test_a_website_in_one_language_keeps_its_404_page(tmp_path: Path) -> None:
     page = '<html lang="en">'
 
     assert hooks().on_post_template(page, "404.html", config(tmp_path)) == page
+
+
+class Network:
+    """The requests of a plugin, with its errors, and an answer or an error for every
+    download in turn: a status code or an exception."""
+
+    class ConnectionError(Exception):
+        pass
+
+    class Timeout(Exception):
+        pass
+
+    def __init__(self, *outcomes: int | Exception) -> None:
+        self.outcomes = list(outcomes)
+        self.downloads: list[str] = []
+
+    def get(self, url: str, **kwargs: Any) -> SimpleNamespace:
+        assert kwargs == {"timeout": 5}
+        self.downloads.append(url)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return SimpleNamespace(status_code=outcome)
+
+
+@pytest.fixture
+def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The seconds that the hook waits, without waiting them."""
+    waits: list[float] = []
+    monkeypatch.setattr(time, "sleep", waits.append)
+    return waits
+
+
+def plugin(monkeypatch: pytest.MonkeyPatch, name: str, network: Network) -> Any:
+    """A plugin whose module downloads with the given requests, as those of Material."""
+    module: Any = ModuleType(f"material.plugins.{name}.plugin")
+    module.requests = network
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    return type("Plugin", (), {"__module__": module.__name__})()
+
+
+def requests_of(plugin: Any) -> Any:
+    """What the module of the plugin downloads with."""
+    return sys.modules[type(plugin).__module__].requests
+
+
+def downloading(monkeypatch: pytest.MonkeyPatch, network: Network) -> Any:
+    """The requests of the privacy plugin, after the hook has set it up."""
+    privacy = plugin(monkeypatch, "privacy", network)
+    hooks().on_config(SimpleNamespace(plugins={"material/privacy": privacy}))
+    return requests_of(privacy)
+
+
+URL = "https://fonts.gstatic.com/s/robotomono/v31/L0x7DF4xlVMF.woff2"
+
+
+def test_a_download_that_times_out_is_tried_again(
+    monkeypatch: pytest.MonkeyPatch, waits: list[float]
+) -> None:
+    network = Network(
+        Network.Timeout("Read timed out."), Network.ConnectionError(), 200
+    )
+
+    response = downloading(monkeypatch, network).get(URL, timeout=5)
+
+    assert response.status_code == 200
+    assert network.downloads == [URL, URL, URL]
+    assert waits == [1, 2]
+
+
+def test_a_download_is_tried_again_after_an_error_of_the_server(
+    monkeypatch: pytest.MonkeyPatch, waits: list[float]
+) -> None:
+    network = Network(503, 200)
+
+    assert downloading(monkeypatch, network).get(URL, timeout=5).status_code == 200
+    assert waits == [1]
+
+
+def test_the_plugin_gets_the_error_of_the_third_attempt(
+    monkeypatch: pytest.MonkeyPatch, waits: list[float]
+) -> None:
+    timeouts = Network(*(Network.Timeout(f"attempt {n}") for n in (1, 2, 3)))
+    errors = Network(500, 502, 503)
+
+    with pytest.raises(Network.Timeout, match="attempt 3"):
+        downloading(monkeypatch, timeouts).get(URL, timeout=5)
+    assert downloading(monkeypatch, errors).get(URL, timeout=5).status_code == 503
+    assert waits == [1, 2, 1, 2]
+
+
+def test_a_missing_file_or_a_wrong_address_is_not_tried_again(
+    monkeypatch: pytest.MonkeyPatch, waits: list[float]
+) -> None:
+    missing = Network(404)
+    wrong = Network(ValueError("Invalid URL"))
+
+    assert downloading(monkeypatch, missing).get(URL, timeout=5).status_code == 404
+    with pytest.raises(ValueError, match="Invalid URL"):
+        downloading(monkeypatch, wrong).get("htp:/fonts", timeout=5)
+    assert missing.downloads == [URL]
+    assert waits == []
+
+
+def test_both_plugins_that_download_try_again_and_nothing_else_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = ("privacy", "social", "search")
+    privacy, social, search = (plugin(monkeypatch, n, Network()) for n in names)
+    module = hooks()
+    config = SimpleNamespace(
+        plugins={
+            "material/privacy": privacy,
+            "material/social": social,
+            "material/search": search,
+        }
+    )
+
+    module.on_config(config)
+    retrying = requests_of(privacy)
+    # Every build of mkdocs serve sets it up again, and once is enough.
+    module.on_config(config)
+
+    assert isinstance(retrying, module.Retrying)
+    assert requests_of(privacy) is retrying
+    assert isinstance(requests_of(social), module.Retrying)
+    assert isinstance(requests_of(search), Network)
+    # The rest of requests is the same.
+    assert retrying.Timeout is Network.Timeout
