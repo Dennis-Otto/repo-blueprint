@@ -6,16 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.3...v0.8.4) (2026-10-10)
+
 ### Bug fixes
 
 - **The website builds when a download is slow:** while the website is built, the privacy plugin of Material downloads the fonts and scripts that the pages use, such as those of Google Fonts, and the social plugin the fonts of the preview cards. They tried every file once, so a single font that didn't come within 5 seconds failed the strict build of the Docs workflow. The hook of the blueprint now has them try a download up to three times, after a second and then two, when the network or the server fails.
-
-## [0.8.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.3...v0.8.4) (2026-10-10)
-
-
-### Bug fixes
-
-* **docs:** try a download of the website again when the network fails ([#110](https://github.com/Dennis-Otto/repo-blueprint/issues/110)) ([0591a71](https://github.com/Dennis-Otto/repo-blueprint/commit/0591a719b2575b9332ff9390bd08859b6316f7b7))
 
 ## [0.8.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.2...v0.8.3) (2026-10-08)
 
