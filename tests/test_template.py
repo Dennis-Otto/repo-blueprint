@@ -904,6 +904,36 @@ def test_renovate_runs_one_release_everywhere() -> None:
     assert len(pins) == 1, pins
 
 
+def test_copier_updates_without_the_maintenance_of_git_in_the_background(
+    projects: dict[str, Path],
+) -> None:
+    # Since Git 2.47, a commit starts git maintenance in the background, and copier
+    # update deletes the repositories it commits to right away: the two collided now
+    # and then, and the update failed with "Directory not empty".
+    command = re.compile(r"^(?!\s*#).*\bcopier update\b", re.MULTILINE)
+    settings = (
+        'GIT_CONFIG_COUNT: "1"',
+        "GIT_CONFIG_KEY_0: maintenance.auto",
+        'GIT_CONFIG_VALUE_0: "false"',
+    )
+    steps = [
+        (name, step)
+        for root in (projects["generic"], ROOT)
+        for name, text in workflows(root).items()
+        for step in text.split("\n      - ")[1:]
+        if command.search(step)
+    ]
+
+    # The blueprint bot of a project and of the blueprint itself, and Variants.
+    assert sorted(name for name, _ in steps) == [
+        "blueprint-update.yml",
+        "blueprint-update.yml",
+        "variants.yml",
+    ]
+    for name, step in steps:
+        assert all(setting in step for setting in settings), name
+
+
 def test_the_branch_bot_leaves_the_branches_of_renovate_alone() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
     assert 'startswith("renovate/") | not' in text
