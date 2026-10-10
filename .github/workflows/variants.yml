@@ -71,6 +71,12 @@ jobs:
           git -C "$PROJECT" add --all
       - name: Render the project from the latest release and update it to this commit
         if: matrix.start == 'update'
+        # As the blueprint bot runs Copier: without the maintenance that Git starts in
+        # the background after a commit, which Copier's update would collide with.
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: maintenance.auto
+          GIT_CONFIG_VALUE_0: "false"
         run: |
           data=(
             --data project_name="Demo Project"
