@@ -519,6 +519,35 @@ def test_every_project_has_a_dev_container(
         assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]
 
 
+def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
+    projects: dict[str, Path],
+) -> None:
+    # github.com answers the page of a file with 503 at times; raw.githubusercontent.com
+    # has the same file, and answers 404 for a missing one as well.
+    config = (projects["generic"] / "lychee.toml").read_text(encoding="utf-8")
+    [rule] = tomllib.loads(config)["remap"]
+    pattern, replacement = rule.split()
+    # Lychee writes a group of the regular expression as $1, Python as \g<1>.
+    replacement = re.sub(r"\$(\d)", r"\\g<\1>", replacement)
+
+    def remapped(url: str) -> str:
+        return re.sub(pattern, replacement, url)
+
+    raw = "https://raw.githubusercontent.com/owner/repo"
+    blob = "https://github.com/owner/repo/blob"
+    assert (
+        remapped(f"{blob}/main/docs/guide.md#setup")
+        == f"{raw}/main/docs/guide.md#setup"
+    )
+    assert remapped(f"{blob}/v1.0.0/LICENSE") == f"{raw}/v1.0.0/LICENSE"
+    for url in (
+        "https://github.com/owner/repo",
+        "https://github.com/owner/repo/tree/main/docs",
+        "https://github.com/owner/repo/issues/1",
+    ):
+        assert remapped(url) == url
+
+
 def test_a_nextcloud_app_packages_only_what_it_needs(
     projects: dict[str, Path],
 ) -> None:
