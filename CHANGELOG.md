@@ -10,6 +10,13 @@ the next release, or lists the pull requests when there is none.
 
 - **The link check passes while GitHub refuses the page of a file:** github.com answers the page of a file, such as `https://github.com/<owner>/<repo>/blob/main/LICENSE`, with 503 Service Unavailable at times while its other pages work, and the Links workflow failed for every such link. It now asks `raw.githubusercontent.com` for the same file, which answers 404 for a missing one as well.
 
+## [0.8.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.4...v0.8.5) (2026-10-10)
+
+
+### Bug fixes
+
+* let the link check ask raw.githubusercontent.com for a file of GitHub ([#114](https://github.com/Dennis-Otto/repo-blueprint/issues/114)) ([a83396e](https://github.com/Dennis-Otto/repo-blueprint/commit/a83396e73691a774beb7a8557335b69268fabac7))
+
 ## [0.8.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.3...v0.8.4) (2026-10-10)
 
 ### Bug fixes
