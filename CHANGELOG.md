@@ -8,7 +8,6 @@ the next release, or lists the pull requests when there is none.
 
 ## [0.9.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.9.0...v0.9.1) (2026-10-12)
 
-
 ### Bug fixes
 
 * **deps:** refresh pip-compile outputs ([#124](https://github.com/Dennis-Otto/repo-blueprint/issues/124)) ([6b4dd2d](https://github.com/Dennis-Otto/repo-blueprint/commit/6b4dd2d15d59b9de490d006eebd2fc6bcfaaff97))
