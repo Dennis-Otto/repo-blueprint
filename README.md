@@ -85,7 +85,7 @@ flowchart TB
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
 | **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it | `upstream.yml` |
 | **Area labels** | every pull request gets the labels of the areas whose files it changes, by the paths in `.github/labeler.yml`, which belongs to the project | `area-labels.yml` |
-| **Branches** | after every change of `main`, the branch bot brings each pull request that waits for auto-merge up to date, so that it merges once its checks pass | `update-branches.yml` |
+| **Branches** | after every change of `main`, the branch bot brings each pull request that waits for auto-merge up to date, Renovate's too, so that it merges once its checks pass | `update-branches.yml` |
 
 ### From a change to a release
 
