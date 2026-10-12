@@ -1,0 +1,96 @@
+name: Rollout
+
+# The rollout of the blueprint. Once the Release workflow has published and verified
+# a release that a merge to main made, it starts the blueprint bot (Blueprint update)
+# in every repository of the release app that has one, so that each repository gets
+# the release within minutes instead of with the bot's weekly run. Started by hand,
+# it rolls out the latest release. Its token of the release app can start workflows
+# and read the repositories, nothing else. It runs in the blueprint only.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: rollout
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    name: rollout
+    # A successful run of the Release workflow for a merge, or one started by hand,
+    # which takes up a release that an earlier run left as a draft; its hourly runs
+    # make no release.
+    if: >-
+      github.repository == 'Dennis-Otto/repo-blueprint' && (
+        github.event_name == 'workflow_dispatch' || (
+          github.event.workflow_run.conclusion == 'success' &&
+          contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event)
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The environment holds the private key of the release app; only main may use it.
+    environment:
+      name: release
+      deployment: false
+    permissions:
+      contents: read
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Find the release that the run of the Release workflow published
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+          if [[ "$EVENT" == workflow_run && "$commit" != "$HEAD_SHA" ]]; then
+            echo "The run made no release; the latest one, $tag, went out before." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Create a token of the release app that can start workflows
+        id: app
+        if: steps.release.outputs.tag != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          # Every repository of the installation, on purpose: the app is installed on
+          # exactly the repositories that the blueprint keeps current.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+          # Only what finding and starting the blueprint bots needs.
+          permission-actions: write
+          permission-contents: read
+      - name: Start the blueprint bot in every repository that has one
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -o pipefail
+          echo "The blueprint bot brings $TAG to:" >> "$GITHUB_STEP_SUMMARY"
+          gh api --paginate installation/repositories \
+            --jq '.repositories[] | select(.archived | not) | "\(.full_name) \(.default_branch)"' |
+            while read -r repo branch; do
+              if [[ "$repo" == "$GITHUB_REPOSITORY" ]]; then
+                continue
+              fi
+              if ! gh api "repos/$repo/contents/.github/workflows/blueprint-update.yml?ref=$branch" --silent 2>/dev/null; then
+                continue
+              fi
+              gh workflow run blueprint-update.yml --repo "$repo" --ref "$branch"
+              echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+            done

@@ -37,7 +37,7 @@ flowchart TB
     blueprint[("Repo Blueprint")]
     you(["You"])
     renovate(["Renovate<br>every 2 hours"])
-    updater(["Blueprint bot<br>every week"])
+    updater(["Blueprint bot<br>after every release<br>and every week"])
     settings(["Settings bot<br>every week"])
 
     subgraph repo ["Your repository"]
@@ -81,7 +81,7 @@ flowchart TB
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels, GitHub Pages, and every file of the community standards of GitHub; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
 | **Clean-up** | every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month | `cleanup.yml` |
 | **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
-| **Updates** | every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
+| **Updates** | right after every release of the blueprint, and every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
 | **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it | `upstream.yml` |
 | **Area labels** | every pull request gets the labels of the areas whose files it changes, by the paths in `.github/labeler.yml`, which belongs to the project | `area-labels.yml` |
@@ -160,7 +160,7 @@ Copier asks for the name, a one-sentence description, the kind of project, the l
 
 ### Once per repository
 
-- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests* and *Workflows* (read and write), and *Actions*, *Dependabot alerts*, *Environments*, *Secrets* and *Variables* (read): with them the settings bot applies the settings as code and Renovate updates the dependencies. Renovate gets a token without *Administration*.
+- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Actions*, *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests* and *Workflows* (read and write), and *Dependabot alerts*, *Environments*, *Secrets* and *Variables* (read): with them the settings bot applies the settings as code, Renovate updates the dependencies, and the rollout of the blueprint starts the blueprint bot of every repository after a release. Renovate gets a token without *Administration*.
 - **The issue assistant** needs `CLAUDE_CODE_OAUTH_TOKEN` in the environment `issue-assistant`.
 - **Delivery:** trusted publishing on PyPI or npm, the app certificate of a Nextcloud app, or the HACS submission, as the checklist says.
 
@@ -224,9 +224,9 @@ config:
 ---
 flowchart TB
     accTitle: How an update of the blueprint arrives
-    accDescr: Every week the blueprint bot runs copier update to the latest release of the blueprint and opens a pull request. With conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
+    accDescr: Right after every release of the blueprint, and every week, the blueprint bot runs copier update to the latest release and opens a pull request. With conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
 
-    bot(["Blueprint bot<br>every week"])
+    bot(["Blueprint bot<br>after every release<br>and every week"])
     pr["Pull request<br>with the changes"]
     conflicts{"Conflicts?"}
     off{"Automerge<br>off?"}
@@ -250,7 +250,7 @@ flowchart TB
     class merged done
 ```
 
-The blueprint bot (`blueprint-update.yml`) runs `copier update` every week. Without conflicts its pull request merges itself once every check passes; conflicts stay in it as markers for the maintainer. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
+The blueprint bot (`blueprint-update.yml`) runs `copier update` every week, and right after every release of the blueprint, whose Rollout workflow starts it in every repository of the release app. Without conflicts its pull request merges itself once every check passes; conflicts stay in it as markers for the maintainer. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
 
 The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
