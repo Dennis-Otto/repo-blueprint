@@ -8,7 +8,6 @@ the next release, or lists the pull requests when there is none.
 
 ## [0.8.7](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.6...v0.8.7) (2026-10-12)
 
-
 ### Bug fixes
 
 * **deps:** update davidanson/markdownlint-cli2 docker tag to v0.23.3 ([#120](https://github.com/Dennis-Otto/repo-blueprint/issues/120)) ([84d2d85](https://github.com/Dennis-Otto/repo-blueprint/commit/84d2d85e68b7395dccdf8fa34bc1972c537ad5c7))
