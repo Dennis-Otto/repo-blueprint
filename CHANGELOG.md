@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.7...v0.8.8) (2026-10-12)
+
 ### Bug fixes
 
 - **Renovate compiles every lock file for its own Python:** Renovate installs pip-tools once per repository and run, for the Python of the first lock file it compiles, so it compiled a lock file for another Python with the wrong one. The lock file of the Home Assistant stack, for Python 3.14, came out for Python 3.12 with Home Assistant 2025.1. It is now compiled with `uv pip compile --python-version 3.14.8`, which doesn't depend on the Python it runs on, and its `requirements-test.in` pins the test plugin, so that a Home Assistant that needs a newer Python fails its update instead of an older Home Assistant being chosen. A project with lock files for two Pythons compiles the one for the other Python with `uv pip compile --python-version` as well.
@@ -15,13 +17,6 @@ the next release, or lists the pull requests when there is none.
 - **The Nextcloud apps get only the releases that run on their PHP:** Renovate offered phpunit 13 and nextcloud/ocp 35, which need PHP 8.4 and 8.3, to apps that run on PHP 8.2, and Composer couldn't update their lock file. Renovate now leaves out the releases that don't run on the platform PHP of `composer.json`. A project on a newer PHP sets `constraints: { php: "8.3.*" }` for Composer in its `.github/renovate.json5`.
 - **Renovate updates mutmut again:** the lock file of the mutation tests recorded `--no-index`, which pip-tools 7.6.1 added by mistake with click 8.5, and Renovate skipped a file with it.
 - **The dependency review accepts regex,** which Home Assistant's test base brings in and whose license reads `Apache-2.0 AND CNRI-Python` since 2026.9.29. An existing Home Assistant integration adds `pkg:pypi/regex` to `allow-dependencies-licenses` in its `.github/dependency-review.yml`, which updates leave alone.
-
-## [0.8.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.7...v0.8.8) (2026-10-12)
-
-
-### Bug fixes
-
-* let Renovate compile every lock file for its own Python and merge lock refreshes ([#127](https://github.com/Dennis-Otto/repo-blueprint/issues/127)) ([9105a73](https://github.com/Dennis-Otto/repo-blueprint/commit/9105a737620c697956da497589fd02ac7ef33051))
 
 ## [0.8.7](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.6...v0.8.7) (2026-10-12)
 
