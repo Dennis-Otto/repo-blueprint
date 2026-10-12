@@ -16,6 +16,13 @@ the next release, or lists the pull requests when there is none.
 - **Renovate updates mutmut again:** the lock file of the mutation tests recorded `--no-index`, which pip-tools 7.6.1 added by mistake with click 8.5, and Renovate skipped a file with it.
 - **The dependency review accepts regex,** which Home Assistant's test base brings in and whose license reads `Apache-2.0 AND CNRI-Python` since 2026.9.29. An existing Home Assistant integration adds `pkg:pypi/regex` to `allow-dependencies-licenses` in its `.github/dependency-review.yml`, which updates leave alone.
 
+## [0.8.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.7...v0.8.8) (2026-10-12)
+
+
+### Bug fixes
+
+* let Renovate compile every lock file for its own Python and merge lock refreshes ([#127](https://github.com/Dennis-Otto/repo-blueprint/issues/127)) ([9105a73](https://github.com/Dennis-Otto/repo-blueprint/commit/9105a737620c697956da497589fd02ac7ef33051))
+
 ## [0.8.7](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.6...v0.8.7) (2026-10-12)
 
 ### Bug fixes
