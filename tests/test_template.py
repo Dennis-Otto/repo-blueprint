@@ -1036,9 +1036,20 @@ def test_copier_updates_without_the_maintenance_of_git_in_the_background(
         assert all(setting in step for setting in settings), name
 
 
-def test_the_branch_bot_leaves_the_branches_of_renovate_alone() -> None:
+def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
-    assert 'startswith("renovate/") | not' in text
+    # Renovate's pull requests are brought up to date, but not the release bot's.
+    assert 'startswith("renovate/")' not in text
+    assert 'startswith("release-please--") | not' in text
+    # A conflicting one Renovate builds anew: no label and no comment of the bot.
+    skip = '[[ "$branch" == renovate/* && "$mergeable" == CONFLICTING ]]'
+    assert text.index(skip) < text.index("--add-label merge-conflict")
+    # The bot's merge commits come from the release app, as Renovate's own commits
+    # do, so Renovate doesn't take the branch for edited and keeps it current.
+    assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in text
+    bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    assert 'username: "dennis-otto-release-automation[bot]"' in bot
+    assert 'gitAuthor: "dennis-otto-release-automation[bot] <' in bot
 
 
 def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
