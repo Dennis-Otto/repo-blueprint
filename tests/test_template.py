@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import textwrap
 import tomllib
 import warnings
 from pathlib import Path
@@ -122,7 +125,7 @@ def test_the_workflows_are_the_blueprints_own(
             text = re.sub(r"        language: \[.*\]\n", "", text)
         if name == "after-checks.yml":
             # The workflows it watches; the bots after the checks test them.
-            watched = r"    # The (?:workflows of the )?checks of this repository.*\n    workflows: \[.*\]\n"
+            watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
         assert text == source, name
@@ -1064,16 +1067,34 @@ def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
     assert 'gh release create "v$version" --draft --prerelease' in job
 
 
+# The workflows of the required checks besides the tests, the same in every repository.
+OTHER_CHECKS = {
+    "CodeQL",
+    "Dependency review",
+    "Docs",
+    "Lint",
+    "Pull request title",
+    "Secret scan",
+}
+
+
 def watched_after_the_checks(workflow: str) -> set[str]:
     watched = re.search(r"^    workflows: \[(.+)\]$", workflow, re.MULTILINE)
     assert watched
     return set(watched[1].split(", "))
 
 
+def after_the_checks_job(name: str) -> str:
+    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    start = after.index(f"\n  {name}:\n")
+    end = re.compile(r"\n\n  [\w-]+:\n").search(after, start + 1)
+    return after[start : end.start() if end else len(after)]
+
+
 def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
     # The checks of every kind of project are only templates here, whose jobs skip.
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert watched_after_the_checks(after) == {"CI (python)", "Variants"}
+    assert watched_after_the_checks(after) == {"CI (python)", "Variants"} | OTHER_CHECKS
     assert "github.event.workflow_run.run_attempt == 1" in after
 
 
@@ -1090,10 +1111,162 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
-    assert watched == names
+    assert watched == names | OTHER_CHECKS
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_for_cancelled_checks_watches_every_required_check(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A late run for an older commit may cancel the run of any of them.
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    required = set(settings["branch"]["required_checks"])
+    watched = watched_after_the_checks(
+        (root / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    )
+    providers = set()
+    for path in (root / ".github/workflows").glob("*.yml"):
+        text = path.read_text(encoding="utf-8")
+        if required & set(re.findall(r"^    name: (.+)$", text, re.M)):
+            name = re.search(r"^name: (.+)$", text, re.M)
+            assert name, path
+            providers.add(name[1])
+            # Runs of a pull request cancel the older runs of the same one.
+            assert "cancel-in-progress:" in text, path
+    assert providers >= OTHER_CHECKS
+    assert providers <= watched
+
+
+def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
+    # Their checks fail the same way again, or, as the changelog, pass once the pull
+    # request changed: no flaky test either way.
+    for job in ("rerun", "report"):
+        listed = re.search(
+            r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
+            after_the_checks_job(job),
+        )
+        assert listed, job
+        assert set(json.loads(listed[1])) == OTHER_CHECKS, job
+    # A run that the bot for cancelled checks started again failed at first in no test.
+    report = after_the_checks_job("report")
+    assert report.index('attempts/1" --jq .conclusion)" == cancelled') < report.index(
+        "gh issue create"
+    )
+
+
+def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
+    job = after_the_checks_job("cancelled")
+    assert "github.event.workflow_run.conclusion == 'cancelled'" in job
+    events = """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
+    assert events in job
+    # Twice at most, whatever cancels the run again.
+    assert "github.event.workflow_run.run_attempt < 3" in job
+    # It reads the runs, their checks and pull requests and starts a run again; it
+    # checks out nothing.
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == [
+        "      actions: write",
+        "      checks: read",
+        "      pull-requests: read",
+    ]
+    assert "actions/checkout" not in job
+    # Every job of the run starts again, so that each of its checks reports.
+    assert 'gh run rerun "$RUN"\n' in job
+    assert "--failed" not in job
+    # The values of the event reach the script as variables only.
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+def run_the_bot_for_cancelled_checks(
+    tmp_path: Path, pull: str, newer: str, message: str
+) -> tuple[str, str]:
+    job = after_the_checks_job("cancelled")
+    script = textwrap.dedent(
+        job[job.index("        run: |\n") + len("        run: |\n") :]
+    )
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    # gh answers as the API does, after the filters of jq.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+echo "$*" >> "$CALLS"
+case "$*" in
+  "api repos/o/r/commits/abc1234def/pulls --jq "*) printf '%s\\n' "$PULL" ;;
+  "api repos/o/r/actions/workflows/3/runs?head_sha=abc1234def --paginate --jq "*) printf '%s\\n' "$NEWER" ;;
+  "api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq "*) printf '11\\n12\\n' ;;
+  "api repos/o/r/check-runs/1"[12]"/annotations --paginate --jq .[].message") printf '%s\\n' "$MESSAGE" ;;
+  "run rerun 5") ;;
+  *) echo "unexpected: gh $*" >&2; exit 1 ;;
+esac
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    calls = tmp_path / "calls"
+    summary = tmp_path / "summary"
+    calls.touch()
+    summary.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "GH_REPO": "o/r",
+        "RUN": "5",
+        "ATTEMPT": "1",
+        "WORKFLOW": "3",
+        "NAME": "CodeQL",
+        "SHA": "abc1234def",
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "CALLS": str(calls),
+        "PULL": pull,
+        "NEWER": newer,
+        "MESSAGE": message,
+    }
+    # As GitHub runs a step: bash -e.
+    result = subprocess.run(
+        ["bash", "-e", "step.sh"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return calls.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8")
+
+
+RACED = "Canceling since a higher priority waiting request for CodeQL-136 exists"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.parametrize(
+    ("pull", "newer", "message", "summary"),
+    [
+        # A newer push replaced the commit, or the pull request is closed.
+        ("", "", RACED, "abc1234 is not the head of an open pull request"),
+        # Another run of the same commit, such as one of an edited title, reports.
+        ("136", "7", RACED, "A newer run of CodeQL for abc1234 reports"),
+        # A person cancelled it.
+        ("136", "", "The operation was canceled.", "it stays cancelled"),
+        # A late run for an older commit cancelled the run for the head.
+        ("136", "", RACED, "the head of #136; it runs again"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
+    tmp_path: Path, pull: str, newer: str, message: str, summary: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(tmp_path, pull, newer, message)
+
+    assert summary in written
+    assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
 
 
 @pytest.mark.parametrize("kind", KINDS)

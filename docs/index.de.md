@@ -77,7 +77,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
 </div>
 
-Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, das Aufräumen und den Dev-Container.
+Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, das Aufräumen und den Dev-Container.
 
 ## Arten von Projekten
 
