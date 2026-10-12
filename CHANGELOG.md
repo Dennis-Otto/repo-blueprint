@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.0...v0.10.1) (2026-10-12)
+
 ### Bug fixes
 
 - **A cancelled check no longer blocks a pull request:** a newer run of a workflow cancels the one still running for the same pull request, but GitHub doesn't always create the runs in the order of the commits. A late run for an older commit could cancel the run for the latest commit, whose required checks then stayed cancelled until someone ran them again by hand, as with the release pull requests of 0.8.8 and 0.10.0. The bots after the checks now start such a run again: when the concurrency of its workflow cancelled it, it is for the latest commit of an open pull request and no newer run of its workflow for that commit exists. A run that a person cancelled stays cancelled. For this they watch the workflows of every required check, CodeQL, Dependency review, Docs, Lint, Pull request title and Secret scan as well as the tests; the flaky-test bot still looks at the tests only.
