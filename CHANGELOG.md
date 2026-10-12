@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.9.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.8...v0.9.0) (2026-10-12)
+
 ### Features
 
 - **Every release of the blueprint goes out at once:** the new Rollout workflow starts the blueprint bot in every repository of the release app as soon as the Release workflow has published and verified a release, so that the update pull requests come within minutes instead of with the bot's weekly run. The release app needs the permission *Actions* to read and write for it: change it in the settings of the app, then accept the new permissions on its installation.
