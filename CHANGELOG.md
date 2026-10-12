@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.8.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.8.7...v0.8.8) (2026-10-12)
+
 ### Bug fixes
 
 - **Renovate compiles every lock file for its own Python:** Renovate installs pip-tools once per repository and run, for the Python of the first lock file it compiles, so it compiled a lock file for another Python with the wrong one. The lock file of the Home Assistant stack, for Python 3.14, came out for Python 3.12 with Home Assistant 2025.1. It is now compiled with `uv pip compile --python-version 3.14.8`, which doesn't depend on the Python it runs on, and its `requirements-test.in` pins the test plugin, so that a Home Assistant that needs a newer Python fails its update instead of an older Home Assistant being chosen. A project with lock files for two Pythons compiles the one for the other Python with `uv pip compile --python-version` as well.
