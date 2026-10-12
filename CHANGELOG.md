@@ -10,6 +10,13 @@ the next release, or lists the pull requests when there is none.
 
 - **Renovate's updates merge without waiting for its next run:** `main` only takes pull requests that are up to date with it, and Renovate brought its own up to date only when it ran, every two hours and often later. An update whose checks had passed waited behind every other merge. The branch bot now brings Renovate's pull requests up to date as well, as the release app that Renovate commits as, so that Renovate still takes the branch for its own; one that conflicts with `main` Renovate builds anew itself, without a label or a comment of the bot.
 
+## [0.10.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.9.1...v0.10.0) (2026-10-12)
+
+
+### Features
+
+* let the branch bot bring Renovate's pull requests up to date ([#135](https://github.com/Dennis-Otto/repo-blueprint/issues/135)) ([033cddb](https://github.com/Dennis-Otto/repo-blueprint/commit/033cddb741268aab33439d172f460495af2f07a5))
+
 ## [0.9.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.9.0...v0.9.1) (2026-10-12)
 
 ### Bug fixes
