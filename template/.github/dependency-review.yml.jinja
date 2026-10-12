@@ -71,4 +71,7 @@ allow-dependencies-licenses:
   - pkg:pypi/snitun
   - pkg:pypi/pyric
   - pkg:pypi/text-unidecode
+  # regex, which the voice parts of Home Assistant's test base bring in, declares
+  # Apache-2.0 AND CNRI-Python.
+  - pkg:pypi/regex
 [%- endif %]
