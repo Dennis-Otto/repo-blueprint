@@ -43,7 +43,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Renovate, das der Blueprint alle zwei Stunden ausführt: Actions, Abhängigkeiten und Images eine Woche nach ihrem Release, ein Update, das eine Schwachstelle behebt, sofort. Routine-Updates mergen sich selbst, sobald alle Prüfungen grün sind.
+    Renovate, das der Blueprint alle zwei Stunden ausführt: Actions, Abhängigkeiten und Images eine Woche nach ihrem Release, ein Update, das eine Schwachstelle behebt, sofort. Routine-Updates und die wöchentliche Auffrischung der Lock-Dateien mergen sich selbst, sobald alle Prüfungen grün sind.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 

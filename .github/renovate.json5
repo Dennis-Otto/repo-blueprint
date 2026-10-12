@@ -52,6 +52,20 @@
       groupName: "the tools of the Nextcloud apps",
     },
     {
+      // As in the Nextcloud apps: only releases that run on their oldest PHP, the
+      // platform of stacks/php/composer.json, and the public API of Nextcloud
+      // within its major version.
+      matchFileNames: ["stacks/php/**"],
+      constraints: { php: "8.2.*" },
+      constraintsFiltering: "strict",
+    },
+    {
+      matchFileNames: ["stacks/php/**"],
+      matchDepNames: ["nextcloud/ocp"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
+    {
       matchFileNames: ["stacks/node/**"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "the tools of the Node packages",
