@@ -961,6 +961,35 @@ def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
         assert expected in (ROOT / name).read_text(encoding="utf-8"), name
 
 
+def test_every_release_of_the_blueprint_rolls_out_at_once(
+    projects: dict[str, Path],
+) -> None:
+    rollout = (ROOT / ".github/workflows/rollout.yml").read_text(encoding="utf-8")
+    # After a successful run of the Release workflow on main, for a merge or started
+    # by hand: its hourly runs make no release.
+    assert "workflows: [Release]" in rollout
+    assert "branches: [main]" in rollout
+    assert "github.event.workflow_run.conclusion == 'success'" in rollout
+    assert (
+        """contains(fromJSON('["push", "workflow_dispatch"]'), """
+        "github.event.workflow_run.event)"
+    ) in rollout
+    # Only for the commit of the latest release, and only in the blueprint.
+    assert '"$commit" != "$HEAD_SHA"' in rollout
+    assert "github.repository == 'Dennis-Otto/repo-blueprint'" in rollout
+    # A token that can only start workflows and read, for the bot of each repository.
+    permissions = re.findall(r"^\s+permission-([\w-]+): (\w+)$", rollout, re.M)
+    assert permissions == [("actions", "write"), ("contents", "read")]
+    assert "gh workflow run blueprint-update.yml" in rollout
+    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    assert "      - rollout.yml\n" in zizmor
+    # The bot it starts can be started by hand; a project has no rollout of its own.
+    for project in projects.values():
+        update = project / ".github/workflows/blueprint-update.yml"
+        assert "  workflow_dispatch:\n" in update.read_text(encoding="utf-8")
+        assert not (project / ".github/workflows/rollout.yml").exists()
+
+
 def test_renovate_runs_one_release_everywhere() -> None:
     pins = set()
     for name in ("renovate.yml", "variants.yml"):
