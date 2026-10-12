@@ -19,7 +19,7 @@
 	"require-dev": {
 		"nextcloud/coding-standard": "^1.5",
 		"nextcloud/ocp": "^33.0",
-		"phpunit/phpunit": "^11.5",
+		"phpunit/phpunit": "^13.0",
 		"vimeo/psalm": "^6.0"
 	},
 	"scripts": {
