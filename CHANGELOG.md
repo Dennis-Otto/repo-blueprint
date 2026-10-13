@@ -11,6 +11,14 @@ the next release, or lists the pull requests when there is none.
 - **The hook runs the checks before every push on Linux, macOS, in the dev container and in Codespaces too:** `.githooks/pre-push` came as a plain file, and Git runs a hook only when it is executable, so outside Windows it skipped the hook with a hint and pushed without the checks. New repositories now get the hook executable, and `.devcontainer/setup.sh`, `.github/sign-tag.sh` and `.github/blueprint.py` too. `scripts/check.sh` now fails while Git has a hook in `.githooks/` as a plain file, as Windows adds a new one, and names the fix: `git update-index --chmod=+x .githooks/pre-push`, and a commit. In your repository, the blueprint bot of 0.10.2 and later makes the four files executable with its next update, or names the command where GitHub can't carry the mode. The bot of 0.10.1 and older can't: if your repository is on such a release, commit `git update-index --chmod=+x .githooks/pre-push .devcontainer/setup.sh .github/sign-tag.sh .github/blueprint.py` before the update, or its pull request keeps the hook a plain file and fails its checks until you do. Where Git ignores the modes of the files, the dev container makes the hook executable on disk.
 - **A Nextcloud app adopted without the sample code passes Psalm and PHPUnit:** `psalm.xml` loads `tests/stubs/Emitter.php` and `phpunit.xml` starts with `tests/bootstrap.php`, but both files came only with the sample code. An existing app that took the blueprint with `sample_code=false` failed both checks, with "Cannot resolve stubfile path" and "Cannot open bootstrap script", unless it carried copies of its own. Every Nextcloud app now gets `tests/bootstrap.php` and `tests/stubs/`; the next update adds the files that an app lacks and keeps the ones it has. The README now shows, under *An existing repository*, where the checks of a Nextcloud app and of a Node package look for the code and the tests.
 
+## [0.10.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.2...v0.10.3) (2026-10-13)
+
+
+### Bug fixes
+
+* let repositories adopted without sample code pass psalm and phpunit ([#172](https://github.com/Dennis-Otto/repo-blueprint/issues/172)) ([83502bd](https://github.com/Dennis-Otto/repo-blueprint/commit/83502bd08eb665b71b462e17f9aefb8d0825c77c))
+* make the pre-push hook executable in every generated repository ([#164](https://github.com/Dennis-Otto/repo-blueprint/issues/164)) ([ceb5389](https://github.com/Dennis-Otto/repo-blueprint/commit/ceb53898c29122ebd38399d92fd496065e75c7c9))
+
 ## [0.10.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.1...v0.10.2) (2026-10-13)
 
 ### Changes
