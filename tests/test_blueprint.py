@@ -643,6 +643,42 @@ def test_a_project_names_its_own_release_app(root: Path) -> None:
     assert settings.rulesets[-1] == tag_creation_ruleset(12345)
 
 
+@pytest.mark.parametrize(
+    ("own", "accepted"),
+    [
+        # The blueprint's app, named again: nothing of its own.
+        ('RELEASE_AUTOMATION_CLIENT_ID = "Iv23client"', True),
+        # An app of its own, with both of its IDs.
+        (
+            'RELEASE_AUTOMATION_CLIENT_ID = "Iv23own"\nRELEASE_AUTOMATION_APP_ID = "12345"',
+            True,
+        ),
+        # An app of its own, as the README described it before the App ID.
+        ('RELEASE_AUTOMATION_CLIENT_ID = "Iv23own"', False),
+    ],
+)
+def test_a_release_app_of_its_own_needs_its_app_id(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    own: str,
+    accepted: bool,
+) -> None:
+    (root / ".github/repository.project.toml").write_text(
+        f"[variables]\n{own}\n", encoding="utf-8"
+    )
+
+    if accepted:
+        assert with_app_id(root).rulesets[-1]["name"] == "Release tag creation"
+        return
+    with pytest.raises(ConfigError):
+        with_app_id(root)
+    assert run(github, root, "settings", "check") == 2
+    err = capsys.readouterr().err
+    assert "set RELEASE_AUTOMATION_APP_ID there too" in err
+    assert not github.calls
+
+
 def creation_rulesets(github: FakeGitHub) -> list[dict[str, Any]]:
     return [
         ruleset

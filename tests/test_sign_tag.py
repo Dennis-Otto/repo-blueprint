@@ -519,6 +519,26 @@ def test_any_other_tag_fails_the_verification(
     assert f"::error::{error}" in result.stdout
 
 
+def test_the_signed_tag_of_another_version_fails_the_verification(
+    github: GitHub,
+) -> None:
+    # A new ref at the signed tag of an older release: its commit is on main and the
+    # release workflow signed it, but for v1.0.0, so a bot must not take it as v9.9.9.
+    github.signs("v1.0.0", github.release)
+    signed = github.git("rev-parse", "refs/tags/v1.0.0")
+    github.git("update-ref", "refs/tags/v9.9.9", signed)
+
+    result = github.sign_tag("verify", "v9.9.9", github.release)
+
+    assert result.returncode == 1
+    assert (
+        "::error::The tag v9.9.9 is the signed tag v1.0.0 of another version"
+        in result.stdout
+    )
+    calls = github.calls.read_text(encoding="utf-8").splitlines()
+    assert not [call for call in calls if call.startswith("verify-tag ")]
+
+
 @pytest.mark.parametrize(
     ("workflow", "verified"),
     [

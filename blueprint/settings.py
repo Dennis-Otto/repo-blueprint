@@ -257,6 +257,24 @@ def release_app_id(variables: dict[str, str]) -> int | None:
     return int(value)
 
 
+def own_release_app(blueprint: dict[str, str], own: dict[str, str]) -> None:
+    """A project that names a release app of its own names its App ID too: with the
+    blueprint's App ID, only the blueprint's app could create its release tags, and its
+    next release couldn't push its tag."""
+    client = "RELEASE_AUTOMATION_CLIENT_ID"
+    if (
+        "RELEASE_AUTOMATION_APP_ID" in blueprint
+        and "RELEASE_AUTOMATION_APP_ID" not in own
+        and own.get(client, blueprint.get(client)) != blueprint.get(client)
+    ):
+        raise ConfigError(
+            "repository.project.toml names a release app of its own in"
+            " RELEASE_AUTOMATION_CLIENT_ID, but not its App ID; set"
+            " RELEASE_AUTOMATION_APP_ID there too, the App ID on the settings page of"
+            " the app, so that the app may create the release tags"
+        )
+
+
 def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[str]:
     """What differs between two rulesets, in the parts this tool manages. A token that
     may only read the administration, such as the release app's, gets the rulesets
@@ -578,7 +596,9 @@ class Settings:
         # current: its own checks, environments, secrets and variables.
         project = path.with_name("repository.project.toml")
         if project.exists():
-            config = merge(config, tomllib.loads(project.read_text(encoding="utf-8")))
+            own = tomllib.loads(project.read_text(encoding="utf-8"))
+            own_release_app(config.get("variables", {}), own.get("variables", {}))
+            config = merge(config, own)
         checks = config.get("branch", {}).get("required_checks", [])
         variables = config.get("variables", {})
         rulesets = [main_ruleset(checks), tag_ruleset()]

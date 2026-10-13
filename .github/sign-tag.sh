@@ -57,7 +57,7 @@ offline+='|context deadline exceeded|Bad Gateway|Service Unavailable|Gateway Tim
 # release workflow: 1 when it isn't, 2 when that could not be checked. It runs in
 # conditions, where bash doesn't stop at an error, so every step checks its own.
 verify() {
-  local tag="$1" commit="$2" repository target log
+  local tag="$1" commit="$2" repository name target log
   repository="$(mktemp -d)"
   git init --quiet "$repository"
   if ! retry github -C "$repository" fetch --quiet --depth=1 "$remote" "refs/tags/$tag:refs/tags/$tag"; then
@@ -66,6 +66,13 @@ verify() {
   fi
   if [[ "$(git -C "$repository" cat-file -t "refs/tags/$tag")" != tag ]]; then
     echo "::error::The tag $tag is not a signed tag; only the release workflow may create the tags of releases."
+    return 1
+  fi
+  # The signature covers the name inside the tag, not the name of the ref: a new ref at
+  # the signed tag of an older release would pass every other check.
+  name="$(git -C "$repository" cat-file tag "refs/tags/$tag" | sed -n '/^$/q; s/^tag //p')"
+  if [[ "$name" != "$tag" ]]; then
+    echo "::error::The tag $tag is the signed tag $name of another version; only the release workflow may create the tags of releases."
     return 1
   fi
   target="$(git -C "$repository" rev-parse "refs/tags/$tag^{commit}")"
