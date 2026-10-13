@@ -81,7 +81,7 @@ How the [OWASP Top 10 CI/CD security risks](https://owasp.org/www-project-top-10
 | --- | --- |
 | Insufficient flow control mechanisms | pull requests only, every required check, a linear history, release tags that never move |
 | Inadequate identity and access management | administrator access only for the maintainers; bots act as GitHub Apps or with the token of their workflow |
-| Dependency chain abuse | lock files with hashes, pins by commit hash and digest, updates only a week after their release, the dependency review and OSV-Scanner |
+| Dependency chain abuse | lock files with hashes, pins by commit hash and digest, updates only a week after their release, a weekly refresh of the lock files that waits for the maintainer, the dependency review and OSV-Scanner |
 | Poisoned pipeline execution | no code of a pull request runs with a secret; actionlint and zizmor audit every workflow |
 | Insufficient pipeline-based access controls | permissions per job, environments that only `main` can use, actions pinned to commit hashes as a setting of the repository |
 | Insufficient credential hygiene | the secret scan and push protection, tokens of the release app that expire after an hour, no secret printed or committed |

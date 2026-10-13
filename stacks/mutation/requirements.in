@@ -1,3 +1,7 @@
 # mutmut, the mutation testing of the Python projects, for the weekly Mutation
-# workflow. https://github.com/Dennis-Otto/repo-blueprint
+# workflow. It runs the pytest and coverage of the project, so the lock file leaves
+# them and what pytest needs out (--no-emit-package=), and it holds for every
+# Python and system that a project may run it on (--universal). Renovate compiles
+# it again with the command in the header of requirements.txt.
+# https://github.com/Dennis-Otto/repo-blueprint
 mutmut==3.8.0

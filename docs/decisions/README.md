@@ -17,3 +17,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0009](0009-run-a-check-only-where-it-can-change-a-result.md) | Run a check only where it can change a result | accepted |
 | [0010](0010-roll-out-one-repository-at-a-time.md) | Roll out each release one repository at a time, and report every repository that misses it | accepted |
 | [0011](0011-downloads-try-again-and-checks-cache-their-tools.md) | Every download tries again, the checks cache what they download, and the CI skips no check for an unreachable server | accepted |
+| [0012](0012-lock-refresh-waits-for-the-maintainer.md) | Refresh every lock file once a week, and let the refresh wait for the maintainer | accepted |
