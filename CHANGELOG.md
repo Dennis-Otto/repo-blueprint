@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+- **Every release gets its signed tag, even when the run of its merge is lost:** the release workflow signed the tag of a release only in the run that the merge of the release pull request started. When that run was cancelled or failed before it got there, the next run could create the release on a tag without a signature, which the immutable release then kept for good. Every run of the Release workflow, the hourly one and one started by hand too, now signs the tag of a merged release pull request before the release is created on it. Signing and pushing the tag try three times each, because GitHub fails a push for a moment now and then, as with the `fatal error in commit_refs` that held up 0.10.0 until someone ran it again; a tag that GitHub took although the push failed counts as pushed.
+- **A release is built only on its own signed tag:** a token that may push could create the tag of the coming version first, at a commit of its own, and the release was then built, signed and published from it. A tag that exists already must now be the one that the release workflow signed, at the commit of the release; any other stops the release before release-please creates it, and the isolated build checks the tag again before it builds or signs anything.
+- **The release check is strict with every new release:** called by an hourly run of the Release workflow, it took the event of that run for its own weekly run: it only noted a tag without a signature, and it skipped a release without the bundle of its provenance altogether. It now checks every new release in full; only its own weekly run of the latest release accepts what older releases lack.
+
 ## [0.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.0...v0.10.1) (2026-10-12)
 
 ### Bug fixes
