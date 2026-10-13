@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.11.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.3...v0.11.0) (2026-10-13)
+
 ### Features
 
 - **A bot that fails tells you, in one issue, and closes it once it passes again:** GitHub mails the failure of a scheduled run only to whoever last changed its schedule, and that of another run to whoever started it, here the release app for most runs, so Findings, Mutation and Renovate failed for days with nobody told. The new bot-health bot (`bot-health.yml`) looks at the end of every run of a bot or a scheduled workflow on `main`: a first failure runs its failed jobs once more where a second try can pass, and a failure that stays opens one issue per workflow, such as *Release fails on main*, with the label `bot-failure`, the failed jobs, the step that failed and the first error of each. A later failure in the same place updates the issue quietly, one in another place adds a comment, and the next run that passes closes it. Runs of pull requests and forks change nothing. Every night it also looks at the latest run of every workflow, the CI of `main` and the workflows of your project too, and starts a workflow whose schedule GitHub missed or switched off. The label comes from the bot; to keep its color in `.github/labels.toml`, which belongs to your project, add the `bot-failure` label of the blueprint's.
