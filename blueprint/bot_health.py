@@ -43,7 +43,7 @@ PASSED = "success"
 # fuzzing failed on an input that they found.
 ONE_TRY = frozenset({"Findings", "Mutation", "Property tests", "Fuzzing"})
 # Workflows that keep an issue of their own about their failures.
-OWN_ISSUE = frozenset({"Newest Python"})
+OWN_ISSUE = frozenset({"Newest Python", "Next runner"})
 # A failure that ended this recently may still get its second try from the run that
 # its end started; the daily look leaves it to that run.
 SECOND_TRY_TIME = timedelta(hours=1)
@@ -71,6 +71,15 @@ GENERIC = re.compile(r"Process completed with exit code \d+\.")
 REPOSITORY = re.compile(r"[\w.-]+/[\w.-]+")
 CRON = re.compile(r"""^\s*-\s*cron:\s*["']([^"'\n]+)["']""", re.MULTILINE)
 DISPATCH = re.compile(r"^  workflow_dispatch:.*\n((?:(?: {4}.*)?\n)*)", re.MULTILINE)
+# The events of a workflow, under on: or after it on its line, and the workflows whose
+# end starts it, listed after workflows: or below it.
+ON_BLOCK = re.compile(r"^on:[ \t]*\n((?:(?:[ \t].*)?\n)*)", re.MULTILINE)
+ON_LINE = re.compile(r"^on:[ \t]*\[?([\w, -]+?)\]?[ \t]*$", re.MULTILINE)
+EVENT = re.compile(r"^  ([\w-]+):", re.MULTILINE)
+AFTER = re.compile(r"^  workflow_run:.*\n((?:(?: {4}.*)?\n)*)", re.MULTILINE)
+AFTER_NAMES = re.compile(
+    r"^ {4}workflows:[ \t]*(?:\[([^\]\n]*)\]|\n((?: {6,}- .*\n)+))", re.MULTILINE
+)
 EVENTS = {
     "schedule": "its schedule",
     "push": "a push",
@@ -173,7 +182,8 @@ class Issue:
 
 def open_issues(api: Api, repo: str) -> dict[str, Issue]:
     """The open issues of the bot by the key in their state: the path of a workflow,
-    or renovate; the newest one where a key has several."""
+    or renovate. Where a key has several, because two runs of the bot opened one each
+    at the same moment, the newest one stays and the older ones close."""
     found: dict[str, Issue] = {}
     listed = api.get(f"repos/{repo}/issues?labels={LABEL}&state=open&per_page=100")
     for item in listed or []:
@@ -186,8 +196,19 @@ def open_issues(api: Api, repo: str) -> dict[str, Issue]:
         except ValueError:
             continue
         key = state.get("key")
-        if isinstance(key, str) and key not in found:
-            found[key] = Issue(int(item["number"]), body, state)
+        if not isinstance(key, str):
+            continue
+        number = int(item["number"])
+        if key in found:
+            close_issue(
+                api,
+                repo,
+                number,
+                f"Continued in #{found[key].number}.",
+                reason="not_planned",
+            )
+        else:
+            found[key] = Issue(number, body, state)
     return found
 
 
@@ -213,11 +234,13 @@ def open_issue(
     return int(response.data["number"])
 
 
-def close_issue(api: Api, repo: str, number: int, comment: str) -> None:
+def close_issue(
+    api: Api, repo: str, number: int, comment: str, *, reason: str = "completed"
+) -> None:
     api.post(f"repos/{repo}/issues/{number}/comments", {"body": comment})
     api.patch(
         f"repos/{repo}/issues/{number}",
-        {"state": "closed", "state_reason": "completed"},
+        {"state": "closed", "state_reason": reason},
     )
 
 
@@ -548,23 +571,77 @@ def missed_time(text: str, now: datetime) -> tuple[datetime | None, bool]:
     return max(times, default=None), None not in crons
 
 
+def events_of(text: str) -> frozenset[str]:
+    """The events that start a workflow, from its on: in either form."""
+    block = ON_BLOCK.search(text)
+    if block is not None:
+        return frozenset(EVENT.findall(block[1]))
+    line = ON_LINE.search(text)
+    names = line[1].split(",") if line else []
+    return frozenset(name.strip() for name in names) - {""}
+
+
+def started_after(text: str) -> frozenset[str] | None:
+    """The workflows whose end starts this one: none without workflow_run, and None
+    when its list can't be read."""
+    block = AFTER.search(text)
+    if block is None:
+        return frozenset()
+    listed = AFTER_NAMES.search(block[1])
+    if listed is None:
+        return None
+    if listed[1] is not None:
+        names = listed[1].split(",")
+    else:
+        names = [line.strip().removeprefix("- ") for line in listed[2].splitlines()]
+    return frozenset(name.strip().strip("\"'") for name in names) - {""}
+
+
+def after_pull_requests(texts: Iterable[tuple[str, str]]) -> frozenset[str]:
+    """The names of the workflows, from their names and texts, that the end of a run
+    for a pull request starts as well, such as After the checks. GitHub gives such a
+    run the default branch and its latest commit, and only its jobs know that it was
+    for a pull request, so the daily look counts their other runs alone."""
+    texts = list(texts)
+    of_pull_requests = {name for name, text in texts if events_of(text) & PULL_REQUESTS}
+    found: set[str] = set()
+    grows = True
+    while grows:
+        grows = False
+        for name, text in texts:
+            after = started_after(text)
+            if name not in found and (after is None or after & of_pull_requests):
+                found.add(name)
+                of_pull_requests.add(name)
+                grows = True
+    return frozenset(found)
+
+
 def look_after(
     api: Api,
     repo: str,
     branch: str,
     workflow: Json,
     issues: Mapping[str, Issue],
-    root: Path,
+    text: str,
     now: datetime,
+    *,
     start: bool,
+    after_checks: bool,
 ) -> tuple[str, bool]:
-    """What the daily look does for one workflow, and whether it started it."""
+    """What the daily look does for one workflow, and whether it started it. With
+    after_checks, a run that the end of another workflow started doesn't count."""
     listed = api.get(
         f"repos/{repo}/actions/workflows/{workflow['id']}/runs"
         f"?branch={urllib.parse.quote(branch)}&exclude_pull_requests=true&per_page=50"
     )
     runs = [Run.of(item) for item in (listed or {}).get("workflow_runs", [])]
-    runs = [run for run in runs if run.of_branch(repo, branch)]
+    runs = [
+        run
+        for run in runs
+        if run.of_branch(repo, branch)
+        and not (after_checks and run.event == "workflow_run")
+    ]
     finished = next(
         (
             run
@@ -584,8 +661,6 @@ def look_after(
     if workflow["state"] == "disabled_inactivity":
         api.put(f"repos/{repo}/actions/workflows/{workflow['id']}/enable")
         notes.append("GitHub had switched it off for inactivity: on again")
-    path = root / str(workflow["path"])
-    text = path.read_text(encoding="utf-8") if path.is_file() else ""
     due, readable = missed_time(text, now)
     if not readable:
         notes.append("a schedule that can't be read")
@@ -625,12 +700,23 @@ def sweep(api: Api, repo: str, root: Path, now: datetime) -> tuple[str, bool]:
         "| Workflow | State |",
         "| --- | --- |",
     ]
+    texts = {
+        str(workflow["path"]): path.read_text(encoding="utf-8")
+        if path.is_file()
+        else ""
+        for workflow in workflows
+        for path in [root / str(workflow["path"])]
+    }
+    after_checks = after_pull_requests(
+        (str(workflow["name"]), texts[str(workflow["path"])]) for workflow in workflows
+    )
     starts = 0
     healthy = True
     for workflow in workflows:
+        name = str(workflow["name"])
         if (
             str(workflow["path"]).startswith("dynamic/")
-            or workflow["name"] in OWN_ISSUE
+            or name in OWN_ISSUE
             or workflow["state"] not in ("active", "disabled_inactivity")
         ):
             continue
@@ -641,14 +727,15 @@ def sweep(api: Api, repo: str, root: Path, now: datetime) -> tuple[str, bool]:
                 branch,
                 workflow,
                 issues,
-                root,
+                texts[str(workflow["path"])],
                 now,
                 start=starts < MOST_STARTS,
+                after_checks=name in after_checks,
             )
         except GitHubError as error:
             state, started, healthy = f"couldn't look: {code(str(error))}", False, False
         starts += started
-        lines.append(f"| {code(str(workflow['name']))} | {state} |")
+        lines.append(f"| {code(name)} | {state} |")
     return "\n".join(lines) + "\n", healthy
 
 

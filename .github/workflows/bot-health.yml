@@ -39,7 +39,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.workflow_run.workflow_id }}
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       # Runs the failed jobs once more.
@@ -79,7 +79,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-sweep
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       # Switches a schedule on again that GitHub switched off, and starts a workflow

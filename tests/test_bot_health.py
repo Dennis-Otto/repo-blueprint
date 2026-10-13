@@ -30,9 +30,11 @@ from blueprint.bot_health import (
     Cron,
     Problem,
     Run,
+    after_pull_requests,
     code,
     default_branch,
     dispatch_inputs,
+    events_of,
     failures,
     marker,
     missed_time,
@@ -40,6 +42,7 @@ from blueprint.bot_health import (
     open_issues,
     renovate_problems,
     renovate_report,
+    started_after,
     sweep,
     watch_run,
 )
@@ -623,6 +626,16 @@ def test_the_issues_of_the_bot_are_found_by_their_state(github: FakeGitHub) -> N
 
     assert set(found) == {RELEASE, FINDINGS}
     assert found[RELEASE].number == newer != older
+    # Two runs of the bot that opened an issue each at the same moment: the older one
+    # points to the newer one and closes.
+    assert github.issues[older]["state"] == "closed"
+    assert github.issues[older]["state_reason"] == "not_planned"
+    assert github.comments[older] == [f"Continued in #{newer}."]
+    assert github.issues[newer]["state"] == "open"
+    assert writes(github) == [
+        ("POST", f"repos/{REPO}/issues/{older}/comments"),
+        ("PATCH", f"repos/{REPO}/issues/{older}"),
+    ]
 
 
 def test_the_label_that_another_run_just_created_is_fine(github: FakeGitHub) -> None:
@@ -654,6 +667,8 @@ def test_the_names_of_the_workflows_exist() -> None:
         if (match := re.search(r"^name: (.+)$", path.read_text("utf-8"), re.M))
     }
     assert names >= ONE_TRY | OWN_ISSUE
+    # Both keep an issue of their own, and a second one would repeat it.
+    assert {"Newest Python", "Next runner"} <= OWN_ISSUE
 
 
 # ---------------------------------------------------------------- the daily look
@@ -700,6 +715,7 @@ def test_the_daily_look_reports_what_the_events_missed(
         workflow(5, "Docs"),
         workflow(6, "Labels"),
         workflow(7, "Newest Python"),
+        workflow(10, "Next runner"),
         workflow(8, "Dependabot", path="dynamic/dependabot/dependabot-updates"),
         workflow(9, "Old", state="disabled_manually"),
     ]
@@ -837,6 +853,136 @@ def test_the_daily_look_starts_a_few_workflows_a_day(
         f"| `W{MOST_STARTS}` | no finished run on `main`; missed its run of "
         f"2026-10-11 05:40 UTC: starts in a later look, {MOST_STARTS} a day |"
     )
+
+
+AFTER_CHECKS = """name: After the checks
+on:
+  workflow_run:
+    # The checks.
+    workflows: [CI (python), "Docs"]
+    types: [completed]
+jobs: {}
+"""
+
+
+def test_the_daily_look_leaves_the_runs_after_the_checks_of_pull_requests_alone(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    write(tmp_path, 1, "name: CI (python)\non:\n  push:\n  pull_request:\njobs: {}\n")
+    write(tmp_path, 2, AFTER_CHECKS)
+    # After the end of a run that follows the checks, in turn.
+    write(
+        tmp_path,
+        3,
+        "name: Comment\non:\n  workflow_run:\n    workflows:\n"
+        "      - After the checks\n    types: [completed]\njobs: {}\n",
+    )
+    # After the end of a release, which no pull request runs.
+    write(
+        tmp_path,
+        4,
+        "name: Rollout\non:\n  workflow_run:\n    workflows: [Release]\n"
+        "  workflow_dispatch:\njobs: {}\n",
+    )
+    findings = ".github/workflows/w5.yml"
+    write(
+        tmp_path,
+        5,
+        "name: Findings\non:\n  workflow_run:\n    workflows: [CI (python)]\n"
+        "  schedule:\n    - cron: '0 0 * * *'\n  workflow_dispatch:\njobs: {}\n",
+    )
+    github.workflows = [
+        workflow(1, "CI (python)"),
+        workflow(2, "After the checks"),
+        workflow(3, "Comment"),
+        workflow(4, "Rollout"),
+        workflow(5, "Findings", path=findings),
+    ]
+    # GitHub gives the runs after the checks of a pull request the default branch,
+    # its latest commit and the repository itself.
+    github.workflow_runs = {
+        2: [run_of(20, name="After the checks", event="workflow_run")],
+        3: [run_of(30, name="Comment", event="workflow_run", conclusion="success")],
+        4: [run_of(40, name="Rollout", event="workflow_run")],
+        5: [
+            run_of(50, name="Findings", path=findings, event="workflow_run"),
+            run_of(
+                51,
+                name="Findings",
+                path=findings,
+                conclusion="success",
+                created=NOW - timedelta(hours=7),
+            ),
+        ],
+    }
+    comment = github.add_issue(".github/workflows/w3.yml", run=29, failed=1)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert summary.splitlines()[6:] == [
+        "| `After the checks` | no finished run on `main` |",
+        "| `CI (python)` | no finished run on `main` |",
+        "| `Comment` | no finished run on `main` |",
+        # Its runs after the checks don't count, those of its schedule do.
+        "| `Findings` | passes |",
+        "| `Rollout` | fails: opened #2 |",
+    ]
+    assert github.issues[comment]["state"] == "open"
+    assert set(github.issues) == {comment, 2}
+    assert github.dispatched == []
+
+
+@pytest.mark.parametrize(
+    ("text", "events"),
+    [
+        (
+            "on:\n  push:\n    branches: [main]\n\n  pull_request:\njobs:\n",
+            {"push", "pull_request"},
+        ),
+        ("on: [push, pull_request_target]\n", {"push", "pull_request_target"}),
+        ("on: push\n", {"push"}),
+        ("on: []\n", set()),
+        ("name: No events\n", set()),
+    ],
+)
+def test_the_events_of_a_workflow(text: str, events: set[str]) -> None:
+    assert events_of(text) == events
+
+
+@pytest.mark.parametrize(
+    ("text", "names"),
+    [
+        (AFTER_CHECKS, {"CI (python)", "Docs"}),
+        (
+            "on:\n  workflow_run:\n    workflows:\n      - 'A'\n      - B C\n"
+            "    types: [completed]\n",
+            {"A", "B C"},
+        ),
+        ("on:\n  workflow_run:\n    workflows: []\n", set()),
+        ("on:\n  push:\n", set()),
+        # A list that can't be read: it may name the checks.
+        ("on:\n  workflow_run:\n    types: [completed]\n", None),
+        ("on:\n  workflow_run:\n    workflows: ${{ x }}\n", None),
+    ],
+)
+def test_the_workflows_whose_end_starts_a_workflow(
+    text: str, names: set[str] | None
+) -> None:
+    assert started_after(text) == names
+
+
+def test_a_workflow_after_an_unreadable_one_follows_the_checks() -> None:
+    unreadable = "on:\n  workflow_run:\n    types: [completed]\n"
+    found = after_pull_requests(
+        [
+            ("Unreadable", unreadable),
+            ("After it", "on:\n  workflow_run:\n    workflows: [Unreadable]\n"),
+            ("Release", "on:\n  push:\n"),
+            ("Rollout", "on:\n  workflow_run:\n    workflows: [Release]\n"),
+        ]
+    )
+    assert found == {"Unreadable", "After it"}
 
 
 def test_the_daily_look_goes_on_after_an_error(
