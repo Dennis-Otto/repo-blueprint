@@ -68,8 +68,9 @@ flowchart TB
 | **Abhängigkeiten** | Renovate, das der Blueprint alle zwei Stunden für jedes Repository als Release-App ausführt: Actions, Abhängigkeiten, Images und die Pins der Workflows, eine Woche nach ihrem Release, und sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt; Routine-Updates und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind, während die wöchentliche Auffrischung jeder Lock-Datei, die die neuesten Versionen ohne die Woche Wartezeit bringt, auf den Maintainer wartet; der Blueprint prüft, dass Renovate jede Lock-Datei liest, die er mitbringt. Dependabot pflegt die Features des Dev-Containers. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Abdeckung** | ein Kommentar an jedem Pull Request mit der Abdeckung seiner Tests im Vergleich zu `main`, Datei für Datei | `after-checks.yml` |
 | **Mutationstests** | jede Woche laufen Tausende kleiner Änderungen des Codes gegen die Tests, und die Zusammenfassung zeigt den Anteil, den sie bemerken, und die überlebenden Mutanten; ein niedriger Wert ist ein Bericht, nie ein Fehlschlag, aber ein Lauf, der nichts misst, schlägt fehl; ein Pull Request, der ändert, wie sie laufen, probiert sie aus | `mutation.yml`: mutmut, Infection |
-| **Wackelige Tests** | ein Testlauf, der fehlschlägt, führt seine fehlgeschlagenen Jobs einmal neu aus; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet | `after-checks.yml` |
-| **Abgebrochene Prüfungen** | ein Lauf einer vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
+| **Wackelige Tests** | ein Testlauf, der fehlschlägt oder dessen Job sein Zeitlimit erreicht, führt seine fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet, mit dem Schritt, dem Test und dem Fehler, die gescheitert sind | `after-checks.yml` |
+| **Abgebrochene Prüfungen** | die schnellen Prüfungen laufen einmal für jeden Commit, sodass kein Lauf für einen anderen Commit sie abbricht; ein Lauf einer längeren vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
+| **Gescheiterte Releases** | das Release eines Merges, das scheitert, etwa am Push seines Tags, den GitHub für einen Moment ablehnt, führt seine fehlgeschlagenen Jobs von selbst einmal neu aus, dort, wo sie stehen geblieben sind | `after-checks.yml` |
 | **Schnelle Prüfungen** | eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python prüft `main` eines Python-Projekts nach jeder Änderung und jede Woche | die Auslöser und Pfadfilter der Workflows, `newest-python.yml` |
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, Beitragsleitfaden mit den Coding-Standards und der Regel, dass jede Änderung ihre Tests mitbringt, Verhaltenskodex, Sicherheitsrichtlinie mit der Prüfung eines Releases und einem Assurance Case, das Sicherheitsdesign der Software (`docs/security.md`), Support, Governance mit den Rollen und dem Fortbestand des Projekts, Issue-Formulare, Pull-Request-Vorlage, Aufzeichnungen der Entscheidungen, die das Projekt prägen (`docs/decisions/`), Discussions mit Formularen für Fragen und Ideen und einer Ankündigung jedes Releases, Sponsor-Button, Social Preview | |
@@ -161,6 +162,57 @@ flowchart TB
 - **Der Release-Pull-Request** ändert nur den Changelog und die Version, die nichts an dem ändern, was ein Scanner findet. Im Blueprint steht die vorgeschriebene Prüfung *variants* für die Varianten und Updates jeder Projektart: Sie besteht, wenn jede bestanden hat oder keine laufen musste, wie im Release-Pull-Request.
 - **Das neueste Python**, Betas eingeschlossen, führt die Prüfungen eines Python-Projekts nach jeder Änderung an `main` und jede Woche aus, in einem eigenen Workflow, der die CI von `main` grün lässt. Ein neues Python bricht jeden Pull Request gleichermaßen, und keiner wartet darauf. Ein Fehlschlag hält ein Issue offen, das der wöchentliche Lauf schließt, sobald die Prüfungen wieder bestehen.
 - **Die Runner** sind mit ihrer Version benannt, `ubuntu-24.04`, nicht `ubuntu-latest`: GitHub zieht dieses Label über Wochen Job für Job auf ein neues Image um, wie ab dem 19. Oktober 2026 auf Ubuntu 26.04, sodass die Läufe eines Workflows zufällig auf dem einen oder dem anderen Image landen würden, mit einem anderen Python, ShellCheck und Docker, und wie ein flaky Test fehlschlügen. Im Blueprint führt der Workflow Next runner die Varianten jede Woche auf dem nächsten Runner aus, und ein Fehlschlag hält ein Issue offen; sobald sie dort bestehen, zieht ein Release des Blueprints jeden Job dorthin um. Ein eigener Workflow, den ein Update nicht anfasst, behält den Runner, den er nennt: Mit `ubuntu-latest` zieht er mit GitHubs Label um.
+
+### Wenn eine Prüfung scheitert oder abbricht
+
+Eine Prüfung, die ein Runner, eine Website oder GitHub für einen Moment scheitern lässt oder die ein Wettlauf zweier Läufe abbricht, braucht niemanden: Die Bots nach den Prüfungen führen sie einmal neu aus und lassen nur rot, was aus einem Grund scheitert.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wenn eine Prüfung scheitert oder abbricht
+    accDescr: Wenn ein Lauf der Prüfungen oder des Releases endet, schauen die Bots nach den Prüfungen, wie. Tests, die beim ersten Versuch fehlgeschlagen sind oder ihr Zeitlimit erreicht haben, führen ihre fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, kommt mit seinem Schritt, seinem Test und seinem Fehler in das Issue der wackeligen Tests, und einer, der wieder scheitert, bleibt rot. Eine vorgeschriebene Prüfung, die ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet neu. Das Release eines Merges, das gescheitert ist, führt seine fehlgeschlagenen Jobs einmal neu aus, dort, wo sie stehen geblieben sind.
+
+    run["Ein Lauf der Prüfungen<br>oder des Releases endet"]
+    tests["Tests beim ersten Versuch fehlgeschlagen<br>oder am Zeitlimit"]
+    raced["Eine vorgeschriebene Prüfung, abgebrochen<br>von einem verspäteten Lauf für einen älteren Commit"]
+    release["Das Release eines Merges ist gescheitert"]
+    before{"Dieselben Jobs schon für<br>den Commit davor gescheitert?"}
+    again["Die fehlgeschlagenen Jobs<br>laufen einmal neu"]
+    flaky["Issue <i>Flaky tests</i><br>Job · Schritt · Test · Fehler"]
+    restart["Der Lauf für den neuesten Commit<br>startet neu"]
+    resume["Die fehlgeschlagenen Jobs des Releases<br>laufen einmal neu, ab dort, wo sie standen"]
+    red["Bleibt rot, für dich"]
+
+    run --> tests
+    run --> raced
+    run --> release
+    tests --> before
+    before -- "nein" --> again
+    before -- "ja" --> red
+    again -- "besteht" --> flaky
+    again -- "scheitert wieder" --> red
+    raced --> restart
+    release --> resume
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class again,restart,resume bot
+    class red person
+    class flaky done
+```
+
+- **Einmal, nicht immer wieder:** Der Bot für wackelige Tests führt die fehlgeschlagenen Jobs des ersten Versuchs eines Testlaufs einmal neu aus, ebenso der Bot für gescheiterte Releases mit einem Release, das ein Merge gestartet hat; der Bot für abgebrochene Prüfungen startet einen Lauf höchstens zweimal. Ein Job, den GitHub an seinem Zeitlimit stoppt, endet abgebrochen, nicht fehlgeschlagen, und läuft ebenfalls einmal neu. Ein Lauf, den du oder ein neuerer Lauf abgebrochen hat, bleibt abgebrochen, auch wenn ein Job, der auf die anderen wartet, deshalb fehlgeschlagen ist.
+- **Ein Fehler, der sich wiederholt, ist echt:** Wenn dieselben Jobs schon für den Commit davor auf demselben Branch gescheitert sind, nachdem sie einmal neu liefen, laufen sie nicht noch einmal, damit ein kaputter Test keinen Runner umsonst beschäftigt.
+- **Das Issue der wackeligen Tests** bekommt für jeden Lauf, der beim Neustart bestanden hat, eine Tabelle: jeden Job, der zuerst fehlgeschlagen ist, mit einem Link zu seinem Log, den Schritt, der gescheitert ist, die Tests, die pytest im Log nennt, und den ersten Fehler. Ein Name oder eine Zeile eines Logs steht dort als reiner Code, sodass ein Pull Request damit weder die Tabelle beenden noch jemanden erwähnen kann.
+- **Die schnellen Prüfungen laufen einmal für jeden Commit:** Titel und Changelog, Dependency Review, Secret Scan, Bereichs-Labels und Website. Ein verspäteter Lauf für einen älteren Commit, etwa einer, den eine Änderung des Release-Pull-Requests startet, während release-please in ihn pusht, bricht sie für den neuesten Commit nicht mehr ab. Die Prüfungen, die Minuten dauern, Tests, Lint, CodeQL und die Varianten, brechen den Lauf für einen älteren Commit weiter ab; einen Wettlauf dort repariert der Bot für abgebrochene Prüfungen.
+- **Weitere Test-Workflows** eines Repositorys, etwa visuelle Tests, kommen mit `copier update --data "test_workflows=Visual check, Screenshot bot"` zur CI und zu Docker E2E dazu.
+- **Die Link-Prüfung eines Pull Requests** liest die Dokumente, die er ändert, und alle Dokumente, wenn er die Regeln ändert oder eine Datei verschiebt oder löscht, auf die ein Dokument verlinken kann. lychee behält die Antworten der Websites einen Tag lang und fragt bei einem Link, der gescheitert ist, erneut nach, sodass eine Website, die für einen Moment nicht erreichbar ist, nur die Pull Requests scheitern lässt, die auf sie verlinken.
 
 ### Mutationstests
 

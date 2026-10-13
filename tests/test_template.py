@@ -980,6 +980,146 @@ def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
         assert remapped(url) == url
 
 
+def choose_the_documents_to_check(
+    tmp_path: Path, changes: dict[str, str | None], event: str = "pull_request"
+) -> tuple[dict[str, str], str]:
+    """Runs the step of the link check that chooses the documents, in a repository
+    whose pull request makes the changes, as GitHub does; returns its outputs and its
+    summary. A change of None deletes the file, one that starts with -> moves it."""
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    def git(*arguments: str) -> str:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        return subprocess.run(
+            ["git", *identity, *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    git("init", "--quiet", "--initial-branch=main")
+    for name in ("README.md", "docs/guide.md", "CHANGELOG.md", "lychee.toml"):
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_text(f"{name}\n", encoding="utf-8", newline="\n")
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "The base")
+    base = git("rev-parse", "HEAD")
+    for name, content in changes.items():
+        path = repository / name
+        if content is None:
+            path.unlink()
+        elif content.startswith("->"):
+            git("mv", name, content.removeprefix("->"))
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8", newline="\n")
+    git("add", "--all")
+    git("commit", "--quiet", "--allow-empty", "-m", "The pull request")
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    output.touch()
+    summary.touch()
+    (tmp_path / "step.sh").write_text(
+        script_of(links, "Choose the documents to check"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=repository,
+        env={
+            **os.environ,
+            "EVENT": event,
+            "BASE_SHA": base,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    outputs = dict(
+        line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+    )
+    return outputs, summary.read_text(encoding="utf-8")
+
+
+EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "event", "outputs"),
+    [
+        # The documents that the pull request adds or changes, by their paths, so that
+        # none reads as an option.
+        (
+            {"docs/guide.md": "changed\n"},
+            "pull_request",
+            {"files": "'./docs/guide.md' "},
+        ),
+        (
+            {"README.md": "changed\n", "docs/new.md": "new\n", "src/app.py": "\n"},
+            "pull_request",
+            {"files": "'./README.md' './docs/new.md' "},
+        ),
+        # The changelog alone is no document to check, and neither is code.
+        ({"CHANGELOG.md": "changed\n", "src/app.py": "\n"}, "pull_request", {}),
+        # New rules apply to every document.
+        (
+            {"lychee.toml": "max_retries = 5\n", "README.md": "x\n"},
+            "pull_request",
+            EVERY_DOCUMENT,
+        ),
+        # A document may link to a file that the pull request deletes or moves.
+        ({"docs/guide.md": None}, "pull_request", EVERY_DOCUMENT),
+        ({"docs/guide.md": "->docs/manual.md"}, "pull_request", EVERY_DOCUMENT),
+        # lychee gets the names through a shell.
+        ({"docs/it's $(here).md": "x\n"}, "pull_request", EVERY_DOCUMENT),
+        # main and the weekly run check every document.
+        ({"docs/guide.md": "changed\n"}, "push", EVERY_DOCUMENT),
+        ({}, "schedule", EVERY_DOCUMENT),
+    ],
+)
+def test_the_link_check_of_a_pull_request_reads_the_documents_it_changes(
+    tmp_path: Path, changes: dict[str, str | None], event: str, outputs: dict[str, str]
+) -> None:
+    # A site that is down for a moment fails only the pull requests that link to it.
+    chosen, summary = choose_the_documents_to_check(tmp_path, changes, event)
+
+    assert chosen == outputs
+    if not outputs:
+        assert "changes no document" in summary
+
+
+def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    job = job_of(links, "links")
+    cache = job[job.index("      - name: Restore the answers of the sites\n") :]
+    assert "        uses: actions/cache@" in cache
+    assert "          path: .lycheecache\n" in cache
+    assert "          key: lychee-${{ github.run_id }}\n" in cache
+    assert "          restore-keys: lychee-\n" in cache
+    check = job[job.index("      - name: Check the links of the documentation\n") :]
+    assert (
+        "args: --config lychee.toml --no-progress --cache --max-cache-age 1d ${{ steps.documents.outputs.files }}\n"
+        in check
+    )
+    # Without a document to check, neither runs; a changed document may have no link.
+    for step in (cache, check):
+        assert "        if: steps.documents.outputs.files != ''\n" in step
+    assert "failIfEmpty: ${{ steps.documents.outputs.every == 'true' }}" in check
+    # A pull request compares its documents with its base.
+    assert (
+        "fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}" in job
+    )
+
+
 def test_a_nextcloud_app_packages_only_what_it_needs(
     projects: dict[str, Path],
 ) -> None:
@@ -2540,7 +2680,15 @@ def after_the_checks_job(name: str) -> str:
 def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
     # The checks of every kind of project are only templates here, whose jobs skip.
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert watched_after_the_checks(after) == {"CI (python)", "Variants"} | OTHER_CHECKS
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (python)",
+            "Variants",
+            "Release",
+        }
+        | OTHER_CHECKS
+    )
     assert "github.event.workflow_run.run_attempt == 1" in after
 
 
@@ -2557,10 +2705,55 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
-    assert watched == names | OTHER_CHECKS
+    assert watched == names | OTHER_CHECKS | {"Release"}
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
+
+
+def test_the_bots_after_the_checks_watch_the_other_tests_that_a_project_names(
+    tmp_path: Path,
+) -> None:
+    # Visual tests or a bot that renders screenshots flake as the CI does.
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="home-assistant",
+        test_workflows=" Visual check,Screenshot bot , ",
+    )
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+
+    assert (
+        "    workflows: [CI (home-assistant), Docker E2E, Visual check, Screenshot bot, CodeQL,"
+        in after
+    )
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (home-assistant)",
+            "Docker E2E",
+            "Visual check",
+            "Screenshot bot",
+            "Release",
+        }
+        | OTHER_CHECKS
+    )
+
+
+@pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])
+def test_the_other_tests_of_a_project_are_named_as_their_workflows_are(
+    tmp_path: Path, names: str
+) -> None:
+    # The names go into a list of YAML in the workflow.
+    with pytest.raises(ValueError, match="test_workflows"):
+        render(
+            tmp_path,
+            project_name="Demo",
+            description="A demo.",
+            project_type="generic",
+            test_workflows=names,
+        )
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -2591,19 +2784,14 @@ def test_the_bot_for_cancelled_checks_watches_every_required_check(
 
 def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     # Their checks fail the same way again, or, as the changelog, pass once the pull
-    # request changed: no flaky test either way.
+    # request changed: no flaky test either way. The release has a bot of its own.
     for job in ("rerun", "report"):
         listed = re.search(
             r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
             after_the_checks_job(job),
         )
         assert listed, job
-        assert set(json.loads(listed[1])) == OTHER_CHECKS, job
-    # A run that the bot for cancelled checks started again failed at first in no test.
-    report = after_the_checks_job("report")
-    assert report.index('attempts/1" --jq .conclusion)" == cancelled') < report.index(
-        "gh issue create"
-    )
+        assert set(json.loads(listed[1])) == OTHER_CHECKS | {"Release"}, job
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
@@ -2714,6 +2902,736 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
+
+
+# jq, which gh runs for its option --jq: the steps that rely on its filters run with
+# it, on Linux and wherever else it is installed.
+JQ = shutil.which("jq")
+WITH_JQ = pytest.mark.skipif(
+    BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
+)
+# The answers of gh: an API call by its path, any other command by its first two
+# words, each through jq as gh does. The jq of gh ends its lines with LF on every
+# system, the jq of Windows with CRLF. What it is given to write, it keeps by the
+# words of its command.
+FAKE_GH = """#!/usr/bin/env bash
+echo "$*" >> "$CALLS"
+filter=""
+if [[ "$1" == api ]]; then
+  key=""
+  shift
+  while (($#)); do
+    case "$1" in
+      --jq) filter="$2"; shift 2 ;;
+      --method | -f | -F) shift 2 ;;
+      --paginate | --silent) shift ;;
+      *) key="$1"; shift ;;
+    esac
+  done
+else
+  key="$1 $2"
+  shift 2
+  while (($#)); do
+    case "$1" in
+      --jq) filter="$2"; shift 2 ;;
+      --body) printf '%s' "$2" > "$WRITTEN/${key// /-}"; shift 2 ;;
+      --body-file) cp "$2" "$WRITTEN/${key// /-}"; shift 2 ;;
+      --state | --search | --json | --title | --label) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+fi
+answer="$ANSWERS/$(tr '/ ' '__' <<<"$key")"
+if [[ ! -f "$answer" ]]; then
+  case "$key" in
+    "run rerun" | "issue comment" | "issue create") exit 0 ;;
+  esac
+  echo "gh has no answer for $key" >&2
+  exit 1
+fi
+if [[ -n "$filter" ]]; then
+  jq -r "$filter" "$answer" | tr -d '\\r'
+else
+  cat "$answer"
+fi
+"""
+TIMED_OUT = "The job has exceeded the maximum execution time of 30m0s"
+CANCELLED = "The operation was canceled."
+EXITED = "Process completed with exit code 1."
+
+
+def run_a_bot_after_the_checks(
+    tmp_path: Path, job: str, step: str, answers: dict[str, object], **variables: str
+) -> tuple[list[str], str, dict[str, str]]:
+    """Runs a step of a bot after the checks, as GitHub does, with the fake gh; returns
+    the calls of gh, the summary of the step and what gh was given to write."""
+    (tmp_path / "step.sh").write_text(
+        script_of(after_the_checks_job(job), step), encoding="utf-8", newline="\n"
+    )
+    folders = {name: tmp_path / name for name in ("bin", "answers", "written")}
+    for folder in folders.values():
+        folder.mkdir()
+    for key, answer in answers.items():
+        (folders["answers"] / re.sub(r"[/ ]", "_", key)).write_text(
+            answer if isinstance(answer, str) else json.dumps(answer),
+            encoding="utf-8",
+            newline="\n",
+        )
+    gh = folders["bin"] / "gh"
+    gh.write_text(FAKE_GH, encoding="utf-8", newline="\n")
+    gh.chmod(0o755)
+    calls = tmp_path / "calls"
+    summary = tmp_path / "summary"
+    calls.touch()
+    summary.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
+        "GH_REPO": "o/r",
+        "RUN": "5",
+        "NAME": "CI (python)",
+        "BRANCH": "feature",
+        "SHA": "abc1234def",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "CALLS": str(calls),
+        "ANSWERS": str(folders["answers"]),
+        "WRITTEN": str(folders["written"]),
+        **variables,
+    }
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    written = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in folders["written"].iterdir()
+    }
+    return (
+        calls.read_text(encoding="utf-8").splitlines(),
+        summary.read_text(encoding="utf-8"),
+        written,
+    )
+
+
+def job_of_a_run(
+    number: int, name: str, conclusion: str, *steps: tuple[str, str]
+) -> dict[str, object]:
+    """A job as the API of the workflow runs answers it."""
+    return {
+        "id": number,
+        "name": name,
+        "conclusion": conclusion,
+        "html_url": f"https://github.com/o/r/actions/runs/5/job/{number}",
+        "steps": [{"name": step, "conclusion": result} for step, result in steps],
+    }
+
+
+def annotations_of_a_job(*messages: str) -> list[dict[str, str]]:
+    """The annotations of a job: its failures, and a notice of the runner."""
+    return [
+        *({"annotation_level": "failure", "message": message} for message in messages),
+        {"annotation_level": "notice", "message": "The ubuntu-latest label moves on."},
+    ]
+
+
+def runs_of_the_branch(*before: int, conclusion: str = "failure") -> dict[str, object]:
+    """The completed runs of the workflow for the branch, the newest first: a later one,
+    the run itself, another run of its commit, one of a fork's branch of the same name,
+    and those for the commits before, which ended with the conclusion."""
+
+    def run(
+        number: int, sha: str, repository: str = "o/r", end: str = "success"
+    ) -> dict[str, object]:
+        return {
+            "id": number,
+            "head_sha": sha,
+            "head_repository": {"full_name": repository},
+            "conclusion": end,
+        }
+
+    return {
+        "workflow_runs": [
+            run(6, "fedcba9"),
+            run(5, "abc1234def"),
+            run(4, "abc1234def"),
+            run(3, "1111111", "fork/r"),
+            *(run(number, f"{number:07}", end=conclusion) for number in before),
+        ]
+    }
+
+
+def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
+    job = after_the_checks_job("rerun")
+    condition = condition_of(job)
+    assert "github.event.workflow_run.run_attempt == 1" in condition
+    assert (
+        """contains(fromJSON('["failure", "cancelled"]'), github.event.workflow_run.conclusion)"""
+        in condition
+    )
+    # It reads the jobs of the runs and their annotations, and starts the failed jobs
+    # again; it checks out nothing.
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == [
+        "      actions: write",
+        "      checks: read",
+    ]
+    assert "actions/checkout" not in job
+    # The values of the event reach the script as variables only.
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("first", "messages", "before", "again"),
+    [
+        # A test failed at first.
+        ("failure", [EXITED], None, True),
+        # A job ran out of time: GitHub cancelled it at its time limit.
+        ("cancelled", [TIMED_OUT, CANCELLED], None, True),
+        # A newer run cancelled it: the bot for cancelled checks sees to it.
+        ("cancelled", [RACED], None, False),
+        # A person cancelled it.
+        ("cancelled", [CANCELLED], None, False),
+        # The run for the commit before ended with the same failure: a real one.
+        ("failure", [EXITED], ("failure", [EXITED]), False),
+        ("cancelled", [TIMED_OUT], ("cancelled", [TIMED_OUT]), False),
+        # A newer push cancelled the run for the commit before, or it passed.
+        ("failure", [EXITED], ("cancelled", [RACED]), True),
+        ("failure", [EXITED], ("success", []), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
+    tmp_path: Path,
+    first: str,
+    messages: list[str],
+    before: tuple[str, list[str]] | None,
+    again: bool,
+) -> None:
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", first),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/check-runs/11/annotations": annotations_of_a_job(*messages),
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+            *([2] if before else []), conclusion=before[0] if before else "failure"
+        ),
+    }
+    if before:
+        conclusion, earlier = before
+        answers["repos/o/r/actions/runs/2/jobs"] = {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", conclusion),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        }
+        answers["repos/o/r/check-runs/21/annotations"] = annotations_of_a_job(*earlier)
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION=first,
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    if before:
+        # The run for the commit before, on the same branch of the same repository.
+        assert any(
+            call.startswith("api repos/o/r/actions/runs/2/jobs ") for call in calls
+        )
+        assert not any(
+            "actions/runs/3/" in call or "actions/runs/4/" in call for call in calls
+        )
+        assert ("broke for the commit before" in summary) != again
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
+    tmp_path: Path,
+) -> None:
+    # The commit before broke one of the two jobs: the other may be flaky.
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "failure"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(2, 1),
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "failure"),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, _, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" in calls
+    runs = next(call for call in calls if "/workflows/3/runs" in call)
+    assert runs.startswith(
+        "api --method GET repos/o/r/actions/workflows/3/runs -f branch=main -f event=push -f status=completed "
+    )
+    # Only the latest run before counts.
+    assert not any("actions/runs/1/" in call for call in calls)
+
+
+def variants_of_a_run(
+    jobs: str, leg: str, messages: tuple[str, ...], first: int
+) -> dict[str, object]:
+    """The jobs of a run of Variants that was cancelled, such as run 38396054999, whose
+    legs a newer run cancelled: a leg that ended as given, one that was cancelled with
+    the messages, and the job that waits for the legs, which failed because they did
+    not pass."""
+    answers: dict[str, object] = {
+        jobs: {
+            "jobs": [
+                job_of_a_run(first, "variant (generic)", leg),
+                job_of_a_run(first + 1, "update (generic)", "cancelled"),
+                job_of_a_run(first + 2, "variants", "failure", ("Check", "failure")),
+            ]
+        },
+        f"repos/o/r/check-runs/{first + 1}/annotations": annotations_of_a_job(
+            *messages
+        ),
+        f"repos/o/r/check-runs/{first + 2}/annotations": annotations_of_a_job(EXITED),
+    }
+    if leg == "cancelled":
+        answers[f"repos/o/r/check-runs/{first}/annotations"] = annotations_of_a_job(
+            *messages
+        )
+    return answers
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("leg", "messages", "again"),
+    [
+        # A newer run cancelled it, after a leg had failed or before.
+        ("cancelled", (RACED, CANCELLED), False),
+        ("failure", (RACED, CANCELLED), False),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), False),
+        ("failure", (CANCELLED,), False),
+        # A leg ran out of time.
+        ("success", (TIMED_OUT, CANCELLED), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_a_cancelled_run_again_only_when_it_ran_out_of_time(
+    tmp_path: Path, leg: str, messages: tuple[str, ...], again: bool
+) -> None:
+    # The job that waits for the legs failed only because they were cancelled; run
+    # again, the run for an older commit would cancel the one for the head.
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        NAME="Variants",
+        CONCLUSION="cancelled",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("a newer run or a person cancelled it" in summary) != again
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("conclusion", "messages", "again"),
+    [
+        # A newer push cancelled the run for the commit before, after a leg had failed.
+        ("cancelled", (RACED, CANCELLED), True),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), True),
+        # It failed: the same jobs broke.
+        ("failure", (CANCELLED,), False),
+    ],
+)
+def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
+    tmp_path: Path, conclusion: str, messages: tuple[str, ...], again: bool
+) -> None:
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(11, "variant (generic)", "failure"),
+                    job_of_a_run(12, "update (generic)", "success"),
+                    job_of_a_run(13, "variants", "failure"),
+                ]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+                2, conclusion=conclusion
+            ),
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/2/jobs", "failure", messages, 21
+            ),
+        },
+        NAME="Variants",
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("broke for the commit before" in summary) != again
+
+
+# The first attempt of a run of the tests, which passed when it ran again: a test that
+# failed, a job that ran out of time, one that failed in its build, one without a log,
+# and jobs that passed or that the failure of another cancelled.
+FIRST_ATTEMPT: dict[str, object] = {
+    "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+    "repos/o/r/actions/runs/5/attempts/1/jobs": {
+        "jobs": [
+            job_of_a_run(
+                11,
+                "test (3.12)",
+                "failure",
+                ("Set up Python", "success"),
+                ("Run the tests", "failure"),
+                ("Post Set up Python", "skipped"),
+            ),
+            job_of_a_run(12, "test (3.13)", "success", ("Run the tests", "success")),
+            job_of_a_run(
+                13,
+                "e2e (Safari)",
+                "cancelled",
+                ("Start Home Assistant", "success"),
+                ("Run the browser tests", "cancelled"),
+            ),
+            job_of_a_run(
+                14, "e2e (Chrome)", "cancelled", ("Run the browser tests", "cancelled")
+            ),
+            job_of_a_run(
+                15, "build", "failure", ("Pull", "failure"), ("Build", "failure")
+            ),
+            job_of_a_run(16, "docs", "failure", ("Build the website", "failure")),
+        ]
+    },
+    "repos/o/r/check-runs/11/annotations": annotations_of_a_job(EXITED),
+    "repos/o/r/check-runs/13/annotations": annotations_of_a_job(TIMED_OUT, CANCELLED),
+    "repos/o/r/check-runs/14/annotations": annotations_of_a_job(CANCELLED),
+    "repos/o/r/check-runs/15/annotations": annotations_of_a_job(
+        EXITED, "Error: the image   could not\nbe pulled"
+    ),
+    "repos/o/r/check-runs/16/annotations": annotations_of_a_job(EXITED),
+    "repos/o/r/actions/jobs/11/logs": (
+        "2026-10-12T09:15:58.0000000Z ===== short test summary info =====\n"
+        "2026-10-12T09:15:58.0000001Z \x1b[31mFAILED\x1b[0m"
+        " tests/test_cards.py::test_board[dark] - AssertionError: assert 1 == 2\n"
+        "2026-10-12T09:15:58.0000002Z FAILED tests/test_cards.py::test_score - TimeoutError\n"
+        "2026-10-12T09:15:58.0000003Z ERROR    homeassistant.setup:setup.py:12 no test\n"
+    ),
+    "repos/o/r/actions/jobs/13/logs": "2026-10-12T09:15:58.0000000Z Open the board\n",
+    "repos/o/r/actions/jobs/15/logs": "2026-10-12T09:15:58.0000000Z Pull the image\n",
+}
+# An empty cell of the table.
+NOTHING = "\N{EN DASH}"
+FLAKY_ROWS = [
+    "| [`test (3.12)`](https://github.com/o/r/actions/runs/5/job/11) | `Run the tests`"
+    " | `tests/test_cards.py::test_board[dark], tests/test_cards.py::test_score`"
+    " | `AssertionError: assert 1 == 2` |",
+    "| [`e2e (Safari)`](https://github.com/o/r/actions/runs/5/job/13)"
+    f" | `Run the browser tests` | {NOTHING} | `{TIMED_OUT}` |",
+    "| [`build`](https://github.com/o/r/actions/runs/5/job/15) | `Pull, Build`"
+    f" | {NOTHING} | `Error: the image could not be pulled` |",
+    "| [`docs`](https://github.com/o/r/actions/runs/5/job/16)"
+    f" | `Build the website` | {NOTHING} | `{EXITED}` |",
+]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
+    tmp_path: Path,
+) -> None:
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {**FIRST_ATTEMPT, "issue list": []},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-create"] == "\n".join(
+        [
+            "The flaky-test bot lists here every job that failed and then passed without"
+            " a change of the code, with the step, the test and the error that failed."
+            " Fix its test, then close this issue.",
+            "",
+            "**CI (python)** failed at first and passed when it ran again, on `feature`"
+            " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
+            "",
+            "| Job | Step | Test | Error |",
+            "| --- | --- | --- | --- |",
+            *FLAKY_ROWS,
+            "",
+        ]
+    )
+    assert any(
+        call.startswith("issue create --title Flaky tests --label maintenance ")
+        for call in calls
+    )
+    assert "\n".join(FLAKY_ROWS) in summary
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [
+                {"number": 8, "title": "Flaky tests of the website"},
+                {"number": 7, "title": "Flaky tests"},
+            ],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "issue-create" not in written
+    assert any(call.startswith("issue comment 7 --body ") for call in calls)
+    assert written["issue-comment"].endswith("\n".join(FLAKY_ROWS))
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_run_that_a_newer_one_cancelled(
+    tmp_path: Path,
+) -> None:
+    # The bot for cancelled checks started it again: no test failed.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11, "test (3.12)", "cancelled", ("Run the tests", "cancelled")
+                    ),
+                    job_of_a_run(
+                        12, "test (3.13)", "cancelled", ("Run the tests", "cancelled")
+                    ),
+                ]
+            },
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(RACED),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(RACED),
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+
+
+@WITH_JQ
+@pytest.mark.parametrize("leg", ["cancelled", "failure"])
+@pytest.mark.parametrize(
+    "messages", [(RACED, CANCELLED), (CANCELLED,)], ids=["raced", "by a person"]
+)
+def test_the_flaky_test_bot_reports_no_job_that_failed_because_others_were_cancelled(
+    tmp_path: Path, leg: str, messages: tuple[str, ...]
+) -> None:
+    # The bot for cancelled checks or a person started a cancelled run of Variants
+    # again, and it passed: the job that waits for the legs failed in no test.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+    assert not any("/logs" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_time(
+    tmp_path: Path,
+) -> None:
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs",
+                "success",
+                (TIMED_OUT, CANCELLED),
+                11,
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    # Not the job that waits for the legs.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| [")
+    ] == [
+        "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
+    ]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
+    tmp_path: Path,
+) -> None:
+    # A pull request names its jobs, its steps and its branch and writes its logs: none
+    # of them may end the code, the cell or the line, or mention anybody.
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11,
+                        "x` | @team\n[a](https://e.vil)",
+                        "failure",
+                        ("s`|\tt", "failure"),
+                    ),
+                    job_of_a_run(12, "long", "failure", ("Run", "failure")),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                "<b>`@team`</b>\r\n| y"
+            ),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job("é" * 200),
+            "repos/o/r/actions/jobs/11/logs": "FAILED tests/x.py::`@team` - z\n",
+            "issue list": [],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+        BRANCH="`@team`\n# x",
+    )
+
+    body = written["issue-create"]
+    assert "on `@team # x` at abc1234" in body
+    rows = body.splitlines()
+    assert (
+        "| [`x \\| @team\\n[a](https://e.vil)`](https://github.com/o/r/actions/runs/5/job/11)"
+        " | `s\\|\\tt` | `tests/x.py::@team` | `<b>@team</b> \\| y` |"
+    ) in rows
+    # An error fills a line at most.
+    assert (
+        "| [`long`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | `Run` | {NOTHING} | `{'é' * 149}\N{HORIZONTAL ELLIPSIS}` |"
+    ) in rows
+    # The code of the branch and of the cells.
+    assert body.count("`") == 2 * 8
+
+
+def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
+    # The failed push of the tag of v0.10.0 held the release and its rollout for 35
+    # minutes, until a person ran it again.
+    job = after_the_checks_job("release")
+    condition = condition_of(job)
+    for part in (
+        "!github.event.repository.fork",
+        "github.event.workflow_run.name == 'Release'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.conclusion == 'failure'",
+        "github.event.workflow_run.run_attempt == 1",
+    ):
+        assert part in condition
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == ["      actions: write"]
+    script = script_of(job, "Run the failed jobs of the release once more")
+    assert script.startswith('gh run rerun "$RUN" --failed\n')
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+# The checks that take seconds, whose runs for different commits never cancel each
+# other, and some that take minutes, whose runs for a newer commit cancel the older.
+QUICK_CHECKS = [
+    "pull-request-title.yml",
+    "dependency-review.yml",
+    "secret-scan.yml",
+    "area-labels.yml",
+    "docs.yml",
+]
+LONG_CHECKS = ["ci-python.yml", "codeql.yml", "variants.yml", "lint.yml"]
+
+
+def concurrency_of(name: str) -> str:
+    workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    found = re.search(
+        r"^concurrency:\n  group: (.+)\n  cancel-in-progress: ", workflow, re.M
+    )
+    assert found, name
+    return found[1]
+
+
+@pytest.mark.parametrize("name", QUICK_CHECKS)
+def test_a_quick_check_never_cancels_the_run_for_another_commit(name: str) -> None:
+    # The release bot edits its pull request while release-please pushes to it, and a
+    # late run for the older commit cancelled the required checks of the head. Runs for
+    # the same commit, such as those of an edited title, still replace each other.
+    group = concurrency_of(name)
+    assert "github.event.pull_request.number" in group
+    assert group.endswith("-${{ github.event.pull_request.head.sha }}")
+
+
+@pytest.mark.parametrize("name", LONG_CHECKS)
+def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
+    # Their runners are worth more than the race, which the bot for cancelled checks
+    # repairs.
+    assert "head.sha" not in concurrency_of(name)
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:

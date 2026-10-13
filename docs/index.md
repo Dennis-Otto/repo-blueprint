@@ -77,7 +77,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
 </div>
 
-The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, the clean-up and the dev container as well.
+The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, failed releases, the clean-up and the dev container as well.
 
 ## Kinds of projects
 
