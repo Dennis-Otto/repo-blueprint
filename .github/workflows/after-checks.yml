@@ -55,7 +55,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-flaky-${{ github.event.workflow_run.id }}
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -145,7 +145,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-flaky-${{ github.event.workflow_run.id }}
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -289,7 +289,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-cancelled-${{ github.event.workflow_run.id }}
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -353,7 +353,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-coverage-${{ github.event.workflow_run.head_sha }}
       cancel-in-progress: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read

@@ -35,7 +35,7 @@ env:
 jobs:
   docs:
     name: docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -103,7 +103,7 @@ jobs:
     name: build the website
     needs: docs
     if: needs.docs.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -131,7 +131,7 @@ jobs:
   deploy:
     name: publish the website
     needs: pages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
       name: github-pages
