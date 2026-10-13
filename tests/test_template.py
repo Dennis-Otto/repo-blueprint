@@ -3494,8 +3494,8 @@ def test_the_bot_health_bot_watches_every_bot(
     else:
         assert not watched & BLUEPRINT_BOTS
     # Every workflow on a schedule that pull requests don't run, whose every run is
-    # one of the default branch; Newest Python and the Next runner keep an issue of
-    # their own.
+    # one of the default branch; Diagrams, Newest Python and the Next runner keep an
+    # issue of their own.
     for name, text in names_of_workflows(root).items():
         events = set(triggers(text))
         if "schedule" in events and not events & {

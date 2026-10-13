@@ -22,43 +22,10 @@ Option 3, in `bot-health.yml` with the logic in `blueprint.py bot-health`, teste
 
 The `workflows` list of `workflow_run` names the bots, whose runs are the default branch's anyway; a workflow that runs for every pull request, such as the CI, would start a run of the bot for each of them. Those come into the nightly look instead, with the workflows of a project, which the list of the blueprint can't name. The nightly look starts a workflow whose latest schedule passed six hours ago without a run, at most four a night, and switches a schedule on again that GitHub switched off.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Which runs the bot-health bot reports, and when
-    accDescr: The end of a run of a listed bot on the default branch, and every night the latest run of every workflow, come to the bot. A run of a pull request or a fork is left alone. A run that passed closes the open issue of its workflow. A first failure that a second try can fix runs its failed jobs again, and its end comes back to the bot. Any other failure opens or updates the one issue of its workflow.
-
-    event(["The end of a run of a bot"])
-    nightly(["Every night: the latest run<br>of every workflow"])
-    branch{"The default branch<br>of the repository itself?"}
-    ignored["Left alone"]
-    passed{"Passed?"}
-    close["Closes the open issue"]
-    again{"A second try can pass,<br>and none ran yet?"}
-    rerun["Runs the failed jobs once more"]
-    issue["Opens or updates<br>the one issue of the workflow"]
-
-    event --> branch
-    nightly --> branch
-    branch -- "no: a pull request or a fork" --> ignored
-    branch -- "yes" --> passed
-    passed -- "yes" --> close
-    passed -- "no" --> again
-    again -- "yes" --> rerun
-    rerun -. "its end" .-> event
-    again -- "no" --> issue
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class event,nightly,rerun bot
-    class issue person
-    class close done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-runs-the-bot-health-bot-reports-and-when.dark.svg">
+  <img src="../images/diagrams/which-runs-the-bot-health-bot-reports-and-when.svg" alt="Which runs the bot-health bot reports, and when: The end of a run of a listed bot on the default branch, and every night the latest run of every workflow, come to the bot. A run of a pull request or a fork is left alone. A run that passed closes the open issue of its workflow. A first failure that a second try can fix runs its failed jobs again, and its end comes back to the bot. Any other failure opens or updates the one issue of its workflow.">
+</picture>
 
 Renovate runs once for every repository, in the blueprint, and logs problems such as a lock file that it can't read as warnings in a run that passes. Its workflow writes the warnings and errors of each run to a file of their own and keeps one issue in the blueprint with those of the latest run that had any. It closes the issue after three runs in a row without a problem, not after the first, because Renovate runs every two hours and a problem of a registry can come and go. The issue is public, so it names public repositories only.
 

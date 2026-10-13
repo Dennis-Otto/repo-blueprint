@@ -667,8 +667,8 @@ def test_the_names_of_the_workflows_exist() -> None:
         if (match := re.search(r"^name: (.+)$", path.read_text("utf-8"), re.M))
     }
     assert names >= ONE_TRY | OWN_ISSUE
-    # Both keep an issue of their own, and a second one would repeat it.
-    assert {"Newest Python", "Next runner"} <= OWN_ISSUE
+    # Each keeps an issue of its own, and a second one would repeat it.
+    assert {"Diagrams", "Newest Python", "Next runner"} <= OWN_ISSUE
 
 
 # ---------------------------------------------------------------- the daily look

@@ -132,45 +132,14 @@ The mutation tests show the lines that the tests run but don't check: every Satu
 
 GitHub mails the failure of a scheduled run only to whoever last changed its schedule, and that of another run to whoever started it, in these repositories the release app for most runs: a red bot used to show only in the Actions tab, as when Findings, Mutation and Renovate failed for days. The bot-health bot (`bot-health.yml`) makes each such failure an issue, and closes it once the bot passes again.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: What the bot-health bot does when a bot fails
-    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or switched off.
-
-    run(["A run of a bot ends<br>on <code>main</code>"])
-    nightly(["Every night<br>the latest run of every workflow"])
-    passed{"Passed?"}
-    first{"A first failure<br>that a second try can fix?"}
-    again["Runs the failed jobs<br>once more"]
-    issue["One issue for the workflow<br>the failed jobs · their steps<br>their first errors"]
-    closed["Closes the issue<br>passes again in the run"]
-    missed["Starts a workflow<br>whose schedule GitHub missed"]
-
-    run --> passed
-    nightly --> passed
-    nightly -- "a schedule missed<br>or switched off" --> missed
-    passed -- "yes" --> closed
-    passed -- "no" --> first
-    first -- "yes" --> again
-    again -. "its end" .-> run
-    first -- "no" --> issue
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class run,nightly,again,missed bot
-    class issue person
-    class closed done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/what-the-bot-health-bot-does-when-a-bot-fails.dark.svg">
+  <img src="docs/images/diagrams/what-the-bot-health-bot-does-when-a-bot-fails.svg" alt="What the bot-health bot does when a bot fails: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or switched off.">
+</picture>
 
 - **One issue per workflow,** titled like *Findings fails on main*, with the labels `bot-failure` and `maintenance`. It names the latest failed run, its attempt and its trigger, and a table of the failed jobs with the step that failed and the first error of each, from the annotations of the run. A later failure in the same place only updates it, without a notification; a failure in another job or step adds a comment. The next run that passes closes it with a link to that run.
 - **A second try only where it can pass:** a first failure runs its failed jobs once more, as the flaky-test bot does for the tests, unless another bot already did. Findings, which fails while an alert is open, Mutation, which takes hours to measure the same again, and the property tests and the fuzzing, which failed on an input that they found, are reported at once. A run that GitHub couldn't start, because its workflow file is invalid, too.
-- **Which runs count:** those of the bots and scheduled workflows that `bot-health.yml` lists, on the default branch, from a schedule, a push, a start by hand or another workflow, never from a pull request or a fork. The checks that run in pull requests, such as the CI, the website or CodeQL, and the workflows of the project count in the nightly look, which takes the latest finished run of every workflow on the default branch, so that none of their runs for a pull request starts a run of the bot. GitHub gives a run that the end of a check of a pull request starts, as it starts After the checks, the default branch too, so the nightly look counts only the other runs of such a workflow. Newest Python and the Next runner keep an issue of their own.
+- **Which runs count:** those of the bots and scheduled workflows that `bot-health.yml` lists, on the default branch, from a schedule, a push, a start by hand or another workflow, never from a pull request or a fork. The checks that run in pull requests, such as the CI, the website or CodeQL, and the workflows of the project count in the nightly look, which takes the latest finished run of every workflow on the default branch, so that none of their runs for a pull request starts a run of the bot. GitHub gives a run that the end of a check of a pull request starts, as it starts After the checks, the default branch too, so the nightly look counts only the other runs of such a workflow. The Diagrams workflow, Newest Python and the Next runner keep an issue of their own.
 - **Missed schedules:** GitHub runs a schedule late at busy times, sometimes not at all, and switches the schedules of a repository off after 60 days without activity. Every night, a workflow whose last run is older than the latest time of its schedule, six hours ago or more, starts by hand, at most four a night so that the pull requests keep their runners; Findings and Issue lifecycle start with `dry_run` off, as their schedule runs them. A schedule that GitHub switched off is switched on again.
 - **Renovate's problems:** Renovate runs centrally in the blueprint and logs a lock file that it can't read as a warning, without failing. The Renovate workflow keeps one issue, *Renovate logs problems*, with the warnings and errors of its latest run that had any, by repository, and closes it after three runs in a row without one. A public issue names public repositories only.
 - The bot reads runs, jobs and annotations and writes issues with the `GITHUB_TOKEN` of its job, and checks out only the default branch, never the code of a pull request. A repository whose `.github/labels.toml`, which belongs to the project, lacks `bot-failure` gets the label from the bot; add it to the file to keep its color and description in one place.
