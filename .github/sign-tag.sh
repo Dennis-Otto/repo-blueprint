@@ -70,7 +70,7 @@ verify() {
 
 gitsign="$RUNNER_TEMP/gitsign"
 curl --fail --location --silent --show-error --retry 5 --retry-all-errors --connect-timeout 15 \
-  --output "$gitsign" \
+  --max-time 300 --output "$gitsign" \
   "https://github.com/sigstore/gitsign/releases/download/v$version/gitsign_${version}_linux_amd64"
 echo "$sha256  $gitsign" | sha256sum --check --strict
 chmod +x "$gitsign"

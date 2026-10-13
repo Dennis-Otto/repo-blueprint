@@ -25,7 +25,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits und der Titel jedes Pull Requests geprüft.
+    `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits und der Titel jedes Pull Requests geprüft. Ein vorübergehender Fehler von GitHub lässt keinen Lauf scheitern: Jeder Download versucht es erneut.
 
 - :material-shield-lock-outline:{ .lg .middle } **Sicherheit**
 

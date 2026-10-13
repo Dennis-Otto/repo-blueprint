@@ -121,7 +121,11 @@ jobs:
             exit 1
           fi
           app_id="$(python3 -c 'import xml.etree.ElementTree as t; print(t.parse("appinfo/info.xml").getroot().findtext("id"))')"
-          curl --fail --location --silent --show-error --output "$RUNNER_TEMP/krankerl.deb" \
+          # Each download tries again after a passing error of the network or of its
+          # server, which would otherwise leave the release a draft. A release builds
+          # without the cache of the checks.
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+            --connect-timeout 15 --max-time 300 --output "$RUNNER_TEMP/krankerl.deb" \
             "https://github.com/ChristophWurst/krankerl/releases/download/v$KRANKERL_VERSION/krankerl_${KRANKERL_VERSION}_amd64.deb"
           echo "$KRANKERL_SHA256  $RUNNER_TEMP/krankerl.deb" | sha256sum --check --strict
           sudo dpkg --install "$RUNNER_TEMP/krankerl.deb"
@@ -132,9 +136,11 @@ jobs:
           fi
           umask 077
           printf '%s' "$APP_PRIVATE_KEY" > "$RUNNER_TEMP/app.key"
-          curl --fail --location --silent --show-error --output "$RUNNER_TEMP/app.crt" \
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+            --connect-timeout 15 --max-time 300 --output "$RUNNER_TEMP/app.crt" \
             "https://raw.githubusercontent.com/nextcloud/app-certificate-requests/master/$app_id/$app_id.crt"
-          curl --fail --location --silent --show-error --output "$RUNNER_TEMP/nextcloud.zip" \
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+            --connect-timeout 15 --max-time 600 --output "$RUNNER_TEMP/nextcloud.zip" \
             "https://download.nextcloud.com/server/releases/nextcloud-$NEXTCLOUD_VERSION.zip"
           echo "$NEXTCLOUD_SHA256  $RUNNER_TEMP/nextcloud.zip" | sha256sum --check --strict
           unzip -q "$RUNNER_TEMP/nextcloud.zip" -d "$RUNNER_TEMP/server"
