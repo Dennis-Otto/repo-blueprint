@@ -15,6 +15,10 @@ on:
         description: The tag of the release or beta
         required: true
         type: string
+      sha:
+        description: The commit that the tag has to point at
+        required: true
+        type: string
       version:
         description: Its version
         required: true
@@ -47,6 +51,19 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      # Anybody with a token that may push could create the tag of a coming release
+      # first, at a commit of their own. Only a tag that the release workflow signed, at
+      # the commit of the release, is built and signed here. The check is the script of
+      # the commit that runs this workflow, not the one of the tag.
+      - name: Verify the tag before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/$GITHUB_REPOSITORY/contents/.github/sign-tag.sh?ref=$GITHUB_SHA" > "$RUNNER_TEMP/sign-tag.sh"
+          bash "$RUNNER_TEMP/sign-tag.sh" verify "$TAG" "$SHA"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}

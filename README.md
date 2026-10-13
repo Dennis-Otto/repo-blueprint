@@ -69,9 +69,9 @@ flowchart TB
 | --- | --- | --- |
 | **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging | the tools of each kind of project, hash-pinned |
 | **Lint** | the workflows (actionlint), the license of every file (REUSE), the Markdown of every document (markdownlint), hints at the spelling in English and German (cspell) and at the style of the English (Vale) of the changed documents, the sign-off of every commit (DCO), the title of every pull request (Conventional Commits), an entry under *Unreleased* for every change for users | `lint.yml`, `pull-request-title.yml` |
-| **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOMs as SPDX and CycloneDX, OpenVEX, release tags signed without a key (gitsign), findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
+| **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOMs as SPDX and CycloneDX, OpenVEX, release tags signed without a key (gitsign) and checked before every build, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
-| **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and an update that fixes a vulnerability at once; routine updates, the weekly refresh of the lock files and releases of dependency updates merge themselves once every check passes. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
+| **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates, the weekly refresh of the lock files and releases of dependency updates merge themselves once every check passes. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Coverage** | one comment on every pull request with the coverage of its tests against that of `main`, file by file | `after-checks.yml` |
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a report, never a failure | `mutation.yml`: mutmut, Infection |
 | **Flaky tests** | a test run that fails runs its failed jobs once more; a job that passes then is reported as flaky in one issue | `after-checks.yml` |
@@ -101,21 +101,22 @@ config:
 ---
 flowchart TB
     accTitle: From a change to a release
-    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it builds the release in isolation, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
+    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
 
     pr["Pull request<br><code>fix:</code> · <code>feat:</code> · <code>feat!:</code>"]
     main["main"]
     rpr["Release pull request<br><code>chore: release x.y.z</code><br>notes from <i>Unreleased</i>"]
     beta["Beta <code>x.y.z-beta.N</code><br>for testers"]
+    tag["Signed tag<br>at the merge, by the next run<br>checked before the build"]
     build["Isolated build<br>SLSA Build Level 3"]
-    release["Release<br>package · SBOMs<br>provenance · signed tag"]
+    release["Release<br>package · SBOMs<br>provenance"]
     deliver["Delivery<br>PyPI · npm · GHCR<br>App Store · HACS"]
     verify["Verified as users can<br>at once and every week"]
 
     pr -- "every check passes" --> main
     main -- "release bot" --> rpr
     main -. "<code>BETA_CHANNEL</code>" .-> beta
-    rpr -- "merged" --> build --> release
+    rpr -- "merged" --> tag --> build --> release
     release --> deliver
     release --> verify
 
