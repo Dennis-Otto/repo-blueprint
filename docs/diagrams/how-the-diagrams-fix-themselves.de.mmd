@@ -1,0 +1,34 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie sich die Diagramme selbst reparieren
+    accDescr: Ein Pull Request, der einen mermaid-Block hinzufügt oder ein Diagramm ändert, und Renovate mit einer neuen Version von mermaid-cli führen die Prüfung diagrams aus, die die Diagramme neu zeichnet. Auf einem Branch des Repositorys committet der Diagramm-Bot die Quellen und Bilder auf den Branch, und die Prüfungen laufen erneut; ein Fork behält die fehlschlagende Prüfung, die den Befehl nennt. Nach dem Merge und jede Woche wird auch main gezeichnet: Ist ein Diagramm noch kein Bild seiner Quelle, behebt das ein Pull Request von bot/diagrams, der sich selbst merged. So sehen alle Leser jedes Diagramm.
+
+    change["Ein Pull Request fügt einen<br>mermaid-Block hinzu<br>oder ändert ein Diagramm"]
+    renovate["Renovate bringt<br>ein neues mermaid-cli"]
+    check{"Die Prüfung diagrams:<br>jedes Diagramm ein Bild<br>seiner Quelle?"}
+    bot["Der Diagramm-Bot committet<br>Quellen und Bilder<br>auf den Branch"]
+    fork["Ein Fork: die Prüfung<br>nennt den Befehl"]
+    merged["Der Pull Request wird gemergt"]
+    main{"main, nach jeder Änderung<br>und jede Woche:<br>jedes Diagramm ein Bild?"}
+    fix["`Ein Pull Request von<br>*bot/diagrams* merged<br>sich selbst`"]
+    done["Alle Leser sehen<br>jedes Diagramm"]
+
+    change --> check
+    renovate --> check
+    check -- "nein, ein Branch" --> bot
+    bot -- "prüft erneut" --> check
+    check -- "nein, ein Fork" --> fork
+    check -- "ja" --> merged --> main
+    main -- "ja" --> done
+    main -- "nein" --> fix --> done
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot,renovate,fix bot
+    class change,fork person
+    class done done

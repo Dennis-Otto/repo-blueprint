@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the blueprint works
+    accDescr: Copier renders a new repository from the questions in copier.yml and the files in template/, which take in the workflows of .github/workflows/, the manifests of stacks/ and blueprint.py. Renovate keeps the workflows and the stacks current.
+
+    renovate(["Renovate"])
+
+    subgraph here ["This repository"]
+        workflows[".github/workflows/<br>run here and are<br>the templates"]
+        stacks["stacks/<br>manifests and<br>lock files"]
+        tool["blueprint.py<br>settings · checklist<br>bots"]
+        template["template/<br>the files of<br>a new repository"]
+        questions["copier.yml<br>the questions"]
+    end
+
+    copier(["Copier"])
+    repo["A new repository"]
+
+    renovate -. "keeps current" .-> workflows
+    renovate -.-> stacks
+    workflows --> template
+    stacks --> template
+    tool --> template
+    template --> copier
+    questions --> copier
+    copier --> repo
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class renovate bot
+    class repo done

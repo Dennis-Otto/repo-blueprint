@@ -20,47 +20,10 @@ What the blueprint protects, what it trusts and which risks remain. [SECURITY.md
 
 ## Trust boundaries
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: The trust boundaries of the blueprint
-    accDescr: Five boundaries. 1, this repository to every repository made from it, through the blueprint bot and the checks of each repository. 2, the template to Copier on your machine, as data for its sandboxed Jinja. 3, blueprint.py to GitHub, with the login of whoever starts it, reading every answer as untrusted. 4, Renovate to every repository, through pull requests without administration. 5, the dashboard to the public, with every value escaped.
-
-    subgraph blueprint ["This repository"]
-        template["Template"]
-        renovate(["Renovate"])
-        dashboard(["Dashboard"])
-    end
-
-    subgraph machine ["Your machine"]
-        copier(["Copier"])
-        tool(["<code>blueprint.py</code>"])
-    end
-
-    subgraph repos ["Each repository"]
-        updater(["Blueprint bot"])
-        checks{"Its checks"}
-        main["main"]
-    end
-
-    github[("GitHub API")]
-    public(["The public"])
-
-    template -- "2 · data for the<br>sandboxed Jinja" --> copier
-    template -- "1 · a release tag" --> updater --> checks --> main
-    renovate -- "4 · pull requests<br>no administration" --> checks
-    tool -- "3 · your login<br>answers untrusted" --> github
-    dashboard -- "5 · public data<br>every value escaped" --> public
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class renovate,updater,dashboard bot
-    class copier,tool person
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/the-trust-boundaries-of-the-blueprint.dark.svg">
+  <img src="images/diagrams/the-trust-boundaries-of-the-blueprint.svg" alt="The trust boundaries of the blueprint: Five boundaries. 1, this repository to every repository made from it, through the blueprint bot and the checks of each repository. 2, the template to Copier on your machine, as data for its sandboxed Jinja. 3, blueprint.py to GitHub, with the login of whoever starts it, reading every answer as untrusted. 4, Renovate to every repository, through pull requests without administration. 5, the dashboard to the public, with every value escaped.">
+</picture>
 
 1. **This repository → every repository made from it.** The blueprint bot of each repository runs `copier update` to the latest published release of the blueprint and opens a pull request there, every week and right after a release, when the Rollout workflow of this repository starts it, one repository after the other, with a token of the release app for that repository alone, which can only start workflows and read. It commits the update with its own code from `main`, not with the code that the update brings, and never overwrites a commit of anyone else on its branch. The checks of that repository decide whether it merges; a conflict, which also turns its auto-merge off, or the repository variable `BLUEPRINT_AUTOMERGE` set to `off`, makes it wait for the maintainer.
 2. **The template → Copier on your machine.** The template is data for Copier's sandboxed Jinja; the answers of the questions are checked by their validators.
@@ -82,6 +45,7 @@ flowchart TB
 | The settings of a repository are weakened by hand | The settings bot compares them with the settings as code after every change and every week, and applies them | the Settings workflow of each repository |
 | A release stands on a tag that the release workflow didn't sign: one that someone created first, at a commit of their own, or one that release-please created after the run of the merge was lost | Every run of the Release workflow, not only the one of the merge, signs the tag of a merged release pull request before the release is created on it, and release-please creates a release only in a run that signed its tag; a tag that exists already must be the release workflow's own, signed at the commit of the merge, and the isolated build checks that again before it builds or signs anything | `.github/sign-tag.sh`, `tests/test_sign_tag.py` |
 | The private key of the release app is abused | The environment `release` only for `main`; tokens per job with the least permissions; no administration for Renovate | `.github/workflows/renovate.yml`, `.github/repository.toml` |
+| A pull request makes the diagram bot commit more than its diagrams, as the release app | The bot acts only for a branch of the repository and runs no code of the pull request: `blueprint.py` of `main` takes from the artifact of the check only sources in `docs/diagrams/`, SVG pictures in `docs/images/diagrams/` and pages of Markdown, by plain paths, deletes only pictures, and commits only onto the commit that the check drew; its token can write contents and pull requests, not workflows | `test_the_bot_writes_only_sources_pictures_and_pages`, `test_the_bot_refuses_anything_else` and `test_the_diagram_bot_commits_nothing_but_diagrams` in `tests/test_diagrams.py` |
 | A name or a description on the dashboard runs as script | Every value is escaped before it becomes HTML | `dashboard.py` |
 
 ## Residual risks

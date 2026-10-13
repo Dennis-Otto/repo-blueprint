@@ -1,0 +1,34 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the diagrams fix themselves
+    accDescr: A pull request that adds a mermaid block or changes a diagram, and Renovate with a new version of mermaid-cli, run the check diagrams, which draws the diagrams anew. On a branch of the repository, the diagram bot commits the sources and pictures onto the branch, and the checks run again; a fork keeps the failing check, which says the command. After the merge, and every week, main is drawn too: when a diagram is not yet a picture of its source, one pull request from bot/diagrams fixes it and merges itself. So every reader sees every diagram.
+
+    change["`A pull request adds a *mermaid* block<br>or changes a diagram`"]
+    renovate["Renovate brings<br>a new mermaid-cli"]
+    check{"The check diagrams:<br>every diagram a picture<br>of its source?"}
+    bot["The diagram bot commits<br>sources and pictures<br>onto the branch"]
+    fork["A fork: the check<br>says the command"]
+    merged["The pull request merges"]
+    main{"main, after every change<br>and every week:<br>every diagram a picture?"}
+    fix["`One pull request from<br>*bot/diagrams* that<br>merges itself`"]
+    done["Every reader sees<br>every diagram"]
+
+    change --> check
+    renovate --> check
+    check -- "no, a branch" --> bot
+    bot -- "checks again" --> check
+    check -- "no, a fork" --> fork
+    check -- "yes" --> merged --> main
+    main -- "yes" --> done
+    main -- "no" --> fix --> done
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot,renovate,fix bot
+    class change,fork person
+    class done done
