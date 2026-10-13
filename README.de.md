@@ -220,21 +220,25 @@ config:
 ---
 flowchart TB
     accTitle: Wie ein Update des Blueprints ankommt
-    accDescr: Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot copier update auf das neueste Release aus und öffnet einen Pull Request. Mit Konflikten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
+    accDescr: Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot copier update auf das neueste veröffentlichte Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
 
     bot(["Blueprint-Bot<br>nach jedem Release<br>und jede Woche"])
-    pr["Pull Request<br>mit den Änderungen"]
+    yours{"Deine Commits<br>auf seinem offenen<br>Pull Request?"}
+    note(["Überlässt ihn dir<br>und sagt einmal, dass<br>ein neueres Release da ist"])
+    pr["Pull Request<br>mit den Änderungen<br>der offene geht weiter"]
     conflicts{"Konflikte?"}
     off{"Automerge<br>abgeschaltet?"}
     checks{"Alle Prüfungen<br>grün?"}
     merged["Merged sich selbst"]
     wait(["Wartet auf<br>den Maintainer"])
 
-    bot -- "<code>copier update</code><br>auf das neueste Release" --> pr --> conflicts
+    bot -- "<code>copier update</code><br>auf das neueste<br>veröffentlichte Release" --> yours
+    yours -- "ja" --> note
+    yours -- "nein" --> pr --> conflicts
     conflicts -- "nein" --> off
     off -- "nein" --> checks
     checks -- "ja" --> merged
-    conflicts -- "ja, in den Dateien<br>markiert" --> wait
+    conflicts -- "ja: in den Dateien markiert<br>Auto-Merge aus, mit Label" --> wait
     off -- "ja" --> wait
     checks -- "nein" --> wait
 
@@ -242,11 +246,13 @@ flowchart TB
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class bot bot
-    class wait person
+    class wait,note person
     class merged done
 ```
 
-Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet. Ohne Konflikte merged sich sein Pull Request selbst, sobald alle Prüfungen grün sind; Konflikte bleiben als Markierungen für den Maintainer darin. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
+Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet. Er nimmt das neueste veröffentlichte Release des Blueprints, den `.copier-answers.yml` nennt, vielleicht eines Forks davon, nie einen Tag, dessen Release noch ein Entwurf ist, und hält einen Pull Request auf dem Branch `blueprint/update`: Ein neueres Release bringt diesen Pull Request weiter, mit seiner Nummer und seinem Auto-Merge, statt ihn zu ersetzen. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind. Konflikte bleiben als Markierungen für den Maintainer darin, in den Dateien, die das Update geändert hat; sie schalten sein Auto-Merge ab und setzen das Label `merge-conflict`. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
+
+Sobald du auf den Branch des Pull Requests committest, etwa um die Markierungen aufzulösen, überlässt der Bot dir den Branch: Ist ein neueres Release erschienen, sagt er das in einem Kommentar, und nachdem du den Pull Request gemerged oder geschlossen hast, bringt sein nächster Lauf den Rest. Ein Merge von `main` mit dem Button *Update branch* zählt nicht als dein Commit, und ein Auto-Merge, das du abschaltest, bleibt aus. Ein Update, das nur ein neues Release in `.copier-answers.yml` festhält, kommt ebenfalls als Pull Request, und die Updates bringen auch die Modi von Dateien mit, etwa ein Skript, das ausführbar wird.
 
 Dem Blueprint gehören die Workflows, `scripts/check.sh` und die Community-Dateien: ihre Änderungen kommen mit den Updates. Dateien des Projekts werden nie überschrieben: README, Changelog, das Sicherheitsdesign in `docs/security.md`, Manifeste und Lock-Dateien der Abhängigkeiten (die hält Renovate aktuell), Code und Tests, `mkdocs.yml` und die Seiten der Website, Issue-Formulare, Labels und akzeptierte Findings. Prüfungen, die nur ein Projekt braucht, gehören in `scripts/check-project.sh`, das `scripts/check.sh` zuletzt ausführt.
 
