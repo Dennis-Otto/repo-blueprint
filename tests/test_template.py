@@ -2421,8 +2421,9 @@ WITH_JQ = pytest.mark.skipif(
     BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
 )
 # The answers of gh: an API call by its path, any other command by its first two
-# words, each through jq as gh does. What it is given to write, it keeps by the words
-# of its command.
+# words, each through jq as gh does. The jq of gh ends its lines with LF on every
+# system, the jq of Windows with CRLF. What it is given to write, it keeps by the
+# words of its command.
 FAKE_GH = """#!/usr/bin/env bash
 echo "$*" >> "$CALLS"
 filter=""
@@ -2459,7 +2460,7 @@ if [[ ! -f "$answer" ]]; then
   exit 1
 fi
 if [[ -n "$filter" ]]; then
-  jq -r "$filter" "$answer"
+  jq -r "$filter" "$answer" | tr -d '\\r'
 else
   cat "$answer"
 fi
