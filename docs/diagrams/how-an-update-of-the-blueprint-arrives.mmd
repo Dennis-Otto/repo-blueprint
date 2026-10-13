@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How an update of the blueprint arrives
+    accDescr: Right after every release of the blueprint, and every week, the blueprint bot runs copier update to the latest published release. When its pull request is still open and you have committed to its branch, the bot leaves the branch to you and says once that a newer release is out. Otherwise it opens the pull request, or moves the open one on to the new release. With conflicts, which turn auto-merge off, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
+
+    bot(["Blueprint bot<br>after every release<br>and every week"])
+    yours{"Your commits<br>on its open<br>pull request?"}
+    note(["Leaves it to you<br>and says once that<br>a newer release is out"])
+    pr["Pull request<br>with the changes<br>the open one moves on"]
+    conflicts{"Conflicts?"}
+    off{"Automerge<br>off?"}
+    checks{"Every check<br>passes?"}
+    merged["Merges itself"]
+    wait(["Waits for<br>the maintainer"])
+
+    bot -- "copier update<br>to the latest<br>published release" --> yours
+    yours -- "yes" --> note
+    yours -- "no" --> pr --> conflicts
+    conflicts -- "no" --> off
+    off -- "no" --> checks
+    checks -- "yes" --> merged
+    conflicts -- "yes: marked in the files<br>auto-merge off, labeled" --> wait
+    off -- "yes" --> wait
+    checks -- "no" --> wait
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot bot
+    class wait,note person
+    class merged done

@@ -1,0 +1,25 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What belongs to the blueprint and what to the project
+    accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings and workflows of its own beside those of the blueprint.
+
+    blueprint[("Repo Blueprint")]
+
+    subgraph repo ["Your repository"]
+        theirs["`**The blueprint's files**<br>workflows · scripts/check.sh<br>.github/repository.toml<br>community files`"]
+        mine["`**The project's files**<br>README · CHANGELOG · docs/<br>code and tests<br>manifests and lock files<br>issue forms · labels`"]
+        adds["`**What the project adds**<br>scripts/check-project.sh<br>.github/repository.project.toml<br>.github/checks.project.toml<br>workflows of its own`"]
+    end
+
+    blueprint -- "copier update<br>merged line by line" --> theirs
+    blueprint -. "never overwritten" .-x mine
+    theirs -- "joined by" --- adds
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    class theirs bot
+    class mine,adds person

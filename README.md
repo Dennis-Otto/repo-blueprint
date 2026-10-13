@@ -24,42 +24,10 @@ The [website of the blueprint](https://dennis-otto.github.io/repo-blueprint/) ha
 
 Every change, yours or a bot's, is a pull request that merges once every check passes, and the release bot makes a signed release of what reaches `main`; three bots keep the repository current on their own. In the pictures, blue is the blueprint and its bots, orange is you and what is yours, and green is what comes out.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How a repository looks after itself
-    accDescr: copier copy makes a repository from the blueprint. Every change, yours or a bot's, is a pull request that merges once every check passes, and the release bot makes a signed release of what reaches main. Renovate, the blueprint bot and the settings bot keep the repository current on their own.
-
-    blueprint[("Repo Blueprint")]
-    you(["You"])
-    renovate(["Renovate<br>every 2 hours"])
-    updater(["Blueprint bot<br>after every release<br>and every week"])
-    settings(["Settings bot<br>every week"])
-
-    subgraph repo ["Your repository"]
-        pr["Pull request"] --> checks{"Every check<br>passes?"}
-        checks -- "yes" --> main["main"]
-        main -- "release bot" --> release["Signed release"]
-    end
-
-    blueprint -- "copier copy" --> repo
-    blueprint -. "a new release" .-> updater
-    you -- "a change" --> pr
-    renovate -- "updates" --> pr
-    updater -- "copier update" --> pr
-    settings -- "the settings as code" --> repo
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class renovate,updater,settings bot
-    class you person
-    class release done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-repository-looks-after-itself.dark.svg">
+  <img src="docs/images/diagrams/how-a-repository-looks-after-itself.svg" alt="How a repository looks after itself: copier copy makes a repository from the blueprint. Every change, yours or a bot's, is a pull request that merges once every check passes, and the release bot makes a signed release of what reaches main. Renovate, the blueprint bot and the settings bot keep the repository current on their own.">
+</picture>
 
 <!-- --8<-- [end:loop] -->
 
@@ -82,6 +50,7 @@ flowchart TB
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide with the coding standards and the rule that every change brings its tests, code of conduct, security policy with how to verify a release and an assurance case, the security design of the software (`docs/security.md`), support, governance with the roles and the continuity of the project, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
 | **Website** | the documentation in `docs/` as a website with search and a light and a dark theme, in English and, with German pages such as `index.de.md` next to the English ones, in German: every pull request builds it strictly, and so does `scripts/check.sh` once the tools of its preview are installed, on Linux, macOS and Windows; every change of `main` publishes it on GitHub Pages | MkDocs with the Material theme, `mkdocs.yml`, `docs.yml` |
+| **Diagrams** | every diagram as a picture that every reader sees, also in the GitHub app, the stores and e-mails, which draw no Mermaid: a Mermaid source in `docs/diagrams/`, drawn as an SVG for the light and one for the dark theme, while the website draws the source live; the check *diagrams* draws the pictures anew in every pull request that changes a diagram or adds a `mermaid` block, and the diagram bot commits the sources and pictures onto its branch; on `main`, a pull request of the diagram bot fixes what is still missing and merges itself; `bash scripts/diagrams.sh --extract` turns the `mermaid` blocks of existing Markdown into sources and their pictures | `scripts/diagrams.sh` with mermaid-cli, `lint.yml`, `after-checks.yml`, `diagrams.yml` |
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels, GitHub Pages, and every file of the community standards of GitHub; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
 | **Clean-up** | every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month | `cleanup.yml` |
 | **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks and of the website, and a hook that runs them before every push, on Linux, macOS and Windows: `scripts/check.sh` fails when Git would skip it | `.devcontainer/`, `.githooks/pre-push` |
@@ -95,75 +64,19 @@ flowchart TB
 
 The title of a pull request decides the next version, and merging the release pull request does the rest:
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: From a change to a release
-    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
-
-    pr["Pull request<br><code>fix:</code> · <code>feat:</code> · <code>feat!:</code>"]
-    main["main"]
-    rpr["Release pull request<br><code>chore: release x.y.z</code><br>notes from <i>Unreleased</i>"]
-    beta["Beta <code>x.y.z-beta.N</code><br>for testers"]
-    tag["Signed tag<br>at the merge, by the next run<br>checked before the build"]
-    build["Isolated build<br>SLSA Build Level 3"]
-    release["Release<br>package · SBOMs<br>provenance"]
-    deliver["Delivery<br>PyPI · npm · GHCR<br>App Store · HACS"]
-    verify["Verified as users can<br>at once and every week"]
-
-    pr -- "every check passes" --> main
-    main -- "release bot" --> rpr
-    main -. "<code>BETA_CHANNEL</code>" .-> beta
-    rpr -- "merged" --> tag --> build --> release
-    release --> deliver
-    release --> verify
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class rpr bot
-    class release done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/from-a-change-to-a-release.dark.svg">
+  <img src="docs/images/diagrams/from-a-change-to-a-release.svg" alt="From a change to a release: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.">
+</picture>
 
 ### When the checks run
 
 A check runs only where it can change a result, because an account of GitHub runs about 20 jobs at once, and each job that can't fail keeps a pull request waiting for a runner:
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: When the checks run
-    accDescr: Every pull request runs the required checks, and the scanners of what it changes: zizmor for a workflow, OSV-Scanner for a lock file, fuzzing for Python code and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs the scanners in full, the secret scan of the whole history, the SBOM and the newest Python.
-
-    pr["Pull request"]
-    rpr["Release pull request<br>changelog and version"]
-    required["Required checks<br>tests · lint · docs · CodeQL<br>dependency review · secret scan"]
-    scanners["Scanners of what it changes<br>workflows: zizmor · lock files: OSV-Scanner<br>Python: fuzzing · documents: links"]
-    main["<code>main</code>"]
-    baseline["What keeps a baseline or publishes<br>tests with coverage · newest Python<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>website · release · branch bot"]
-    weekly["Scanners in full · fuzzing for 15 minutes<br>secret scan of the whole history<br>SBOM · newest Python"]
-
-    pr --> required
-    pr -- "changes what they read" --> scanners
-    rpr -- "no scanner" --> required
-    required -- "every check passes" --> main
-    main -- "after a merge" --> baseline
-    main -- "every week" --> weekly
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class pr person
-    class rpr bot
-    class main done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/when-the-checks-run.dark.svg">
+  <img src="docs/images/diagrams/when-the-checks-run.svg" alt="When the checks run: Every pull request runs the required checks, and the scanners of what it changes: zizmor for a workflow, OSV-Scanner for a lock file, fuzzing for Python code and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs the scanners in full, the secret scan of the whole history, the SBOM and the newest Python.">
+</picture>
 
 - **After a merge:** `main` takes a pull request only when it is up to date with it, so the merge gives `main` the files that the checks of the pull request passed. `main` runs only the tests, whose coverage the coverage bot compares every pull request with, the analyses that code scanning compares with, and what publishes, such as the website and the release. Lint runs in the pull requests, the secret scan and the fuzzing there and every week, and the SBOM every week; every release has an SBOM of its own.
 - **The release pull request** changes only the changelog and the version, which can't change what a scanner finds. In the blueprint, the required check *variants* stands for the variants and updates of every kind of project: it passes when each passed, or when none had to run, as in the release pull request.
@@ -174,45 +87,10 @@ flowchart TB
 
 A check that a runner, a site or GitHub fails for a moment, or that a race of two runs cancels, needs no person: the bots after the checks run it once more, and leave red only what fails for a reason.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: When a check fails or stops
-    accDescr: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. The release of a merge that failed runs its failed jobs once more, where they stopped.
-
-    run["A run of the checks<br>or of the release ends"]
-    tests["Tests failed or ran out of time<br>at the first attempt"]
-    raced["A required check cancelled<br>by a late run for an older commit"]
-    release["The release of a merge failed"]
-    before{"The same jobs broke<br>for the commit before?"}
-    again["The failed jobs run once more"]
-    flaky["Issue <i>Flaky tests</i><br>job · step · test · error"]
-    restart["The run for the head<br>starts again"]
-    resume["The failed jobs of the release<br>run once more, where they stopped"]
-    red["Stays red, for you"]
-
-    run --> tests
-    run --> raced
-    run --> release
-    tests --> before
-    before -- "no" --> again
-    before -- "yes" --> red
-    again -- "passes" --> flaky
-    again -- "fails again" --> red
-    raced --> restart
-    release --> resume
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class again,restart,resume bot
-    class red person
-    class flaky done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/when-a-check-fails-or-stops.dark.svg">
+  <img src="docs/images/diagrams/when-a-check-fails-or-stops.svg" alt="When a check fails or stops: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. The release of a merge that failed runs its failed jobs once more, where they stopped.">
+</picture>
 
 - **Once, not again and again:** the flaky-test bot runs the failed jobs of the first attempt of a test run once more, and so does the bot for failed releases with a release that a merge started; the bot for cancelled checks starts a run twice at most. A job that GitHub stops at its time limit ends cancelled, not failed, and runs once more as well. A run that you or a newer run cancelled stays cancelled, even when a job that waits for the others failed because of it.
 - **A failure that repeats is real:** when the same jobs broke for the commit before on the same branch, after they ran once more, the jobs don't run again, so that a broken test doesn't keep a runner busy for nothing.
@@ -225,78 +103,38 @@ flowchart TB
 
 A check that fails explains itself, to you and to everyone who sends a pull request, also from a fork: what it found, why that matters and how to fix it, with the commands to run.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: The PR coach
-    accDescr: A push to a pull request, also one from a fork, runs the checks. A check that fails explains itself in its summary and as its annotation, from the explanations of .github/checks.toml and .github/checks.project.toml. After the checks, the PR coach reads the check runs and their annotations from the API, without running any code of the pull request, and keeps one comment on the pull request up to date: a section for each check that failed, with the problem, why it matters, the fix and its commands. You push the fix, and once every check passes, the comment says so.
-
-    push(["A push to a pull request<br>also from a fork"])
-    checks{"Every check<br>passes?"}
-    explain["The check that failed explains itself<br>in its summary and as its annotation"]
-    coach["The PR coach after the checks<br>reads the check runs from the API<br>and runs no code of the pull request"]
-    comment["One comment on the pull request<br>for each check: the problem, why it matters,<br>the fix and its commands"]
-    passed["The comment says<br>every check passed"]
-    catalog[("<code>.github/checks.toml</code><br><code>.github/checks.project.toml</code>")]
-
-    push --> checks
-    checks -- "no" --> explain --> coach --> comment
-    comment -- "you push the fix" --> push
-    checks -- "yes" --> passed
-    catalog -.-> explain
-    catalog -.-> coach
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class explain,coach,comment bot
-    class push person
-    class passed done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-pr-coach.dark.svg">
+  <img src="docs/images/diagrams/the-pr-coach.svg" alt="The PR coach: A push to a pull request, also one from a fork, runs the checks. A check that fails explains itself in its summary and as its annotation, from the explanations of .github/checks.toml and .github/checks.project.toml. After the checks, the PR coach reads the check runs and their annotations from the API, without running any code of the pull request, and keeps one comment on the pull request up to date: a section for each check that failed, with the problem, why it matters, the fix and its commands. You push the fix, and once every check passes, the comment says so.">
+</picture>
 
 - **In the check:** a job that fails ends with a step that writes the explanation of its check into the summary and as an annotation, which the list of the checks shows. `scripts/check.sh` does the same for the step that stopped it, on your machine as well, and in the CI the files of the pull request show the problems of the text files, of Ruff and of actionlint at their lines.
 - **One comment, also for a fork:** the runs of a pull request from a fork can't write to it, so the coach runs after the checks, in the repository itself. It keeps one comment with a section for each check that failed, the findings of its annotations and a link to its log, and a suggested title when the title is no Conventional Commit. A pull request whose checks never failed gets no comment; once every check passes, a comment that listed failures turns into a short all-clear.
 - **Safe with any pull request:** the coach reads the check runs and their annotations from the API and checks out only the explanations of the default branch; it runs no code of the pull request. Text that a pull request controls, such as a file name, a message or a title, appears only as code, cut to a short length, so it can't mention anybody, link anywhere or break the comment.
 - **Every check explains itself:** the explanations are in `.github/checks.toml`, which the blueprint keeps current, and those of a project's own checks in `.github/checks.project.toml`, which belongs to the project and wins. A test of the blueprint fails for a required check or a step of `scripts/check.sh` without an explanation, and `python3 .github/blueprint.py coach verify` lists them in a repository.
 
+### Diagrams that fix themselves
+
+The GitHub app, HACS, the Nextcloud App Store, PyPI and the e-mails of GitHub draw no Mermaid and show a `mermaid` block as code. So every diagram is a picture of its source, and the bots keep it that way without a person.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-diagrams-fix-themselves.dark.svg">
+  <img src="docs/images/diagrams/how-the-diagrams-fix-themselves.svg" alt="How the diagrams fix themselves: A pull request that adds a mermaid block or changes a diagram, and Renovate with a new version of mermaid-cli, run the check diagrams, which draws the diagrams anew. On a branch of the repository, the diagram bot commits the sources and pictures onto the branch, and the checks run again; a fork keeps the failing check, which says the command. After the merge, and every week, main is drawn too: when a diagram is not yet a picture of its source, one pull request from bot/diagrams fixes it and merges itself. So every reader sees every diagram.">
+</picture>
+
+- **A pull request fixes itself:** when a pull request from a branch of the repository adds a `mermaid` block or changes a source, the check *diagrams* runs `bash scripts/diagrams.sh --extract`, and the diagram bot commits the sources and pictures it made onto the branch, as the release app, with a comment that names the pages it changed. The checks of that commit pass. A pull request from a fork gets the failing check, whose summary lists the files and the command.
+- **`main` fixes itself:** after every change of `main` that touches a diagram or adds a `mermaid` block, and every week, the Diagrams workflow draws every diagram of `main`. When something is missing, such as the blocks of a repository right after the update of the blueprint, it keeps one pull request from the branch `bot/diagrams` with the fix, which merges itself once every check passes, and closes it when `main` is fixed otherwise. A failed run opens an issue, which the weekly run closes once the bot passes again.
+- **A new renderer draws anew:** Renovate keeps the image of mermaid-cli in `scripts/diagrams.sh` current; the check draws the pictures again on its branch, and the diagram bot commits them, so the update still merges on its own.
+- **Nothing but diagrams:** the bot runs no code of a pull request. It commits only sources in `docs/diagrams/`, SVG pictures in `docs/images/diagrams/` and pages of Markdown, by plain paths, onto the very commit that the check drew, and only for a branch of the repository.
+
 ### Mutation tests
 
 The mutation tests show the lines that the tests run but don't check: every Saturday they change the code in thousands of small ways, the mutants, and run the tests that cover each one. A mutant that no test notices survives.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the mutation tests run
-    accDescr: Every Saturday, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. mutmut changes the Python in a copy of the repository and leaves out the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. When mutants ran, the summary shows the score and the surviving mutants, the artifact keeps them and the dashboard shows the score. A run that measured nothing fails and shows the last words of the tool.
-
-    start["Every Saturday · on demand<br>a pull request that changes<br><code>mutation.yml</code> or mutmut"]
-    python["mutmut<br>the Python, in a copy in <code>mutants/</code><br>without the tests marked <code>mutation_unsafe</code>"]
-    php["Infection<br>the PHP of a Nextcloud app<br>with <code>tests/bootstrap.php</code>"]
-    score["The summary and the artifact<br>the score · the surviving mutants"]
-    dashboard["The dashboard<br><i>mutants caught</i>"]
-    fail["The run fails<br>with the last words of the tool"]
-
-    start --> python
-    start --> php
-    python -- "mutants ran" --> score
-    php -- "mutants ran" --> score
-    score --> dashboard
-    python -. "nothing measured" .-> fail
-    php -. "nothing measured" .-> fail
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class python,php bot
-    class score,dashboard done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-mutation-tests-run.dark.svg">
+  <img src="docs/images/diagrams/how-the-mutation-tests-run.svg" alt="How the mutation tests run: Every Saturday, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. mutmut changes the Python in a copy of the repository and leaves out the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. When mutants ran, the summary shows the score and the surviving mutants, the artifact keeps them and the dashboard shows the score. A run that measured nothing fails and shows the last words of the tool.">
+</picture>
 
 - **The score is the share of the mutants that a test noticed,** among those of the code that the tests run: for mutmut the killed among the killed and the survived, for Infection its *Covered Code MSI*. The dashboard shows it as *mutants caught*.
 - **A low score fails nothing,** not even below a minimum that the project's own configuration sets, but a run in which no mutant ran does, with the end of the output of mutmut or Infection in its summary: a broken configuration shows up in the week it breaks, not as an empty dashboard.
@@ -368,30 +206,10 @@ The other kinds set these places in files of their own, such as `pyproject.toml`
 
 ## Settings as code
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: The settings as code
-    accDescr: The settings of a repository live in .github/repository.toml, with those of the project alone and the labels. blueprint.py settings apply, run by an administrator, and the settings bot, after every change and every week, make GitHub match them; settings check shows what differs.
-
-    files[".github/repository.toml<br>repository.project.toml<br>labels.toml"]
-    apply(["<code>settings apply</code><br>by an administrator"])
-    bot(["Settings bot<br>after every change<br>and every week"])
-    github["GitHub<br>merges · rulesets · security<br>Actions · environments<br>variables · labels · Pages"]
-
-    files --> apply --> github
-    files --> bot --> github
-    github -. "<code>settings check</code><br>shows what differs" .-> files
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class bot bot
-    class apply person
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-settings-as-code.dark.svg">
+  <img src="docs/images/diagrams/the-settings-as-code.svg" alt="The settings as code: The settings of a repository live in .github/repository.toml, with those of the project alone and the labels. blueprint.py settings apply, run by an administrator, and the settings bot, after every change and every week, make GitHub match them; settings check shows what differs.">
+</picture>
 
 `.github/repository.toml` holds the settings of a repository; `blueprint.py settings check` compares them with GitHub and `settings apply` makes GitHub match:
 
@@ -406,78 +224,17 @@ flowchart TB
 
 ## Updates
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How an update of the blueprint arrives
-    accDescr: Right after every release of the blueprint, and every week, the blueprint bot runs copier update to the latest published release. When its pull request is still open and you have committed to its branch, the bot leaves the branch to you and says once that a newer release is out. Otherwise it opens the pull request, or moves the open one on to the new release. With conflicts, which turn auto-merge off, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
-
-    bot(["Blueprint bot<br>after every release<br>and every week"])
-    yours{"Your commits<br>on its open<br>pull request?"}
-    note(["Leaves it to you<br>and says once that<br>a newer release is out"])
-    pr["Pull request<br>with the changes<br>the open one moves on"]
-    conflicts{"Conflicts?"}
-    off{"Automerge<br>off?"}
-    checks{"Every check<br>passes?"}
-    merged["Merges itself"]
-    wait(["Waits for<br>the maintainer"])
-
-    bot -- "<code>copier update</code><br>to the latest<br>published release" --> yours
-    yours -- "yes" --> note
-    yours -- "no" --> pr --> conflicts
-    conflicts -- "no" --> off
-    off -- "no" --> checks
-    checks -- "yes" --> merged
-    conflicts -- "yes: marked in the files<br>auto-merge off, labeled" --> wait
-    off -- "yes" --> wait
-    checks -- "no" --> wait
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class bot bot
-    class wait,note person
-    class merged done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-an-update-of-the-blueprint-arrives.dark.svg">
+  <img src="docs/images/diagrams/how-an-update-of-the-blueprint-arrives.svg" alt="How an update of the blueprint arrives: Right after every release of the blueprint, and every week, the blueprint bot runs copier update to the latest published release. When its pull request is still open and you have committed to its branch, the bot leaves the branch to you and says once that a newer release is out. Otherwise it opens the pull request, or moves the open one on to the new release. With conflicts, which turn auto-merge off, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.">
+</picture>
 
 The blueprint bot (`blueprint-update.yml`) runs `copier update` every week, and right after every release of the blueprint, whose Rollout workflow starts it in every repository of the release app. It takes the latest published release of the blueprint that `.copier-answers.yml` names, a fork of it perhaps, never a tag whose release is still a draft, and keeps one pull request on the branch `blueprint/update`: a newer release moves that pull request on, with its number and its auto-merge, instead of replacing it. Without conflicts it merges itself once every check passes. Conflicts stay in it as markers for the maintainer, in the files that the update touched; they turn its auto-merge off and add the label `merge-conflict`. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How a release of the blueprint rolls out
-    accDescr: Once the Release workflow has published and verified a release, the Rollout workflow takes the repositories of the release app one after the other, the quickest checks first. It starts the blueprint bot of a repository and waits up to 15 minutes for the bot and the checks of its update pull request, then goes on with the next one. A repository whose bot it can't start, or whose bot fails, fails the run by its name, and the others still get the release.
-
-    release(["Release workflow<br>publishes and verifies<br>a release"])
-    next["Next repository<br>the quickest checks first"]
-    start["Starts its<br>blueprint bot"]
-    wait["Waits up to 15 minutes<br>for the bot and the checks<br>of its pull request"]
-    failed(["The run fails<br>by the name of<br>the repository"])
-    more{"Another<br>repository?"}
-    finished["Every repository<br>has the release<br>in a pull request"]
-
-    release --> next --> start --> wait --> more
-    start -- "GitHub fails<br>three times" --> failed
-    wait -- "the bot fails" --> failed
-    failed -. "the others<br>go on" .-> more
-    more -- "yes" --> next
-    more -- "no" --> finished
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class release,next,start,wait bot
-    class failed person
-    class finished done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-release-of-the-blueprint-rolls-out.dark.svg">
+  <img src="docs/images/diagrams/how-a-release-of-the-blueprint-rolls-out.svg" alt="How a release of the blueprint rolls out: Once the Release workflow has published and verified a release, the Rollout workflow takes the repositories of the release app one after the other, the quickest checks first. It starts the blueprint bot of a repository and waits up to 15 minutes for the bot and the checks of its update pull request, then goes on with the next one. A repository whose bot it can't start, or whose bot fails, fails the run by its name, and the others still get the release.">
+</picture>
 
 The Rollout workflow of the blueprint brings each release to the repositories of the release app one after the other, those with the quickest checks first: it starts the blueprint bot of a repository and gives the bot and the checks of its update pull request up to 15 minutes before it starts the next one, so that the update pull requests don't all wait for the runners of the account at once. A repository whose bot it can't start, or whose bot fails, fails the run by its name; the others still get the release. It rolls out every release that a run of the Release workflow published, whether the merge of the release pull request started that run, the hourly schedule or a start by hand; a release that the run of a later merge finished, because the run of its own merge was lost, waits for a start by hand (Actions → Rollout) or the weekly run of the bots. Started by hand itself, it rolls out the latest release. Rollouts of releases that come close together overlap, but never in the same repository: there, the newer release takes the place of an older one that still waits.
 
@@ -487,33 +244,10 @@ The blueprint owns the workflows, `scripts/check.sh` and the community files: th
 
 ## What belongs to a project
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: What belongs to the blueprint and what to the project
-    accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings and workflows of its own beside those of the blueprint.
-
-    blueprint[("Repo Blueprint")]
-
-    subgraph repo ["Your repository"]
-        theirs["<b>The blueprint's files</b><br>workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>community files"]
-        mine["<b>The project's files</b><br>README · CHANGELOG · <code>docs/</code><br>code and tests<br>manifests and lock files<br>issue forms · labels"]
-        adds["<b>What the project adds</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br><code>.github/checks.project.toml</code><br>workflows of its own"]
-    end
-
-    blueprint -- "<code>copier update</code><br>merged line by line" --> theirs
-    blueprint -. "never overwritten" .-x mine
-    theirs -- "joined by" --- adds
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class theirs bot
-    class mine,adds person
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/what-belongs-to-the-blueprint-and-what-to-the-project.dark.svg">
+  <img src="docs/images/diagrams/what-belongs-to-the-blueprint-and-what-to-the-project.svg" alt="What belongs to the blueprint and what to the project: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings and workflows of its own beside those of the blueprint.">
+</picture>
 
 The blueprint keeps the shared parts of every repository equal; a project adds its own without forking them:
 
@@ -529,6 +263,7 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 ## Tools in every repository
 
 - `bash scripts/check.sh`: the checks of the CI, locally.
+- `bash scripts/diagrams.sh`: draws every diagram of `docs/diagrams/` as its pictures in `docs/images/diagrams/`, with Docker; `--extract` first turns every `mermaid` block of the Markdown into a source and its picture, and `--check` checks without Docker what `scripts/check.sh` checks.
 - `bash scripts/social-preview.sh`: renders `.github/social-preview.html` into the 1280×640 image that GitHub shows for links to the repository; upload it under *Settings → Social preview*.
 
 ## Dashboard
@@ -541,43 +276,10 @@ Every Monday, the Weekly report workflow posts in the [discussions](https://gith
 
 ## How the blueprint works
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the blueprint works
-    accDescr: Copier renders a new repository from the questions in copier.yml and the files in template/, which take in the workflows of .github/workflows/, the manifests of stacks/ and blueprint.py. Renovate keeps the workflows and the stacks current.
-
-    renovate(["Renovate"])
-
-    subgraph here ["This repository"]
-        workflows["<code>.github/workflows/</code><br>run here and are<br>the templates"]
-        stacks["<code>stacks/</code><br>manifests and<br>lock files"]
-        tool["<code>blueprint.py</code><br>settings · checklist<br>bots"]
-        template["<code>template/</code><br>the files of<br>a new repository"]
-        questions["<code>copier.yml</code><br>the questions"]
-    end
-
-    copier(["Copier"])
-    repo["A new repository"]
-
-    renovate -. "keeps current" .-> workflows
-    renovate -.-> stacks
-    workflows --> template
-    stacks --> template
-    tool --> template
-    template --> copier
-    questions --> copier
-    copier --> repo
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class renovate bot
-    class repo done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-blueprint-works.dark.svg">
+  <img src="docs/images/diagrams/how-the-blueprint-works.svg" alt="How the blueprint works: Copier renders a new repository from the questions in copier.yml and the files in template/, which take in the workflows of .github/workflows/, the manifests of stacks/ and blueprint.py. Renovate keeps the workflows and the stacks current.">
+</picture>
 
 - `copier.yml` holds the questions. `template/` holds the files of a new repository; a file or folder name such as `[% if stack == 'php' %]composer.json[% endif %]` carries its condition, and a name that renders empty is left out. The delimiters `{= =}` and `[% %]` appear in no workflow, script or manifest, so `${{ }}` of GitHub Actions and `[[ ]]` of Bash and TOML stay as they are.
 - The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Renovate keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.

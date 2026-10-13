@@ -64,6 +64,20 @@ machine, with the rules of `.markdownlint.jsonc`:"""
 commands = ['npx markdownlint-cli2 --fix "**/*.md"']
 docs = "CONTRIBUTING.md#coding-standards"
 
+[check.diagrams]
+title = "The diagrams"
+problem = """A page has a `mermaid` block, which the GitHub app shows as code, or a
+picture in `docs/images/diagrams/` differs from what its source in `docs/diagrams/`
+draws; the summary of the check lists the files."""
+why = """The GitHub app, HACS, the stores of the projects and the e-mails of GitHub draw
+no Mermaid, so only a picture of its source shows a diagram to every reader, and the
+picture has to show what its source says."""
+fix = """On a branch of this repository, the diagram bot commits the fix in a minute.
+From a fork, turn the blocks into sources and draw their pictures with Docker, then
+commit what changed:"""
+commands = ["bash scripts/diagrams.sh --extract"]
+docs = "CONTRIBUTING.md#website"
+
 [check.docs]
 title = "The website"
 problem = """The website doesn't build strictly: a link or an anchor leads nowhere, a
@@ -319,6 +333,18 @@ commands = [
   '''printf '\n' >> FILE  # the line break at the end''',
 ]
 docs = "CONTRIBUTING.md#coding-standards"
+
+[step.Diagrams]
+problem = """A page has a `mermaid` block, which the GitHub app shows as code, a source
+in `docs/diagrams/` lacks one of its two pictures, or a picture in
+`docs/images/diagrams/` has no source; the log names each one."""
+why = """Only a picture of its source shows a diagram to every reader, also in the
+GitHub app, and only a picture with its source can be drawn again."""
+fix = """Turn the blocks into sources and draw their pictures with Docker, then commit
+what changed; without Docker, push, and on a branch of this repository the diagram bot
+draws them for you:"""
+commands = ["bash scripts/diagrams.sh --extract"]
+docs = "CONTRIBUTING.md#website"
 
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose

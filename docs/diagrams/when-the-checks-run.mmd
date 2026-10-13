@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When the checks run
+    accDescr: Every pull request runs the required checks, and the scanners of what it changes: zizmor for a workflow, OSV-Scanner for a lock file, fuzzing for Python code and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs the scanners in full, the secret scan of the whole history, the SBOM and the newest Python.
+
+    pr["Pull request"]
+    rpr["Release pull request<br>changelog and version"]
+    required["Required checks<br>tests · lint · docs · CodeQL<br>dependency review · secret scan"]
+    scanners["Scanners of what it changes<br>workflows: zizmor · lock files: OSV-Scanner<br>Python: fuzzing · documents: links"]
+    main["main"]
+    baseline["What keeps a baseline or publishes<br>tests with coverage · newest Python<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>website · release · branch bot"]
+    weekly["Scanners in full · fuzzing for 15 minutes<br>secret scan of the whole history<br>SBOM · newest Python"]
+
+    pr --> required
+    pr -- "changes what they read" --> scanners
+    rpr -- "no scanner" --> required
+    required -- "every check passes" --> main
+    main -- "after a merge" --> baseline
+    main -- "every week" --> weekly
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class pr person
+    class rpr bot
+    class main done

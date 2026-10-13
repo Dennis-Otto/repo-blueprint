@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a diagram reaches every reader
+    accDescr: A diagram is a Mermaid source in docs/diagrams/. scripts/diagrams.sh draws it with mermaid-cli in Docker as an SVG picture for the light and one for the dark theme, which the Markdown shows with a picture element, so that the GitHub app, the stores, e-mails and github.com all show it. The website draws the source itself, live. In a pull request that changes a diagram, the check diagrams draws the pictures anew, and the diagram bot commits those that differ.
+
+    you(["You"])
+    source["`**docs/diagrams/NAME.mmd**<br>Mermaid, from top to bottom<br>accTitle · accDescr`"]
+    draw["scripts/diagrams.sh<br>mermaid-cli in Docker<br>without network"]
+    pictures["docs/images/diagrams/<br>NAME.svg · NAME.dark.svg"]
+    readers["README and docs/ with a picture<br>the GitHub app · github.com<br>HACS · App Store · PyPI · e-mails"]
+    website["The website<br>draws the source live"]
+    check{"The check diagrams:<br>the same pictures?"}
+    bot(["Diagram bot<br>commits the pictures"])
+
+    you -- "writes" --> source
+    source --> draw --> pictures --> readers
+    source -- "the hook of MkDocs" --> website
+    source -. "a pull request" .-> check
+    check -- "no, on a branch<br>of the repository" --> bot
+    bot -.-> pictures
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class draw,check,bot bot
+    class you,source person
+    class readers,website done

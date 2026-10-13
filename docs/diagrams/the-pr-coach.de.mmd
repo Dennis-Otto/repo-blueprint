@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Der PR-Coach
+    accDescr: Ein Push in einen Pull Request, auch in einen aus einem Fork, startet die Prüfungen. Eine Prüfung, die scheitert, erklärt sich in ihrer Zusammenfassung und als ihre Annotation, aus den Erklärungen von .github/checks.toml und .github/checks.project.toml. Nach den Prüfungen liest der PR-Coach die Check-Runs und ihre Annotationen über die API, ohne Code des Pull Requests auszuführen, und hält einen Kommentar am Pull Request aktuell: einen Abschnitt für jede gescheiterte Prüfung, mit dem Problem, warum es wichtig ist, der Behebung und ihren Befehlen. Du pushst die Behebung, und sobald jede Prüfung besteht, sagt der Kommentar das.
+
+    push(["Ein Push in einen Pull Request<br>auch aus einem Fork"])
+    checks{"Besteht jede<br>Prüfung?"}
+    explain["Die gescheiterte Prüfung erklärt sich<br>in ihrer Zusammenfassung und als Annotation"]
+    coach["Der PR-Coach nach den Prüfungen<br>liest die Check-Runs über die API<br>und führt keinen Code des Pull Requests aus"]
+    comment["Ein Kommentar am Pull Request<br>für jede Prüfung: das Problem, warum es wichtig ist,<br>die Behebung und ihre Befehle"]
+    passed["Der Kommentar sagt:<br>jede Prüfung bestanden"]
+    catalog[(".github/checks.toml<br>.github/checks.project.toml")]
+
+    push --> checks
+    checks -- "nein" --> explain --> coach --> comment
+    comment -- "du pushst die Behebung" --> push
+    checks -- "ja" --> passed
+    catalog -.-> explain
+    catalog -.-> coach
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class explain,coach,comment bot
+    class push person
+    class passed done

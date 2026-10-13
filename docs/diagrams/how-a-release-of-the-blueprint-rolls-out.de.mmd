@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Release des Blueprints ausgerollt wird
+    accDescr: Sobald der Release-Workflow ein Release veröffentlicht und geprüft hat, nimmt sich der Rollout-Workflow die Repositorys der Release-App nacheinander vor, die mit den schnellsten Prüfungen zuerst. Er startet den Blueprint-Bot eines Repositorys und wartet bis zu 15 Minuten auf den Bot und die Prüfungen seines Update-Pull-Requests, dann geht es mit dem nächsten weiter. Ein Repository, dessen Bot er nicht starten kann oder dessen Bot scheitert, lässt den Lauf mit seinem Namen fehlschlagen, und die anderen bekommen das Release trotzdem.
+
+    release(["Release-Workflow<br>veröffentlicht und prüft<br>ein Release"])
+    next["Nächstes Repository<br>schnellste Prüfungen zuerst"]
+    start["Startet seinen<br>Blueprint-Bot"]
+    wait["Wartet bis zu 15 Minuten<br>auf den Bot und die Prüfungen<br>seines Pull Requests"]
+    failed(["Der Lauf schlägt fehl<br>mit dem Namen<br>des Repositorys"])
+    more{"Noch ein<br>Repository?"}
+    finished["Jedes Repository<br>hat das Release<br>in einem Pull Request"]
+
+    release --> next --> start --> wait --> more
+    start -- "GitHub scheitert<br>dreimal" --> failed
+    wait -- "der Bot scheitert" --> failed
+    failed -. "die anderen<br>gehen weiter" .-> more
+    more -- "ja" --> next
+    more -- "nein" --> finished
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class release,next,start,wait bot
+    class failed person
+    class finished done
