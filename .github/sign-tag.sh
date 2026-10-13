@@ -8,18 +8,24 @@
 # every step that asks them tries three times.
 #   bash .github/sign-tag.sh v1.2.3 [commit]
 # With verify, it only checks that the tag on GitHub is one that the release workflow
-# signed, at the given commit, and fails for any other tag.
-#   bash .github/sign-tag.sh verify v1.2.3 commit
-# For the release bot only; it needs the permission id-token: write to sign and, in
-# GH_TOKEN, a token that may push tags, or read them to verify.
+# signed, at the given commit, and fails for any other tag: a tag of this repository,
+# or of the one named last, such as the blueprint that the blueprint bot updates from.
+#   bash .github/sign-tag.sh verify v1.2.3 commit [owner/repository]
+# For the release bot and the blueprint bot only; it needs the permission
+# id-token: write to sign and, in GH_TOKEN, a token that may push tags, or read them
+# to verify.
 # https://github.com/Dennis-Otto/repo-blueprint
 set -euo pipefail
 
 version=0.17.1
 sha256=69213a8a0813a151e5a47d0060862952ff833a845d57309dff76f7ba6600abae
-remote="https://github.com/$GITHUB_REPOSITORY.git"
+repo="$GITHUB_REPOSITORY"
+if [[ "$1" == verify && -n "${4:-}" ]]; then
+  repo="$4"
+fi
+remote="https://github.com/$repo.git"
 issuer=https://token.actions.githubusercontent.com
-release="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/heads/main"
+release="https://github.com/$repo/.github/workflows/release.yml@refs/heads/main"
 
 # gh hands the token to git, so that it appears in no URL and no file.
 github() {

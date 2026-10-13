@@ -436,6 +436,34 @@ def test_any_other_tag_fails_the_verification(
     assert f"::error::{error}" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("workflow", "verified"),
+    [
+        (RELEASE_WORKFLOW, True),
+        # The release workflow of the repository that runs the check, not of o/r.
+        ("o/project/.github/workflows/release.yml@refs/heads/main", False),
+    ],
+)
+def test_the_tag_of_another_repository_verifies_against_its_release_workflow(
+    github: GitHub, workflow: str, verified: bool
+) -> None:
+    # As the blueprint bot of o/project checks a release of its blueprint, o/r.
+    github.signs("v1.0.0", github.release, workflow=workflow)
+    github.environment["GITHUB_REPOSITORY"] = "o/project"
+
+    result = github.sign_tag("verify", "v1.0.0", github.release, "o/r")
+
+    if verified:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "The tag v1.0.0 is signed by the release workflow" in result.stdout
+    else:
+        assert result.returncode == 1
+        assert "::error::The signature of the tag v1.0.0 isn't one" in result.stdout
+    calls = github.calls.read_text(encoding="utf-8").splitlines()
+    assert "fetch ok" in calls
+    assert "verify-tag v1.0.0" in calls
+
+
 def sign_step() -> str:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     start = release.index("      - name: Sign the tag of a release")

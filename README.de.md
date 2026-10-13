@@ -292,7 +292,7 @@ Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, 
 
 ### Einmal pro Repository
 
-- **Die Release-App** öffnet die Release- und Update-Pull-Requests, damit ihre Prüfungen laufen. Installiere sie auf dem Repository und hinterlege ihren privaten Schlüssel als Secret `RELEASE_AUTOMATION_PRIVATE_KEY` im Environment `release`. Die App braucht die Berechtigungen *Actions*, *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests* und *Workflows* (Lesen und Schreiben) sowie *Dependabot alerts*, *Environments*, *Secrets* und *Variables* (Lesen): Damit wendet der Settings-Bot die Einstellungen als Code an, Renovate aktualisiert die Abhängigkeiten, und der Rollout des Blueprints startet nach einem Release den Blueprint-Bot jedes Repositorys. Renovate bekommt ein Token ohne *Administration*.
+- **Die Release-App** öffnet die Release- und Update-Pull-Requests, damit ihre Prüfungen laufen. Installiere sie auf dem Repository und hinterlege ihren privaten Schlüssel als Secret `RELEASE_AUTOMATION_PRIVATE_KEY` im Environment `release`. Die App braucht die Berechtigungen *Actions*, *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests* und *Workflows* (Lesen und Schreiben) sowie *Dependabot alerts*, *Environments*, *Secrets* und *Variables* (Lesen): Damit wendet der Settings-Bot die Einstellungen als Code an, Renovate aktualisiert die Abhängigkeiten, und der Rollout des Blueprints startet nach einem Release den Blueprint-Bot jedes Repositorys. Renovate bekommt ein Token ohne *Administration*. Der Release-Workflow legt jeden Release-Tag mit der App an, und das Ruleset *Release tag creation* lässt niemand anderen einen anlegen; die Variablen `RELEASE_AUTOMATION_CLIENT_ID` und `RELEASE_AUTOMATION_APP_ID` in `.github/repository.toml` nennen die App, und ein Projekt mit einer eigenen App setzt beide in `.github/repository.project.toml`.
 - **Der Issue-Assistent** braucht `CLAUDE_CODE_OAUTH_TOKEN` im Environment `issue-assistant`.
 - **Auslieferung:** Trusted Publishing auf PyPI oder npm, das App-Zertifikat einer Nextcloud-App oder die Einreichung bei HACS, wie es die Checkliste sagt.
 
@@ -349,8 +349,8 @@ flowchart TB
 - **Repository:** Squash-Merges mit dem Titel des Pull Requests, Auto-Merge, Branch-Updates, gelöschte Branches, Sign-off auch für Commits im Web, kein Wiki, keine Projects.
 - **Sicherheit:** unveränderliche Releases, private Meldung von Schwachstellen, Dependabot-Alerts mit den Sicherheitsupdates von Renovate, Secret Scanning mit Push-Schutz.
 - **Actions:** standardmäßig nur lesende Tokens, keine Freigaben durch Workflows, Actions nur per Commit-Hash, Freigabe der Workflows jedes externen Beitragenden.
-- **Rulesets:** *Protect main* (nur Pull Requests, Squash, lineare Historie, alle Pflichtprüfungen, kein Löschen und kein Force-Push) und *Release tags* (`v*.*.*` bewegt sich nie).
-- **Variablen und Environments:** `PUBLISH_TO`, die Release-App und Environments, die nur `main` nutzen darf, mit den Secrets, die sie brauchen.
+- **Rulesets:** *Protect main* (nur Pull Requests, Squash, lineare Historie, alle Pflichtprüfungen, kein Löschen und kein Force-Push), *Release tags* (`v*.*.*` bewegt sich nie) und *Release tag creation* (nur die Release-App, deren App-ID `RELEASE_AUTOMATION_APP_ID` nennt, legt einen `v*.*.*`-Tag an, den der Release-Workflow signiert).
+- **Variablen und Environments:** `PUBLISH_TO`, die Release-App (`RELEASE_AUTOMATION_CLIENT_ID` und `RELEASE_AUTOMATION_APP_ID`) und Environments, die nur `main` nutzen darf, mit den Secrets, die sie brauchen.
 - **Pages:** GitHub Pages veröffentlicht die Website, die der Docs-Workflow baut.
 
 `blueprint.py` braucht Python 3.12 und die GitHub CLI, angemeldet als Administrator, sonst nichts. Es liest und zeigt nie den Wert eines Secrets. Jedes Repository hat eine Kopie in `.github/blueprint.py` und `.github/blueprint/`, und der Settings-Bot (`settings.yml`) vergleicht seine Einstellungen jede Woche und nach jeder Änderung mit den Einstellungen als Code, damit kein Repository abdriftet.
@@ -365,9 +365,11 @@ config:
 ---
 flowchart TB
     accTitle: Wie ein Update des Blueprints ankommt
-    accDescr: Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot copier update auf das neueste veröffentlichte Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
+    accDescr: Gleich nach jedem Release des Blueprints, und jede Woche, prüft der Blueprint-Bot zuerst das neueste veröffentlichte Release. Ein Release, das nicht unveränderlich ist, dessen Tag nicht auf dem main-Branch des Blueprints liegt oder das der Release-Workflow des Blueprints nicht signiert hat, lässt den Lauf fehlschlagen, und nichts wird aktualisiert. Sonst führt der Bot copier update auf dieses Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
 
     bot(["Blueprint-Bot<br>nach jedem Release<br>und jede Woche"])
+    verified{"Release unveränderlich,<br>auf main, signiert von<br>seinem Release-Workflow?"}
+    refused(["Lauf schlägt fehl<br>nichts wird aktualisiert"])
     yours{"Deine Commits<br>auf seinem offenen<br>Pull Request?"}
     note(["Überlässt ihn dir<br>und sagt einmal, dass<br>ein neueres Release da ist"])
     pr["Pull Request<br>mit den Änderungen<br>der offene geht weiter"]
@@ -377,7 +379,9 @@ flowchart TB
     merged["Merged sich selbst"]
     wait(["Wartet auf<br>den Maintainer"])
 
-    bot -- "<code>copier update</code><br>auf das neueste<br>veröffentlichte Release" --> yours
+    bot -- "das neueste<br>veröffentlichte Release" --> verified
+    verified -- "nein" --> refused
+    verified -- "ja: <code>copier update</code>" --> yours
     yours -- "ja" --> note
     yours -- "nein" --> pr --> conflicts
     conflicts -- "nein" --> off
@@ -391,11 +395,11 @@ flowchart TB
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class bot bot
-    class wait,note person
+    class wait,note,refused person
     class merged done
 ```
 
-Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet. Er nimmt das neueste veröffentlichte Release des Blueprints, den `.copier-answers.yml` nennt, vielleicht eines Forks davon, nie einen Tag, dessen Release noch ein Entwurf ist, und hält einen Pull Request auf dem Branch `blueprint/update`: Ein neueres Release bringt diesen Pull Request weiter, mit seiner Nummer und seinem Auto-Merge, statt ihn zu ersetzen. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind. Konflikte bleiben als Markierungen für den Maintainer darin, in den Dateien, die das Update geändert hat; sie schalten sein Auto-Merge ab und setzen das Label `merge-conflict`. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
+Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet. Er nimmt das neueste veröffentlichte Release des Blueprints, den `.copier-answers.yml` nennt, vielleicht eines Forks davon, nie einen Tag, dessen Release noch ein Entwurf ist. Vor dem Update prüft er das Release: Es muss unveränderlich sein, sein Tag muss auf einen Commit von `main` des Blueprints zeigen, und der Release-Workflow des Blueprints muss den Tag signiert haben (gitsign, wie [SECURITY.md](https://github.com/Dennis-Otto/repo-blueprint/blob/main/SECURITY.md#verify-a-release) zeigt). Jedes andere Release lässt den Lauf fehlschlagen, bevor Copier etwas rendert, mit dem Grund und dem, was zu tun ist, in der Zusammenfassung des Laufs, sodass ein Tag, den jemand anderes gepusht hat, kein Repository erreicht; antwortet GitHub nicht, fragt der Bot dreimal und wartet dann auf seinen nächsten Lauf. Der Bot hält einen Pull Request auf dem Branch `blueprint/update`: Ein neueres Release bringt diesen Pull Request weiter, mit seiner Nummer und seinem Auto-Merge, statt ihn zu ersetzen. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind. Konflikte bleiben als Markierungen für den Maintainer darin, in den Dateien, die das Update geändert hat; sie schalten sein Auto-Merge ab und setzen das Label `merge-conflict`. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
 
 ```mermaid
 ---

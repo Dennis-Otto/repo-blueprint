@@ -6,6 +6,11 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **The blueprint bot updates only to a release that the release workflow of the blueprint made:** it took the latest published release of the blueprint as it was, so anyone who could push a tag to the blueprint, with the token of a job that runs a third-party action or with a leaked token, could have brought workflows of their own to every repository made from it, which the update would then have merged. Before every update, the bot now checks that the release is immutable, that its tag points at a commit of the blueprint's `main`, and that the release workflow of the blueprint signed the tag with gitsign; any other release fails its run before Copier renders anything, and the summary of the run says why and what to do. A question that GitHub doesn't answer is asked three times and refuses nothing. The update that brings this release still runs the bot before it; every later update is verified. Decision 0016 says why.
+- **Only the release app creates release tags:** the rules of the release tags blocked their update and deletion, not their creation, so any token that may push could create the tag of a new version. The settings bot now adds the ruleset *Release tag creation*, which lets only the release app create a `v*.*.*` tag, where the new variable `RELEASE_AUTOMATION_APP_ID` in `.github/repository.toml` names the app, as it does from this release on; the app, like everyone else, still can't move or delete one. Releases and betas create their tags with the app as before. A project with a release app of its own sets `RELEASE_AUTOMATION_APP_ID` and `RELEASE_AUTOMATION_CLIENT_ID` to that app in `.github/repository.project.toml`. SECURITY.md now says how a repository made from the blueprint receives a fix, and how to check the signature of a release tag yourself.
+
 ## [0.10.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.1...v0.10.2) (2026-10-13)
 
 ### Changes

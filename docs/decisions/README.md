@@ -20,3 +20,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0012](0012-lock-refresh-waits-for-the-maintainer.md) | Refresh every lock file once a week, and let the refresh wait for the maintainer | accepted |
 | [0013](0013-name-the-runner-and-try-the-next-one.md) | Name the runner with its version, and try the next one every week before the jobs move | accepted |
 | [0014](0014-recover-from-a-stalled-check-without-a-person.md) | Recover from a stalled check without a person, once | accepted |
+| [0016](0016-update-only-to-a-verified-release.md) | Update only to a release that the release workflow made, and let only the release app create release tags | accepted |

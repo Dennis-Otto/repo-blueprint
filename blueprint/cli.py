@@ -21,7 +21,7 @@ from blueprint.checklist import checklist, describe_steps
 from blueprint.coverage_comment import Coverage, coverage_comment
 from blueprint.github import Api, GitHubError, current_repo
 from blueprint.notices import third_party_notices
-from blueprint.settings import CONFIG, Settings, apply, check, describe
+from blueprint.settings import CONFIG, ConfigError, Settings, apply, check, describe
 from blueprint.update import SOURCE, Outdated, update_pull_request
 from blueprint.vex import openvex
 
@@ -233,6 +233,12 @@ def main(
         if arguments.action == "check":
             print("python3 blueprint.py settings apply sets what the API can set.")
         return 2 if refused else 1
-    except (GitHubError, OSError, tomllib.TOMLDecodeError, Outdated) as error:
+    except (
+        GitHubError,
+        OSError,
+        tomllib.TOMLDecodeError,
+        ConfigError,
+        Outdated,
+    ) as error:
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2
