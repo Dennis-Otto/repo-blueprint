@@ -38,8 +38,9 @@ name: After the checks
 # what scripts/diagrams.sh --extract changed in the check onto that branch, as the
 # release app, so that the checks run again, and says in a comment which blocks became
 # pictures. blueprint.py of main takes only sources, SVG pictures and pages of
-# Markdown from the artifact "diagrams". A pull request from a fork keeps the failing
-# check, with the command that fixes it.
+# Markdown from the artifact "diagrams". When the bot can't commit, it says so on the
+# pull request, with the command. A pull request from a fork keeps the failing check,
+# with the command that fixes it.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -445,6 +446,7 @@ jobs:
     permissions:
       actions: read # the diagrams that the check kept
       contents: read # blueprint.py of main, which checks them
+      pull-requests: write # the comment when the bot fails
     env:
       # The first line of the bot's commits.
       HEADLINE: "docs: draw the diagrams anew"
@@ -525,3 +527,15 @@ jobs:
           if [[ -s "$RUNNER_TEMP/comment.md" ]]; then
             gh pr comment "${NUMBER:-$BRANCH}" --body-file "$RUNNER_TEMP/comment.md"
           fi
+      # The failed check of the pull request promises the bot's commit; when the bot
+      # can't make it, the pull request learns so, with the command that fixes it.
+      - name: Say on the pull request that the bot failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh pr comment "${NUMBER:-$BRANCH}" --body "The diagram bot couldn't commit the diagrams of this pull request ($URL). Run \`bash scripts/diagrams.sh --extract\` with Docker and commit what it changes, or take the files from the artifact \`diagrams\` of the check *diagrams*."
