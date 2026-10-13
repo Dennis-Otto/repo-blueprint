@@ -2,8 +2,9 @@ name: Windows
 
 # The checks of scripts/check.sh on Windows, in Git Bash, as a contributor on Windows
 # runs them before a push; the other workflows run on Linux only. Every week, and for
-# a pull request that changes the code, the tests or what they run with. Not a
-# required check. This workflow belongs to the blueprint alone.
+# a pull request that changes the code, the tests, the template they render (whose
+# paths must be valid on Windows too) or what they run with. Not a required check.
+# This workflow belongs to the blueprint alone.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -12,6 +13,9 @@ on:
       - "**.py"
       - "blueprint/**"
       - "tests/**"
+      - "template/**"
+      - "includes/**"
+      - copier.yml
       - pyproject.toml
       - requirements-dev.txt
       - .python-version

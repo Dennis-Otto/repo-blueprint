@@ -46,10 +46,28 @@ TOOL = sorted(
         ),
     ]
 )
-# The bash of the PATH, which the tests run the steps of the workflows in, by its full
-# path: Windows looks for a bare "bash" in System32 before the PATH, and there it is
-# the launcher of WSL, which runs the step in Linux without the variables of the test.
-BASH = shutil.which("bash")
+
+
+# The bash that the tests run the steps of the workflows in, by its full path. Windows
+# looks for a bare "bash" in System32 before the PATH, and has the launcher of WSL as
+# bash.exe there and in WindowsApps, which runs the step in Linux without the variables
+# of the test. So the search leaves out these two folders and ends with the bash of Git
+# for Windows next to its git: the PATH of Git Bash, which scripts/check.sh runs in,
+# has that bash first, while the PATH of PowerShell or of the test runner of an IDE
+# has only its git.
+def find_bash() -> str | None:
+    path = [
+        entry
+        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        if Path(entry).name.casefold() not in {"system32", "windowsapps"}
+    ]
+    git = shutil.which("git")
+    if git:
+        path.append(str(Path(git).parents[1] / "bin"))
+    return shutil.which("bash", path=os.pathsep.join(path))
+
+
+BASH = find_bash()
 
 
 def render(destination: Path, **data: str | bool) -> Path:
@@ -1251,7 +1269,7 @@ esac
 RACED = "Canceling since a higher priority waiting request for CodeQL-136 exists"
 
 
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("pull", "newer", "message", "summary"),
     [
@@ -1275,8 +1293,10 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:
-    # A bare "bash" ran the steps in WSL on Windows, and scripts/check.sh failed there.
-    bare = re.compile(r'\[\s*"bash",')
+    # A bare "bash" ran the steps in WSL on Windows, and scripts/check.sh failed there:
+    # the first argument of a call or of a list or tuple, alone or after env; only the
+    # search for it may name it.
+    bare = re.compile(r'(?:\[|(?<!which)\()\s*(?:"/usr/bin/env",\s*)?"bash"\s*[,\])]')
     for path in sorted((ROOT / "tests").glob("*.py")):
         assert not bare.search(path.read_text(encoding="utf-8")), path.name
 
@@ -1289,7 +1309,8 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     assert "    shell: bash\n" in windows
     assert "run: pip install --require-hashes -r requirements-dev.txt\n" in windows
     assert "run: bash scripts/check.sh\n" in windows
-    # Every week, and for each pull request that changes what the checks run.
+    # Every week, and for each pull request that changes what the checks run, the
+    # template that the tests render among it: its paths must be valid on Windows too.
     assert "  schedule:\n    - cron: " in windows
     paths = re.search(r"  pull_request:\n    paths:\n((?:      - .+\n)+)", windows)
     assert paths
@@ -1297,6 +1318,9 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
         "**.py",
         "blueprint/**",
         "tests/**",
+        "template/**",
+        "includes/**",
+        "copier.yml",
         "pyproject.toml",
         "requirements-dev.txt",
         "scripts/check.sh",
