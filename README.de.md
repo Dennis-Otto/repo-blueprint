@@ -18,42 +18,10 @@ Die [Website des Blueprints](https://dennis-otto.github.io/repo-blueprint/de/) z
 
 Jede Änderung, deine oder die eines Bots, ist ein Pull Request, der merged, sobald alle Prüfungen grün sind, und der Release-Bot macht aus dem, was auf `main` ankommt, ein signiertes Release; drei Bots halten das Repository von selbst aktuell. In den Bildern ist Blau der Blueprint mit seinen Bots, Orange bist du mit allem, was dir gehört, und Grün ist das Ergebnis.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wie sich ein Repository selbst pflegt
-    accDescr: copier copy legt aus dem Blueprint ein Repository an. Jede Änderung, deine oder die eines Bots, ist ein Pull Request, der merged, sobald alle Prüfungen grün sind, und der Release-Bot macht aus dem, was auf main ankommt, ein signiertes Release. Renovate, der Blueprint-Bot und der Settings-Bot halten das Repository von selbst aktuell.
-
-    blueprint[("Repo Blueprint")]
-    you(["Du"])
-    renovate(["Renovate<br>alle 2 Stunden"])
-    updater(["Blueprint-Bot<br>nach jedem Release<br>und jede Woche"])
-    settings(["Settings-Bot<br>jede Woche"])
-
-    subgraph repo ["Dein Repository"]
-        pr["Pull Request"] --> checks{"Alle Prüfungen<br>grün?"}
-        checks -- "ja" --> main["main"]
-        main -- "Release-Bot" --> release["Signiertes Release"]
-    end
-
-    blueprint -- "copier copy" --> repo
-    blueprint -. "ein neues Release" .-> updater
-    you -- "eine Änderung" --> pr
-    renovate -- "Updates" --> pr
-    updater -- "copier update" --> pr
-    settings -- "die Einstellungen als Code" --> repo
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class renovate,updater,settings bot
-    class you person
-    class release done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-repository-looks-after-itself.de.dark.svg">
+  <img src="docs/images/diagrams/how-a-repository-looks-after-itself.de.svg" alt="Wie sich ein Repository selbst pflegt: copier copy legt aus dem Blueprint ein Repository an. Jede Änderung, deine oder die eines Bots, ist ein Pull Request, der merged, sobald alle Prüfungen grün sind, und der Release-Bot macht aus dem, was auf main ankommt, ein signiertes Release. Renovate, der Blueprint-Bot und der Settings-Bot halten das Repository von selbst aktuell.">
+</picture>
 
 <!-- --8<-- [end:loop] -->
 
@@ -75,6 +43,7 @@ flowchart TB
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, Beitragsleitfaden mit den Coding-Standards und der Regel, dass jede Änderung ihre Tests mitbringt, Verhaltenskodex, Sicherheitsrichtlinie mit der Prüfung eines Releases und einem Assurance Case, das Sicherheitsdesign der Software (`docs/security.md`), Support, Governance mit den Rollen und dem Fortbestand des Projekts, Issue-Formulare, Pull-Request-Vorlage, Aufzeichnungen der Entscheidungen, die das Projekt prägen (`docs/decisions/`), Discussions mit Formularen für Fragen und Ideen und einer Ankündigung jedes Releases, Sponsor-Button, Social Preview | |
 | **Website** | die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Design, auf Englisch und, mit deutschen Seiten wie `index.de.md` neben den englischen, auf Deutsch: jeder Pull Request baut sie streng, und ebenso `scripts/check.sh`, sobald die Werkzeuge ihrer Vorschau installiert sind, unter Linux, macOS und Windows; jede Änderung an `main` veröffentlicht sie auf GitHub Pages | MkDocs mit dem Material-Theme, `mkdocs.yml`, `docs.yml` |
+| **Diagramme** | jedes Diagramm als Bild, das alle sehen, auch in der GitHub-App, in den Stores und in E-Mails, die kein Mermaid zeichnen: eine Mermaid-Quelle in `docs/diagrams/`, gezeichnet als SVG für das helle und eines für das dunkle Design, während die Website die Quelle live zeichnet; die Prüfung *diagrams* zeichnet die Bilder in jedem Pull Request neu, der ein Diagramm ändert oder einen `mermaid`-Block hinzufügt, und der Diagramm-Bot committet Quellen und Bilder auf seinen Branch; auf `main` behebt ein Pull Request des Diagramm-Bots, was noch fehlt, und merged sich selbst; `bash scripts/diagrams.sh --extract` macht aus den `mermaid`-Blöcken vorhandenen Markdowns Quellen und ihre Bilder | `scripts/diagrams.sh` mit mermaid-cli, `lint.yml`, `after-checks.yml`, `diagrams.yml` |
 | **Einstellungen** | die Einstellungen des Repositorys als Code: Merges, Rulesets, Sicherheit, Actions, Environments, Variablen, Labels, GitHub Pages und jede Datei der Community-Standards von GitHub; der Settings-Bot wendet sie nach jeder Änderung und jede Woche an | `.github/repository.toml` und `blueprint.py` |
 | **Aufräumen** | jede Woche verschwinden die Branches, die `main` enthält, und die Caches geschlossener Pull Requests; ein Branch mit eigener Arbeit bleibt und wird nach einem Monat aufgelistet | `cleanup.yml` |
 | **Entwicklung** | ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prüfungen und der Website, und ein Hook, der sie vor jedem Push ausführt, unter Linux, macOS und Windows: `scripts/check.sh` schlägt fehl, wenn Git ihn überspringen würde | `.devcontainer/`, `.githooks/pre-push` |
@@ -88,75 +57,19 @@ flowchart TB
 
 Der Titel eines Pull Requests bestimmt die nächste Version, und der Merge des Release-Pull-Requests erledigt den Rest:
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Von einer Änderung zum Release
-    accDescr: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text von Unreleased. Sein Merge signiert zuerst seinen Tag, im nächsten Lauf des Release-Bots, baut dann das Release isoliert, sobald der Tag geprüft ist, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.
-
-    pr["Pull Request<br><code>fix:</code> · <code>feat:</code> · <code>feat!:</code>"]
-    main["main"]
-    rpr["Release-Pull-Request<br><code>chore: release x.y.z</code><br>Notes aus <i>Unreleased</i>"]
-    beta["Beta <code>x.y.z-beta.N</code><br>für Tester"]
-    tag["Signierter Tag<br>am Merge, vom nächsten Lauf<br>vor dem Build geprüft"]
-    build["Isolierter Build<br>SLSA Build Level 3"]
-    release["Release<br>Paket · SBOMs<br>Provenance"]
-    deliver["Auslieferung<br>PyPI · npm · GHCR<br>App Store · HACS"]
-    verify["Geprüft wie von Nutzern<br>sofort und jede Woche"]
-
-    pr -- "alle Prüfungen grün" --> main
-    main -- "Release-Bot" --> rpr
-    main -. "<code>BETA_CHANNEL</code>" .-> beta
-    rpr -- "gemergt" --> tag --> build --> release
-    release --> deliver
-    release --> verify
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class rpr bot
-    class release done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/from-a-change-to-a-release.de.dark.svg">
+  <img src="docs/images/diagrams/from-a-change-to-a-release.de.svg" alt="Von einer Änderung zum Release: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text von Unreleased. Sein Merge signiert zuerst seinen Tag, im nächsten Lauf des Release-Bots, baut dann das Release isoliert, sobald der Tag geprüft ist, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.">
+</picture>
 
 ### Wann die Prüfungen laufen
 
 Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann, denn ein Konto bei GitHub führt etwa 20 Jobs gleichzeitig aus, und jeder Job, der nicht fehlschlagen kann, lässt einen Pull Request auf einen Runner warten:
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wann die Prüfungen laufen
-    accDescr: Jeder Pull Request führt die vorgeschriebenen Prüfungen aus, und die Scanner dessen, was er ändert: zizmor für einen Workflow, OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.
-
-    pr["Pull Request"]
-    rpr["Release-Pull-Request<br>Changelog und Version"]
-    required["Vorgeschriebene Prüfungen<br>Tests · Lint · Docs · CodeQL<br>Dependency Review · Secret Scan"]
-    scanners["Scanner dessen, was er ändert<br>Workflows: zizmor · Lock-Dateien: OSV-Scanner<br>Python: Fuzzing · Dokumente: Links"]
-    main["<code>main</code>"]
-    baseline["Was eine Vergleichsbasis hält oder veröffentlicht<br>Tests mit Abdeckung · neuestes Python<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>Website · Release · Branch-Bot"]
-    weekly["Scanner vollständig · 15 Minuten Fuzzing<br>Secret Scan der ganzen History<br>SBOM · neuestes Python"]
-
-    pr --> required
-    pr -- "ändert, was sie lesen" --> scanners
-    rpr -- "kein Scanner" --> required
-    required -- "alle Prüfungen grün" --> main
-    main -- "nach einem Merge" --> baseline
-    main -- "jede Woche" --> weekly
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class pr person
-    class rpr bot
-    class main done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/when-the-checks-run.de.dark.svg">
+  <img src="docs/images/diagrams/when-the-checks-run.de.svg" alt="Wann die Prüfungen laufen: Jeder Pull Request führt die vorgeschriebenen Prüfungen aus, und die Scanner dessen, was er ändert: zizmor für einen Workflow, OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.">
+</picture>
 
 - **Nach einem Merge:** `main` nimmt einen Pull Request nur auf, wenn er auf dem neuesten Stand ist, also bekommt `main` durch den Merge die Dateien, mit denen die Prüfungen des Pull Requests bestanden haben. `main` führt nur die Tests aus, mit deren Abdeckung der Abdeckungs-Bot jeden Pull Request vergleicht, die Analysen, mit denen Code Scanning vergleicht, und was veröffentlicht, etwa die Website und das Release. Lint läuft in den Pull Requests, Secret Scan und Fuzzing dort und jede Woche, und die SBOM jede Woche; jedes Release hat eine eigene SBOM.
 - **Der Release-Pull-Request** ändert nur den Changelog und die Version, die nichts an dem ändern, was ein Scanner findet. Im Blueprint steht die vorgeschriebene Prüfung *variants* für die Varianten und Updates jeder Projektart: Sie besteht, wenn jede bestanden hat oder keine laufen musste, wie im Release-Pull-Request.
@@ -167,45 +80,10 @@ flowchart TB
 
 Eine Prüfung, die ein Runner, eine Website oder GitHub für einen Moment scheitern lässt oder die ein Wettlauf zweier Läufe abbricht, braucht niemanden: Die Bots nach den Prüfungen führen sie einmal neu aus und lassen nur rot, was aus einem Grund scheitert.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wenn eine Prüfung scheitert oder abbricht
-    accDescr: Wenn ein Lauf der Prüfungen oder des Releases endet, schauen die Bots nach den Prüfungen, wie. Tests, die beim ersten Versuch fehlgeschlagen sind oder ihr Zeitlimit erreicht haben, führen ihre fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, kommt mit seinem Schritt, seinem Test und seinem Fehler in das Issue der wackeligen Tests, und einer, der wieder scheitert, bleibt rot. Eine vorgeschriebene Prüfung, die ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet neu. Das Release eines Merges, das gescheitert ist, führt seine fehlgeschlagenen Jobs einmal neu aus, dort, wo sie stehen geblieben sind.
-
-    run["Ein Lauf der Prüfungen<br>oder des Releases endet"]
-    tests["Tests beim ersten Versuch fehlgeschlagen<br>oder am Zeitlimit"]
-    raced["Eine vorgeschriebene Prüfung, abgebrochen<br>von einem verspäteten Lauf für einen älteren Commit"]
-    release["Das Release eines Merges ist gescheitert"]
-    before{"Dieselben Jobs schon für<br>den Commit davor gescheitert?"}
-    again["Die fehlgeschlagenen Jobs<br>laufen einmal neu"]
-    flaky["Issue <i>Flaky tests</i><br>Job · Schritt · Test · Fehler"]
-    restart["Der Lauf für den neuesten Commit<br>startet neu"]
-    resume["Die fehlgeschlagenen Jobs des Releases<br>laufen einmal neu, ab dort, wo sie standen"]
-    red["Bleibt rot, für dich"]
-
-    run --> tests
-    run --> raced
-    run --> release
-    tests --> before
-    before -- "nein" --> again
-    before -- "ja" --> red
-    again -- "besteht" --> flaky
-    again -- "scheitert wieder" --> red
-    raced --> restart
-    release --> resume
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class again,restart,resume bot
-    class red person
-    class flaky done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/when-a-check-fails-or-stops.de.dark.svg">
+  <img src="docs/images/diagrams/when-a-check-fails-or-stops.de.svg" alt="Wenn eine Prüfung scheitert oder abbricht: Wenn ein Lauf der Prüfungen oder des Releases endet, schauen die Bots nach den Prüfungen, wie. Tests, die beim ersten Versuch fehlgeschlagen sind oder ihr Zeitlimit erreicht haben, führen ihre fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, kommt mit seinem Schritt, seinem Test und seinem Fehler in das Issue der wackeligen Tests, und einer, der wieder scheitert, bleibt rot. Eine vorgeschriebene Prüfung, die ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet neu. Das Release eines Merges, das gescheitert ist, führt seine fehlgeschlagenen Jobs einmal neu aus, dort, wo sie stehen geblieben sind.">
+</picture>
 
 - **Einmal, nicht immer wieder:** Der Bot für wackelige Tests führt die fehlgeschlagenen Jobs des ersten Versuchs eines Testlaufs einmal neu aus, ebenso der Bot für gescheiterte Releases mit einem Release, das ein Merge gestartet hat; der Bot für abgebrochene Prüfungen startet einen Lauf höchstens zweimal. Ein Job, den GitHub an seinem Zeitlimit stoppt, endet abgebrochen, nicht fehlgeschlagen, und läuft ebenfalls einmal neu. Ein Lauf, den du oder ein neuerer Lauf abgebrochen hat, bleibt abgebrochen, auch wenn ein Job, der auf die anderen wartet, deshalb fehlgeschlagen ist.
 - **Ein Fehler, der sich wiederholt, ist echt:** Wenn dieselben Jobs schon für den Commit davor auf demselben Branch gescheitert sind, nachdem sie einmal neu liefen, laufen sie nicht noch einmal, damit ein kaputter Test keinen Runner umsonst beschäftigt.
@@ -214,40 +92,28 @@ flowchart TB
 - **Weitere Test-Workflows** eines Repositorys, etwa visuelle Tests, kommen mit `copier update --data "test_workflows=Visual check, Screenshot bot"` zur CI und zu Docker E2E dazu.
 - **Die Link-Prüfung eines Pull Requests** liest die Dokumente, die er ändert, und alle Dokumente, wenn er die Regeln ändert oder eine Datei verschiebt oder löscht, auf die ein Dokument verlinken kann. lychee behält die Antworten der Websites einen Tag lang und fragt bei einem Link, der gescheitert ist, erneut nach, sodass eine Website, die für einen Moment nicht erreichbar ist, nur die Pull Requests scheitern lässt, die auf sie verlinken.
 
+### Diagramme, die sich selbst reparieren
+
+Die GitHub-App, HACS, der Nextcloud App Store, PyPI und die E-Mails von GitHub zeichnen kein Mermaid und zeigen einen `mermaid`-Block als Code. Darum ist jedes Diagramm ein Bild seiner Quelle, und die Bots halten das ohne einen Menschen so.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-diagrams-fix-themselves.de.dark.svg">
+  <img src="docs/images/diagrams/how-the-diagrams-fix-themselves.de.svg" alt="Wie sich die Diagramme selbst reparieren: Ein Pull Request, der einen mermaid-Block hinzufügt oder ein Diagramm ändert, und Renovate mit einer neuen Version von mermaid-cli führen die Prüfung diagrams aus, die die Diagramme neu zeichnet. Auf einem Branch des Repositorys committet der Diagramm-Bot die Quellen und Bilder auf den Branch, und die Prüfungen laufen erneut; ein Fork behält die fehlschlagende Prüfung, die den Befehl nennt. Nach dem Merge und jede Woche wird auch main gezeichnet: Ist ein Diagramm noch kein Bild seiner Quelle, behebt das ein Pull Request von bot/diagrams, der sich selbst merged. So sehen alle Leser jedes Diagramm.">
+</picture>
+
+- **Ein Pull Request repariert sich selbst:** Fügt ein Pull Request von einem Branch des Repositorys einen `mermaid`-Block hinzu oder ändert er eine Quelle, führt die Prüfung *diagrams* `bash scripts/diagrams.sh --extract` aus, und der Diagramm-Bot committet die Quellen und Bilder, die dabei entstehen, als Release-App auf den Branch, mit einem Kommentar, der die geänderten Seiten nennt. Die Prüfungen dieses Commits bestehen. Ein Pull Request aus einem Fork bekommt die fehlschlagende Prüfung, deren Zusammenfassung die Dateien und den Befehl nennt.
+- **`main` repariert sich selbst:** Nach jeder Änderung von `main`, die eine Seite oder ein Diagramm betrifft, und jede Woche zeichnet der Workflow Diagrams alle Diagramme von `main`. Fehlt etwas, etwa die Blöcke eines Repositorys direkt nach dem Update des Blueprints, hält er einen Pull Request vom Branch `bot/diagrams` mit der Korrektur, der sich selbst merged, sobald alle Prüfungen bestehen, und schließt ihn, wenn `main` anders repariert wurde.
+- **Ein neuer Renderer zeichnet neu:** Renovate hält das Image von mermaid-cli in `scripts/diagrams.sh` aktuell; die Prüfung zeichnet die Bilder auf seinem Branch neu, und der Diagramm-Bot committet sie, sodass das Update weiterhin von selbst merged.
+- **Nur Diagramme:** Der Bot führt keinen Code eines Pull Requests aus. Er committet nur Quellen in `docs/diagrams/`, SVG-Bilder in `docs/images/diagrams/` und Markdown-Seiten, mit einfachen Pfaden, auf genau den Commit, den die Prüfung gezeichnet hat, und nur für einen Branch des Repositorys.
+
 ### Mutationstests
 
 Die Mutationstests zeigen die Zeilen, die die Tests ausführen, aber nicht prüfen: Jeden Samstag ändern sie den Code auf Tausende kleine Weisen, die Mutanten, und führen die Tests aus, die jeden davon abdecken. Ein Mutant, den kein Test bemerkt, überlebt.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wie die Mutationstests laufen
-    accDescr: Jeden Samstag, auf Abruf und für einen Pull Request, der ändert, wie sie laufen, führt der Mutation-Workflow die Mutanten aus. mutmut ändert das Python in einer Kopie des Repositorys und lässt die Tests mit der Markierung mutation_unsafe aus; Infection ändert das PHP einer Nextcloud-App, mit dem Bootstrap ihrer Tests. Wenn Mutanten liefen, zeigt die Zusammenfassung den Wert und die überlebenden Mutanten, das Artefakt bewahrt sie auf und das Dashboard zeigt den Wert. Ein Lauf, der nichts gemessen hat, schlägt fehl und zeigt die letzten Worte des Werkzeugs.
-
-    start["Jeden Samstag · auf Abruf<br>ein Pull Request, der<br><code>mutation.yml</code> oder mutmut ändert"]
-    python["mutmut<br>das Python, in einer Kopie in <code>mutants/</code><br>ohne die Tests mit <code>mutation_unsafe</code>"]
-    php["Infection<br>das PHP einer Nextcloud-App<br>mit <code>tests/bootstrap.php</code>"]
-    score["Zusammenfassung und Artefakt<br>der Wert · die überlebenden Mutanten"]
-    dashboard["Das Dashboard<br><i>gefangene Mutanten</i>"]
-    fail["Der Lauf schlägt fehl<br>mit den letzten Worten des Werkzeugs"]
-
-    start --> python
-    start --> php
-    python -- "Mutanten liefen" --> score
-    php -- "Mutanten liefen" --> score
-    score --> dashboard
-    python -. "nichts gemessen" .-> fail
-    php -. "nichts gemessen" .-> fail
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class python,php bot
-    class score,dashboard done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-mutation-tests-run.de.dark.svg">
+  <img src="docs/images/diagrams/how-the-mutation-tests-run.de.svg" alt="Wie die Mutationstests laufen: Jeden Samstag, auf Abruf und für einen Pull Request, der ändert, wie sie laufen, führt der Mutation-Workflow die Mutanten aus. mutmut ändert das Python in einer Kopie des Repositorys und lässt die Tests mit der Markierung mutation_unsafe aus; Infection ändert das PHP einer Nextcloud-App, mit dem Bootstrap ihrer Tests. Wenn Mutanten liefen, zeigt die Zusammenfassung den Wert und die überlebenden Mutanten, das Artefakt bewahrt sie auf und das Dashboard zeigt den Wert. Ein Lauf, der nichts gemessen hat, schlägt fehl und zeigt die letzten Worte des Werkzeugs.">
+</picture>
 
 - **Der Wert ist der Anteil der Mutanten, den ein Test bemerkt hat,** unter denen des Codes, den die Tests ausführen: bei mutmut die getöteten unter den getöteten und den überlebenden, bei Infection sein *Covered Code MSI*. Das Dashboard zeigt ihn als *gefangene Mutanten*.
 - **Ein niedriger Wert lässt nichts fehlschlagen,** auch nicht unter einem Minimum, das die eigene Konfiguration des Projekts setzt, aber ein Lauf, in dem kein Mutant lief, schon, mit dem Ende der Ausgabe von mutmut oder Infection in seiner Zusammenfassung: Eine kaputte Konfiguration zeigt sich in der Woche, in der sie kaputtgeht, nicht als leeres Dashboard.
@@ -319,30 +185,10 @@ Die anderen Arten legen diese Orte in eigenen Dateien fest, etwa in `pyproject.t
 
 ## Einstellungen als Code
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Die Einstellungen als Code
-    accDescr: Die Einstellungen eines Repositorys stehen in .github/repository.toml, mit denen nur dieses Projekts und den Labels. blueprint.py settings apply, ausgeführt von einem Administrator, und der Settings-Bot, nach jeder Änderung und jede Woche, gleichen GitHub an sie an; settings check zeigt, was abweicht.
-
-    files[".github/repository.toml<br>repository.project.toml<br>labels.toml"]
-    apply(["<code>settings apply</code><br>durch einen Administrator"])
-    bot(["Settings-Bot<br>nach jeder Änderung<br>und jede Woche"])
-    github["GitHub<br>Merges · Rulesets · Sicherheit<br>Actions · Environments<br>Variablen · Labels · Pages"]
-
-    files --> apply --> github
-    files --> bot --> github
-    github -. "<code>settings check</code><br>zeigt, was abweicht" .-> files
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class bot bot
-    class apply person
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-settings-as-code.de.dark.svg">
+  <img src="docs/images/diagrams/the-settings-as-code.de.svg" alt="Die Einstellungen als Code: Die Einstellungen eines Repositorys stehen in .github/repository.toml, mit denen nur dieses Projekts und den Labels. blueprint.py settings apply, ausgeführt von einem Administrator, und der Settings-Bot, nach jeder Änderung und jede Woche, gleichen GitHub an sie an; settings check zeigt, was abweicht.">
+</picture>
 
 `.github/repository.toml` enthält die Einstellungen eines Repositorys; `blueprint.py settings check` vergleicht sie mit GitHub, `settings apply` gleicht GitHub an:
 
@@ -357,78 +203,17 @@ flowchart TB
 
 ## Updates
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wie ein Update des Blueprints ankommt
-    accDescr: Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot copier update auf das neueste veröffentlichte Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
-
-    bot(["Blueprint-Bot<br>nach jedem Release<br>und jede Woche"])
-    yours{"Deine Commits<br>auf seinem offenen<br>Pull Request?"}
-    note(["Überlässt ihn dir<br>und sagt einmal, dass<br>ein neueres Release da ist"])
-    pr["Pull Request<br>mit den Änderungen<br>der offene geht weiter"]
-    conflicts{"Konflikte?"}
-    off{"Automerge<br>abgeschaltet?"}
-    checks{"Alle Prüfungen<br>grün?"}
-    merged["Merged sich selbst"]
-    wait(["Wartet auf<br>den Maintainer"])
-
-    bot -- "<code>copier update</code><br>auf das neueste<br>veröffentlichte Release" --> yours
-    yours -- "ja" --> note
-    yours -- "nein" --> pr --> conflicts
-    conflicts -- "nein" --> off
-    off -- "nein" --> checks
-    checks -- "ja" --> merged
-    conflicts -- "ja: in den Dateien markiert<br>Auto-Merge aus, mit Label" --> wait
-    off -- "ja" --> wait
-    checks -- "nein" --> wait
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class bot bot
-    class wait,note person
-    class merged done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-an-update-of-the-blueprint-arrives.de.dark.svg">
+  <img src="docs/images/diagrams/how-an-update-of-the-blueprint-arrives.de.svg" alt="Wie ein Update des Blueprints ankommt: Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot copier update auf das neueste veröffentlichte Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.">
+</picture>
 
 Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet. Er nimmt das neueste veröffentlichte Release des Blueprints, den `.copier-answers.yml` nennt, vielleicht eines Forks davon, nie einen Tag, dessen Release noch ein Entwurf ist, und hält einen Pull Request auf dem Branch `blueprint/update`: Ein neueres Release bringt diesen Pull Request weiter, mit seiner Nummer und seinem Auto-Merge, statt ihn zu ersetzen. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind. Konflikte bleiben als Markierungen für den Maintainer darin, in den Dateien, die das Update geändert hat; sie schalten sein Auto-Merge ab und setzen das Label `merge-conflict`. Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt jedes Update auf den Maintainer warten. Von Hand startet er unter *Actions → Blueprint update*, lokal mit `copier update`.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wie ein Release des Blueprints ausgerollt wird
-    accDescr: Sobald der Release-Workflow ein Release veröffentlicht und geprüft hat, nimmt sich der Rollout-Workflow die Repositorys der Release-App nacheinander vor, die mit den schnellsten Prüfungen zuerst. Er startet den Blueprint-Bot eines Repositorys und wartet bis zu 15 Minuten auf den Bot und die Prüfungen seines Update-Pull-Requests, dann geht es mit dem nächsten weiter. Ein Repository, dessen Bot er nicht starten kann oder dessen Bot scheitert, lässt den Lauf mit seinem Namen fehlschlagen, und die anderen bekommen das Release trotzdem.
-
-    release(["Release-Workflow<br>veröffentlicht und prüft<br>ein Release"])
-    next["Nächstes Repository<br>schnellste Prüfungen zuerst"]
-    start["Startet seinen<br>Blueprint-Bot"]
-    wait["Wartet bis zu 15 Minuten<br>auf den Bot und die Prüfungen<br>seines Pull Requests"]
-    failed(["Der Lauf schlägt fehl<br>mit dem Namen<br>des Repositorys"])
-    more{"Noch ein<br>Repository?"}
-    finished["Jedes Repository<br>hat das Release<br>in einem Pull Request"]
-
-    release --> next --> start --> wait --> more
-    start -- "GitHub scheitert<br>dreimal" --> failed
-    wait -- "der Bot scheitert" --> failed
-    failed -. "die anderen<br>gehen weiter" .-> more
-    more -- "ja" --> next
-    more -- "nein" --> finished
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class release,next,start,wait bot
-    class failed person
-    class finished done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-release-of-the-blueprint-rolls-out.de.dark.svg">
+  <img src="docs/images/diagrams/how-a-release-of-the-blueprint-rolls-out.de.svg" alt="Wie ein Release des Blueprints ausgerollt wird: Sobald der Release-Workflow ein Release veröffentlicht und geprüft hat, nimmt sich der Rollout-Workflow die Repositorys der Release-App nacheinander vor, die mit den schnellsten Prüfungen zuerst. Er startet den Blueprint-Bot eines Repositorys und wartet bis zu 15 Minuten auf den Bot und die Prüfungen seines Update-Pull-Requests, dann geht es mit dem nächsten weiter. Ein Repository, dessen Bot er nicht starten kann oder dessen Bot scheitert, lässt den Lauf mit seinem Namen fehlschlagen, und die anderen bekommen das Release trotzdem.">
+</picture>
 
 Der Rollout-Workflow des Blueprints bringt jedes Release nacheinander in die Repositorys der Release-App, die mit den schnellsten Prüfungen zuerst: Er startet den Blueprint-Bot eines Repositorys und gibt dem Bot und den Prüfungen seines Update-Pull-Requests bis zu 15 Minuten, bevor er den nächsten startet, damit die Update-Pull-Requests nicht alle zugleich auf die Runner des Kontos warten. Ein Repository, dessen Bot er nicht starten kann oder dessen Bot scheitert, lässt den Lauf mit seinem Namen fehlschlagen; die anderen bekommen das Release trotzdem. Er rollt jedes Release aus, das ein Lauf des Release-Workflows veröffentlicht hat, ob der Merge des Release-Pull-Requests diesen Lauf gestartet hat, der stündliche Zeitplan oder ein Start von Hand; ein Release, das der Lauf eines späteren Merges fertiggestellt hat, weil der Lauf seines eigenen Merges verloren ging, wartet auf einen Start von Hand (Actions → Rollout) oder den wöchentlichen Lauf der Bots. Selbst von Hand gestartet, rollt er das neueste Release aus. Rollouts von Releases, die kurz nacheinander kommen, überlappen sich, aber nie im selben Repository: Dort nimmt das neuere Release den Platz eines älteren ein, das noch wartet.
 
@@ -438,33 +223,10 @@ Dem Blueprint gehören die Workflows, `scripts/check.sh` und die Community-Datei
 
 ## Was einem Projekt gehört
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Was dem Blueprint gehört und was dem Projekt
-    accDescr: copier update bringt die Änderungen der Dateien des Blueprints, Zeile für Zeile mit den Änderungen des Repositorys zusammengeführt, und überschreibt nie die Dateien des Projekts. Ein Projekt ergänzt eigene Prüfungen, Einstellungen und Workflows neben denen des Blueprints.
-
-    blueprint[("Repo Blueprint")]
-
-    subgraph repo ["Dein Repository"]
-        theirs["<b>Die Dateien des Blueprints</b><br>Workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>Community-Dateien"]
-        mine["<b>Die Dateien des Projekts</b><br>README · CHANGELOG · <code>docs/</code><br>Code und Tests<br>Manifeste und Lock-Dateien<br>Issue-Formulare · Labels"]
-        adds["<b>Was das Projekt ergänzt</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br>eigene Workflows"]
-    end
-
-    blueprint -- "<code>copier update</code><br>Zeile für Zeile zusammengeführt" --> theirs
-    blueprint -. "nie überschrieben" .-x mine
-    theirs -- "ergänzt durch" --- adds
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class theirs bot
-    class mine,adds person
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/what-belongs-to-the-blueprint-and-what-to-the-project.de.dark.svg">
+  <img src="docs/images/diagrams/what-belongs-to-the-blueprint-and-what-to-the-project.de.svg" alt="Was dem Blueprint gehört und was dem Projekt: copier update bringt die Änderungen der Dateien des Blueprints, Zeile für Zeile mit den Änderungen des Repositorys zusammengeführt, und überschreibt nie die Dateien des Projekts. Ein Projekt ergänzt eigene Prüfungen, Einstellungen und Workflows neben denen des Blueprints.">
+</picture>
 
 Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt ergänzt seine eigenen, ohne sie abzuspalten:
 
@@ -479,6 +241,7 @@ Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt
 ## Werkzeuge in jedem Repository
 
 - `bash scripts/check.sh`: die Prüfungen der CI, lokal.
+- `bash scripts/diagrams.sh`: zeichnet jedes Diagramm aus `docs/diagrams/` als seine Bilder in `docs/images/diagrams/`, mit Docker; `--extract` macht vorher aus jedem `mermaid`-Block des Markdowns eine Quelle und ihr Bild, und `--check` prüft ohne Docker, was `scripts/check.sh` prüft.
 - `bash scripts/social-preview.sh`: rendert `.github/social-preview.html` in das 1280×640-Bild, das GitHub bei Links auf das Repository zeigt; hochladen unter *Settings → Social preview*.
 
 ## Dashboard
@@ -491,43 +254,10 @@ Jeden Montag veröffentlicht der Workflow Weekly report in den [Discussions](htt
 
 ## Wie der Blueprint funktioniert
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Wie der Blueprint funktioniert
-    accDescr: Copier rendert ein neues Repository aus den Fragen in copier.yml und den Dateien in template/, die die Workflows aus .github/workflows/, die Manifeste aus stacks/ und blueprint.py aufnehmen. Renovate hält die Workflows und die Stacks aktuell.
-
-    renovate(["Renovate"])
-
-    subgraph here ["Dieses Repository"]
-        workflows["<code>.github/workflows/</code><br>laufen hier und sind<br>die Vorlagen"]
-        stacks["<code>stacks/</code><br>Manifeste und<br>Lock-Dateien"]
-        tool["<code>blueprint.py</code><br>Einstellungen · Checkliste<br>Bots"]
-        template["<code>template/</code><br>die Dateien eines<br>neuen Repositorys"]
-        questions["<code>copier.yml</code><br>die Fragen"]
-    end
-
-    copier(["Copier"])
-    repo["Ein neues Repository"]
-
-    renovate -. "hält aktuell" .-> workflows
-    renovate -.-> stacks
-    workflows --> template
-    stacks --> template
-    tool --> template
-    template --> copier
-    questions --> copier
-    copier --> repo
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class renovate bot
-    class repo done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-blueprint-works.de.dark.svg">
+  <img src="docs/images/diagrams/how-the-blueprint-works.de.svg" alt="Wie der Blueprint funktioniert: Copier rendert ein neues Repository aus den Fragen in copier.yml und den Dateien in template/, die die Workflows aus .github/workflows/, die Manifeste aus stacks/ und blueprint.py aufnehmen. Renovate hält die Workflows und die Stacks aktuell.">
+</picture>
 
 - `copier.yml` enthält die Fragen. `template/` enthält die Dateien eines neuen Repositorys; ein Datei- oder Ordnername wie `[% if stack == 'php' %]composer.json[% endif %]` trägt seine Bedingung, und ein Name, der leer gerendert wird, entfällt. Die Trennzeichen `{= =}` und `[% %]` kommen in keinem Workflow, Skript oder Manifest vor; so bleiben `${{ }}` von GitHub Actions und `[[ ]]` von Bash und TOML unverändert.
 - Die Workflows in `.github/workflows/` laufen in diesem Repository und sind zugleich die Vorlagen der Workflows jedes neuen Repositorys: actionlint prüft sie, und Renovate hält ihre Actions hier aktuell. Eine Zeile mit *Not in the blueprint itself* schaltet einen Job in diesem Repository ab und fehlt in neuen.

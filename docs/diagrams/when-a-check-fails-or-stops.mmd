@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When a check fails or stops
+    accDescr: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. The release of a merge that failed runs its failed jobs once more, where they stopped.
+
+    run["A run of the checks<br>or of the release ends"]
+    tests["Tests failed or ran out of time<br>at the first attempt"]
+    raced["A required check cancelled<br>by a late run for an older commit"]
+    release["The release of a merge failed"]
+    before{"The same jobs broke<br>for the commit before?"}
+    again["The failed jobs run once more"]
+    flaky["`Issue *Flaky tests*<br>job · step · test · error`"]
+    restart["The run for the head<br>starts again"]
+    resume["The failed jobs of the release<br>run once more, where they stopped"]
+    red["Stays red, for you"]
+
+    run --> tests
+    run --> raced
+    run --> release
+    tests --> before
+    before -- "no" --> again
+    before -- "yes" --> red
+    again -- "passes" --> flaky
+    again -- "fails again" --> red
+    raced --> restart
+    release --> resume
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class again,restart,resume bot
+    class red person
+    class flaky done

@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Which updates of Renovate merge on their own
+    accDescr: A routine update waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer, as a major update does.
+
+    routine(["Routine update"])
+    fix(["Fix of a vulnerability"])
+    refresh(["Weekly refresh<br>of the lock files"])
+    major(["Major update"])
+    week["A week after<br>its release"]
+    checks{"Every check<br>passes"}
+    merge["Merges on its own"]
+    maintainer["Waits for<br>the maintainer"]
+
+    routine --> week --> checks
+    fix -- "at once" --> checks
+    checks --> merge
+    refresh -- "newest versions,<br>no week of waiting" --> maintainer
+    major --> maintainer
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class routine,fix,refresh,major,week,checks bot
+    class maintainer person
+    class merge done
