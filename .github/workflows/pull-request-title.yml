@@ -107,16 +107,18 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.type }}
         run: |
           pattern='^(feat|fix|perf)(\(([a-z0-9._/-]+)\))?(!)?: '
+          required=true
           if [[ ! "$TITLE" =~ $pattern ]]; then
+            required=false
             echo "A pull request of this type changes nothing for users; no entry needed." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           # Bots, such as Dependabot, the release bot and the blueprint bot, and updates
           # of dependencies write no notes of their own.
-          if [[ "$AUTHOR" == Bot || "${BASH_REMATCH[3]}" == deps || "${BASH_REMATCH[3]}" == deps-dev ]]; then
+          elif [[ "$AUTHOR" == Bot || "${BASH_REMATCH[3]}" == deps || "${BASH_REMATCH[3]}" == deps-dev ]]; then
+            required=false
             echo "Updates and bots write no entry." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
           fi
+          # Whatever its type or author, a pull request that adds or changes a fragment
+          # has it checked: the release reads every file of changelog.d/.
           # The files of the changelog that the pull request adds or changes, each as a
           # JSON string on a line of its own, so that no name spans two lines. A hidden
           # file, such as changelog.d/.gitkeep, is no fragment.
@@ -149,11 +151,11 @@ jobs:
             echo "::error::This pull request adds ${#fragments[@]} fragments of the changelog; describe its change in one, or a few."
             exit 1
           fi
-          if [[ "$changelog" == false ]] && ((${#fragments[@]} == 0)); then
+          if [[ "$required" == true && "$changelog" == false ]] && ((${#fragments[@]} == 0)); then
             echo "::error::Describe what changes for users in a new file of changelog.d/, such as changelog.d/dark-mode.md, below a heading such as '### Features' or '### Bug fixes', or under '## Unreleased' in CHANGELOG.md; it becomes the notes of the next release."
             exit 1
           fi
-          if [[ "$changelog" == true ]]; then
+          if [[ "$required" == true && "$changelog" == true ]]; then
             echo "CHANGELOG.md has the entry of this change." >> "$GITHUB_STEP_SUMMARY"
           fi
           if ((${#fragments[@]} > 0)); then

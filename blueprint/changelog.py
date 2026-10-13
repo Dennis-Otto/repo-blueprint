@@ -88,6 +88,8 @@ class Fragment:
 
     path: str
     text: str
+    # False for a file that is no text in UTF-8, which the check names.
+    readable: bool = True
 
 
 class FragmentError(ValueError):
@@ -143,13 +145,21 @@ def read_fragments(folder: Path) -> list[Fragment]:
     if not folder.is_dir():
         return []
     return [
-        Fragment(
-            f"{folder.name}/{entry.name}",
-            entry.read_text(encoding="utf-8") if entry.is_file() else "",
-        )
+        read_fragment(entry, f"{folder.name}/{entry.name}")
         for entry in sorted(folder.iterdir(), key=lambda entry: entry.name)
         if not entry.name.startswith(".")
     ]
+
+
+def read_fragment(entry: Path, path: str) -> Fragment:
+    """A fragment as text in UTF-8, with or without the byte order mark that some
+    editors of Windows write first; a folder has no text."""
+    if not entry.is_file():
+        return Fragment(path, "")
+    try:
+        return Fragment(path, entry.read_text(encoding="utf-8-sig"))
+    except UnicodeDecodeError:
+        return Fragment(path, "", readable=False)
 
 
 def known_headings(changelog: str) -> list[str]:
@@ -178,6 +188,11 @@ def fragment_problems(fragments: Sequence[Fragment], changelog: str) -> list[str
                 f"{fragment.path}: is no fragment. Name a fragment with letters, "
                 "digits, dots, dashes and underscores, ending in .md, such as "
                 f"{FRAGMENTS}/dark-mode.md."
+            )
+        elif not fragment.readable:
+            problems.append(
+                f"{fragment.path}: is no text in UTF-8. Save it as UTF-8, the encoding "
+                "of the changelog."
             )
         elif not fragment.text.strip():
             problems.append(

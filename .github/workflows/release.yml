@@ -220,15 +220,18 @@ jobs:
                 fi
                 listed='[]'
               fi
-              deletions="$(jq -R . "$RUNNER_TEMP/taken" | jq -sc --argjson listed "$listed" 'map(select(IN($listed[])) | {path: .})')"
+              # Without a line end (-j), which the jq.exe of Git Bash writes as CRLF.
+              deletions="$(jq -R . "$RUNNER_TEMP/taken" | jq -scj --argjson listed "$listed" 'map(select(IN($listed[])) | {path: .})')"
               if cmp -s "$RUNNER_TEMP/release.md" "$RUNNER_TEMP/branch.md" && [[ "$deletions" == '[]' ]]; then
                 echo "The changelog of $version is up to date."
                 continue
               fi
               echo "Writing the changelog of $version into $branch."
+              # A file, not a process substitution, which the jq.exe of Git Bash can't open.
+              base64 --wrap=0 "$RUNNER_TEMP/release.md" > "$RUNNER_TEMP/release.b64"
               jq --null-input --arg repo "$GH_REPO" --arg branch "$branch" --arg head "$head" \
                 --arg headline "chore: write the changelog of $version" \
-                --rawfile contents <(base64 --wrap=0 "$RUNNER_TEMP/release.md") \
+                --rawfile contents "$RUNNER_TEMP/release.b64" \
                 --argjson deletions "$deletions" \
                 '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
                   variables: {input: {

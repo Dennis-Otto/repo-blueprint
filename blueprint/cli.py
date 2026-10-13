@@ -102,11 +102,12 @@ def coverage_command(arguments: argparse.Namespace) -> int:
 
 
 def utf8_output() -> None:
-    """Windows consoles default to a code page without the marks of the checklist."""
+    """Windows consoles default to a code page without the marks of the checklist, and
+    to CRLF, which a file of the repository written from the output must not get."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
-            reconfigure(encoding="utf-8")
+            reconfigure(encoding="utf-8", newline="\n")
 
 
 def main(

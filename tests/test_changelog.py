@@ -17,6 +17,7 @@ from blueprint.changelog import (
     FragmentError,
     add_unreleased,
     beta_notes,
+    checked,
     fragment_problems,
     known_headings,
     merge_headings,
@@ -535,6 +536,32 @@ def test_the_fragments_are_read_by_their_names(tmp_path: Path) -> None:
         fragment("sub", ""),
     ]
     assert read_fragments(tmp_path / "missing") == []
+
+
+def test_a_fragment_with_a_byte_order_mark_or_not_in_utf8_is_read(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "changelog.d"
+    folder.mkdir()
+    # As PowerShell 5 writes UTF-8, and as an editor writes Latin-1.
+    (folder / "a-bom.md").write_bytes(b"\xef\xbb\xbf" + FEATURE.encode())
+    (folder / "b-latin.md").write_bytes(
+        "### Fixed\n\n- Gr\xfc\xdfe.\n".encode("latin-1")
+    )
+
+    fragments = read_fragments(folder)
+
+    assert fragments == [
+        fragment("a-bom.md", FEATURE),
+        Fragment("changelog.d/b-latin.md", "", readable=False),
+    ]
+    # The check names the one, and the release stops at it instead of a traceback.
+    assert fragment_problems(fragments, main_changelog()) == [
+        "changelog.d/b-latin.md: is no text in UTF-8. Save it as UTF-8, the encoding "
+        "of the changelog."
+    ]
+    with pytest.raises(FragmentError):
+        checked(fragments, main_changelog())
 
 
 def write_fragments(folder: Path, **fragments: str) -> None:

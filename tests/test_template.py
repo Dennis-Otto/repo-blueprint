@@ -1777,7 +1777,10 @@ def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothin
         result.stdout,
         re.MULTILINE,
     )
-    assert f"\n+- Supports Nextcloud {newest}.\n" in result.stdout
+    # The entry in a fragment of its own, which no release conflicts with.
+    assert f"\n+++ b/changelog.d/nextcloud-{newest}.md\n" in result.stdout
+    assert f"\n+### Changed\n+\n+- Supports Nextcloud {newest}.\n" in result.stdout
+    assert "CHANGELOG.md" not in result.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -4932,6 +4935,40 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
         ("docs: a guide", "User", [], 0, "changes nothing for users", []),
         ("feat: a card", "Bot", [], 0, "Updates and bots write no entry.", []),
         ("fix(deps): bump", "User", [], 0, "Updates and bots write no entry.", []),
+        # Whatever the type or the author, the release reads every fragment, so a
+        # pull request that needs no entry still has its fragments checked.
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/guide.md", "added"), ("CHANGELOG.md", "modified")],
+            0,
+            "changes nothing for users",
+            ["changelog.d/guide.md"],
+        ),
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/README.md", "added"), ("changelog.d/notes.txt", "added")],
+            1,
+            '::error::"changelog.d/notes.txt" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "feat: a card",
+            "Bot",
+            [("changelog.d/my fix.md", "added")],
+            1,
+            '::error::"changelog.d/my fix.md" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "chore(deps): bump",
+            "User",
+            [(f"changelog.d/f{number}.md", "added") for number in range(21)],
+            1,
+            "::error::This pull request adds 21 fragments of the changelog;",
+            [],
+        ),
         (
             "feat: a card",
             "User",
@@ -5018,11 +5055,14 @@ def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
     assert (listed.read_text(encoding="utf-8").splitlines() if fragments else []) == (
         fragments
     )
-    # Only a change for users of a person asks the API.
-    asked = title.startswith(("feat:", "fix!:", "perf:")) and author == "User"
-    assert len(step.calls) == (1 if asked else 0)
-    if asked:
-        assert step.calls[0].startswith("api repos/o/r/pulls/7/files --paginate --jq ")
+    # Every pull request has its files listed, to check its fragments.
+    assert len(step.calls) == 1
+    assert step.calls[0].startswith("api repos/o/r/pulls/7/files --paginate --jq ")
+    # Only a change for users of a person needs an entry, and is told it has one.
+    required = title.startswith(("feat:", "fix!:", "perf:")) and author == "User"
+    if not required:
+        assert "::error::Describe what changes" not in step.result.stdout
+        assert "CHANGELOG.md has the entry" not in step.summary
     if title == "perf: faster":
         errors = [
             line for line in step.result.stdout.splitlines() if "::error::" in line

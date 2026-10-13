@@ -849,6 +849,20 @@ def test_the_output_is_utf8_where_it_can_be(monkeypatch: pytest.MonkeyPatch) -> 
     cli.utf8_output()
 
 
+def test_the_output_has_lf_line_endings_also_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A release section redirected into a file keeps the LF of the repository.
+    raw = io.BytesIO()
+    stdout = io.TextIOWrapper(raw, encoding="cp1252", newline="\r\n")
+    monkeypatch.setattr("sys.stdout", stdout)
+    monkeypatch.setattr("sys.stderr", io.StringIO())
+    cli.utf8_output()
+    stdout.write("## 1.0.0 ✓\n")
+    stdout.flush()
+    assert raw.getvalue() == "## 1.0.0 ✓\n".encode()
+
+
 def test_a_gap_in_the_community_profile_is_reported(
     github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
