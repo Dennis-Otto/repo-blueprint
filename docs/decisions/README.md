@@ -12,3 +12,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0004](0004-settings-as-code.md) | Keep the settings of every repository as code, applied by a bot | accepted |
 | [0005](0005-renovate-instead-of-dependabot.md) | Keep the dependencies current with a self-hosted Renovate | accepted |
 | [0006](0006-beta-channel.md) | Publish a beta of the next release after every change for users, where a project wants it | accepted |
+| [0007](0007-no-action-pinned-to-a-branch.md) | Pin no action to a branch: run a tool that follows its branch as an image | accepted |

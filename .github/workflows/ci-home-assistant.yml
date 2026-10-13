@@ -78,16 +78,23 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # HACS' moving ghcr.io/hacs/action:main image on purpose: it always validates
+      # against the rules HACS applies to new submissions today. The step runs it as
+      # the action hacs/action does, with the inputs as INPUT_ variables and the event
+      # as a file, but without the action itself: a pin to a commit of its branch
+      # falls behind with every commit there, which zizmor reports. The image reads
+      # the repository through the API, at the branch of the event, so the job checks
+      # nothing out.
       - name: Validate the HACS metadata
-        # The action runs HACS' moving ghcr.io/hacs/action:main image on purpose: it
-        # always validates against the rules HACS applies to new submissions today.
-        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
-        with:
-          category: integration
-          comment: false
+        env:
+          INPUT_CATEGORY: integration
+          INPUT_COMMENT: "false"
+          INPUT_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --env INPUT_CATEGORY --env INPUT_COMMENT --env INPUT_GITHUB_TOKEN \
+            --env GITHUB_REPOSITORY --env GITHUB_EVENT_PATH=/github/workflow/event.json \
+            --volume "$GITHUB_EVENT_PATH:/github/workflow/event.json:ro" \
+            ghcr.io/hacs/action:main
 
   hassfest:
     name: hassfest
@@ -103,6 +110,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # hassfest runs Home Assistant's current image, for the same reason.
+      # hassfest runs Home Assistant's current image, for the same reasons and as its
+      # action home-assistant/actions/hassfest does, with the problem matcher of the
+      # action, which shows each error and warning as an annotation.
       - name: Validate the integration
-        uses: home-assistant/actions/hassfest@06749dd8c0b54f350bc69c8752456cee498808a3 # master
+        run: |
+          cat > "$RUNNER_TEMP/hassfest.json" <<'EOF'
+          {"problemMatcher": [{"owner": "hassfest", "pattern": [{"regexp": "^\\*\\s\\[(ERROR|WARNING)\\]\\s(.*)$", "severity": 1, "message": 2}]}]}
+          EOF
+          echo "::add-matcher::$RUNNER_TEMP/hassfest.json"
+          docker run --rm --volume "$PWD:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest

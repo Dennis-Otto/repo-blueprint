@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **Findings no longer fails when hassfest or HACS move on:** the CI of a Home Assistant integration pinned the actions of hassfest and HACS to a commit of their branches, and zizmor reports such a pin as soon as the branch moves on, as `home-assistant/actions` did twice on 2026-10-12. From then on, the Findings workflow failed every run, and Renovate, which waits a week after each commit, couldn't catch up. The CI now runs their images with `docker run`, as the actions did, without a pin that falls behind; hassfest still shows its errors as annotations. Renovate follows an action that a project pins to a branch in its next run and merges the update once every check passes.
+
 ## [0.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.0...v0.10.1) (2026-10-12)
 
 ### Bug fixes
