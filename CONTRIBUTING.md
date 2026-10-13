@@ -67,6 +67,8 @@ python3 -m venv .venv
 . .venv/bin/activate && bash scripts/check.sh
 ```
 
+On Windows, run them in Git Bash, which comes with [Git for Windows](https://gitforwindows.org/), with `python` in place of `python3` and `.venv/Scripts/` in place of `.venv/bin/`. The Windows workflow runs them there as well: every week, and for each pull request that changes the code or the tests.
+
 To run them before every push on its own, turn on the hook of the repository once:
 
 ```sh

@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **The checks of the blueprint pass on Windows:** `bash scripts/check.sh` failed in Git Bash on Windows in four tests of the bot for cancelled checks, because Windows started their bare `bash` from System32, where it is the launcher of WSL, which ran the step in Linux without its variables. The tests now run the bash that the `PATH` finds, Git Bash, and the new Windows workflow runs the checks on Windows every week and for each pull request that changes the code or the tests. The repositories made from the blueprint don't change.
+
 ## [0.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.0...v0.10.1) (2026-10-12)
 
 ### Bug fixes
