@@ -20,6 +20,7 @@ from blueprint.checklist import checklist, reuse_compliant
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
     MAIN_ONLY,
+    ConfigError,
     Drift,
     Settings,
     apply_pages,
@@ -30,6 +31,7 @@ from blueprint.settings import (
     main_ruleset,
     merge,
     ruleset_differences,
+    tag_creation_ruleset,
     tag_ruleset,
 )
 
@@ -258,6 +260,9 @@ class FakeGitHub:
             self.rulesets[self.next_id] = body
             self.next_id += 1
             return 201, body
+        if method == "DELETE":
+            del self.rulesets[int(number or 0)]
+            return 204, None
         self.rulesets[int(number or 0)] = body
         return 200, body
 
@@ -579,6 +584,176 @@ def test_the_tag_ruleset_leaves_major_tags_free() -> None:
     ruleset = tag_ruleset()
 
     assert ruleset["conditions"]["ref_name"]["include"] == ["refs/tags/v*.*.*"]
+
+
+def test_only_the_release_app_creates_release_tags() -> None:
+    creation = tag_creation_ruleset(4739928)
+
+    assert creation["target"] == "tag"
+    assert creation["enforcement"] == "active"
+    assert creation["conditions"] == tag_ruleset()["conditions"]
+    assert creation["rules"] == [{"type": "creation"}]
+    assert creation["bypass_actors"] == [
+        {"actor_id": 4739928, "actor_type": "Integration", "bypass_mode": "always"}
+    ]
+    # Release tags never move, not even for the app, which only creates them.
+    tags = tag_ruleset()
+    assert tags["bypass_actors"] == []
+    assert [rule["type"] for rule in tags["rules"]] == [
+        "deletion",
+        "non_fast_forward",
+        "update",
+    ]
+
+
+def with_app_id(root: Path, value: str = "4739928") -> Settings:
+    """The settings with the App ID of the release app next to its Client ID."""
+    path = root / ".github/repository.toml"
+    path.write_text(
+        CONFIG.replace(
+            "[variables]\n", f'[variables]\nRELEASE_AUTOMATION_APP_ID = "{value}"\n'
+        ),
+        encoding="utf-8",
+    )
+    return Settings.load(path)
+
+
+def test_the_settings_name_the_app_that_creates_release_tags(root: Path) -> None:
+    # Without the App ID, the rulesets stay as they were: anyone who may push creates
+    # release tags.
+    without = Settings.load(root / ".github/repository.toml")
+    assert [ruleset["name"] for ruleset in without.rulesets] == [
+        "Protect main",
+        "Release tags",
+    ]
+
+    settings = with_app_id(root)
+
+    assert settings.rulesets == [*without.rulesets, tag_creation_ruleset(4739928)]
+    assert settings.variables["RELEASE_AUTOMATION_APP_ID"] == "4739928"
+
+
+def test_a_project_names_its_own_release_app(root: Path) -> None:
+    (root / ".github/repository.project.toml").write_text(
+        '[variables]\nRELEASE_AUTOMATION_APP_ID = " 12345 "\n', encoding="utf-8"
+    )
+
+    settings = with_app_id(root)
+
+    assert settings.rulesets[-1] == tag_creation_ruleset(12345)
+
+
+@pytest.mark.parametrize(
+    ("own", "accepted"),
+    [
+        # The blueprint's app, named again: nothing of its own.
+        ('RELEASE_AUTOMATION_CLIENT_ID = "Iv23client"', True),
+        # An app of its own, with both of its IDs.
+        (
+            'RELEASE_AUTOMATION_CLIENT_ID = "Iv23own"\nRELEASE_AUTOMATION_APP_ID = "12345"',
+            True,
+        ),
+        # An app of its own, as the README described it before the App ID.
+        ('RELEASE_AUTOMATION_CLIENT_ID = "Iv23own"', False),
+    ],
+)
+def test_a_release_app_of_its_own_needs_its_app_id(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    own: str,
+    accepted: bool,
+) -> None:
+    (root / ".github/repository.project.toml").write_text(
+        f"[variables]\n{own}\n", encoding="utf-8"
+    )
+
+    if accepted:
+        assert with_app_id(root).rulesets[-1]["name"] == "Release tag creation"
+        return
+    with pytest.raises(ConfigError):
+        with_app_id(root)
+    assert run(github, root, "settings", "check") == 2
+    err = capsys.readouterr().err
+    assert "set RELEASE_AUTOMATION_APP_ID there too" in err
+    assert not github.calls
+
+
+def creation_rulesets(github: FakeGitHub) -> list[dict[str, Any]]:
+    return [
+        ruleset
+        for ruleset in github.rulesets.values()
+        if ruleset["name"] == "Release tag creation"
+    ]
+
+
+def test_apply_lets_only_the_release_app_create_release_tags(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_app_id(root)
+
+    assert run(github, root, "settings", "check") == 1
+    assert "ruleset Release tag creation" in capsys.readouterr().out
+    run(github, root, "settings", "apply")
+
+    assert creation_rulesets(github) == [tag_creation_ruleset(4739928)]
+    assert github.variables["RELEASE_AUTOMATION_APP_ID"] == "4739928"
+
+    # Another app among the exceptions is drift, which apply sets right.
+    creation_rulesets(github)[0]["bypass_actors"][0]["actor_id"] = 1
+    set_secrets(github)
+    capsys.readouterr()
+    assert run(github, root, "settings", "check") == 1
+    out = capsys.readouterr().out
+    assert 'ruleset Release tag creation: GitHub has "bypass_actors"' in out
+    assert run(github, root, "settings", "apply") == 0
+    assert creation_rulesets(github) == [tag_creation_ruleset(4739928)]
+
+
+def test_without_the_app_id_the_rule_of_creation_goes(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_app_id(root)
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    # A ruleset of the maintainer's own, which the settings as code don't know.
+    github.rulesets[99] = {"name": "Release branches", "target": "branch"}
+    # A pull request takes the App ID out again.
+    (root / ".github/repository.toml").write_text(CONFIG, encoding="utf-8")
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "check") == 1
+    out = capsys.readouterr().out
+    assert (
+        'ruleset Release tag creation: GitHub has "present", the configuration wants'
+        ' "absent"'
+    ) in out
+    assert run(github, root, "settings", "apply") == 0
+
+    assert creation_rulesets(github) == []
+    assert sorted(ruleset["name"] for ruleset in github.rulesets.values()) == [
+        "Protect main",
+        "Release branches",
+        "Release tags",
+    ]
+
+
+@pytest.mark.parametrize("value", ["Iv23client", "-1", "47 39"])
+def test_an_app_id_that_is_no_number_stops_the_run(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    value: str,
+) -> None:
+    with pytest.raises(ConfigError):
+        with_app_id(root, value)
+
+    assert run(github, root, "settings", "check") == 2
+
+    err = capsys.readouterr().err
+    assert "RELEASE_AUTOMATION_APP_ID must be the number of the release app" in err
+    assert repr(value) in err
+    assert not github.calls
 
 
 def test_an_environment_without_main_drifts(github: FakeGitHub) -> None:
