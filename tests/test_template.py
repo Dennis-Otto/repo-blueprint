@@ -608,6 +608,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".gitattributes",
         ".gitignore",
         ".python-version",
+        "CLAUDE.md",
         "CODE_OF_CONDUCT.md",
         "GOVERNANCE.md",
         "LICENSE",
@@ -1360,12 +1361,18 @@ def test_secrets_stay_out_of_git(projects: dict[str, Path], kind: str) -> None:
         assert pattern in ignored, pattern
 
 
+def files_of_the_project() -> list[str]:
+    """The patterns of _skip_if_exists in copier.yml: the files that belong to a
+    project after its first copy, which an update never overwrites."""
+    config = (ROOT / "copier.yml").read_text(encoding="utf-8")
+    block = config.split("_skip_if_exists:", 1)[1].split("\n\n", 1)[0]
+    return re.findall(r'^  - "?([^"\n]+?)"?$', block, re.MULTILINE)
+
+
 def test_updates_reach_every_file_of_the_blueprint() -> None:
     # Copier matches _skip_if_exists like .gitignore; a pattern without a slash
     # would match at any depth and keep the blueprint's files from their updates.
-    config = (ROOT / "copier.yml").read_text(encoding="utf-8")
-    block = config.split("_skip_if_exists:", 1)[1].split("\n\n", 1)[0]
-    skip = re.findall(r'^  - "?([^"\n]+?)"?$', block, re.MULTILINE)
+    skip = files_of_the_project()
     assert "/*.py" in skip
     # The patterns as Copier reads them.
     matcher = pathspec.PathSpec.from_lines("gitignore", skip)
@@ -1381,6 +1388,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "custom_components/demo/__init__.py",
         ".github/labels.toml",
         "docs/security.md",
+        ".github/agents.project.md",
     ):
         assert matcher.match_file(owned), owned
     for updated in (
@@ -1392,8 +1400,114 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         ".github/docs-requirements.txt",
         "docs/README.md",
         "scripts/check.sh",
+        "AGENTS.md",
+        "CLAUDE.md",
     ):
         assert not matcher.match_file(updated), updated
+
+
+def listed_files_of_the_project(agents: str) -> list[str]:
+    """The patterns that the list of the files of the project in an AGENTS.md names,
+    one per code span, from the line that introduces the list to the next heading."""
+    start = agents.index("\nThe files of this project, as `_skip_if_exists`")
+    end = agents.index("\n## ", start)
+    patterns = []
+    for line in agents[start:end].splitlines()[1:]:
+        if line.startswith("- **"):
+            patterns += re.findall(r"`([^`]+)`", line.split(":** ", 1)[1])
+    return patterns
+
+
+# The commands that set up the tools of each kind of project and run its tests,
+# which AGENTS.md names for coding agents.
+AGENT_COMMANDS = {
+    "home-assistant": [
+        "pip install --require-hashes -r requirements-test.txt",
+        "coverage run -m pytest && coverage report",
+    ],
+    "nextcloud-app": ["composer install", "vendor/bin/phpunit"],
+    "github-action": [
+        "pip install --require-hashes -r requirements-dev.txt",
+        "coverage run -m pytest && coverage report",
+    ],
+    "python-package": [
+        "pip install --require-hashes -r requirements-dev.txt",
+        "coverage run -m pytest && coverage report",
+    ],
+    "node-package": ["npm ci", "`npm test`"],
+    "container": ["docker run --rm demo-project:check --self-test"],
+    "generic": ["no build and no tests of its own"],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_tells_coding_agents_its_rules(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    # The commands of the kind of project, and the rules of every pull request.
+    for command in (*AGENT_COMMANDS[kind], "bash scripts/check.sh"):
+        assert command in agents, command
+    for rule in (
+        "`git commit -s`",
+        "`## Unreleased` in `CHANGELOG.md`",
+        "Conventional Commit",
+        "`fix` and `perf` a patch, `feat` a minor",
+        "`Fixes #123`",
+        "`--no-verify`",
+        "`scripts/check-project.sh`",
+        "`.github/repository.project.toml`",
+    ):
+        assert rule in agents, rule
+    # The files of the project are exactly those that an update never overwrites,
+    # so that the list for coding agents can't drift from copier.yml.
+    listed = listed_files_of_the_project(agents)
+    assert sorted(listed) == sorted(files_of_the_project())
+    assert len(listed) == len(set(listed))
+    # It ends with the notes of the project, which belong to the project.
+    assert agents.endswith(
+        "## Project notes\n\nSee [.github/agents.project.md](.github/agents.project.md).\n"
+    )
+    notes = (project / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert "Demo Project: A " in notes
+    assert "## Where things are" in notes
+    # Every link of AGENTS.md to a file of the repository leads to one.
+    for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", agents):
+        if not link.startswith("https://"):
+            assert (project / link).is_file(), link
+    # Claude Code reads AGENTS.md and the notes through the imports of CLAUDE.md,
+    # each on a line of its own; Codex and GitHub Copilot read AGENTS.md directly.
+    claude = (project / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    assert "@AGENTS.md" in claude
+    assert "@.github/agents.project.md" in claude
+
+
+def test_the_blueprint_tells_coding_agents_its_rules() -> None:
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    for rule in (
+        "bash scripts/check.sh",
+        "coverage run -m pytest && coverage report",
+        "`git commit -s`",
+        "`## Unreleased` in `CHANGELOG.md`",
+        "`Fixes #123`",
+        "`README.md` and `README.de.md` together",
+        "`tests/test_template.py`",
+        "`_skip_if_exists`",
+        "`template/AGENTS.md.jinja`",
+    ):
+        assert rule in agents, rule
+    assert agents.endswith(
+        "## Project notes\n\nSee [.github/agents.project.md](.github/agents.project.md).\n"
+    )
+    for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", agents):
+        if not link.startswith("https://"):
+            assert (ROOT / link).is_file(), link
+    # Its CLAUDE.md is the one of every repository, which test_the_blueprint_
+    # follows_its_own_template keeps equal.
+    claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    assert "@AGENTS.md" in claude
+    assert "@.github/agents.project.md" in claude
 
 
 def test_copying_runs_no_code_of_the_blueprint() -> None:

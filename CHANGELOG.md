@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Features
+
+- **Coding agents follow the rules of each repository:** every repository gets an `AGENTS.md`, which Claude Code, Codex, GitHub Copilot and Cursor read: the commands that set up the tools and run the checks and tests of its kind, the titles of pull requests and the versions they make, the entry under Unreleased, the sign-off, and what never to do to get a check green. It also says which files belong to the project and which to the blueprint, so that an agent changes a workflow or `scripts/check.sh` in the blueprint instead of in one repository; a test keeps that list equal to the files that an update never overwrites. `CLAUDE.md` brings `AGENTS.md` to Claude Code; the package of a Nextcloud app leaves both out. The notes of a project, such as its architecture and the commands of its own checks, go into `.github/agents.project.md`, which the update adds once and then leaves to the project. A repository that already has an `AGENTS.md` or a `CLAUDE.md` gets the blueprint's in the update pull request, with conflict markers where the two differ: move its own notes into `.github/agents.project.md`.
+
 ### Changes
 
 - **Every job runs on `ubuntu-24.04`, named with its version:** GitHub moves `ubuntu-latest` to Ubuntu 26.04 from 19 October 2026, one job at a time over a month, so that the runs of one workflow would have landed on either image at random, with Python 3.14 instead of 3.12, ShellCheck 0.11 and Docker 29, and failed like flaky tests. The workflows of the blueprint now name `ubuntu-24.04` and keep it until the checks of every kind of project pass on Ubuntu 26.04, which the blueprint tries every week; then one release moves every job. The workflows of the issue assistant follow with its next release. A workflow of your own, such as one of end-to-end tests, and the action test `.github/workflows/action-test.yml` of a GitHub Action, which the update leaves alone, keep `ubuntu-latest` until you change their `runs-on:` to `ubuntu-24.04` as well.

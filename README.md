@@ -83,6 +83,7 @@ flowchart TB
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels, GitHub Pages, and every file of the community standards of GitHub; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
 | **Clean-up** | every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month | `cleanup.yml` |
 | **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks and of the website, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
+| **Coding agents** | the rules of the repository for Claude Code, Codex, GitHub Copilot and Cursor: the commands of the checks and tests of its kind, the titles of pull requests and the versions they make, the changelog, the sign-off, and which files belong to the project and which to the blueprint, a list that a test of the blueprint keeps equal to the files an update never overwrites; the notes of the project join them from a file of its own | `AGENTS.md`, `CLAUDE.md`, `.github/agents.project.md` |
 | **Updates** | right after every release of the blueprint, and every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
 | **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it; started by hand as a dry run, it shows the pull request it would open and changes nothing | `upstream.yml` |
@@ -379,7 +380,7 @@ The Rollout workflow of the blueprint brings each release to the repositories of
 
 Once you commit to the branch of the pull request, to resolve the markers for example, the bot leaves the branch to you: when a newer release is out, it says so in one comment, and after you merge or close the pull request, its next run brings the rest. A merge of `main` with the button *Update branch* doesn't count as your commit, and an auto-merge that you switch off stays off. An update that only records a new release in `.copier-answers.yml` comes as a pull request too, and the updates carry the modes of files, such as a script that becomes executable.
 
-The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
+The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, accepted findings, and the notes for coding agents. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
 ## What belongs to a project
 
@@ -391,14 +392,14 @@ config:
 ---
 flowchart TB
     accTitle: What belongs to the blueprint and what to the project
-    accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings and workflows of its own beside those of the blueprint.
+    accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings, notes for coding agents and workflows of its own beside those of the blueprint.
 
     blueprint[("Repo Blueprint")]
 
     subgraph repo ["Your repository"]
-        theirs["<b>The blueprint's files</b><br>workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>community files"]
+        theirs["<b>The blueprint's files</b><br>workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>community files · <code>AGENTS.md</code>"]
         mine["<b>The project's files</b><br>README · CHANGELOG · <code>docs/</code><br>code and tests<br>manifests and lock files<br>issue forms · labels"]
-        adds["<b>What the project adds</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br>workflows of its own"]
+        adds["<b>What the project adds</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br><code>.github/agents.project.md</code><br>workflows of its own"]
     end
 
     blueprint -- "<code>copier update</code><br>merged line by line" --> theirs
@@ -416,6 +417,7 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 - **Changes in the blueprint's files survive updates:** `copier update` merges the changes of the blueprint with those of the repository, line by line, and marks a conflict only where both changed the same lines.
 - **Settings of the project alone** go into `.github/repository.project.toml`, such as the checks of its end-to-end tests or an environment with its secrets. `blueprint.py` and the settings bot add them to `.github/repository.toml`.
 - **Checks of the project alone** go into `scripts/check-project.sh`, which `scripts/check.sh` runs last; **workflows of the project alone** are workflow files of their own.
+- **Notes for coding agents** go into `.github/agents.project.md`, such as the architecture of the project and the commands of its own checks. `AGENTS.md`, which the blueprint keeps current, has the rules of every repository and points to them, and `CLAUDE.md` brings both to Claude Code.
 - **Several copyright holders,** such as the authors of a fork, are the answer `copyright`, separated by semicolons; LICENSE and REUSE.toml name each of them.
 - **Files under another license,** such as third-party artwork, get a `.license` file next to them, as REUSE describes.
 - **The package of a Nextcloud app** is checked by `scripts/check-package.sh ARCHIVE unsigned|signed` if the project has one: `scripts/check.sh` runs it on the package that krankerl builds, the release on the package before and after signing.
