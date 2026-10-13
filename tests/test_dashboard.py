@@ -314,6 +314,17 @@ def test_a_repository_without_reports_has_no_health_values() -> None:
             {"build/infection-summary.log": "Mutation Score Indicator (MSI): 81.5%\n"},
             81.5,
         ),
+        # The artifact of a Nextcloud app: the output of Infection next to its logs.
+        (
+            {
+                "infection-summary.log": "Total: 40\n\nKilled by Test Framework: 35\n",
+                "infection-output.log": "Metrics:\n"
+                "         Mutation Score Indicator (MSI): 87%\n"
+                "         Mutation Code Coverage: 100%\n"
+                "         Covered Code MSI: 87%\n",
+            },
+            87.0,
+        ),
         ({"results.txt": "nothing ran\n"}, None),
         ({}, None),
     ],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import configparser
 import hashlib
 import json
 import os
@@ -35,14 +36,16 @@ PINNED = re.compile(
     r"uses: (?:\./|docker://[^@\s]+@sha256:[0-9a-f]{64}|[\w.-]+/[\w./-]+@[0-9a-f]{40})"
 )
 # The settings tool, which every repository gets in .github/: the script that starts
-# it and every file of its package.
+# it and every file of its package. The mutation tests run in a copy of the repository,
+# where mutmut keeps what it knows of each module next to it, as cli.py.meta and
+# cli.py.spans; those are no part of the tool.
 TOOL = sorted(
     [
         "blueprint.py",
         *(
             f"blueprint/{path.name}"
             for path in (ROOT / "blueprint").iterdir()
-            if path.is_file()
+            if path.is_file() and path.suffix not in (".meta", ".spans")
         ),
     ]
 )
@@ -424,6 +427,9 @@ def test_every_repository_gets_the_settings_tool(
         assert copy == (ROOT / name).read_text(encoding="utf-8"), name
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_settings_tool_runs_in_every_repository(
     projects: dict[str, Path], kind: str
@@ -932,6 +938,9 @@ def test_renovate_keeps_every_project_current(
     assert "dependabot_security_updates = false" in settings
 
 
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
 def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
     # Renovate installs pip-tools once per repository and run, for the Python of the
     # first lock file it compiles: the lock files of pip-compile share one Python, and
@@ -1522,3 +1531,343 @@ def test_the_code_of_a_project_meets_mutants_every_week(
         assert not tools.exists()
     else:
         assert not mutation.exists()
+
+
+def mutation_step(name: str, kind: str) -> str:
+    """The script of a step of the Mutation workflow for one kind of code."""
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    step = re.search(
+        rf"      - name: {re.escape(name)}\n        if: .*== '{kind}'\n"
+        r"(?:        (?!run: \|).*\n)*        run: \|\n((?:          .*\n|\n)+)",
+        workflow,
+    )
+    assert step, name
+    return textwrap.dedent(step[1])
+
+
+def run_mutation_step(
+    tmp_path: Path, name: str, kind: str, tools: dict[str, str], **variables: str
+) -> tuple[int, str]:
+    """Runs a step of the Mutation workflow in tmp_path/project as GitHub does, with
+    stand-ins for its tools; the exit code and what it wrote to the summary."""
+    step = tmp_path / "step.sh"
+    step.write_text(mutation_step(name, kind), encoding="utf-8", newline="\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for tool, script in tools.items():
+        (bin_dir / tool).write_text(
+            f"#!/usr/bin/env bash\n{script}", encoding="utf-8", newline="\n"
+        )
+        (bin_dir / tool).chmod(0o755)
+    (tmp_path / "temp").mkdir(exist_ok=True)
+    summary = tmp_path / "summary"
+    summary.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": (tmp_path / "temp").as_posix(),
+        "GITHUB_ENV": (tmp_path / "env").as_posix(),
+        "GITHUB_STEP_SUMMARY": summary.as_posix(),
+        "MUTMUT_LIMIT": "1m",
+        **variables,
+    }
+    # As GitHub runs a step: bash -e. By its full path, which on Windows is Git Bash,
+    # not the launcher of WSL in System32.
+    bash = shutil.which("bash")
+    assert bash
+    result = subprocess.run(
+        [bash, "-e", step.as_posix()],
+        cwd=tmp_path / "project",
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return result.returncode, summary.read_text(encoding="utf-8")
+
+
+def mutmut_list(config: configparser.ConfigParser, key: str) -> list[str]:
+    """A list of setup.cfg as mutmut 3 reads it: one item on each line, else the whole
+    value as one item."""
+    value = config.get("mutmut", key)
+    return [item for item in value.split("\n") if item] if "\n" in value else [value]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.parametrize(
+    ("files", "paths"),
+    [
+        # The modules of the root and its packages, as in the blueprint, but not the
+        # tests and not the settings tool in .github/.
+        (
+            [
+                "blueprint/__init__.py",
+                "blueprint.py",
+                "dashboard.py",
+                "weekly.py",
+                "conftest.py",
+                "tests/__init__.py",
+                ".github/blueprint/__init__.py",
+            ],
+            ["blueprint", "blueprint.py", "dashboard.py", "weekly.py"],
+        ),
+        (["src/demo/__init__.py", "tests/test_demo.py"], ["src"]),
+        (
+            ["custom_components/demo/__init__.py", "tests/test_init.py"],
+            ["custom_components"],
+        ),
+    ],
+)
+def test_mutmut_mutates_the_code_of_every_kind_of_project(
+    tmp_path: Path, files: list[str], paths: list[str]
+) -> None:
+    project = tmp_path / "project"
+    others = ["pyproject.toml", "docs/index.md", ".github/workflows/mutation.yml"]
+    for name in [*files, *others, ".git/HEAD"]:
+        (project / name).parent.mkdir(parents=True, exist_ok=True)
+        (project / name).touch()
+    calls = tmp_path / "calls"
+
+    code, _ = run_mutation_step(
+        tmp_path,
+        "Run the mutants against the tests",
+        "python",
+        {"mutmut": 'echo "$*" >> "$CALLS"\n'},
+        CALLS=calls.as_posix(),
+    )
+
+    assert code == 0
+    config = configparser.ConfigParser()
+    config.read(project / "setup.cfg", encoding="utf-8")
+    # Not "blueprint,blueprint.py,dashboard.py,weekly.py": mutmut 3 takes that for one
+    # path, which it doesn't find, and mutates nothing.
+    assert mutmut_list(config, "source_paths") == paths
+    # The tests may read any file of the repository; Git stays the checkout's own.
+    copied = mutmut_list(config, "also_copy")
+    assert {".github", "docs", "pyproject.toml", "tests"} <= set(copied)
+    assert not {".git", "setup.cfg"} & set(copied)
+    assert mutmut_list(config, "pytest_add_cli_args") == ["-m", "not mutation_unsafe"]
+    assert calls.read_text(encoding="utf-8").startswith("run --max-children ")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("setup.cfg", "[mutmut]\nsource_paths=lib\n"),
+        ("pyproject.toml", '[tool.mutmut]\nsource_paths = ["lib"]\n'),
+    ],
+)
+def test_mutmut_keeps_the_configuration_of_a_project(
+    tmp_path: Path, name: str, text: str
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / name).write_text(text, encoding="utf-8")
+
+    code, _ = run_mutation_step(
+        tmp_path, "Run the mutants against the tests", "python", {"mutmut": "true\n"}
+    )
+
+    assert code == 0
+    assert (project / name).read_text(encoding="utf-8") == text
+    assert (project / "setup.cfg").exists() == (name == "setup.cfg")
+
+
+MUTANTS = """\
+    demo.x_add__mutmut_1: killed
+    demo.x_add__mutmut_2: survived
+    demo.x_add__mutmut_3: no tests
+"""
+# The output of mutmut, whose spinner redraws the line of each phase with \r.
+STOPPED = (
+    "⠋ Generating mutants\r⠙ Generating mutants\r⠇ Generating mutants\n"
+    "    done in 597ms (0 files mutated, 0 ignored, 0 unmodified)\n"
+    "⠋ Running stats\r⠹ Running stats\n"
+    "Stopping early, because we could not find any test case for any mutant.\n"
+)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.parametrize(
+    ("results", "status", "code", "expected"),
+    [
+        (
+            MUTANTS,
+            "0",
+            0,
+            "**50 %** of the mutants were noticed by a test: 1 killed, 1 survived, 1 other.\n",
+        ),
+        (MUTANTS, "124", 0, "The run stopped at its time limit"),
+        # A configuration that mutates nothing, in the words of mutmut, with the
+        # last state of each line.
+        (
+            "",
+            "1",
+            1,
+            "```text\n⠇ Generating mutants\n    done in 597ms (0 files mutated,"
+            " 0 ignored, 0 unmodified)\n⠹ Running stats\nStopping early,",
+        ),
+        # No error of mutmut, but nothing measured either.
+        ("", "0", 1, "No mutant ran. The end of the output of mutmut:\n"),
+    ],
+)
+def test_the_score_of_mutmut_or_why_it_has_none(
+    tmp_path: Path, results: str, status: str, code: int, expected: str
+) -> None:
+    (tmp_path / "project").mkdir()
+    (tmp_path / "temp").mkdir()
+    (tmp_path / "temp/run.txt").write_text(STOPPED, encoding="utf-8", newline="\n")
+
+    exit_code, summary = run_mutation_step(
+        tmp_path,
+        "Report the score and the surviving mutants",
+        "python",
+        {"mutmut": 'printf "%s" "$RESULTS"\n'},
+        RESULTS=results,
+        status=status,
+    )
+
+    assert exit_code == code
+    assert summary.startswith("### Mutation tests (mutmut)\n")
+    assert expected in summary
+    assert "⠋" not in summary
+    assert ("\n- demo.x_add__mutmut_2\n" in summary) == bool(results)
+
+
+# The end of the output of Infection.
+INFECTION = """\
+40 mutations were generated:
+      35 mutants were killed by Test Framework
+       5 covered mutants were not detected
+
+Metrics:
+         Mutation Score Indicator (MSI): 87%
+         Mutation Code Coverage: 100%
+         Covered Code MSI: 87%
+"""
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.parametrize("bootstrap", [True, False])
+def test_infection_runs_with_the_bootstrap_of_the_tests(
+    tmp_path: Path, bootstrap: bool
+) -> None:
+    project = tmp_path / "project"
+    (project / "tests").mkdir(parents=True)
+    if bootstrap:
+        (project / "tests/bootstrap.php").touch()
+    calls = tmp_path / "calls"
+
+    code, _ = run_mutation_step(
+        tmp_path,
+        "Run the mutants against the tests",
+        "php",
+        {"php": 'echo "$*" > "$CALLS"\nprintf "%s" "$OUTPUT"\n'},
+        CALLS=calls.as_posix(),
+        OUTPUT=INFECTION,
+    )
+
+    assert code == 0
+    config = json.loads((project / "infection.json5").read_text(encoding="utf-8"))
+    # The classes of Nextcloud, which Infection loads with the code of the app.
+    assert config.get("bootstrap") == ("tests/bootstrap.php" if bootstrap else None)
+    assert config["source"] == {"directories": ["lib"]}
+    assert config["logs"]["summary"] == "build/infection-summary.log"
+    # The score of the output, which no log of Infection has, for the dashboard.
+    output = (project / "build/infection-output.log").read_text(encoding="utf-8")
+    assert "Mutation Score Indicator (MSI): 87%" in output
+    assert " --min-msi=0 " in calls.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+def test_an_error_of_infection_fails_the_run(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "infection.json5").write_text("{}\n", encoding="utf-8")
+    failing = "echo 'This application requires a PHP version matching \"^8.3\".' >&2\nexit 1\n"
+
+    code, _ = run_mutation_step(
+        tmp_path, "Run the mutants against the tests", "php", {"php": failing}
+    )
+
+    # Not hidden by the tail of its output, which succeeds.
+    assert code == 1
+    output = (project / "build/infection-output.log").read_text(encoding="utf-8")
+    assert "requires a PHP version" in output
+    assert (project / "infection.json5").read_text(encoding="utf-8") == "{}\n"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (
+            INFECTION,
+            "- Mutation Score Indicator (MSI): 87%\n- Mutation Code Coverage: 100%\n"
+            "- Covered Code MSI: 87%\n",
+        ),
+        (
+            'Class "OCP\\AppFramework\\App" not found\n',
+            'Infection reported no score. The end of its output:\n\n```text\nClass "OCP',
+        ),
+    ],
+)
+def test_the_score_of_infection_or_why_it_has_none(
+    tmp_path: Path, output: str, expected: str
+) -> None:
+    build = tmp_path / "project/build"
+    build.mkdir(parents=True)
+    (build / "infection-output.log").write_text(output, encoding="utf-8")
+    (build / "infection-summary.log").write_text("Total: 40\n", encoding="utf-8")
+
+    code, summary = run_mutation_step(tmp_path, "Report the score", "php", {})
+
+    assert code == 0
+    assert summary.startswith("### Mutation tests (Infection)\n")
+    assert expected in summary
+    assert summary.endswith("```text\nTotal: 40\n```\n")
+
+
+def test_infection_gets_a_php_that_it_runs_on() -> None:
+    # Infection 0.35 needs PHP 8.3, newer than the oldest PHP of a Nextcloud app, on
+    # which its checks run.
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    assert "INFECTION_VERSION: 0.35." in workflow
+    versions = re.findall(r'php-version: "(\d+)\.(\d+)"', workflow)
+    assert versions
+    assert all((int(major), int(minor)) >= (8, 3) for major, minor in versions)
+
+
+def test_a_pull_request_that_changes_how_the_mutants_run_tries_them() -> None:
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    events = workflow[workflow.index("\non:\n") : workflow.index("\npermissions:")]
+    for path in (
+        ".github/workflows/mutation.yml",
+        ".github/mutation-requirements.txt",
+        "stacks/mutation/requirements.txt",
+    ):
+        assert f"      - {path}\n" in events, path
+    # mutmut for a quarter of an hour, every week for hours; it keeps the mutants it
+    # reached. Infection reports at its end only.
+    limit = re.search(r"\n      MUTMUT_LIMIT: \$\{\{ (.+) \}\}\n", workflow)
+    assert limit
+    assert limit[1] == "github.event_name == 'pull_request' && '15m' || '320m'"
+    assert workflow.count('timeout "$MUTMUT_LIMIT" mutmut run ') == 1
+    assert (
+        "timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 350 }}"
+        in workflow
+    )
+
+
+@pytest.mark.parametrize("kind", ["home-assistant", "github-action", "python-package"])
+def test_a_test_can_stay_out_of_the_mutation_tests(
+    projects: dict[str, Path], kind: str
+) -> None:
+    def marker(path: Path) -> list[str]:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+        markers: list[str] = config["tool"]["pytest"]["ini_options"]["markers"]
+        return [line for line in markers if line.startswith("mutation_unsafe: ")]
+
+    assert marker(ROOT / "pyproject.toml")
+    assert marker(projects[kind] / "pyproject.toml") == marker(ROOT / "pyproject.toml")
