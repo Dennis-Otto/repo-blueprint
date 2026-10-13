@@ -6,6 +6,9 @@ pythonpath = ["."]
 addopts = ["--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]
+markers = [
+    "mutation_unsafe: fails in the copy of the repository with the mutants, which has no Git and other code; the Mutation workflow leaves it out",
+]
 
 [tool.coverage.run]
 branch = true

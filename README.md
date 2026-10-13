@@ -73,7 +73,7 @@ flowchart TB
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
 | **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates, the weekly refresh of the lock files and releases of dependency updates merge themselves once every check passes. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Coverage** | one comment on every pull request with the coverage of its tests against that of `main`, file by file | `after-checks.yml` |
-| **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a report, never a failure | `mutation.yml`: mutmut, Infection |
+| **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
 | **Flaky tests** | a test run that fails runs its failed jobs once more; a job that passes then is reported as flaky in one issue | `after-checks.yml` |
 | **Cancelled checks** | a run of a required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
@@ -124,6 +124,47 @@ flowchart TB
     class rpr bot
     class release done
 ```
+
+### Mutation tests
+
+The mutation tests show the lines that the tests run but don't check: every Saturday they change the code in thousands of small ways, the mutants, and run the tests that cover each one. A mutant that no test notices survives.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the mutation tests run
+    accDescr: Every Saturday, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. mutmut changes the Python in a copy of the repository and leaves out the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. When mutants ran, the summary shows the score and the surviving mutants, the artifact keeps them and the dashboard shows the score. A run that measured nothing fails and shows the last words of the tool.
+
+    start["Every Saturday · on demand<br>a pull request that changes<br><code>mutation.yml</code> or mutmut"]
+    python["mutmut<br>the Python, in a copy in <code>mutants/</code><br>without the tests marked <code>mutation_unsafe</code>"]
+    php["Infection<br>the PHP of a Nextcloud app<br>with <code>tests/bootstrap.php</code>"]
+    score["The summary and the artifact<br>the score · the surviving mutants"]
+    dashboard["The dashboard<br><i>mutants caught</i>"]
+    fail["The run fails<br>with the last words of the tool"]
+
+    start --> python
+    start --> php
+    python -- "mutants ran" --> score
+    php -- "mutants ran" --> score
+    score --> dashboard
+    python -. "nothing measured" .-> fail
+    php -. "nothing measured" .-> fail
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class python,php bot
+    class score,dashboard done
+```
+
+- **The score is the share of the mutants that a test noticed,** among those of the code that the tests run: for mutmut the killed among the killed and the survived, for Infection its *Covered Code MSI*. The dashboard shows it as *mutants caught*.
+- **A low score fails nothing,** not even below a minimum that the project's own configuration sets, but a run in which no mutant ran does, with the end of the output of mutmut or Infection in its summary: a broken configuration shows up in the week it breaks, not as an empty dashboard.
+- **A pull request that changes how the mutants run,** `mutation.yml` or the pinned mutmut, tries them, mutmut for a quarter of an hour, and shows a defect as a red check before the weekly run. The check isn't required, so a pull request that merges itself, such as an update of mutmut, doesn't wait for it: its red check is a warning to read.
+- **mutmut runs the tests in a copy of the repository,** `mutants/`, with the changed code and without Git. A test that can't work there, because it reads the code as text or asks Git, gets the marker `@pytest.mark.mutation_unsafe`, and the mutation tests leave it out; the `pyproject.toml` of a new Python project registers the marker.
+- **A configuration of the project wins:** a `[tool.mutmut]` table in `pyproject.toml` or a `[mutmut]` section in `setup.cfg` for mutmut, an `infection.json5` for Infection. Without one, mutmut mutates `custom_components/`, `src/` or the modules and packages of the root, and Infection mutates `lib/` on PHP 8.3, with `tests/bootstrap.php`, which loads the classes of Nextcloud.
 
 ## Kinds of projects
 
