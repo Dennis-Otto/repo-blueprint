@@ -3,10 +3,11 @@ name: Upstream
 # The upstream bot of a Nextcloud app. Every week it compares the newest release of
 # Nextcloud with the max-version of appinfo/info.xml. When Nextcloud has a new major
 # version, it opens a pull request as the release app that raises max-version to it
-# and says so under Unreleased in CHANGELOG.md, so that every check, the end-to-end
-# tests of the newest version included, runs against it. It merges itself once they
-# pass, unless the repository variable UPSTREAM_AUTOMERGE is off. Started by hand as a
-# dry run, it only shows the pull request it would open, and changes nothing.
+# and says so in a fragment of the changelog, changelog.d/nextcloud-<version>.md, so
+# that every check, the end-to-end tests of the newest version included, runs against
+# it. It merges itself once they pass, unless the repository variable
+# UPSTREAM_AUTOMERGE is off. Started by hand as a dry run, it only shows the pull
+# request it would open, and changes nothing.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:

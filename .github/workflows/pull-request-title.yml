@@ -145,7 +145,18 @@ jobs:
           # JSON string on a line of its own, so that no name spans two lines. A hidden
           # file, such as changelog.d/.gitkeep, is no fragment.
           filter='.[] | select(.status != "removed") | .filename | select(. == "CHANGELOG.md" or test("^changelog\\.d/[^.]")) | @json'
-          gh api "repos/$GH_REPO/pulls/$NUMBER/files" --paginate --jq "$filter" > "$RUNNER_TEMP/changed"
+          # Every pull request asks, also those of bots, which need no entry; GitHub fails
+          # for a moment now and then, so it asks three times before the check fails.
+          for attempt in 1 2 3; do
+            if gh api "repos/$GH_REPO/pulls/$NUMBER/files" --paginate --jq "$filter" > "$RUNNER_TEMP/changed"; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::GitHub did not list the files of this pull request. Run the check again."
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           fragment='^"(changelog\.d/[A-Za-z0-9][A-Za-z0-9._-]*\.md)"$'
           changelog=false
           fragments=()
