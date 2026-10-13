@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import textwrap
 import tomllib
 import warnings
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 import pathspec
@@ -247,6 +249,175 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
         for action, comment in re.findall(r"uses: (\S+@[0-9a-f]{40})( # \S+)?", text):
             # As Renovate tells a version from a branch: v1, 1.2.3.
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
+
+
+# The runner of the jobs, named with its version, and the one that the Next runner
+# workflow tries every week before the jobs move to it. A move changes both here.
+RUNNER = "ubuntu-24.04"
+NEXT_RUNNER = "ubuntu-26.04"
+# The issue assistant's templates, which its check keeps equal to the action's: the
+# issue assistant names their runners in its own repository.
+ISSUE_ASSISTANT_WORKFLOWS = {
+    "issue-assistant.yml",
+    "issue-lifecycle.yml",
+    "labels.yml",
+    "findings.yml",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_runs_on_a_runner_named_with_its_version(
+    projects: dict[str, Path], project: str
+) -> None:
+    # GitHub moves ubuntu-latest to a new image one job at a time, over weeks: the
+    # runs of one workflow would land on either image at random, and what the new one
+    # breaks would look like a flaky test in every repository. Only a pull request
+    # moves the jobs, once the variants pass on the next runner.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    assert set(flows) >= ISSUE_ASSISTANT_WORKFLOWS
+    # In workflows of the blueprint alone, which no project has.
+    exceptions = {
+        # The checks of the blueprint on Windows, as a contributor there runs them.
+        ("windows.yml", "windows-2025"),
+        # The variants, on the runner that a run by hand or the Next runner names.
+        ("variants.yml", f"${{{{ inputs.runner || '{RUNNER}' }}}}"),
+    }
+    for name, text in flows.items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        jobs = re.findall(r"^  [\w-]+:$", text.split("\njobs:\n", 1)[1], re.M)
+        runners = re.findall(r"^    runs-on: (.+)$", text, re.M)
+        callers = re.findall(r"^    uses: ", text, re.M)
+        # Every job names its runner, but one that calls a workflow, whose jobs do: the
+        # Variants, the build and the check of a release here, and OSV-Scanner its own.
+        assert len(runners) + len(callers) == len(jobs), name
+        for runner in runners:
+            assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
+
+
+def test_the_next_runner_runs_the_variants_every_week(
+    projects: dict[str, Path],
+) -> None:
+    flows = workflows(ROOT)
+    next_runner, variants = flows["next-runner.yml"], flows["variants.yml"]
+    # Every week and by hand, not in pull requests: the next image breaks main and every
+    # pull request alike, and none waits for it.
+    assert set(triggers(next_runner)) == {"schedule", "workflow_dispatch"}
+    job = job_of(next_runner, "next-runner")
+    assert "    uses: ./.github/workflows/variants.yml\n" in job
+    assert f"    with:\n      runner: {NEXT_RUNNER}\n" in job
+    # The issue of a failure names the runner that failed.
+    assert f"          RUNNER: {NEXT_RUNNER}\n" in job_of(next_runner, "report")
+    # The Variants take the runner from their caller or from a run by hand, and run on
+    # the runner of the jobs otherwise: in pull requests and in their own weekly run.
+    assert set(triggers(variants)) == {
+        "pull_request",
+        "schedule",
+        "workflow_dispatch",
+        "workflow_call",
+    }
+    assert (
+        "        type: choice\n"
+        f"        options: [{RUNNER}, {NEXT_RUNNER}]\n"
+        f"        default: {RUNNER}\n"
+    ) in variants
+    assert f"    runs-on: ${{{{ inputs.runner || '{RUNNER}' }}}}\n" in job_of(
+        variants, "variant"
+    )
+    # Neither the required check variants nor any other waits for the next runner.
+    settings = tomllib.loads(
+        (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    names = re.findall(r"^    name: (.+)$", next_runner, re.M)
+    assert names == ["next runner", "report"]
+    assert not set(names) & set(settings["branch"]["required_checks"])
+    # The workflow of the blueprint alone, whose variants are those of every project.
+    for project in projects.values():
+        assert not (project / ".github/workflows/next-runner.yml").exists()
+
+
+def run_with_a_fake_gh(tmp_path: Path, script: str, environment: dict[str, str]) -> str:
+    """Runs the script of a step with a gh that answers `issue list` with $OPEN and
+    writes down every other call, and returns those calls."""
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  echo "$OPEN"
+  exit 0
+fi
+echo "$*" >> calls
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    (tmp_path / "calls").touch()
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "URL": "https://github.com/o/r/actions/runs/1",
+            **environment,
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return (tmp_path / "calls").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "open_issue", "call"),
+    [
+        # A failure opens the issue, or brings the open one up to date.
+        ("failure", "", "issue create --title The variants fail on the next runner"),
+        ("failure", "7", "issue edit 7 --body"),
+        # The next run closes it once the variants pass again.
+        ("success", "7", f"issue close 7 --comment The variants pass on {NEXT_RUNNER}"),
+        ("success", "", ""),
+    ],
+)
+def test_a_failure_on_the_next_runner_keeps_an_issue_open(
+    tmp_path: Path, result: str, open_issue: str, call: str
+) -> None:
+    # No pull request shows the run, so its warning needs a place of its own.
+    next_runner = (ROOT / ".github/workflows/next-runner.yml").read_text(
+        encoding="utf-8"
+    )
+    report = job_of(next_runner, "report")
+    assert "\n    needs: next-runner\n" in report
+    assert condition_of(report) == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        """contains(fromJSON('["success", "failure"]'), needs.next-runner.result)"""
+    )
+    # Only the job that runs no code of the variants may write issues.
+    assert "\n    permissions:\n      issues: write\n    steps:" in report
+    assert next_runner.count("issues: write") == 1
+    calls = run_with_a_fake_gh(
+        tmp_path,
+        script_of(next_runner, "Keep the issue of the next runner current"),
+        {"RESULT": result, "OPEN": open_issue, "RUNNER": NEXT_RUNNER},
+    )
+
+    assert calls.startswith(call), calls
+    assert (call == "") == (calls == "")
+    assert ("--label maintenance" in calls) == (call.startswith("issue create"))
+    assert (f"The Variants workflow fails on {NEXT_RUNNER}," in calls) == (
+        result == "failure"
+    )
+    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
+        result == "failure"
+    )
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -1003,6 +1174,8 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         if kind == "nextcloud-app"
         else []
     )
+    if kind == "nextcloud-app":
+        assert_psalm_and_phpunit_find_every_file_they_name(project)
     assert (project / "scripts/check.sh").exists()
     assert (project / ".github/workflows/ci.yml").exists()
     # The website waits for the pages of the project; the check docs passes until then.
@@ -1012,20 +1185,10 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     )
 
 
-@pytest.mark.parametrize("sample_code", [True, False])
-def test_psalm_and_phpunit_find_every_file_they_name(
-    tmp_path: Path, sample_code: bool
-) -> None:
+def assert_psalm_and_phpunit_find_every_file_they_name(project: Path) -> None:
     # psalm.xml and phpunit.xml belong to the blueprint and reach an app adopted
     # without the sample code as well; psalm stops at a stub it can't find, phpunit
     # at a missing bootstrap, before either looks at the code.
-    project = render(
-        tmp_path,
-        project_name="Demo",
-        description="A demo.",
-        project_type="nextcloud-app",
-        sample_code=sample_code,
-    )
     psalm = ElementTree.parse(project / "psalm.xml").getroot()
     stubs = [
         str(stub.get("name")) for stub in psalm.findall("psalm:stubs/psalm:file", PSALM)
@@ -1047,6 +1210,12 @@ def test_psalm_and_phpunit_find_every_file_they_name(
     assert loaded == ["tests/stubs/Emitter.php", "tests/stubs/OC.php"]
     for name in (*stubs, bootstrap, *loaded):
         assert (project / name).is_file(), name
+
+
+def test_psalm_and_phpunit_find_every_file_they_name(projects: dict[str, Path]) -> None:
+    # With the sample code; test_an_existing_repository_takes_no_sample_code checks
+    # the app adopted without it.
+    assert_psalm_and_phpunit_find_every_file_they_name(projects["nextcloud-app"])
 
 
 def test_adopting_a_nextcloud_app_keeps_its_own_tests(tmp_path: Path) -> None:
@@ -1220,13 +1389,6 @@ def test_renovate_keeps_every_project_current(
         '"pre-commit": { enabled: true }',
     ):
         assert setting in rules, setting
-    # The weekly refresh of the lock files has no release date: it merges at once.
-    refresh = re.search(
-        r'matchUpdateTypes: \["lockFileMaintenance"\],\n\s+minimumReleaseAge: null,\n'
-        r"\s+automerge: true,",
-        rules,
-    )
-    assert refresh
     python = kind in ("home-assistant", "github-action", "python-package")
     # Ruff and its pre-commit hook run the same version.
     assert ('matchDepNames: ["ruff", "astral-sh/ruff-pre-commit"]' in rules) == python
@@ -1292,6 +1454,8 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
     # Renovate installs pip-tools once per repository and run, for the Python of the
     # first lock file it compiles: the lock files of pip-compile share one Python, and
     # one for another Python is compiled with uv, for a Python with its patch level.
+    # So is the one of mutmut, which leaves out the pytest of the project with an
+    # option that Renovate allows for uv alone.
     pip_compile = {}
     uv = {}
     tracked = subprocess.run(
@@ -1309,24 +1473,527 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
             assert "--no-index" not in header, name
         else:
             command = re.search(
-                r"^#    uv pip compile .*--python-version (\d+\.\d+\.\d+) ",
+                r"^#    uv pip compile .*--python-version=(\d+\.\d+(?:\.\d+)?) ",
                 header,
                 re.M,
             )
             assert command, name
             uv[name] = command[1]
     assert len(set(pip_compile.values())) == 1, pip_compile
-    assert list(uv) == ["stacks/home-assistant/requirements-test.txt"]
+    assert sorted(uv) == [
+        "stacks/home-assistant/requirements-test.txt",
+        "stacks/mutation/requirements.txt",
+    ]
     copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
     python = re.search(r"stack == 'home-assistant' %\]([\d.]+)\[% else", copier)
     assert python
     assert uv["stacks/home-assistant/requirements-test.txt"].startswith(python[1] + ".")
+    # mutmut runs on the Python of each Python project, from the oldest on, which the
+    # lock files of pip-compile are for.
+    assert uv["stacks/mutation/requirements.txt"] == next(iter(pip_compile.values()))
     # The pinned test plugin makes a Home Assistant that needs a newer Python fail
     # its update, instead of an older Home Assistant being chosen.
     inputs = (ROOT / "stacks/home-assistant/requirements-test.in").read_text(
         encoding="utf-8"
     )
     assert re.search(r"^pytest-homeassistant-custom-component==\S+$", inputs, re.M)
+
+
+# How Renovate reads the command in the header of a lock file of pip-compile, after
+# lib/modules/manager/pip-compile/common.ts and utils.ts of the version that the
+# Renovate workflow runs. It compiles the file again with that command, and skips a
+# file whose command it can't read in every run, with no more than a warning in its
+# log: the file gets no update from then on, not even one that fixes a
+# vulnerability. The job "renovate rules" lets Renovate itself read every file.
+HEADER = re.compile(r"^(?:#.*?\r?\n)+# {4}(?P<command>\S*)(?P<arguments> .*?)?\r?\n")
+PYTHON_OF_PIP_COMPILE = re.compile(
+    r"^(?:#.*?\r?\n)*# This file is autogenerated by pip-compile with Python "
+    r"\d+(?:\.\d+)*\s",
+    re.IGNORECASE,
+)
+WITH_A_VALUE = {"--output-file", "--extra", "--extra-index-url"}
+PIP_WITH_A_VALUE = {"--resolver", "--constraint", *WITH_A_VALUE}
+UV_WITH_A_VALUE = {
+    *("--constraints", "--constraint", "--python-version", "--no-emit-package"),
+    *("--prerelease", "--format", "--resolution", "--fork-strategy"),
+    *("--exclude-newer", "--exclude-newer-package", "--group", "--override"),
+    *("--overrides", *WITH_A_VALUE),
+}
+FOR_BOTH = {
+    "-v",
+    "--generate-hashes",
+    "--emit-index-url",
+    "--index-url",
+    "--all-extras",
+}
+KNOWN_OPTIONS = {
+    "pip-compile": {
+        *("--allow-unsafe", "--generate-hashes", "--no-emit-index-url"),
+        *("--strip-extras", *FOR_BOTH, *PIP_WITH_A_VALUE),
+    },
+    "uv": {"--no-strip-extras", "--universal", *FOR_BOTH, *UV_WITH_A_VALUE},
+}
+
+
+def why_renovate_skips(root: Path, name: str) -> list[str]:
+    """What keeps Renovate from compiling the lock file root/name again; nothing for a
+    file that it reads."""
+    content = (root / name).read_text(encoding="utf-8")
+    header = HEADER.match(content)
+    if not header:
+        return ["no command in the header"]
+    command = header["command"]
+    if command not in KNOWN_OPTIONS:
+        return [f"{command}, a command of its own"]
+    problems = []
+    sources, output = [], ""
+    for argument in shlex.split(header["arguments"] or ""):
+        if command == "uv" and argument in ("pip", "compile"):
+            continue
+        if not argument.startswith("-"):
+            sources.append(argument)
+            continue
+        option, _, value = argument.partition("=")
+        if argument == "--no-header":
+            problems.append("--no-header, which Renovate refuses")
+        elif argument in PIP_WITH_A_VALUE | UV_WITH_A_VALUE:
+            problems.append(f"{argument} without = before its value")
+        elif option not in KNOWN_OPTIONS[command]:
+            problems.append(f"{argument}, an option that Renovate doesn't know")
+        elif option == "--output-file":
+            output = value
+    # Renovate finds the folder of the command from the path of the output file.
+    if output and Path(output).name != Path(name).name:
+        problems.append(f"{output} as the output file")
+    if not sources:
+        problems.append("no source file")
+    for source in sources:
+        if not (root / name).parent.joinpath(source).is_file():
+            problems.append(f"{source}, a source file that doesn't exist")
+    # The Python to compile it for, which Renovate installs.
+    if command == "pip-compile" and not PYTHON_OF_PIP_COMPILE.match(content):
+        problems.append("no Python in the header")
+    return problems
+
+
+def lock_files_of_pip_compile(names: list[str]) -> list[str]:
+    """The files that Renovate's pip-compile finds, by its managerFilePatterns."""
+    rules = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    pattern = re.search(
+        r'"pip-compile": \{ managerFilePatterns: \["/(.+)/"\] \}', rules
+    )
+    assert pattern
+    found = re.compile(json.loads(f'"{pattern[1]}"'))
+    return sorted(name for name in names if found.search(name))
+
+
+@pytest.mark.parametrize(
+    ("header", "problems"),
+    [
+        (
+            "# This file was autogenerated by uv via the following command:\n"
+            "#    uv pip compile --generate-hashes --python-version 3.14.8"
+            " --output-file=requirements.txt requirements.in\n",
+            # Without the =, the value reads as one more file to compile.
+            [
+                "--python-version without = before its value",
+                "3.14.8, a source file that doesn't exist",
+            ],
+        ),
+        (
+            "#\n# This file is autogenerated by pip-compile with Python 3.12\n"
+            "# by the following command:\n#\n"
+            "#    pip-compile --generate-hashes --output-file=requirements.txt"
+            " --strip-extras --unsafe-package=coverage requirements.in\n",
+            ["--unsafe-package=coverage, an option that Renovate doesn't know"],
+        ),
+        (
+            "# This file was autogenerated by uv via the following command:\n"
+            "#    uv pip compile --python-platform=linux --no-header"
+            " --output-file=requirements-dev.txt\n",
+            [
+                "--python-platform=linux, an option that Renovate doesn't know",
+                "--no-header, which Renovate refuses",
+                "requirements-dev.txt as the output file",
+                "no source file",
+            ],
+        ),
+        (
+            "#\n# This file is autogenerated by pip-compile\n#\n"
+            "#    pip-compile --generate-hashes --output-file=requirements.txt"
+            " requirements.in elsewhere.in\n",
+            [
+                "elsewhere.in, a source file that doesn't exist",
+                "no Python in the header",
+            ],
+        ),
+        ("# by make:\n#    make requirements.txt\n", ["make, a command of its own"]),
+        ("mutmut==3.8.0\n", ["no command in the header"]),
+        # What the lock files of the blueprint have.
+        (
+            "#\n# This file is autogenerated by pip-compile with Python 3.12\n"
+            "# by the following command:\n#\n"
+            "#    pip-compile --allow-unsafe --generate-hashes"
+            " --output-file=requirements.txt --strip-extras requirements.in\n",
+            [],
+        ),
+        (
+            "# This file was autogenerated by uv via the following command:\n"
+            "#    uv pip compile --generate-hashes --universal --python-version=3.12"
+            " --no-emit-package=pytest --output-file=requirements.txt"
+            " requirements.in\n",
+            [],
+        ),
+    ],
+)
+def test_the_guard_of_the_lock_files_finds_what_renovate_skips(
+    tmp_path: Path, header: str, problems: list[str]
+) -> None:
+    (tmp_path / "requirements.in").write_text("mutmut\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text(
+        f"{header}mutmut==3.8.0\n", encoding="utf-8"
+    )
+
+    assert why_renovate_skips(tmp_path, "requirements.txt") == problems
+
+
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
+def test_renovate_reads_every_lock_file_of_the_blueprint() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True, text=True
+    ).stdout.split("\0")
+    names = lock_files_of_pip_compile(tracked)
+
+    assert {name: why_renovate_skips(ROOT, name) for name in names} == {
+        name: [] for name in names
+    }
+    # The tools of the blueprint's tests and of every kind of project.
+    assert len(names) == 1 + len(list((ROOT / "stacks").glob("*/requirements*.txt")))
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_renovate_reads_every_lock_file_of_a_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    names = lock_files_of_pip_compile(
+        [path.relative_to(project).as_posix() for path in project.rglob("*.txt")]
+    )
+
+    assert {name: why_renovate_skips(project, name) for name in names} == {
+        name: [] for name in names
+    }
+    expected = {
+        "home-assistant": ["requirements-test.txt"],
+        "python-package": ["requirements-dev.txt", "requirements-fuzz.txt"],
+        "github-action": ["requirements-dev.txt", "requirements-fuzz.txt"],
+    }
+    assert names == expected.get(kind, [])
+
+
+def renovate_rules(text: str) -> dict[str, Any]:
+    """The rules of a .json5 file of Renovate: JSON with comments, names without
+    quotes and commas before a closing bracket."""
+    out, position = [], 0
+    token = re.compile(
+        r'(?P<string>"(?:[^"\\]|\\.)*")|(?P<comment>//[^\n]*)'
+        r"|(?P<name>[A-Za-z_$][\w$]*)(?=\s*:)|(?P<comma>,(?=\s*[}\]]))"
+    )
+    for found in token.finditer(text):
+        out.append(text[position : found.start()])
+        if found["string"]:
+            out.append(found["string"])
+        elif found["name"]:
+            out.append(json.dumps(found["name"]))
+        position = found.end()
+    out.append(text[position:])
+    rules = json.loads("".join(out))
+    assert isinstance(rules, dict)
+    return rules
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
+    projects: dict[str, Path], kind: str
+) -> None:
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    # Every package manager refreshes its lock files once a week, in the same window
+    # as the other updates.
+    assert shared["lockFileMaintenance"] == {
+        "enabled": True,
+        "schedule": shared["schedule"],
+    }
+    # The refresh brings the newest version of every indirect dependency, also one of
+    # minutes ago, without the week of waiting: so it never merges on its own. A rule
+    # that could apply to it decides, the last one with a say.
+    automerge = shared.get("automerge", False)
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    refresh = [
+        rule
+        for rule in rules
+        if rule.get("matchUpdateTypes") == ["lockFileMaintenance"]
+    ]
+    # Renovate builds it anew only in its window: a change of main after the review
+    # doesn't bring versions that the maintainer hasn't seen.
+    assert refresh == [
+        {
+            "matchUpdateTypes": ["lockFileMaintenance"],
+            "minimumReleaseAge": None,
+            "automerge": False,
+            "updateNotScheduled": False,
+        }
+    ]
+    for rule in rules:
+        # A refresh has no dependency, datasource or version of its own to match.
+        about_a_dependency = any(
+            key.startswith("match")
+            and key not in ("matchUpdateTypes", "matchManagers", "matchFileNames")
+            for key in rule
+        )
+        types = rule.get("matchUpdateTypes", ["lockFileMaintenance"])
+        if "lockFileMaintenance" in types and not about_a_dependency:
+            automerge = rule.get("automerge", automerge)
+    assert automerge is False
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("log", "status", "errors"),
+    [
+        (
+            [
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {
+                        "requirements.in": ["requirements.txt"],
+                        "stacks/demo/requirements.in": ["stacks/demo/requirements.txt"],
+                    },
+                }
+            ],
+            0,
+            [],
+        ),
+        (
+            # Two lock files of one source are one package file of Renovate.
+            [
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {
+                        "requirements.in": [
+                            "requirements.txt",
+                            "stacks/demo/requirements.txt",
+                        ]
+                    },
+                }
+            ],
+            0,
+            [],
+        ),
+        (
+            [
+                {
+                    "level": 40,
+                    "msg": "pip-compile error",
+                    "repository": "local",
+                    "matchedFile": "stacks/demo/requirements.txt",
+                    "errorMessage": "Option --unsafe-package=coverage not supported (yet)",
+                },
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {"requirements.in": ["requirements.txt"]},
+                },
+            ],
+            0,
+            [
+                'pip-compile error: {"matchedFile": "stacks/demo/requirements.txt",'
+                ' "errorMessage": "Option --unsafe-package=coverage not supported'
+                ' (yet)"}',
+                "Renovate doesn't read the lock file stacks/demo/requirements.txt.",
+            ],
+        ),
+        (
+            [{"level": 30, "msg": "Extracted dependencies", "sources": {}}],
+            0,
+            [
+                "Renovate doesn't read the lock file requirements.txt.",
+                "Renovate doesn't read the lock file stacks/demo/requirements.txt.",
+            ],
+        ),
+        (
+            # Renovate ends with exit code 1 after an error, as with broken rules.
+            [{"level": 60, "msg": "Repository has invalid config"}],
+            1,
+            [
+                "Repository has invalid config: {}",
+                "Renovate didn't finish reading the files.",
+                "Renovate ended with exit code 1.",
+            ],
+        ),
+        (
+            # docker can't start Renovate at all.
+            [],
+            125,
+            [
+                "Renovate didn't finish reading the files.",
+                "Renovate ended with exit code 125.",
+            ],
+        ),
+    ],
+)
+def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
+    tmp_path: Path, log: list[dict[str, object]], status: int, errors: list[str]
+) -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_of(workflow, "validate")
+    step = job[job.index("      - name: Read every file of the dependencies") :]
+    run = "        run: |\n"
+    script = textwrap.dedent(step[step.index(run) + len(run) :])
+    # A checkout with two lock files of pip-compile, as GitHub leaves it.
+    checkout = tmp_path / "checkout"
+    for name in ("requirements.txt", "stacks/demo/requirements.txt", "notes.txt"):
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / name).write_text("# A file.\n", encoding="utf-8")
+    author = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+    for command in (
+        ["init", "--quiet"],
+        ["add", "."],
+        [*author, "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "a"],
+    ):
+        subprocess.run(["git", *command], cwd=checkout, check=True)
+    (checkout / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    # Renovate's log as JSON lines, with the package files it found of pip-compile,
+    # and a line of its own; docker notes what it gets and ends as Renovate does,
+    # python3 is the Python of the tests.
+    lines = []
+    for entry in log:
+        if "sources" in entry:
+            sources = entry.pop("sources")
+            assert isinstance(sources, dict)
+            entry["packageFiles"] = {
+                "pip-compile": [
+                    {"packageFile": source, "lockFiles": locks, "deps": []}
+                    for source, locks in sources.items()
+                ],
+                "pip_requirements": [{"packageFile": "requirements.txt"}],
+            }
+        lines.append(json.dumps({"name": "renovate", "pid": 7, "v": 0, **entry}))
+    (tmp_path / "log").write_text(
+        "Starting Renovate\n" + "".join(f"{line}\n" for line in lines),
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool, body in {
+        # The archive that it mounts, and its arguments.
+        "docker": 'tar -tf - < "${4%:/tmp/repository.tar:ro}" > "$CALLS.tar"\n'
+        'printf \'%s\\n\' "$@" > "$CALLS"\ncat "$LOG"\nexit "$STATUS"\n',
+        "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+    }.items():
+        (bin_dir / tool).write_text(
+            f"#!/usr/bin/env bash\n{body}", encoding="utf-8", newline="\n"
+        )
+        (bin_dir / tool).chmod(0o755)
+    (tmp_path / "temp").mkdir()
+    summary = tmp_path / "summary"
+    summary.touch()
+    calls = tmp_path / "calls"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": (tmp_path / "temp").as_posix(),
+        "GITHUB_STEP_SUMMARY": summary.as_posix(),
+        "IMAGE": "renovate",
+        "CALLS": calls.as_posix(),
+        "LOG": (tmp_path / "log").as_posix(),
+        "STATUS": str(status),
+    }
+    # As GitHub runs a step: bash -e.
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=checkout,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == (1 if errors else 0), result.stderr
+    assert re.findall(r"^::error title=Renovate::(.*)$", result.stdout, re.M) == errors
+    # Lines that are no JSON stay in the log of the job.
+    assert result.stdout.startswith("Starting Renovate\n")
+    expected = "" if errors else "the 2 lock files of pip-compile among them"
+    assert expected in summary.read_text(encoding="utf-8")
+    # The committed files reach Renovate, in its container, as the rules of the
+    # blueprint, without a token, and with every warning in its log.
+    archive = (tmp_path / "calls.tar").read_text(encoding="utf-8").splitlines()
+    assert sorted(name for name in archive if not name.endswith("/")) == [
+        "notes.txt",
+        "requirements.txt",
+        "stacks/demo/requirements.txt",
+    ]
+    arguments = calls.read_text(encoding="utf-8").splitlines()
+    assert arguments[:3] == ["run", "--rm", "--volume"]
+    for argument in (
+        "LOG_LEVEL=info",
+        "LOG_FORMAT=json",
+        "RENOVATE_GITHUB_TOKEN_WARN=false",
+        "RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5",
+        "renovate",
+    ):
+        assert argument in arguments, argument
+    assert not any(
+        "TOKEN=" in argument and "WARN" not in argument for argument in arguments
+    )
+    assert arguments[-1].strip().endswith("renovate --platform=local --dry-run=extract")
+
+
+def test_the_renovate_rules_run_for_every_change_of_a_lock_file() -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    events = workflow[
+        workflow.index("\n  pull_request:\n") : workflow.index("\n  workflow_dispatch:")
+        + 1
+    ]
+    for path in (
+        ".github/renovate*.json5",
+        ".github/workflows/renovate.yml",
+        '"**/requirements*.txt"',
+        '"**/requirements*.in"',
+    ):
+        assert f"      - {path}\n" in events, path
+    # The step lists the lock files as Renovate finds them.
+    step = workflow[
+        workflow.index("      - name: Read every file of the dependencies") :
+    ]
+    pattern = re.search(r"grep -E '([^']+)'", step)
+    assert pattern
+    rules = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    assert f'managerFilePatterns: ["/{json.dumps(pattern[1])[1:-1]}/"]' in rules
+
+
+def test_a_pull_request_checks_the_renovate_rules_without_waiting_for_the_bot() -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    # Renovate's run opens several pull requests of lock files at once: a group of
+    # the whole workflow would let them wait for the bot and cancel each other.
+    assert not re.search(r"^concurrency:", workflow, re.M)
+    assert (
+        "    concurrency:\n"
+        "      group: renovate-rules-${{ github.event.pull_request.number }}\n"
+        "      cancel-in-progress: true\n"
+    ) in job_of(workflow, "validate")
+    # One run of the bot at a time, and a waiting one isn't cancelled by a check.
+    assert (
+        "    concurrency:\n      group: renovate\n      cancel-in-progress: false\n"
+    ) in job_of(workflow, "renovate")
 
 
 def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
@@ -1833,7 +2500,7 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     # Contributors on Windows run scripts/check.sh in Git Bash; the other workflows
     # run on Linux only.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
-    assert "    runs-on: windows-latest\n" in windows
+    assert "    runs-on: windows-2025\n" in windows
     assert "    shell: bash\n" in windows
     assert "run: pip install --require-hashes -r requirements-dev.txt\n" in windows
     assert "run: bash scripts/check.sh\n" in windows
@@ -2070,45 +2737,12 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
     # Only the job without the code of the project may write issues.
     assert "\n    permissions:\n      issues: write\n    steps:" in report
     assert newest.count("issues: write") == 1
-    (tmp_path / "step.sh").write_text(
+    calls = run_with_a_fake_gh(
+        tmp_path,
         script_of(newest, "Keep the issue of the newest Python current"),
-        encoding="utf-8",
-        newline="\n",
-    )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-if [[ "$1 $2" == "issue list" ]]; then
-  echo "$OPEN"
-  exit 0
-fi
-echo "$*" >> calls
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
-    gh.chmod(0o755)
-    (tmp_path / "calls").touch()
-    assert BASH
-    done = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "RESULT": result,
-            "OPEN": open_issue,
-            "URL": "https://github.com/o/r/actions/runs/1",
-        },
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+        {"RESULT": result, "OPEN": open_issue},
     )
 
-    assert done.returncode == 0, done.stderr
-    calls = (tmp_path / "calls").read_text(encoding="utf-8")
     if not call:
         assert calls == ""
         return
