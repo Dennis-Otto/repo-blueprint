@@ -70,6 +70,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RUN: ${{ github.event.workflow_run.id }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           NAME: ${{ github.event.workflow_run.name }}
           WORKFLOW: ${{ github.event.workflow_run.workflow_id }}
           EVENT: ${{ github.event.workflow_run.event }}
@@ -77,27 +78,39 @@ jobs:
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          # The jobs of a run that failed or ran out of time, by name: GitHub cancels a
-          # job at its time limit and says so in an annotation. A job that a newer run
-          # cancelled is the business of the bot for cancelled checks, and one that a
-          # person cancelled stays so. With a second argument, only the jobs it names.
+          # The jobs of an attempt that failed or ran out of time, by name, given the
+          # conclusion of the attempt: GitHub cancels a job at its time limit and says
+          # so in an annotation. An attempt that a newer run cancelled broke nothing; it
+          # is the business of the bot for cancelled checks. In one that a person or a
+          # time limit cancelled, only the jobs that ran out of time broke: a job that
+          # waits for the others fails when they are cancelled. With a third argument,
+          # only the jobs it names.
           broken() {
-            local jobs id conclusion name
+            local jobs id conclusion name messages found=""
             jobs="$(gh api "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
               --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.id, .conclusion, .name] | @tsv')" ||
               return 1
             while IFS=$'\t' read -r -u 4 id conclusion name; do
-              if [[ -z "$id" ]] || { [[ -n "${2:-}" ]] && ! grep -Fxq -- "$name" <<<"$2"; }; then
+              if [[ -z "$id" ]] || [[ "$conclusion" == failure && "$2" == cancelled ]]; then
                 continue
               fi
-              if [[ "$conclusion" == failure ]] ||
-                gh api "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message' |
-                grep -q "has exceeded the maximum execution time"; then
-                printf '%s\n' "$name"
+              if [[ "$conclusion" == cancelled ]]; then
+                messages="$(gh api "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
+                  return 1
+                if grep -q "higher priority waiting request" <<<"$messages"; then
+                  return 0
+                fi
+                if ! grep -q "has exceeded the maximum execution time" <<<"$messages"; then
+                  continue
+                fi
+              fi
+              if [[ -z "${3:-}" ]] || grep -Fxq -- "$name" <<<"$3"; then
+                found+="$name"$'\n'
               fi
             done 4<<<"$jobs"
+            printf '%s' "$found"
           }
-          now="$(broken "$RUN/attempts/1")"
+          now="$(broken "$RUN/attempts/1" "$CONCLUSION")"
           if [[ -z "$now" ]]; then
             echo "No job of $NAME failed or ran out of time; a newer run or a person cancelled it." >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -108,9 +121,10 @@ jobs:
           # jobs run once more.
           previous="$(gh api --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
             -f branch="$BRANCH" -f event="$EVENT" -f status=completed -f per_page=30 \
-            --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[0].id // empty" ||
+            --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[0] // empty | [.id, .conclusion] | @tsv" ||
             true)"
-          if [[ -n "$previous" ]] && [[ "$(broken "$previous" "$now" | sort)" == "$(sort <<<"$now")" ]]; then
+          if [[ -n "$previous" ]] &&
+            [[ "$(broken "${previous%%$'\t'*}" "${previous#*$'\t'}" "$now" | sort)" == "$(sort <<<"$now")" ]]; then
             mapfile -t jobs <<<"$now"
             {
               echo "The same jobs of $NAME broke for the commit before, so they don't run again:"
@@ -173,17 +187,24 @@ jobs:
           }
           # Each job that failed in the first attempt, or ran out of time there, with
           # the step that broke, the tests that pytest names in its log, and the first
-          # error that it reported. A job that a newer run or a person cancelled, as
-          # one that the bot for cancelled checks started again, failed in no test.
+          # error that it reported. An attempt that a newer run cancelled, as one that
+          # the bot for cancelled checks started again, failed in no test. In one that
+          # a person or a time limit cancelled, only the jobs that ran out of time
+          # broke: a job that waits for the others fails when they are cancelled.
+          first="$(gh api "repos/$GH_REPO/actions/runs/$RUN/attempts/1" --jq .conclusion)"
           jobs="$(gh api "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
             --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.id, .conclusion, .html_url, .name, ([.steps[]? | select(.conclusion == "failure" or .conclusion == "cancelled") | .name] | join(", "))] | @tsv')"
           rows=""
           while IFS=$'\t' read -r -u 3 id conclusion url name steps; do
-            if [[ -z "$id" ]]; then
+            if [[ -z "$id" ]] || [[ "$conclusion" == failure && "$first" == cancelled ]]; then
               continue
             fi
             errors="$(gh api "repos/$GH_REPO/check-runs/$id/annotations" --paginate \
               --jq '.[] | select(.annotation_level == "failure") | .message | gsub("\\s+"; " ")' || true)"
+            if grep -q "higher priority waiting request" <<<"$errors"; then
+              rows=""
+              break
+            fi
             if [[ "$conclusion" == cancelled ]] && ! grep -q "has exceeded the maximum execution time" <<<"$errors"; then
               continue
             fi

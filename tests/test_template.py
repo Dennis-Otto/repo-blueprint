@@ -2551,16 +2551,19 @@ def annotations_of_a_job(*messages: str) -> list[dict[str, str]]:
     ]
 
 
-def runs_of_the_branch(*before: int) -> dict[str, object]:
+def runs_of_the_branch(*before: int, conclusion: str = "failure") -> dict[str, object]:
     """The completed runs of the workflow for the branch, the newest first: a later one,
     the run itself, another run of its commit, one of a fork's branch of the same name,
-    and those for the commits before."""
+    and those for the commits before, which ended with the conclusion."""
 
-    def run(number: int, sha: str, repository: str = "o/r") -> dict[str, object]:
+    def run(
+        number: int, sha: str, repository: str = "o/r", end: str = "success"
+    ) -> dict[str, object]:
         return {
             "id": number,
             "head_sha": sha,
             "head_repository": {"full_name": repository},
+            "conclusion": end,
         }
 
     return {
@@ -2569,7 +2572,7 @@ def runs_of_the_branch(*before: int) -> dict[str, object]:
             run(5, "abc1234def"),
             run(4, "abc1234def"),
             run(3, "1111111", "fork/r"),
-            *(run(number, f"{number:07}") for number in before),
+            *(run(number, f"{number:07}", end=conclusion) for number in before),
         ]
     }
 
@@ -2630,7 +2633,7 @@ def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
         },
         "repos/o/r/check-runs/11/annotations": annotations_of_a_job(*messages),
         "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
-            *([2] if before else [])
+            *([2] if before else []), conclusion=before[0] if before else "failure"
         ),
     }
     if before:
@@ -2648,6 +2651,7 @@ def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
         "rerun",
         "Run the failed jobs once more",
         answers,
+        CONCLUSION=first,
         WORKFLOW="3",
         EVENT="pull_request",
         HEAD_REPO="o/r",
@@ -2691,6 +2695,7 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
         "rerun",
         "Run the failed jobs once more",
         answers,
+        CONCLUSION="failure",
         WORKFLOW="3",
         EVENT="push",
         BRANCH="main",
@@ -2706,10 +2711,123 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
     assert not any("actions/runs/1/" in call for call in calls)
 
 
+def variants_of_a_run(
+    jobs: str, leg: str, messages: tuple[str, ...], first: int
+) -> dict[str, object]:
+    """The jobs of a run of Variants that was cancelled, such as run 38396054999, whose
+    legs a newer run cancelled: a leg that ended as given, one that was cancelled with
+    the messages, and the job that waits for the legs, which failed because they did
+    not pass."""
+    answers: dict[str, object] = {
+        jobs: {
+            "jobs": [
+                job_of_a_run(first, "variant (generic)", leg),
+                job_of_a_run(first + 1, "update (generic)", "cancelled"),
+                job_of_a_run(first + 2, "variants", "failure", ("Check", "failure")),
+            ]
+        },
+        f"repos/o/r/check-runs/{first + 1}/annotations": annotations_of_a_job(
+            *messages
+        ),
+        f"repos/o/r/check-runs/{first + 2}/annotations": annotations_of_a_job(EXITED),
+    }
+    if leg == "cancelled":
+        answers[f"repos/o/r/check-runs/{first}/annotations"] = annotations_of_a_job(
+            *messages
+        )
+    return answers
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("leg", "messages", "again"),
+    [
+        # A newer run cancelled it, after a leg had failed or before.
+        ("cancelled", (RACED, CANCELLED), False),
+        ("failure", (RACED, CANCELLED), False),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), False),
+        ("failure", (CANCELLED,), False),
+        # A leg ran out of time.
+        ("success", (TIMED_OUT, CANCELLED), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_a_cancelled_run_again_only_when_it_ran_out_of_time(
+    tmp_path: Path, leg: str, messages: tuple[str, ...], again: bool
+) -> None:
+    # The job that waits for the legs failed only because they were cancelled; run
+    # again, the run for an older commit would cancel the one for the head.
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        NAME="Variants",
+        CONCLUSION="cancelled",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("a newer run or a person cancelled it" in summary) != again
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("conclusion", "messages", "again"),
+    [
+        # A newer push cancelled the run for the commit before, after a leg had failed.
+        ("cancelled", (RACED, CANCELLED), True),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), True),
+        # It failed: the same jobs broke.
+        ("failure", (CANCELLED,), False),
+    ],
+)
+def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
+    tmp_path: Path, conclusion: str, messages: tuple[str, ...], again: bool
+) -> None:
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(11, "variant (generic)", "failure"),
+                    job_of_a_run(12, "update (generic)", "success"),
+                    job_of_a_run(13, "variants", "failure"),
+                ]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+                2, conclusion=conclusion
+            ),
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/2/jobs", "failure", messages, 21
+            ),
+        },
+        NAME="Variants",
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("broke for the commit before" in summary) != again
+
+
 # The first attempt of a run of the tests, which passed when it ran again: a test that
 # failed, a job that ran out of time, one that failed in its build, one without a log,
 # and jobs that passed or that the failure of another cancelled.
 FIRST_ATTEMPT: dict[str, object] = {
+    "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
     "repos/o/r/actions/runs/5/attempts/1/jobs": {
         "jobs": [
             job_of_a_run(
@@ -2844,6 +2962,7 @@ def test_the_flaky_test_bot_reports_no_run_that_a_newer_one_cancelled(
                     ),
                 ]
             },
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
             "repos/o/r/check-runs/11/annotations": annotations_of_a_job(RACED),
             "repos/o/r/check-runs/12/annotations": annotations_of_a_job(RACED),
         },
@@ -2853,6 +2972,68 @@ def test_the_flaky_test_bot_reports_no_run_that_a_newer_one_cancelled(
     assert "nothing to report" in summary
     assert not written
     assert not any(call.startswith("issue ") for call in calls)
+
+
+@WITH_JQ
+@pytest.mark.parametrize("leg", ["cancelled", "failure"])
+@pytest.mark.parametrize(
+    "messages", [(RACED, CANCELLED), (CANCELLED,)], ids=["raced", "by a person"]
+)
+def test_the_flaky_test_bot_reports_no_job_that_failed_because_others_were_cancelled(
+    tmp_path: Path, leg: str, messages: tuple[str, ...]
+) -> None:
+    # The bot for cancelled checks or a person started a cancelled run of Variants
+    # again, and it passed: the job that waits for the legs failed in no test.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+    assert not any("/logs" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_time(
+    tmp_path: Path,
+) -> None:
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs",
+                "success",
+                (TIMED_OUT, CANCELLED),
+                11,
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    # Not the job that waits for the legs.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| [")
+    ] == [
+        "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
+    ]
 
 
 @WITH_JQ
@@ -2866,6 +3047,7 @@ def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
         "report",
         "Add the jobs that failed at first to the issue of flaky tests",
         {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
             "repos/o/r/actions/runs/5/attempts/1/jobs": {
                 "jobs": [
                     job_of_a_run(
