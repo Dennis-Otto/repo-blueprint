@@ -1571,12 +1571,10 @@ def run_mutation_step(
         "MUTMUT_LIMIT": "1m",
         **variables,
     }
-    # As GitHub runs a step: bash -e. By its full path, which on Windows is Git Bash,
-    # not the launcher of WSL in System32.
-    bash = shutil.which("bash")
-    assert bash
+    # As GitHub runs a step: bash -e.
+    assert BASH
     result = subprocess.run(
-        [bash, "-e", step.as_posix()],
+        [BASH, "-e", step.as_posix()],
         cwd=tmp_path / "project",
         env=environment,
         capture_output=True,
@@ -1593,7 +1591,7 @@ def mutmut_list(config: configparser.ConfigParser, key: str) -> list[str]:
     return [item for item in value.split("\n") if item] if "\n" in value else [value]
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("files", "paths"),
     [
@@ -1650,7 +1648,7 @@ def test_mutmut_mutates_the_code_of_every_kind_of_project(
     assert calls.read_text(encoding="utf-8").startswith("run --max-children ")
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("name", "text"),
     [
@@ -1688,7 +1686,7 @@ STOPPED = (
 )
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("results", "status", "code", "expected"),
     [
@@ -1748,7 +1746,7 @@ Metrics:
 """
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize("bootstrap", [True, False])
 def test_infection_runs_with_the_bootstrap_of_the_tests(
     tmp_path: Path, bootstrap: bool
@@ -1780,7 +1778,7 @@ def test_infection_runs_with_the_bootstrap_of_the_tests(
     assert " --min-msi=0 " in calls.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_an_error_of_infection_fails_the_run(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1798,7 +1796,7 @@ def test_an_error_of_infection_fails_the_run(tmp_path: Path) -> None:
     assert (project / "infection.json5").read_text(encoding="utf-8") == "{}\n"
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the step runs in bash")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("output", "expected"),
     [
