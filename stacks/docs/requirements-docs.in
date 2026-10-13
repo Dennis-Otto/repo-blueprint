@@ -11,3 +11,9 @@ mkdocs-material[imaging]
 mkdocs-glightbox
 mkdocs-git-revision-date-localized-plugin
 mkdocs-static-i18n
+# The time zones of the dates, which the date plugin requires on Windows alone, since
+# Windows has none that Python reads. pip-compile runs on Linux and would leave them
+# out, and pip then refuses the whole file on Windows: with --require-hashes, every
+# requirement needs its pin and hashes. Listed here, the lock pins them for every
+# system; Linux and macOS don't need them, and they change nothing there.
+tzdata

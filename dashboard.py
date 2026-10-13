@@ -182,15 +182,26 @@ def when(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
+def main_runs(api: Api, repo: str, workflow: str) -> list[dict[str, Any]]:
+    """The last successful runs of workflow for main itself, newest first. A pull
+    request from the main of a fork runs on a branch of that name too, with its own
+    changes, even to the workflow."""
+    runs = api.get(
+        f"repos/{repo}/actions/workflows/{workflow}/runs"
+        "?branch=main&status=success&per_page=10&exclude_pull_requests=true"
+    )
+    return [
+        run
+        for run in (runs or {}).get("workflow_runs") or []
+        if not str(run.get("event", "")).startswith("pull_request")
+    ]
+
+
 def artifact(
     api: Api, download: Downloader, repo: str, workflow: str, name: str
 ) -> dict[str, bytes]:
     """The files of the artifact name of the last successful run of workflow on main."""
-    runs = api.get(
-        f"repos/{repo}/actions/workflows/{workflow}/runs"
-        "?branch=main&status=success&per_page=1&exclude_pull_requests=true"
-    )
-    found = (runs or {}).get("workflow_runs") or []
+    found = main_runs(api, repo, workflow)
     if not found:
         return {}
     listed = api.get(f"repos/{repo}/actions/runs/{found[0]['id']}/artifacts") or {}
@@ -211,6 +222,9 @@ def coverage(files: dict[str, bytes]) -> float | None:
 
 
 def mutation(files: dict[str, bytes]) -> float | None:
+    """The share of the mutants of the code that the tests run which a test caught:
+    of mutmut the killed among the killed and survived, of Infection the Covered Code
+    MSI, or the MSI of an older artifact that has no other."""
     for name, data in files.items():
         text = data.decode("utf-8", "replace")
         if name.endswith("results.txt"):
@@ -218,7 +232,9 @@ def mutation(files: dict[str, bytes]) -> float | None:
             survived = len(re.findall(r": survived$", text, re.MULTILINE))
             if killed + survived:
                 return 100 * killed / (killed + survived)
-        found = re.search(r"Mutation Score Indicator \(MSI\): (\d+(?:\.\d+)?)%", text)
+        found = re.search(r"Covered Code MSI: (\d+(?:\.\d+)?)%", text) or re.search(
+            r"Mutation Score Indicator \(MSI\): (\d+(?:\.\d+)?)%", text
+        )
         if found:
             return float(found[1])
     return None
@@ -245,13 +261,9 @@ def answer_hours(api: Api, repo: str, since: datetime) -> float | None:
 
 
 def ci_minutes(api: Api, repo: str) -> float | None:
-    runs = api.get(
-        f"repos/{repo}/actions/workflows/{WORKFLOWS['CI']}/runs"
-        "?branch=main&status=success&per_page=10&exclude_pull_requests=true"
-    )
     minutes = [
         (when(run["updated_at"]) - when(run["run_started_at"])).total_seconds() / 60
-        for run in (runs or {}).get("workflow_runs", [])
+        for run in main_runs(api, repo, WORKFLOWS["CI"])
         if run.get("run_started_at") and run.get("updated_at")
     ]
     return statistics.median(minutes) if minutes else None
