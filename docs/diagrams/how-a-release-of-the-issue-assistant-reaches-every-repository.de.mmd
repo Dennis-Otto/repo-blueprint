@@ -1,0 +1,29 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Release des Issue-Assistenten in jedes Repository kommt
+    accDescr: Jeden Morgen nimmt der Sync-Bot des Blueprints das neueste veröffentlichte Release des Issue-Assistenten und prüft es: Das Release muss unveränderlich sein, GitHubs Attestierung muss stimmen, sein Tag muss auf einen Commit des main-Branches des Issue-Assistenten zeigen, und sein Release-Workflow muss den Tag signiert haben. Jedes andere Release lässt den Lauf fehlschlagen, und nichts ändert sich. Sonst führt der Bot install des Releases im Wurzelverzeichnis des Blueprints aus, das die vier Workflows und die Firewall-Regeln des Releases schreibt und jeden Pin der Action umstellt, und hält einen Pull Request mit dem Ergebnis, der sich selbst merged, sobald alle Prüfungen grün sind. Das nächste Release des Blueprints bringt es mit dem Blueprint-Bot in jedes Repository.
+
+    release(["Ein Release des<br>Issue-Assistenten"])
+    bot(["Sync-Bot<br>jeden Morgen"])
+    verified{"Unveränderlich, attestiert,<br>auf main, signiert von<br>seinem Release-Workflow?"}
+    refused(["Lauf schlägt fehl<br>nichts ändert sich"])
+    install["install des Releases<br>im Blueprint: die vier Workflows,<br>die Firewall-Regeln, jeder Pin"]
+    pr["Pull Request von<br>bot/issue-assistant<br>merged sich selbst, sobald<br>alle Prüfungen grün sind"]
+    blueprint["Das nächste Release<br>des Blueprints"]
+    fleet["Jedes Repository,<br>mit seinem Blueprint-Bot"]
+
+    release --> bot
+    bot -- "das neueste<br>veröffentlichte Release" --> verified
+    verified -- "nein" --> refused
+    verified -- "ja" --> install --> pr --> blueprint --> fleet
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot,install,pr,blueprint bot
+    class release,refused person
+    class fleet done

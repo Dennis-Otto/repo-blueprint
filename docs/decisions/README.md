@@ -29,3 +29,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0021](0021-install-with-uv-and-bound-every-step.md) | Install the tools with uv, start mypy from its cache, and end every step that installs, builds or downloads after five minutes | accepted |
 | [0022](0022-every-check-explains-its-failure.md) | Every check explains its failure, in the check and in one comment, also on a pull request from a fork | accepted |
 | [0023](0023-pull-requests-fix-themselves.md) | Pull requests fix what a command can fix by themselves: the check fixes, the fix bot commits, suggests or opens a pull request for main | accepted |
+| [0024](0024-take-over-each-verified-release-of-the-issue-assistant.md) | Take over each verified release of the issue assistant with a bot of the blueprint, not with Renovate | accepted |
