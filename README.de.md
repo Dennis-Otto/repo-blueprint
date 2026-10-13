@@ -70,6 +70,7 @@ flowchart TB
 | **Mutationstests** | jede Woche laufen Tausende kleiner Änderungen des Codes gegen die Tests, und die Zusammenfassung zeigt den Anteil, den sie bemerken, und die überlebenden Mutanten; ein Bericht, nie ein Fehlschlag | `mutation.yml`: mutmut, Infection |
 | **Wackelige Tests** | ein Testlauf, der fehlschlägt, führt seine fehlgeschlagenen Jobs einmal neu aus; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet | `after-checks.yml` |
 | **Abgebrochene Prüfungen** | ein Lauf einer vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
+| **Schnelle Prüfungen** | eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python prüft `main` eines Python-Projekts nach jeder Änderung und jede Woche | die Auslöser und Pfadfilter der Workflows, `newest-python.yml` |
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, Beitragsleitfaden mit den Coding-Standards und der Regel, dass jede Änderung ihre Tests mitbringt, Verhaltenskodex, Sicherheitsrichtlinie mit der Prüfung eines Releases und einem Assurance Case, das Sicherheitsdesign der Software (`docs/security.md`), Support, Governance mit den Rollen und dem Fortbestand des Projekts, Issue-Formulare, Pull-Request-Vorlage, Aufzeichnungen der Entscheidungen, die das Projekt prägen (`docs/decisions/`), Discussions mit Formularen für Fragen und Ideen und einer Ankündigung jedes Releases, Sponsor-Button, Social Preview | |
 | **Website** | die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Design, auf Englisch und, mit deutschen Seiten wie `index.de.md` neben den englischen, auf Deutsch: jeder Pull Request baut sie streng, jede Änderung an `main` veröffentlicht sie auf GitHub Pages | MkDocs mit dem Material-Theme, `mkdocs.yml`, `docs.yml` |
@@ -117,6 +118,47 @@ flowchart TB
     class rpr bot
     class release done
 ```
+
+### Wann die Prüfungen laufen
+
+Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann, denn ein Konto bei GitHub führt etwa 20 Jobs gleichzeitig aus, und jeder Job, der nicht fehlschlagen kann, lässt einen Pull Request auf einen Runner warten:
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wann die Prüfungen laufen
+    accDescr: Jeder Pull Request führt die vorgeschriebenen Prüfungen aus, und die Scanner dessen, was er ändert: zizmor für einen Workflow, OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.
+
+    pr["Pull Request"]
+    rpr["Release-Pull-Request<br>Changelog und Version"]
+    required["Vorgeschriebene Prüfungen<br>Tests · Lint · Docs · CodeQL<br>Dependency Review · Secret Scan"]
+    scanners["Scanner dessen, was er ändert<br>Workflows: zizmor · Lock-Dateien: OSV-Scanner<br>Python: Fuzzing · Dokumente: Links"]
+    main["<code>main</code>"]
+    baseline["Was eine Vergleichsbasis hält oder veröffentlicht<br>Tests mit Abdeckung · neuestes Python<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>Website · Release · Branch-Bot"]
+    weekly["Scanner vollständig · 15 Minuten Fuzzing<br>Secret Scan der ganzen History<br>SBOM · neuestes Python"]
+
+    pr --> required
+    pr -- "ändert, was sie lesen" --> scanners
+    rpr -- "kein Scanner" --> required
+    required -- "alle Prüfungen grün" --> main
+    main -- "nach einem Merge" --> baseline
+    main -- "jede Woche" --> weekly
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class pr person
+    class rpr bot
+    class main done
+```
+
+- **Nach einem Merge:** `main` nimmt einen Pull Request nur auf, wenn er auf dem neuesten Stand ist, also bekommt `main` durch den Merge die Dateien, mit denen die Prüfungen des Pull Requests bestanden haben. `main` führt nur die Tests aus, mit deren Abdeckung der Abdeckungs-Bot jeden Pull Request vergleicht, die Analysen, mit denen Code Scanning vergleicht, und was veröffentlicht, etwa die Website und das Release. Lint läuft in den Pull Requests, Secret Scan und Fuzzing dort und jede Woche, und die SBOM jede Woche; jedes Release hat eine eigene SBOM.
+- **Der Release-Pull-Request** ändert nur den Changelog und die Version, die nichts an dem ändern, was ein Scanner findet. Im Blueprint steht die vorgeschriebene Prüfung *variants* für die Varianten und Updates jeder Projektart: Sie besteht, wenn jede bestanden hat oder keine laufen musste, wie im Release-Pull-Request.
+- **Das neueste Python**, Betas eingeschlossen, führt die Prüfungen eines Python-Projekts nach jeder Änderung an `main` und jede Woche aus, in einem eigenen Workflow, der die CI von `main` grün lässt. Ein neues Python bricht jeden Pull Request gleichermaßen, und keiner wartet darauf.
 
 ## Arten von Projekten
 
@@ -352,7 +394,7 @@ flowchart TB
 - Die Workflows in `.github/workflows/` laufen in diesem Repository und sind zugleich die Vorlagen der Workflows jedes neuen Repositorys: actionlint prüft sie, und Renovate hält ihre Actions hier aktuell. Eine Zeile mit *Not in the blueprint itself* schaltet einen Job in diesem Repository ab und fehlt in neuen.
 - `blueprint.py` startet das Werkzeug der Einstellungen als Code, der Checkliste und der Bots. Sein Code liegt in `blueprint/`, ein Modul für jede Aufgabe, mit einer eigenen `ruff.toml`, damit die Ruff-Einstellungen eines Projekts nicht für ihn gelten.
 - `stacks/` enthält Manifeste und Lock-Dateien jeder Projektart, die Renovate aktuell hält; ein neues Projekt startet von ihnen.
-- `tests/` prüft `blueprint.py` gegen ein simuliertes GitHub und rendert jede Projektart; der Variants-Workflow rendert jede einzelne und führt ihre eigenen Prüfungen mit den echten Werkzeugen aus. Außerdem bringt er ein Repository jeder Art vom letzten Release auf den Commit; das muss jede Datei des Blueprints so bekommen, wie ein neues Repository sie hat, und dieselben Prüfungen bestehen. Der Windows-Workflow führt `scripts/check.sh` außerdem unter Windows aus, in Git Bash wie auf dem Rechner eines Mitwirkenden, jede Woche und für jeden Pull Request, der den Code oder die Tests ändert.
+- `tests/` prüft `blueprint.py` gegen ein simuliertes GitHub und rendert jede Projektart; der Variants-Workflow rendert jede einzelne und führt ihre eigenen Prüfungen mit den echten Werkzeugen aus. Außerdem bringt er ein Repository jeder Art vom letzten Release auf den Commit; das muss jede Datei des Blueprints so bekommen, wie ein neues Repository sie hat, und dieselben Prüfungen bestehen: in jedem Pull Request außer dem Release-Pull-Request, und jede Woche. Der Windows-Workflow führt `scripts/check.sh` außerdem unter Windows aus, in Git Bash wie auf dem Rechner eines Mitwirkenden, jede Woche und für jeden Pull Request, der den Code oder die Tests ändert.
 - `docs/` macht diese Dokumentation zur Website des Blueprints: ihre Seiten binden die READMEs ein, und der Dashboard-Workflow veröffentlicht sie mit dem Dashboard unter `dashboard/`.
 
 Wohin sich der Blueprint entwickelt: [die Roadmap](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/roadmap.md) (englisch). Was er schützt und wem er vertraut: [sein Sicherheitsdesign](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/security.md) (englisch).

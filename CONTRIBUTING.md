@@ -18,6 +18,8 @@ New functionality comes with tests in the automated test suite, in the same pull
 
 A change of the template comes with a test in `tests/test_template.py` that renders it, and the Variants workflow runs the checks of every kind of project with its real tools, for a new repository and for one that the update brings from the latest release. A change that the files of a project must follow, which an update never touches, says in the changelog how an existing project makes it.
 
+A new check runs only where it can change a result, as [decision 0009](docs/decisions/0009-run-a-check-only-where-it-can-change-a-result.md) describes: a required check in every pull request and without a path filter, a scanner in the pull requests that change what it reads, and on `main` only what keeps a baseline or publishes.
+
 ## Coding standards
 
 - **Python** follows [PEP 8](https://peps.python.org/pep-0008/) in the format of [Ruff](https://docs.astral.sh/ruff/), which matches Black, with the rules of Ruff that `pyproject.toml` selects. The code has type hints, which mypy checks in its strict mode.
