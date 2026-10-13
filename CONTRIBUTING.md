@@ -67,7 +67,7 @@ python3 -m venv .venv
 . .venv/bin/activate && bash scripts/check.sh
 ```
 
-On Windows, run them in Git Bash, which comes with [Git for Windows](https://gitforwindows.org/), with `python` in place of `python3` and `.venv/Scripts/` in place of `.venv/bin/`. The Windows workflow runs them there as well: every week, and for each pull request that changes the code or the tests.
+On Windows, run them in Git Bash, which comes with [Git for Windows](https://gitforwindows.org/), with `py -3` in place of `python3` and `.venv/Scripts/` in place of `.venv/bin/`. The Windows workflow runs them there as well: every week, and for each pull request that changes the code or the tests.
 
 To run them before every push on its own, turn on the hook of the repository once:
 
@@ -86,6 +86,8 @@ python3 -m venv .venv-docs
 .venv-docs/bin/pip install --require-hashes -r stacks/docs/requirements-docs.txt
 .venv-docs/bin/mkdocs serve
 ```
+
+On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place of `.venv-docs/bin/`; the dev container sets these tools up on its own. With them, `bash scripts/check.sh` builds the website strictly as well, as the check *docs* does, and without them it leaves that to the CI. The preview cards for social media come from the CI alone, because they need the Cairo library, which Windows doesn't have; where it is installed, `CI=true` before the command draws them too.
 
 Pictures make the documentation easier to follow:
 
