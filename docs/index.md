@@ -67,7 +67,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    Every week the blueprint bot runs `copier update` and opens a pull request. Without conflicts, it merges itself once every check passes; the files of the project are never overwritten.
+    After every release and every week, the blueprint bot runs `copier update` and keeps one pull request current. Without conflicts, it merges itself once every check passes; the files of the project and your commits on its branch are never overwritten.
 
 - :material-account-group-outline:{ .lg .middle } **Community**
 

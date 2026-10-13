@@ -1250,6 +1250,134 @@ def test_copier_updates_without_the_maintenance_of_git_in_the_background(
         assert all(setting in step for setting in settings), name
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_blueprint_bot_keeps_one_pull_request(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    text = (project / ".github/workflows/blueprint-update.yml").read_text(
+        encoding="utf-8"
+    )
+    steps = text.split("\n      - ")
+    release = next(step for step in steps if "gh release view" in step)
+    update = next(step for step in steps if "copier update --" in step)
+
+    # Only to a published release: the Release workflow pushes the tag first.
+    assert 'gh release view --repo "$source" --json tagName --jq .tagName' in release
+    assert "TAG: ${{ steps.release.outputs.tag }}" in update
+    assert "SOURCE: ${{ steps.release.outputs.source }}" in update
+    assert '--source "$SOURCE"' in update
+    assert 'copier update --defaults --conflict inline --vcs-ref "$TAG"' in update
+    # The bot of main commits, copied before the update changes it, as the app whose
+    # commits it may replace; the scratch branch of a commit without modes is per run.
+    assert (
+        update.index("cp -R .github/blueprint.py .github/blueprint")
+        < update.index("copier update --")
+        < update.index("git add --all")
+        < update.index("update-commit")
+    )
+    assert "APP: ${{ steps.app.outputs.app-slug }}" in update
+    assert '--app "${APP}[bot]"' in update
+    assert '--run-id "$GITHUB_RUN_ID"' in update
+    # The workflow no longer puts the branch back on main, which closed the pull
+    # request, nor scans the whole repository for markers.
+    for gone in ("force", "createCommitOnBranch", "git grep", "gh pr merge"):
+        assert gone not in text, gone
+    tool = (project / ".github/blueprint/update.py").read_text(encoding="utf-8")
+    assert '"--disable-auto"' in tool
+    assert 'f"{BRANCH}-{run_id}"' in tool
+    assert 'BRANCH = "blueprint/update"' in tool
+    result = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "update-commit", "--help"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--app APP" in result.stdout
+    assert "--source SOURCE" in result.stdout
+
+
+def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
+    """The step of the blueprint bot that finds the release to update to, with a gh
+    that knows the releases of the blueprint and of a fork."""
+    text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
+    step = next(step for step in text.split("\n      - ") if "gh release view" in step)
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    (tmp_path / ".copier-answers.yml").write_text(
+        f"_commit: v1.0.0\n_src_path: {source}\n", encoding="utf-8", newline="\n"
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+case "$*" in
+  "release view --repo Dennis-Otto/repo-blueprint --json tagName --jq .tagName") echo v1.2.0 ;;
+  "release view --repo Someone/blueprint --json tagName --jq .tagName") echo v0.3.0 ;;
+  "release view --repo Someone/new --json tagName --jq .tagName") ;;
+  *) echo "unexpected: gh $*" >&2; exit 1 ;;
+esac
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    output.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "GITHUB_OUTPUT": str(output),
+    }
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return result.returncode, output.read_text(encoding="utf-8"), result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("source", "output"),
+    [
+        (
+            "https://github.com/Dennis-Otto/repo-blueprint.git",
+            "source=Dennis-Otto/repo-blueprint\ntag=v1.2.0\n",
+        ),
+        # A repository made from a fork updates to the fork's releases, whose tags
+        # the fork has.
+        ("gh:Someone/blueprint", "source=Someone/blueprint\ntag=v0.3.0\n"),
+        (
+            "https://github.com/Someone/blueprint",
+            "source=Someone/blueprint\ntag=v0.3.0\n",
+        ),
+        # A blueprint that isn't on GitHub, a folder for a test, say.
+        ("/home/me/repo-blueprint", "source=Dennis-Otto/repo-blueprint\ntag=v1.2.0\n"),
+    ],
+)
+def test_the_blueprint_bot_updates_to_the_release_of_its_source(
+    tmp_path: Path, source: str, output: str
+) -> None:
+    assert run_the_release_step(tmp_path, source)[:2] == (0, output)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_blueprint_bot_needs_a_published_release(tmp_path: Path) -> None:
+    code, output, stdout = run_the_release_step(tmp_path, "gh:Someone/new")
+
+    assert code == 1
+    assert output == ""
+    assert "::error::The blueprint Someone/new has no published release" in stdout
+
+
 def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
     # Renovate's pull requests are brought up to date, but not the release bot's.

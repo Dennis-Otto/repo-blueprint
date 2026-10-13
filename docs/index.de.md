@@ -67,7 +67,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Jede Woche führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind; die Dateien des Projekts werden nie überschrieben.
+    Nach jedem Release und jede Woche führt der Blueprint-Bot `copier update` aus und hält einen Pull Request aktuell. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind; die Dateien des Projekts und deine Commits auf seinem Branch werden nie überschrieben.
 
 - :material-account-group-outline:{ .lg .middle } **Community**
 
