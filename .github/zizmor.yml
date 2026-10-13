@@ -19,8 +19,9 @@ rules:
       - welcome.yml
       - dependabot-automerge.yml
       # After the checks, the flaky-test bot only runs failed jobs again and writes an
-      # issue, the bot for cancelled checks only runs cancelled runs again, and the
-      # coverage bot reads the coverage reports and writes one comment.
+      # issue, the bot for cancelled checks only runs cancelled runs again, the bot for
+      # failed releases only runs the failed jobs of a release again, and the coverage
+      # bot reads the coverage reports and writes one comment.
       - after-checks.yml
       # The rollout starts after a run of the Release workflow on main; it reads the
       # jobs of that run, the latest release, the repositories of the release app and
@@ -33,9 +34,11 @@ rules:
     ignore:
       # The test run of the action uses it the way its documentation shows, ./
       - action-test.yml
-      # The release workflow calls the release verification with ./, because
-      # actionlint doesn't know the self-repository syntax $/ yet.
+      # The release workflow calls the release verification, and the Next runner
+      # workflow the Variants, with ./, because actionlint doesn't know the
+      # self-repository syntax $/ yet.
       - release.yml
+      - next-runner.yml
   github-app:
     ignore:
       # The token action has no input for the Variables permission that the settings

@@ -61,15 +61,16 @@ flowchart TB
 
 | Bereich | Was läuft | Womit |
 | --- | --- | --- |
-| **Prüfungen** | `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint, Paketbau | die Werkzeuge der jeweiligen Projektart, per Hash gepinnt |
+| **Prüfungen** | `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint, Paketbau; ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern, weil jeder Download der Workflows es erneut versucht, und die Prüfungen einer Nextcloud-App halten krankerl im Cache der CI | die Werkzeuge der jeweiligen Projektart, per Hash gepinnt |
 | **Lint** | Workflows (actionlint), Lizenz jeder Datei (REUSE), das Markdown jedes Dokuments (markdownlint), Hinweise zur Rechtschreibung auf Englisch und Deutsch (cspell) und zum Stil des Englischen (Vale) der geänderten Dokumente, Sign-off jedes Commits (DCO), Titel jedes Pull Requests (Conventional Commits), ein Eintrag unter *Unreleased* für jede Änderung für Nutzer | `lint.yml`, `pull-request-title.yml` |
 | **Sicherheit** | CodeQL, OpenSSF Scorecard, Dependency Review, Secret Scan, SBOMs als SPDX und CycloneDX, OpenVEX, schlüssellos signierte und vor jedem Build geprüfte Release-Tags (gitsign), Findings-Wächter, die Sicherheitsprüfung der Workflows (zizmor), jede Lock-Datei gegen die OSV-Datenbank (OSV-Scanner), der Netzwerkverkehr jedes Jobs (Harden-Runner) | jede Action auf einen Commit-Hash gepinnt |
 | **Releases** | ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major), und dem Text von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und der signierten Provenance eines isolierten Builds (SLSA Build Level 3), liefert es aus und prüft es danach so, wie es seine Nutzer können, auch jede Woche; wo die Repository-Variable `BETA_CHANNEL` auf true steht, wird außerdem jede Änderung für Nutzer zu einer Beta des nächsten Releases, einem Prerelease für Tester | release-please, die Release-App, unveränderliche Releases, `verify-release.yml` |
-| **Abhängigkeiten** | Renovate, das der Blueprint alle zwei Stunden für jedes Repository als Release-App ausführt: Actions, Abhängigkeiten, Images und die Pins der Workflows, eine Woche nach ihrem Release, und sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt; Routine-Updates, die wöchentliche Auffrischung der Lock-Dateien und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind. Dependabot pflegt die Features des Dev-Containers. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
+| **Abhängigkeiten** | Renovate, das der Blueprint alle zwei Stunden für jedes Repository als Release-App ausführt: Actions, Abhängigkeiten, Images und die Pins der Workflows, eine Woche nach ihrem Release, und sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt; Routine-Updates und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind, während die wöchentliche Auffrischung jeder Lock-Datei, die die neuesten Versionen ohne die Woche Wartezeit bringt, auf den Maintainer wartet; der Blueprint prüft, dass Renovate jede Lock-Datei liest, die er mitbringt. Dependabot pflegt die Features des Dev-Containers. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Abdeckung** | ein Kommentar an jedem Pull Request mit der Abdeckung seiner Tests im Vergleich zu `main`, Datei für Datei | `after-checks.yml` |
 | **Mutationstests** | jede Woche laufen Tausende kleiner Änderungen des Codes gegen die Tests, und die Zusammenfassung zeigt den Anteil, den sie bemerken, und die überlebenden Mutanten; ein niedriger Wert ist ein Bericht, nie ein Fehlschlag, aber ein Lauf, der nichts misst, schlägt fehl; ein Pull Request, der ändert, wie sie laufen, probiert sie aus | `mutation.yml`: mutmut, Infection |
-| **Wackelige Tests** | ein Testlauf, der fehlschlägt, führt seine fehlgeschlagenen Jobs einmal neu aus; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet | `after-checks.yml` |
-| **Abgebrochene Prüfungen** | ein Lauf einer vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
+| **Wackelige Tests** | ein Testlauf, der fehlschlägt oder dessen Job sein Zeitlimit erreicht, führt seine fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet, mit dem Schritt, dem Test und dem Fehler, die gescheitert sind | `after-checks.yml` |
+| **Abgebrochene Prüfungen** | die schnellen Prüfungen laufen einmal für jeden Commit, sodass kein Lauf für einen anderen Commit sie abbricht; ein Lauf einer längeren vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
+| **Gescheiterte Releases** | das Release eines Merges, das scheitert, etwa am Push seines Tags, den GitHub für einen Moment ablehnt, führt seine fehlgeschlagenen Jobs von selbst einmal neu aus, dort, wo sie stehen geblieben sind | `after-checks.yml` |
 | **Schnelle Prüfungen** | eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python prüft `main` eines Python-Projekts nach jeder Änderung und jede Woche | die Auslöser und Pfadfilter der Workflows, `newest-python.yml` |
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, Beitragsleitfaden mit den Coding-Standards und der Regel, dass jede Änderung ihre Tests mitbringt, Verhaltenskodex, Sicherheitsrichtlinie mit der Prüfung eines Releases und einem Assurance Case, das Sicherheitsdesign der Software (`docs/security.md`), Support, Governance mit den Rollen und dem Fortbestand des Projekts, Issue-Formulare, Pull-Request-Vorlage, Aufzeichnungen der Entscheidungen, die das Projekt prägen (`docs/decisions/`), Discussions mit Formularen für Fragen und Ideen und einer Ankündigung jedes Releases, Sponsor-Button, Social Preview | |
@@ -79,7 +80,7 @@ flowchart TB
 | **Entwicklung** | ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prüfungen und der Website, und ein Hook, der sie vor jedem Push ausführt, unter Linux, macOS und Windows: `scripts/check.sh` schlägt fehl, wenn Git ihn überspringen würde | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request | `blueprint-update.yml` |
 | **App Store** | für eine Nextcloud-App: die Registrierung ihrer ID mit ihrem Zertifikat, einmal, von Hand | `register-app.yml` |
-| **Upstream** | für eine Nextcloud-App, jede Woche: hat Nextcloud eine neue Hauptversion, hebt ein Pull Request `max-version` an und merged sich selbst, sobald jede Prüfung, auch die End-to-End-Tests, dagegen besteht | `upstream.yml` |
+| **Upstream** | für eine Nextcloud-App, jede Woche: hat Nextcloud eine neue Hauptversion, hebt ein Pull Request `max-version` an und merged sich selbst, sobald jede Prüfung, auch die End-to-End-Tests, dagegen besteht; von Hand als Probelauf gestartet, zeigt er den Pull Request, den er öffnen würde, und ändert nichts | `upstream.yml` |
 | **Bereichs-Labels** | jeder Pull Request bekommt die Labels der Bereiche, deren Dateien er ändert, nach den Pfaden in `.github/labeler.yml`, die dem Projekt gehört | `area-labels.yml` |
 | **Branches** | nach jeder Änderung an `main` bringt der Branch-Bot jeden Pull Request, der auf Auto-Merge wartet, auf den neuesten Stand, auch die von Renovate, damit er nach grünen Prüfungen merged | `update-branches.yml` |
 
@@ -160,6 +161,58 @@ flowchart TB
 - **Nach einem Merge:** `main` nimmt einen Pull Request nur auf, wenn er auf dem neuesten Stand ist, also bekommt `main` durch den Merge die Dateien, mit denen die Prüfungen des Pull Requests bestanden haben. `main` führt nur die Tests aus, mit deren Abdeckung der Abdeckungs-Bot jeden Pull Request vergleicht, die Analysen, mit denen Code Scanning vergleicht, und was veröffentlicht, etwa die Website und das Release. Lint läuft in den Pull Requests, Secret Scan und Fuzzing dort und jede Woche, und die SBOM jede Woche; jedes Release hat eine eigene SBOM.
 - **Der Release-Pull-Request** ändert nur den Changelog und die Version, die nichts an dem ändern, was ein Scanner findet. Im Blueprint steht die vorgeschriebene Prüfung *variants* für die Varianten und Updates jeder Projektart: Sie besteht, wenn jede bestanden hat oder keine laufen musste, wie im Release-Pull-Request.
 - **Das neueste Python**, Betas eingeschlossen, führt die Prüfungen eines Python-Projekts nach jeder Änderung an `main` und jede Woche aus, in einem eigenen Workflow, der die CI von `main` grün lässt. Ein neues Python bricht jeden Pull Request gleichermaßen, und keiner wartet darauf. Ein Fehlschlag hält ein Issue offen, das der wöchentliche Lauf schließt, sobald die Prüfungen wieder bestehen.
+- **Die Runner** sind mit ihrer Version benannt, `ubuntu-24.04`, nicht `ubuntu-latest`: GitHub zieht dieses Label über Wochen Job für Job auf ein neues Image um, wie ab dem 19. Oktober 2026 auf Ubuntu 26.04, sodass die Läufe eines Workflows zufällig auf dem einen oder dem anderen Image landen würden, mit einem anderen Python, ShellCheck und Docker, und wie ein flaky Test fehlschlügen. Im Blueprint führt der Workflow Next runner die Varianten jede Woche auf dem nächsten Runner aus, und ein Fehlschlag hält ein Issue offen; sobald sie dort bestehen, zieht ein Release des Blueprints jeden Job dorthin um. Ein eigener Workflow, den ein Update nicht anfasst, behält den Runner, den er nennt: Mit `ubuntu-latest` zieht er mit GitHubs Label um.
+
+### Wenn eine Prüfung scheitert oder abbricht
+
+Eine Prüfung, die ein Runner, eine Website oder GitHub für einen Moment scheitern lässt oder die ein Wettlauf zweier Läufe abbricht, braucht niemanden: Die Bots nach den Prüfungen führen sie einmal neu aus und lassen nur rot, was aus einem Grund scheitert.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wenn eine Prüfung scheitert oder abbricht
+    accDescr: Wenn ein Lauf der Prüfungen oder des Releases endet, schauen die Bots nach den Prüfungen, wie. Tests, die beim ersten Versuch fehlgeschlagen sind oder ihr Zeitlimit erreicht haben, führen ihre fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, kommt mit seinem Schritt, seinem Test und seinem Fehler in das Issue der wackeligen Tests, und einer, der wieder scheitert, bleibt rot. Eine vorgeschriebene Prüfung, die ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet neu. Das Release eines Merges, das gescheitert ist, führt seine fehlgeschlagenen Jobs einmal neu aus, dort, wo sie stehen geblieben sind.
+
+    run["Ein Lauf der Prüfungen<br>oder des Releases endet"]
+    tests["Tests beim ersten Versuch fehlgeschlagen<br>oder am Zeitlimit"]
+    raced["Eine vorgeschriebene Prüfung, abgebrochen<br>von einem verspäteten Lauf für einen älteren Commit"]
+    release["Das Release eines Merges ist gescheitert"]
+    before{"Dieselben Jobs schon für<br>den Commit davor gescheitert?"}
+    again["Die fehlgeschlagenen Jobs<br>laufen einmal neu"]
+    flaky["Issue <i>Flaky tests</i><br>Job · Schritt · Test · Fehler"]
+    restart["Der Lauf für den neuesten Commit<br>startet neu"]
+    resume["Die fehlgeschlagenen Jobs des Releases<br>laufen einmal neu, ab dort, wo sie standen"]
+    red["Bleibt rot, für dich"]
+
+    run --> tests
+    run --> raced
+    run --> release
+    tests --> before
+    before -- "nein" --> again
+    before -- "ja" --> red
+    again -- "besteht" --> flaky
+    again -- "scheitert wieder" --> red
+    raced --> restart
+    release --> resume
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class again,restart,resume bot
+    class red person
+    class flaky done
+```
+
+- **Einmal, nicht immer wieder:** Der Bot für wackelige Tests führt die fehlgeschlagenen Jobs des ersten Versuchs eines Testlaufs einmal neu aus, ebenso der Bot für gescheiterte Releases mit einem Release, das ein Merge gestartet hat; der Bot für abgebrochene Prüfungen startet einen Lauf höchstens zweimal. Ein Job, den GitHub an seinem Zeitlimit stoppt, endet abgebrochen, nicht fehlgeschlagen, und läuft ebenfalls einmal neu. Ein Lauf, den du oder ein neuerer Lauf abgebrochen hat, bleibt abgebrochen, auch wenn ein Job, der auf die anderen wartet, deshalb fehlgeschlagen ist.
+- **Ein Fehler, der sich wiederholt, ist echt:** Wenn dieselben Jobs schon für den Commit davor auf demselben Branch gescheitert sind, nachdem sie einmal neu liefen, laufen sie nicht noch einmal, damit ein kaputter Test keinen Runner umsonst beschäftigt.
+- **Das Issue der wackeligen Tests** bekommt für jeden Lauf, der beim Neustart bestanden hat, eine Tabelle: jeden Job, der zuerst fehlgeschlagen ist, mit einem Link zu seinem Log, den Schritt, der gescheitert ist, die Tests, die pytest im Log nennt, und den ersten Fehler. Ein Name oder eine Zeile eines Logs steht dort als reiner Code, sodass ein Pull Request damit weder die Tabelle beenden noch jemanden erwähnen kann.
+- **Die schnellen Prüfungen laufen einmal für jeden Commit:** Titel und Changelog, Dependency Review, Secret Scan, Bereichs-Labels und Website. Ein verspäteter Lauf für einen älteren Commit, etwa einer, den eine Änderung des Release-Pull-Requests startet, während release-please in ihn pusht, bricht sie für den neuesten Commit nicht mehr ab. Die Prüfungen, die Minuten dauern, Tests, Lint, CodeQL und die Varianten, brechen den Lauf für einen älteren Commit weiter ab; einen Wettlauf dort repariert der Bot für abgebrochene Prüfungen.
+- **Weitere Test-Workflows** eines Repositorys, etwa visuelle Tests, kommen mit `copier update --data "test_workflows=Visual check, Screenshot bot"` zur CI und zu Docker E2E dazu.
+- **Die Link-Prüfung eines Pull Requests** liest die Dokumente, die er ändert, und alle Dokumente, wenn er die Regeln ändert oder eine Datei verschiebt oder löscht, auf die ein Dokument verlinken kann. lychee behält die Antworten der Websites einen Tag lang und fragt bei einem Link, der gescheitert ist, erneut nach, sodass eine Website, die für einen Moment nicht erreichbar ist, nur die Pull Requests scheitern lässt, die auf sie verlinken.
 
 ### Mutationstests
 
@@ -471,7 +524,7 @@ flowchart TB
 - Die Workflows in `.github/workflows/` laufen in diesem Repository und sind zugleich die Vorlagen der Workflows jedes neuen Repositorys: actionlint prüft sie, und Renovate hält ihre Actions hier aktuell. Eine Zeile mit *Not in the blueprint itself* schaltet einen Job in diesem Repository ab und fehlt in neuen.
 - `blueprint.py` startet das Werkzeug der Einstellungen als Code, der Checkliste und der Bots. Sein Code liegt in `blueprint/`, ein Modul für jede Aufgabe, mit einer eigenen `ruff.toml`, damit die Ruff-Einstellungen eines Projekts nicht für ihn gelten.
 - `stacks/` enthält Manifeste und Lock-Dateien jeder Projektart, die Renovate aktuell hält; ein neues Projekt startet von ihnen.
-- `tests/` prüft `blueprint.py` gegen ein simuliertes GitHub und rendert jede Projektart; der Variants-Workflow rendert jede einzelne und führt ihre eigenen Prüfungen mit den echten Werkzeugen aus. Außerdem bringt er ein Repository jeder Art vom letzten Release auf den Commit; das muss jede Datei des Blueprints so bekommen, wie ein neues Repository sie hat, und dieselben Prüfungen bestehen: in jedem Pull Request außer dem Release-Pull-Request, und jede Woche. Der Windows-Workflow führt `scripts/check.sh` außerdem unter Windows aus, in Git Bash wie auf dem Rechner eines Mitwirkenden, jede Woche und für jeden Pull Request, der den Code oder die Tests ändert.
+- `tests/` prüft `blueprint.py` gegen ein simuliertes GitHub und rendert jede Projektart; der Variants-Workflow rendert jede einzelne und führt ihre eigenen Prüfungen mit den echten Werkzeugen aus. Außerdem bringt er ein Repository jeder Art vom letzten Release auf den Commit; das muss jede Datei des Blueprints so bekommen, wie ein neues Repository sie hat, und dieselben Prüfungen bestehen: in jedem Pull Request außer dem Release-Pull-Request, und jede Woche. Der Windows-Workflow führt `scripts/check.sh` außerdem unter Windows aus, in Git Bash wie auf dem Rechner eines Mitwirkenden, jede Woche und für jeden Pull Request, der den Code oder die Tests ändert. Der Workflow Next runner führt die Variants jede Woche auf dem Runner aus, auf den die Jobs als Nächstes umziehen.
 - `docs/` macht diese Dokumentation zur Website des Blueprints: ihre Seiten binden die READMEs ein, und der Dashboard-Workflow veröffentlicht sie mit dem Dashboard unter `dashboard/`.
 
 Wohin sich der Blueprint entwickelt: [die Roadmap](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/roadmap.md) (englisch). Was er schützt und wem er vertraut: [sein Sicherheitsdesign](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/security.md) (englisch).

@@ -25,7 +25,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits und der Titel jedes Pull Requests geprüft.
+    `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits und der Titel jedes Pull Requests geprüft. Ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern: Jeder Download versucht es erneut.
 
 - :material-shield-lock-outline:{ .lg .middle } **Sicherheit**
 
@@ -43,7 +43,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Renovate, das der Blueprint alle zwei Stunden ausführt: Actions, Abhängigkeiten und Images eine Woche nach ihrem Release, sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt. Routine-Updates und die wöchentliche Auffrischung der Lock-Dateien mergen sich selbst, sobald alle Prüfungen grün sind.
+    Renovate, das der Blueprint alle zwei Stunden ausführt: Actions, Abhängigkeiten und Images eine Woche nach ihrem Release, sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt. Routine-Updates mergen sich selbst, sobald alle Prüfungen grün sind; die wöchentliche Auffrischung jeder Lock-Datei wartet auf den Maintainer.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 
@@ -77,7 +77,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
 </div>
 
-Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, das Aufräumen und den Dev-Container.
+Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, gescheiterte Releases, das Aufräumen und den Dev-Container.
 
 ## Arten von Projekten
 

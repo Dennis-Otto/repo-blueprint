@@ -1,9 +1,10 @@
 # The test tools of the integration; the test plugin pins Home Assistant itself.
 # Renovate keeps this list and the hash-pinned requirements-test.txt current. The
-# lock file is compiled with `uv pip compile --python-version` for the Python of
-# the CI (see .github/renovate-blueprint.json5), and the test plugin is pinned:
-# a Home Assistant that needs a newer Python fails its update instead of an older
-# Home Assistant being chosen.
+# lock file is compiled with `uv pip compile --python-version=` for the Python of
+# the CI, and Renovate compiles it again with the command in its header (see
+# .github/renovate-blueprint.json5). The test plugin is pinned: a Home Assistant
+# that needs a newer Python fails its update instead of an older Home Assistant
+# being chosen.
 coverage
 hypothesis
 mypy

@@ -1,0 +1,71 @@
+name: Next runner
+
+# The jobs of the blueprint, and of every repository made from it, run on a runner
+# named with its version, ubuntu-24.04: when GitHub moves ubuntu-latest to a new
+# image, one job at a time over weeks, none of them moves with it by surprise.
+# This workflow runs the Variants on the next runner every week: the checks of every
+# kind of project, a new one and one updated from the latest release, with their
+# real tools. Once they pass there, one pull request moves every job to it. Not in
+# pull requests and not a required check: a new image breaks main and every pull
+# request alike, and none waits for it. A failure keeps one issue open, which the
+# next run closes once the variants pass again. This workflow belongs to the
+# blueprint alone.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  schedule:
+    - cron: "15 5 * * 4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  next-runner:
+    name: next runner
+    uses: ./.github/workflows/variants.yml
+    with:
+      runner: ubuntu-26.04
+
+  # The issue of the warning: a failed run on main opens it or brings it up to date,
+  # and the next run on main closes it once the variants pass on the next runner.
+  report:
+    name: report
+    needs: next-runner
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      contains(fromJSON('["success", "failure"]'), needs.next-runner.result)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Keep the issue of the next runner current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.next-runner.result }}
+          RUNNER: ubuntu-26.04
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="The variants fail on the next runner"
+          number="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          if [[ "$RESULT" == success ]]; then
+            if [[ -n "$number" ]]; then
+              gh issue close "$number" --comment "The variants pass on $RUNNER again."
+            fi
+            exit 0
+          fi
+          body="$(printf '%s\n\n%s\n' \
+            "The Variants workflow fails on $RUNNER, the runner that every job moves to next. Make the variants pass there before the jobs move; the next run closes this issue then." \
+            "The latest failure: $URL")"
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body "$body"
+          else
+            gh issue create --title "$title" --label maintenance --body "$body"
+          fi

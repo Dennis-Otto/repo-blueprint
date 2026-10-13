@@ -67,15 +67,16 @@ flowchart TB
 
 | Area | What runs | How |
 | --- | --- | --- |
-| **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging | the tools of each kind of project, hash-pinned |
+| **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging; a passing error of a download fails no run, because every download of the workflows tries again, and the checks of a Nextcloud app keep krankerl in the cache of the CI | the tools of each kind of project, hash-pinned |
 | **Lint** | the workflows (actionlint), the license of every file (REUSE), the Markdown of every document (markdownlint), hints at the spelling in English and German (cspell) and at the style of the English (Vale) of the changed documents, the sign-off of every commit (DCO), the title of every pull request (Conventional Commits), an entry under *Unreleased* for every change for users | `lint.yml`, `pull-request-title.yml` |
 | **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOMs as SPDX and CycloneDX, OpenVEX, release tags signed without a key (gitsign) and checked before every build, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
-| **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates, the weekly refresh of the lock files and releases of dependency updates merge themselves once every check passes. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
+| **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates and releases of dependency updates merge themselves once every check passes, while the weekly refresh of every lock file, which brings the newest versions without the week of waiting, waits for the maintainer; the blueprint checks that Renovate reads every lock file that it brings. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Coverage** | one comment on every pull request with the coverage of its tests against that of `main`, file by file | `after-checks.yml` |
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
-| **Flaky tests** | a test run that fails runs its failed jobs once more; a job that passes then is reported as flaky in one issue | `after-checks.yml` |
-| **Cancelled checks** | a run of a required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
+| **Flaky tests** | a test run that fails, or whose job runs out of time, runs its failed jobs once more, unless the same jobs broke for the commit before; a job that passes then is reported as flaky in one issue, with the step, the test and the error that failed | `after-checks.yml` |
+| **Cancelled checks** | the quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
+| **Failed releases** | the release of a merge that fails, as at a push of its tag that GitHub refuses for a moment, runs its failed jobs once more by itself, where they stopped | `after-checks.yml` |
 | **Fast checks** | a check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python checks the `main` of a Python project after every change and every week | the triggers and path filters of the workflows, `newest-python.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide with the coding standards and the rule that every change brings its tests, code of conduct, security policy with how to verify a release and an assurance case, the security design of the software (`docs/security.md`), support, governance with the roles and the continuity of the project, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
@@ -85,7 +86,7 @@ flowchart TB
 | **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks and of the website, and a hook that runs them before every push, on Linux, macOS and Windows: `scripts/check.sh` fails when Git would skip it | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | right after every release of the blueprint, and every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
-| **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it | `upstream.yml` |
+| **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it; started by hand as a dry run, it shows the pull request it would open and changes nothing | `upstream.yml` |
 | **Area labels** | every pull request gets the labels of the areas whose files it changes, by the paths in `.github/labeler.yml`, which belongs to the project | `area-labels.yml` |
 | **Branches** | after every change of `main`, the branch bot brings each pull request that waits for auto-merge up to date, Renovate's too, so that it merges once its checks pass | `update-branches.yml` |
 
@@ -166,6 +167,58 @@ flowchart TB
 - **After a merge:** `main` takes a pull request only when it is up to date with it, so the merge gives `main` the files that the checks of the pull request passed. `main` runs only the tests, whose coverage the coverage bot compares every pull request with, the analyses that code scanning compares with, and what publishes, such as the website and the release. Lint runs in the pull requests, the secret scan and the fuzzing there and every week, and the SBOM every week; every release has an SBOM of its own.
 - **The release pull request** changes only the changelog and the version, which can't change what a scanner finds. In the blueprint, the required check *variants* stands for the variants and updates of every kind of project: it passes when each passed, or when none had to run, as in the release pull request.
 - **The newest Python**, beta included, runs the checks of a Python project after every change of `main` and every week, in a workflow of its own that keeps the CI of `main` green. A new Python breaks every pull request alike, and none waits for it. A failure keeps an issue open, which the weekly run closes once the checks pass again.
+- **The runners** are named with their version, `ubuntu-24.04`, not `ubuntu-latest`: GitHub moves that label to a new image one job at a time over weeks, as to Ubuntu 26.04 from 19 October 2026, so that the runs of one workflow would land on either image at random, with another Python, ShellCheck and Docker, and fail like a flaky test. In the blueprint, the Next runner workflow runs the variants on the next runner every week, and a failure keeps an issue open; once they pass there, a release of the blueprint moves every job to it. A workflow of your own, which an update leaves alone, keeps the runner it names: with `ubuntu-latest`, it moves with GitHub's label.
+
+### When a check fails or stops
+
+A check that a runner, a site or GitHub fails for a moment, or that a race of two runs cancels, needs no person: the bots after the checks run it once more, and leave red only what fails for a reason.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When a check fails or stops
+    accDescr: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. The release of a merge that failed runs its failed jobs once more, where they stopped.
+
+    run["A run of the checks<br>or of the release ends"]
+    tests["Tests failed or ran out of time<br>at the first attempt"]
+    raced["A required check cancelled<br>by a late run for an older commit"]
+    release["The release of a merge failed"]
+    before{"The same jobs broke<br>for the commit before?"}
+    again["The failed jobs run once more"]
+    flaky["Issue <i>Flaky tests</i><br>job · step · test · error"]
+    restart["The run for the head<br>starts again"]
+    resume["The failed jobs of the release<br>run once more, where they stopped"]
+    red["Stays red, for you"]
+
+    run --> tests
+    run --> raced
+    run --> release
+    tests --> before
+    before -- "no" --> again
+    before -- "yes" --> red
+    again -- "passes" --> flaky
+    again -- "fails again" --> red
+    raced --> restart
+    release --> resume
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class again,restart,resume bot
+    class red person
+    class flaky done
+```
+
+- **Once, not again and again:** the flaky-test bot runs the failed jobs of the first attempt of a test run once more, and so does the bot for failed releases with a release that a merge started; the bot for cancelled checks starts a run twice at most. A job that GitHub stops at its time limit ends cancelled, not failed, and runs once more as well. A run that you or a newer run cancelled stays cancelled, even when a job that waits for the others failed because of it.
+- **A failure that repeats is real:** when the same jobs broke for the commit before on the same branch, after they ran once more, the jobs don't run again, so that a broken test doesn't keep a runner busy for nothing.
+- **The issue of flaky tests** gets a table for each run that passed when it ran again: each job that failed at first, with a link to its log, the step that broke, the tests that pytest names in the log, and the first error. A name or a line of a log is written as plain code, so a pull request can't end the table or mention anybody with it.
+- **The quick checks run once for each commit:** the title and the changelog, the dependency review, the secret scan, the area labels and the website. A late run for an older commit, such as one that an edit of the release pull request starts while release-please pushes to it, no longer cancels them for the head. The checks that take minutes, the tests, Lint, CodeQL and the variants, still cancel the run for an older commit; the bot for cancelled checks repairs a race there.
+- **Other workflows of tests** that a repository has, such as visual tests, join the CI and Docker E2E with `copier update --data "test_workflows=Visual check, Screenshot bot"`.
+- **The link check of a pull request** reads the documents that it changes, and every document when it changes the rules, or moves or deletes a file that a document may link to. lychee keeps the answers of the sites for a day and asks again for a link that failed, so that a site that is down for a moment fails only the pull requests that link to it.
 
 ### Mutation tests
 
@@ -477,7 +530,7 @@ flowchart TB
 - The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Renovate keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.
 - `blueprint.py` starts the tool of the settings as code, the checklist and the bots. Its code is in `blueprint/`, a module for each task, with a `ruff.toml` of its own, so that the Ruff settings of a project don't apply to it.
 - `stacks/` holds the dependency manifests and lock files of each kind of project, which Renovate keeps current; a new project starts from them.
-- `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools, and also updates a repository of each kind from the latest release to the commit, which must bring every file of the blueprint as a new repository has it and pass the same checks: in every pull request but the release pull request, and every week. The Windows workflow runs `scripts/check.sh` on Windows as well, in Git Bash like a contributor there, every week and for each pull request that changes the code or the tests.
+- `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools, and also updates a repository of each kind from the latest release to the commit, which must bring every file of the blueprint as a new repository has it and pass the same checks: in every pull request but the release pull request, and every week. The Windows workflow runs `scripts/check.sh` on Windows as well, in Git Bash like a contributor there, every week and for each pull request that changes the code or the tests. The Next runner workflow runs the Variants every week on the runner that the jobs move to next.
 - `docs/` makes this documentation the website of the blueprint: its pages include the READMEs, and the Dashboard workflow publishes them with the dashboard under `dashboard/`.
 
 Where the blueprint is heading: [the roadmap](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/roadmap.md). What it protects and trusts: [its security design](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/security.md).

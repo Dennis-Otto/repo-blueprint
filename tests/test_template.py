@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,11 +15,12 @@ import textwrap
 import tomllib
 import warnings
 from pathlib import Path
+from typing import Any
 
 import pathspec
 import pytest
 from copier import run_copy
-from shell import BASH
+from shell import BASH, in_bash
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -244,6 +246,175 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
         for action, comment in re.findall(r"uses: (\S+@[0-9a-f]{40})( # \S+)?", text):
             # As Renovate tells a version from a branch: v1, 1.2.3.
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
+
+
+# The runner of the jobs, named with its version, and the one that the Next runner
+# workflow tries every week before the jobs move to it. A move changes both here.
+RUNNER = "ubuntu-24.04"
+NEXT_RUNNER = "ubuntu-26.04"
+# The issue assistant's templates, which its check keeps equal to the action's: the
+# issue assistant names their runners in its own repository.
+ISSUE_ASSISTANT_WORKFLOWS = {
+    "issue-assistant.yml",
+    "issue-lifecycle.yml",
+    "labels.yml",
+    "findings.yml",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_runs_on_a_runner_named_with_its_version(
+    projects: dict[str, Path], project: str
+) -> None:
+    # GitHub moves ubuntu-latest to a new image one job at a time, over weeks: the
+    # runs of one workflow would land on either image at random, and what the new one
+    # breaks would look like a flaky test in every repository. Only a pull request
+    # moves the jobs, once the variants pass on the next runner.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    assert set(flows) >= ISSUE_ASSISTANT_WORKFLOWS
+    # In workflows of the blueprint alone, which no project has.
+    exceptions = {
+        # The checks of the blueprint on Windows, as a contributor there runs them.
+        ("windows.yml", "windows-2025"),
+        # The variants, on the runner that a run by hand or the Next runner names.
+        ("variants.yml", f"${{{{ inputs.runner || '{RUNNER}' }}}}"),
+    }
+    for name, text in flows.items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        jobs = re.findall(r"^  [\w-]+:$", text.split("\njobs:\n", 1)[1], re.M)
+        runners = re.findall(r"^    runs-on: (.+)$", text, re.M)
+        callers = re.findall(r"^    uses: ", text, re.M)
+        # Every job names its runner, but one that calls a workflow, whose jobs do: the
+        # Variants, the build and the check of a release here, and OSV-Scanner its own.
+        assert len(runners) + len(callers) == len(jobs), name
+        for runner in runners:
+            assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
+
+
+def test_the_next_runner_runs_the_variants_every_week(
+    projects: dict[str, Path],
+) -> None:
+    flows = workflows(ROOT)
+    next_runner, variants = flows["next-runner.yml"], flows["variants.yml"]
+    # Every week and by hand, not in pull requests: the next image breaks main and every
+    # pull request alike, and none waits for it.
+    assert set(triggers(next_runner)) == {"schedule", "workflow_dispatch"}
+    job = job_of(next_runner, "next-runner")
+    assert "    uses: ./.github/workflows/variants.yml\n" in job
+    assert f"    with:\n      runner: {NEXT_RUNNER}\n" in job
+    # The issue of a failure names the runner that failed.
+    assert f"          RUNNER: {NEXT_RUNNER}\n" in job_of(next_runner, "report")
+    # The Variants take the runner from their caller or from a run by hand, and run on
+    # the runner of the jobs otherwise: in pull requests and in their own weekly run.
+    assert set(triggers(variants)) == {
+        "pull_request",
+        "schedule",
+        "workflow_dispatch",
+        "workflow_call",
+    }
+    assert (
+        "        type: choice\n"
+        f"        options: [{RUNNER}, {NEXT_RUNNER}]\n"
+        f"        default: {RUNNER}\n"
+    ) in variants
+    assert f"    runs-on: ${{{{ inputs.runner || '{RUNNER}' }}}}\n" in job_of(
+        variants, "variant"
+    )
+    # Neither the required check variants nor any other waits for the next runner.
+    settings = tomllib.loads(
+        (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    names = re.findall(r"^    name: (.+)$", next_runner, re.M)
+    assert names == ["next runner", "report"]
+    assert not set(names) & set(settings["branch"]["required_checks"])
+    # The workflow of the blueprint alone, whose variants are those of every project.
+    for project in projects.values():
+        assert not (project / ".github/workflows/next-runner.yml").exists()
+
+
+def run_with_a_fake_gh(tmp_path: Path, script: str, environment: dict[str, str]) -> str:
+    """Runs the script of a step with a gh that answers `issue list` with $OPEN and
+    writes down every other call, and returns those calls."""
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  echo "$OPEN"
+  exit 0
+fi
+echo "$*" >> calls
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    (tmp_path / "calls").touch()
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "URL": "https://github.com/o/r/actions/runs/1",
+            **environment,
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return (tmp_path / "calls").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "open_issue", "call"),
+    [
+        # A failure opens the issue, or brings the open one up to date.
+        ("failure", "", "issue create --title The variants fail on the next runner"),
+        ("failure", "7", "issue edit 7 --body"),
+        # The next run closes it once the variants pass again.
+        ("success", "7", f"issue close 7 --comment The variants pass on {NEXT_RUNNER}"),
+        ("success", "", ""),
+    ],
+)
+def test_a_failure_on_the_next_runner_keeps_an_issue_open(
+    tmp_path: Path, result: str, open_issue: str, call: str
+) -> None:
+    # No pull request shows the run, so its warning needs a place of its own.
+    next_runner = (ROOT / ".github/workflows/next-runner.yml").read_text(
+        encoding="utf-8"
+    )
+    report = job_of(next_runner, "report")
+    assert "\n    needs: next-runner\n" in report
+    assert condition_of(report) == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        """contains(fromJSON('["success", "failure"]'), needs.next-runner.result)"""
+    )
+    # Only the job that runs no code of the variants may write issues.
+    assert "\n    permissions:\n      issues: write\n    steps:" in report
+    assert next_runner.count("issues: write") == 1
+    calls = run_with_a_fake_gh(
+        tmp_path,
+        script_of(next_runner, "Keep the issue of the next runner current"),
+        {"RESULT": result, "OPEN": open_issue, "RUNNER": NEXT_RUNNER},
+    )
+
+    assert calls.startswith(call), calls
+    assert (call == "") == (calls == "")
+    assert ("--label maintenance" in calls) == (call.startswith("issue create"))
+    assert (f"The Variants workflow fails on {NEXT_RUNNER}," in calls) == (
+        result == "failure"
+    )
+    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
+        result == "failure"
+    )
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -1074,6 +1245,146 @@ def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
         assert remapped(url) == url
 
 
+def choose_the_documents_to_check(
+    tmp_path: Path, changes: dict[str, str | None], event: str = "pull_request"
+) -> tuple[dict[str, str], str]:
+    """Runs the step of the link check that chooses the documents, in a repository
+    whose pull request makes the changes, as GitHub does; returns its outputs and its
+    summary. A change of None deletes the file, one that starts with -> moves it."""
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    def git(*arguments: str) -> str:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        return subprocess.run(
+            ["git", *identity, *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    git("init", "--quiet", "--initial-branch=main")
+    for name in ("README.md", "docs/guide.md", "CHANGELOG.md", "lychee.toml"):
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_text(f"{name}\n", encoding="utf-8", newline="\n")
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "The base")
+    base = git("rev-parse", "HEAD")
+    for name, content in changes.items():
+        path = repository / name
+        if content is None:
+            path.unlink()
+        elif content.startswith("->"):
+            git("mv", name, content.removeprefix("->"))
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8", newline="\n")
+    git("add", "--all")
+    git("commit", "--quiet", "--allow-empty", "-m", "The pull request")
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    output.touch()
+    summary.touch()
+    (tmp_path / "step.sh").write_text(
+        script_of(links, "Choose the documents to check"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=repository,
+        env={
+            **os.environ,
+            "EVENT": event,
+            "BASE_SHA": base,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    outputs = dict(
+        line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+    )
+    return outputs, summary.read_text(encoding="utf-8")
+
+
+EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "event", "outputs"),
+    [
+        # The documents that the pull request adds or changes, by their paths, so that
+        # none reads as an option.
+        (
+            {"docs/guide.md": "changed\n"},
+            "pull_request",
+            {"files": "'./docs/guide.md' "},
+        ),
+        (
+            {"README.md": "changed\n", "docs/new.md": "new\n", "src/app.py": "\n"},
+            "pull_request",
+            {"files": "'./README.md' './docs/new.md' "},
+        ),
+        # The changelog alone is no document to check, and neither is code.
+        ({"CHANGELOG.md": "changed\n", "src/app.py": "\n"}, "pull_request", {}),
+        # New rules apply to every document.
+        (
+            {"lychee.toml": "max_retries = 5\n", "README.md": "x\n"},
+            "pull_request",
+            EVERY_DOCUMENT,
+        ),
+        # A document may link to a file that the pull request deletes or moves.
+        ({"docs/guide.md": None}, "pull_request", EVERY_DOCUMENT),
+        ({"docs/guide.md": "->docs/manual.md"}, "pull_request", EVERY_DOCUMENT),
+        # lychee gets the names through a shell.
+        ({"docs/it's $(here).md": "x\n"}, "pull_request", EVERY_DOCUMENT),
+        # main and the weekly run check every document.
+        ({"docs/guide.md": "changed\n"}, "push", EVERY_DOCUMENT),
+        ({}, "schedule", EVERY_DOCUMENT),
+    ],
+)
+def test_the_link_check_of_a_pull_request_reads_the_documents_it_changes(
+    tmp_path: Path, changes: dict[str, str | None], event: str, outputs: dict[str, str]
+) -> None:
+    # A site that is down for a moment fails only the pull requests that link to it.
+    chosen, summary = choose_the_documents_to_check(tmp_path, changes, event)
+
+    assert chosen == outputs
+    if not outputs:
+        assert "changes no document" in summary
+
+
+def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    job = job_of(links, "links")
+    cache = job[job.index("      - name: Restore the answers of the sites\n") :]
+    assert "        uses: actions/cache@" in cache
+    assert "          path: .lycheecache\n" in cache
+    assert "          key: lychee-${{ github.run_id }}\n" in cache
+    assert "          restore-keys: lychee-\n" in cache
+    check = job[job.index("      - name: Check the links of the documentation\n") :]
+    assert (
+        "args: --config lychee.toml --no-progress --cache --max-cache-age 1d ${{ steps.documents.outputs.files }}\n"
+        in check
+    )
+    # Without a document to check, neither runs; a changed document may have no link.
+    for step in (cache, check):
+        assert "        if: steps.documents.outputs.files != ''\n" in step
+    assert "failIfEmpty: ${{ steps.documents.outputs.every == 'true' }}" in check
+    # A pull request compares its documents with its base.
+    assert (
+        "fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}" in job
+    )
+
+
 def test_a_nextcloud_app_packages_only_what_it_needs(
     projects: dict[str, Path],
 ) -> None:
@@ -1121,9 +1432,330 @@ def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
     assert pins[0] == pins[1]
 
 
+# Each curl of a script or of a step, with the lines it continues on; not one that a
+# comment names.
+CURL = re.compile(r"^[^#\n]*?\bcurl ((?:.*\\\n)*.*)$", re.MULTILINE)
+# Where the blueprint and every repository made from it run curl.
+SCRIPTS = (
+    ".github/workflows/*.yml",
+    ".github/*.sh",
+    "scripts/*.sh",
+    ".devcontainer/*.sh",
+    ".githooks/*",
+)
+# What every download needs so that a passing error of GitHub or of another server,
+# like the 504 of a release download that failed the checks of a Nextcloud app on
+# main (Dennis-Otto/paperless-unified-search#94), fails no run: an answer with an
+# error status is an error (--fail); every error, a reset connection too, brings
+# another try after a pause that doubles each time (--retry, --retry-all-errors); a
+# connection that hangs fails and tries again instead of holding the job until its
+# time limit (--connect-timeout, --max-time); and the download goes into a file, which
+# curl empties before it tries again, where in a pipe the start of a broken try would
+# stay in front of the next one (--output).
+DOWNLOAD = (
+    "--fail",
+    "--retry ",
+    "--retry-all-errors",
+    "--connect-timeout ",
+    "--max-time ",
+    "--output ",
+)
+
+
+def run_workflow_step(
+    tmp_path: Path,
+    script: str,
+    cwd: Path,
+    tools: dict[str, str],
+    without: tuple[str, ...] = (),
+    **variables: str,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Runs the script of a step as GitHub does, with bash -e and stand-ins for its
+    tools, which write what they are called with to $CALLS, and without the variables
+    named; the result, and the calls. The stand-ins come first on the PATH even in the
+    bash of Git for Windows, which puts its own curl in front of it (in_bash)."""
+    step = tmp_path / "step.sh"
+    step.write_text(script, encoding="utf-8", newline="\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool, body in tools.items():
+        (bin_dir / tool).write_text(
+            f'#!/usr/bin/env bash\necho "{tool} $*" >> "$CALLS"\n{body}',
+            encoding="utf-8",
+            newline="\n",
+        )
+        (bin_dir / tool).chmod(0o755)
+    calls = tmp_path / "calls"
+    calls.touch()
+    environment = {
+        **{key: value for key, value in os.environ.items() if key not in without},
+        "STUBS": bin_dir.as_posix(),
+        "CALLS": calls.as_posix(),
+        **variables,
+    }
+    result = subprocess.run(
+        in_bash("-e", step.as_posix()),
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return result, calls.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_every_download_tries_again_after_a_passing_error(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    downloads = 0
+    for pattern in SCRIPTS:
+        for path in sorted(folder.glob(pattern)):
+            for found in CURL.findall(path.read_text(encoding="utf-8")):
+                command = re.sub(r"\\\n\s*", "", found)
+                # An upload retries only where its API takes a second one without
+                # harm, as the release in the App Store does.
+                if "--request POST" in command:
+                    continue
+                downloads += 1
+                for option in DOWNLOAD:
+                    assert option in command, f"{path.name}: curl {command}"
+    # The gitsign of the signed release tags, in every repository.
+    assert downloads > 0
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("cache", ["empty", "krankerl", "changed"])
+def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
+    tmp_path: Path, cache: str
+) -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    version = dict(re.findall(r"(KRANKERL_(?:VERSION|SHA256)): (\S+)", workflow))[
+        "KRANKERL_VERSION"
+    ]
+    # Restored before the install, under a key that changes with krankerl; GitHub
+    # saves it only after a run that passed, which checked it.
+    restore = workflow[workflow.index("uses: actions/cache@") :]
+    assert restore.index("- name: Install krankerl") > 0
+    assert "path: ${{ runner.temp }}/krankerl\n" in restore
+    assert (
+        "key: krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}\n"
+        in restore
+    )
+    package = b"the package of krankerl\n"
+    temp = tmp_path / "temp"
+    deb = temp / f"krankerl/krankerl_{version}_amd64.deb"
+    if cache != "empty":
+        deb.parent.mkdir(parents=True)
+        deb.write_bytes(package if cache == "krankerl" else b"a changed package\n")
+    script = script_of(
+        workflow, "Install krankerl, which builds the package of the app"
+    )
+
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "curl": textwrap.dedent(
+                """\
+                while (($# > 0)); do
+                  if [[ "$1" == --output ]]; then echo "the package of krankerl" > "$2"; fi
+                  shift
+                done
+                """
+            ),
+            "sudo": "",
+        },
+        RUNNER_TEMP=temp.as_posix(),
+        KRANKERL_VERSION=version,
+        KRANKERL_SHA256=hashlib.sha256(package).hexdigest(),
+    )
+
+    downloads = [call for call in calls if call.startswith("curl ")]
+    installs = [call for call in calls if call.startswith("sudo ")]
+    if cache == "changed":
+        # The checksum is checked for a package of the cache too.
+        assert result.returncode != 0
+        assert downloads == []
+        assert installs == []
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(downloads) == (1 if cache == "empty" else 0)
+    for download in downloads:
+        assert all(option in download for option in DOWNLOAD), download
+        assert f"--output {deb.as_posix()} " in download
+    assert installs == [f"sudo dpkg --install {deb.as_posix()}"]
+
+
 def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
     assert "vendor/bin/psalm --taint-analysis" in check
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("ci", "reachable", "code", "message"),
+    [
+        ("true", True, 0, "appinfo/info.xml follows the schema of the App Store."),
+        ("", True, 0, "appinfo/info.xml follows the schema of the App Store."),
+        # Locally, the CI checks it then.
+        (
+            "",
+            False,
+            0,
+            "The schema of the App Store is out of reach here; the CI checks it.",
+        ),
+        # In the CI, nothing else would: a broken info.xml could merge while the App
+        # Store is down.
+        (
+            "true",
+            False,
+            1,
+            "The schema of the App Store is out of reach, and the CI checks"
+            " appinfo/info.xml against it; run the checks again once"
+            " apps.nextcloud.com answers.",
+        ),
+    ],
+)
+def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    ci: str,
+    reachable: bool,
+    code: int,
+    message: str,
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "App metadata"')
+    metadata = check[start : check.index('step "PHP syntax"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (repository / "scripts/metadata.sh").write_text(
+        check[: check.index('step "Text files"')] + metadata,
+        encoding="utf-8",
+        newline="\n",
+    )
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    curl = (
+        textwrap.dedent(
+            """\
+            while (($# > 0)); do
+              if [[ "$1" == --output ]]; then echo "<xs:schema/>" > "$2"; fi
+              shift
+            done
+            """
+        )
+        if reachable
+        else 'echo "curl: (22) The requested URL returned error: 504" >&2\nexit 22\n'
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/metadata.sh\n",
+        repository,
+        {"curl": curl, "php": ""},
+        without=("CI",),
+        TMPDIR=temporary.as_posix(),
+        **({"CI": ci} if ci else {}),
+    )
+
+    assert result.returncode == code, result.stdout + result.stderr
+    assert result.stdout.endswith(f"\n{message}\n")
+    assert len(calls) == (2 if reachable else 1), calls
+    assert all(option in calls[0] for option in DOWNLOAD), calls[0]
+    # PHP checks info.xml against the schema that curl downloaded.
+    assert [call.split(" ", 2)[:2] for call in calls[1:]] == (
+        [["php", "-r"]] if reachable else []
+    )
+    # The schema goes again.
+    assert list(temporary.iterdir()) == []
+
+
+# It starts the tool, which in the copy of the mutation tests is the code with the
+# mutants, and the variables of mutmut switch them in that process too.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothing(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    project = projects["nextcloud-app"]
+    work = tmp_path / "work"
+    for name in ("appinfo/info.xml", "CHANGELOG.md", ".github/blueprint.py"):
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(project / name, work / name)
+    shutil.copytree(project / ".github/blueprint", work / ".github/blueprint")
+    supported = re.search(
+        r'max-version="(\d+)"', (work / "appinfo/info.xml").read_text(encoding="utf-8")
+    )
+    assert supported
+    # The next major version of Nextcloud is out.
+    newest = int(supported[1]) + 1
+    for command in (
+        ["init", "--quiet"],
+        ["config", "core.autocrlf", "false"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--message",
+            "start",
+        ],
+    ):
+        subprocess.run(["git", *command], cwd=work, check=True)
+    script = script_of(
+        (ROOT / ".github/workflows/upstream.yml").read_text(encoding="utf-8"),
+        "Raise max-version to the newest major version of Nextcloud",
+    )
+
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        work,
+        {
+            # Only what a dry run may ask; it writes nothing to GitHub.
+            "gh": textwrap.dedent(
+                f"""\
+                case "$*" in
+                  "api repos/nextcloud/server/releases/latest --jq .tag_name") echo v{newest}.0.1 ;;
+                  "pr list --head upstream/nextcloud-{newest} --state open --json number --jq .[].number") ;;
+                  *) exit 1 ;;
+                esac
+                """
+            ),
+            "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+        },
+        GH_TOKEN="token",
+        GH_REPO="Someone/app",
+        AUTOMERGE="",
+        DRY_RUN="true",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [call for call in calls if call.startswith("gh ")] == [
+        "gh api repos/nextcloud/server/releases/latest --jq .tag_name",
+        f"gh pr list --head upstream/nextcloud-{newest} --state open --json number"
+        " --jq .[].number",
+    ]
+    assert (
+        f'A dry run: the pull request "feat: support Nextcloud {newest}" from the'
+        f" branch upstream/nextcloud-{newest} would make this change."
+    ) in result.stdout
+    # The change of the commit that it would make.
+    assert re.search(
+        rf'^\+\t\t<nextcloud min-version="\d+" max-version="{newest}"/>$',
+        result.stdout,
+        re.MULTILINE,
+    )
+    assert f"\n+- Supports Nextcloud {newest}.\n" in result.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -1395,13 +2027,6 @@ def test_renovate_keeps_every_project_current(
         '"pre-commit": { enabled: true }',
     ):
         assert setting in rules, setting
-    # The weekly refresh of the lock files has no release date: it merges at once.
-    refresh = re.search(
-        r'matchUpdateTypes: \["lockFileMaintenance"\],\n\s+minimumReleaseAge: null,\n'
-        r"\s+automerge: true,",
-        rules,
-    )
-    assert refresh
     python = kind in ("home-assistant", "github-action", "python-package")
     # Ruff and its pre-commit hook run the same version.
     assert ('matchDepNames: ["ruff", "astral-sh/ruff-pre-commit"]' in rules) == python
@@ -1467,6 +2092,8 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
     # Renovate installs pip-tools once per repository and run, for the Python of the
     # first lock file it compiles: the lock files of pip-compile share one Python, and
     # one for another Python is compiled with uv, for a Python with its patch level.
+    # So is the one of mutmut, which leaves out the pytest of the project with an
+    # option that Renovate allows for uv alone.
     pip_compile = {}
     uv = {}
     tracked = subprocess.run(
@@ -1484,24 +2111,527 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
             assert "--no-index" not in header, name
         else:
             command = re.search(
-                r"^#    uv pip compile .*--python-version (\d+\.\d+\.\d+) ",
+                r"^#    uv pip compile .*--python-version=(\d+\.\d+(?:\.\d+)?) ",
                 header,
                 re.M,
             )
             assert command, name
             uv[name] = command[1]
     assert len(set(pip_compile.values())) == 1, pip_compile
-    assert list(uv) == ["stacks/home-assistant/requirements-test.txt"]
+    assert sorted(uv) == [
+        "stacks/home-assistant/requirements-test.txt",
+        "stacks/mutation/requirements.txt",
+    ]
     copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
     python = re.search(r"stack == 'home-assistant' %\]([\d.]+)\[% else", copier)
     assert python
     assert uv["stacks/home-assistant/requirements-test.txt"].startswith(python[1] + ".")
+    # mutmut runs on the Python of each Python project, from the oldest on, which the
+    # lock files of pip-compile are for.
+    assert uv["stacks/mutation/requirements.txt"] == next(iter(pip_compile.values()))
     # The pinned test plugin makes a Home Assistant that needs a newer Python fail
     # its update, instead of an older Home Assistant being chosen.
     inputs = (ROOT / "stacks/home-assistant/requirements-test.in").read_text(
         encoding="utf-8"
     )
     assert re.search(r"^pytest-homeassistant-custom-component==\S+$", inputs, re.M)
+
+
+# How Renovate reads the command in the header of a lock file of pip-compile, after
+# lib/modules/manager/pip-compile/common.ts and utils.ts of the version that the
+# Renovate workflow runs. It compiles the file again with that command, and skips a
+# file whose command it can't read in every run, with no more than a warning in its
+# log: the file gets no update from then on, not even one that fixes a
+# vulnerability. The job "renovate rules" lets Renovate itself read every file.
+HEADER = re.compile(r"^(?:#.*?\r?\n)+# {4}(?P<command>\S*)(?P<arguments> .*?)?\r?\n")
+PYTHON_OF_PIP_COMPILE = re.compile(
+    r"^(?:#.*?\r?\n)*# This file is autogenerated by pip-compile with Python "
+    r"\d+(?:\.\d+)*\s",
+    re.IGNORECASE,
+)
+WITH_A_VALUE = {"--output-file", "--extra", "--extra-index-url"}
+PIP_WITH_A_VALUE = {"--resolver", "--constraint", *WITH_A_VALUE}
+UV_WITH_A_VALUE = {
+    *("--constraints", "--constraint", "--python-version", "--no-emit-package"),
+    *("--prerelease", "--format", "--resolution", "--fork-strategy"),
+    *("--exclude-newer", "--exclude-newer-package", "--group", "--override"),
+    *("--overrides", *WITH_A_VALUE),
+}
+FOR_BOTH = {
+    "-v",
+    "--generate-hashes",
+    "--emit-index-url",
+    "--index-url",
+    "--all-extras",
+}
+KNOWN_OPTIONS = {
+    "pip-compile": {
+        *("--allow-unsafe", "--generate-hashes", "--no-emit-index-url"),
+        *("--strip-extras", *FOR_BOTH, *PIP_WITH_A_VALUE),
+    },
+    "uv": {"--no-strip-extras", "--universal", *FOR_BOTH, *UV_WITH_A_VALUE},
+}
+
+
+def why_renovate_skips(root: Path, name: str) -> list[str]:
+    """What keeps Renovate from compiling the lock file root/name again; nothing for a
+    file that it reads."""
+    content = (root / name).read_text(encoding="utf-8")
+    header = HEADER.match(content)
+    if not header:
+        return ["no command in the header"]
+    command = header["command"]
+    if command not in KNOWN_OPTIONS:
+        return [f"{command}, a command of its own"]
+    problems = []
+    sources, output = [], ""
+    for argument in shlex.split(header["arguments"] or ""):
+        if command == "uv" and argument in ("pip", "compile"):
+            continue
+        if not argument.startswith("-"):
+            sources.append(argument)
+            continue
+        option, _, value = argument.partition("=")
+        if argument == "--no-header":
+            problems.append("--no-header, which Renovate refuses")
+        elif argument in PIP_WITH_A_VALUE | UV_WITH_A_VALUE:
+            problems.append(f"{argument} without = before its value")
+        elif option not in KNOWN_OPTIONS[command]:
+            problems.append(f"{argument}, an option that Renovate doesn't know")
+        elif option == "--output-file":
+            output = value
+    # Renovate finds the folder of the command from the path of the output file.
+    if output and Path(output).name != Path(name).name:
+        problems.append(f"{output} as the output file")
+    if not sources:
+        problems.append("no source file")
+    for source in sources:
+        if not (root / name).parent.joinpath(source).is_file():
+            problems.append(f"{source}, a source file that doesn't exist")
+    # The Python to compile it for, which Renovate installs.
+    if command == "pip-compile" and not PYTHON_OF_PIP_COMPILE.match(content):
+        problems.append("no Python in the header")
+    return problems
+
+
+def lock_files_of_pip_compile(names: list[str]) -> list[str]:
+    """The files that Renovate's pip-compile finds, by its managerFilePatterns."""
+    rules = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    pattern = re.search(
+        r'"pip-compile": \{ managerFilePatterns: \["/(.+)/"\] \}', rules
+    )
+    assert pattern
+    found = re.compile(json.loads(f'"{pattern[1]}"'))
+    return sorted(name for name in names if found.search(name))
+
+
+@pytest.mark.parametrize(
+    ("header", "problems"),
+    [
+        (
+            "# This file was autogenerated by uv via the following command:\n"
+            "#    uv pip compile --generate-hashes --python-version 3.14.8"
+            " --output-file=requirements.txt requirements.in\n",
+            # Without the =, the value reads as one more file to compile.
+            [
+                "--python-version without = before its value",
+                "3.14.8, a source file that doesn't exist",
+            ],
+        ),
+        (
+            "#\n# This file is autogenerated by pip-compile with Python 3.12\n"
+            "# by the following command:\n#\n"
+            "#    pip-compile --generate-hashes --output-file=requirements.txt"
+            " --strip-extras --unsafe-package=coverage requirements.in\n",
+            ["--unsafe-package=coverage, an option that Renovate doesn't know"],
+        ),
+        (
+            "# This file was autogenerated by uv via the following command:\n"
+            "#    uv pip compile --python-platform=linux --no-header"
+            " --output-file=requirements-dev.txt\n",
+            [
+                "--python-platform=linux, an option that Renovate doesn't know",
+                "--no-header, which Renovate refuses",
+                "requirements-dev.txt as the output file",
+                "no source file",
+            ],
+        ),
+        (
+            "#\n# This file is autogenerated by pip-compile\n#\n"
+            "#    pip-compile --generate-hashes --output-file=requirements.txt"
+            " requirements.in elsewhere.in\n",
+            [
+                "elsewhere.in, a source file that doesn't exist",
+                "no Python in the header",
+            ],
+        ),
+        ("# by make:\n#    make requirements.txt\n", ["make, a command of its own"]),
+        ("mutmut==3.8.0\n", ["no command in the header"]),
+        # What the lock files of the blueprint have.
+        (
+            "#\n# This file is autogenerated by pip-compile with Python 3.12\n"
+            "# by the following command:\n#\n"
+            "#    pip-compile --allow-unsafe --generate-hashes"
+            " --output-file=requirements.txt --strip-extras requirements.in\n",
+            [],
+        ),
+        (
+            "# This file was autogenerated by uv via the following command:\n"
+            "#    uv pip compile --generate-hashes --universal --python-version=3.12"
+            " --no-emit-package=pytest --output-file=requirements.txt"
+            " requirements.in\n",
+            [],
+        ),
+    ],
+)
+def test_the_guard_of_the_lock_files_finds_what_renovate_skips(
+    tmp_path: Path, header: str, problems: list[str]
+) -> None:
+    (tmp_path / "requirements.in").write_text("mutmut\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text(
+        f"{header}mutmut==3.8.0\n", encoding="utf-8"
+    )
+
+    assert why_renovate_skips(tmp_path, "requirements.txt") == problems
+
+
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
+def test_renovate_reads_every_lock_file_of_the_blueprint() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True, text=True
+    ).stdout.split("\0")
+    names = lock_files_of_pip_compile(tracked)
+
+    assert {name: why_renovate_skips(ROOT, name) for name in names} == {
+        name: [] for name in names
+    }
+    # The tools of the blueprint's tests and of every kind of project.
+    assert len(names) == 1 + len(list((ROOT / "stacks").glob("*/requirements*.txt")))
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_renovate_reads_every_lock_file_of_a_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    names = lock_files_of_pip_compile(
+        [path.relative_to(project).as_posix() for path in project.rglob("*.txt")]
+    )
+
+    assert {name: why_renovate_skips(project, name) for name in names} == {
+        name: [] for name in names
+    }
+    expected = {
+        "home-assistant": ["requirements-test.txt"],
+        "python-package": ["requirements-dev.txt", "requirements-fuzz.txt"],
+        "github-action": ["requirements-dev.txt", "requirements-fuzz.txt"],
+    }
+    assert names == expected.get(kind, [])
+
+
+def renovate_rules(text: str) -> dict[str, Any]:
+    """The rules of a .json5 file of Renovate: JSON with comments, names without
+    quotes and commas before a closing bracket."""
+    out, position = [], 0
+    token = re.compile(
+        r'(?P<string>"(?:[^"\\]|\\.)*")|(?P<comment>//[^\n]*)'
+        r"|(?P<name>[A-Za-z_$][\w$]*)(?=\s*:)|(?P<comma>,(?=\s*[}\]]))"
+    )
+    for found in token.finditer(text):
+        out.append(text[position : found.start()])
+        if found["string"]:
+            out.append(found["string"])
+        elif found["name"]:
+            out.append(json.dumps(found["name"]))
+        position = found.end()
+    out.append(text[position:])
+    rules = json.loads("".join(out))
+    assert isinstance(rules, dict)
+    return rules
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
+    projects: dict[str, Path], kind: str
+) -> None:
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    # Every package manager refreshes its lock files once a week, in the same window
+    # as the other updates.
+    assert shared["lockFileMaintenance"] == {
+        "enabled": True,
+        "schedule": shared["schedule"],
+    }
+    # The refresh brings the newest version of every indirect dependency, also one of
+    # minutes ago, without the week of waiting: so it never merges on its own. A rule
+    # that could apply to it decides, the last one with a say.
+    automerge = shared.get("automerge", False)
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    refresh = [
+        rule
+        for rule in rules
+        if rule.get("matchUpdateTypes") == ["lockFileMaintenance"]
+    ]
+    # Renovate builds it anew only in its window: a change of main after the review
+    # doesn't bring versions that the maintainer hasn't seen.
+    assert refresh == [
+        {
+            "matchUpdateTypes": ["lockFileMaintenance"],
+            "minimumReleaseAge": None,
+            "automerge": False,
+            "updateNotScheduled": False,
+        }
+    ]
+    for rule in rules:
+        # A refresh has no dependency, datasource or version of its own to match.
+        about_a_dependency = any(
+            key.startswith("match")
+            and key not in ("matchUpdateTypes", "matchManagers", "matchFileNames")
+            for key in rule
+        )
+        types = rule.get("matchUpdateTypes", ["lockFileMaintenance"])
+        if "lockFileMaintenance" in types and not about_a_dependency:
+            automerge = rule.get("automerge", automerge)
+    assert automerge is False
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("log", "status", "errors"),
+    [
+        (
+            [
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {
+                        "requirements.in": ["requirements.txt"],
+                        "stacks/demo/requirements.in": ["stacks/demo/requirements.txt"],
+                    },
+                }
+            ],
+            0,
+            [],
+        ),
+        (
+            # Two lock files of one source are one package file of Renovate.
+            [
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {
+                        "requirements.in": [
+                            "requirements.txt",
+                            "stacks/demo/requirements.txt",
+                        ]
+                    },
+                }
+            ],
+            0,
+            [],
+        ),
+        (
+            [
+                {
+                    "level": 40,
+                    "msg": "pip-compile error",
+                    "repository": "local",
+                    "matchedFile": "stacks/demo/requirements.txt",
+                    "errorMessage": "Option --unsafe-package=coverage not supported (yet)",
+                },
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {"requirements.in": ["requirements.txt"]},
+                },
+            ],
+            0,
+            [
+                'pip-compile error: {"matchedFile": "stacks/demo/requirements.txt",'
+                ' "errorMessage": "Option --unsafe-package=coverage not supported'
+                ' (yet)"}',
+                "Renovate doesn't read the lock file stacks/demo/requirements.txt.",
+            ],
+        ),
+        (
+            [{"level": 30, "msg": "Extracted dependencies", "sources": {}}],
+            0,
+            [
+                "Renovate doesn't read the lock file requirements.txt.",
+                "Renovate doesn't read the lock file stacks/demo/requirements.txt.",
+            ],
+        ),
+        (
+            # Renovate ends with exit code 1 after an error, as with broken rules.
+            [{"level": 60, "msg": "Repository has invalid config"}],
+            1,
+            [
+                "Repository has invalid config: {}",
+                "Renovate didn't finish reading the files.",
+                "Renovate ended with exit code 1.",
+            ],
+        ),
+        (
+            # docker can't start Renovate at all.
+            [],
+            125,
+            [
+                "Renovate didn't finish reading the files.",
+                "Renovate ended with exit code 125.",
+            ],
+        ),
+    ],
+)
+def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
+    tmp_path: Path, log: list[dict[str, object]], status: int, errors: list[str]
+) -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_of(workflow, "validate")
+    step = job[job.index("      - name: Read every file of the dependencies") :]
+    run = "        run: |\n"
+    script = textwrap.dedent(step[step.index(run) + len(run) :])
+    # A checkout with two lock files of pip-compile, as GitHub leaves it.
+    checkout = tmp_path / "checkout"
+    for name in ("requirements.txt", "stacks/demo/requirements.txt", "notes.txt"):
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / name).write_text("# A file.\n", encoding="utf-8")
+    author = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+    for command in (
+        ["init", "--quiet"],
+        ["add", "."],
+        [*author, "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "a"],
+    ):
+        subprocess.run(["git", *command], cwd=checkout, check=True)
+    (checkout / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    # Renovate's log as JSON lines, with the package files it found of pip-compile,
+    # and a line of its own; docker notes what it gets and ends as Renovate does,
+    # python3 is the Python of the tests.
+    lines = []
+    for entry in log:
+        if "sources" in entry:
+            sources = entry.pop("sources")
+            assert isinstance(sources, dict)
+            entry["packageFiles"] = {
+                "pip-compile": [
+                    {"packageFile": source, "lockFiles": locks, "deps": []}
+                    for source, locks in sources.items()
+                ],
+                "pip_requirements": [{"packageFile": "requirements.txt"}],
+            }
+        lines.append(json.dumps({"name": "renovate", "pid": 7, "v": 0, **entry}))
+    (tmp_path / "log").write_text(
+        "Starting Renovate\n" + "".join(f"{line}\n" for line in lines),
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool, body in {
+        # The archive that it mounts, and its arguments.
+        "docker": 'tar -tf - < "${4%:/tmp/repository.tar:ro}" > "$CALLS.tar"\n'
+        'printf \'%s\\n\' "$@" > "$CALLS"\ncat "$LOG"\nexit "$STATUS"\n',
+        "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+    }.items():
+        (bin_dir / tool).write_text(
+            f"#!/usr/bin/env bash\n{body}", encoding="utf-8", newline="\n"
+        )
+        (bin_dir / tool).chmod(0o755)
+    (tmp_path / "temp").mkdir()
+    summary = tmp_path / "summary"
+    summary.touch()
+    calls = tmp_path / "calls"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": (tmp_path / "temp").as_posix(),
+        "GITHUB_STEP_SUMMARY": summary.as_posix(),
+        "IMAGE": "renovate",
+        "CALLS": calls.as_posix(),
+        "LOG": (tmp_path / "log").as_posix(),
+        "STATUS": str(status),
+    }
+    # As GitHub runs a step: bash -e.
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=checkout,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == (1 if errors else 0), result.stderr
+    assert re.findall(r"^::error title=Renovate::(.*)$", result.stdout, re.M) == errors
+    # Lines that are no JSON stay in the log of the job.
+    assert result.stdout.startswith("Starting Renovate\n")
+    expected = "" if errors else "the 2 lock files of pip-compile among them"
+    assert expected in summary.read_text(encoding="utf-8")
+    # The committed files reach Renovate, in its container, as the rules of the
+    # blueprint, without a token, and with every warning in its log.
+    archive = (tmp_path / "calls.tar").read_text(encoding="utf-8").splitlines()
+    assert sorted(name for name in archive if not name.endswith("/")) == [
+        "notes.txt",
+        "requirements.txt",
+        "stacks/demo/requirements.txt",
+    ]
+    arguments = calls.read_text(encoding="utf-8").splitlines()
+    assert arguments[:3] == ["run", "--rm", "--volume"]
+    for argument in (
+        "LOG_LEVEL=info",
+        "LOG_FORMAT=json",
+        "RENOVATE_GITHUB_TOKEN_WARN=false",
+        "RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5",
+        "renovate",
+    ):
+        assert argument in arguments, argument
+    assert not any(
+        "TOKEN=" in argument and "WARN" not in argument for argument in arguments
+    )
+    assert arguments[-1].strip().endswith("renovate --platform=local --dry-run=extract")
+
+
+def test_the_renovate_rules_run_for_every_change_of_a_lock_file() -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    events = workflow[
+        workflow.index("\n  pull_request:\n") : workflow.index("\n  workflow_dispatch:")
+        + 1
+    ]
+    for path in (
+        ".github/renovate*.json5",
+        ".github/workflows/renovate.yml",
+        '"**/requirements*.txt"',
+        '"**/requirements*.in"',
+    ):
+        assert f"      - {path}\n" in events, path
+    # The step lists the lock files as Renovate finds them.
+    step = workflow[
+        workflow.index("      - name: Read every file of the dependencies") :
+    ]
+    pattern = re.search(r"grep -E '([^']+)'", step)
+    assert pattern
+    rules = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    assert f'managerFilePatterns: ["/{json.dumps(pattern[1])[1:-1]}/"]' in rules
+
+
+def test_a_pull_request_checks_the_renovate_rules_without_waiting_for_the_bot() -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    # Renovate's run opens several pull requests of lock files at once: a group of
+    # the whole workflow would let them wait for the bot and cancel each other.
+    assert not re.search(r"^concurrency:", workflow, re.M)
+    assert (
+        "    concurrency:\n"
+        "      group: renovate-rules-${{ github.event.pull_request.number }}\n"
+        "      cancel-in-progress: true\n"
+    ) in job_of(workflow, "validate")
+    # One run of the bot at a time, and a waiting one isn't cancelled by a check.
+    assert (
+        "    concurrency:\n      group: renovate\n      cancel-in-progress: false\n"
+    ) in job_of(workflow, "renovate")
 
 
 def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
@@ -1815,7 +2945,15 @@ def after_the_checks_job(name: str) -> str:
 def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
     # The checks of every kind of project are only templates here, whose jobs skip.
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert watched_after_the_checks(after) == {"CI (python)", "Variants"} | OTHER_CHECKS
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (python)",
+            "Variants",
+            "Release",
+        }
+        | OTHER_CHECKS
+    )
     assert "github.event.workflow_run.run_attempt == 1" in after
 
 
@@ -1832,10 +2970,55 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
-    assert watched == names | OTHER_CHECKS
+    assert watched == names | OTHER_CHECKS | {"Release"}
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
+
+
+def test_the_bots_after_the_checks_watch_the_other_tests_that_a_project_names(
+    tmp_path: Path,
+) -> None:
+    # Visual tests or a bot that renders screenshots flake as the CI does.
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="home-assistant",
+        test_workflows=" Visual check,Screenshot bot , ",
+    )
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+
+    assert (
+        "    workflows: [CI (home-assistant), Docker E2E, Visual check, Screenshot bot, CodeQL,"
+        in after
+    )
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (home-assistant)",
+            "Docker E2E",
+            "Visual check",
+            "Screenshot bot",
+            "Release",
+        }
+        | OTHER_CHECKS
+    )
+
+
+@pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])
+def test_the_other_tests_of_a_project_are_named_as_their_workflows_are(
+    tmp_path: Path, names: str
+) -> None:
+    # The names go into a list of YAML in the workflow.
+    with pytest.raises(ValueError, match="test_workflows"):
+        render(
+            tmp_path,
+            project_name="Demo",
+            description="A demo.",
+            project_type="generic",
+            test_workflows=names,
+        )
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -1866,19 +3049,14 @@ def test_the_bot_for_cancelled_checks_watches_every_required_check(
 
 def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     # Their checks fail the same way again, or, as the changelog, pass once the pull
-    # request changed: no flaky test either way.
+    # request changed: no flaky test either way. The release has a bot of its own.
     for job in ("rerun", "report"):
         listed = re.search(
             r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
             after_the_checks_job(job),
         )
         assert listed, job
-        assert set(json.loads(listed[1])) == OTHER_CHECKS, job
-    # A run that the bot for cancelled checks started again failed at first in no test.
-    report = after_the_checks_job("report")
-    assert report.index('attempts/1" --jq .conclusion)" == cancelled') < report.index(
-        "gh issue create"
-    )
+        assert set(json.loads(listed[1])) == OTHER_CHECKS | {"Release"}, job
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
@@ -1991,6 +3169,736 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
     assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
 
 
+# jq, which gh runs for its option --jq: the steps that rely on its filters run with
+# it, on Linux and wherever else it is installed.
+JQ = shutil.which("jq")
+WITH_JQ = pytest.mark.skipif(
+    BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
+)
+# The answers of gh: an API call by its path, any other command by its first two
+# words, each through jq as gh does. The jq of gh ends its lines with LF on every
+# system, the jq of Windows with CRLF. What it is given to write, it keeps by the
+# words of its command.
+FAKE_GH = """#!/usr/bin/env bash
+echo "$*" >> "$CALLS"
+filter=""
+if [[ "$1" == api ]]; then
+  key=""
+  shift
+  while (($#)); do
+    case "$1" in
+      --jq) filter="$2"; shift 2 ;;
+      --method | -f | -F) shift 2 ;;
+      --paginate | --silent) shift ;;
+      *) key="$1"; shift ;;
+    esac
+  done
+else
+  key="$1 $2"
+  shift 2
+  while (($#)); do
+    case "$1" in
+      --jq) filter="$2"; shift 2 ;;
+      --body) printf '%s' "$2" > "$WRITTEN/${key// /-}"; shift 2 ;;
+      --body-file) cp "$2" "$WRITTEN/${key// /-}"; shift 2 ;;
+      --state | --search | --json | --title | --label) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+fi
+answer="$ANSWERS/$(tr '/ ' '__' <<<"$key")"
+if [[ ! -f "$answer" ]]; then
+  case "$key" in
+    "run rerun" | "issue comment" | "issue create") exit 0 ;;
+  esac
+  echo "gh has no answer for $key" >&2
+  exit 1
+fi
+if [[ -n "$filter" ]]; then
+  jq -r "$filter" "$answer" | tr -d '\\r'
+else
+  cat "$answer"
+fi
+"""
+TIMED_OUT = "The job has exceeded the maximum execution time of 30m0s"
+CANCELLED = "The operation was canceled."
+EXITED = "Process completed with exit code 1."
+
+
+def run_a_bot_after_the_checks(
+    tmp_path: Path, job: str, step: str, answers: dict[str, object], **variables: str
+) -> tuple[list[str], str, dict[str, str]]:
+    """Runs a step of a bot after the checks, as GitHub does, with the fake gh; returns
+    the calls of gh, the summary of the step and what gh was given to write."""
+    (tmp_path / "step.sh").write_text(
+        script_of(after_the_checks_job(job), step), encoding="utf-8", newline="\n"
+    )
+    folders = {name: tmp_path / name for name in ("bin", "answers", "written")}
+    for folder in folders.values():
+        folder.mkdir()
+    for key, answer in answers.items():
+        (folders["answers"] / re.sub(r"[/ ]", "_", key)).write_text(
+            answer if isinstance(answer, str) else json.dumps(answer),
+            encoding="utf-8",
+            newline="\n",
+        )
+    gh = folders["bin"] / "gh"
+    gh.write_text(FAKE_GH, encoding="utf-8", newline="\n")
+    gh.chmod(0o755)
+    calls = tmp_path / "calls"
+    summary = tmp_path / "summary"
+    calls.touch()
+    summary.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
+        "GH_REPO": "o/r",
+        "RUN": "5",
+        "NAME": "CI (python)",
+        "BRANCH": "feature",
+        "SHA": "abc1234def",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "CALLS": str(calls),
+        "ANSWERS": str(folders["answers"]),
+        "WRITTEN": str(folders["written"]),
+        **variables,
+    }
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    written = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in folders["written"].iterdir()
+    }
+    return (
+        calls.read_text(encoding="utf-8").splitlines(),
+        summary.read_text(encoding="utf-8"),
+        written,
+    )
+
+
+def job_of_a_run(
+    number: int, name: str, conclusion: str, *steps: tuple[str, str]
+) -> dict[str, object]:
+    """A job as the API of the workflow runs answers it."""
+    return {
+        "id": number,
+        "name": name,
+        "conclusion": conclusion,
+        "html_url": f"https://github.com/o/r/actions/runs/5/job/{number}",
+        "steps": [{"name": step, "conclusion": result} for step, result in steps],
+    }
+
+
+def annotations_of_a_job(*messages: str) -> list[dict[str, str]]:
+    """The annotations of a job: its failures, and a notice of the runner."""
+    return [
+        *({"annotation_level": "failure", "message": message} for message in messages),
+        {"annotation_level": "notice", "message": "The ubuntu-latest label moves on."},
+    ]
+
+
+def runs_of_the_branch(*before: int, conclusion: str = "failure") -> dict[str, object]:
+    """The completed runs of the workflow for the branch, the newest first: a later one,
+    the run itself, another run of its commit, one of a fork's branch of the same name,
+    and those for the commits before, which ended with the conclusion."""
+
+    def run(
+        number: int, sha: str, repository: str = "o/r", end: str = "success"
+    ) -> dict[str, object]:
+        return {
+            "id": number,
+            "head_sha": sha,
+            "head_repository": {"full_name": repository},
+            "conclusion": end,
+        }
+
+    return {
+        "workflow_runs": [
+            run(6, "fedcba9"),
+            run(5, "abc1234def"),
+            run(4, "abc1234def"),
+            run(3, "1111111", "fork/r"),
+            *(run(number, f"{number:07}", end=conclusion) for number in before),
+        ]
+    }
+
+
+def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
+    job = after_the_checks_job("rerun")
+    condition = condition_of(job)
+    assert "github.event.workflow_run.run_attempt == 1" in condition
+    assert (
+        """contains(fromJSON('["failure", "cancelled"]'), github.event.workflow_run.conclusion)"""
+        in condition
+    )
+    # It reads the jobs of the runs and their annotations, and starts the failed jobs
+    # again; it checks out nothing.
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == [
+        "      actions: write",
+        "      checks: read",
+    ]
+    assert "actions/checkout" not in job
+    # The values of the event reach the script as variables only.
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("first", "messages", "before", "again"),
+    [
+        # A test failed at first.
+        ("failure", [EXITED], None, True),
+        # A job ran out of time: GitHub cancelled it at its time limit.
+        ("cancelled", [TIMED_OUT, CANCELLED], None, True),
+        # A newer run cancelled it: the bot for cancelled checks sees to it.
+        ("cancelled", [RACED], None, False),
+        # A person cancelled it.
+        ("cancelled", [CANCELLED], None, False),
+        # The run for the commit before ended with the same failure: a real one.
+        ("failure", [EXITED], ("failure", [EXITED]), False),
+        ("cancelled", [TIMED_OUT], ("cancelled", [TIMED_OUT]), False),
+        # A newer push cancelled the run for the commit before, or it passed.
+        ("failure", [EXITED], ("cancelled", [RACED]), True),
+        ("failure", [EXITED], ("success", []), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
+    tmp_path: Path,
+    first: str,
+    messages: list[str],
+    before: tuple[str, list[str]] | None,
+    again: bool,
+) -> None:
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", first),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/check-runs/11/annotations": annotations_of_a_job(*messages),
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+            *([2] if before else []), conclusion=before[0] if before else "failure"
+        ),
+    }
+    if before:
+        conclusion, earlier = before
+        answers["repos/o/r/actions/runs/2/jobs"] = {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", conclusion),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        }
+        answers["repos/o/r/check-runs/21/annotations"] = annotations_of_a_job(*earlier)
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION=first,
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    if before:
+        # The run for the commit before, on the same branch of the same repository.
+        assert any(
+            call.startswith("api repos/o/r/actions/runs/2/jobs ") for call in calls
+        )
+        assert not any(
+            "actions/runs/3/" in call or "actions/runs/4/" in call for call in calls
+        )
+        assert ("broke for the commit before" in summary) != again
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
+    tmp_path: Path,
+) -> None:
+    # The commit before broke one of the two jobs: the other may be flaky.
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "failure"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(2, 1),
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "failure"),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, _, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" in calls
+    runs = next(call for call in calls if "/workflows/3/runs" in call)
+    assert runs.startswith(
+        "api --method GET repos/o/r/actions/workflows/3/runs -f branch=main -f event=push -f status=completed "
+    )
+    # Only the latest run before counts.
+    assert not any("actions/runs/1/" in call for call in calls)
+
+
+def variants_of_a_run(
+    jobs: str, leg: str, messages: tuple[str, ...], first: int
+) -> dict[str, object]:
+    """The jobs of a run of Variants that was cancelled, such as run 38396054999, whose
+    legs a newer run cancelled: a leg that ended as given, one that was cancelled with
+    the messages, and the job that waits for the legs, which failed because they did
+    not pass."""
+    answers: dict[str, object] = {
+        jobs: {
+            "jobs": [
+                job_of_a_run(first, "variant (generic)", leg),
+                job_of_a_run(first + 1, "update (generic)", "cancelled"),
+                job_of_a_run(first + 2, "variants", "failure", ("Check", "failure")),
+            ]
+        },
+        f"repos/o/r/check-runs/{first + 1}/annotations": annotations_of_a_job(
+            *messages
+        ),
+        f"repos/o/r/check-runs/{first + 2}/annotations": annotations_of_a_job(EXITED),
+    }
+    if leg == "cancelled":
+        answers[f"repos/o/r/check-runs/{first}/annotations"] = annotations_of_a_job(
+            *messages
+        )
+    return answers
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("leg", "messages", "again"),
+    [
+        # A newer run cancelled it, after a leg had failed or before.
+        ("cancelled", (RACED, CANCELLED), False),
+        ("failure", (RACED, CANCELLED), False),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), False),
+        ("failure", (CANCELLED,), False),
+        # A leg ran out of time.
+        ("success", (TIMED_OUT, CANCELLED), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_a_cancelled_run_again_only_when_it_ran_out_of_time(
+    tmp_path: Path, leg: str, messages: tuple[str, ...], again: bool
+) -> None:
+    # The job that waits for the legs failed only because they were cancelled; run
+    # again, the run for an older commit would cancel the one for the head.
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        NAME="Variants",
+        CONCLUSION="cancelled",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("a newer run or a person cancelled it" in summary) != again
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("conclusion", "messages", "again"),
+    [
+        # A newer push cancelled the run for the commit before, after a leg had failed.
+        ("cancelled", (RACED, CANCELLED), True),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), True),
+        # It failed: the same jobs broke.
+        ("failure", (CANCELLED,), False),
+    ],
+)
+def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
+    tmp_path: Path, conclusion: str, messages: tuple[str, ...], again: bool
+) -> None:
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(11, "variant (generic)", "failure"),
+                    job_of_a_run(12, "update (generic)", "success"),
+                    job_of_a_run(13, "variants", "failure"),
+                ]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+                2, conclusion=conclusion
+            ),
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/2/jobs", "failure", messages, 21
+            ),
+        },
+        NAME="Variants",
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("broke for the commit before" in summary) != again
+
+
+# The first attempt of a run of the tests, which passed when it ran again: a test that
+# failed, a job that ran out of time, one that failed in its build, one without a log,
+# and jobs that passed or that the failure of another cancelled.
+FIRST_ATTEMPT: dict[str, object] = {
+    "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+    "repos/o/r/actions/runs/5/attempts/1/jobs": {
+        "jobs": [
+            job_of_a_run(
+                11,
+                "test (3.12)",
+                "failure",
+                ("Set up Python", "success"),
+                ("Run the tests", "failure"),
+                ("Post Set up Python", "skipped"),
+            ),
+            job_of_a_run(12, "test (3.13)", "success", ("Run the tests", "success")),
+            job_of_a_run(
+                13,
+                "e2e (Safari)",
+                "cancelled",
+                ("Start Home Assistant", "success"),
+                ("Run the browser tests", "cancelled"),
+            ),
+            job_of_a_run(
+                14, "e2e (Chrome)", "cancelled", ("Run the browser tests", "cancelled")
+            ),
+            job_of_a_run(
+                15, "build", "failure", ("Pull", "failure"), ("Build", "failure")
+            ),
+            job_of_a_run(16, "docs", "failure", ("Build the website", "failure")),
+        ]
+    },
+    "repos/o/r/check-runs/11/annotations": annotations_of_a_job(EXITED),
+    "repos/o/r/check-runs/13/annotations": annotations_of_a_job(TIMED_OUT, CANCELLED),
+    "repos/o/r/check-runs/14/annotations": annotations_of_a_job(CANCELLED),
+    "repos/o/r/check-runs/15/annotations": annotations_of_a_job(
+        EXITED, "Error: the image   could not\nbe pulled"
+    ),
+    "repos/o/r/check-runs/16/annotations": annotations_of_a_job(EXITED),
+    "repos/o/r/actions/jobs/11/logs": (
+        "2026-10-12T09:15:58.0000000Z ===== short test summary info =====\n"
+        "2026-10-12T09:15:58.0000001Z \x1b[31mFAILED\x1b[0m"
+        " tests/test_cards.py::test_board[dark] - AssertionError: assert 1 == 2\n"
+        "2026-10-12T09:15:58.0000002Z FAILED tests/test_cards.py::test_score - TimeoutError\n"
+        "2026-10-12T09:15:58.0000003Z ERROR    homeassistant.setup:setup.py:12 no test\n"
+    ),
+    "repos/o/r/actions/jobs/13/logs": "2026-10-12T09:15:58.0000000Z Open the board\n",
+    "repos/o/r/actions/jobs/15/logs": "2026-10-12T09:15:58.0000000Z Pull the image\n",
+}
+# An empty cell of the table.
+NOTHING = "\N{EN DASH}"
+FLAKY_ROWS = [
+    "| [`test (3.12)`](https://github.com/o/r/actions/runs/5/job/11) | `Run the tests`"
+    " | `tests/test_cards.py::test_board[dark], tests/test_cards.py::test_score`"
+    " | `AssertionError: assert 1 == 2` |",
+    "| [`e2e (Safari)`](https://github.com/o/r/actions/runs/5/job/13)"
+    f" | `Run the browser tests` | {NOTHING} | `{TIMED_OUT}` |",
+    "| [`build`](https://github.com/o/r/actions/runs/5/job/15) | `Pull, Build`"
+    f" | {NOTHING} | `Error: the image could not be pulled` |",
+    "| [`docs`](https://github.com/o/r/actions/runs/5/job/16)"
+    f" | `Build the website` | {NOTHING} | `{EXITED}` |",
+]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
+    tmp_path: Path,
+) -> None:
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {**FIRST_ATTEMPT, "issue list": []},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-create"] == "\n".join(
+        [
+            "The flaky-test bot lists here every job that failed and then passed without"
+            " a change of the code, with the step, the test and the error that failed."
+            " Fix its test, then close this issue.",
+            "",
+            "**CI (python)** failed at first and passed when it ran again, on `feature`"
+            " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
+            "",
+            "| Job | Step | Test | Error |",
+            "| --- | --- | --- | --- |",
+            *FLAKY_ROWS,
+            "",
+        ]
+    )
+    assert any(
+        call.startswith("issue create --title Flaky tests --label maintenance ")
+        for call in calls
+    )
+    assert "\n".join(FLAKY_ROWS) in summary
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [
+                {"number": 8, "title": "Flaky tests of the website"},
+                {"number": 7, "title": "Flaky tests"},
+            ],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "issue-create" not in written
+    assert any(call.startswith("issue comment 7 --body ") for call in calls)
+    assert written["issue-comment"].endswith("\n".join(FLAKY_ROWS))
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_run_that_a_newer_one_cancelled(
+    tmp_path: Path,
+) -> None:
+    # The bot for cancelled checks started it again: no test failed.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11, "test (3.12)", "cancelled", ("Run the tests", "cancelled")
+                    ),
+                    job_of_a_run(
+                        12, "test (3.13)", "cancelled", ("Run the tests", "cancelled")
+                    ),
+                ]
+            },
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(RACED),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(RACED),
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+
+
+@WITH_JQ
+@pytest.mark.parametrize("leg", ["cancelled", "failure"])
+@pytest.mark.parametrize(
+    "messages", [(RACED, CANCELLED), (CANCELLED,)], ids=["raced", "by a person"]
+)
+def test_the_flaky_test_bot_reports_no_job_that_failed_because_others_were_cancelled(
+    tmp_path: Path, leg: str, messages: tuple[str, ...]
+) -> None:
+    # The bot for cancelled checks or a person started a cancelled run of Variants
+    # again, and it passed: the job that waits for the legs failed in no test.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+    assert not any("/logs" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_time(
+    tmp_path: Path,
+) -> None:
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs",
+                "success",
+                (TIMED_OUT, CANCELLED),
+                11,
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    # Not the job that waits for the legs.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| [")
+    ] == [
+        "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
+    ]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
+    tmp_path: Path,
+) -> None:
+    # A pull request names its jobs, its steps and its branch and writes its logs: none
+    # of them may end the code, the cell or the line, or mention anybody.
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11,
+                        "x` | @team\n[a](https://e.vil)",
+                        "failure",
+                        ("s`|\tt", "failure"),
+                    ),
+                    job_of_a_run(12, "long", "failure", ("Run", "failure")),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                "<b>`@team`</b>\r\n| y"
+            ),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job("é" * 200),
+            "repos/o/r/actions/jobs/11/logs": "FAILED tests/x.py::`@team` - z\n",
+            "issue list": [],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+        BRANCH="`@team`\n# x",
+    )
+
+    body = written["issue-create"]
+    assert "on `@team # x` at abc1234" in body
+    rows = body.splitlines()
+    assert (
+        "| [`x \\| @team\\n[a](https://e.vil)`](https://github.com/o/r/actions/runs/5/job/11)"
+        " | `s\\|\\tt` | `tests/x.py::@team` | `<b>@team</b> \\| y` |"
+    ) in rows
+    # An error fills a line at most.
+    assert (
+        "| [`long`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | `Run` | {NOTHING} | `{'é' * 149}\N{HORIZONTAL ELLIPSIS}` |"
+    ) in rows
+    # The code of the branch and of the cells.
+    assert body.count("`") == 2 * 8
+
+
+def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
+    # The failed push of the tag of v0.10.0 held the release and its rollout for 35
+    # minutes, until a person ran it again.
+    job = after_the_checks_job("release")
+    condition = condition_of(job)
+    for part in (
+        "!github.event.repository.fork",
+        "github.event.workflow_run.name == 'Release'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.conclusion == 'failure'",
+        "github.event.workflow_run.run_attempt == 1",
+    ):
+        assert part in condition
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == ["      actions: write"]
+    script = script_of(job, "Run the failed jobs of the release once more")
+    assert script.startswith('gh run rerun "$RUN" --failed\n')
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+# The checks that take seconds, whose runs for different commits never cancel each
+# other, and some that take minutes, whose runs for a newer commit cancel the older.
+QUICK_CHECKS = [
+    "pull-request-title.yml",
+    "dependency-review.yml",
+    "secret-scan.yml",
+    "area-labels.yml",
+    "docs.yml",
+]
+LONG_CHECKS = ["ci-python.yml", "codeql.yml", "variants.yml", "lint.yml"]
+
+
+def concurrency_of(name: str) -> str:
+    workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    found = re.search(
+        r"^concurrency:\n  group: (.+)\n  cancel-in-progress: ", workflow, re.M
+    )
+    assert found, name
+    return found[1]
+
+
+@pytest.mark.parametrize("name", QUICK_CHECKS)
+def test_a_quick_check_never_cancels_the_run_for_another_commit(name: str) -> None:
+    # The release bot edits its pull request while release-please pushes to it, and a
+    # late run for the older commit cancelled the required checks of the head. Runs for
+    # the same commit, such as those of an edited title, still replace each other.
+    group = concurrency_of(name)
+    assert "github.event.pull_request.number" in group
+    assert group.endswith("-${{ github.event.pull_request.head.sha }}")
+
+
+@pytest.mark.parametrize("name", LONG_CHECKS)
+def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
+    # Their runners are worth more than the race, which the bot for cancelled checks
+    # repairs.
+    assert "head.sha" not in concurrency_of(name)
+
+
 def test_the_tests_start_the_bash_of_the_path() -> None:
     # A bare "bash" ran the steps in WSL on Windows, and scripts/check.sh failed there:
     # the first argument of a call or of a list or tuple, alone or after env; only the
@@ -2008,7 +3916,7 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     # Contributors on Windows run scripts/check.sh in Git Bash; the other workflows
     # run on Linux only.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
-    assert "    runs-on: windows-latest\n" in windows
+    assert "    runs-on: windows-2025\n" in windows
     assert "    shell: bash\n" in windows
     assert "run: pip install --require-hashes -r requirements-dev.txt\n" in windows
     assert "run: bash scripts/check.sh\n" in windows
@@ -2245,45 +4153,12 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
     # Only the job without the code of the project may write issues.
     assert "\n    permissions:\n      issues: write\n    steps:" in report
     assert newest.count("issues: write") == 1
-    (tmp_path / "step.sh").write_text(
+    calls = run_with_a_fake_gh(
+        tmp_path,
         script_of(newest, "Keep the issue of the newest Python current"),
-        encoding="utf-8",
-        newline="\n",
-    )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-if [[ "$1 $2" == "issue list" ]]; then
-  echo "$OPEN"
-  exit 0
-fi
-echo "$*" >> calls
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
-    gh.chmod(0o755)
-    (tmp_path / "calls").touch()
-    assert BASH
-    done = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "RESULT": result,
-            "OPEN": open_issue,
-            "URL": "https://github.com/o/r/actions/runs/1",
-        },
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+        {"RESULT": result, "OPEN": open_issue},
     )
 
-    assert done.returncode == 0, done.stderr
-    calls = (tmp_path / "calls").read_text(encoding="utf-8")
     if not call:
         assert calls == ""
         return

@@ -25,7 +25,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit and the title of every pull request are checked as well.
+    `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit and the title of every pull request are checked as well. A passing error of a download fails no run: every download tries again.
 
 - :material-shield-lock-outline:{ .lg .middle } **Security**
 
@@ -43,7 +43,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    Renovate, which the blueprint runs every two hours: actions, dependencies and images a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows. Routine updates and the weekly refresh of the lock files merge themselves once every check passes.
+    Renovate, which the blueprint runs every two hours: actions, dependencies and images a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows. Routine updates merge themselves once every check passes; the weekly refresh of every lock file waits for the maintainer.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 
@@ -77,7 +77,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
 </div>
 
-The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, the clean-up and the dev container as well.
+The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, failed releases, the clean-up and the dev container as well.
 
 ## Kinds of projects
 

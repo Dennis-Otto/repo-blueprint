@@ -29,7 +29,7 @@ jobs:
   verify:
     name: verify the release
     if: ${{ !github.event.repository.fork }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       attestations: read
@@ -90,7 +90,8 @@ jobs:
           # which the weekly run only notes. It checks the tag on its own, as a user
           # would, not with the verify of sign-tag.sh, one of the scripts it checks.
           gitsign="$RUNNER_TEMP/gitsign"
-          curl --fail --location --silent --show-error --output "$gitsign" \
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+            --connect-timeout 15 --max-time 300 --output "$gitsign" \
             "https://github.com/sigstore/gitsign/releases/download/v$GITSIGN_VERSION/gitsign_${GITSIGN_VERSION}_linux_amd64"
           echo "$GITSIGN_SHA256  $gitsign" | sha256sum --check --strict >/dev/null
           chmod +x "$gitsign"
@@ -173,8 +174,13 @@ jobs:
           case "$PUBLISH_TO" in
             pypi)
               name="${GH_REPO#*/}"
-              published="$(curl --fail --silent --show-error "https://pypi.org/pypi/$name/$version/json" |
-                jq -r '.urls[].digests.sha256' | sort)"
+              published=""
+              # Into a file, which curl empties before it tries again.
+              if curl --fail --silent --show-error --retry 5 --retry-all-errors \
+                --connect-timeout 15 --max-time 300 --output "$RUNNER_TEMP/pypi.json" \
+                "https://pypi.org/pypi/$name/$version/json"; then
+                published="$(jq -r '.urls[].digests.sha256' "$RUNNER_TEMP/pypi.json" | sort)"
+              fi
               attached="$(sha256sum ./*.whl ./*.tar.gz 2>/dev/null | cut -d' ' -f1 | sort)"
               if [[ -n "$published" && "$published" == "$attached" ]]; then
                 pass "PyPI has the same files of $version."
@@ -205,12 +211,15 @@ jobs:
                 "repos/$GH_REPO/contents/appinfo/info.xml?ref=$TAG" |
                 python3 -c 'import sys, xml.etree.ElementTree as t; print(t.parse(sys.stdin).getroot().findtext("id"))')"
               # The page of the app shows a new release at once and links its signed
-              # package; the list of all apps follows up to hours later.
+              # package; the list of all apps follows up to hours later. The loop waits
+              # for the package, curl itself tries again after a passing error.
               package="https://github.com/$GH_REPO/releases/download/$TAG/$app_id.tar.gz"
               offered=false
               for attempt in 1 2 3 4 5 6; do
-                if curl --fail --silent --show-error --max-time 60 "https://apps.nextcloud.com/apps/$app_id" |
-                  grep -qF "href=\"$package\""; then
+                if curl --fail --silent --show-error --retry 2 --retry-all-errors \
+                  --connect-timeout 15 --max-time 30 --output "$RUNNER_TEMP/app.html" \
+                  "https://apps.nextcloud.com/apps/$app_id" &&
+                  grep -qF "href=\"$package\"" "$RUNNER_TEMP/app.html"; then
                   offered=true
                   break
                 fi
