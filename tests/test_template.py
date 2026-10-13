@@ -1215,6 +1215,18 @@ def test_every_release_of_the_blueprint_rolls_out_one_repository_at_a_time(
     assert "looks=15\n" in job
     assert "    timeout-minutes: 25\n" in job
     assert "gh workflow run blueprint-update.yml" in job
+    # One rollout at a time in each repository, never for the whole workflow: GitHub
+    # starts a Rollout run after every run of the Release workflow, and a group of the
+    # workflow would let one that rolls nothing out cancel the waiting rollout of a
+    # release. The group is on the job that a run without a release skips.
+    assert not re.search(r"^concurrency:", rollout, re.M)
+    assert re.findall(r"^\s+concurrency:$", rollout, re.M) == ["    concurrency:"]
+    assert (
+        "    concurrency:\n"
+        "      group: rollout-${{ matrix.repository }}\n"
+        "      cancel-in-progress: false\n"
+    ) in job
+    assert "    if: needs.plan.outputs.repositories != ''\n" in job
     zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
     assert "      - rollout.yml\n" in zizmor
     # The bot it starts can be started by hand; a project has no rollout of its own.

@@ -22,9 +22,10 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: rollout
-  cancel-in-progress: false
+# No concurrency for the whole workflow: GitHub starts a run of the Rollout after every
+# run of the Release workflow, and a run that waited for such a group was cancelled by
+# the next one, even by one that rolls nothing out. Each repository has a group of its
+# own instead, on the job that brings the release there.
 
 jobs:
   plan:
@@ -186,6 +187,13 @@ jobs:
     name: ${{ matrix.repository }}
     needs: plan
     if: needs.plan.outputs.repositories != ''
+    # One rollout at a time in each repository. A run that rolls nothing out skips
+    # this job and never joins a group. When a newer release reaches a repository
+    # while the job of an older one still waits there, it takes its place, as the bot
+    # always brings the latest release.
+    concurrency:
+      group: rollout-${{ matrix.repository }}
+      cancel-in-progress: false
     strategy:
       # One repository after the other, in the order of the plan, and every one of
       # them, also after one that failed.
