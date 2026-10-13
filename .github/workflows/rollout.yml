@@ -1,11 +1,16 @@
 name: Rollout
 
 # The rollout of the blueprint. Once the Release workflow has published and verified
-# a release that a merge to main made, it starts the blueprint bot (Blueprint update)
-# in every repository of the release app that has one, so that each repository gets
-# the release within minutes instead of with the bot's weekly run. Started by hand,
-# it rolls out the latest release. Its token of the release app can start workflows
-# and read the repositories, nothing else. It runs in the blueprint only.
+# a release, it starts the blueprint bot (Blueprint update) in every repository of the
+# release app that has one, so that each repository gets the release within minutes
+# instead of with the bot's weekly run. It goes from one repository to the next, the
+# quickest checks first, and gives the bot and the checks of its update pull request
+# up to 15 minutes before it starts the next one, so that the update pull requests
+# don't all wait for the runners of the account at once. A repository that it can't
+# start, or whose bot fails, fails the run by its name; the others get the release all
+# the same. Started by hand, it rolls out the latest release. Its tokens of the release
+# app can start workflows and read, nothing else, each in one repository. It runs in
+# the blueprint only.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -22,16 +27,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  rollout:
-    name: rollout
-    # A successful run of the Release workflow for a merge, or one started by hand,
-    # which takes up a release that an earlier run left as a draft; its hourly runs
-    # make no release.
+  plan:
+    name: plan the rollout
+    # A successful run of the Release workflow that can have made a release, or a
+    # start by hand. Of the runs for a push, only the one for the merge of a release
+    # pull request makes a release, so the others start no runner. A run on the hourly
+    # schedule makes one when the run of the merge failed before it, and one started by
+    # hand when it takes up a draft. A release that the run of a later merge made,
+    # because the run of its own merge was lost, waits for a start by hand or for the
+    # weekly run of the bots.
     if: >-
       github.repository == 'Dennis-Otto/repo-blueprint' && (
         github.event_name == 'workflow_dispatch' || (
-          github.event.workflow_run.conclusion == 'success' &&
-          contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event)
+          github.event.workflow_run.conclusion == 'success' && (
+            github.event.workflow_run.event != 'push' ||
+            startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')
+          )
         )
       )
     runs-on: ubuntu-latest
@@ -41,7 +52,13 @@ jobs:
       name: release
       deployment: false
     permissions:
+      # The jobs of the run of the Release workflow, and the latest release.
+      actions: read
       contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      repositories: ${{ steps.repositories.outputs.repositories }}
+      last: ${{ steps.repositories.outputs.last }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -51,17 +68,50 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
-          commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
-          if [[ "$EVENT" == workflow_run && "$commit" != "$HEAD_SHA" ]]; then
-            echo "The run made no release; the latest one, $tag, went out before." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          set -euo pipefail
+          # The latest release, and the job of the run that makes a release public.
+          ask_github() {
+            latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt \
+              --jq '"\(.tagName) \(.publishedAt)"')" || return
+            publish=""
+            if [[ -n "$RUN_ID" ]]; then
+              publish="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" \
+                --jq '.jobs[] | select(.name == "publish the release") | "\(.conclusion) \(.started_at)"')"
+            fi
+          }
+          # GitHub fails for a moment now and then, so it asks three times.
+          for attempt in 1 2 3; do
+            if ask_github; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::The latest release, or the jobs of the run of the Release workflow, could not be read."
+              exit 1
+            fi
+            sleep 15
+          done
+          read -r tag published <<<"$latest"
+          # Started by hand, the rollout takes the latest release. After a run of the
+          # Release workflow, whatever started it, it takes the release that the run
+          # published: the run's job "publish the release" succeeded, and the latest
+          # release went public after that job started; a beta leaves the latest release
+          # as it was. A run that GitHub started again for its failed jobs keeps the jobs
+          # that passed before.
+          if [[ -n "$RUN_ID" ]]; then
+            read -r conclusion started <<<"$publish"
+            if [[ "$conclusion" == success ]]; then
+              published_at="$(date -d "$published" +%s)"
+              started_at="$(date -d "$started" +%s)"
+            fi
+            if [[ "$conclusion" != success ]] || ((published_at < started_at)); then
+              echo "The run made no release; the latest one, $tag, went out before." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Create a token of the release app that can start workflows
+      - name: Create a token of the release app that lists its repositories
         id: app
         if: steps.release.outputs.tag != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -71,26 +121,239 @@ jobs:
           # Every repository of the installation, on purpose: the app is installed on
           # exactly the repositories that the blueprint keeps current.
           owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
-          # Only what finding and starting the blueprint bots needs.
-          permission-actions: write
-          permission-contents: read
-      - name: Start the blueprint bot in every repository that has one
+          # Only the names of its repositories.
+          permission-metadata: read
+      - name: List the repositories, the quickest checks first
+        id: repositories
         if: steps.release.outputs.tag != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ steps.release.outputs.tag }}
+          # The repositories by the time that their checks take, the quickest first, so
+          # that each update pull request is done soon. The longest go last, as no
+          # repository waits for the last one. A repository that isn't named here goes
+          # first: a new one has few checks yet.
+          ORDER: dennis-otto.github.io issue-assistant paperless-unified-search paperless-sync ha-autodarts
         run: |
-          set -o pipefail
-          echo "The blueprint bot brings $TAG to:" >> "$GITHUB_STEP_SUMMARY"
-          gh api --paginate installation/repositories \
-            --jq '.repositories[] | select(.archived | not) | "\(.full_name) \(.default_branch)"' |
-            while read -r repo branch; do
-              if [[ "$repo" == "$GITHUB_REPOSITORY" ]]; then
-                continue
+          set -euo pipefail
+          # GitHub fails for a moment now and then, so it asks three times.
+          for attempt in 1 2 3; do
+            if listing="$(gh api --paginate installation/repositories \
+              --jq '.repositories[] | select(.archived | not) | .full_name')"; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::The repositories of the release app could not be listed."
+              exit 1
+            fi
+            sleep 15
+          done
+          read -r -a order <<<"$ORDER"
+          place() {
+            local index
+            for index in "${!order[@]}"; do
+              if [[ "${order[index]}" == "${1#*/}" ]]; then
+                echo $((index + 1))
+                return
               fi
-              if ! gh api "repos/$repo/contents/.github/workflows/blueprint-update.yml?ref=$branch" --silent 2>/dev/null; then
-                continue
-              fi
-              gh workflow run blueprint-update.yml --repo "$repo" --ref "$branch"
-              echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
             done
+            echo 0
+          }
+          mapfile -t repositories < <(
+            while read -r repository; do
+              if [[ -n "$repository" && "$repository" != "$GITHUB_REPOSITORY" ]]; then
+                echo "$(place "$repository") $repository"
+              fi
+            done <<<"$listing" | LC_ALL=C sort -k 1,1n -k 2,2 | cut -d ' ' -f 2
+          )
+          if ((${#repositories[@]} == 0)); then
+            echo "The release app has no other repository to bring $TAG to." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "The blueprint bots bring $TAG to these repositories, one after the other:"
+            echo
+            printf '1. %s\n' "${repositories[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The names of repositories need no escapes in JSON.
+          matrix="$(printf '"%s",' "${repositories[@]}")"
+          {
+            echo "repositories=[${matrix%,}]"
+            echo "last=${repositories[-1]}"
+          } >> "$GITHUB_OUTPUT"
+
+  rollout:
+    name: ${{ matrix.repository }}
+    needs: plan
+    if: needs.plan.outputs.repositories != ''
+    strategy:
+      # One repository after the other, in the order of the plan, and every one of
+      # them, also after one that failed.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        repository: ${{ fromJSON(needs.plan.outputs.repositories) }}
+    runs-on: ubuntu-latest
+    # The 15 looks of the wait, the questions to GitHub between them, and the token
+    # and the start before them.
+    timeout-minutes: 25
+    # The environment holds the private key of the release app; only main may use it.
+    environment:
+      name: release
+      deployment: false
+    permissions: {}
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Create a token of the release app for the repository
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repository }}
+          # Only what finding and starting the blueprint bot needs, and reading how the
+          # bot and the checks of its pull request are doing.
+          permission-actions: write
+          permission-checks: read
+          permission-contents: read
+          permission-pull-requests: read
+          permission-statuses: read
+      - name: Start the blueprint bot of the repository
+        id: start
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPOSITORY: ${{ matrix.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # GitHub fails for a moment now and then, so it asks three times, 15 seconds
+          # apart. Only its answer that the workflow doesn't exist means that the
+          # repository has no blueprint bot; any other is an error. gh fails on every
+          # answer but a success, so the first line, with the status, tells.
+          for attempt in 1 2 3; do
+            status="$(gh api --include --silent "repos/$REPOSITORY/contents/.github/workflows/blueprint-update.yml" 2>/dev/null |
+              awk 'NR == 1 { print $2 }')" || true
+            if [[ "$status" == 200 || "$status" == 404 ]] || ((attempt == 3)); then
+              break
+            fi
+            sleep 15
+          done
+          if [[ "$status" == 404 ]]; then
+            echo "$REPOSITORY has no blueprint bot." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$status" != 200 ]]; then
+            problem="GitHub answered the look for its blueprint bot with ${status:-nothing}"
+            echo "::error::Not started in $REPOSITORY: $problem."
+            echo "✘ Not started in $REPOSITORY: $problem." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          for attempt in 1 2 3; do
+            if started="$(gh workflow run blueprint-update.yml --repo "$REPOSITORY")"; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::Not started in $REPOSITORY: its blueprint bot could not be started."
+              echo "✘ Not started in $REPOSITORY: its blueprint bot could not be started." >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            sleep 15
+          done
+          # GitHub names the run that it started, most of the time.
+          run="$(sed -n 's|^https://github\.com/.*/actions/runs/\([0-9][0-9]*\)$|\1|p' <<<"$started")"
+          echo "The blueprint bot of $REPOSITORY brings $TAG${run:+: https://github.com/$REPOSITORY/actions/runs/$run}." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "started=true"
+            echo "run=$run"
+          } >> "$GITHUB_OUTPUT"
+      - name: Wait for the blueprint bot, and for the checks of its pull request
+        if: steps.start.outputs.started == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPOSITORY: ${{ matrix.repository }}
+          RUN: ${{ steps.start.outputs.run }}
+          # No repository waits for the last one.
+          LAST: ${{ matrix.repository == needs.plan.outputs.last }}
+          # How the checks of the update pull request stand, and its address: pending
+          # while one of them waits or runs, or while none has started yet; then failed
+          # or passed. A pull request that merged or closed has nothing to wait for.
+          CHECKS: >-
+            (if .state != "OPEN" then "closed" else
+              [.statusCheckRollup[] |
+                if .__typename == "CheckRun" then
+                  if .status != "COMPLETED" then "pending"
+                  elif (.conclusion | IN("SUCCESS", "NEUTRAL", "SKIPPED")) then "passed"
+                  else "failed" end
+                elif (.state | IN("PENDING", "EXPECTED")) then "pending"
+                elif .state == "SUCCESS" then "passed"
+                else "failed" end]
+              | if length == 0 or any(. == "pending") then "pending"
+                elif any(. == "failed") then "failed"
+                else "passed" end
+            end) + " " + .url
+        run: |
+          set -euo pipefail
+          # 15 looks at most, a minute apart, for the bot and the checks together;
+          # then the rollout goes on.
+          looks=15
+          another_look() {
+            if ((looks == 0)); then
+              return 1
+            fi
+            looks=$((looks - 1))
+            sleep 60
+          }
+          # The bot first, to tell whether it brought the release, when GitHub named
+          # its run.
+          if [[ -n "$RUN" ]]; then
+            while :; do
+              bot="$(gh run view "$RUN" --repo "$REPOSITORY" --json status,conclusion --jq '"\(.status) \(.conclusion)"')" || bot=""
+              read -r status conclusion <<<"$bot"
+              if [[ "$status" == completed ]]; then
+                break
+              fi
+              if ! another_look; then
+                echo "The blueprint bot still ran after 15 minutes; the rollout goes on." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            done
+            if [[ "$conclusion" != success ]]; then
+              echo "::error::The blueprint bot failed in $REPOSITORY: https://github.com/$REPOSITORY/actions/runs/$RUN"
+              echo "✘ The blueprint bot failed in $REPOSITORY." >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          fi
+          if [[ "$LAST" == true ]]; then
+            echo "The blueprint bot is done; the checks of its pull request run on their own." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Then the checks of its update pull request, before the next repository.
+          while :; do
+            if answer="$(gh pr view blueprint/update --repo "$REPOSITORY" --json state,statusCheckRollup,url --jq "$CHECKS" 2>"$RUNNER_TEMP/pull-request")"; then
+              read -r checks address <<<"$answer"
+              if [[ "$checks" != pending ]]; then
+                break
+              fi
+            elif grep -q "no pull requests found" "$RUNNER_TEMP/pull-request"; then
+              checks=closed
+              break
+            fi
+            if ! another_look; then
+              checks=running
+              break
+            fi
+          done
+          case "$checks" in
+            passed) result="The checks of its update pull request passed." ;;
+            failed)
+              echo "::warning::The checks of the update pull request of $REPOSITORY failed: $address"
+              result="The checks of its update pull request failed; it waits for the maintainer."
+              ;;
+            closed) result="No update pull request is open: it merged, or the repository was up to date." ;;
+            *) result="The checks of its update pull request still ran after 15 minutes; the rollout goes on." ;;
+          esac
+          echo "$result" >> "$GITHUB_STEP_SUMMARY"

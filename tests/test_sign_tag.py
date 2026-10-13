@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from shell import BASH
+from shell import BASH, in_bash
 
 ROOT = Path(__file__).parents[1]
 GIT = shutil.which("git")
@@ -21,15 +21,6 @@ pytestmark = pytest.mark.skipif(
     reason="the scripts run in bash, Git Bash on Windows, with git",
 )
 RELEASE_WORKFLOW = "o/r/.github/workflows/release.yml@refs/heads/main"
-
-
-def in_bash(*arguments: str) -> list[str]:
-    """The command that runs bash with the stubs of the folder $STUBS first on its PATH.
-    The bash of Git for Windows puts its own folders, with git, curl and sleep, in front
-    of the PATH that it gets from PowerShell or an IDE, so they go in front once more."""
-    assert BASH
-    first = 'PATH="$(cd "$STUBS" && pwd):$PATH" && exec "$BASH" "$@"'
-    return [BASH, "-c", first, "stubs", *arguments]
 
 
 # The outcomes that a test plans for a stub, one per call and line; none succeeds.
