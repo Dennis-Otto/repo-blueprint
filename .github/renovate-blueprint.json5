@@ -2,11 +2,11 @@
 // Renovate keeps the actions, the dependencies, the images and the pins of the
 // workflows current; the Renovate workflow of the blueprint runs it for every
 // repository with a .github/renovate.json5, as the release app. An update waits a
-// week after its release; one that fixes a vulnerability comes at once. Routine
-// updates and the weekly refresh of the lock files merge on their own once every
-// check passes; a major update waits for the maintainer. Updates of what the users
-// run are committed as fix(deps) and lead to a patch release, updates of the tools
-// as chore(deps).
+// week after its release; one that fixes a vulnerability comes at once, and so does
+// the new commit of a branch that an action follows. Routine updates and the weekly
+// refresh of the lock files merge on their own once every check passes; a major
+// update waits for the maintainer. Updates of what the users run are committed as
+// fix(deps) and lead to a patch release, updates of the tools as chore(deps).
 // https://github.com/Dennis-Otto/repo-blueprint
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
@@ -97,6 +97,19 @@
       matchManagers: ["github-actions"],
       matchUpdateTypes: ["major"],
       groupName: "the actions to a new major version",
+    },
+    {
+      // An action pinned to a commit of a branch, with the branch in its comment, as
+      // a project may add one: zizmor reports the pin as soon as the branch moves on,
+      // and every commit to the branch starts the week of waiting anew, so Renovate
+      // would never catch up with a branch that moves every few days. It follows the
+      // branch in its next run instead.
+      matchManagers: ["github-actions"],
+      matchDatasources: ["github-digest"],
+      minimumReleaseAge: null,
+      schedule: ["at any time"],
+      automerge: true,
+      groupName: "the actions that follow a branch",
     },
     {
       // The versions of Python, Node and PHP that the workflows set up, and the
