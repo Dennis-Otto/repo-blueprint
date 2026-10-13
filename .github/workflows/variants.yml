@@ -10,11 +10,15 @@ name: Variants
 # must give every file of the blueprint as a new repository has it, without a
 # conflict and without --trust, and the files of the project, which it keeps, must
 # still pass the checks of this commit.
+#
+# Not after a merge: main takes a pull request only when it is up to date, so a merge
+# gives main the tree that the pull request ran here. Nor in the release pull request,
+# which changes only the changelog and the version, files that no project gets. The
+# check variants stands for every variant in the rules of main: it passes when each
+# one passed, or when none had to run.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
-  push:
-    branches: [main]
   pull_request:
   schedule:
     - cron: "10 5 * * 3"
@@ -31,6 +35,10 @@ jobs:
   variant:
     # A new repository (variant) and one updated from the latest release (update).
     name: ${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})
+    # Not in the release pull request: the branch of the release bot in this repository.
+    if: >-
+      !startsWith(github.head_ref, 'release-please--') ||
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -234,3 +242,23 @@ jobs:
         # Home Assistant's current image on purpose, as in the CI of the integrations:
         # it validates against the rules that apply today.
         run: docker run --rm --volume "$PWD/$PROJECT:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
+
+  # The rules of main require this one check, not each variant: a matrix that its
+  # condition skips reports none of its legs.
+  variants:
+    name: variants
+    if: always()
+    needs: variant
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Require every variant to pass, or none to run
+        env:
+          RESULT: ${{ needs.variant.result }}
+        run: |
+          echo "The variants: $RESULT"
+          [[ "$RESULT" == success || "$RESULT" == skipped ]]

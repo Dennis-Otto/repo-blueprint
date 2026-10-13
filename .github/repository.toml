@@ -42,20 +42,9 @@ fork_pr_approval = "all_external_contributors"
 [branch]
 required_checks = [
   "check (python)",
-  "variant (home-assistant)",
-  "variant (nextcloud-app)",
-  "variant (github-action)",
-  "variant (python-package)",
-  "variant (node-package)",
-  "variant (container)",
-  "variant (generic)",
-  "update (home-assistant)",
-  "update (nextcloud-app)",
-  "update (github-action)",
-  "update (python-package)",
-  "update (node-package)",
-  "update (container)",
-  "update (generic)",
+  # Every variant and every update of the Variants workflow, which the release pull
+  # request skips.
+  "variants",
   "workflow-lint",
   "reuse",
   "markdown",
