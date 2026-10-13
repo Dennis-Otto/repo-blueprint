@@ -11,6 +11,7 @@ and the changelog of its releases.
     python3 blueprint.py bot-health ...     one issue per failing bot (the bot-health bot)
     python3 blueprint.py diagrams extract   the ```mermaid blocks as sources and pictures
     python3 blueprint.py diagrams ...       keep, commit and report (the diagram bots)
+    python3 blueprint.py pages [--fix]      the READMEs and docs in one column, for phones
 
 Run it in the root of a repository made from the blueprint, with the GitHub CLI `gh`
 signed in as an administrator. It needs Python 3.12 and nothing else. It never reads,

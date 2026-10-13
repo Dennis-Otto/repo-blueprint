@@ -50,6 +50,28 @@ step "Diagrams"
 # scripts/diagrams.sh draws them, with Docker.
 bash scripts/diagrams.sh --check
 
+step "Pages in one column"
+# The READMEs, CONTRIBUTING.md and the pages of docs/ without columns side by side,
+# which the GitHub app and phones squeeze: no <table> that sets a picture beside text,
+# no cell with a width. Each finding says how to fix it; pages --fix fixes what it can.
+tool=.github/blueprint.py
+[[ -f "$tool" ]] || tool=blueprint.py
+python=""
+for candidate in python3 python py; do
+  if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 12))' >/dev/null 2>&1; then
+    python="$candidate"
+    break
+  fi
+done
+if [[ -n "$python" ]]; then
+  "$python" "$tool" pages
+elif [[ -n "${CI:-}" ]]; then
+  echo "Checking the pages needs Python 3.12 or newer, which this runner lacks."
+  exit 1
+else
+  echo "Python 3.12 or newer is not installed here; the CI checks the pages."
+fi
+
 step "Version"
 # The release bot writes the version of each release into these files.
 release="$(grep -oE '"\.": *"[^"]+"' .release-please-manifest.json | grep -oE '[0-9][^"]*')"

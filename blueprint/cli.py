@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -29,6 +30,7 @@ from blueprint.coverage_comment import Coverage, coverage_comment
 from blueprint.diagrams import SOURCES, commit_request, extract, keep, listing, report
 from blueprint.github import Api, GitHubError, current_repo
 from blueprint.notices import third_party_notices
+from blueprint.pages import Layout, annotation, command, fixed, layouts, pages
 from blueprint.settings import CONFIG, ConfigError, Settings, apply, check, describe
 from blueprint.update import SOURCE, Outdated, update_pull_request
 from blueprint.vex import openvex
@@ -145,6 +147,53 @@ def diagrams_command(arguments: argparse.Namespace, root: Path) -> int:
     else:
         print("No ```mermaid block in the Markdown.")
     return 0
+
+
+def pages_command(arguments: argparse.Namespace, root: Path) -> int:
+    """The layouts of the pages that GitHub shows, one on each line, and in the CI also
+    as annotations at their lines; with --fix, the pages in one column first, where
+    there is a safe way to."""
+    shown = pages(root)
+    left: list[tuple[Path, Layout]] = []
+    fixable = 0
+    for page in shown:
+        path = root / page
+        text = path.read_text(encoding="utf-8")
+        found = layouts(text)
+        editable = sum(1 for layout in found if layout.edits)
+        fixable += editable
+        if arguments.fix and editable:
+            text = fixed(text, found)
+            path.write_text(text, encoding="utf-8", newline="\n")
+            found = layouts(text)
+            print(f"{page.as_posix()}: {editable} layout(s) in one column now")
+        left += [(page, layout) for layout in found]
+    if not left:
+        print(f"The {len(shown)} page(s) that GitHub shows have one column.")
+        return 0
+    for page, layout in left:
+        print(f"{page.as_posix()}:{layout.line}: {layout.message}")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for page, layout in left:
+            print(annotation(page, layout))
+    print(
+        f"{len(left)} layout(s) set columns side by side, which the GitHub app and "
+        "phones squeeze. A page has one column, so that it reads well everywhere: the "
+        "text, and below it each picture at full width; a table is for tabular data, "
+        "as CONTRIBUTING.md describes."
+    )
+    if arguments.fix:
+        print(
+            "These are left to you: a table inside another one, a table without its "
+            "end, or one with content outside of its cells or on its lines."
+        )
+    elif fixable:
+        print(
+            f"{command(root)} pages --fix puts {fixable} of them in one column: the "
+            "cells of a layout table one below the other, the text before its picture, "
+            "and cells without their width."
+        )
+    return 1
 
 
 def utf8_output() -> None:
@@ -338,6 +387,18 @@ def main(
         help="comment: on the pull request whose blocks became pictures; "
         "pull-request: the description of the bot's pull request for main",
     )
+    pages_parser = commands.add_parser(
+        "pages",
+        help="the READMEs, CONTRIBUTING files and pages of docs/ in one column, for "
+        "the GitHub app and phones: no table that sets a picture beside text, no cell "
+        "with a width",
+    )
+    pages_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="put the cells of a layout table one below the other, the text before "
+        "its picture, and leave out the widths of cells, first",
+    )
     arguments = parser.parse_args(argv)
 
     if arguments.command == "coverage":
@@ -350,6 +411,12 @@ def main(
         try:
             return diagrams_command(arguments, root)
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "pages":
+        try:
+            return pages_command(arguments, root)
+        except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command in (
