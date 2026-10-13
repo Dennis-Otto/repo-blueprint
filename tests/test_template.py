@@ -14,6 +14,7 @@ import textwrap
 import tomllib
 import warnings
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pathspec
 import pytest
@@ -36,6 +37,8 @@ GUARD = "    # Not in the blueprint itself; generated repositories don't have th
 PINNED = re.compile(
     r"uses: (?:\./|docker://[^@\s]+@sha256:[0-9a-f]{64}|[\w.-]+/[\w./-]+@[0-9a-f]{40})"
 )
+# The namespace of the elements of psalm.xml.
+PSALM = {"psalm": "https://getpsalm.org/schema/config"}
 # The settings tool, which every repository gets in .github/: the script that starts
 # it and every file of its package. The mutation tests run in a copy of the repository,
 # where mutmut keeps what it knows of each module next to it, as cli.py.meta and
@@ -886,6 +889,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "Dockerfile",
         "img/app.svg",
         "tests/test_demo.py",
+        "tests/bootstrap.php",
         "custom_components/demo/__init__.py",
         ".github/labels.toml",
         "docs/security.md",
@@ -969,7 +973,7 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
 
 
-@pytest.mark.parametrize("kind", ["github-action", "home-assistant", "nextcloud-app"])
+@pytest.mark.parametrize("kind", KINDS)
 def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) -> None:
     # An update would bring the samples back that an adopted repository deleted.
     project = render(
@@ -980,16 +984,25 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         sample_code=False,
     )
     for sample in (
-        "tests",
         "fuzz",
         "docs/index.md",
         "src",
+        "test",
         "lib",
+        "app",
+        "Dockerfile",
         "custom_components",
         "action.yml",
         "demo.py",
     ):
         assert not (project / sample).exists(), sample
+    # No sample test either: a Nextcloud app gets only the files that its psalm.xml
+    # and phpunit.xml name, which belong to the blueprint.
+    assert sorted(files_of(project / "tests")) == (
+        ["bootstrap.php", "stubs/Emitter.php", "stubs/OC.php"]
+        if kind == "nextcloud-app"
+        else []
+    )
     assert (project / "scripts/check.sh").exists()
     assert (project / ".github/workflows/ci.yml").exists()
     # The website waits for the pages of the project; the check docs passes until then.
@@ -997,6 +1010,83 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     assert "sample_code: false" in (project / ".copier-answers.yml").read_text(
         encoding="utf-8"
     )
+
+
+@pytest.mark.parametrize("sample_code", [True, False])
+def test_psalm_and_phpunit_find_every_file_they_name(
+    tmp_path: Path, sample_code: bool
+) -> None:
+    # psalm.xml and phpunit.xml belong to the blueprint and reach an app adopted
+    # without the sample code as well; psalm stops at a stub it can't find, phpunit
+    # at a missing bootstrap, before either looks at the code.
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="nextcloud-app",
+        sample_code=sample_code,
+    )
+    psalm = ElementTree.parse(project / "psalm.xml").getroot()
+    stubs = [
+        str(stub.get("name")) for stub in psalm.findall("psalm:stubs/psalm:file", PSALM)
+    ]
+    bootstrap = str(
+        ElementTree.parse(project / "phpunit.xml").getroot().get("bootstrap")
+    )
+    # The files that the bootstrap loads before the autoloader of Composer.
+    loaded = [
+        f"tests/{name}"
+        for name in re.findall(
+            r"^require_once __DIR__ \. '/([^']+)';$",
+            (project / bootstrap).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if not name.startswith("../vendor/")
+    ]
+    assert stubs == ["tests/stubs/Emitter.php"]
+    assert loaded == ["tests/stubs/Emitter.php", "tests/stubs/OC.php"]
+    for name in (*stubs, bootstrap, *loaded):
+        assert (project / name).is_file(), name
+
+
+def test_adopting_a_nextcloud_app_keeps_its_own_tests(tmp_path: Path) -> None:
+    # An app adopted before the blueprint brought its bootstrap carries its own;
+    # /tests in _skip_if_exists keeps every file of it, and only what is missing
+    # comes from the blueprint, on the copy as on every update.
+    own = {
+        "tests/bootstrap.php": "<?php\n\nrequire_once __DIR__ . '/stubs/Emitter.php';\n",
+        "tests/stubs/Emitter.php": "<?php\n\nnamespace OC\\Hooks;\n\ninterface Emitter {\n}\n",
+        "tests/Unit/ServiceTest.php": "<?php\n\nfinal class ServiceTest {\n}\n",
+    }
+    for name, text in own.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8", newline="\n")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        run_copy(
+            str(ROOT),
+            tmp_path,
+            data={
+                "project_name": "Demo",
+                "description": "A demo.",
+                "project_type": "nextcloud-app",
+                "sample_code": False,
+            },
+            defaults=True,
+            overwrite=True,
+            vcs_ref="HEAD",
+            quiet=True,
+        )
+
+    for name, text in own.items():
+        assert (tmp_path / name).read_text(encoding="utf-8") == text, name
+    assert (tmp_path / "tests/stubs/OC.php").is_file()
+    assert sorted(files_of(tmp_path / "tests")) == [
+        "Unit/ServiceTest.php",
+        "bootstrap.php",
+        "stubs/Emitter.php",
+        "stubs/OC.php",
+    ]
 
 
 def test_the_area_labels_of_pull_requests_exist() -> None:
