@@ -5,11 +5,11 @@ config:
 ---
 flowchart TB
     accTitle: Von einer Änderung zum Release
-    accDescr: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text von Unreleased. Sein Merge signiert zuerst seinen Tag, im nächsten Lauf des Release-Bots, baut dann das Release isoliert, sobald der Tag geprüft ist, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.
+    accDescr: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text der Fragmente und von Unreleased. Sein Merge signiert zuerst seinen Tag, im nächsten Lauf des Release-Bots, baut dann das Release isoliert, sobald der Tag geprüft ist, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.
 
     pr["Pull Request<br>fix: · feat: · feat!:"]
     main["main"]
-    rpr["`Release-Pull-Request<br>chore: release x.y.z<br>Notes aus *Unreleased*`"]
+    rpr["`Release-Pull-Request<br>chore: release x.y.z<br>Notes aus changelog.d/<br>und *Unreleased*`"]
     beta["Beta x.y.z-beta.N<br>für Tester"]
     tag["Signierter Tag<br>am Merge, vom nächsten Lauf<br>vor dem Build geprüft"]
     build["Isolierter Build<br>SLSA Build Level 3"]
