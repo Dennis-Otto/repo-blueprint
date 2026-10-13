@@ -1598,7 +1598,12 @@ def test_the_checks_build_the_website(projects: dict[str, Path], kind: str) -> N
     assert website < check.index("if [[ -f scripts/check-project.sh ]]")
     assert website_step(check) == website_step(generic)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert "`.venv-docs/Scripts/` in place of `.venv-docs/bin/`" in contributing
+    # On Windows with the launcher of python.org, which every install has, and not
+    # with python, which can be the stub of the Microsoft Store.
+    assert (
+        "On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in"
+        " place of `.venv-docs/bin/`"
+    ) in contributing
     assert "`bash scripts/check.sh` builds the website strictly as well" in contributing
 
 
@@ -1629,7 +1634,8 @@ def run_the_website_step(
     fail: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """The step Website of scripts/check.sh, in a repository with these pages and a
-    fake MkDocs at this place: in .venv-docs, on the PATH, or nowhere ("")."""
+    fake MkDocs at this place: in .venv-docs, in an activated environment (VIRTUAL_ENV
+    and its folder), alone on the PATH, or nowhere ("")."""
     check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
     repository = tmp_path / "repository"
     (repository / "scripts").mkdir(parents=True)
@@ -1647,9 +1653,19 @@ def run_the_website_step(
         for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
         if not shutil.which("mkdocs", path=entry)
     ]
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"NO_MKDOCS_2_WARNING", "FAIL", "VIRTUAL_ENV"}
+    }
     if mkdocs:
         if mkdocs == "PATH":
             fake = tmp_path / "bin/mkdocs"
+            path.insert(0, str(fake.parent))
+        elif mkdocs.startswith("VIRTUAL_ENV/"):
+            # As its activation leaves it, in bash or in PowerShell on Windows.
+            fake = tmp_path / "environment" / mkdocs.removeprefix("VIRTUAL_ENV/")
+            environment["VIRTUAL_ENV"] = str(tmp_path / "environment")
             path.insert(0, str(fake.parent))
         else:
             fake = repository / mkdocs
@@ -1659,11 +1675,6 @@ def run_the_website_step(
     temporary = tmp_path / "tmp"
     temporary.mkdir()
     calls = tmp_path / "calls"
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in {"NO_MKDOCS_2_WARNING", "FAIL"}
-    }
     environment.update(
         PATH=os.pathsep.join(path), TMPDIR=str(temporary), CALLS=str(calls)
     )
@@ -1689,8 +1700,9 @@ def run_the_website_step(
         # them up on Linux and macOS, and on Windows.
         ".venv-docs/bin/mkdocs",
         ".venv-docs/Scripts/mkdocs.exe",
-        # Tools of another environment, such as an activated one.
-        "PATH",
+        # The tools of an activated environment.
+        "VIRTUAL_ENV/bin/mkdocs",
+        "VIRTUAL_ENV/Scripts/mkdocs.exe",
     ],
 )
 def test_the_website_step_builds_the_website_strictly(
@@ -1719,9 +1731,12 @@ def test_the_website_step_shows_why_the_build_fails(
 
     assert result.returncode == 1
     assert "contains a link 'nowhere.md', but the target is not found" in result.stdout
-    assert "The website fails to build strictly; the log above says why." in (
-        result.stdout
-    )
+    # Which MkDocs failed, and where to find how to install it again.
+    assert (
+        "The website fails to build strictly with .venv-docs/bin/mkdocs; the log above"
+        " says why.\nTools that are out of date or incomplete install again as"
+        " CONTRIBUTING.md shows.\n"
+    ) in result.stdout
     assert "The website builds strictly." not in result.stdout
     assert list(temporary.iterdir()) == []
 
@@ -1733,6 +1748,13 @@ def test_the_website_step_shows_why_the_build_fails(
         # Without the tools, as in the CI, whose check docs builds the website.
         (
             "",
+            ("mkdocs.yml", "docs/index.md"),
+            "MkDocs is not installed here; the CI builds the website.",
+        ),
+        # A MkDocs from elsewhere, such as Homebrew or pipx, has neither the theme nor
+        # the plugins of the website, and would fail every check.
+        (
+            "PATH",
             ("mkdocs.yml", "docs/index.md"),
             "MkDocs is not installed here; the CI builds the website.",
         ),
@@ -1781,7 +1803,8 @@ def test_the_dev_container_sets_up_the_tools_of_the_website(
     assert python == (kind in {"home-assistant", "github-action", "python-package"})
     if not python:
         assert tools.index("sudo apt-get update") < tools.index("python3 -m venv")
-    assert setup.index(".venv-docs") < setup.index("git config core.hooksPath")
+    # Last, so that the hook of the checks is set up even when they fail to install.
+    assert setup.index("git config core.hooksPath") < setup.index(".venv-docs")
 
 
 def test_the_clean_up_bot_keeps_the_work_of_others() -> None:
