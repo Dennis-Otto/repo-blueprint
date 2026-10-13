@@ -16,7 +16,7 @@ import textwrap
 import tomllib
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from xml.etree import ElementTree
 
 import pathspec
@@ -1256,33 +1256,64 @@ def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
         assert remapped(url) == url
 
 
-def choose_the_documents_to_check(
-    tmp_path: Path, changes: dict[str, str | None], event: str = "pull_request"
-) -> tuple[dict[str, str], str]:
-    """Runs the step of the link check that chooses the documents, in a repository
-    whose pull request makes the changes, as GitHub does; returns its outputs and its
-    summary. A change of None deletes the file, one that starts with -> moves it."""
-    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+class PullRequest(NamedTuple):
+    """A repository as the checkout of a pull request leaves it."""
+
+    repository: Path
+    # The squash commit that main got after the base that the event names.
+    squash: str
+    # The commits of the pull request, the oldest first; the last one is its head.
+    commits: list[str]
+
+
+def a_pull_request_on_a_newer_main(
+    tmp_path: Path, changes: dict[str, str | None], *signed_off: bool
+) -> PullRequest:
+    """A pull request whose branch starts on a newer main than the base that its event
+    names, as the branch of the release bot does when the bot builds it again. Main got
+    a squash commit since that base, which deletes docs/old.md and adds docs/main.md and
+    whose sign-off names another address than GitHub gives its author. The first commit
+    of the pull request makes the changes; each one has a sign-off or not. A change of
+    None deletes the file, one that starts with -> moves it. origin/main is the base
+    branch, HEAD the merge commit that the checkout of a pull request leaves."""
     repository = tmp_path / "repository"
     repository.mkdir()
 
     def git(*arguments: str) -> str:
         identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
         return subprocess.run(
-            ["git", *identity, *arguments],
+            ["git", *identity, "-c", "commit.gpgsign=false", *arguments],
             cwd=repository,
             capture_output=True,
             check=True,
             encoding="utf-8",
         ).stdout.strip()
 
+    def commit(message: str, *options: str) -> str:
+        git("add", "--all")
+        git("commit", "--quiet", "--allow-empty", "-m", message, *options)
+        return git("rev-parse", "HEAD")
+
     git("init", "--quiet", "--initial-branch=main")
-    for name in ("README.md", "docs/guide.md", "CHANGELOG.md", "lychee.toml"):
+    for name in (
+        "README.md",
+        "docs/guide.md",
+        "docs/old.md",
+        "CHANGELOG.md",
+        "lychee.toml",
+    ):
         (repository / name).parent.mkdir(parents=True, exist_ok=True)
         (repository / name).write_text(f"{name}\n", encoding="utf-8", newline="\n")
-    git("add", "--all")
-    git("commit", "--quiet", "-m", "The base")
-    base = git("rev-parse", "HEAD")
+    commit("The base", "--signoff")
+    (repository / "docs/old.md").unlink()
+    (repository / "docs/main.md").write_text("main\n", encoding="utf-8", newline="\n")
+    # GitHub authors a squash commit with the noreply address of the account, while
+    # the sign-off of its pull request names the address of the commits there.
+    squash = commit(
+        "fix: a change of main (#1)\n\nSigned-off-by: Dev <dev@example.com>",
+        "--author=Dev <1+dev@users.noreply.github.com>",
+    )
+    git("switch", "--quiet", "--create", "feature")
     for name, content in changes.items():
         path = repository / name
         if content is None:
@@ -1292,8 +1323,26 @@ def choose_the_documents_to_check(
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8", newline="\n")
-    git("add", "--all")
-    git("commit", "--quiet", "--allow-empty", "-m", "The pull request")
+    commits = [
+        commit(
+            f"Commit {number} of the pull request", *(["--signoff"] if signed else [])
+        )
+        for number, signed in enumerate(signed_off, start=1)
+    ]
+    git("update-ref", "refs/remotes/origin/main", "main")
+    git("switch", "--quiet", "--detach", "main")
+    git("merge", "--quiet", "--no-ff", "-m", "Merge the pull request", commits[-1])
+    return PullRequest(repository, squash, commits)
+
+
+def choose_the_documents_to_check(
+    tmp_path: Path, changes: dict[str, str | None], event: str = "pull_request"
+) -> tuple[dict[str, str], str]:
+    """Runs the step of the link check that chooses the documents, in a repository
+    whose pull request makes the changes, as GitHub does; returns its outputs and its
+    summary."""
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
     output = tmp_path / "output"
     summary = tmp_path / "summary"
     output.touch()
@@ -1310,7 +1359,7 @@ def choose_the_documents_to_check(
         env={
             **os.environ,
             "EVENT": event,
-            "BASE_SHA": base,
+            "BASE_REF": "main",
             "GITHUB_OUTPUT": str(output),
             "GITHUB_STEP_SUMMARY": str(summary),
         },
@@ -1357,6 +1406,9 @@ EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
         ({"docs/guide.md": "->docs/manual.md"}, "pull_request", EVERY_DOCUMENT),
         # lychee gets the names through a shell.
         ({"docs/it's $(here).md": "x\n"}, "pull_request", EVERY_DOCUMENT),
+        # Main deleted and added a document since the base that the event names; that
+        # is no change of the pull request.
+        ({}, "pull_request", {}),
         # main and the weekly run check every document.
         ({"docs/guide.md": "changed\n"}, "push", EVERY_DOCUMENT),
         ({}, "schedule", EVERY_DOCUMENT),
@@ -1371,6 +1423,138 @@ def test_the_link_check_of_a_pull_request_reads_the_documents_it_changes(
     assert chosen == outputs
     if not outputs:
         assert "changes no document" in summary
+
+
+def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
+    # The base that the event of a pull request names can be older than the commit of
+    # main that its branch starts on: the release bot builds its branch again on a
+    # newer main, and the event keeps the old base. The base branch, which the checkout
+    # fetches with the whole history, is current.
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    for workflow, name in ((lint, "dco"), (lint, "prose"), (links, "links")):
+        job = job_of(workflow, name)
+        assert "base.sha" not in job, name
+        assert "BASE_REF: ${{ github.event.pull_request.base.ref }}" in job, name
+        assert "fetch-depth: 0" in job or "'pull_request' && '0' ||" in job, name
+
+
+def check_the_sign_offs(
+    tmp_path: Path, *signed_off: bool
+) -> tuple[PullRequest, subprocess.CompletedProcess[str]]:
+    """Runs the DCO check, as GitHub does, on a pull request whose commits each have a
+    sign-off or not, on a newer main than the base that its event names."""
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    pull_request = a_pull_request_on_a_newer_main(tmp_path, {}, *signed_off)
+    (tmp_path / "step.sh").write_text(
+        script_of(lint, "Check the sign-off of every commit"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert BASH
+    return pull_request, subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=pull_request.repository,
+        env={
+            **os.environ,
+            "BASE_REF": "main",
+            "HEAD_SHA": pull_request.commits[-1],
+            "PR_AUTHOR": "dev",
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("signed_off", [(True,), (True, True)])
+def test_the_sign_off_check_passes_a_pull_request_on_a_newer_main(
+    tmp_path: Path, signed_off: tuple[bool, ...]
+) -> None:
+    # The squash commit of main lacks the sign-off of its author, but it is no commit
+    # of the pull request, though it came after the base that the event names.
+    pull_request, result = check_the_sign_offs(tmp_path, *signed_off)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"Checked the sign-off of {len(signed_off)} commit(s)." in result.stdout
+    assert pull_request.squash not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("signed_off", [(False,), (True, False), (False, True)])
+def test_the_sign_off_check_fails_a_commit_of_the_pull_request_without_one(
+    tmp_path: Path, signed_off: tuple[bool, ...]
+) -> None:
+    pull_request, result = check_the_sign_offs(tmp_path, *signed_off)
+    unsigned = pull_request.commits[signed_off.index(False)]
+
+    assert result.returncode == 1
+    assert (
+        f"::error::Commit {unsigned} lacks the sign-off "
+        "'Signed-off-by: Dev <dev@example.com>'. Commit with git commit -s."
+    ) in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "documents"),
+    [
+        # Main deleted and added a document since the base that the event names.
+        ({}, []),
+        ({"docs/guide.md": "changed\n", "CHANGELOG.md": "x\n"}, ["docs/guide.md"]),
+    ],
+)
+def test_the_prose_hints_read_the_documents_that_the_pull_request_changes(
+    tmp_path: Path, changes: dict[str, str | None], documents: list[str]
+) -> None:
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    # npm installs nothing; docker writes down the documents that Vale gets.
+    for name in ("npm", "docker"):
+        (stubs / name).write_text(
+            f'#!/usr/bin/env bash\necho "{name} $*" >> "$CALLS"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        (stubs / name).chmod(0o755)
+    for name in ("calls", "summary"):
+        (tmp_path / name).touch()
+    (tmp_path / "runner").mkdir()
+    (tmp_path / "step.sh").write_text(
+        script_of(lint, "Hint at the spelling and the style of the changed documents"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    result = subprocess.run(
+        in_bash("-e", (tmp_path / "step.sh").as_posix()),
+        cwd=repository,
+        env={
+            **os.environ,
+            "STUBS": stubs.as_posix(),
+            "CALLS": (tmp_path / "calls").as_posix(),
+            "BASE_REF": "main",
+            "VALE": "vale",
+            "GITHUB_STEP_SUMMARY": (tmp_path / "summary").as_posix(),
+            "RUNNER_TEMP": (tmp_path / "runner").as_posix(),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    summary = (tmp_path / "summary").read_text(encoding="utf-8")
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+
+    assert result.returncode == 0, result.stderr
+    if documents:
+        [docker] = [call for call in calls if call.startswith("docker ")]
+        assert docker.endswith(" sh " + " ".join(documents)), docker
+        assert f"in {len(documents)} changed document(s)." in summary
+    else:
+        assert calls == []
+        assert "No document changes." in summary
 
 
 def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
