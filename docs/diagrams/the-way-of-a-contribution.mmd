@@ -5,11 +5,11 @@ config:
 ---
 flowchart TB
     accTitle: The way of a contribution
-    accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry under Unreleased, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.
+    accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry in a new file of changelog.d, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.
 
     issue["Issue<br>for anything larger"]
     branch["Branch from main"]
-    change["`The change with its tests<br>an entry under *Unreleased*<br>every commit signed off`"]
+    change["`The change with its tests<br>an entry in changelog.d/<br>every commit signed off`"]
     pr["Pull request<br>feat: … · fix: … · feat!: …"]
     checks{"Every required<br>check passes?"}
     main["Squashed into main<br>the title decides<br>the next version"]

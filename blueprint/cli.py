@@ -15,10 +15,15 @@ from xml.etree import ElementTree
 
 import blueprint
 from blueprint.changelog import (
+    FRAGMENTS,
+    FragmentError,
     add_unreleased,
     beta_notes,
+    fragment_problems,
+    read_fragments,
     release_changelog,
     release_notes,
+    released_fragments,
 )
 from blueprint.checklist import checklist, describe_steps
 from blueprint.coach import (
@@ -54,8 +59,11 @@ def changelog_command(arguments: argparse.Namespace) -> int:
         return 0
     if arguments.command == "beta":
         text = Path(arguments.file).read_text(encoding="utf-8")
-        sys.stdout.write(beta_notes(arguments.version, text))
+        fragments = read_fragments(Path(arguments.fragments))
+        sys.stdout.write(beta_notes(arguments.version, text, fragments))
         return 0
+    if arguments.command == "fragments":
+        return fragments_command(arguments)
     if arguments.command == "vex":
         accepted = Path(arguments.file)
         text = accepted.read_text(encoding="utf-8") if accepted.is_file() else ""
@@ -68,11 +76,33 @@ def changelog_command(arguments: argparse.Namespace) -> int:
         sys.stdout.write(third_party_notices(arguments.version, sbom))
         return 0
     read = [Path(name).read_text(encoding="utf-8") for name in arguments.files]
-    if arguments.action == "release":
-        sys.stdout.write(release_changelog(arguments.version, *read))
-    else:
+    if arguments.action == "notes":
         sys.stdout.write(release_notes(arguments.version, *read))
+        return 0
+    main, branch = read
+    fragments = read_fragments(Path(arguments.fragments))
+    sys.stdout.write(release_changelog(arguments.version, main, branch, fragments))
+    if arguments.taken:
+        taken = released_fragments(arguments.version, branch, fragments)
+        Path(arguments.taken).write_text(
+            "".join(f"{path}\n" for path in taken), encoding="utf-8", newline="\n"
+        )
     return 0
+
+
+def fragments_command(arguments: argparse.Namespace) -> int:
+    """Checks the fragments as the release takes them in: the problems on stdout, one
+    on each line, for the check of a pull request to show."""
+    folder = Path(arguments.folder)
+    changelog = Path(arguments.file)
+    text = changelog.read_text(encoding="utf-8") if changelog.is_file() else ""
+    fragments = read_fragments(folder)
+    problems = fragment_problems(fragments, text)
+    for problem in problems:
+        print(problem)
+    if not problems:
+        print(f"The {len(fragments)} fragment(s) in {folder.name}/ are fine.")
+    return 1 if problems else 0
 
 
 def coverage_command(arguments: argparse.Namespace) -> int:
@@ -165,11 +195,12 @@ def diagrams_command(arguments: argparse.Namespace, root: Path) -> int:
 
 
 def utf8_output() -> None:
-    """Windows consoles default to a code page without the marks of the checklist."""
+    """Windows consoles default to a code page without the marks of the checklist, and
+    to CRLF, which a file of the repository written from the output must not get."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
-            reconfigure(encoding="utf-8")
+            reconfigure(encoding="utf-8", newline="\n")
 
 
 def main(
@@ -213,6 +244,16 @@ def main(
         help="release: the changelog of main and that of the release branch; "
         "notes: the changelog of the release and the notes of release-please",
     )
+    changelog_parser.add_argument(
+        "--fragments",
+        default=FRAGMENTS,
+        help="release: the folder of the fragments, by default %(default)s",
+    )
+    changelog_parser.add_argument(
+        "--taken",
+        help="release: the file to write the paths of the fragments into that the "
+        "release takes in, one on each line, for the release bot to delete",
+    )
     unreleased_parser = commands.add_parser(
         "unreleased", help="add an entry under Unreleased in the changelog, for bots"
     )
@@ -226,6 +267,20 @@ def main(
         "version", help="the version of the beta, such as 1.3.0-beta.2"
     )
     beta_parser.add_argument("--file", default="CHANGELOG.md")
+    beta_parser.add_argument("--fragments", default=FRAGMENTS)
+    fragments_parser = commands.add_parser(
+        "fragments",
+        help="check the fragments of the changelog as a release takes them in, for "
+        "the changelog check",
+    )
+    fragments_parser.add_argument(
+        "--folder", default=FRAGMENTS, help="by default %(default)s"
+    )
+    fragments_parser.add_argument(
+        "--file",
+        default="CHANGELOG.md",
+        help="the changelog, whose headings a fragment may use too",
+    )
     coverage_parser = commands.add_parser(
         "coverage",
         help="the comment of the coverage bot: a Cobertura report against that of main",
@@ -372,9 +427,20 @@ def main(
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
-    if arguments.command in ("changelog", "unreleased", "beta", "vex", "notices"):
+    if arguments.command in (
+        "changelog",
+        "unreleased",
+        "beta",
+        "fragments",
+        "vex",
+        "notices",
+    ):
         try:
             return changelog_command(arguments)
+        except FragmentError as error:
+            for problem in error.problems:
+                print(f"blueprint.py: {problem}", file=sys.stderr)
+            return 1
         except OSError as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2

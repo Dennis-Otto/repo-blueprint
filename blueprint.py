@@ -7,6 +7,7 @@ each task is a module of the package blueprint/ next to this file.
     python3 blueprint.py checklist          the steps outside the API, and which are done
     python3 blueprint.py changelog ...      the changelog of a release (the release bot)
     python3 blueprint.py unreleased ...     an entry under Unreleased (the other bots)
+    python3 blueprint.py fragments          check the fragments of the changelog in changelog.d/
     python3 blueprint.py notices ...        the licenses of the third-party components
     python3 blueprint.py update-commit ...  the pull request of an update (the blueprint bot)
     python3 blueprint.py diagrams extract   the ```mermaid blocks as sources and pictures

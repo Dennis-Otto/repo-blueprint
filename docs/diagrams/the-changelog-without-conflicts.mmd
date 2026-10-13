@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The changelog without conflicts
+    accDescr: Two pull requests each add a file of their own to changelog.d, so they merge into main one after the other without a conflict. The release bot writes the section of the next release from the fragments and the text of Unreleased into CHANGELOG.md of the release pull request, and deletes the fragments in the same commit. Merging it makes that section the notes of the release.
+
+    a["Pull request<br>changelog.d/dark-mode.md"]
+    b["Pull request<br>changelog.d/token-secret.md"]
+    main["main<br>one file for each change"]
+    rpr["Release pull request<br>the section of x.y.z in CHANGELOG.md<br>the fragments deleted"]
+    notes["Release notes<br>each kind of change below one heading"]
+
+    a -- "merged" --> main
+    b -- "merged, without a conflict" --> main
+    main -- "release bot" --> rpr
+    rpr -- "merged" --> notes
+
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class a,b person
+    class rpr bot
+    class notes done
