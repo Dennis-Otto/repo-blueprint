@@ -188,6 +188,14 @@ def script_of(workflow: str, step: str) -> str:
     return textwrap.dedent("".join(lines))
 
 
+def step_of(workflow: str, start: str) -> str:
+    """The text of the step of a workflow whose first line starts with start, such as
+    "      - name: Run the checks", up to the next step or job."""
+    begin = workflow.index(f"\n{start}") + 1
+    end = re.compile(r"\n(?= {0,6}\S)").search(workflow, begin)
+    return workflow[begin : end.start() + 1 if end else len(workflow)]
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_no_template_syntax_is_left(projects: dict[str, Path], kind: str) -> None:
     for path in text_files(projects[kind]):
@@ -1333,19 +1341,23 @@ def a_pull_request_on_a_newer_main(
 
 
 def choose_the_documents_to_check(
-    tmp_path: Path, changes: dict[str, str | None], event: str = "pull_request"
+    tmp_path: Path,
+    changes: dict[str, str | None],
+    event: str = "pull_request",
+    workflow: str = "links.yml",
+    step: str = "Choose the documents to check",
 ) -> tuple[dict[str, str], str]:
-    """Runs the step of the link check that chooses the documents, in a repository
-    whose pull request makes the changes, as GitHub does; returns its outputs and its
-    summary."""
-    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    """Runs the step of a workflow that chooses the documents, by default that of the
+    link check, in a repository whose pull request makes the changes, as GitHub does,
+    with tmp_path as its RUNNER_TEMP; returns its outputs and its summary."""
+    source = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
     repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
     output = tmp_path / "output"
     summary = tmp_path / "summary"
     output.touch()
     summary.touch()
     (tmp_path / "step.sh").write_text(
-        script_of(links, "Choose the documents to check"),
+        script_of(source, step),
         encoding="utf-8",
         newline="\n",
     )
@@ -1359,6 +1371,7 @@ def choose_the_documents_to_check(
             "BASE_REF": "main",
             "GITHUB_OUTPUT": str(output),
             "GITHUB_STEP_SUMMARY": str(summary),
+            "RUNNER_TEMP": tmp_path.as_posix(),
         },
         capture_output=True,
         encoding="utf-8",
@@ -1507,14 +1520,24 @@ def test_the_sign_off_check_fails_a_commit_of_the_pull_request_without_one(
     [
         # Main deleted and added a document since the base that the event names.
         ({}, []),
-        ({"docs/guide.md": "changed\n", "CHANGELOG.md": "x\n"}, ["docs/guide.md"]),
+        (
+            {
+                "docs/guide.md": "changed\n",
+                "docs/a new guide.md": "new\n",
+                "CHANGELOG.md": "x\n",
+            },
+            ["docs/a new guide.md", "docs/guide.md"],
+        ),
     ],
 )
-def test_the_prose_hints_read_the_documents_that_the_pull_request_changes(
+def test_the_prose_hints_give_vale_the_documents_that_the_pull_request_changes(
     tmp_path: Path, changes: dict[str, str | None], documents: list[str]
 ) -> None:
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
-    repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
+    # The step before finds the documents; the hints run only when it found some.
+    outputs, _ = choose_the_documents_to_check(
+        tmp_path, changes, workflow="lint.yml", step="Find the changed documents"
+    )
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     # npm installs nothing; docker writes down the documents that Vale gets.
@@ -1525,34 +1548,32 @@ def test_the_prose_hints_read_the_documents_that_the_pull_request_changes(
             newline="\n",
         )
         (stubs / name).chmod(0o755)
-    for name in ("calls", "summary"):
-        (tmp_path / name).touch()
-    (tmp_path / "runner").mkdir()
-    (tmp_path / "step.sh").write_text(
+    (tmp_path / "calls").touch()
+    (tmp_path / "hints.sh").write_text(
         script_of(lint, "Hint at the spelling and the style of the changed documents"),
         encoding="utf-8",
         newline="\n",
     )
-    result = subprocess.run(
-        in_bash("-e", (tmp_path / "step.sh").as_posix()),
-        cwd=repository,
-        env={
-            **os.environ,
-            "STUBS": stubs.as_posix(),
-            "CALLS": (tmp_path / "calls").as_posix(),
-            "BASE_REF": "main",
-            "VALE": "vale",
-            "GITHUB_STEP_SUMMARY": (tmp_path / "summary").as_posix(),
-            "RUNNER_TEMP": (tmp_path / "runner").as_posix(),
-        },
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
+    if outputs.get("changed") == "true":
+        result = subprocess.run(
+            in_bash("-e", (tmp_path / "hints.sh").as_posix()),
+            cwd=tmp_path / "repository",
+            env={
+                **os.environ,
+                "STUBS": stubs.as_posix(),
+                "CALLS": (tmp_path / "calls").as_posix(),
+                "VALE": "vale",
+                "GITHUB_STEP_SUMMARY": (tmp_path / "summary").as_posix(),
+                "RUNNER_TEMP": tmp_path.as_posix(),
+            },
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
     summary = (tmp_path / "summary").read_text(encoding="utf-8")
     calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
 
-    assert result.returncode == 0, result.stderr
     if documents:
         [docker] = [call for call in calls if call.startswith("docker ")]
         assert docker.endswith(" sh " + " ".join(documents)), docker
@@ -1583,6 +1604,71 @@ def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
     assert (
         "fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}" in job
     )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "documents"),
+    [
+        (
+            {
+                "README.md": "A changed README.\n",
+                "docs/a new guide.md": "A new guide.\n",
+                "CHANGELOG.md": "The changelog, which the release bot writes.\n",
+                "lychee.toml": "A file that isn't a document.\n",
+            },
+            ["README.md", "docs/a new guide.md"],
+        ),
+        ({"CHANGELOG.md": "Only the changelog.\n"}, []),
+        ({"docs/guide.md": None}, []),
+        ({}, []),
+    ],
+)
+def test_the_prose_hints_read_the_documents_that_a_pull_request_changes(
+    tmp_path: Path, changes: dict[str, str | None], documents: list[str]
+) -> None:
+    outputs, summary = choose_the_documents_to_check(
+        tmp_path, changes, workflow="lint.yml", step="Find the changed documents"
+    )
+
+    if documents:
+        assert outputs == {"changed": "true"}
+        # One name after the other, each ended by a NUL, which no name holds.
+        listed = (tmp_path / "documents").read_text(encoding="utf-8")
+        assert listed.split("\0") == [*documents, ""]
+        assert summary == ""
+    else:
+        assert outputs == {}
+        assert summary == "No document changes.\n"
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_prose_hints_install_their_tools_from_the_cache_of_npm(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    prose = job_of(
+        (folder / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "prose"
+    )
+    setup = step_of(prose, "      - uses: actions/setup-node@")
+    hints = step_of(
+        prose,
+        "      - name: Hint at the spelling and the style of the changed documents",
+    )
+    assert "          cache: npm\n" in setup
+    lock = re.search(r"\n          cache-dependency-path: (\S+)\n", setup)
+    assert lock
+    assert (folder / lock[1]).is_file()
+    install = re.search(r"\n +npm ci --prefix (\S+) ", hints)
+    assert install
+    assert install[1] == Path(lock[1]).parent.as_posix()
+    # Node and the packages come only for changed documents, the runs that install
+    # them, so that every run with npm's cache has one to save.
+    changed = "        if: steps.documents.outputs.changed == 'true'\n"
+    assert changed in setup
+    assert changed in hints
+    # The names that the step before found, which may hold spaces.
+    assert "\n          mapfile -d '' -t files < \"$RUNNER_TEMP/documents\"\n" in hints
 
 
 def test_a_nextcloud_app_packages_only_what_it_needs(
@@ -1738,8 +1824,9 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     ]
     # Restored before the install, under a key that changes with krankerl; GitHub
     # saves it only after a run that passed, which checked it.
-    restore = workflow[workflow.index("uses: actions/cache@") :]
-    assert restore.index("- name: Install krankerl") > 0
+    restore = step_of(workflow, "      - name: Restore krankerl from the cache")
+    assert workflow.index(restore) < workflow.index("      - name: Install krankerl")
+    assert "uses: actions/cache@" in restore
     assert "path: ${{ runner.temp }}/krankerl\n" in restore
     assert (
         "key: krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}\n"
@@ -1794,6 +1881,150 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
 def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
     assert "vendor/bin/psalm --taint-analysis" in check
+
+
+def test_psalm_reads_ahead_only_the_packages_that_composer_cannot_load(
+    projects: dict[str, Path],
+) -> None:
+    # Psalm reads the files of extraFiles before it checks the code, and finds every
+    # other class through the autoloader of Composer when the code uses it. Reading
+    # all of vendor/, some 5,000 files, took 30 of the 35 seconds of each of its two
+    # runs, for the same findings; so it reads ahead the packages that the autoloader
+    # can't find, and only those.
+    project = projects["nextcloud-app"]
+    extra = (
+        ElementTree.parse(project / "psalm.xml")
+        .getroot()
+        .find("psalm:extraFiles", PSALM)
+    )
+    assert extra is not None
+    assert [entry.tag for entry in extra] == [f"{{{PSALM['psalm']}}}directory"]
+    read_ahead = [str(entry.get("name")) for entry in extra]
+    lock = json.loads((project / "composer.lock").read_text(encoding="utf-8"))
+    without_autoloader = sorted(
+        f"vendor/{package['name']}"
+        for package in (*lock["packages"], *lock["packages-dev"])
+        # A tool, such as the PHAR of php-cs-fixer, holds no code that the app uses.
+        if not package.get("autoload") and package.get("type", "library") == "library"
+    )
+    assert read_ahead == without_autoloader == ["vendor/nextcloud/ocp"]
+    # Neither run keeps a cache of its own, so that no result depends on one.
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert check.count(" --threads=1 --no-cache\n") == 2
+
+
+@pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("broken", [False, True])
+def test_the_syntax_check_of_a_nextcloud_app_reads_the_files_at_once(
+    projects: dict[str, Path], tmp_path: Path, broken: bool
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "PHP syntax"')
+    syntax = check[start : check.index('step "Coding standard"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (repository / "scripts/syntax.sh").write_text(
+        check[: check.index('step "Text files"')] + syntax,
+        encoding="utf-8",
+        newline="\n",
+    )
+    names = [
+        "appinfo/routes.php",
+        "lib/AppInfo/Application.php",
+        "lib/Service/A Service.php",
+        "tests/Unit/AppInfo/ApplicationTest.php",
+        *(["lib/Broken.php"] if broken else []),
+    ]
+    for name in [*names, "vendor/autoload.php"]:
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_text("<?php\n", encoding="utf-8")
+
+    # As PHP answers without a php.ini: everything on stdout, and 255 for an error,
+    # after which xargs starts no further PHP.
+    php = textwrap.dedent(
+        """\
+        if [[ "$2" == *Broken.php ]]; then
+          printf '\\nParse error: Unclosed "(" in %s on line 2\\n' "$2"
+          echo "Errors parsing $2"
+          exit 255
+        fi
+        echo "No syntax errors detected in $2"
+        """
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/syntax.sh\n",
+        repository,
+        {"php": php, "getconf": "echo 4\n"},
+    )
+
+    # One PHP for each file of the app, as many at once as there are processors, and
+    # only the errors show.
+    assert calls[0] == "getconf _NPROCESSORS_ONLN"
+    every = {f"php --syntax-check {name}" for name in names}
+    assert "No syntax errors detected" not in result.stdout
+    if broken:
+        assert result.returncode != 0
+        assert "php --syntax-check lib/Broken.php" in calls
+        assert set(calls[1:]) <= every
+        assert (
+            'Parse error: Unclosed "(" in lib/Broken.php on line 2\n' in result.stdout
+        )
+        assert "Errors parsing lib/Broken.php\n" in result.stdout
+        assert "Every PHP file parses." not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sorted(calls[1:]) == sorted(every)
+        assert result.stdout == "\n== PHP syntax\nEvery PHP file parses.\n"
+
+
+def test_the_ci_of_a_nextcloud_app_keeps_the_packages_of_composer() -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    find = step_of(workflow, "      - name: Find the cache of Composer")
+    restore = step_of(
+        workflow, "      - name: Restore the packages of Composer from the cache"
+    )
+    install = workflow.index("      - name: Install the locked tools\n")
+    assert workflow.index(find) < workflow.index(restore) < install
+    assert "        id: composer\n" in find
+    assert (
+        '        run: echo "files=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"\n'
+        in find
+    )
+    assert "        uses: actions/cache@" in restore
+    assert "          path: ${{ steps.composer.outputs.files }}\n" in restore
+    # A changed lock file starts from the packages of the one before.
+    assert (
+        "          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}\n"
+        in restore
+    )
+    assert "          restore-keys: composer-${{ runner.os }}-\n" in restore
+
+
+def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
+    projects: dict[str, Path],
+) -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    restore = step_of(workflow, "      - name: Restore the cache of php-cs-fixer")
+    assert workflow.index(restore) < workflow.index("      - name: Run the checks\n")
+    assert "        uses: actions/cache@" in restore
+    assert "          path: .php-cs-fixer.cache\n" in restore
+    tools = "${{ hashFiles('composer.lock', '.php-cs-fixer.dist.php') }}"
+    # Every run saves what it checked; the next one starts from the latest.
+    assert f"          key: php-cs-fixer-{tools}-${{{{ github.sha }}}}\n" in restore
+    assert f"          restore-keys: php-cs-fixer-{tools}-\n" in restore
+    # php-cs-fixer keeps its cache there, as the configuration of the app leaves it,
+    # and Git ignores it.
+    project = projects["nextcloud-app"]
+    config = (project / ".php-cs-fixer.dist.php").read_text(encoding="utf-8")
+    assert "setCacheFile" not in config
+    assert "setUsingCache" not in config
+    assert "\n/.php-cs-fixer.cache\n" in (project / ".gitignore").read_text(
+        encoding="utf-8"
+    )
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "\nvendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -4808,6 +5039,30 @@ def test_the_tools_of_the_website_install_on_windows() -> None:
         lock,
         re.MULTILINE,
     )
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_website_takes_its_tools_from_the_cache_of_pip(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    # The check docs, and the build of the website that the next job publishes.
+    for name in ("docs", "pages"):
+        job = job_of(docs, name)
+        setup = step_of(job, "      - uses: actions/setup-python@")
+        assert "          cache: pip\n" in setup
+        # Under a key of the hash-pinned list that the job installs.
+        listed = re.search(r"\n          cache-dependency-path: (\S+)\n", setup)
+        installed = re.findall(
+            r"\n        run: pip install --require-hashes -r (\S+)\n", job
+        )
+        assert listed
+        assert installed == [listed[1]]
+        assert (folder / listed[1]).is_file()
+        assert job.index(setup) < job.index(
+            f"pip install --require-hashes -r {listed[1]}"
+        )
 
 
 def website_step(check: str) -> str:
