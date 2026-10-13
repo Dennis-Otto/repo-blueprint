@@ -136,7 +136,7 @@ jobs:
               echo
               echo "The first surviving mutants; \`mutmut show <name>\` shows one:"
               echo
-              grep ': survived$' "$RUNNER_TEMP/results.txt" | head -n 30 | sed 's/: survived$//; s/^ */- /'
+              grep -m 30 ': survived$' "$RUNNER_TEMP/results.txt" | sed 's/: survived$//; s/^ */- /'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           # A run that measures nothing, not a low score, fails: an error of the tool
