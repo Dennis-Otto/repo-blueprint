@@ -90,6 +90,96 @@ def workflows(project: Path) -> dict[str, str]:
     }
 
 
+def job_of(workflow: str, name: str) -> str:
+    """The text of a job of a workflow, up to the next job."""
+    start = workflow.index(f"\n  {name}:\n")
+    end = re.compile(r"\n\n  [\w-]+:\n").search(workflow, start + 1)
+    return workflow[start : end.start() if end else len(workflow)]
+
+
+def condition_of(job: str) -> str:
+    """The condition of a job, on one line."""
+    found = re.search(r"^    if: (>-\n(?:      .+\n)+|.+)", job + "\n", re.M)
+    assert found, job
+    return " ".join(found[1].removeprefix(">-").split())
+
+
+def triggers(workflow: str) -> dict[str, list[str]]:
+    """The events that start a workflow, each with the lines of its settings, without
+    their comments."""
+    events: dict[str, list[str]] = {}
+    settings: list[str] = []
+    for line in workflow.split("\non:\n", 1)[1].splitlines():
+        if line and not line.startswith(" "):
+            break
+        if re.match(r"  [\w-]+:", line):
+            settings = events.setdefault(line.strip().split(":")[0], [])
+        elif line.strip() and not line.lstrip().startswith("#"):
+            settings.append(line)
+    return events
+
+
+def paths_of(workflow: str, event: str) -> list[str]:
+    """The path filters of an event that starts a workflow, in their order."""
+    settings = triggers(workflow)[event]
+    patterns = []
+    for line in settings[settings.index("    paths:") + 1 :]:
+        if not line.startswith("      - "):
+            break
+        patterns.append(line.removeprefix("      - ").strip('"'))
+    return patterns
+
+
+def runs_for(patterns: list[str], changed: list[str]) -> bool:
+    """Whether a change of these files starts a workflow with these path filters, as
+    GitHub matches them: in their order, where a later ! takes a path out again."""
+
+    def expression(pattern: str) -> str:
+        parts = re.split(r"(\*\*/|\*\*|\*)", pattern)
+        wildcards = {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*"}
+        return "".join(wildcards.get(part, re.escape(part)) for part in parts)
+
+    def included(path: str) -> bool:
+        result = False
+        for pattern in patterns:
+            negated = pattern.startswith("!")
+            if re.fullmatch(expression(pattern.removeprefix("!")), path):
+                result = not negated
+        return result
+
+    return any(included(path) for path in changed)
+
+
+def files_of(root: Path) -> list[str]:
+    """The files of a repository, by their paths from its root."""
+    if root == ROOT:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+        return [name for name in listed.split("\0") if name]
+    return [
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(root).parts
+    ]
+
+
+def script_of(workflow: str, step: str) -> str:
+    """The script of a step of a workflow, as the runner hands it to bash."""
+    start = workflow.index(f"      - name: {step}\n")
+    run = workflow.index("        run: |\n", start) + len("        run: |\n")
+    lines = []
+    for line in workflow[run:].splitlines(keepends=True):
+        if line.strip() and not line.startswith("          "):
+            break
+        lines.append(line)
+    return textwrap.dedent("".join(lines))
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_no_template_syntax_is_left(projects: dict[str, Path], kind: str) -> None:
     for path in text_files(projects[kind]):
@@ -156,14 +246,14 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_the_required_checks_exist(projects: dict[str, Path], kind: str) -> None:
-    project = projects[kind]
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_required_checks_exist(projects: dict[str, Path], project: str) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
     settings = tomllib.loads(
-        (project / ".github/repository.toml").read_text(encoding="utf-8")
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
     )
     names = set()
-    for text in workflows(project).values():
+    for text in workflows(root).values():
         names.update(re.findall(r"^    name: (.+)$", text, re.M))
     for check in settings["branch"]["required_checks"]:
         assert check in names, check
@@ -462,12 +552,6 @@ def test_the_readme_of_an_integration_works_in_hacs(projects: dict[str, Path]) -
 
     for target in re.findall(r"\]\(([^)\s]+)\)", readme):
         assert target.startswith(("https://", "#")), target
-
-
-def job_of(workflow: str, name: str) -> str:
-    start = workflow.index(f"\n  {name}:\n")
-    end = re.compile(r"\n\n  [\w-]+:\n").search(workflow, start + 1)
-    return workflow[start : end.start() if end else len(workflow)]
 
 
 def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
@@ -1421,9 +1505,7 @@ def watched_after_the_checks(workflow: str) -> set[str]:
 
 def after_the_checks_job(name: str) -> str:
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    start = after.index(f"\n  {name}:\n")
-    end = re.compile(r"\n\n  [\w-]+:\n").search(after, start + 1)
-    return after[start : end.start() if end else len(after)]
+    return job_of(after, name)
 
 
 def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
@@ -1653,6 +1735,359 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
         assert not (project / ".github/workflows/windows.yml").exists()
 
 
+# The release pull request: the branch of the release bot in this repository, not a
+# branch of a fork that is named like it.
+RELEASE_PULL_REQUEST = (
+    "!startsWith(github.head_ref, 'release-please--') || "
+    "github.event.pull_request.head.repo.full_name != github.repository"
+)
+# The scanners of pull requests, by workflow and job, each for the files it reads.
+SCANNERS = {
+    "fuzz.yml": "fuzz",
+    "zizmor.yml": "zizmor",
+    "osv-scanner.yml": "pull-request",
+    "links.yml": "links",
+}
+
+
+def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> None:
+    # It changes the changelog and the version, which no kind of project renders and
+    # no scanner reads, and the pull requests it releases ran every check already.
+    flows = workflows(ROOT)
+    skipped = {"variants.yml": "variant", "lint.yml": "prose", **SCANNERS}
+    for name, job in skipped.items():
+        assert RELEASE_PULL_REQUEST in condition_of(job_of(flows[name], job)), name
+
+
+def test_one_check_stands_for_every_variant() -> None:
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    gate = job_of(variants, "variants")
+    assert "\n    name: variants\n" in gate
+    assert "\n    needs: variant\n" in gate
+    # Also after a variant failed, so that the check reports the failure.
+    assert condition_of(gate) == "always()"
+    settings = tomllib.loads(
+        (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    # A matrix that its condition skips reports none of its legs, so none is required.
+    required = settings["branch"]["required_checks"]
+    assert [check for check in required if check.startswith(("variant", "update"))] == [
+        "variants"
+    ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "passes"),
+    [("success", True), ("skipped", True), ("failure", False), ("cancelled", False)],
+)
+def test_the_check_variants_passes_when_every_variant_passed_or_none_ran(
+    tmp_path: Path, result: str, passes: bool
+) -> None:
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    script = script_of(variants, "Require every variant to pass, or none to run")
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env={**os.environ, "RESULT": result},
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert (done.returncode == 0) == passes, done.stderr
+
+
+def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
+    # main takes a pull request only when it is up to date, so a merge gives main the
+    # tree that the checks of the pull request passed with.
+    flows = workflows(ROOT)
+    for name in ("variants.yml", "lint.yml", "secret-scan.yml", "sbom.yml", "fuzz.yml"):
+        assert "push" not in triggers(flows[name]), name
+    # What depends on tools and sites that move on their own runs every week instead.
+    for name in ("variants.yml", "secret-scan.yml", "sbom.yml", "fuzz.yml"):
+        assert "schedule" in triggers(flows[name]), name
+    # Every release carries an SBOM of its own; the weekly one is the repository's.
+    assert set(triggers(flows["sbom.yml"])) == {"schedule", "workflow_dispatch"}
+    # After every merge: the coverage of main, the newest Python, the analyses that code
+    # scanning compares pull requests with, the website, the release and the branch bot.
+    for name in (
+        "ci-python.yml",
+        "newest-python.yml",
+        "codeql.yml",
+        "zizmor.yml",
+        "osv-scanner.yml",
+        "scorecard.yml",
+        "docs.yml",
+        "release.yml",
+        "update-branches.yml",
+    ):
+        assert triggers(flows[name])["push"] == ["    branches: [main]"], name
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    scanners = [name for name in SCANNERS if name in flows]
+    filters = {name: paths_of(flows[name], "pull_request") for name in scanners}
+    # Only Python projects are fuzzed.
+    python = project in ("blueprint", "python-package", "github-action")
+    assert ("fuzz.yml" in filters) == python
+
+    def reads(scanner: str, path: str) -> bool:
+        name = path.rsplit("/", 1)[-1]
+        if scanner == "fuzz.yml":
+            return path.endswith(".py") or path.startswith("fuzz/")
+        if scanner == "zizmor.yml":
+            return path.startswith(".github/workflows/") or path in (
+                "action.yml",
+                ".github/dependabot.yml",
+                ".github/zizmor.yml",
+            )
+        if scanner == "osv-scanner.yml":
+            return bool(re.search(r"requirements[^/]*\.txt$", name)) or name in (
+                "package-lock.json",
+                "composer.lock",
+                "osv-scanner.toml",
+            )
+        return path.endswith(".md") and path != "CHANGELOG.md"
+
+    for path in files_of(root):
+        for scanner, patterns in filters.items():
+            if reads(scanner, path):
+                assert runs_for(patterns, [path]), f"{scanner}: {path}"
+    # A change of the documentation starts only the link check, and the release pull
+    # request, with the changelog and the version, starts none.
+    for changed in (
+        ["README.md", "docs/index.md"],
+        ["CHANGELOG.md", "version.txt", ".release-please-manifest.json"],
+    ):
+        for scanner, patterns in filters.items():
+            expected = scanner == "links.yml" and "README.md" in changed
+            assert runs_for(patterns, changed) == expected, (scanner, changed)
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_required_check_never_waits_for_a_path_filter(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A workflow that its path filter leaves out reports none of its checks, and a
+    # required check that never reports blocks the pull request for good.
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    required = set(settings["branch"]["required_checks"])
+    providers = 0
+    for name, text in workflows(root).items():
+        if required & set(re.findall(r"^    name: (.+)$", text, re.M)):
+            providers += 1
+            events = triggers(text)
+            assert {"pull_request", "pull_request_target"} & set(events), name
+            for event in ("pull_request", "pull_request_target"):
+                for line in events.get(event, []):
+                    assert not line.startswith("    paths"), f"{name}: {line}"
+    assert providers >= len(OTHER_CHECKS)
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_newest_python_checks_main_and_every_week(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    python = project in ("blueprint", "python-package", "github-action")
+    assert ("newest-python.yml" in flows) == python
+    for name, text in flows.items():
+        if name != "newest-python.yml":
+            assert "check (newest Python)" not in text, name
+    if python:
+        newest = flows["newest-python.yml"]
+        # Not in pull requests: a new Python breaks them all alike, and none waits for
+        # this check. A workflow of its own, so that it leaves the CI of main green.
+        assert set(triggers(newest)) == {"push", "schedule", "workflow_dispatch"}
+        assert "\n    name: check (newest Python)\n" in newest
+        assert 'python-version: "3.x"\n          allow-prereleases: true\n' in newest
+        assert "run: bash scripts/check.sh\n" in newest
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "open_issue", "call"),
+    [
+        # A failure opens the issue, or brings the open one up to date.
+        ("failure", "", "issue create --title The checks fail with the newest Python"),
+        ("failure", "7", "issue edit 7 --body"),
+        # The weekly run closes it once the checks pass again.
+        ("success", "7", "issue close 7"),
+        ("success", "", ""),
+    ],
+)
+def test_a_failure_with_the_newest_python_keeps_an_issue_open(
+    tmp_path: Path, result: str, open_issue: str, call: str
+) -> None:
+    # No pull request shows the check, so its warning needs a place of its own.
+    newest = (ROOT / ".github/workflows/newest-python.yml").read_text(encoding="utf-8")
+    report = job_of(newest, "report")
+    assert condition_of(report) == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        "(needs.newest-python.result == 'failure' || github.event_name == 'schedule')"
+    )
+    # Only the job without the code of the project may write issues.
+    assert "\n    permissions:\n      issues: write\n    steps:" in report
+    assert newest.count("issues: write") == 1
+    (tmp_path / "step.sh").write_text(
+        script_of(newest, "Keep the issue of the newest Python current"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  echo "$OPEN"
+  exit 0
+fi
+echo "$*" >> calls
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    (tmp_path / "calls").touch()
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "RESULT": result,
+            "OPEN": open_issue,
+            "URL": "https://github.com/o/r/actions/runs/1",
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+    if not call:
+        assert calls == ""
+        return
+    assert calls.startswith(call), calls
+    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
+        result == "failure"
+    )
+
+
+def run_the_search_for_the_website(
+    tmp_path: Path, root: Path, event: str, pages: str, fork: bool
+) -> tuple[str, str]:
+    docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    script = tmp_path / "step.sh"
+    script.write_text(
+        script_of(docs, "Look for the website"), encoding="utf-8", newline="\n"
+    )
+    # gh answers as GitHub Pages does: its build type, or 404 where it is off.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+if [[ "$*" != "api repos/o/r/pages --jq .build_type" || -z "$PAGES" ]]; then
+  exit 1
+fi
+echo "$PAGES"
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    output.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "EVENT": event,
+        "FORK": str(fork).lower(),
+        "GITHUB_REF": "refs/heads/main" if event == "push" else "refs/pull/1/merge",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_OUTPUT": str(output),
+        "PAGES": pages,
+    }
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", script.as_posix()],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout, output.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("project", "event", "pages", "fork", "output", "notice"),
+    [
+        # Every pull request builds the website as the check docs.
+        ("generic", "pull_request", "workflow", False, "build=true\n", ""),
+        # main publishes it where GitHub Pages publishes from a workflow.
+        ("generic", "push", "workflow", False, "publish=true\n", ""),
+        (
+            "generic",
+            "push",
+            "",
+            False,
+            "build=true\n",
+            "doesn't publish from GitHub Actions",
+        ),
+        # The blueprint's Dashboard publishes it with the dashboard; main only builds it.
+        (
+            "blueprint",
+            "push",
+            "workflow",
+            False,
+            "build=true\n",
+            "dashboard.yml publishes",
+        ),
+        # A fork of the blueprint runs no Dashboard, so its Docs publishes the website.
+        ("blueprint", "push", "workflow", True, "publish=true\n", ""),
+        ("none", "push", "workflow", False, "", "No website here"),
+    ],
+)
+def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    project: str,
+    event: str,
+    pages: str,
+    fork: bool,
+    output: str,
+    notice: str,
+) -> None:
+    roots = {"blueprint": ROOT, "none": tmp_path}
+    root = roots.get(project) or projects[project]
+
+    printed, written = run_the_search_for_the_website(
+        tmp_path, root, event, pages, fork
+    )
+
+    assert written == output
+    assert (notice in printed) if notice else printed == ""
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_project_records_its_decisions(
     projects: dict[str, Path], kind: str
@@ -1750,10 +2185,17 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
     assert "mkdocs-material==" in tools
     docs = workflows(project)["docs.yml"]
     assert "pip install --require-hashes -r .github/docs-requirements.txt" in docs
-    # Only the blueprint leaves the publishing to its Dashboard workflow.
     assert "repo-blueprint" not in docs.replace(
         "https://github.com/Dennis-Otto/repo-blueprint", ""
     )
+    # The Docs workflow publishes it; only the blueprint has another workflow for that,
+    # its Dashboard.
+    publishers = [
+        name
+        for name, text in workflows(project).items()
+        if "uses: actions/deploy-pages@" in text
+    ]
+    assert publishers == ["docs.yml"]
     settings = tomllib.loads(
         (project / ".github/repository.toml").read_text(encoding="utf-8")
     )
