@@ -25,6 +25,7 @@ from copier import run_copy
 from shell import BASH, in_bash
 
 from blueprint.changelog import Fragment, release_changelog
+from blueprint.pages import layouts, shown
 from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
@@ -1199,6 +1200,109 @@ def test_the_checks_fail_while_git_would_skip_a_hook(
             0,
             "\n== Git hooks\nEvery hook in .githooks/ is executable.\n",
         ), passed.stderr
+
+
+def pages_step(check: str) -> str:
+    start = check.index('step "Pages in one column"')
+    return check[start : check.index('step "Version"', start)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_its_pages_have_one_column(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # In every kind of project the same, right after the diagrams, without Docker.
+    assert check.index('\nstep "Diagrams"\n') < check.index(
+        '\nstep "Pages in one column"\n'
+    )
+    assert pages_step(check) == pages_step(generic) == pages_step(own)
+    assert '"$python" "$tool" pages\n' in pages_step(check)
+    assert "docker" not in pages_step(check)
+    # The pages that a new repository starts with have one column.
+    checked = [
+        page
+        for page in project.rglob("*.md")
+        if ".git" not in page.parts and shown(page.relative_to(project))
+    ]
+    assert project / "README.md" in checked
+    assert project / "CONTRIBUTING.md" in checked
+    for page in checked:
+        assert layouts(page.read_text(encoding="utf-8")) == [], page
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "## Pages in one column" in contributing
+    assert "`python3 .github/blueprint.py pages --fix`" in contributing
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_a_page_with_columns_side_by_side(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    script = check[: check.index('step "Text files"')] + pages_step(check)
+    (project / "scripts/pages.sh").write_text(script, encoding="utf-8", newline="\n")
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    # The Python of the tests first, without the variables of a run of the CI.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("CI", "GITHUB_ACTIONS")
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/pages.sh"],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    passed = step()
+    readme = project / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    readme.write_text(
+        text
+        + '\n<table><tr>\n<td width="50%">The card</td>\n'
+        + '<td><img src="docs/images/card.png" alt="The card"></td>\n</tr></table>\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    failed = step()
+    fix = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "pages", "--fix"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    fixed = step()
+
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+    assert "page(s) that GitHub shows have one column." in passed.stdout
+    line = text.count("\n") + 2
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert f"\nREADME.md:{line}: a <table> that sets a picture beside" in failed.stdout
+    assert (
+        "python3 .github/blueprint.py pages --fix puts 1 of them in one column"
+        in failed.stdout
+    )
+    assert fix.returncode == 0, fix.stdout + fix.stderr
+    assert readme.read_text(encoding="utf-8").endswith(
+        '\nThe card\n\n<img src="docs/images/card.png" alt="The card">\n'
+    )
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
 
 
 @pytest.mark.skipif(
