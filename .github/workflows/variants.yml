@@ -85,14 +85,17 @@ jobs:
         with:
           python-version-file: .python-version
       # uv installs every hash-pinned tool of the variant, Copier, the website's and
-      # the project's, from its cache, which GitHub keeps for each kind under a key of
-      # the lock files of the blueprint, and checks the hash of a cached package too.
+      # the project's, in seconds and checks the hash of each package. Its cache keeps
+      # only the wheels that it built from source, for each kind under a key of the
+      # lock files of the blueprint: pre-built ones download faster than a cache
+      # restores them.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
           version: "0.12.17"
           enable-cache: true
+          prune-cache: true
           cache-dependency-glob: |
             requirements-dev.txt
             stacks/**/requirements*.txt

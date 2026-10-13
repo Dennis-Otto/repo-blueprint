@@ -39,14 +39,17 @@ jobs:
         timeout-minutes: 5
         with:
           python-version-file: .python-version
-      # uv installs the tools from its cache, which GitHub keeps under a key of the
-      # lock file, and checks the hash of a cached package too.
+      # uv installs the hash-pinned tools in seconds and checks the hash of each
+      # package. Its cache keeps only the wheels that it built from source, under a
+      # key of the lock file: pre-built ones download faster than a cache restores
+      # them.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
           version: "0.12.17"
           enable-cache: true
+          prune-cache: true
           cache-dependency-glob: requirements-dev.txt
       - name: Install the hash-pinned tools
         timeout-minutes: 5

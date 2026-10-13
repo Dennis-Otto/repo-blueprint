@@ -5597,10 +5597,12 @@ def test_a_glob_of_setup_uv_matches_as_the_action_does() -> None:
 def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
     projects: dict[str, Path], kind: str
 ) -> None:
-    # uv installs the hash-pinned tools in seconds from its cache, where pip took a
-    # minute for those of Home Assistant even with its own. GitHub keeps the cache of
-    # uv under a key of the lock files that the job installs, and uv checks the hash of
-    # a cached package too.
+    # uv installs the hash-pinned tools in seconds, where pip took a minute for those
+    # of Home Assistant even with its cache, and checks the hash of each package.
+    # GitHub keeps the cache of uv under a key of the lock files that the job installs,
+    # pruned to the wheels that uv built from source: in the Variants, uv downloaded
+    # the tools of Home Assistant in 6 seconds, while a cache with them, 232 MB, took
+    # 7 to 11 seconds to restore.
     folder = ROOT if kind == "blueprint" else projects[kind]
     found = workflows(folder)
     installs, versions = 0, set()
@@ -5609,7 +5611,7 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
             continue
         workflow = found[name]
         assert not PIP.search(workflow), name
-        # One cache for the packages, uv's, not pip's as well.
+        # No cache of pip's downloads either.
         assert "cache: pip" not in workflow, name
         for job_name in jobs_of(workflow):
             job = job_of(workflow, job_name)
@@ -5628,6 +5630,7 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
                 setup = setups[0]
                 assert setting_of(setup, "if") in (None, setting_of(step, "if"))
                 assert "          enable-cache: true\n" in setup
+                assert "          prune-cache: true\n" in setup
                 version = UV_VERSION.search(setup)
                 assert version, setup
                 versions.add(version[1])
