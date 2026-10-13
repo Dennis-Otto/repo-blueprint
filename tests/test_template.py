@@ -6393,9 +6393,6 @@ def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
         ]
 
 
-# In the copy of the mutation tests, the tool is the code with the mutants, which the
-# variables of mutmut switch in the process that this test starts.
-@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("title", "author"), [("chore(deps): bump", "Bot"), ("feat: a card", "User")]
@@ -6428,6 +6425,9 @@ def test_the_changelog_check_asks_github_three_times_for_the_files(
     assert "fragments=true" not in step.output
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("fragments", "code", "summary", "errors"),
