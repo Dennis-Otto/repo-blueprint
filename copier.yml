@@ -221,6 +221,15 @@ sample_code:
   help: Start with sample code and tests; an existing repository that takes the blueprint answers no
   default: true
 
+# The flaky-test bot watches the CI and Docker E2E of every repository; a repository
+# whose other workflows run tests, such as visual tests, names them here.
+test_workflows:
+  type: str
+  help: Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more; empty for none
+  default: ""
+  validator: >-
+    [% if test_workflows and not (test_workflows | regex_search('^[A-Za-z0-9 ()._/,-]+$')) %]Name each workflow as the name: line of its file does, with letters, digits, spaces and ( ) . _ / - only, and separate them by commas.[% endif %]
+
 # Derived from the answers; never asked and not stored.
 
 stack:
