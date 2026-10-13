@@ -21,7 +21,7 @@ concurrency:
 jobs:
   workflow-lint:
     name: workflow-lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Record the network traffic of the job
@@ -36,7 +36,7 @@ jobs:
 
   reuse:
     name: reuse
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Record the network traffic of the job
@@ -51,7 +51,7 @@ jobs:
 
   markdown:
     name: markdown
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Record the network traffic of the job
@@ -78,7 +78,7 @@ jobs:
       github.event_name == 'pull_request' &&
       (!startsWith(github.head_ref, 'release-please--') ||
       github.event.pull_request.head.repo.full_name != github.repository)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Record the network traffic of the job
@@ -121,7 +121,7 @@ jobs:
   dco:
     name: dco
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Record the network traffic of the job
@@ -162,7 +162,7 @@ jobs:
 
   issue-assistant:
     name: issue-assistant
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Record the network traffic of the job

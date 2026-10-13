@@ -16,6 +16,10 @@ name: Variants
 # which changes only the changelog and the version, files that no project gets. The
 # check variants stands for every variant in the rules of main: it passes when each
 # one passed, or when none had to run.
+#
+# The variants run on the runner of the blueprint's jobs, ubuntu-24.04. The Next
+# runner workflow runs them on the next one every week, before the jobs move to it,
+# and so can a run started here by hand.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -23,6 +27,18 @@ on:
   schedule:
     - cron: "10 5 * * 3"
   workflow_dispatch:
+    inputs:
+      runner:
+        description: The runner of the variants
+        type: choice
+        options: [ubuntu-24.04, ubuntu-26.04]
+        default: ubuntu-24.04
+  workflow_call:
+    inputs:
+      runner:
+        description: The runner of the variants
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -39,7 +55,9 @@ jobs:
     if: >-
       !startsWith(github.head_ref, 'release-please--') ||
       github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
+    # The runner of every job, or the one that a run by hand or the Next runner
+    # workflow names.
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -249,7 +267,7 @@ jobs:
     name: variants
     if: always()
     needs: variant
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Record the network traffic of the job

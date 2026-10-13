@@ -27,7 +27,7 @@ concurrency:
 jobs:
   newest-python:
     name: check (newest Python)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Record the network traffic of the job
@@ -54,7 +54,7 @@ jobs:
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' &&
       (needs.newest-python.result == 'failure' || github.event_name == 'schedule')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       issues: write

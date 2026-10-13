@@ -29,7 +29,7 @@ permissions: {}
 jobs:
   assets:
     name: release assets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # The signing key of a Nextcloud app belongs to this environment.
     environment:
