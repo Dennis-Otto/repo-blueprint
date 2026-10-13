@@ -12,3 +12,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0004](0004-settings-as-code.md) | Keep the settings of every repository as code, applied by a bot | accepted |
 | [0005](0005-renovate-instead-of-dependabot.md) | Keep the dependencies current with a self-hosted Renovate | accepted |
 | [0006](0006-beta-channel.md) | Publish a beta of the next release after every change for users, where a project wants it | accepted |
+| [0007](0007-one-update-pull-request.md) | Keep one update pull request, move it on with each release, and leave a maintainer's commits alone | accepted |

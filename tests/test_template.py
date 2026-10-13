@@ -1039,6 +1039,55 @@ def test_copier_updates_without_the_maintenance_of_git_in_the_background(
         assert all(setting in step for setting in settings), name
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_blueprint_bot_keeps_one_pull_request(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    text = (project / ".github/workflows/blueprint-update.yml").read_text(
+        encoding="utf-8"
+    )
+    steps = text.split("\n      - ")
+    release = next(step for step in steps if "gh release view" in step)
+    update = next(step for step in steps if "copier update --" in step)
+
+    # Only to a published release: the Release workflow pushes the tag first.
+    assert (
+        "gh release view --repo Dennis-Otto/repo-blueprint --json tagName --jq .tagName"
+        in release
+    )
+    assert "TAG: ${{ steps.release.outputs.tag }}" in update
+    assert 'copier update --defaults --conflict inline --vcs-ref "$TAG"' in update
+    # The bot of main commits, copied before the update changes it, as the app whose
+    # commits it may replace; the scratch branch of a commit without modes is per run.
+    assert (
+        update.index("cp -R .github/blueprint.py .github/blueprint")
+        < update.index("copier update --")
+        < update.index("git add --all")
+        < update.index("update-commit")
+    )
+    assert "APP: ${{ steps.app.outputs.app-slug }}" in update
+    assert '--app "${APP}[bot]"' in update
+    assert '--run-id "$GITHUB_RUN_ID"' in update
+    # The workflow no longer puts the branch back on main, which closed the pull
+    # request, nor scans the whole repository for markers.
+    for gone in ("force", "createCommitOnBranch", "git grep", "gh pr merge"):
+        assert gone not in text, gone
+    tool = (project / ".github/blueprint/update.py").read_text(encoding="utf-8")
+    assert '"--disable-auto"' in tool
+    assert 'f"{BRANCH}-{run_id}"' in tool
+    assert 'BRANCH = "blueprint/update"' in tool
+    result = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "update-commit", "--help"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--app APP" in result.stdout
+
+
 def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
     # Renovate's pull requests are brought up to date, but not the release bot's.
