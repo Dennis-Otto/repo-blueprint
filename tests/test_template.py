@@ -2281,6 +2281,10 @@ def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothin
     assert f"\n+++ b/changelog.d/nextcloud-{newest}.md\n" in result.stdout
     assert f"\n+### Changed\n+\n+- Supports Nextcloud {newest}.\n" in result.stdout
     assert "CHANGELOG.md" not in result.stdout
+    # And its description says where the entry goes.
+    workflow = (project / ".github/workflows/upstream.yml").read_text(encoding="utf-8")
+    assert "a fragment of the changelog, changelog.d/nextcloud-<version>.md" in workflow
+    assert "CHANGELOG.md" not in workflow
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -5447,6 +5451,9 @@ def test_every_project_draws_its_diagrams_as_pictures(
     assert "sparse-checkout: |\n            .github/blueprint\n" in bot
     assert ' diagrams commit "$kept" --branch "$BRANCH" \\\n' in bot
     assert '--head "$SHA"' in bot
+    # Its commit lands on top of the branch and never needs to change a workflow.
+    assert "permission-workflows" not in bot
+    assert "      - name: Say on the pull request that the bot failed\n" in bot
     # No expression in a script, where the name of a branch could run as code.
     for script in bot.split("        run: |\n")[1:]:
         assert "${{" not in script.split("\n      - ")[0]
@@ -5463,6 +5470,8 @@ def test_every_project_draws_its_diagrams_as_pictures(
     opener = job_of(main, "pull-request")
     assert "      name: release\n" in opener
     assert "bash scripts/diagrams.sh" not in opener
+    # Its branch moves from an older main to the newest, across changes of workflows.
+    assert "\n          permission-workflows: write\n" in opener
     assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
     for script in opener.split("        run: |\n")[1:]:
         assert "${{" not in script.split("\n      - ")[0]
@@ -5474,6 +5483,9 @@ def test_every_project_draws_its_diagrams_as_pictures(
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/diagrams.sh`" in contributing
     assert "`docs/diagrams/" in contributing
+    # The colors of the blueprint's diagrams, the same in every repository.
+    for color in ("`#526cfe`", "`#f59e0b`", "`#16a34a`"):
+        assert color in contributing, color
 
 
 def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
@@ -6128,7 +6140,8 @@ def run_a_step_with_the_fake_gh(
     tmp_path: Path, script: str, answers: dict[str, object], **variables: str
 ) -> Step:
     """Runs the script of a step in tmp_path/checkout, as GitHub runs it, with the fake
-    gh, the Python of the tests as python3, and $RUNNER_TEMP in tmp_path/temp."""
+    gh, the Python of the tests as python3, a sleep that only notes its seconds in
+    tmp_path/slept, and $RUNNER_TEMP in tmp_path/temp."""
     checkout = tmp_path / "checkout"
     checkout.mkdir(exist_ok=True)
     (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
@@ -6144,6 +6157,7 @@ def run_a_step_with_the_fake_gh(
     for tool, body in {
         "gh": FAKE_GH,
         "python3": f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+        "sleep": f'#!/usr/bin/env bash\necho "$*" >> "{(tmp_path / "slept").as_posix()}"\n',
     }.items():
         (folders["bin"] / tool).write_text(body, encoding="utf-8", newline="\n")
         (folders["bin"] / tool).chmod(0o755)
@@ -6384,6 +6398,38 @@ def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
 @pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
+    ("title", "author"), [("chore(deps): bump", "Bot"), ("feat: a card", "User")]
+)
+def test_the_changelog_check_asks_github_three_times_for_the_files(
+    tmp_path: Path, title: str, author: str
+) -> None:
+    # The check is required of every pull request, those of bots included, so a
+    # moment in which GitHub fails doesn't fail it at once.
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            changelog_check(),
+            "Require an entry in the changelog for a change for users",
+        ),
+        {"repos/o/r/pulls/7/files.error": "gh: Bad Gateway (HTTP 502)\n"},
+        NUMBER="7",
+        TITLE=title,
+        AUTHOR=author,
+    )
+
+    assert step.result.returncode == 1
+    assert len(step.calls) == 3
+    assert all(call.startswith("api repos/o/r/pulls/7/files ") for call in step.calls)
+    assert (tmp_path / "slept").read_text(encoding="utf-8").split() == ["10", "20"]
+    assert (
+        "::error::GitHub did not list the files of this pull request. Run the check "
+        "again." in step.result.stdout
+    )
+    assert "fragments=true" not in step.output
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
     ("fragments", "code", "summary", "errors"),
     [
         (
@@ -6608,7 +6654,9 @@ def test_every_repository_gets_the_folder_of_the_fragments(
     assert (project / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     for text in (
-        "in a new file in `changelog.d/` named after your branch",
+        # A branch such as feat/dark-mode has a slash, which no fragment's name has.
+        "named after your branch without its type, such as `changelog.d/dark-mode.md` "
+        "for the branch `feat/dark-mode`",
         "### The changelog",
         "`python3 .github/blueprint.py fragments` checks them",
     ):

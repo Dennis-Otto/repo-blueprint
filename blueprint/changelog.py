@@ -30,20 +30,29 @@ def block(text: str) -> str:
 
 
 SUBHEADING = re.compile(r"^### .*$", re.MULTILINE)
+# A heading above the kinds of change, such as the title of the changelog or that of a
+# release, with up to three spaces before it, as Markdown takes it.
+TOP_HEADING = re.compile(r"^ {0,3}#{1,2}(?:[ \t].*)?$", re.MULTILINE)
 LIST_LINE = re.compile(r"^(?:\s*(?:[-*+]|\d+\.)\s|\s{2,}\S)")
+
+
+def kind_of(heading: re.Match[str]) -> str:
+    """A heading of a kind of change as the release writes it: "### " and its words,
+    however many spaces stand around them, so that "###  Features" is "### Features"."""
+    return f"### {heading.group()[4:].strip()}"
 
 
 def merge_headings(text: str) -> str:
     """The text with each kind of change under one heading: when two pull requests
     each start a "### Features", the entries of the second join those of the first."""
     headings = list(SUBHEADING.finditer(text))
-    if len(headings) == len({match.group().strip() for match in headings}):
+    if len(headings) == len({kind_of(match) for match in headings}):
         return text
     ends = [match.start() for match in headings[1:]] + [len(text)]
     bodies: dict[str, list[str]] = {}
     for match, end in zip(headings, ends, strict=True):
         body = text[match.end() : end].strip("\n")
-        chunks = bodies.setdefault(match.group().strip(), [])
+        chunks = bodies.setdefault(kind_of(match), [])
         if body.strip():
             chunks.append(body)
     parts = [text[: headings[0].start()].strip("\n")]
@@ -221,7 +230,7 @@ def problems_of(text: str, known: list[str]) -> list[str]:
         f"has the heading {shown(match.group())}, which would start a section of the "
         "changelog of its own. A fragment has only headings of kinds of change, such "
         "as `### Features`."
-        for match in HEADING.finditer(text)
+        for match in TOP_HEADING.finditer(text)
     ]
     folded = {heading.casefold(): heading for heading in known}
     ends = [match.start() for match in headings[1:]] + [len(text)]
@@ -258,7 +267,7 @@ def fragment_sections(fragments: Sequence[Fragment]) -> list[tuple[str, str]]:
         headings = list(SUBHEADING.finditer(fragment.text))
         ends = [match.start() for match in headings[1:]] + [len(fragment.text)]
         sections += [
-            (match.group().strip(), fragment.text[match.end() : end].strip("\n"))
+            (kind_of(match), fragment.text[match.end() : end].strip("\n"))
             for match, end in zip(headings, ends, strict=True)
         ]
     rank = {f"### {kind}": index for index, kind in enumerate(KINDS)}
@@ -356,28 +365,3 @@ def beta_notes(version: str, changelog: str, fragments: Sequence[Fragment] = ())
         text or "The changes of this beta are not described yet.",
     ]
     return "\n".join([*lines, ""])
-
-
-def add_unreleased(changelog: str, heading: str, entry: str) -> str:
-    """The changelog with the entry under its heading in Unreleased; both are added
-    when they are missing, and an entry that is there already stays once."""
-    log = Changelog.parse(changelog)
-    found = log.find(UNRELEASED)
-    if found is None:
-        log.sections.insert(0, ("## Unreleased", block("")))
-        found = 0
-    lines = log.sections[found][1].strip("\n").split("\n")
-    if entry in lines:
-        return changelog
-    title = f"### {heading}"
-    if title not in lines:
-        lines += ["", title]
-    start = lines.index(title) + 1
-    end = start
-    while end < len(lines) and not lines[end].startswith("### "):
-        end += 1
-    while end > start and not lines[end - 1].strip():
-        end -= 1
-    lines[end:end] = [entry] if end > start else ["", entry]
-    log.sections[found] = (log.sections[found][0], block("\n".join(lines)))
-    return log.render()

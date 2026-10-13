@@ -15,7 +15,6 @@ from blueprint.changelog import (
     Changelog,
     Fragment,
     FragmentError,
-    add_unreleased,
     beta_notes,
     checked,
     fragment_problems,
@@ -243,47 +242,6 @@ def test_the_command_line_names_a_missing_file(
     assert "missing.md" in capsys.readouterr().err
 
 
-def test_a_bot_adds_an_entry_under_its_heading() -> None:
-    main = main_changelog(unreleased="### Changed\n\n- a\n\n### Fixed\n\n- b\n")
-    result = add_unreleased(main, "Changed", "- Supports Nextcloud 36.")
-    assert (
-        "### Changed\n\n- a\n- Supports Nextcloud 36.\n\n### Fixed\n\n- b\n" in result
-    )
-    assert result.endswith(OLDER)
-    # A second run adds nothing.
-    assert add_unreleased(result, "Changed", "- Supports Nextcloud 36.") == result
-
-
-def test_a_bot_adds_the_heading_and_unreleased_when_they_are_missing() -> None:
-    fixed = main_changelog(unreleased="### Fixed\n\n- b\n")
-    assert "- b\n\n### Changed\n\n- c\n\n## 1.2.2" in add_unreleased(
-        fixed, "Changed", "- c"
-    )
-    empty = main_changelog(unreleased="")
-    assert "## Unreleased\n\n### Changed\n\n- c\n\n## 1.2.2" in add_unreleased(
-        empty, "Changed", "- c"
-    )
-    heading_alone = main_changelog(unreleased="### Changed\n")
-    assert "## Unreleased\n\n### Changed\n\n- c\n\n## 1.2.2" in add_unreleased(
-        heading_alone, "Changed", "- c"
-    )
-    without = f"{PREAMBLE}{OLDER}"
-    assert add_unreleased(without, "Changed", "- c") == (
-        f"{PREAMBLE}## Unreleased\n\n### Changed\n\n- c\n\n{OLDER}"
-    )
-
-
-def test_the_command_line_adds_an_entry(tmp_path: Path) -> None:
-    changelog = tmp_path / "CHANGELOG.md"
-    changelog.write_text(main_changelog(unreleased=""), encoding="utf-8")
-
-    assert cli.main(["unreleased", "Changed", "- c", "--file", str(changelog)]) == 0
-    assert "### Changed\n\n- c\n" in changelog.read_text(encoding="utf-8")
-    assert (
-        cli.main(["unreleased", "Changed", "- c", "--file", str(tmp_path / "x")]) == 2
-    )
-
-
 def test_a_beta_shows_what_main_holds() -> None:
     notes = beta_notes("1.3.0-beta.2", main_changelog())
 
@@ -379,6 +337,32 @@ def test_fragments_alone_list_the_kinds_of_change_in_their_order() -> None:
     assert "start a game by voice" not in result
 
 
+def test_a_heading_with_more_spaces_is_the_same_kind_of_change() -> None:
+    main = main_changelog(unreleased="")
+    fragments = [
+        fragment("a-fix.md", "###  Fixed \n\n- First fix.\n"),
+        fragment("b-added.md", "###   Added\n\n- An addition, for #14.\n"),
+        fragment("c-fix.md", "### Fixed\n\n- Second fix.\n"),
+    ]
+
+    # The check takes such a heading, and the release puts it with its kind, in the
+    # order of the kinds, instead of under a heading of its own at the end.
+    assert fragment_problems(fragments, main) == []
+    result = release_changelog("1.3.0", main, branch_changelog(main), fragments)
+    assert section_of(result) == (
+        "### Added\n\n- An addition, for #14.\n\n"
+        "### Fixed\n\n- First fix.\n- Second fix."
+    )
+    # The same for a heading of Unreleased that a fragment joins.
+    spaced = main_changelog(unreleased="###  Features\n\n- One (#1).\n")
+    result = release_changelog(
+        "1.3.0", spaced, branch_changelog(spaced), [fragment("cards.md", FEATURE)]
+    )
+    assert section_of(result) == (
+        "### Features\n\n- One (#1).\n- **Cards:** a new card (#14)."
+    )
+
+
 def test_a_prerelease_leaves_the_fragments_for_the_release() -> None:
     main = main_changelog()
     branch = branch_changelog(main, version="1.3.0-beta.1")
@@ -466,6 +450,15 @@ def test_a_beta_shows_the_fragments_too() -> None:
             "changelog.d/section.md: has the heading `## 1.4.0`, which would start a "
             "section of the changelog of its own.",
         ),
+        # A title, as Markdown takes it, would land in the changelog and the notes.
+        (
+            "title.md",
+            f"{FIX}\n# Release notes\n",
+            "changelog.d/title.md: has the heading `# Release notes`, which would "
+            "start a section of the changelog of its own.",
+        ),
+        ("indented.md", f"{FIX}\n   ## 1.4.0\n", "has the heading `## 1.4.0`"),
+        ("hash.md", f"{FIX}\n#\n", "has the heading `#`"),
         (
             "typo.md",
             "### Fixes\n\n- A fix.\n",

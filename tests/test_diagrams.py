@@ -1490,6 +1490,46 @@ def test_the_diagram_bot_leaves_a_branch_that_moved_on(tmp_path: Path) -> None:
     assert not (tmp_path / "request.json").exists()
 
 
+# gh, which only notes what it was asked.
+GH_NOTES = '#!/usr/bin/env bash\nprintf "gh %s\\n" "$*" >> "$CALLS"\n'
+FAILED = (
+    "after-checks.yml",
+    "diagrams",
+    "Say on the pull request that the bot failed",
+)
+
+
+@needs_bash
+@pytest.mark.parametrize(("number", "target"), [("7", "7"), ("", "feature")])
+def test_a_diagram_bot_that_fails_says_so_on_the_pull_request(
+    tmp_path: Path, number: str, target: str
+) -> None:
+    # The failed check promised the bot's commit; without it, the pull request learns
+    # what to do itself.
+    text = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    job = text[text.index("\n  diagrams:\n") :]
+    assert "        if: failure()\n" in job[job.index(f"      - name: {FAILED[2]}\n") :]
+
+    result, _, _ = run_step(
+        workflow_step(*FAILED),
+        tmp_path,
+        tmp_path,
+        {"gh": GH_NOTES},
+        GH_REPO="o/r",
+        BRANCH="feature",
+        NUMBER=number,
+        URL="https://github.com/o/r/actions/runs/8",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls(tmp_path) == [
+        f"gh pr comment {target} --body The diagram bot couldn't commit the diagrams"
+        " of this pull request (https://github.com/o/r/actions/runs/8). Run"
+        " `bash scripts/diagrams.sh --extract` with Docker and commit what it changes,"
+        " or take the files from the artifact `diagrams` of the check *diagrams*."
+    ]
+
+
 def applied(root: Path, request: dict[str, Any]) -> None:
     """What GitHub does with the request of the bot: the commit on the branch."""
     changed = request["variables"]["input"]["fileChanges"]
@@ -1611,7 +1651,10 @@ PULL_REQUEST = (
 
 @runs_a_copy_of_the_tool
 @needs_bash
-def test_the_diagrams_of_main_are_drawn_for_their_pull_request(tmp_path: Path) -> None:
+@pytest.mark.parametrize("app", ["Iv23li", ""])
+def test_the_diagrams_of_main_are_drawn_for_their_pull_request(
+    tmp_path: Path, app: str
+) -> None:
     root = with_tools(
         repository(
             tmp_path / "repository",
@@ -1621,12 +1664,24 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(tmp_path: Path) -
     commit(root, "A block that went around the check")
 
     result, output, summary = run_step(
-        workflow_step(*DRAW_MAIN), root, tmp_path, {"docker": DOCKER}
+        workflow_step(*DRAW_MAIN), root, tmp_path, {"docker": DOCKER}, APP=app
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert output == "drawn=true\nstale=true\n"
-    assert summary.startswith("### Diagrams\nThe pull request of the diagram bot")
+    if app:
+        assert summary.startswith("### Diagrams\nThe pull request of the diagram bot")
+        assert "::warning::" not in result.stdout
+    else:
+        # Without the release app, no pull request comes: the run says what to do.
+        assert summary.startswith(
+            "### Diagrams\nThe variable `RELEASE_AUTOMATION_CLIENT_ID` of the release"
+            " app is empty, so no bot opens the pull request with these files. Run"
+            " `bash scripts/diagrams.sh --extract` with Docker"
+        )
+        assert (
+            "::warning::main has diagrams that not every reader sees" in result.stdout
+        )
     assert "- `docs/guide.md`: its `mermaid` blocks are pictures now\n" in summary
     assert "files/docs/guide.md" in files_of(tmp_path / "runner/diagrams")
 
@@ -1634,7 +1689,7 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(tmp_path: Path) -
     again = tmp_path / "again"
     again.mkdir()
     result, output, summary = run_step(
-        workflow_step(*DRAW_MAIN), root, again, {"docker": DOCKER}
+        workflow_step(*DRAW_MAIN), root, again, {"docker": DOCKER}, APP=app
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert output == "drawn=true\n"
@@ -1772,10 +1827,18 @@ def test_the_bot_of_main_updates_its_pull_request(tmp_path: Path) -> None:
     # The head of the open pull request moves once, to the new commit, and never to
     # the commit of main, which would close the pull request.
     assert moved == [
-        "gh api --method PATCH repos/o/r/git/refs/heads/bot/diagrams-next"
-        " -f sha=abc1234def -F force=true",
         "gh api --method PATCH repos/o/r/git/refs/heads/bot/diagrams -f sha=c0ffee"
         " -F force=true",
+    ]
+    # The branch that a failed run left behind is never moved, which GitHub could
+    # refuse, but made anew at the commit that was drawn, and removed at the end.
+    scratch = [call for call in made if "bot/diagrams-next" in call]
+    assert scratch == [
+        "gh api repos/o/r/git/ref/heads/bot/diagrams-next",
+        "gh api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
+        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams-next"
+        " -f sha=abc1234def",
+        "gh api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
     ]
     assert (
         f"gh pr edit 9 --body-file {(tmp_path / 'runner/body.md').as_posix()}" in made
