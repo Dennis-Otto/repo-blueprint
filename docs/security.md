@@ -87,3 +87,4 @@ flowchart TB
 - A change that is wrong but passes every check reaches every repository with the next release of the blueprint. The maintainer's review of every release that is not only dependency updates is the last guard.
 - Copier and the GitHub CLI run with the permissions of whoever starts them.
 - The checks of a Home Assistant integration run the current images of hassfest and HACS, not an image by digest, so that they validate against the rules of today, as the actions of both projects do. hassfest sees the checkout read-only, and HACS a token that can only read.
+- An action that a project pins to a branch follows that branch without the week of waiting and merges on its own, so a bad commit there reaches the workflows of that project within hours. Pin an action to a release where it has one; the workflows of the blueprint pin none to a branch.
