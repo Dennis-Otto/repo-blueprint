@@ -21,4 +21,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0013](0013-name-the-runner-and-try-the-next-one.md) | Name the runner with its version, and try the next one every week before the jobs move | accepted |
 | [0014](0014-recover-from-a-stalled-check-without-a-person.md) | Recover from a stalled check without a person, once | accepted |
 | [0016](0016-diagrams-as-pictures-of-their-sources.md) | Show every diagram as a picture drawn from its Mermaid source, because the GitHub app draws no Mermaid | accepted |
-| [0019](0019-update-only-to-a-verified-release.md) | Update only to a release that the release workflow made, and let only the release app create release tags | accepted |
+| [0017](0017-cache-what-a-check-can-verify-never-a-finding.md) | Cache what a check can verify, never a finding: downloads by their lock files, php-cs-fixer by content, Psalm without a cache | accepted |
+| [0020](0020-update-only-to-a-verified-release.md) | Update only to a release that the release workflow made, and let only the release app create release tags | accepted |
