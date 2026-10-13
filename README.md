@@ -73,6 +73,7 @@ flowchart TB
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
 | **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates and releases of dependency updates merge themselves once every check passes, while the weekly refresh of every lock file, which brings the newest versions without the week of waiting, waits for the maintainer; the blueprint checks that Renovate reads every lock file that it brings. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Coverage** | one comment on every pull request with the coverage of its tests against that of `main`, file by file | `after-checks.yml` |
+| **PR coach** | every check that fails says what it found, why that matters and how to fix it, with the commands to run: in the summary of the check, as its annotation and in one comment on the pull request that follows every push, also on a pull request from a fork; a title that is no Conventional Commit gets one that passes, and `scripts/check.sh` explains the step that stopped it on your machine too | `.github/checks.toml`, `.github/checks.project.toml`, `after-checks.yml` |
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
 | **Flaky tests** | a test run that fails, or whose job runs out of time, runs its failed jobs once more, unless the same jobs broke for the commit before; a job that passes then is reported as flaky in one issue, with the step, the test and the error that failed | `after-checks.yml` |
 | **Cancelled checks** | the quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
@@ -219,6 +220,48 @@ flowchart TB
 - **The quick checks run once for each commit:** the title and the changelog, the dependency review, the secret scan, the area labels and the website. A late run for an older commit, such as one that an edit of the release pull request starts while release-please pushes to it, no longer cancels them for the head. The checks that take minutes, the tests, Lint, CodeQL and the variants, still cancel the run for an older commit; the bot for cancelled checks repairs a race there.
 - **Other workflows of tests** that a repository has, such as visual tests, join the CI and Docker E2E with `copier update --data "test_workflows=Visual check, Screenshot bot"`.
 - **The link check of a pull request** reads the documents that it changes, and every document when it changes the rules, or moves or deletes a file that a document may link to. lychee keeps the answers of the sites for a day and asks again for a link that failed, so that a site that is down for a moment fails only the pull requests that link to it.
+
+### The PR coach
+
+A check that fails explains itself, to you and to everyone who sends a pull request, also from a fork: what it found, why that matters and how to fix it, with the commands to run.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The PR coach
+    accDescr: A push to a pull request, also one from a fork, runs the checks. A check that fails explains itself in its summary and as its annotation, from the explanations of .github/checks.toml and .github/checks.project.toml. After the checks, the PR coach reads the check runs and their annotations from the API, without running any code of the pull request, and keeps one comment on the pull request up to date: a section for each check that failed, with the problem, why it matters, the fix and its commands. You push the fix, and once every check passes, the comment says so.
+
+    push(["A push to a pull request<br>also from a fork"])
+    checks{"Every check<br>passes?"}
+    explain["The check that failed explains itself<br>in its summary and as its annotation"]
+    coach["The PR coach after the checks<br>reads the check runs from the API<br>and runs no code of the pull request"]
+    comment["One comment on the pull request<br>for each check: the problem, why it matters,<br>the fix and its commands"]
+    passed["The comment says<br>every check passed"]
+    catalog[("<code>.github/checks.toml</code><br><code>.github/checks.project.toml</code>")]
+
+    push --> checks
+    checks -- "no" --> explain --> coach --> comment
+    comment -- "you push the fix" --> push
+    checks -- "yes" --> passed
+    catalog -.-> explain
+    catalog -.-> coach
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class explain,coach,comment bot
+    class push person
+    class passed done
+```
+
+- **In the check:** a job that fails ends with a step that writes the explanation of its check into the summary and as an annotation, which the list of the checks shows. `scripts/check.sh` does the same for the step that stopped it, on your machine as well, and in the CI the files of the pull request show the problems of the text files and of Ruff at their lines.
+- **One comment, also for a fork:** the runs of a pull request from a fork can't write to it, so the coach runs after the checks, in the repository itself. It keeps one comment with a section for each check that failed, the findings of its annotations and a link to its log, and a suggested title when the title is no Conventional Commit. A pull request whose checks never failed gets no comment; once every check passes, a comment that listed failures turns into a short all-clear.
+- **Safe with any pull request:** the coach reads the check runs and their annotations from the API and checks out only the explanations of the default branch; it runs no code of the pull request. Text that a pull request controls, such as a file name, a message or a title, appears only as code, cut to a short length, so it can't mention anybody, link anywhere or break the comment.
+- **Every check explains itself:** the explanations are in `.github/checks.toml`, which the blueprint keeps current, and those of a project's own checks in `.github/checks.project.toml`, which belongs to the project and wins. A test of the blueprint fails for a required check or a step of `scripts/check.sh` without an explanation, and `python3 .github/blueprint.py coach verify` lists them in a repository.
 
 ### Mutation tests
 

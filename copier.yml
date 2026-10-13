@@ -53,6 +53,7 @@ _skip_if_exists:
   - .github/dependency-review.yml
   - .github/social-preview.html
   - .github/repository.project.toml
+  - .github/checks.project.toml
   - .github/workflows/action-test.yml
   - /.lycheeignore
   - /pyproject.toml

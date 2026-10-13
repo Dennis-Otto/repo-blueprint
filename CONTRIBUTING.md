@@ -81,6 +81,12 @@ Git runs the hook only when its file is executable. Windows has no such mode and
 
 The dev container in `.devcontainer/` has all of this set up, for VS Code and for GitHub Codespaces: open the repository in it, and `bash scripts/check.sh` runs.
 
+## When a check fails
+
+A check that fails explains itself. The PR coach writes what the check found, why that matters and how to fix it, with the commands to run, into the summary of the check and as its annotation; the pull request also shows the annotations of a tool at the lines that it names. After the checks, the coach keeps one comment on the pull request up to date with a section for each check that failed, also on a pull request from a fork, and a title that is no Conventional Commit gets one that passes. The comment follows every push and says so once every check passes. On your machine, `scripts/check.sh` explains the step that stopped it in the same words.
+
+The explanations are in [`.github/checks.toml`](.github/checks.toml). A new check, or a new step of `scripts/check.sh`, comes with its explanation there, in the same pull request: what it found, why that matters and how to fix it, with the commands and a link to read more. A test fails for a required check or a step without one, and `python3 blueprint.py coach verify` lists them. The coach runs no code of a pull request and shows the text of its checks only as code, as [decision 0016](docs/decisions/0016-every-check-explains-its-failure.md) describes.
+
 ## Website
 
 MkDocs builds the website of the blueprint from `mkdocs.yml` and the pages in `docs/`, which include the READMEs and the changelog. The check *docs* builds it strictly in every pull request, and the Dashboard workflow publishes it with the dashboard. To see it while you write, at <http://127.0.0.1:8000>:

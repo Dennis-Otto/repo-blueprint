@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      # The explanations of the PR coach, from the default branch.
+      contents: read
       issues: write
       pull-requests: write
     steps:
@@ -80,6 +82,25 @@ jobs:
             if [[ "$want" == false && "$has" == true ]]; then gh pr edit "$NUMBER" --remove-label "$label"; fi
           done
           echo "Labels: ${wanted[*]}" >> "$GITHUB_STEP_SUMMARY"
+      # The PR coach needs blueprint.py and .github/checks.toml of the default branch;
+      # nothing of the pull request is checked out.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: failure()
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            blueprint
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: "conventional title"
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
 
   changelog:
     name: changelog
@@ -87,6 +108,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      # The explanations of the PR coach, from the default branch.
+      contents: read
       pull-requests: read
     steps:
       - name: Record the network traffic of the job
@@ -119,3 +142,22 @@ jobs:
           fi
           echo "::error::Describe what changes for users under '## Unreleased' in CHANGELOG.md; it becomes the notes of the next release."
           exit 1
+      # The PR coach needs blueprint.py and .github/checks.toml of the default branch;
+      # nothing of the pull request is checked out.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: failure()
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            blueprint
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: changelog
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"

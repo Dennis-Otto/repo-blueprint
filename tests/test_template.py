@@ -23,6 +23,8 @@ import pytest
 from copier import run_copy
 from shell import BASH, in_bash
 
+from blueprint.coach import Catalog, missing
+
 ROOT = Path(__file__).parents[1]
 KINDS = [
     "home-assistant",
@@ -620,6 +622,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         "scripts/check.sh",
         ".github/FUNDING.yml",
         ".github/findings.toml",
+        ".github/checks.toml",
         ".github/pull_request_template.md",
         ".github/ISSUE_TEMPLATE/config.yml",
         ".github/ISSUE_TEMPLATE/feature_request.yml",
@@ -739,9 +742,12 @@ def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
     assert "uses: hacs/action" not in ci
     assert "uses: home-assistant/actions" not in ci
     hacs = job_of(ci, "hacs")
-    assert hacs.endswith("\n            ghcr.io/hacs/action:main")
-    # HACS reads the repository through the API, so the job checks nothing out.
-    assert "actions/checkout" not in hacs
+    validation = hacs[: hacs.index("      # The PR coach needs")]
+    assert validation.endswith("\n            ghcr.io/hacs/action:main\n")
+    # HACS reads the repository through the API, so the job checks nothing out but
+    # what the PR coach needs when it failed.
+    assert "actions/checkout" not in validation
+    assert hacs.count("actions/checkout") == 1
     # hassfest checks the checkout, read-only, exactly as the Variants workflow does.
     command = (
         'docker run --rm --volume "$PWD:/github/workspace:ro"'
@@ -758,9 +764,10 @@ def run_the_step_with_docker(
     # The step runs in the folder workspace/, as in the checkout of a runner.
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    script = textwrap.dedent(
-        job[job.index("        run: |\n") + len("        run: |\n") :]
-    )
+    # Its script, up to the next step, such as the one of the PR coach.
+    step = job[job.index("        run: |\n") + len("        run: |\n") :]
+    end = re.search(r"^      [-#]", step, re.M)
+    script = textwrap.dedent(step[: end.start()] if end else step)
     (workspace / "step.sh").write_text(script, encoding="utf-8", newline="\n")
     # docker writes down what the container would get: its variables, its mounts,
     # with the folder of the step as $PWD, and its image.
@@ -1789,6 +1796,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "tests/bootstrap.php",
         "custom_components/demo/__init__.py",
         ".github/labels.toml",
+        ".github/checks.project.toml",
         "docs/security.md",
     ):
         assert matcher.match_file(owned), owned
@@ -1799,6 +1807,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         ".github/workflows/ci.yml",
         ".github/workflows/docs.yml",
         ".github/docs-requirements.txt",
+        ".github/checks.toml",
         "docs/README.md",
         "scripts/check.sh",
     ):
@@ -3017,6 +3026,9 @@ OTHER_CHECKS = {
     "Pull request title",
     "Secret scan",
 }
+# The workflows of the scanners of the pull requests that change what they read; the PR
+# coach reports them too.
+SCANNER_WORKFLOWS = {"Fuzzing", "Links", "OSV-Scanner", "Workflow security"}
 
 
 def watched_after_the_checks(workflow: str) -> set[str]:
@@ -3041,6 +3053,7 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
             "Release",
         }
         | OTHER_CHECKS
+        | SCANNER_WORKFLOWS
     )
     assert "github.event.workflow_run.run_attempt == 1" in after
 
@@ -3058,7 +3071,7 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
-    assert watched == names | OTHER_CHECKS | {"Release"}
+    assert watched == names | OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
@@ -3091,6 +3104,7 @@ def test_the_bots_after_the_checks_watch_the_other_tests_that_a_project_names(
             "Release",
         }
         | OTHER_CHECKS
+        | SCANNER_WORKFLOWS
     )
 
 
@@ -3144,7 +3158,196 @@ def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
             after_the_checks_job(job),
         )
         assert listed, job
-        assert set(json.loads(listed[1])) == OTHER_CHECKS | {"Release"}, job
+        assert set(json.loads(listed[1])) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+        ), job
+
+
+def job_alone(workflow: str, key: str) -> str:
+    """The text of a job, without the comment that comes before the next job."""
+    start = workflow.index(f"\n  {key}:\n")
+    end = re.compile(r"\n  [#\w-]").search(workflow, start + 1)
+    return workflow[start : end.start() if end else len(workflow)].rstrip("\n") + "\n"
+
+
+EXPLAIN_COMMENT = (
+    "      # The PR coach: what failed, why it matters and how to fix it, in the summary\n"
+    "      # of the check and as its annotation, from .github/checks.toml.\n"
+)
+
+
+def explain_step(check: str) -> str:
+    """The last step of the job of a check: the PR coach explains its failure."""
+    value = f'"{check}"' if " " in check else check
+    return EXPLAIN_COMMENT + (
+        "      - name: Explain the failure\n"
+        "        if: failure()\n"
+        "        env:\n"
+        f"          CHECK: {value}\n"
+        "        run: |\n"
+        "          script=.github/blueprint.py\n"
+        '          [[ -f "$script" ]] || script=blueprint.py\n'
+        '          python3 "$script" coach explain "$CHECK"\n'
+    )
+
+
+# Only what the PR coach needs, and only after a failure, for a job that checks out
+# nothing else.
+COACH_CHECKOUT = re.compile(
+    r"      - uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n"
+    r"        if: failure\(\)\n"
+    r"        with:\n"
+    r"          persist-credentials: false\n"
+    r"          sparse-checkout: \|\n"
+    r"            \.github\n"
+    r"            blueprint\n"
+)
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_required_check_explains_its_failure(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    jobs = {}
+    for text in workflows(root).values():
+        for key in re.findall(r"^  ([\w-]+):\n    name: ", text, re.M):
+            job = job_alone(text, key)
+            name = re.search(r"^    name: (.+)$", job, re.M)
+            assert name
+            jobs[name[1]] = job
+    for check in settings["branch"]["required_checks"]:
+        job = jobs[check]
+        # The summary and the annotation of the check say how to fix it.
+        assert job.endswith(explain_step(check)), check
+        before = job[: job.index(EXPLAIN_COMMENT)]
+        checkouts = before.count("actions/checkout@")
+        coach = COACH_CHECKOUT.findall(before)
+        assert checkouts == 1, check
+        # A job that checks nothing out gets only what the PR coach needs.
+        if coach:
+            assert before.endswith(coach[0])
+            assert before.index("actions/checkout@") > before.index("run: |")
+
+
+def test_the_checks_of_a_matrix_explain_each_failure() -> None:
+    codeql = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    analyze = job_alone(codeql, "analyze")
+    assert analyze.endswith(explain_step("analyze (${{ matrix.language }})"))
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    variant = job_alone(variants, "variant")
+    name = (
+        "${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})"
+    )
+    assert f"    name: {name}\n" in variant
+    assert variant.endswith(explain_step(name))
+    # The scanners of the pull requests, which aren't required, explain theirs too.
+    for workflow, check in (("zizmor", "zizmor"), ("links", "links"), ("fuzz", "fuzz")):
+        text = (ROOT / f".github/workflows/{workflow}.yml").read_text(encoding="utf-8")
+        assert job_alone(text, check).endswith(explain_step(check)), workflow
+
+
+def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() -> None:
+    job = after_the_checks_job("coach")
+    assert "    name: PR coach\n" in job
+    assert condition_of(job) == (
+        "!github.event.repository.fork && "
+        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) && """
+        "github.event.workflow_run.conclusion != 'cancelled'"
+    )
+    # One report at a time for each commit, the newest last, and none cancelled.
+    assert (
+        "      group: ${{ github.workflow }}-coach-${{ github.event.workflow_run.head_sha }}\n"
+        "      cancel-in-progress: false\n"
+    ) in job
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == [
+        "      checks: read",
+        "      contents: read",
+        "      pull-requests: write",
+    ]
+    # The default branch, which the run is of, and only blueprint.py with the
+    # explanations; nothing of the pull request.
+    checkout = job[job.index("actions/checkout@") : job.index("      - name: Keep")]
+    assert "ref:" not in checkout
+    assert "persist-credentials: false" in checkout
+    assert (
+        "sparse-checkout: |\n            .github\n            blueprint\n" in checkout
+    )
+    # The values of the event reach the script as variables only.
+    script = job[job.index("        run: |\n") :]
+    assert "${{" not in script
+    assert '--repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER"' in script
+    assert "SHA: ${{ github.event.workflow_run.head_sha }}" in job
+    assert "NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}" in job
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_gets_the_pr_coach(projects: dict[str, Path], kind: str) -> None:
+    project = projects[kind]
+    github = project / ".github"
+    assert (github / "checks.toml").read_text(encoding="utf-8") == (
+        ROOT / ".github/checks.toml"
+    ).read_text(encoding="utf-8")
+    # The explanations of the project's own checks: only an example to start from.
+    own = (github / "checks.project.toml").read_text(encoding="utf-8")
+    assert tomllib.loads(own) == {}
+    assert '# [check."e2e (*)"]' in own
+    # Every required check and every step of its checks is explained, and each link
+    # leads to a section of its contributing guide.
+    explained = Catalog.load(project)
+    required = tomllib.loads((github / "repository.toml").read_text(encoding="utf-8"))
+    checks = required["branch"]["required_checks"]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    steps = re.findall(r'^step "(.+)"$', check, re.M)
+    assert missing(explained, checks, steps) == []
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    anchors = {
+        re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        for heading in re.findall(r"^#+ (.+)$", contributing, re.M)
+    }
+    assert "when-a-check-fails" in anchors
+    used = [explained.check(name) for name in checks]
+    used += [explained.step(name) for name in steps]
+    for entry in used:
+        assert entry
+        if entry.docs.startswith("CONTRIBUTING.md#"):
+            assert entry.docs.removeprefix("CONTRIBUTING.md#") in anchors, entry.key
+    # A step that fails is explained; nothing else sets the trap of the script.
+    assert check.count("\ntrap coach EXIT\n") == 1
+    assert re.findall(r"^trap ", check, re.M) == ["trap "]
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants.
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_pr_coach_runs_in_every_repository(
+    projects: dict[str, Path], kind: str
+) -> None:
+    def coach(*arguments: str) -> subprocess.CompletedProcess[str]:
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith("GITHUB_")
+        }
+        return subprocess.run(
+            [sys.executable, ".github/blueprint.py", "coach", *arguments],
+            cwd=projects[kind],
+            capture_output=True,
+            encoding="utf-8",
+            env=environment,
+            check=False,
+        )
+
+    verified = coach("verify")
+    assert verified.returncode == 0, verified.stderr
+    explained = coach("explain", "--step", "Text files")
+    assert explained.returncode == 0, explained.stderr
+    assert explained.stdout.startswith("PR coach: Text files (scripts/check.sh)\n")
+    assert not (projects[kind] / ".github/blueprint/__pycache__").exists()
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
@@ -3174,9 +3377,10 @@ def run_the_bot_for_cancelled_checks(
     tmp_path: Path, pull: str, newer: str, message: str
 ) -> tuple[str, str]:
     job = after_the_checks_job("cancelled")
-    script = textwrap.dedent(
-        job[job.index("        run: |\n") + len("        run: |\n") :]
-    )
+    # Its script, up to the next step, such as the one of the PR coach.
+    step = job[job.index("        run: |\n") + len("        run: |\n") :]
+    end = re.search(r"^      [-#]", step, re.M)
+    script = textwrap.dedent(step[: end.start()] if end else step)
     (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
     # gh answers as the API does, after the filters of jq.
     bin_dir = tmp_path / "bin"

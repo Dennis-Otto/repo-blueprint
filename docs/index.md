@@ -27,6 +27,12 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit and the title of every pull request are checked as well. A passing error of a download fails no run: every download tries again.
 
+- :material-lightbulb-on-outline:{ .lg .middle } **PR coach**
+
+    ---
+
+    Every check that fails says what it found, why that matters and how to fix it, with the commands to run: in the check, and in one comment on the pull request that follows every push, also on a pull request from a fork.
+
 - :material-shield-lock-outline:{ .lg .middle } **Security**
 
     ---
@@ -77,7 +83,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
 </div>
 
-The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, failed releases, the clean-up and the dev container as well.
+The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR coach, the coverage of every pull request, mutation tests, flaky tests, cancelled checks, failed releases, the clean-up and the dev container as well.
 
 ## Kinds of projects
 

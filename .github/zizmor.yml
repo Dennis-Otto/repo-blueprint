@@ -20,8 +20,10 @@ rules:
       - dependabot-automerge.yml
       # After the checks, the flaky-test bot only runs failed jobs again and writes an
       # issue, the bot for cancelled checks only runs cancelled runs again, the bot for
-      # failed releases only runs the failed jobs of a release again, and the coverage
-      # bot reads the coverage reports and writes one comment.
+      # failed releases only runs the failed jobs of a release again, the coverage bot
+      # reads the coverage reports and writes one comment, and the PR coach reads the
+      # check runs from the API and writes one comment, with only the explanations of
+      # the default branch checked out.
       - after-checks.yml
       # The rollout starts after a run of the Release workflow on main; it reads the
       # jobs of that run, the latest release, the repositories of the release app and

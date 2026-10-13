@@ -67,6 +67,7 @@ flowchart TB
 | **Releases** | ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major), und dem Text von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und der signierten Provenance eines isolierten Builds (SLSA Build Level 3), liefert es aus und prüft es danach so, wie es seine Nutzer können, auch jede Woche; wo die Repository-Variable `BETA_CHANNEL` auf true steht, wird außerdem jede Änderung für Nutzer zu einer Beta des nächsten Releases, einem Prerelease für Tester | release-please, die Release-App, unveränderliche Releases, `verify-release.yml` |
 | **Abhängigkeiten** | Renovate, das der Blueprint alle zwei Stunden für jedes Repository als Release-App ausführt: Actions, Abhängigkeiten, Images und die Pins der Workflows, eine Woche nach ihrem Release, und sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt; Routine-Updates und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind, während die wöchentliche Auffrischung jeder Lock-Datei, die die neuesten Versionen ohne die Woche Wartezeit bringt, auf den Maintainer wartet; der Blueprint prüft, dass Renovate jede Lock-Datei liest, die er mitbringt. Dependabot pflegt die Features des Dev-Containers. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Abdeckung** | ein Kommentar an jedem Pull Request mit der Abdeckung seiner Tests im Vergleich zu `main`, Datei für Datei | `after-checks.yml` |
+| **PR-Coach** | jede Prüfung, die scheitert, sagt, was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür: in der Zusammenfassung der Prüfung, als ihre Annotation und in einem Kommentar am Pull Request, der jedem Push folgt, auch an einem Pull Request aus einem Fork; ein Titel, der kein Conventional Commit ist, bekommt einen, der besteht, und `scripts/check.sh` erklärt den Schritt, an dem es scheitert, auch auf deinem Rechner | `.github/checks.toml`, `.github/checks.project.toml`, `after-checks.yml` |
 | **Mutationstests** | jede Woche laufen Tausende kleiner Änderungen des Codes gegen die Tests, und die Zusammenfassung zeigt den Anteil, den sie bemerken, und die überlebenden Mutanten; ein niedriger Wert ist ein Bericht, nie ein Fehlschlag, aber ein Lauf, der nichts misst, schlägt fehl; ein Pull Request, der ändert, wie sie laufen, probiert sie aus | `mutation.yml`: mutmut, Infection |
 | **Wackelige Tests** | ein Testlauf, der fehlschlägt oder dessen Job sein Zeitlimit erreicht, führt seine fehlgeschlagenen Jobs einmal neu aus, außer dieselben Jobs sind schon für den Commit davor gescheitert; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet, mit dem Schritt, dem Test und dem Fehler, die gescheitert sind | `after-checks.yml` |
 | **Abgebrochene Prüfungen** | die schnellen Prüfungen laufen einmal für jeden Commit, sodass kein Lauf für einen anderen Commit sie abbricht; ein Lauf einer längeren vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
@@ -213,6 +214,48 @@ flowchart TB
 - **Die schnellen Prüfungen laufen einmal für jeden Commit:** Titel und Changelog, Dependency Review, Secret Scan, Bereichs-Labels und Website. Ein verspäteter Lauf für einen älteren Commit, etwa einer, den eine Änderung des Release-Pull-Requests startet, während release-please in ihn pusht, bricht sie für den neuesten Commit nicht mehr ab. Die Prüfungen, die Minuten dauern, Tests, Lint, CodeQL und die Varianten, brechen den Lauf für einen älteren Commit weiter ab; einen Wettlauf dort repariert der Bot für abgebrochene Prüfungen.
 - **Weitere Test-Workflows** eines Repositorys, etwa visuelle Tests, kommen mit `copier update --data "test_workflows=Visual check, Screenshot bot"` zur CI und zu Docker E2E dazu.
 - **Die Link-Prüfung eines Pull Requests** liest die Dokumente, die er ändert, und alle Dokumente, wenn er die Regeln ändert oder eine Datei verschiebt oder löscht, auf die ein Dokument verlinken kann. lychee behält die Antworten der Websites einen Tag lang und fragt bei einem Link, der gescheitert ist, erneut nach, sodass eine Website, die für einen Moment nicht erreichbar ist, nur die Pull Requests scheitern lässt, die auf sie verlinken.
+
+### Der PR-Coach
+
+Eine Prüfung, die scheitert, erklärt sich selbst, dir und allen, die einen Pull Request schicken, auch aus einem Fork: was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Der PR-Coach
+    accDescr: Ein Push in einen Pull Request, auch in einen aus einem Fork, startet die Prüfungen. Eine Prüfung, die scheitert, erklärt sich in ihrer Zusammenfassung und als ihre Annotation, aus den Erklärungen von .github/checks.toml und .github/checks.project.toml. Nach den Prüfungen liest der PR-Coach die Check-Runs und ihre Annotationen über die API, ohne Code des Pull Requests auszuführen, und hält einen Kommentar am Pull Request aktuell: einen Abschnitt für jede gescheiterte Prüfung, mit dem Problem, warum es wichtig ist, der Behebung und ihren Befehlen. Du pushst die Behebung, und sobald jede Prüfung besteht, sagt der Kommentar das.
+
+    push(["Ein Push in einen Pull Request<br>auch aus einem Fork"])
+    checks{"Besteht jede<br>Prüfung?"}
+    explain["Die gescheiterte Prüfung erklärt sich<br>in ihrer Zusammenfassung und als Annotation"]
+    coach["Der PR-Coach nach den Prüfungen<br>liest die Check-Runs über die API<br>und führt keinen Code des Pull Requests aus"]
+    comment["Ein Kommentar am Pull Request<br>für jede Prüfung: das Problem, warum es wichtig ist,<br>die Behebung und ihre Befehle"]
+    passed["Der Kommentar sagt:<br>jede Prüfung bestanden"]
+    catalog[("<code>.github/checks.toml</code><br><code>.github/checks.project.toml</code>")]
+
+    push --> checks
+    checks -- "nein" --> explain --> coach --> comment
+    comment -- "du pushst die Behebung" --> push
+    checks -- "ja" --> passed
+    catalog -.-> explain
+    catalog -.-> coach
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class explain,coach,comment bot
+    class push person
+    class passed done
+```
+
+- **In der Prüfung:** Ein Job, der scheitert, endet mit einem Schritt, der die Erklärung seiner Prüfung in die Zusammenfassung und als Annotation schreibt, die die Liste der Prüfungen zeigt. `scripts/check.sh` macht dasselbe für den Schritt, an dem es scheitert, auch auf deinem Rechner, und in der CI zeigen die Dateien des Pull Requests die Probleme der Textdateien und von Ruff an ihren Zeilen.
+- **Ein Kommentar, auch für einen Fork:** Die Läufe eines Pull Requests aus einem Fork können nicht in ihn schreiben, deshalb läuft der Coach nach den Prüfungen, im Repository selbst. Er hält einen Kommentar mit einem Abschnitt für jede gescheiterte Prüfung, den Funden ihrer Annotationen und einem Link zu ihrem Log, und einem Vorschlag für den Titel, wenn der Titel kein Conventional Commit ist. Ein Pull Request, dessen Prüfungen nie gescheitert sind, bekommt keinen Kommentar; sobald jede Prüfung besteht, wird ein Kommentar, der Fehler gezeigt hat, zu einer kurzen Entwarnung.
+- **Sicher mit jedem Pull Request:** Der Coach liest die Check-Runs und ihre Annotationen über die API und checkt nur die Erklärungen des Standard-Branches aus; er führt keinen Code des Pull Requests aus. Text, den ein Pull Request bestimmt, etwa ein Dateiname, eine Meldung oder ein Titel, erscheint nur als Code, auf eine kurze Länge gekürzt, sodass er niemanden erwähnen, nirgendwohin verlinken und den Kommentar nicht kaputt machen kann.
+- **Jede Prüfung erklärt sich:** Die Erklärungen stehen in `.github/checks.toml`, die der Blueprint aktuell hält, und die der eigenen Prüfungen eines Projekts in `.github/checks.project.toml`, die dem Projekt gehört und Vorrang hat. Ein Test des Blueprints scheitert an einer vorgeschriebenen Prüfung oder einem Schritt von `scripts/check.sh` ohne Erklärung, und `python3 .github/blueprint.py coach verify` listet sie in einem Repository auf.
 
 ### Mutationstests
 
