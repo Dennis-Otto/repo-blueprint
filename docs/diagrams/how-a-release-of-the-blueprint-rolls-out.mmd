@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a release of the blueprint rolls out
+    accDescr: Once the Release workflow has published and verified a release, the Rollout workflow takes the repositories of the release app one after the other, the quickest checks first. It starts the blueprint bot of a repository and waits up to 15 minutes for the bot and the checks of its update pull request, then goes on with the next one. A repository whose bot it can't start, or whose bot fails, fails the run by its name, and the others still get the release.
+
+    release(["Release workflow<br>publishes and verifies<br>a release"])
+    next["Next repository<br>the quickest checks first"]
+    start["Starts its<br>blueprint bot"]
+    wait["Waits up to 15 minutes<br>for the bot and the checks<br>of its pull request"]
+    failed(["The run fails<br>by the name of<br>the repository"])
+    more{"Another<br>repository?"}
+    finished["Every repository<br>has the release<br>in a pull request"]
+
+    release --> next --> start --> wait --> more
+    start -- "GitHub fails<br>three times" --> failed
+    wait -- "the bot fails" --> failed
+    failed -. "the others<br>go on" .-> more
+    more -- "yes" --> next
+    more -- "no" --> finished
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class release,next,start,wait bot
+    class failed person
+    class finished done

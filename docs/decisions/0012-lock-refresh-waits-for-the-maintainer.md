@@ -20,38 +20,10 @@ The refresh ran only for the lock files of `pip-compile`, whose manager switches
 
 Option 3 now, and option 4 once the check exists. Every package manager refreshes its lock files once a week, in the same window as the other updates; the pull request of the refresh waits for the maintainer, whose review of its diff sees every new version. Renovate builds the refresh anew only in that window (`updateNotScheduled: false`): otherwise every change of main would resolve its lock files again, also after the review, and the versions published since would merge with the diff the maintainer approved. The two lock files that Renovate skipped are compiled again with `uv pip compile` and an `=` before every value, and the one of mutmut leaves out the pytest of the project with `--no-emit-package=`, which Renovate allows for `uv`. Two checks keep every lock file readable: a test that reads the header of each lock file of the blueprint and of every kind of project as Renovate does, and the job `renovate rules` of the Renovate workflow, in which Renovate itself reads every file of a pull request that changes its rules or a lock file, and which fails on a warning or a lock file that it skips.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: Which updates of Renovate merge on their own
-    accDescr: A routine update waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer, as a major update does.
-
-    routine(["Routine update"])
-    fix(["Fix of a vulnerability"])
-    refresh(["Weekly refresh<br>of the lock files"])
-    major(["Major update"])
-    week["A week after<br>its release"]
-    checks{"Every check<br>passes"}
-    merge["Merges on its own"]
-    maintainer["Waits for<br>the maintainer"]
-
-    routine --> week --> checks
-    fix -- "at once" --> checks
-    checks --> merge
-    refresh -- "newest versions,<br>no week of waiting" --> maintainer
-    major --> maintainer
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class routine,fix,refresh,major,week,checks bot
-    class maintainer person
-    class merge done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-updates-of-renovate-merge-on-their-own.dark.svg">
+  <img src="../images/diagrams/which-updates-of-renovate-merge-on-their-own.svg" alt="Which updates of Renovate merge on their own: A routine update waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer, as a major update does.">
+</picture>
 
 ## Consequences
 

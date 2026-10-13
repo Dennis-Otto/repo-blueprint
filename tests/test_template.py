@@ -620,6 +620,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         "SUPPORT.md",
         "release-please-config.json",
         "scripts/check.sh",
+        "scripts/diagrams.sh",
         ".github/FUNDING.yml",
         ".github/findings.toml",
         ".github/pull_request_template.md",
@@ -2011,6 +2012,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         ".github/docs-requirements.txt",
         "docs/README.md",
         "scripts/check.sh",
+        "scripts/diagrams.sh",
     ):
         assert not matcher.match_file(updated), updated
 
@@ -5067,6 +5069,106 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         for target in re.findall(r"\]\(([^)\s#]+)", text):
             if "://" not in target:
                 assert (page.parent / target).resolve().is_relative_to(pages), target
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_draws_its_diagrams_as_pictures(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The GitHub app and the stores show a ```mermaid block as code; a diagram is a
+    # source in docs/diagrams/ and pictures of it, which the blueprint's script draws.
+    project = projects[kind]
+    script = (project / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    assert script == (ROOT / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    # The image, by its digest, where the rules of Renovate find it.
+    assert re.search(
+        r'^image="minlag/mermaid-cli:[^"@]+@sha256:[0-9a-f]{64}"$', script, re.M
+    )
+    # The check of check.sh needs neither Docker nor Python, right after the text files.
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    step = check.index('\nstep "Diagrams"\n')
+    version = check.index('\nstep "Version"\n')
+    assert check.index('\nstep "Text files"\n') < step < version
+    assert "\nbash scripts/diagrams.sh --check\n" in check[step:version]
+    # The check that draws them anew, which every pull request must pass.
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert "diagrams" in settings["branch"]["required_checks"]
+    job = job_of(workflows(project)["lint.yml"], "diagrams")
+    assert "\n            bash scripts/diagrams.sh --extract\n" in job
+    assert "\n            git checkout --quiet --detach HEAD^2\n" in job
+    assert "          name: diagrams\n" in job
+    # The diagram bot commits what the check drew, onto a branch of the repository
+    # alone, as the release app, with the tool of main; it never checks out a pull
+    # request.
+    bot = job_of(workflows(project)["after-checks.yml"], "diagrams")
+    condition = condition_of(bot)
+    for part in (
+        "!github.event.repository.fork",
+        "github.event.workflow_run.name == 'Lint'",
+        "github.event.workflow_run.event == 'pull_request'",
+        "github.event.workflow_run.conclusion == 'failure'",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    ):
+        assert part in condition, part
+    assert "      name: release\n" in bot
+    assert "ref:" not in bot
+    assert "sparse-checkout: |\n            .github/blueprint\n" in bot
+    assert ' diagrams commit "$kept" --branch "$BRANCH" \\\n' in bot
+    assert '--head "$SHA"' in bot
+    # No expression in a script, where the name of a branch could run as code.
+    for script in bot.split("        run: |\n")[1:]:
+        assert "${{" not in script.split("\n      - ")[0]
+    # The diagram bot of main keeps one pull request from bot/diagrams, which merges
+    # itself; only the job that draws nothing has the release app.
+    main = workflows(project)["diagrams.yml"]
+    assert "  push:\n    branches: [main]\n" in main
+    assert "  schedule:\n" in main
+    assert "  BRANCH: bot/diagrams\n" in main
+    draw = job_of(main, "draw")
+    assert "\n          bash scripts/diagrams.sh --extract\n" in draw
+    assert "secrets." not in draw
+    assert "environment:" not in draw
+    opener = job_of(main, "pull-request")
+    assert "      name: release\n" in opener
+    assert "bash scripts/diagrams.sh" not in opener
+    assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
+    for script in opener.split("        run: |\n")[1:]:
+        assert "${{" not in script.split("\n      - ")[0]
+    # The website draws the sources live, and GitHub folds the pictures in diffs.
+    hooks = (project / ".github/mkdocs_blueprint.py").read_text(encoding="utf-8")
+    assert "def on_page_content(" in hooks
+    attributes = (project / ".gitattributes").read_text(encoding="utf-8")
+    assert "\ndocs/images/diagrams/*.svg linguist-generated=true\n" in attributes
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`bash scripts/diagrams.sh`" in contributing
+    assert "`docs/diagrams/" in contributing
+
+
+def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
+    # A new version of mermaid-cli may draw the pictures otherwise: Renovate updates
+    # its image on a branch of the repository, where the check draws them anew and
+    # the diagram bot commits them.
+    rules = renovate_rules(
+        (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    script = (ROOT / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    image = re.search(
+        r'^image="([^:"]+):([^@"]+)@(sha256:[0-9a-f]{64})"$', script, re.M
+    )
+    assert image
+    found = []
+    for manager in rules["customManagers"]:
+        files = [re.compile(name.strip("/")) for name in manager["managerFilePatterns"]]
+        if not any(name.search("scripts/diagrams.sh") for name in files):
+            continue
+        for pattern in manager["matchStrings"]:
+            for match in re.finditer(pattern.replace("(?<", "(?P<"), script):
+                found.append(
+                    (match["depName"], match["currentValue"], match["currentDigest"])
+                )
+    assert found == [image.groups()]
 
 
 def test_the_tools_of_the_website_install_on_windows() -> None:

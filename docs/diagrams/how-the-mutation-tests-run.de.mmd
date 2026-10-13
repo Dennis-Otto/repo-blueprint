@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie die Mutationstests laufen
+    accDescr: Jeden Samstag, auf Abruf und für einen Pull Request, der ändert, wie sie laufen, führt der Mutation-Workflow die Mutanten aus. mutmut ändert das Python in einer Kopie des Repositorys und lässt die Tests mit der Markierung mutation_unsafe aus; Infection ändert das PHP einer Nextcloud-App, mit dem Bootstrap ihrer Tests. Wenn Mutanten liefen, zeigt die Zusammenfassung den Wert und die überlebenden Mutanten, das Artefakt bewahrt sie auf und das Dashboard zeigt den Wert. Ein Lauf, der nichts gemessen hat, schlägt fehl und zeigt die letzten Worte des Werkzeugs.
+
+    start["Jeden Samstag · auf Abruf<br>ein Pull Request, der<br>mutation.yml oder mutmut ändert"]
+    python["mutmut<br>das Python, in einer Kopie in mutants/<br>ohne die Tests mit mutation_unsafe"]
+    php["Infection<br>das PHP einer Nextcloud-App<br>mit tests/bootstrap.php"]
+    score["Zusammenfassung und Artefakt<br>der Wert · die überlebenden Mutanten"]
+    dashboard["`Das Dashboard<br>*gefangene Mutanten*`"]
+    fail["Der Lauf schlägt fehl<br>mit den letzten Worten des Werkzeugs"]
+
+    start --> python
+    start --> php
+    python -- "Mutanten liefen" --> score
+    php -- "Mutanten liefen" --> score
+    score --> dashboard
+    python -. "nichts gemessen" .-> fail
+    php -. "nichts gemessen" .-> fail
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class python,php bot
+    class score,dashboard done

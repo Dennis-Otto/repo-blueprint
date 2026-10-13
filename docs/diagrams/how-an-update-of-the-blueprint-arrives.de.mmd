@@ -1,0 +1,39 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Update des Blueprints ankommt
+    accDescr: Gleich nach jedem Release des Blueprints, und jede Woche, prüft der Blueprint-Bot zuerst das neueste veröffentlichte Release. Ein Release, das nicht unveränderlich ist, dessen Tag nicht auf dem main-Branch des Blueprints liegt oder das der Release-Workflow des Blueprints nicht signiert hat, lässt den Lauf fehlschlagen, und nichts wird aktualisiert. Sonst führt der Bot copier update auf dieses Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.
+
+    bot(["Blueprint-Bot<br>nach jedem Release<br>und jede Woche"])
+    verified{"Release unveränderlich,<br>auf main, signiert von<br>seinem Release-Workflow?"}
+    refused(["Lauf schlägt fehl<br>nichts wird aktualisiert"])
+    yours{"Deine Commits<br>auf seinem offenen<br>Pull Request?"}
+    note(["Überlässt ihn dir<br>und sagt einmal, dass<br>ein neueres Release da ist"])
+    pr["Pull Request<br>mit den Änderungen<br>der offene geht weiter"]
+    conflicts{"Konflikte?"}
+    off{"Automerge<br>abgeschaltet?"}
+    checks{"Alle Prüfungen<br>grün?"}
+    merged["Merged sich selbst"]
+    wait(["Wartet auf<br>den Maintainer"])
+
+    bot -- "das neueste<br>veröffentlichte Release" --> verified
+    verified -- "nein" --> refused
+    verified -- "ja: copier update" --> yours
+    yours -- "ja" --> note
+    yours -- "nein" --> pr --> conflicts
+    conflicts -- "nein" --> off
+    off -- "nein" --> checks
+    checks -- "ja" --> merged
+    conflicts -- "ja: in den Dateien markiert<br>Auto-Merge aus, mit Label" --> wait
+    off -- "ja" --> wait
+    checks -- "nein" --> wait
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot bot
+    class wait,note,refused person
+    class merged done

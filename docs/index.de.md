@@ -57,6 +57,12 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     Die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Design, auf Englisch und Deutsch. Jeder Pull Request baut sie streng, jede Änderung an `main` veröffentlicht sie auf GitHub Pages.
 
+- :material-sitemap-outline:{ .lg .middle } **Diagramme**
+
+    ---
+
+    Jedes Diagramm als Bild, das alle sehen, auch in der GitHub-App und in den Stores, gezeichnet aus seiner Mermaid-Quelle; die Website zeichnet die Quelle live. Die Bots reparieren sie selbst: im Pull Request, auf `main` und nach einem Update des Renderers.
+
 - :material-cog-outline:{ .lg .middle } **Einstellungen als Code**
 
     ---

@@ -23,40 +23,10 @@ Before `copier update`, the blueprint bot verifies the latest published release 
 
 The settings bot adds a ruleset *Release tag creation* that blocks the creation of `v*.*.*` tags for everyone but the release app, whose App ID the variable `RELEASE_AUTOMATION_APP_ID` of `.github/repository.toml` names. It is a ruleset of its own, next to *Release tags*, which keeps blocking every update and deletion without any exception: the app may create a release tag, but like everyone else never move or delete one. Every path that creates a release tag already runs with the token of the app: `.github/sign-tag.sh` for the tags of releases and of betas, and release-please only creates a release on a tag that the workflow signed before. A repository whose settings name no App ID keeps the rules it had, and taking the App ID out of the settings deletes the ruleset again, so a pull request undoes it.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the blueprint bot verifies a release before it updates
-    accDescr: The blueprint bot takes the latest published release of its source. It checks that the release is immutable, that its tag points at a commit of the main branch of the source, and that the release workflow of the source signed the tag with gitsign. Only when all three hold does Copier update to exactly that tag; otherwise the run fails and nothing changes. In the source, only the release app may create a release tag, and nobody may move or delete one.
-
-    app(["Release app<br>the only one that creates<br>a release tag"])
-    tag["Release tag of the blueprint<br>signed by its release workflow"]
-    bot(["Blueprint bot<br>of each repository"])
-    immutable{"Release<br>immutable?"}
-    main{"Tag on<br>main?"}
-    signed{"Signed by its<br>release workflow?"}
-    refused(["The run fails<br>nothing changes"])
-    update["<code>copier update --vcs-ref</code><br>to exactly that tag"]
-
-    app --> tag --> bot --> immutable
-    immutable -- "yes" --> main
-    main -- "yes" --> signed
-    signed -- "yes" --> update
-    immutable -- "no" --> refused
-    main -- "no" --> refused
-    signed -- "no" --> refused
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class app,bot bot
-    class refused person
-    class update done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-blueprint-bot-verifies-a-release-before-it-updates.dark.svg">
+  <img src="../images/diagrams/how-the-blueprint-bot-verifies-a-release-before-it-updates.svg" alt="How the blueprint bot verifies a release before it updates: The blueprint bot takes the latest published release of its source. It checks that the release is immutable, that its tag points at a commit of the main branch of the source, and that the release workflow of the source signed the tag with gitsign. Only when all three hold does Copier update to exactly that tag; otherwise the run fails and nothing changes. In the source, only the release app may create a release tag, and nobody may move or delete one.">
+</picture>
 
 ## Consequences
 
