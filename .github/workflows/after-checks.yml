@@ -38,9 +38,11 @@ name: After the checks
 # .github/checks.project.toml. It works for a pull request from a fork as well, whose
 # own runs can't write to it. The comment follows every push and turns into a short
 # all-clear once every check passes; a pull request whose checks never failed gets
-# none. It reads the check runs and their annotations from the API and shows their
-# text only as code. The scanners, which run in the pull requests that change what
-# they read, start it as well.
+# none. A check that was cancelled, as a job that ran out of time is, hasn't passed
+# either. It reads the check runs and their annotations from the API and shows their
+# text only as code, and waits up to three minutes for the checks of other apps, such
+# as the alerts of code scanning, which end after the last workflow. The scanners,
+# which run in the pull requests that change what they read, start it as well.
 #
 # The diagram bot: when the check diagrams of Lint finds a ```mermaid block, which
 # the GitHub app shows as code, or pictures of diagrams that differ from their sources
@@ -437,12 +439,13 @@ jobs:
 
   coach:
     name: PR coach
-    # After every run of the checks of a pull request, also one from a fork, but not
-    # one that a newer run cancelled: that one reports in its place.
+    # After every run of the checks of a pull request, also one from a fork, and one
+    # that was cancelled: a job that ran out of time ends so, and its check hasn't
+    # passed. For a run that a push cancelled, the coach finds that its commit is no
+    # longer the head and stops.
     if: >-
       !github.event.repository.fork &&
-      contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) &&
-      github.event.workflow_run.conclusion != 'cancelled'
+      contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)
     # One report at a time for each commit, so that the last one sees every check.
     concurrency:
       group: ${{ github.workflow }}-coach-${{ github.event.workflow_run.head_sha }}

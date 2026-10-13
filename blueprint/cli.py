@@ -111,12 +111,14 @@ def explain_command(arguments: argparse.Namespace, root: Path) -> int:
         text = unknown(arguments.name, step)
         sys.stdout.write(text)
     else:
+        repo = os.environ.get("GITHUB_REPOSITORY") or None
+        entry = entry.within(repo)
         sys.stdout.write(plain(entry, step))
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(annotation(entry, step))
         url = link(
             entry.docs,
-            os.environ.get("GITHUB_REPOSITORY") or None,
+            repo,
             os.environ.get("GITHUB_SERVER_URL") or "https://github.com",
         )
         text = summary(entry, step, url)

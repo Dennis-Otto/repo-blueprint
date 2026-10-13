@@ -3628,7 +3628,7 @@ EXPLAIN_COMMENT = (
 )
 
 
-def explain_step(check: str) -> str:
+def explain_step(check: str, python: str = "python3") -> str:
     """The last step of the job of a check: the PR coach explains its failure."""
     value = f'"{check}"' if " " in check else check
     return EXPLAIN_COMMENT + (
@@ -3639,7 +3639,7 @@ def explain_step(check: str) -> str:
         "        run: |\n"
         "          script=.github/blueprint.py\n"
         '          [[ -f "$script" ]] || script=blueprint.py\n'
-        '          python3 "$script" coach explain "$CHECK"\n'
+        f'          {python} "$script" coach explain "$CHECK"\n'
     )
 
 
@@ -3700,6 +3700,11 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     for workflow, check in (("zizmor", "zizmor"), ("links", "links"), ("fuzz", "fuzz")):
         text = (ROOT / f".github/workflows/{workflow}.yml").read_text(encoding="utf-8")
         assert job_alone(text, check).endswith(explain_step(check)), workflow
+    # And the checks on Windows, whose runner has python, not python3.
+    windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
+    assert job_alone(windows, "check").endswith(
+        explain_step("check (Windows)", "python")
+    )
 
 
 def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() -> None:
@@ -3707,8 +3712,7 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     assert "    name: PR coach\n" in job
     assert condition_of(job) == (
         "!github.event.repository.fork && "
-        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) && """
-        "github.event.workflow_run.conclusion != 'cancelled'"
+        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
     )
     # One report at a time for each commit, the newest last, and none cancelled.
     assert (

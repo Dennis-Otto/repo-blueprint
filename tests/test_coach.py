@@ -10,7 +10,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +88,18 @@ def test_the_blueprint_explains_every_required_check_and_every_step() -> None:
     assert "Website" in steps
     assert missing(explained, checks, steps) == []
     assert cli.main(["coach", "verify"], root=ROOT) == 0
+    # Each link of them leads to a section of the contributing guide.
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    anchors = {
+        re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        for heading in re.findall(r"^#+ (.+)$", contributing, re.M)
+    }
+    used = [explained.check(name) for name in checks]
+    used += [explained.step(name) for name in steps]
+    for entry in used:
+        assert entry
+        if entry.docs.startswith("CONTRIBUTING.md#"):
+            assert entry.docs.removeprefix("CONTRIBUTING.md#") in anchors, entry.key
 
 
 def test_every_explanation_says_what_why_and_how(
@@ -338,6 +350,11 @@ def test_explain_writes_the_summary_and_the_annotation_in_the_ci(
         f"(https://github.com/{REPO}/blob/HEAD/CONTRIBUTING.md#coding-standards)"
         in written
     )
+    # The commands name the repository of the run, also for a pull request from a fork.
+    assert cli.main(["coach", "explain", "dco"], root=ROOT) == 0
+    out = capsys.readouterr().out
+    assert f"\n      git fetch https://github.com/{REPO}.git main\n" in out
+    assert f"%0Agit fetch https://github.com/{REPO}.git main%0A" in out
 
 
 def test_explain_names_what_it_cannot_explain(
@@ -672,6 +689,9 @@ class FakeGitHub:
         self.annotations: dict[str, list[dict[str, Any]]] = recorded["annotations"]
         self.comments: list[dict[str, Any]] = []
         self.calls: list[tuple[str, str]] = []
+        self.waits: list[float] = []
+        # What happens while the coach waits for the checks of other apps.
+        self.meanwhile: Callable[[FakeGitHub], None] = lambda github: None
 
     def __call__(
         self, arguments: Sequence[str], body: str | None
@@ -726,9 +746,13 @@ class FakeGitHub:
         for run in self.runs:
             run.update(status="completed", conclusion=conclusion)
 
+    def wait(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        self.meanwhile(self)
+
 
 def run_report(github: FakeGitHub, number: int | None = None) -> str:
-    return report(Api(runner=github), REPO, SHA, number, catalog())
+    return report(Api(runner=github), REPO, SHA, number, catalog(), wait=github.wait)
 
 
 def body_of(github: FakeGitHub) -> str:
@@ -748,7 +772,10 @@ def test_a_pull_request_from_a_fork_gets_one_report() -> None:
     assert github.writes() == [("POST", f"repos/{REPO}/issues/42/comments")]
     body = body_of(github)
     assert body.startswith(f"{MARKER}\n### PR coach\n\n**5 checks failed.**")
-    assert "\n\n1 check is still running.\n\n<details>" in body
+    assert "\n\n1 check is still running.\n\n⚠️ **1 check stopped" in body
+    assert "- `codeql` · [its log](https://github.com/Dennis-Otto/demo/" in body
+    # A check of the workflows still runs, which starts the coach again when it ends.
+    assert github.waits == []
     # Five sections, closed, as there are more than three.
     assert body.count("<details>") == 5
     assert "<details open>" not in body
@@ -882,7 +909,7 @@ def test_the_report_follows_the_checks_in_its_one_comment() -> None:
     github.runs[8]["status"] = "in_progress"
     run_report(github)
     assert (
-        "⏳ No check fails any more.\n\n2 checks are still running.\n\n<sub>"
+        "⏳ No check has failed so far.\n\n2 checks are still running.\n\n<sub>"
     ) in body_of(github)
 
     # Every check passed.
@@ -893,6 +920,104 @@ def test_the_report_follows_the_checks_in_its_one_comment() -> None:
     assert "<details" not in body
     assert "still running" not in body
     assert len(github.comments) == 1
+
+
+def test_a_cancelled_check_has_not_passed() -> None:
+    github = FakeGitHub()
+    run_report(github)
+    github.finish()
+    # A job that ran out of time, as GitHub reports it.
+    github.runs[8]["conclusion"] = "cancelled"
+
+    run_report(github)
+
+    body = body_of(github)
+    assert "Every check passed" not in body
+    assert "⏳ No check has failed so far." in body
+    assert (
+        "⚠️ **1 check stopped before the end**, cancelled or held, and hasn't passed "
+        "until it runs again."
+    ) in body
+    assert "- `codeql` · [its log](https://github.com/Dennis-Otto/demo/" in body
+    assert "still running" not in body
+
+    # Two, one of them with a link elsewhere, which is left out.
+    github.runs[5].update(conclusion="action_required", html_url="https://evil.example")
+    run_report(github)
+    body = body_of(github)
+    assert "**2 checks stopped before the end**" in body
+    assert "haven't passed until they run again" in body
+    assert "\n- `reuse`\n" in body
+    assert "evil.example" not in body
+
+
+def test_the_coach_waits_for_the_checks_of_other_apps() -> None:
+    github = FakeGitHub()
+    run_report(github)
+    github.finish()
+    # The alerts of code scanning, after the last workflow ended.
+    github.runs[6].update(status="in_progress", conclusion=None)
+
+    def alerts(github: FakeGitHub) -> None:
+        if len(github.waits) == 2:
+            github.runs[6].update(status="completed", conclusion="failure")
+
+    github.meanwhile = alerts
+    run_report(github)
+
+    assert github.waits == [20, 20]
+    body = body_of(github)
+    assert "**1 check failed.**" in body
+    assert "<code>CodeQL</code>" in body
+    assert "still running" not in body
+
+
+def test_the_coach_waits_for_other_apps_only_a_while() -> None:
+    github = FakeGitHub()
+    run_report(github)
+    github.finish()
+    github.runs[6].update(status="queued", conclusion=None)
+
+    run_report(github)
+
+    assert github.waits == [20] * 9
+    assert "⏳ No check has failed so far.\n\n1 check is still running." in body_of(
+        github
+    )
+
+
+def test_a_variant_keeps_its_own_explanation_with_the_step() -> None:
+    github = FakeGitHub()
+    github.runs[0]["name"] = "variant (python-package)"
+
+    run_report(github)
+
+    part = sections(body_of(github))["variant (python-package)"]
+    # The project that the variant made stopped at the step; the fix is in the
+    # template, as the explanation of the variant says, not in this repository.
+    assert "It stopped at the step **Ruff** of `scripts/check.sh`." in part
+    assert "python -m pytest tests/test_template.py" in part
+    assert "ruff format ." not in part
+    assert "Then run every check on your machine" not in part
+
+
+def test_the_fix_rebases_onto_the_main_of_the_repository() -> None:
+    github = FakeGitHub()
+
+    run_report(github)
+
+    # Not onto origin/main, which is the fork's own on a pull request from a fork.
+    part = sections(body_of(github))["dco"]
+    assert (
+        f"git fetch https://github.com/{REPO}.git main\n"
+        "git rebase --signoff FETCH_HEAD\n"
+    ) in part
+    assert "origin/main" not in part
+    gitleaks = catalog().check("gitleaks")
+    assert gitleaks is not None
+    assert gitleaks.within(None).commands[0] == (
+        "git fetch https://github.com/OWNER/NAME.git main"
+    )
 
 
 def test_a_pull_request_whose_checks_never_failed_gets_no_comment() -> None:

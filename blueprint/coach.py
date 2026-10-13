@@ -17,9 +17,10 @@ import fnmatch
 import html
 import re
 import textwrap
+import time
 import tomllib
-from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,18 @@ ALIASES = {
     "dependencies": "build",
 }
 FAILED = frozenset({"failure", "timed_out", "startup_failure"})
+# A check that ended before it finished, such as a job that ran out of time, which
+# GitHub reports as cancelled, or one that waits for a person: it hasn't passed.
+STOPPED = frozenset({"cancelled", "action_required", "stale"})
+# The checks that run scripts/check.sh of this repository, whose step explains them.
+OWN_CHECKS = "check (*)"
+# The app of the jobs of the workflows, which start the coach when they end; the check
+# runs of other apps, such as the alerts of code scanning, may end after the last one.
+ACTIONS = "github-actions"
+WAIT = 20
+WAITS = 9
+# What a command of an explanation writes for the repository, as OWNER/NAME.
+REPO = "{repo}"
 # The annotation that GitHub adds to every job that fails, which says nothing more.
 GENERIC = re.compile(r"Process completed with exit code \d+\.")
 # What the report shows of a pull request at most: GitHub takes 65536 characters.
@@ -123,6 +136,13 @@ class Entry:
         # The texts may wrap over several lines of the file.
         title, problem, why, fix = (" ".join(texts[name].split()) for name in FIELDS)
         return cls(key, title, problem, why, fix, tuple(commands), docs)
+
+    def within(self, repo: str | None) -> Entry:
+        """The explanation for a repository: {repo} in a command becomes its name, so
+        that a fork rebases onto the main of this repository, not onto its own."""
+        name = repo or "OWNER/NAME"
+        commands = tuple(command.replace(REPO, name) for command in self.commands)
+        return replace(self, commands=commands)
 
 
 @dataclass(frozen=True)
@@ -337,6 +357,7 @@ class Run:
     conclusion: str
     url: str
     annotations: int
+    app: str = ACTIONS
 
     @classmethod
     def parse(cls, data: Json) -> Run:
@@ -350,11 +371,20 @@ class Run:
             # Only a link to GitHub itself; an app may set any other.
             url=url if GITHUB_PAGE.fullmatch(url) else "",
             annotations=int(output.get("annotations_count") or 0),
+            app=str((data.get("app") or {}).get("slug") or ""),
         )
 
     @property
     def failed(self) -> bool:
         return self.status == "completed" and self.conclusion in FAILED
+
+    @property
+    def stopped(self) -> bool:
+        return self.status == "completed" and self.conclusion in STOPPED
+
+    @property
+    def pending(self) -> bool:
+        return self.status != "completed"
 
 
 @dataclass(frozen=True)
@@ -460,6 +490,8 @@ def section(
 ) -> str:
     """The part of the report about one check that failed."""
     entry = catalog.check(run.name)
+    if entry:
+        entry = entry.within(repo)
     name = html_code(run.name)
     title = f"<b>{html.escape(entry.title)}</b> · {name}" if entry else name
     lines = [
@@ -472,15 +504,21 @@ def section(
         for step in dict.fromkeys(finding.step for finding in found)
         if step in catalog.steps
     ]
+    # A check that runs scripts/check.sh of this repository is explained by the step
+    # that stopped it. Another one that runs a scripts/check.sh, as a variant runs that
+    # of the project that it made, keeps its own explanation and names the step.
+    own = entry is None or fnmatch.fnmatchcase(run.name, OWN_CHECKS)
     for step in steps:
         lines += [f"It stopped at the step **{step.key}** of `scripts/check.sh`.", ""]
-        lines += details(step, link(step.docs, repo))
+        if not own:
+            continue
+        lines += details(step.within(repo), link(step.docs, repo))
         lines += [
             "Then run every check on your machine with `bash scripts/check.sh`, which "
             "explains each step that fails as well.",
             "",
         ]
-    if entry and not steps:
+    if entry and not (own and steps):
         lines += details(entry, link(entry.docs, repo))
     if not entry and not steps:
         lines += [
@@ -507,6 +545,23 @@ def section(
     return "\n".join([*lines, "</details>", ""])
 
 
+def halted(stopped: list[Run]) -> list[str]:
+    """The checks that stopped before the end, which haven't passed."""
+    one = len(stopped) == 1
+    count = "1 check" if one else f"{len(stopped)} checks"
+    lines = [
+        f"⚠️ **{count} stopped before the end**, cancelled or held, and "
+        f"{'hasn' if one else 'haven'}'t passed until {'it runs' if one else 'they run'} "
+        "again. A push runs every check again, and a maintainer can run one again "
+        "from its log:",
+        "",
+    ]
+    for run in stopped:
+        log = f" · [its log]({run.url})" if run.url else ""
+        lines.append(f"- {code(run.name, NAME_LENGTH)}{log}")
+    return lines
+
+
 def footer(repo: str, sha: str) -> str:
     guide = link("CONTRIBUTING.md#when-a-check-fails", repo)
     return (
@@ -525,7 +580,8 @@ def render(
 ) -> str:
     """The comment of the PR coach on a pull request."""
     failed = [run for run in runs if run.failed]
-    pending = sum(1 for run in runs if run.status != "completed")
+    stopped = [run for run in runs if run.stopped]
+    pending = sum(1 for run in runs if run.pending)
     lines = [MARKER, "### PR coach", ""]
     if failed:
         count = f"{len(failed)} check{'s' if len(failed) > 1 else ''}"
@@ -535,8 +591,8 @@ def render(
             "follows.",
             "",
         ]
-    elif pending:
-        lines += ["⏳ No check fails any more.", ""]
+    elif pending or stopped:
+        lines += ["⏳ No check has failed so far.", ""]
     else:
         lines += ["✅ **Every check passed.** Thank you!", ""]
     # No promise that the comment follows: the coach starts only after the workflows
@@ -544,6 +600,8 @@ def render(
     if pending:
         running = "1 check is" if pending == 1 else f"{pending} checks are"
         lines += [f"{running} still running.", ""]
+    if stopped:
+        lines += [*halted(stopped), ""]
     body = "\n".join([*lines, ""])
     left = len(failed)
     for run in failed:
@@ -566,7 +624,21 @@ def find_comment(api: Api, repo: str, number: int) -> Json | None:
     return None
 
 
-def report(api: Api, repo: str, sha: str, number: int | None, catalog: Catalog) -> str:
+def apps_only(runs: list[Run]) -> bool:
+    """Whether only checks of apps other than the workflows still run: none of the
+    workflows that start the coach ends after them."""
+    pending = [run for run in runs if run.pending]
+    return bool(pending) and all(run.app != ACTIONS for run in pending)
+
+
+def report(
+    api: Api,
+    repo: str,
+    sha: str,
+    number: int | None,
+    catalog: Catalog,
+    wait: Callable[[float], None] = time.sleep,
+) -> str:
     """Keeps the one comment of the PR coach on the pull request of sha up to date,
     and says what it did, for the summary of the job. A pull request whose checks
     never failed gets no comment."""
@@ -575,6 +647,12 @@ def report(api: Api, repo: str, sha: str, number: int | None, catalog: Catalog) 
         return f"{sha[:7]} is no longer the head of an open pull request; no report.\n"
     number = int(pull["number"])
     runs = check_runs(api, repo, sha)
+    # The checks of other apps start no coach when they end; it waits a little for them.
+    for _ in range(WAITS):
+        if not apps_only(runs):
+            break
+        wait(WAIT)
+        runs = check_runs(api, repo, sha)
     comment = find_comment(api, repo, number)
     if comment is None and not any(run.failed for run in runs):
         return f"No check of #{number} failed; it needs no report.\n"
