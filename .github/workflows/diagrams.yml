@@ -11,7 +11,8 @@ name: Diagrams
 # check passes. It runs after every change of main that touches a diagram or a page
 # of Markdown, and every week; when main is fixed otherwise, it closes the pull
 # request. Drawing runs without secrets; only the job of the pull request has the
-# release app, and runs nothing that it drew.
+# release app, and runs nothing that it drew. A failed run opens an issue, which the
+# next weekly run closes once the bot passes again.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -47,6 +48,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      drawn: ${{ steps.draw.outputs.drawn }}
       stale: ${{ steps.draw.outputs.stale }}
     steps:
       - name: Record the network traffic of the job
@@ -55,13 +57,31 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The commit before, to see what a push changed.
+          fetch-depth: 2
           persist-credentials: false
       - name: Draw the diagrams of main
         id: draw
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          bash scripts/diagrams.sh --extract
           tool=.github/blueprint.py
           [[ -f "$tool" ]] || tool=blueprint.py
+          # A push of one commit that changes no source, no picture and not the script
+          # leaves every picture as the check diagrams of its pull request found it; only
+          # a new ```mermaid block needs pictures then, which extract finds without
+          # Docker and the large image of mermaid-cli.
+          if [[ "$EVENT" == push && "$(git rev-parse HEAD^ 2> /dev/null)" == "$BEFORE" ]] &&
+            git diff --quiet HEAD^ HEAD -- docs/diagrams docs/images/diagrams scripts/diagrams.sh; then
+            python3 "$tool" diagrams extract
+            if [[ -z "$(git status --porcelain)" ]]; then
+              echo "The push changes no diagram and adds no \`mermaid\` block." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+          bash scripts/diagrams.sh --extract
+          echo "drawn=true" >> "$GITHUB_OUTPUT"
           changed="$(python3 "$tool" diagrams keep "$RUNNER_TEMP/diagrams")"
           if [[ -z "$changed" ]]; then
             echo "Every diagram of main is a picture of its source, as drawn." >> "$GITHUB_STEP_SUMMARY"
@@ -83,7 +103,8 @@ jobs:
   pull-request:
     name: keep the pull request of the diagrams
     needs: draw
-    if: vars.RELEASE_AUTOMATION_CLIENT_ID != ''
+    # Once main was drawn, to open, update or close the pull request.
+    if: vars.RELEASE_AUTOMATION_CLIENT_ID != '' && needs.draw.outputs.drawn == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     # The environment holds the private key of the release app; only main may use it.
@@ -138,13 +159,20 @@ jobs:
             exit 0
           fi
 
-          # The branch starts again from the commit that was drawn, so that there is
-          # one pull request with one commit, however often main changed.
-          if gh api "repos/$GH_REPO/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
-            gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$BRANCH" -f sha="$SHA" -F force=true > /dev/null
-          else
-            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$SHA" > /dev/null
-          fi
+          # Points a branch at a commit, new or moved.
+          point() {
+            if gh api "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
+              gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
+            else
+              gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
+            fi
+          }
+          # The commit starts from the commit that was drawn, so that there is one pull
+          # request with one commit, however often main changed. It is made on a branch
+          # of its own, and the branch of the pull request moves to it in one step: a
+          # pull request whose head is a commit of main would be closed by GitHub.
+          scratch="$BRANCH-next"
+          point "$scratch" "$SHA"
           tool=.github/blueprint.py
           [[ -f "$tool" ]] || tool=blueprint.py
           kept="$RUNNER_TEMP/diagrams"
@@ -155,9 +183,11 @@ jobs:
           body="Drawn by scripts/diagrams.sh --extract from the sources in docs/diagrams/: $URL
 
           Signed-off-by: ${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
-          python3 "$tool" --repo "$GH_REPO" diagrams commit "$kept" --branch "$BRANCH" \
+          python3 "$tool" --repo "$GH_REPO" diagrams commit "$kept" --branch "$scratch" \
             --head "$SHA" --headline "$HEADLINE" --body "$body" > "$RUNNER_TEMP/commit.json"
           commit="$(gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
+          point "$BRANCH" "$commit"
+          gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           python3 "$tool" diagrams report "$kept" --for pull-request > "$RUNNER_TEMP/body.md"
           if [[ -n "$open" ]]; then
             gh pr edit "$open" --body-file "$RUNNER_TEMP/body.md"
@@ -166,3 +196,45 @@ jobs:
           fi
           gh pr merge "$BRANCH" --auto --squash
           echo "The pull request of the diagrams from $BRANCH has the commit $commit, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"
+
+  # The issue of a failed run of the bot: a failure opens it or brings it up to date,
+  # and the weekly run closes it once the bot passes again.
+  report:
+    name: report
+    needs: [draw, pull-request]
+    if: >-
+      !cancelled() && !github.event.repository.fork &&
+      (contains(needs.*.result, 'failure') || github.event_name != 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Keep the issue of the diagram bot current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ contains(needs.*.result, 'failure') }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="The diagram bot fails"
+          number="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          if [[ "$FAILED" != true ]]; then
+            if [[ -n "$number" ]]; then
+              gh issue close "$number" --comment "The diagram bot passes again: $URL"
+            fi
+            exit 0
+          fi
+          body="$(printf '%s\n\n%s\n' \
+            "The Diagrams workflow failed on main, so a \`mermaid\` block or a stale picture may stay there. Its log says why; the weekly run closes this issue once the bot passes again." \
+            "The latest failure: $URL")"
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body "$body"
+          else
+            gh issue create --title "$title" --label maintenance --body "$body"
+          fi

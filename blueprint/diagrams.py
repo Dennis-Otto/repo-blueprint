@@ -47,6 +47,16 @@ DESCRIPTION = re.compile(
     re.M,
 )
 FRONT_MATTER = re.compile(r"\A---[ \t]*\n(?:[^\n]*\n)*?---[ \t]*\n")
+# A heading of Markdown, and the fence of a block of code, in which # starts no heading.
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(?P<text>.*?)(?:[ \t]+#+)?[ \t]*$")
+CODE = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})")
+# The label of a node or a subgraph of a flowchart, such as a["Label"] or b(Label).
+LABEL = re.compile(
+    r"\b\w+[\[({>]+[ \t]*"
+    r"(?:\"(?P<quoted>[^\"\n]+)\"|(?P<plain>[^\])}\"\n|]+))"
+)
+# The labels that a description without accDescr names, at most.
+LABELS = 10
 QUOTED = re.compile(r'"([^"\n]*)"')
 # The tags of HTML that labels hold: a picture shows its labels as SVG text, where
 # only <br> breaks a line and Markdown makes bold and italic.
@@ -207,9 +217,10 @@ def _outside_quotes(text: str) -> str:
     return TAG.sub(lambda found: "<br>" if found["name"].lower() == "br" else "", text)
 
 
-def alt_text(source: str) -> str:
+def alt_text(source: str, heading: str = "") -> str:
     """The text of a picture for those who don't see it: the title and the description
-    of the diagram for screen readers, accTitle and accDescr."""
+    of the diagram for screen readers, accTitle and accDescr. Without them, the
+    heading above the diagram and the labels of its nodes say what it shows."""
     title = TITLE.search(source)
     description = DESCRIPTION.search(source)
     parts = [title["text"]] if title and title["text"] else []
@@ -217,7 +228,53 @@ def alt_text(source: str) -> str:
         text = description["line"] or " ".join((description["block"] or "").split())
         if text:
             parts.append(text)
+    if not parts:
+        parts = [part for part in (heading, ", ".join(labels(source))) if part]
     return ": ".join(parts) or "A diagram"
+
+
+def labels(source: str) -> list[str]:
+    """The first labels of the nodes and subgraphs of a flowchart, each once, as plain
+    words."""
+    body = FRONT_MATTER.sub("", source)
+    lines = [line.strip() for line in body.splitlines()]
+    kind = next((line for line in lines if line and not line.startswith("%%")), "")
+    if kind.split(" ")[0] not in ("flowchart", "graph"):
+        return []
+    found: list[str] = []
+    for match in LABEL.finditer(body):
+        text = plain(re.sub(r"<br\s*/?>", " ", match["quoted"] or match["plain"]))
+        if text and text not in found:
+            found.append(text)
+    return found[:LABELS]
+
+
+def plain(text: str) -> str:
+    """Words of Markdown without their markup: links, code, emphasis and HTML."""
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    # An attribute list such as {#id .class}; the order of [.#] keeps the template of
+    # the blueprint, whose comments start with that pair the other way round, intact.
+    text = re.sub(r"\{[.#][^}]*\}[ \t]*$", "", text)
+    text = re.sub(r"<[^>]+>|[`*]", "", text)
+    return " ".join(text.split())
+
+
+def heading_before(text: str, position: int) -> str:
+    """The words of the last heading of a page above a position, outside of blocks of
+    code and of the front matter."""
+    front = FRONT_MATTER.match(text)
+    heading, fence = "", ""
+    for line in text[front.end() if front else 0 : position].splitlines():
+        code = CODE.match(line)
+        if fence:
+            closing = code and code["fence"].startswith(fence)
+            if closing and not line.strip(" \t" + fence[0]):
+                fence = ""
+        elif code:
+            fence = code["fence"]
+        elif found := HEADING.match(line):
+            heading = found["text"]
+    return plain(heading)
 
 
 def slug(text: str) -> str:
@@ -284,8 +341,9 @@ class Names:
 def extract(root: Path, pages: list[Path] | None = None) -> list[Extracted]:
     """Takes every ```mermaid block of the pages into a source of docs/diagrams/ and
     puts its <picture> in its place. A source that exists keeps its name; a new one is
-    named after its title, accTitle, and a diagram of a German page after the one at
-    the same place of the English page, with .de. Running it again changes nothing."""
+    named after its title, accTitle, or else the heading above it, and a diagram of a
+    German page after the one at the same place of the English page, with .de.
+    Running it again changes nothing."""
     names = Names(root)
     shown: dict[Path, list[str]] = {}
     extracted: list[Extracted] = []
@@ -306,11 +364,13 @@ def extract(root: Path, pages: list[Path] | None = None) -> list[Extracted]:
                 found.append(diagram.name)
                 continue
             source = without_html(diagram.source)
+            heading = heading_before(text, diagram.start)
             if english:
                 wanted = f"{english[index].removesuffix('.de')}.de"
             else:
                 title = TITLE.search(source)
                 wanted = slug(title["text"]) if title else ""
+                wanted = wanted or slug(heading)
                 wanted = wanted or f"{slug(page.name.removesuffix('.md'))}-{index + 1}"
                 if german(page):
                     wanted += ".de"
@@ -318,7 +378,7 @@ def extract(root: Path, pages: list[Path] | None = None) -> list[Extracted]:
             found.append(name)
             extracted.append(Extracted(page, SOURCES / f"{name}.mmd", new))
             pieces.append(text[position : diagram.start])
-            snippet = picture(name, page, alt_text(source), diagram.indent)
+            snippet = picture(name, page, alt_text(source, heading), diagram.indent)
             if not text[diagram.start : diagram.end].endswith("\n"):
                 snippet = snippet.removesuffix("\n")
             pieces.append(snippet)

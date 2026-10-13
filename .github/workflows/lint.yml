@@ -72,10 +72,10 @@ jobs:
   # The diagrams as pictures that every reader sees: the GitHub app shows a ```mermaid
   # block as code. Drawn anew when a pull request changes a source, a picture or the
   # script, or adds a ```mermaid block, which pulls the large image of mermaid-cli;
-  # any other pull request passes at once. Once the repository has a source in
-  # docs/diagrams/, scripts/diagrams.sh --extract turns a new block into a source and
-  # its picture as well. For a branch of this repository, the diagram bot (After the
-  # checks) commits what changed; for a fork, the artifact diagrams of the run holds it.
+  # any other pull request passes at once. Once a page shows a picture of a diagram,
+  # scripts/diagrams.sh --extract turns a new block into a source and its picture as
+  # well. For a branch of this repository, the diagram bot (After the checks) commits
+  # what changed; for a fork, the artifact diagrams of the run holds it.
   diagrams:
     name: diagrams
     runs-on: ubuntu-24.04
@@ -107,13 +107,15 @@ jobs:
             # The head of the pull request, onto which the diagram bot commits.
             git checkout --quiet --detach HEAD^2
           fi
-          if compgen -G 'docs/diagrams/*.mmd' > /dev/null; then
+          if bash scripts/diagrams.sh --adopted; then
             bash scripts/diagrams.sh --extract
           else
-            # Until the first source, a ```mermaid block is a warning; the Diagrams
-            # workflow of main moves the blocks after the update of the blueprint.
-            echo "This repository has no source in docs/diagrams/ yet: a \`mermaid\` block is a warning, and the Diagrams workflow of main turns the blocks into pictures after the merge." >> "$GITHUB_STEP_SUMMARY"
-            bash scripts/diagrams.sh
+            # Until a page shows a picture, a ```mermaid block is a warning, and the
+            # sources in docs/diagrams/ may belong to the project's own way to draw
+            # them; the Diagrams workflow of main moves the blocks after the update of
+            # the blueprint.
+            echo "No page of this repository shows a picture of docs/images/diagrams/ yet: a \`mermaid\` block is a warning, and the Diagrams workflow of main turns the blocks into pictures after the merge." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           tool=.github/blueprint.py
           [[ -f "$tool" ]] || tool=blueprint.py

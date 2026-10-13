@@ -30,7 +30,9 @@ from blueprint.diagrams import (
     dedent,
     diagrams_of,
     extract,
+    heading_before,
     keep,
+    labels,
     markdown_pages,
     picture,
     report,
@@ -131,6 +133,76 @@ def test_a_long_title_is_cut_where_a_word_ends() -> None:
 )
 def test_the_alt_text_is_the_title_and_the_description(source: str, alt: str) -> None:
     assert alt_text(source) == alt
+
+
+LABELLED = """\
+flowchart TB
+    subgraph cloud["Nextcloud"]
+        a["Browser<br>app"] --> b(Paperless **ngx**)
+        c{Decide} -->|yes| d[[`sync`]]
+        e>Flag] --> f[(Database)] --> g["Browser<br/>app"]
+    end
+    classDef note fill:#fff
+"""
+
+
+@pytest.mark.parametrize(
+    ("source", "heading", "alt"),
+    [
+        # Without accTitle and accDescr, the heading above and the labels of the nodes.
+        (
+            LABELLED,
+            "How it works",
+            "How it works: Nextcloud, Browser app, Paperless ngx, Decide, sync, Flag,"
+            " Database",
+        ),
+        (
+            LABELLED,
+            "",
+            "Nextcloud, Browser app, Paperless ngx, Decide, sync, Flag, Database",
+        ),
+        ("flowchart TB\n  a --> b\n", "Steps", "Steps"),
+        # Only a flowchart has labels to name, after its front matter and comments.
+        ("sequenceDiagram\n  A->>B: hi\n  B-->>A: ok\n", "", "A diagram"),
+        ("xychart-beta\n  x-axis [a, b]\n  bar [1, 2]\n", "Costs", "Costs"),
+        ("---\ntitle: T\n---\n%% A comment\ngraph LR\n  a[One]\n", "", "One"),
+        ("", "", "A diagram"),
+        # A node at the end of an arrow has its label too.
+        ("flowchart TB\n  a-->b(Two)\n  c==>d>Three]\n", "", "Two, Three"),
+        # The title and the description come first.
+        (DIAGRAM, "How it works", alt_text(DIAGRAM)),
+    ],
+)
+def test_a_diagram_without_a_title_is_told_by_its_heading_and_labels(
+    source: str, heading: str, alt: str
+) -> None:
+    assert alt_text(source, heading) == alt
+
+
+def test_a_diagram_names_at_most_ten_labels() -> None:
+    source = "flowchart TB\n" + "".join(f"    n{i}[Step {i}]\n" for i in range(12))
+
+    assert labels(source) == [f"Step {i}" for i in range(10)]
+
+
+@pytest.mark.parametrize(
+    ("text", "heading"),
+    [
+        ("# Demo\n\nText.\n", "Demo"),
+        ("# Demo\n\n## How it works ##\n", "How it works"),
+        (
+            "## The [guide](docs/guide.md) of `blueprint.py` {#guide}\n",
+            "The guide of blueprint.py",
+        ),
+        # Neither a comment in a block of code nor one in the front matter is a heading.
+        ("---\n# a comment\n---\n# Page\n\n```bash\n# a comment\n```\n", "Page"),
+        ("# Page\n\n~~~~\n# code\n~~~\n# still code\n~~~~\n", "Page"),
+        ("    # code, by its indentation\nText.\n", ""),
+        ("Text without a heading.\n", ""),
+    ],
+)
+def test_the_heading_above_a_diagram(text: str, heading: str) -> None:
+    assert heading_before(text, len(text)) == heading
 
 
 @pytest.mark.parametrize(
@@ -285,13 +357,14 @@ def test_extract_turns_every_block_into_a_picture_of_a_source(tmp_path: Path) ->
         (item.page.as_posix(), item.source.as_posix(), item.new) for item in extracted
     ] == [
         ("README.md", "docs/diagrams/how-a-change-ships.mmd", True),
-        ("README.md", "docs/diagrams/readme-2.mmd", True),
+        # Without accTitle, the heading above names it.
+        ("README.md", "docs/diagrams/demo.mmd", True),
         ("docs/end.md", "docs/diagrams/end-1.mmd", True),
         ("docs/guide.md", "docs/diagrams/how-a-change-ships.mmd", False),
         # The German page takes the names of the English one, and its second diagram
         # is the same as there.
         ("README.de.md", "docs/diagrams/how-a-change-ships.de.mmd", True),
-        ("README.de.md", "docs/diagrams/readme-2.mmd", False),
+        ("README.de.md", "docs/diagrams/demo.mmd", False),
         # Without an English page, the German titles name them.
         (
             "docs/other.de.md",
@@ -306,7 +379,7 @@ def test_extract_turns_every_block_into_a_picture_of_a_source(tmp_path: Path) ->
     ]
     sources = root / "docs/diagrams"
     assert (sources / "how-a-change-ships.mmd").read_text(encoding="utf-8") == DIAGRAM
-    assert (sources / "readme-2.mmd").read_text(encoding="utf-8") == (
+    assert (sources / "demo.mmd").read_text(encoding="utf-8") == (
         "flowchart TB\n    a[x] --> b\n"
     )
     assert (sources / "how-a-change-ships.de.mmd").read_text(encoding="utf-8") == GERMAN
@@ -314,7 +387,7 @@ def test_extract_turns_every_block_into_a_picture_of_a_source(tmp_path: Path) ->
         "# Demo\n\n"
         + picture("how-a-change-ships", Path("README.md"), alt_text(DIAGRAM))
         + "\nText.\n\n1. A step:\n\n"
-        + picture("readme-2", Path("README.md"), "A diagram", "   ")
+        + picture("demo", Path("README.md"), "Demo: x", "   ")
         + "\nThe end.\n"
     )
     assert (root / "docs/guide.md").read_text(encoding="utf-8") == (
@@ -1159,9 +1232,62 @@ def test_a_block_waits_for_main_until_the_first_source(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert output == ""
-    assert summary.startswith("This repository has no source in docs/diagrams/ yet")
-    assert summary.endswith("Every diagram is a picture of its source, as drawn.\n")
+    assert summary.startswith("No page of this repository shows a picture")
+    assert summary.endswith("turns the blocks into pictures after the merge.\n")
     assert (root / "README.md").read_text(encoding="utf-8").endswith(block(DIAGRAM))
+    assert not (tmp_path / "calls").exists()
+
+
+@needs_bash
+def test_the_update_leaves_sources_that_a_project_draws_itself(tmp_path: Path) -> None:
+    # A repository that kept Mermaid sources in docs/diagrams/ before, drawn by a
+    # script of its own into other pictures: the update of the blueprint, which
+    # changes scripts/diagrams.sh, passes without pictures that no page shows.
+    root = with_tools(
+        repository(
+            tmp_path / "repository",
+            {
+                "README.md": "# Demo\n\n![Steps](docs/images/en/steps-light.png)\n",
+                "docs/diagrams/steps.en.mmd": 'flowchart TB\n    a["<b>A</b>"] --> b\n',
+                "docs/diagrams/light.json": "{}\n",
+            },
+        )
+    )
+    commit(root, "Main")
+    script_text = (root / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    pull_request(root, {"scripts/diagrams.sh": script_text + "# Updated\n"})
+
+    result, output, summary = run_step(
+        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output == ""
+    assert summary.startswith("No page of this repository shows a picture")
+    assert not (tmp_path / "calls").exists()
+    check = script(root, tmp_path, "--check")
+    assert check.returncode == 0, check.stdout + check.stderr
+    assert check.stdout == (
+        "No page shows a picture of docs/images/diagrams/ yet, so the sources in"
+        " docs/diagrams/ are left as they are.\n"
+    )
+    extracted = script(root, tmp_path, "--extract")
+    assert extracted.returncode == 0, extracted.stdout + extracted.stderr
+    assert extracted.stdout.endswith(
+        "No page shows a picture of docs/images/diagrams/ yet, so there is nothing to"
+        " draw.\n"
+    )
+    assert not (root / "docs/images/diagrams").exists()
+    assert script(root, tmp_path, "--adopted").returncode == 1
+
+    # Once a page shows a picture, the sources need theirs.
+    (root / "docs/guide.md").write_text(
+        picture("steps", Path("docs/guide.md"), "Steps"), encoding="utf-8"
+    )
+    assert script(root, tmp_path, "--adopted").returncode == 0
+    check = script(root, tmp_path, "--check")
+    assert check.returncode == 1
+    assert "docs/diagrams/steps.en.mmd: its picture" in check.stdout
 
 
 # gh, as the API answers after the filters of jq.
@@ -1175,6 +1301,7 @@ case "$*" in
   "api repos/o/r/commits/abc1234def --jq "*) printf '%s\\n' "${MESSAGE:-fix: a label}" ;;
   "api repos/o/r/git/ref/heads/feature --jq .object.sha") printf '%s\\n' "$HEAD" ;;
   "api repos/o/r/git/ref/heads/bot/diagrams") [[ -n "${EXISTS:-}" ]] ;;
+  "api repos/o/r/git/ref/heads/bot/diagrams-next") [[ -n "${LEFT:-}" ]] ;;
   "api --method "*) ;;
   "api users/app[bot] --jq .id") echo 42 ;;
   "api graphql --input "*) cp "$4" "$REQUEST" && echo c0ffee ;;
@@ -1483,7 +1610,7 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(tmp_path: Path) -
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == "stale=true\n"
+    assert output == "drawn=true\nstale=true\n"
     assert summary.startswith("### Diagrams\nThe pull request of the diagram bot")
     assert "- `docs/guide.md`: its `mermaid` blocks are pictures now\n" in summary
     assert "files/docs/guide.md" in files_of(tmp_path / "runner/diagrams")
@@ -1495,12 +1622,58 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(tmp_path: Path) -
         workflow_step(*DRAW_MAIN), root, again, {"docker": DOCKER}
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == ""
+    assert output == "drawn=true\n"
     assert summary == "Every diagram of main is a picture of its source, as drawn.\n"
 
 
+@needs_bash
+@pytest.mark.parametrize(
+    ("change", "commits", "drawn"),
+    [
+        # Text alone needs no Docker: the check of the pull request drew the rest.
+        ({"README.md": "# Demo\n\nMore text.\n"}, 1, False),
+        # A new block, a changed source, or more than one commit is drawn.
+        ({"docs/guide.md": "# Guide\n\n" + block(MERGES)}, 1, True),
+        ({"docs/diagrams/steps.mmd": DIAGRAM + "\n"}, 1, True),
+        ({"README.md": "# Demo\n\nMore text.\n"}, 2, True),
+    ],
+)
+def test_a_push_to_main_draws_only_what_may_have_changed(
+    tmp_path: Path, change: dict[str, str], commits: int, drawn: bool
+) -> None:
+    root = with_tools(repository(tmp_path / "repository", MAIN))
+    commit(root, "Main")
+    before = git_in(root, "rev-parse", "HEAD")
+    for number in range(commits):
+        for name, text in change.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text + "\n" * number, encoding="utf-8")
+        commit(root, f"Push {number}")
+
+    result, output, summary = run_step(
+        workflow_step(*DRAW_MAIN),
+        root,
+        tmp_path,
+        {"docker": DOCKER},
+        EVENT="push",
+        BEFORE=before,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "calls").exists() == drawn
+    if drawn:
+        assert output.startswith("drawn=true\n")
+    else:
+        assert output == ""
+        assert summary == "The push changes no diagram and adds no `mermaid` block.\n"
+
+
 def run_the_bot_of_main(
-    tmp_path: Path, stale: bool, open_number: str = "", exists: bool = False
+    tmp_path: Path,
+    stale: bool,
+    open_number: str = "",
+    exists: bool = False,
+    left: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str, list[str]]:
     root = with_tools(tmp_path / "main")
     if stale:
@@ -1522,6 +1695,7 @@ def run_the_bot_of_main(
         URL="https://github.com/o/r/actions/runs/6",
         OPEN=open_number,
         EXISTS="yes" if exists else "",
+        LEFT="yes" if left else "",
         REQUEST=(tmp_path / "request.json").as_posix(),
         BODY=(tmp_path / "body.md").as_posix(),
     )
@@ -1541,18 +1715,24 @@ def test_the_bot_of_main_opens_one_pull_request_that_merges_itself(
     )
     assert made == [
         pull_request_list,
-        "gh api repos/o/r/git/ref/heads/bot/diagrams",
-        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams"
+        # The commit is made on a branch of its own, from the commit that was drawn.
+        "gh api repos/o/r/git/ref/heads/bot/diagrams-next",
+        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams-next"
         " -f sha=abc1234def",
         "gh api users/app[bot] --jq .id",
         f"gh api graphql --input {(tmp_path / 'runner/commit.json').as_posix()}"
         " --jq .data.createCommitOnBranch.commit.oid",
+        # The branch of the pull request starts at that commit.
+        "gh api repos/o/r/git/ref/heads/bot/diagrams",
+        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams"
+        " -f sha=c0ffee",
+        "gh api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
         "gh pr create --base main --head bot/diagrams --title docs: draw the diagrams"
         f" anew --body-file {(tmp_path / 'runner/body.md').as_posix()}",
         "gh pr merge bot/diagrams --auto --squash",
     ]
     request = json.loads((tmp_path / "request.json").read_text(encoding="utf-8"))
-    assert request["variables"]["input"]["branch"]["branchName"] == "bot/diagrams"
+    assert request["variables"]["input"]["branch"]["branchName"] == "bot/diagrams-next"
     assert request["variables"]["input"]["expectedHeadOid"] == "abc1234def"
     body = (tmp_path / "body.md").read_text(encoding="utf-8")
     assert body.startswith("`main` has diagrams that not every reader sees")
@@ -1564,15 +1744,21 @@ def test_the_bot_of_main_opens_one_pull_request_that_merges_itself(
 
 @needs_bash
 def test_the_bot_of_main_updates_its_pull_request(tmp_path: Path) -> None:
+    # A branch for the commit that a failed run left behind starts again, too.
     result, _, made = run_the_bot_of_main(
-        tmp_path, stale=True, open_number="9", exists=True
+        tmp_path, stale=True, open_number="9", exists=True, left=True
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (
-        "gh api --method PATCH repos/o/r/git/refs/heads/bot/diagrams -f sha=abc1234def"
-        " -F force=true"
-    ) in made
+    moved = [call for call in made if call.startswith("gh api --method PATCH ")]
+    # The head of the open pull request moves once, to the new commit, and never to
+    # the commit of main, which would close the pull request.
+    assert moved == [
+        "gh api --method PATCH repos/o/r/git/refs/heads/bot/diagrams-next"
+        " -f sha=abc1234def -F force=true",
+        "gh api --method PATCH repos/o/r/git/refs/heads/bot/diagrams -f sha=c0ffee"
+        " -F force=true",
+    ]
     assert (
         f"gh pr edit 9 --body-file {(tmp_path / 'runner/body.md').as_posix()}" in made
     )
@@ -1600,3 +1786,63 @@ def test_the_bot_of_main_closes_its_pull_request_once_main_is_fixed(
     else:
         assert len(made) == 1
         assert summary == ""
+
+
+# gh for the issue of the diagram bot.
+GH_ISSUES = """#!/usr/bin/env bash
+echo "gh $*" >> "$CALLS"
+case "$*" in
+  "issue list "*) echo "${ISSUE:-}" ;;
+  "issue create "*|"issue edit "*|"issue close "*) ;;
+  *) echo "unexpected: gh $*" >&2; exit 1 ;;
+esac
+"""
+REPORT = ("diagrams.yml", "report", "Keep the issue of the diagram bot current")
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("failed", "issue", "last"),
+    [
+        (
+            "true",
+            "",
+            "gh issue create --title The diagram bot fails --label maintenance --body ",
+        ),
+        ("true", "12", "gh issue edit 12 --body "),
+        (
+            "false",
+            "12",
+            "gh issue close 12 --comment The diagram bot passes again:"
+            " https://github.com/o/r/actions/runs/6",
+        ),
+        ("false", "", "gh issue list "),
+    ],
+)
+def test_a_failed_run_of_the_bot_keeps_one_issue(
+    tmp_path: Path, failed: str, issue: str, last: str
+) -> None:
+    result, _, _ = run_step(
+        workflow_step(*REPORT),
+        tmp_path,
+        tmp_path,
+        {"gh": GH_ISSUES},
+        GH_REPO="o/r",
+        FAILED=failed,
+        ISSUE=issue,
+        URL="https://github.com/o/r/actions/runs/6",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # A body of more than one line takes more than one line of the calls.
+    made = (tmp_path / "calls").read_text(encoding="utf-8")
+    parts = made.split("\ngh ")
+    assert parts[0].startswith(
+        'gh issue list --state open --search "The diagram bot fails" in:title'
+    )
+    assert len(parts) == (1 if last.startswith("gh issue list") else 2)
+    assert (parts[0] if len(parts) == 1 else "gh " + parts[-1]).startswith(last)
+    if failed == "true":
+        assert made.endswith(
+            "\n\nThe latest failure: https://github.com/o/r/actions/runs/6\n"
+        )

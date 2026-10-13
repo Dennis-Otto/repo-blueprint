@@ -12,6 +12,9 @@
 #   bash scripts/diagrams.sh --check    without Docker, what scripts/check.sh checks: no
 #                                       ```mermaid block, both pictures of every source
 #                                       and a source for every picture
+#   bash scripts/diagrams.sh --adopted  whether the pages show pictures of diagrams yet;
+#                                       until then, the checks only warn of a block and
+#                                       leave the sources to a way of the project's own
 #
 # The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
 set -euo pipefail
@@ -35,15 +38,31 @@ markdown() {
   git ls-files -z --cached --others --exclude-standard -- '*.md'
 }
 
-# The checks, which need neither Docker nor Python: a ```mermaid block fails once the
-# repository has sources in docs/diagrams/, and is a warning until then, so that an
-# update of the blueprint passes before its diagrams moved.
+# A picture of a diagram, as a page shows it.
+shown='images/diagrams/[A-Za-z0-9._-]+\.svg'
+
+# Whether the repository shows its diagrams as pictures: a picture is drawn, or a page
+# shows one. Until then, a ```mermaid block is a warning, so that an update of the
+# blueprint passes before its diagrams moved, and the sources in docs/diagrams/ may
+# belong to a way of the project's own to draw them, which the checks leave alone.
+adopted() {
+  local file
+  for file in "$pictures"/*.svg; do
+    [[ -f "$file" ]] && return 0
+  done
+  git grep --untracked -qE "$shown" -- '*.md'
+}
+
+# The checks, which need neither Docker nor Python.
 check() {
   local -a found=() blocks=() problems=()
-  local file name picture line
-  for file in "$sources"/*.mmd; do
-    [[ -f "$file" ]] && found+=("$file")
-  done
+  local file name picture line in_use=false
+  if adopted; then
+    in_use=true
+    for file in "$sources"/*.mmd; do
+      [[ -f "$file" ]] && found+=("$file")
+    done
+  fi
   while IFS= read -r -d '' file; do
     [[ -f "$file" ]] || continue
     while IFS=: read -r line _; do
@@ -53,7 +72,7 @@ check() {
       if [[ ! -f "$pictures/${picture##*/}" ]]; then
         problems+=("$file:$line: shows $pictures/${picture##*/}, which doesn't exist")
       fi
-    done < <(grep -noE 'images/diagrams/[A-Za-z0-9._-]+\.svg' "$file" || true)
+    done < <(grep -noE "$shown" "$file" || true)
   done < <(markdown)
   for file in "${found[@]}"; do
     name="$(basename "$file" .mmd)"
@@ -78,10 +97,10 @@ check() {
   local extract="bash scripts/diagrams.sh --extract turns each into a picture of a source in $sources/."
   if ((${#blocks[@]} > 0)); then
     printf '%s\n' "${blocks[@]}"
-    if ((${#found[@]} == 0)); then
-      echo "A warning for now: $extract"
-    else
+    if [[ "$in_use" == true ]]; then
       problems+=("${#blocks[@]} diagram(s) in a \`\`\`mermaid block; $extract")
+    else
+      echo "A warning for now: $extract"
     fi
   fi
   if ((${#problems[@]} > 0)); then
@@ -91,6 +110,8 @@ check() {
   fi
   if ((${#found[@]} > 0)); then
     echo "Each of the ${#found[@]} diagram(s) in $sources/ has its pictures."
+  elif compgen -G "$sources/*.mmd" > /dev/null; then
+    echo "No page shows a picture of $pictures/ yet, so the sources in $sources/ are left as they are."
   elif ((${#blocks[@]} == 0)); then
     echo "No diagrams here."
   fi
@@ -252,13 +273,21 @@ extract() {
   "$python" "$tool" diagrams extract
 }
 
+# Takes the blocks out, and draws the pictures once a page shows them.
+extract_and_render() {
+  extract
+  if adopted; then
+    render
+  else
+    echo "No page shows a picture of $pictures/ yet, so there is nothing to draw."
+  fi
+}
+
 case "${1:-}" in
   "") render ;;
   --check) check ;;
-  --extract)
-    extract
-    render
-    ;;
+  --adopted) adopted ;;
+  --extract) extract_and_render ;;
   -h | --help) usage ;;
   *)
     usage >&2
