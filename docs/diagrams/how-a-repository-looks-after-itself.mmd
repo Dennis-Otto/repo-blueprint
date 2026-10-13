@@ -1,0 +1,34 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a repository looks after itself
+    accDescr: copier copy makes a repository from the blueprint. Every change, yours or a bot's, is a pull request that merges once every check passes, and the release bot makes a signed release of what reaches main. Renovate, the blueprint bot and the settings bot keep the repository current on their own.
+
+    blueprint[("Repo Blueprint")]
+    you(["You"])
+    renovate(["Renovate<br>every 2 hours"])
+    updater(["Blueprint bot<br>after every release<br>and every week"])
+    settings(["Settings bot<br>every week"])
+
+    subgraph repo ["Your repository"]
+        pr["Pull request"] --> checks{"Every check<br>passes?"}
+        checks -- "yes" --> main["main"]
+        main -- "release bot" --> release["Signed release"]
+    end
+
+    blueprint -- "copier copy" --> repo
+    blueprint -. "a new release" .-> updater
+    you -- "a change" --> pr
+    renovate -- "updates" --> pr
+    updater -- "copier update" --> pr
+    settings -- "the settings as code" --> repo
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class renovate,updater,settings bot
+    class you person
+    class release done

@@ -1,0 +1,22 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The settings as code
+    accDescr: The settings of a repository live in .github/repository.toml, with those of the project alone and the labels. blueprint.py settings apply, run by an administrator, and the settings bot, after every change and every week, make GitHub match them; settings check shows what differs.
+
+    files[".github/repository.toml<br>repository.project.toml<br>labels.toml"]
+    apply(["settings apply<br>by an administrator"])
+    bot(["Settings bot<br>after every change<br>and every week"])
+    github["GitHub<br>merges · rulesets · security<br>Actions · environments<br>variables · labels · Pages"]
+
+    files --> apply --> github
+    files --> bot --> github
+    github -. "settings check<br>shows what differs" .-> files
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    class bot bot
+    class apply person

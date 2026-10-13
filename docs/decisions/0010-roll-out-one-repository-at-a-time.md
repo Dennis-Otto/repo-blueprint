@@ -25,39 +25,10 @@ Then a job for each repository, in that order, one at a time and all of them, al
 
 Only a run of the Release workflow that can have made a release starts a runner: the run for the merge of a release pull request, whose commit starts with the title `chore: release x.y.z`, and every run on the hourly schedule or started by hand.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the Rollout brings a release to the repositories
-    accDescr: A run of the Release workflow that can have made a release starts the plan. The plan takes the release that the run published and lists the repositories of the release app, the quickest checks first. Then one job for each repository, one at a time: it looks for the blueprint bot, starts it, and waits for the bot and the checks of its update pull request, up to 15 minutes, before the next repository. A repository without a bot is left out; one that GitHub doesn't answer or start, or whose bot fails, fails its job by its name, and the next repository starts all the same.
-
-    run(["Release workflow<br>a merge of a release pull request<br>the hourly schedule or by hand"])
-    plan["Plan: the release that the run published<br>the repositories, the quickest checks first"]
-    look{"Has the repository<br>a blueprint bot?"}
-    left(["Left out"])
-    start["Starts the bot<br>three tries, 15 seconds apart"]
-    wait["Waits for the bot and the checks<br>of its pull request<br>a look a minute, 15 at most"]
-    failed(["The job fails by the name<br>of the repository"])
-    next["The next repository"]
-
-    run --> plan --> look
-    look -- "no: GitHub says 404" --> left --> next
-    look -- "yes" --> start --> wait --> next
-    look -- "GitHub fails three times" --> failed
-    start -- "GitHub fails three times" --> failed
-    wait -- "the bot fails" --> failed
-    failed --> next
-    next -.-> look
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class run,plan,start,wait bot
-    class failed person
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-rollout-brings-a-release-to-the-repositories.dark.svg">
+  <img src="../images/diagrams/how-the-rollout-brings-a-release-to-the-repositories.svg" alt="How the Rollout brings a release to the repositories: A run of the Release workflow that can have made a release starts the plan. The plan takes the release that the run published and lists the repositories of the release app, the quickest checks first. Then one job for each repository, one at a time: it looks for the blueprint bot, starts it, and waits for the bot and the checks of its update pull request, up to 15 minutes, before the next repository. A repository without a bot is left out; one that GitHub doesn't answer or start, or whose bot fails, fails its job by its name, and the next repository starts all the same.">
+</picture>
 
 ## Consequences
 

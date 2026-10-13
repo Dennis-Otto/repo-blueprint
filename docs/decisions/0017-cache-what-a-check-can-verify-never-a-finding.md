@@ -23,29 +23,10 @@ Option 3. A check may start from a cache when it verifies what comes out of it:
 - **Work checked by content:** php-cs-fixer skips a file whose content has the hash that its cache knows as clean, and reads a cache only of its own version, rules and PHP. It stores the hash of the content as it should be, so a file that breaks the standard fails in every run, with the cache or without it.
 - **Never a finding:** Psalm and its taint analysis run without a cache. `extraFiles` lists only `vendor/nextcloud/ocp`, the public API of Nextcloud, whose package has no autoloader; Psalm finds every other class through Composer's when the code uses it. A test keeps the list equal to the packages of `composer.lock` without an autoloader.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: What the checks of a Nextcloud app take from a cache
-    accDescr: The downloads of Composer, pip and npm come from caches under a key of their lock files, and the tools check them against the lock. php-cs-fixer starts from its cache and checks every file whose content changed. Psalm and its taint analysis use no cache and read the public API of Nextcloud ahead, everything else through the autoloader.
-
-    lock["The lock files<br><code>composer.lock</code> · pip · npm"]
-    downloads["Downloads from the cache<br>checked against the lock"]
-    fixer["php-cs-fixer<br>skips content it knows as clean"]
-    psalm["Psalm and its taint analysis<br>no cache · read ahead: <code>vendor/nextcloud/ocp</code>"]
-    result["The same findings<br>in a few seconds"]
-
-    lock --> downloads --> fixer --> psalm --> result
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class downloads,fixer,psalm bot
-    class result done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-the-checks-of-a-nextcloud-app-take-from-a-cache.dark.svg">
+  <img src="../images/diagrams/what-the-checks-of-a-nextcloud-app-take-from-a-cache.svg" alt="What the checks of a Nextcloud app take from a cache: The downloads of Composer, pip and npm come from caches under a key of their lock files, and the tools check them against the lock. php-cs-fixer starts from its cache and checks every file whose content changed. Psalm and its taint analysis use no cache and read the public API of Nextcloud ahead, everything else through the autoloader.">
+</picture>
 
 GitHub keeps the cache of a pull request to that pull request: `main`, which publishes the website, starts only from caches of `main`, and a release builds without any cache, as [0011](0011-downloads-try-again-and-checks-cache-their-tools.md) says.
 
