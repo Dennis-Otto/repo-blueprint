@@ -22,6 +22,16 @@ import pytest
 from copier import run_copy
 from shell import BASH
 
+from blueprint.bot_health import (
+    FAILED,
+    LABEL,
+    LABEL_COLOR,
+    LABEL_DESCRIPTION,
+    OWN_ISSUE,
+    RENOVATE_LABEL,
+    TYPE,
+)
+
 ROOT = Path(__file__).parents[1]
 KINDS = [
     "home-assistant",
@@ -222,6 +232,11 @@ def test_the_workflows_are_the_blueprints_own(
         if name == "after-checks.yml":
             # The workflows it watches; the bots after the checks test them.
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
+            source = re.sub(watched, "", source)
+            text = re.sub(watched, "", text)
+        if name == "bot-health.yml":
+            # The bots it watches, without those of the blueprint alone in a project.
+            watched = r"    # The bots and the scheduled workflows of every repository.*\n    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
         assert text == source, name
@@ -2224,6 +2239,125 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
+
+
+# The bots of the blueprint alone, which a project's bot-health bot leaves out.
+BLUEPRINT_BOTS = {"Dashboard", "Renovate", "Rollout", "Weekly report"}
+
+
+def names_of_workflows(root: Path) -> dict[str, str]:
+    """The workflows of a repository by their names."""
+    named = {}
+    for text in workflows(root).values():
+        name = re.search(r"^name: (.+)$", text, re.MULTILINE)
+        assert name
+        named[name[1]] = text
+    return named
+
+
+def watched_by_bot_health(root: Path) -> set[str]:
+    text = (root / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    watched = re.search(r"^    workflows: \[(.+)\]$", text, re.MULTILINE)
+    assert watched
+    return set(watched[1].split(", "))
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_health_bot_watches_every_bot(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    watched = watched_by_bot_health(root)
+
+    # Each is the name of a workflow of the blueprint: a typo would watch nothing.
+    assert watched <= set(names_of_workflows(ROOT))
+    if project == "blueprint":
+        assert watched >= BLUEPRINT_BOTS
+    else:
+        assert not watched & BLUEPRINT_BOTS
+    # Every workflow on a schedule that pull requests don't run, whose every run is
+    # one of the default branch; Newest Python keeps an issue of its own.
+    for name, text in names_of_workflows(root).items():
+        events = set(triggers(text))
+        if "schedule" in events and not events & {
+            "pull_request",
+            "pull_request_target",
+        }:
+            assert name in watched | OWN_ISSUE | {"Bot health"}, name
+    # Not the checks of pull requests, each of whose runs would start a run of the
+    # bot that skips: the daily look covers their runs on the default branch.
+    assert not watched & OTHER_CHECKS
+    assert "Bot health" not in watched
+
+
+def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
+    text = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    assert set(triggers(text)) == {"workflow_run", "schedule", "workflow_dispatch"}
+    run = job_of(text, "run")
+    condition = condition_of(run)
+    for part in (
+        "github.event_name == 'workflow_run'",
+        "!github.event.repository.fork",
+        "github.event.workflow_run.head_branch == github.event.repository.default_branch",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+        '!contains(fromJSON(\'["pull_request", "pull_request_target"]\'), '
+        "github.event.workflow_run.event)",
+    ):
+        assert part in condition, part
+    ends = re.search(
+        r"contains\(fromJSON\('(\[[^\]]+\])'\), github\.event\.workflow_run\.conclusion\)",
+        condition,
+    )
+    assert ends
+    assert set(json.loads(ends[1])) == FAILED | {"success"}
+    assert "github.event_name != 'workflow_run'" in condition_of(job_of(text, "sweep"))
+    # One run at a time per workflow, set on the job: a run that skips, for a pull
+    # request, never replaces the waiting one for the default branch.
+    assert "\nconcurrency:" not in text
+    assert (
+        "group: ${{ github.workflow }}-${{ github.event.workflow_run.workflow_id }}"
+        in run
+    )
+    for name in ("run", "sweep"):
+        job = job_of(text, name)
+        # The default branch, without the token in the checkout.
+        assert "persist-credentials: false" in job, name
+        assert "ref:" not in job, name
+        assert "bot-health" in job, name
+        assert "issues: write" in job, name
+    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
+    assert "      - bot-health.yml\n" in dangerous
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_repository_has_the_labels_of_the_bot_health_bot(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    text = (root / ".github/labels.toml").read_text(encoding="utf-8")
+    labels = {label["name"]: label for label in tomllib.loads(text)["label"]}
+
+    assert {TYPE, RENOVATE_LABEL} <= set(labels)
+    # The bot creates the label where a repository's own labels.toml lacks it.
+    assert labels[LABEL]["color"] == LABEL_COLOR
+    assert labels[LABEL]["description"] == LABEL_DESCRIPTION
+
+
+def test_renovate_reports_its_problems_in_one_issue() -> None:
+    text = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_of(text, "renovate")
+    log = re.search(r"RENOVATE_LOG_FILE: (\S+)", job)
+    # Renovate reads the path in lower case, and the action shares /tmp with it.
+    assert log
+    assert log[1].startswith("/tmp/")
+    assert log[1] == log[1].lower()
+    assert "RENOVATE_LOG_FILE_LEVEL: warn" in job
+    step = "Keep the issue of Renovate's problems current"
+    assert job.index(f"- name: {step}") > job.index("- name: Run Renovate")
+    assert f"bot-health renovate {log[1]} " in script_of(text, step)
+    assert "if: ${{ !cancelled() }}" in job.split(f"- name: {step}", 1)[1]
+    assert "issues: write" in job
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:

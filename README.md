@@ -76,6 +76,7 @@ flowchart TB
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
 | **Flaky tests** | a test run that fails runs its failed jobs once more; a job that passes then is reported as flaky in one issue | `after-checks.yml` |
 | **Cancelled checks** | a run of a required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
+| **Bot health** | a bot or a scheduled workflow that fails on `main` runs its failed jobs once more where a second try can pass, and otherwise keeps one issue per workflow open, with the failed jobs, their steps and their first errors, which the next run that passes closes; every night, a look at the latest run of every workflow, those of the project too, which starts a workflow whose schedule GitHub missed or switched off; in the blueprint, one issue with the warnings and errors of Renovate | `bot-health.yml`, `blueprint.py bot-health` |
 | **Fast checks** | a check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python checks the `main` of a Python project after every change and every week | the triggers and path filters of the workflows, `newest-python.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide with the coding standards and the rule that every change brings its tests, code of conduct, security policy with how to verify a release and an assurance case, the security design of the software (`docs/security.md`), support, governance with the roles and the continuity of the project, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
@@ -208,6 +209,53 @@ flowchart TB
 - **mutmut runs the tests in a copy of the repository,** `mutants/`, with the changed code and without Git. A test that can't work there, because it reads the code as text or asks Git, gets the marker `@pytest.mark.mutation_unsafe`, and the mutation tests leave it out; the `pyproject.toml` of a new Python project registers the marker.
 - **A configuration of the project wins:** a `[tool.mutmut]` table in `pyproject.toml` or a `[mutmut]` section in `setup.cfg` for mutmut, an `infection.json5` for Infection. Without one, mutmut mutates `custom_components/`, `src/` or the modules and packages of the root, and Infection mutates `lib/` on PHP 8.3, with `tests/bootstrap.php`, which loads the classes of Nextcloud.
 
+### When a bot fails
+
+GitHub mails the failure of a scheduled run only to whoever last changed its schedule, and that of another run to whoever started it, in these repositories the release app for most runs: a red bot used to show only in the Actions tab, as when Findings, Mutation and Renovate failed for days. The bot-health bot (`bot-health.yml`) makes each such failure an issue, and closes it once the bot passes again.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What the bot-health bot does when a bot fails
+    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or switched off.
+
+    run(["A run of a bot ends<br>on <code>main</code>"])
+    nightly(["Every night<br>the latest run of every workflow"])
+    passed{"Passed?"}
+    first{"A first failure<br>that a second try can fix?"}
+    again["Runs the failed jobs<br>once more"]
+    issue["One issue for the workflow<br>the failed jobs · their steps<br>their first errors"]
+    closed["Closes the issue<br>passes again in the run"]
+    missed["Starts a workflow<br>whose schedule GitHub missed"]
+
+    run --> passed
+    nightly --> passed
+    nightly -- "a schedule missed<br>or switched off" --> missed
+    passed -- "yes" --> closed
+    passed -- "no" --> first
+    first -- "yes" --> again
+    again -. "its end" .-> run
+    first -- "no" --> issue
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class run,nightly,again,missed bot
+    class issue person
+    class closed done
+```
+
+- **One issue per workflow,** titled like *Findings fails on main*, with the labels `bot-failure` and `maintenance`. It names the latest failed run, its attempt and its trigger, and a table of the failed jobs with the step that failed and the first error of each, from the annotations of the run. A later failure in the same place only updates it, without a notification; a failure in another job or step adds a comment. The next run that passes closes it with a link to that run.
+- **A second try only where it can pass:** a first failure runs its failed jobs once more, as the flaky-test bot does for the tests, unless another bot already did. Findings, which fails while an alert is open, Mutation, which takes hours to measure the same again, and the property tests and the fuzzing, which failed on an input that they found, are reported at once. A run that GitHub couldn't start, because its workflow file is invalid, too.
+- **Which runs count:** those of the bots and scheduled workflows that `bot-health.yml` lists, on the default branch, from a schedule, a push, a start by hand or another workflow, never from a pull request or a fork. The checks that run in pull requests, such as the CI, the website or CodeQL, and the workflows of the project count in the nightly look, which takes the latest finished run of every workflow on the default branch, so that none of their runs for a pull request starts a run of the bot. Newest Python keeps an issue of its own.
+- **Missed schedules:** GitHub runs a schedule late at busy times, sometimes not at all, and switches the schedules of a repository off after 60 days without activity. Every night, a workflow whose last run is older than the latest time of its schedule, six hours ago or more, starts by hand, at most four a night so that the pull requests keep their runners; Findings and Issue lifecycle start with `dry_run` off, as their schedule runs them. A schedule that GitHub switched off is switched on again.
+- **Renovate's problems:** Renovate runs centrally in the blueprint and logs a lock file that it can't read as a warning, without failing. The Renovate workflow keeps one issue, *Renovate logs problems*, with the warnings and errors of its latest run that had any, by repository, and closes it after three runs in a row without one. A public issue names public repositories only.
+- The bot reads runs, jobs and annotations and writes issues with the `GITHUB_TOKEN` of its job, and checks out only the default branch, never the code of a pull request. A repository whose `.github/labels.toml`, which belongs to the project, lacks `bot-failure` gets the label from the bot; add it to the file to keep its color and description in one place.
+
 ## Kinds of projects
 
 | Kind | Stack | Checks | Delivery |
@@ -257,7 +305,7 @@ An existing repository takes the blueprint on a branch, in one pull request:
 
 1. `copier copy --overwrite --vcs-ref vX.Y.Z --data sample_code=false gh:Dennis-Otto/repo-blueprint .` with the answers that fit the repository, without the sample code and tests of a new one, such as its description, topics and homepage as they are on GitHub, so that `settings apply` changes nothing there. The files of the project (README, changelog, code, tests, manifests, labels, issue forms, icons) stay as they are.
 2. Look at the diff of every file of the blueprint and put back what belongs to the project only: sections of SECURITY.md or CONTRIBUTING.md, rules of Renovate (in `.github/renovate.json5`), hosts of the issue assistant, ignore rules. `copier update` keeps these changes from then on.
-3. Write the version of the latest release into `version.txt` and `.release-please-manifest.json`, start `CHANGELOG.md` with `## Unreleased`, and give `.github/labels.toml` the labels of the bots (`autorelease: pending`, `autorelease: tagged`, `merge-conflict`, `maintenance`, `docker`).
+3. Write the version of the latest release into `version.txt` and `.release-please-manifest.json`, start `CHANGELOG.md` with `## Unreleased`, and give `.github/labels.toml` the labels of the bots (`autorelease: pending`, `autorelease: tagged`, `merge-conflict`, `maintenance`, `bot-failure`, `docker`).
 4. Put the checks of the project alone, such as its end-to-end tests, into `.github/repository.project.toml` and `scripts/check-project.sh`; remove the workflows, scripts and tests that the blueprint replaces, and delete files of the template that the project doesn't need, such as a sample test. A repository without `docs/` has no website until it writes `docs/index.md`; `mkdocs.yml` shows how German pages join it.
 5. Open the pull request. Once its new checks pass, `blueprint.py settings apply` switches the required checks, the variables and the labels, and the pull request can merge.
 

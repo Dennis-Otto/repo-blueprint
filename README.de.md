@@ -70,6 +70,7 @@ flowchart TB
 | **Mutationstests** | jede Woche laufen Tausende kleiner Änderungen des Codes gegen die Tests, und die Zusammenfassung zeigt den Anteil, den sie bemerken, und die überlebenden Mutanten; ein niedriger Wert ist ein Bericht, nie ein Fehlschlag, aber ein Lauf, der nichts misst, schlägt fehl; ein Pull Request, der ändert, wie sie laufen, probiert sie aus | `mutation.yml`: mutmut, Infection |
 | **Wackelige Tests** | ein Testlauf, der fehlschlägt, führt seine fehlgeschlagenen Jobs einmal neu aus; ein Job, der dann besteht, wird in einem Issue als wackelig gemeldet | `after-checks.yml` |
 | **Abgebrochene Prüfungen** | ein Lauf einer vorgeschriebenen Prüfung für den neuesten Commit eines Pull Requests, den ein verspäteter Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu, statt den Merge zu blockieren | `after-checks.yml` |
+| **Zustand der Bots** | ein Bot oder ein geplanter Workflow, der auf `main` fehlschlägt, führt seine fehlgeschlagenen Jobs einmal neu aus, wo ein zweiter Versuch bestehen kann, und hält sonst ein Issue pro Workflow offen, mit den fehlgeschlagenen Jobs, ihren Schritten und ihren ersten Fehlern, das der nächste bestandene Lauf schließt; jede Nacht ein Blick auf den letzten Lauf jedes Workflows, auch der des Projekts, der einen Workflow startet, dessen Zeitplan GitHub verpasst oder abgeschaltet hat; im Blueprint ein Issue mit den Warnungen und Fehlern von Renovate | `bot-health.yml`, `blueprint.py bot-health` |
 | **Schnelle Prüfungen** | eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python prüft `main` eines Python-Projekts nach jeder Änderung und jede Woche | die Auslöser und Pfadfilter der Workflows, `newest-python.yml` |
 | **Issues** | eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält | der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, Beitragsleitfaden mit den Coding-Standards und der Regel, dass jede Änderung ihre Tests mitbringt, Verhaltenskodex, Sicherheitsrichtlinie mit der Prüfung eines Releases und einem Assurance Case, das Sicherheitsdesign der Software (`docs/security.md`), Support, Governance mit den Rollen und dem Fortbestand des Projekts, Issue-Formulare, Pull-Request-Vorlage, Aufzeichnungen der Entscheidungen, die das Projekt prägen (`docs/decisions/`), Discussions mit Formularen für Fragen und Ideen und einer Ankündigung jedes Releases, Sponsor-Button, Social Preview | |
@@ -202,6 +203,53 @@ flowchart TB
 - **mutmut führt die Tests in einer Kopie des Repositorys aus,** `mutants/`, mit dem geänderten Code und ohne Git. Ein Test, der dort nicht funktionieren kann, weil er den Code als Text liest oder Git fragt, bekommt die Markierung `@pytest.mark.mutation_unsafe`, und die Mutationstests lassen ihn aus; die `pyproject.toml` eines neuen Python-Projekts registriert die Markierung.
 - **Eine Konfiguration des Projekts hat Vorrang:** eine Tabelle `[tool.mutmut]` in `pyproject.toml` oder ein Abschnitt `[mutmut]` in `setup.cfg` für mutmut, eine `infection.json5` für Infection. Ohne sie mutiert mutmut `custom_components/`, `src/` oder die Module und Pakete der Wurzel, und Infection mutiert `lib/` auf PHP 8.3, mit `tests/bootstrap.php`, das die Klassen von Nextcloud lädt.
 
+### Wenn ein Bot fehlschlägt
+
+GitHub schickt den Fehlschlag eines geplanten Laufs nur an den, der seinen Zeitplan zuletzt geändert hat, und den eines anderen Laufs an den, der ihn gestartet hat, in diesen Repositorys meist die Release-App: Ein roter Bot zeigte sich nur im Actions-Tab, so wie Findings, Mutation und Renovate tagelang fehlschlugen. Der Bot für den Zustand der Bots (`bot-health.yml`) macht aus jedem solchen Fehlschlag ein Issue und schließt es, sobald der Bot wieder besteht.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Was der Bot für den Zustand der Bots tut, wenn ein Bot fehlschlägt
+    accDescr: Wenn ein Lauf eines Bots oder eines geplanten Workflows auf dem Standardbranch endet, sieht der Bot ihn sich an; Läufe von Pull Requests starten nichts. Ein erster Fehlschlag, den ein zweiter Versuch beheben kann, führt seine fehlgeschlagenen Jobs einmal neu aus. Ein Fehlschlag, der bleibt, öffnet ein Issue für den Workflow oder aktualisiert es, mit den fehlgeschlagenen Jobs, ihren Schritten und ihren ersten Fehlern. Ein Lauf, der besteht, schließt das Issue. Jede Nacht sieht sich der Bot den letzten Lauf jedes Workflows an, falls GitHub ein Ereignis verloren hat, und startet einen Workflow, dessen Zeitplan GitHub verpasst oder abgeschaltet hat.
+
+    run(["Ein Lauf eines Bots endet<br>auf <code>main</code>"])
+    nightly(["Jede Nacht<br>der letzte Lauf jedes Workflows"])
+    passed{"Bestanden?"}
+    first{"Ein erster Fehlschlag,<br>den ein zweiter Versuch beheben kann?"}
+    again["Führt die fehlgeschlagenen<br>Jobs einmal neu aus"]
+    issue["Ein Issue für den Workflow<br>die fehlgeschlagenen Jobs · ihre Schritte<br>ihre ersten Fehler"]
+    closed["Schließt das Issue<br>besteht wieder im Lauf"]
+    missed["Startet einen Workflow,<br>dessen Zeitplan GitHub verpasst hat"]
+
+    run --> passed
+    nightly --> passed
+    nightly -- "ein Zeitplan verpasst<br>oder abgeschaltet" --> missed
+    passed -- "ja" --> closed
+    passed -- "nein" --> first
+    first -- "ja" --> again
+    again -. "sein Ende" .-> run
+    first -- "nein" --> issue
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class run,nightly,again,missed bot
+    class issue person
+    class closed done
+```
+
+- **Ein Issue pro Workflow,** mit einem Titel wie *Findings fails on main* und den Labels `bot-failure` und `maintenance`. Es nennt den letzten fehlgeschlagenen Lauf, seinen Versuch und seinen Auslöser und eine Tabelle der fehlgeschlagenen Jobs mit dem Schritt, der fehlschlug, und dem ersten Fehler eines jeden, aus den Annotationen des Laufs. Ein späterer Fehlschlag an derselben Stelle aktualisiert es nur, ohne Benachrichtigung; ein Fehlschlag in einem anderen Job oder Schritt fügt einen Kommentar hinzu. Der nächste Lauf, der besteht, schließt es mit einem Link auf diesen Lauf.
+- **Ein zweiter Versuch nur, wo er bestehen kann:** Ein erster Fehlschlag führt seine fehlgeschlagenen Jobs einmal neu aus, wie es der Bot für wackelige Tests bei den Tests tut, außer ein anderer Bot hat das schon getan. Findings, das fehlschlägt, solange ein Alarm offen ist, Mutation, das Stunden braucht, um dasselbe noch einmal zu messen, und die Property-Tests und das Fuzzing, die an einer Eingabe fehlschlugen, die sie gefunden haben, werden sofort gemeldet. Ein Lauf, den GitHub nicht starten konnte, weil seine Workflow-Datei ungültig ist, ebenso.
+- **Welche Läufe zählen:** die der Bots und geplanten Workflows, die `bot-health.yml` aufzählt, auf dem Standardbranch, von einem Zeitplan, einem Push, einem Start von Hand oder einem anderen Workflow, nie von einem Pull Request oder einem Fork. Die Prüfungen, die in Pull Requests laufen, etwa die CI, die Website oder CodeQL, und die Workflows des Projekts zählen im nächtlichen Blick, der den letzten beendeten Lauf jedes Workflows auf dem Standardbranch nimmt, sodass keiner ihrer Läufe für einen Pull Request einen Lauf des Bots startet. Newest Python hält ein eigenes Issue.
+- **Verpasste Zeitpläne:** GitHub führt einen Zeitplan zu Stoßzeiten verspätet aus, manchmal gar nicht, und schaltet die Zeitpläne eines Repositorys nach 60 Tagen ohne Aktivität ab. Jede Nacht startet ein Workflow von Hand, dessen letzter Lauf älter ist als die letzte Zeit seines Zeitplans, die sechs Stunden oder länger her ist, höchstens vier pro Nacht, damit die Pull Requests ihre Runner behalten; Findings und Issue lifecycle starten mit abgeschaltetem `dry_run`, wie ihr Zeitplan sie ausführt. Einen Zeitplan, den GitHub abgeschaltet hat, schaltet der Bot wieder ein.
+- **Die Probleme von Renovate:** Renovate läuft zentral im Blueprint und protokolliert eine Lock-Datei, die es nicht lesen kann, als Warnung, ohne fehlzuschlagen. Der Renovate-Workflow hält ein Issue, *Renovate logs problems*, mit den Warnungen und Fehlern seines letzten Laufs, der welche hatte, nach Repository, und schließt es nach drei Läufen in Folge ohne eines. Ein öffentliches Issue nennt nur öffentliche Repositorys.
+- Der Bot liest Läufe, Jobs und Annotationen und schreibt Issues mit dem `GITHUB_TOKEN` seines Jobs, und er checkt nur den Standardbranch aus, nie den Code eines Pull Requests. Ein Repository, dessen `.github/labels.toml`, die dem Projekt gehört, kein `bot-failure` hat, bekommt das Label vom Bot; trag es in die Datei ein, damit Farbe und Beschreibung an einem Ort bleiben.
+
 ## Arten von Projekten
 
 | Art | Stack | Prüfungen | Auslieferung |
@@ -251,7 +299,7 @@ Ein bestehendes Repository übernimmt den Blueprint auf einem Branch, in einem P
 
 1. `copier copy --overwrite --vcs-ref vX.Y.Z --data sample_code=false gh:Dennis-Otto/repo-blueprint .` mit den Antworten, die zum Repository passen, ohne den Beispielcode und die Beispieltests eines neuen, etwa Beschreibung, Topics und Homepage wie auf GitHub, damit `settings apply` dort nichts ändert. Die Dateien des Projekts (README, Changelog, Code, Tests, Manifeste, Labels, Issue-Formulare, Icons) bleiben, wie sie sind.
 2. Den Diff jeder Datei des Blueprints ansehen und zurückholen, was nur dem Projekt gehört: Abschnitte von SECURITY.md oder CONTRIBUTING.md, Regeln von Renovate (in `.github/renovate.json5`), Hosts des Issue-Assistenten, Ignore-Regeln. `copier update` behält diese Änderungen von da an.
-3. Die Version des letzten Releases in `version.txt` und `.release-please-manifest.json` schreiben, `CHANGELOG.md` mit `## Unreleased` beginnen und `.github/labels.toml` die Labels der Bots geben (`autorelease: pending`, `autorelease: tagged`, `merge-conflict`, `maintenance`, `docker`).
+3. Die Version des letzten Releases in `version.txt` und `.release-please-manifest.json` schreiben, `CHANGELOG.md` mit `## Unreleased` beginnen und `.github/labels.toml` die Labels der Bots geben (`autorelease: pending`, `autorelease: tagged`, `merge-conflict`, `maintenance`, `bot-failure`, `docker`).
 4. Die Prüfungen nur dieses Projekts, etwa seine End-to-End-Tests, in `.github/repository.project.toml` und `scripts/check-project.sh` eintragen; die Workflows, Skripte und Tests entfernen, die der Blueprint ersetzt, und Dateien der Vorlage löschen, die das Projekt nicht braucht, etwa einen Beispieltest. Ein Repository ohne `docs/` hat keine Website, bis es `docs/index.md` schreibt; `mkdocs.yml` zeigt, wie deutsche Seiten dazukommen.
 5. Den Pull Request öffnen. Sobald seine neuen Prüfungen bestehen, stellt `blueprint.py settings apply` die Pflicht-Prüfungen, Variablen und Labels um, und der Pull Request kann mergen.
 
