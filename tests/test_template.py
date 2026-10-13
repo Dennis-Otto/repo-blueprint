@@ -542,12 +542,6 @@ def test_the_readme_of_an_integration_works_in_hacs(projects: dict[str, Path]) -
         assert target.startswith(("https://", "#")), target
 
 
-def job_of(workflow: str, name: str) -> str:
-    start = workflow.index(f"\n  {name}:\n")
-    end = re.compile(r"\n\n  [\w-]+:\n").search(workflow, start + 1)
-    return workflow[start : end.start() if end else len(workflow)]
-
-
 def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
     projects: dict[str, Path],
 ) -> None:
@@ -1904,8 +1898,81 @@ def test_the_newest_python_checks_main_and_every_week(
         assert "run: bash scripts/check.sh\n" in newest
 
 
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "open_issue", "call"),
+    [
+        # A failure opens the issue, or brings the open one up to date.
+        ("failure", "", "issue create --title The checks fail with the newest Python"),
+        ("failure", "7", "issue edit 7 --body"),
+        # The weekly run closes it once the checks pass again.
+        ("success", "7", "issue close 7"),
+        ("success", "", ""),
+    ],
+)
+def test_a_failure_with_the_newest_python_keeps_an_issue_open(
+    tmp_path: Path, result: str, open_issue: str, call: str
+) -> None:
+    # No pull request shows the check, so its warning needs a place of its own.
+    newest = (ROOT / ".github/workflows/newest-python.yml").read_text(encoding="utf-8")
+    report = job_of(newest, "report")
+    assert condition_of(report) == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        "(needs.newest-python.result == 'failure' || github.event_name == 'schedule')"
+    )
+    # Only the job without the code of the project may write issues.
+    assert "\n    permissions:\n      issues: write\n    steps:" in report
+    assert newest.count("issues: write") == 1
+    (tmp_path / "step.sh").write_text(
+        script_of(newest, "Keep the issue of the newest Python current"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  echo "$OPEN"
+  exit 0
+fi
+echo "$*" >> calls
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    (tmp_path / "calls").touch()
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "RESULT": result,
+            "OPEN": open_issue,
+            "URL": "https://github.com/o/r/actions/runs/1",
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+    if not call:
+        assert calls == ""
+        return
+    assert calls.startswith(call), calls
+    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
+        result == "failure"
+    )
+
+
 def run_the_search_for_the_website(
-    tmp_path: Path, root: Path, event: str, pages: str
+    tmp_path: Path, root: Path, event: str, pages: str, fork: bool
 ) -> tuple[str, str]:
     docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     script = tmp_path / "step.sh"
@@ -1933,6 +2000,7 @@ echo "$PAGES"
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "EVENT": event,
+        "FORK": str(fork).lower(),
         "GITHUB_REF": "refs/heads/main" if event == "push" else "refs/pull/1/merge",
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_OUTPUT": str(output),
@@ -1953,16 +2021,32 @@ echo "$PAGES"
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("project", "event", "pages", "output", "notice"),
+    ("project", "event", "pages", "fork", "output", "notice"),
     [
         # Every pull request builds the website as the check docs.
-        ("generic", "pull_request", "workflow", "build=true\n", ""),
+        ("generic", "pull_request", "workflow", False, "build=true\n", ""),
         # main publishes it where GitHub Pages publishes from a workflow.
-        ("generic", "push", "workflow", "publish=true\n", ""),
-        ("generic", "push", "", "build=true\n", "doesn't publish from GitHub Actions"),
+        ("generic", "push", "workflow", False, "publish=true\n", ""),
+        (
+            "generic",
+            "push",
+            "",
+            False,
+            "build=true\n",
+            "doesn't publish from GitHub Actions",
+        ),
         # The blueprint's Dashboard publishes it with the dashboard; main only builds it.
-        ("blueprint", "push", "workflow", "build=true\n", "dashboard.yml publishes"),
-        ("none", "push", "workflow", "", "No website here"),
+        (
+            "blueprint",
+            "push",
+            "workflow",
+            False,
+            "build=true\n",
+            "dashboard.yml publishes",
+        ),
+        # A fork of the blueprint runs no Dashboard, so its Docs publishes the website.
+        ("blueprint", "push", "workflow", True, "publish=true\n", ""),
+        ("none", "push", "workflow", False, "", "No website here"),
     ],
 )
 def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
@@ -1971,13 +2055,16 @@ def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
     project: str,
     event: str,
     pages: str,
+    fork: bool,
     output: str,
     notice: str,
 ) -> None:
     roots = {"blueprint": ROOT, "none": tmp_path}
     root = roots.get(project) or projects[project]
 
-    printed, written = run_the_search_for_the_website(tmp_path, root, event, pages)
+    printed, written = run_the_search_for_the_website(
+        tmp_path, root, event, pages, fork
+    )
 
     assert written == output
     assert (notice in printed) if notice else printed == ""

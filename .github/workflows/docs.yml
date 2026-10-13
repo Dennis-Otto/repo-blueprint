@@ -6,7 +6,8 @@ name: Docs
 # repository without mkdocs.yml or a home page in docs/ has no website, and the
 # check passes, so that it can be required everywhere. Where another workflow
 # publishes GitHub Pages, as the Dashboard of the blueprint does with its dashboard,
-# a run on main only builds the website. The tools are the hash-pinned ones of
+# a run on main only builds the website; in a fork, where the Dashboard doesn't run,
+# Docs publishes it. The tools are the hash-pinned ones of
 # stacks/docs/requirements-docs.txt, which the blueprint keeps current.
 # https://github.com/Dennis-Otto/repo-blueprint
 
@@ -56,6 +57,7 @@ jobs:
         id: site
         env:
           EVENT: ${{ github.event_name }}
+          FORK: ${{ github.event.repository.fork }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ ! -f mkdocs.yml ]] || [[ ! -f docs/index.md && ! -f docs/README.md ]]; then
@@ -63,9 +65,10 @@ jobs:
             exit 0
           fi
           if [[ "$EVENT" != pull_request && "$GITHUB_REF" == refs/heads/main ]]; then
-            # GitHub Pages has one website, and the other workflow publishes it.
+            # GitHub Pages has one website, and the other workflow publishes it; not in
+            # a fork, where the Dashboard of the blueprint doesn't run.
             for workflow in .github/workflows/*.y*ml; do
-              if [[ "$workflow" != .github/workflows/docs.yml ]] &&
+              if [[ "$FORK" != true && "$workflow" != .github/workflows/docs.yml ]] &&
                 grep -qF 'actions/deploy-pages@' "$workflow"; then
                 echo "::notice::$workflow publishes this website; this run only builds it."
                 echo "build=true" >> "$GITHUB_OUTPUT"

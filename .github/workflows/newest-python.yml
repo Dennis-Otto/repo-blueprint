@@ -5,7 +5,9 @@ name: Newest Python
 # every week. Not in pull requests: a new Python breaks main and every pull request
 # alike, and no pull request waits for this check. A workflow of its own, so that its
 # warning leaves the CI of main green, whose coverage the coverage bot compares every
-# pull request with. https://github.com/Dennis-Otto/repo-blueprint
+# pull request with. Since no pull request shows the warning, a failure keeps one issue
+# open, which the weekly run closes once the checks pass again.
+# https://github.com/Dennis-Otto/repo-blueprint
 
 on:
   push:
@@ -43,3 +45,45 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.txt
       - name: Run the checks
         run: bash scripts/check.sh
+
+  # The issue of the warning: a failed run on main opens it or brings it up to date,
+  # and the weekly run closes it once the checks pass with the newest Python again.
+  report:
+    name: report
+    needs: newest-python
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      (needs.newest-python.result == 'failure' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Keep the issue of the newest Python current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.newest-python.result }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="The checks fail with the newest Python"
+          number="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          if [[ "$RESULT" == success ]]; then
+            if [[ -n "$number" ]]; then
+              gh issue close "$number" --comment "The checks pass with the newest Python again."
+            fi
+            exit 0
+          fi
+          body="$(printf '%s\n\n%s\n' \
+            "The checks of scripts/check.sh fail with the newest Python, beta included, which the runners get next. Make them pass with it; the weekly run closes this issue then." \
+            "The latest failure: $URL")"
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body "$body"
+          else
+            gh issue create --title "$title" --label maintenance --body "$body"
+          fi
