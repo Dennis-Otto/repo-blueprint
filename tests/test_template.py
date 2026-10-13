@@ -6470,6 +6470,9 @@ def release_branch_changelog(main: str) -> str:
     return f"{main[:index]}## [1.3.0](https://x/compare/v1.2.2...v1.3.0) (2026-10-13)\n\n### Features\n\n* a card\n\n{main[index:]}"
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @WITH_JQ
 @pytest.mark.parametrize(
     ("fragments", "listed", "deleted"),
@@ -6537,6 +6540,9 @@ def test_the_release_bot_writes_the_fragments_into_the_release_and_deletes_them(
     assert len(asked) == (1 if fragments else 0)
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @WITH_JQ
 def test_the_release_bot_leaves_a_release_that_is_written_already(
     tmp_path: Path,
@@ -6560,6 +6566,9 @@ def test_the_release_bot_leaves_a_release_that_is_written_already(
     assert "input" not in done.written
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @WITH_JQ
 def test_the_release_bot_stops_when_it_cannot_see_the_fragments_of_the_branch(
     tmp_path: Path,
