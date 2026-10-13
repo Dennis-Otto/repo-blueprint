@@ -265,21 +265,25 @@ config:
 ---
 flowchart TB
     accTitle: How an update of the blueprint arrives
-    accDescr: Right after every release of the blueprint, and every week, the blueprint bot runs copier update to the latest release and opens a pull request. With conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
+    accDescr: Right after every release of the blueprint, and every week, the blueprint bot runs copier update to the latest published release. When its pull request is still open and you have committed to its branch, the bot leaves the branch to you and says once that a newer release is out. Otherwise it opens the pull request, or moves the open one on to the new release. With conflicts, which turn auto-merge off, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer; otherwise it merges itself once every check passes.
 
     bot(["Blueprint bot<br>after every release<br>and every week"])
-    pr["Pull request<br>with the changes"]
+    yours{"Your commits<br>on its open<br>pull request?"}
+    note(["Leaves it to you<br>and says once that<br>a newer release is out"])
+    pr["Pull request<br>with the changes<br>the open one moves on"]
     conflicts{"Conflicts?"}
     off{"Automerge<br>off?"}
     checks{"Every check<br>passes?"}
     merged["Merges itself"]
     wait(["Waits for<br>the maintainer"])
 
-    bot -- "<code>copier update</code><br>to the latest release" --> pr --> conflicts
+    bot -- "<code>copier update</code><br>to the latest<br>published release" --> yours
+    yours -- "yes" --> note
+    yours -- "no" --> pr --> conflicts
     conflicts -- "no" --> off
     off -- "no" --> checks
     checks -- "yes" --> merged
-    conflicts -- "yes, marked<br>in the files" --> wait
+    conflicts -- "yes: marked in the files<br>auto-merge off, labeled" --> wait
     off -- "yes" --> wait
     checks -- "no" --> wait
 
@@ -287,11 +291,13 @@ flowchart TB
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class bot bot
-    class wait person
+    class wait,note person
     class merged done
 ```
 
-The blueprint bot (`blueprint-update.yml`) runs `copier update` every week, and right after every release of the blueprint, whose Rollout workflow starts it in every repository of the release app. Without conflicts its pull request merges itself once every check passes; conflicts stay in it as markers for the maintainer. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
+The blueprint bot (`blueprint-update.yml`) runs `copier update` every week, and right after every release of the blueprint, whose Rollout workflow starts it in every repository of the release app. It takes the latest published release of the blueprint that `.copier-answers.yml` names, a fork of it perhaps, never a tag whose release is still a draft, and keeps one pull request on the branch `blueprint/update`: a newer release moves that pull request on, with its number and its auto-merge, instead of replacing it. Without conflicts it merges itself once every check passes. Conflicts stay in it as markers for the maintainer, in the files that the update touched; they turn its auto-merge off and add the label `merge-conflict`. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
+
+Once you commit to the branch of the pull request, to resolve the markers for example, the bot leaves the branch to you: when a newer release is out, it says so in one comment, and after you merge or close the pull request, its next run brings the rest. A merge of `main` with the button *Update branch* doesn't count as your commit, and an auto-merge that you switch off stays off. An update that only records a new release in `.copier-answers.yml` comes as a pull request too, and the updates carry the modes of files, such as a script that becomes executable.
 
 The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
