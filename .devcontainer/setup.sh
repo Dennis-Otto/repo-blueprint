@@ -8,5 +8,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # The tools go into .venv, which the container puts first on the PATH.
 python -m venv .venv
 .venv/bin/pip install --require-hashes -r requirements-dev.txt
+# The tools of the website go into .venv-docs: for its preview with
+# .venv-docs/bin/mkdocs serve, and for scripts/check.sh, which builds it then.
+if [[ -f mkdocs.yml ]]; then
+  python3 -m venv .venv-docs
+  .venv-docs/bin/pip install --require-hashes -r stacks/docs/requirements-docs.txt
+fi
 git config core.hooksPath .githooks
 echo "Ready: bash scripts/check.sh runs the checks of the CI."

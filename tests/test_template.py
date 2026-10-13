@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -365,9 +366,14 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".devcontainer/Dockerfile",
         ".devcontainer/setup.sh",
     ):
-        assert (ROOT / name).read_text(encoding="utf-8") == (project / name).read_text(
-            encoding="utf-8"
-        ), name
+        own = (ROOT / name).read_text(encoding="utf-8")
+        if name == ".devcontainer/setup.sh":
+            # The blueprint keeps the tools of the website in stacks/docs/, from where
+            # every repository gets them as .github/docs-requirements.txt.
+            own = own.replace(
+                "stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"
+            )
+        assert own == (project / name).read_text(encoding="utf-8"), name
 
 
 @pytest.mark.parametrize("kind", ["python-package", "github-action"])
@@ -1511,7 +1517,9 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         "    - navigation.tabs",
         "  search: {}",
         "  privacy: {}",
-        "  social: {}",
+        # The cards need Cairo, which Windows lacks: only the CI, where GitHub's
+        # runners set CI to true, makes them, and a preview builds without them.
+        "  social:\n    enabled: !ENV [CI, false]",
         "  glightbox: {}",
         "  git-revision-date-localized:",
         "  - .github/mkdocs_blueprint.py",
@@ -1557,6 +1565,223 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         for target in re.findall(r"\]\(([^)\s#]+)", text):
             if "://" not in target:
                 assert (page.parent / target).resolve().is_relative_to(pages), target
+
+
+def test_the_tools_of_the_website_install_on_windows() -> None:
+    # The plugin for the dates requires tzdata on Windows alone. pip-compile on Linux
+    # left it out of the lock, and with --require-hashes pip refused all of it there.
+    wanted = (ROOT / "stacks/docs/requirements-docs.in").read_text(encoding="utf-8")
+    assert "\ntzdata\n" in wanted
+    lock = (ROOT / "stacks/docs/requirements-docs.txt").read_text(encoding="utf-8")
+    assert re.search(
+        r"^tzdata==\S+ \\\n(?:    --hash=sha256:[0-9a-f]{64} \\\n)*"
+        r"    --hash=sha256:[0-9a-f]{64}\n",
+        lock,
+        re.MULTILINE,
+    )
+
+
+def website_step(check: str) -> str:
+    start = check.index('step "Website"')
+    return check[start : check.index("if [[ -f scripts/check-project.sh ]]", start)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_checks_build_the_website(projects: dict[str, Path], kind: str) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the checks of the stack and before those of the project alone, the same
+    # in every kind of project.
+    website = check.index('\nstep "Website"\n')
+    assert check.rindex('\nstep "') == website
+    assert website < check.index("if [[ -f scripts/check-project.sh ]]")
+    assert website_step(check) == website_step(generic)
+    contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`.venv-docs/Scripts/` in place of `.venv-docs/bin/`" in contributing
+    assert "`bash scripts/check.sh` builds the website strictly as well" in contributing
+
+
+# A MkDocs that records how the step calls it, and whether the folder it builds into
+# is a new one under TMPDIR, and that fails like a strict build with a broken link
+# when FAIL is set.
+FAKE_MKDOCS = """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "${NO_MKDOCS_2_WARNING:-}" "$@" > "$CALLS"
+if [[ "$4" == "$TMPDIR"/* && -d "$4" ]]; then
+  echo "a new folder" >> "$CALLS"
+fi
+echo "<h1>Demo</h1>" > "$4/index.html"
+echo "INFO    -  Building documentation to directory: $4"
+if [[ -n "${FAIL:-}" ]]; then
+  echo "WARNING -  Doc file 'index.md' contains a link 'nowhere.md', but the target is not found."
+  echo "Aborted with 1 warnings in strict mode!"
+  exit 1
+fi
+"""
+
+
+def run_the_website_step(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    mkdocs: str,
+    pages: tuple[str, ...] = ("mkdocs.yml", "docs/index.md"),
+    fail: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """The step Website of scripts/check.sh, in a repository with these pages and a
+    fake MkDocs at this place: in .venv-docs, on the PATH, or nowhere ("")."""
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    script = check[: check.index('step "Text files"')] + website_step(check)
+    (repository / "scripts/website.sh").write_text(
+        script, encoding="utf-8", newline="\n"
+    )
+    for page in pages:
+        (repository / page).parent.mkdir(parents=True, exist_ok=True)
+        (repository / page).write_text("# Demo\n", encoding="utf-8", newline="\n")
+    # The PATH without a MkDocs of this computer.
+    path = [
+        entry
+        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        if not shutil.which("mkdocs", path=entry)
+    ]
+    if mkdocs:
+        if mkdocs == "PATH":
+            fake = tmp_path / "bin/mkdocs"
+            path.insert(0, str(fake.parent))
+        else:
+            fake = repository / mkdocs
+        fake.parent.mkdir(parents=True, exist_ok=True)
+        fake.write_text(FAKE_MKDOCS, encoding="utf-8", newline="\n")
+        fake.chmod(0o755)
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    calls = tmp_path / "calls"
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"NO_MKDOCS_2_WARNING", "FAIL"}
+    }
+    environment.update(
+        PATH=os.pathsep.join(path), TMPDIR=str(temporary), CALLS=str(calls)
+    )
+    if fail:
+        environment["FAIL"] = "1"
+    assert BASH
+    result = subprocess.run(
+        [BASH, "scripts/website.sh"],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return result, calls, temporary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "mkdocs",
+    [
+        # The tools of the preview, as CONTRIBUTING.md and the dev container set
+        # them up on Linux and macOS, and on Windows.
+        ".venv-docs/bin/mkdocs",
+        ".venv-docs/Scripts/mkdocs.exe",
+        # Tools of another environment, such as an activated one.
+        "PATH",
+    ],
+)
+def test_the_website_step_builds_the_website_strictly(
+    projects: dict[str, Path], tmp_path: Path, mkdocs: str
+) -> None:
+    result, calls, temporary = run_the_website_step(projects, tmp_path, mkdocs)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "The website builds strictly." in result.stdout
+    # Its log only when the build fails.
+    assert "INFO" not in result.stdout + result.stderr
+    recorded = calls.read_text(encoding="utf-8").splitlines()
+    assert recorded[:4] == ["true", "build", "--strict", "--site-dir"]
+    assert recorded[5:] == ["a new folder"]
+    # The website goes again: nothing is left in the temporary folder.
+    assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_website_step_shows_why_the_build_fails(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    result, _, temporary = run_the_website_step(
+        projects, tmp_path, ".venv-docs/bin/mkdocs", fail=True
+    )
+
+    assert result.returncode == 1
+    assert "contains a link 'nowhere.md', but the target is not found" in result.stdout
+    assert "The website fails to build strictly; the log above says why." in (
+        result.stdout
+    )
+    assert "The website builds strictly." not in result.stdout
+    assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("mkdocs", "pages", "message"),
+    [
+        # Without the tools, as in the CI, whose check docs builds the website.
+        (
+            "",
+            ("mkdocs.yml", "docs/index.md"),
+            "MkDocs is not installed here; the CI builds the website.",
+        ),
+        # Without a home page, as before the first page of a project without sample
+        # code, or without mkdocs.yml: no website, as in the Docs workflow.
+        (
+            ".venv-docs/bin/mkdocs",
+            ("mkdocs.yml",),
+            "No website here: it needs mkdocs.yml and a home page, docs/index.md.",
+        ),
+        (
+            ".venv-docs/bin/mkdocs",
+            ("docs/index.md",),
+            "No website here: it needs mkdocs.yml and a home page, docs/index.md.",
+        ),
+    ],
+)
+def test_the_website_step_passes_without_tools_or_website(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    mkdocs: str,
+    pages: tuple[str, ...],
+    message: str,
+) -> None:
+    result, calls, _ = run_the_website_step(projects, tmp_path, mkdocs, pages)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == f"\n== Website\n{message}\n"
+    assert not calls.exists()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_dev_container_sets_up_the_tools_of_the_website(
+    projects: dict[str, Path], kind: str
+) -> None:
+    setup = (projects[kind] / ".devcontainer/setup.sh").read_text(encoding="utf-8")
+    tools = setup[setup.index("if [[ -f mkdocs.yml ]]; then") :]
+
+    assert "\n  python3 -m venv .venv-docs\n" in tools
+    assert (
+        "\n  .venv-docs/bin/pip install --require-hashes -r .github/docs-requirements.txt\n"
+        in tools
+    )
+    # The images of the Python projects have Python; the others get its venv first.
+    python = "python3-venv" not in tools
+    assert python == (kind in {"home-assistant", "github-action", "python-package"})
+    if not python:
+        assert tools.index("sudo apt-get update") < tools.index("python3 -m venv")
+    assert setup.index(".venv-docs") < setup.index("git config core.hooksPath")
 
 
 def test_the_clean_up_bot_keeps_the_work_of_others() -> None:

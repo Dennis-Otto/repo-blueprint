@@ -3,8 +3,13 @@
 # main. This file belongs to the project: the blueprint writes it once, and its
 # updates leave it as it is. The settings that every website shares come from
 # .github/mkdocs-blueprint.yml, which the blueprint keeps current; a setting here
-# wins over the same one there. Preview the website while you write with
-#   pip install --require-hashes -r .github/docs-requirements.txt && mkdocs serve
+# wins over the same one there. Preview the website while you write, at
+# http://127.0.0.1:8000, with the tools of the Docs workflow in .venv-docs:
+#   python3 -m venv .venv-docs
+#   .venv-docs/bin/pip install --require-hashes -r .github/docs-requirements.txt
+#   .venv-docs/bin/mkdocs serve
+# On Windows, with python for python3 and .venv-docs/Scripts/ for .venv-docs/bin/.
+# With these tools, scripts/check.sh builds the website too, as the check docs does.
 # https://squidfunk.github.io/mkdocs-material/
 INHERIT: .github/mkdocs-blueprint.yml
 site_name: {= project_name | to_json(ensure_ascii=False) =}

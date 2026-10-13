@@ -19,5 +19,16 @@ if [[ -f package.json ]]; then
   npm ci --ignore-scripts
 fi
 [%- endif %]
+# The tools of the website go into .venv-docs: for its preview with
+# .venv-docs/bin/mkdocs serve, and for scripts/check.sh, which builds it then.
+if [[ -f mkdocs.yml ]]; then
+[%- if stack not in ['python', 'home-assistant'] %]
+  # Python's venv, which this image lacks.
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends python3-venv
+[%- endif %]
+  python3 -m venv .venv-docs
+  .venv-docs/bin/pip install --require-hashes -r .github/docs-requirements.txt
+fi
 git config core.hooksPath .githooks
 echo "Ready: bash scripts/check.sh runs the checks of the CI."

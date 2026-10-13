@@ -87,6 +87,8 @@ python3 -m venv .venv-docs
 .venv-docs/bin/mkdocs serve
 ```
 
+On Windows, use `python` in place of `python3` and `.venv-docs/Scripts/` in place of `.venv-docs/bin/`; the dev container sets these tools up on its own. With them, `bash scripts/check.sh` builds the website strictly as well, as the check *docs* does, and without them it leaves that to the CI. The preview cards for social media come from the CI alone, because they need the Cairo library, which Windows doesn't have; where it is installed, `CI=true` before the command draws them too.
+
 Pictures make the documentation easier to follow:
 
 - **Diagrams** are Mermaid in a `mermaid` block of the Markdown, which GitHub and the website both draw. They run from top to bottom (`flowchart TB`), so that they keep their size in the column of a page, and have `accTitle` and `accDescr` for screen readers. Their colors are tints that read in the light and the dark theme: blue (`#526cfe`) the blueprint and its bots, orange (`#f59e0b`) you and what is yours, green (`#16a34a`) what comes out. A diagram in a README comes in English and in German.
