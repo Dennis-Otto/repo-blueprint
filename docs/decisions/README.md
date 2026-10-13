@@ -19,4 +19,9 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0011](0011-downloads-try-again-and-checks-cache-their-tools.md) | Every download tries again, the checks cache what they download, and the CI skips no check for an unreachable server | accepted |
 | [0012](0012-lock-refresh-waits-for-the-maintainer.md) | Refresh every lock file once a week, and let the refresh wait for the maintainer | accepted |
 | [0013](0013-name-the-runner-and-try-the-next-one.md) | Name the runner with its version, and try the next one every week before the jobs move | accepted |
+| [0014](0014-recover-from-a-stalled-check-without-a-person.md) | Recover from a stalled check without a person, once | accepted |
 | [0015](0015-tell-coding-agents-the-rules-in-agents-md.md) | Tell coding agents the rules in AGENTS.md, with the files of a project kept equal to copier.yml | accepted |
+| [0016](0016-diagrams-as-pictures-of-their-sources.md) | Show every diagram as a picture drawn from its Mermaid source, because the GitHub app draws no Mermaid | accepted |
+| [0017](0017-cache-what-a-check-can-verify-never-a-finding.md) | Cache what a check can verify, never a finding: downloads by their lock files, php-cs-fixer by content, Psalm without a cache | accepted |
+| [0018](0018-changelog-fragments.md) | Each pull request writes its entry of the changelog into a file of its own | accepted |
+| [0020](0020-update-only-to-a-verified-release.md) | Update only to a release that the release workflow made, and let only the release app create release tags | accepted |

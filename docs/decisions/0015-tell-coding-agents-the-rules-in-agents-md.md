@@ -5,7 +5,7 @@
 
 ## Context
 
-Coding agents write a large share of the pull requests of the repositories made from the blueprint. The rules they need are in the long prose of CONTRIBUTING.md, or nowhere: the commands of the checks of each kind of project, the titles of pull requests and the versions they make, the entry under Unreleased, the sign-off, and above all which files belong to the project and which to the blueprint. An agent that fixes a workflow or `scripts/check.sh` in one repository makes a change that conflicts with the next update and that the other repositories never get. Which files belong to a project is in `_skip_if_exists` of `copier.yml`, which an agent in a repository made from the blueprint doesn't see.
+Coding agents write a large share of the pull requests of the repositories made from the blueprint. The rules they need are in the long prose of CONTRIBUTING.md, or nowhere: the commands of the checks of each kind of project, the titles of pull requests and the versions they make, the fragment of the changelog, the diagrams, the sign-off, and above all which files belong to the project and which to the blueprint. An agent that fixes a workflow or `scripts/check.sh` in one repository makes a change that conflicts with the next update and that the other repositories never get. Which files belong to a project is in `_skip_if_exists` of `copier.yml`, which an agent in a repository made from the blueprint doesn't see.
 
 `AGENTS.md` at the root of a repository is the file that Codex, GitHub Copilot, Cursor and other agents read on their own. Claude Code reads `CLAUDE.md`, which can import other files with lines such as `@AGENTS.md`.
 

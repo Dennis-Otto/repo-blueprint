@@ -19,10 +19,12 @@ on:
 
 permissions: {}
 
-# Pull requests cancel their older runs; runs on main wait for each other, so that
-# the website of the latest commit is published last.
+# One run for each commit of a pull request: a quick check, whose runs for different
+# commits never cancel each other, so that a late run for an older commit can't
+# cancel the check of the head. Runs on main wait for each other, so that the
+# website of the latest commit is published last.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -90,6 +92,10 @@ jobs:
         with:
           # The Python that the tools of the website are compiled for.
           python-version: "3.12"
+          # The packages that pip downloads, under a key of their hash-pinned list;
+          # pip checks the hash of a package from the cache too.
+          cache: pip
+          cache-dependency-path: stacks/docs/requirements-docs.txt
       - name: Install the hash-pinned tools of the website
         if: steps.site.outputs.build == 'true'
         run: pip install --require-hashes -r stacks/docs/requirements-docs.txt
@@ -118,6 +124,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: stacks/docs/requirements-docs.txt
       - name: Install the hash-pinned tools of the website
         run: pip install --require-hashes -r stacks/docs/requirements-docs.txt
       - name: Build the website

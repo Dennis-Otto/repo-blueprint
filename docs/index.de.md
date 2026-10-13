@@ -57,6 +57,12 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     Die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Design, auf Englisch und Deutsch. Jeder Pull Request baut sie streng, jede Änderung an `main` veröffentlicht sie auf GitHub Pages.
 
+- :material-sitemap-outline:{ .lg .middle } **Diagramme**
+
+    ---
+
+    Jedes Diagramm als Bild, das alle sehen, auch in der GitHub-App und in den Stores, gezeichnet aus seiner Mermaid-Quelle; die Website zeichnet die Quelle live. Die Bots reparieren sie selbst: im Pull Request, auf `main` und nach einem Update des Renderers.
+
 - :material-cog-outline:{ .lg .middle } **Einstellungen als Code**
 
     ---
@@ -67,7 +73,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Nach jedem Release und jede Woche führt der Blueprint-Bot `copier update` aus und hält einen Pull Request aktuell. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind; die Dateien des Projekts und deine Commits auf seinem Branch werden nie überschrieben.
+    Nach jedem Release und jede Woche prüft der Blueprint-Bot das Release, das unveränderlich und vom Release-Workflow des Blueprints signiert sein muss, führt dann `copier update` aus und hält einen Pull Request aktuell. Ohne Konflikte merged er sich selbst, sobald alle Prüfungen grün sind; die Dateien des Projekts und deine Commits auf seinem Branch werden nie überschrieben.
 
 - :material-account-group-outline:{ .lg .middle } **Community**
 
@@ -83,7 +89,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
 </div>
 
-Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, das Aufräumen und den Dev-Container.
+Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, gescheiterte Releases, das Aufräumen und den Dev-Container.
 
 ## Arten von Projekten
 

@@ -21,6 +21,7 @@ on:
       - .python-version
       - .gitattributes
       - scripts/check.sh
+      - scripts/diagrams.sh
       - .github/workflows/windows.yml
   schedule:
     - cron: "20 3 * * 4"

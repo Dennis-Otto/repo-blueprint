@@ -4,32 +4,10 @@ Where the blueprint is heading in the next twelve months, until October 2027, an
 
 ## Done
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: The larger steps of the blueprint
-    accDescr: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags. Next comes a screenshot bot.
-
-    subgraph done ["Done"]
-        direction LR
-        early["<b>0.1 – 0.3</b><br>seven kinds of projects<br>settings as code<br>release bot"]
-        middle["<b>0.4 – 0.5</b><br>settings bot<br>Renovate<br>beta channel"]
-        late["<b>0.6 – 0.8</b><br>websites<br>SLSA Build Level 3<br>signed tags"]
-        early --> middle --> late
-    end
-
-    next(["<b>Next</b><br>a screenshot bot"])
-    done --> next
-
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    classDef plan fill:#526cfe2e,stroke:#526cfe,stroke-width:2px,stroke-dasharray:6 4
-    class early,middle,late done
-    class next plan
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/the-larger-steps-of-the-blueprint.dark.svg">
+  <img src="images/diagrams/the-larger-steps-of-the-blueprint.svg" alt="The larger steps of the blueprint: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags. Next comes a screenshot bot.">
+</picture>
 
 The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELOG.md) names every change of every release. The larger steps so far:
 
@@ -40,7 +18,7 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 - **0.7:** the settings that every website shares, from the blueprint, and a successor that the owner designated on GitHub, who can carry the project on.
 - **0.8:** websites in more than one language, issue forms that point to the documentation, and the website of the owner itself made from the blueprint.
 - **OpenSSF Best Practices:** the blueprint holds [the Silver level](https://www.bestpractices.dev/projects/15284) of the badge.
-- **The next release:** what the section *Unreleased* of the changelog lists.
+- **The next release:** what the fragments in `changelog.d/` and the section *Unreleased* of the changelog list.
 
 ## Next
 
@@ -57,6 +35,6 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 ## Not planned
 
 - **Forges other than GitHub.** The blueprint builds on the rulesets, environments, attestations, immutable releases and the API of GitHub.
-- **Releases by hand.** Versions follow the titles of the pull requests, and the notes are the text that they write under *Unreleased*.
+- **Releases by hand.** Versions follow the titles of the pull requests, and the notes are the text that they write in their fragments of the changelog or under *Unreleased*.
 - **Bots that merge what nobody approved.** Only updates that pass every check merge on their own; every other change waits for a person.
 - **Secrets in files.** `blueprint.py` never reads or sets the value of a secret, and no file of the blueprint holds one.

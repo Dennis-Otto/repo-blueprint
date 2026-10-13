@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import configparser
 import hashlib
 import json
@@ -15,12 +16,16 @@ import textwrap
 import tomllib
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+from xml.etree import ElementTree
 
 import pathspec
 import pytest
 from copier import run_copy
 from shell import BASH, in_bash
+
+from blueprint.changelog import Fragment, release_changelog
+from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -38,6 +43,8 @@ GUARD = "    # Not in the blueprint itself; generated repositories don't have th
 PINNED = re.compile(
     r"uses: (?:\./|docker://[^@\s]+@sha256:[0-9a-f]{64}|[\w.-]+/[\w./-]+@[0-9a-f]{40})"
 )
+# The namespace of the elements of psalm.xml.
+PSALM = {"psalm": "https://getpsalm.org/schema/config"}
 # The settings tool, which every repository gets in .github/: the script that starts
 # it and every file of its package. The mutation tests run in a copy of the repository,
 # where mutmut keeps what it knows of each module next to it, as cli.py.meta and
@@ -180,6 +187,14 @@ def script_of(workflow: str, step: str) -> str:
             break
         lines.append(line)
     return textwrap.dedent("".join(lines))
+
+
+def step_of(workflow: str, start: str) -> str:
+    """The text of the step of a workflow whose first line starts with start, such as
+    "      - name: Run the checks", up to the next step or job."""
+    begin = workflow.index(f"\n{start}") + 1
+    end = re.compile(r"\n(?= {0,6}\S)").search(workflow, begin)
+    return workflow[begin : end.start() + 1 if end else len(workflow)]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -616,6 +631,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         "SUPPORT.md",
         "release-please-config.json",
         "scripts/check.sh",
+        "scripts/diagrams.sh",
         ".github/FUNDING.yml",
         ".github/findings.toml",
         ".github/pull_request_template.md",
@@ -650,7 +666,31 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
             own = own.replace(
                 "stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"
             )
+        if name == "SECURITY.md":
+            own = as_an_action(own)
         assert own == (project / name).read_text(encoding="utf-8"), name
+
+
+def as_an_action(security: str) -> str:
+    """The security policy of the blueprint as that of the GitHub Action it is
+    rendered as: the blueprint is a template, so a repository made from it receives a
+    fix with its blueprint bot, which verifies the signed tag of a release, where users
+    of an action pin a commit."""
+    security, supported = re.subn(
+        r"A repository made from the blueprint receives a fix .*",
+        "Repositories that use the action pin its commit hash; merge the update pull"
+        " request of Dependabot or Renovate for a new release to receive a fix.",
+        security,
+    )
+    security, verified = re.subn(
+        r"Copier renders a repository from the tag of a release.*?\n```\n",
+        "Repositories that use the action pin the commit hash of a release;"
+        " `gh release verify` shows which commit the tag of a release stands for.\n",
+        security,
+        flags=re.DOTALL,
+    )
+    assert (supported, verified) == (1, 1)
+    return security
 
 
 @pytest.mark.parametrize("kind", ["python-package", "github-action"])
@@ -941,6 +981,8 @@ def test_every_project_has_a_dev_container(
         re.M,
     )
     assert "git config core.hooksPath .githooks" in setup
+    # Where Git ignores the modes of the files, the hook gets its mode on disk.
+    assert "chmod +x .githooks/*" in setup
     requirements = {
         "home-assistant": "requirements-test.txt",
         "python-package": "requirements-dev.txt",
@@ -950,6 +992,269 @@ def test_every_project_has_a_dev_container(
         assert f"-r {requirements[kind]}" in setup
         assert (project / requirements[kind]).exists()
         assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]
+
+
+def renders_a_script(path: Path) -> bool:
+    """Whether the file of the blueprint is, or renders as, a script with a shebang:
+    a file of the template that only includes another renders as that one."""
+    text = path.read_bytes()
+    include = re.fullmatch(rb'\[% include "([^"]+)" -%\]\n?', text)
+    if include:
+        text = (ROOT / include.group(1).decode()).read_bytes()
+    return text.startswith(b"#!")
+
+
+# It asks Git for the modes of the files, which the copy of the mutation tests has none
+# of.
+@pytest.mark.mutation_unsafe
+def test_every_script_of_the_blueprint_is_executable_in_git() -> None:
+    # Copier gives a file of a new repository the mode that Git has for it in the
+    # template, on Windows too, and the blueprint bot brings a new mode to an existing
+    # repository. Git runs a hook only when it is executable: the pre-push hook was a
+    # plain file, which Git on Linux, macOS, in the dev container and in Codespaces
+    # skipped, so that a push went through with failing checks.
+    listing = subprocess.run(
+        ["git", "ls-files", "--stage", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    modes = {}
+    for entry in listing.split("\0")[:-1]:
+        meta, path = entry.split("\t", 1)
+        mode = meta.split(" ", 1)[0]
+        # Files, not links or submodules.
+        if mode in ("100644", "100755"):
+            modes[path] = mode
+    scripts = {path for path in modes if renders_a_script(ROOT / path)}
+    executable = {path for path, mode in modes.items() if mode == "100755"}
+
+    assert executable == scripts
+    assert {
+        ".githooks/pre-push",
+        "template/.githooks/pre-push.jinja",
+        "template/.github/sign-tag.sh.jinja",
+        "template/.devcontainer/setup.sh.jinja",
+        "template/scripts/check.sh.jinja",
+    } <= scripts
+
+
+# Copier asks Git for the modes of the files of the template, which the copy of the
+# mutation tests has no Git for.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no executable files")
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_script_of_a_new_repository_is_executable(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    modes = {
+        path.relative_to(project).as_posix(): path.stat().st_mode & 0o111
+        for path in text_files(project)
+    }
+    scripts = {
+        name for name in modes if (project / name).read_bytes().startswith(b"#!")
+    }
+
+    assert {name for name, mode in modes.items() if mode} == scripts
+    assert all(modes[name] == 0o111 for name in scripts)
+    assert {".githooks/pre-push", ".devcontainer/setup.sh", "scripts/check.sh"} <= (
+        scripts
+    )
+
+
+# The author of the commits of the tests, whatever this computer has set up.
+IDENTITY = ("-c", "user.name=Dev", "-c", "user.email=dev@example.com")
+
+
+# It needs the modes that Copier takes from Git, which the copy of the mutation tests
+# has no Git for.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the hook runs bash, Git Bash on Windows")
+def test_the_hook_stops_a_push_whose_checks_fail(
+    projects: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert BASH
+    project = tmp_path / "project"
+    remote = tmp_path / "remote.git"
+    shutil.copytree(projects["generic"], project)
+    # No configuration of this computer, such as signed commits, gets in the way, and
+    # the hook finds the bash of the tests, Git Bash on Windows.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("PATH", f"{Path(BASH).parent}{os.pathsep}{os.environ['PATH']}")
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *IDENTITY, *arguments],
+            cwd=project,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    assert git("init", "--quiet", "--bare", str(remote)).returncode == 0
+    # A new repository as the README starts it, with the hook turned on as
+    # CONTRIBUTING.md and the dev container turn it on.
+    assert git("init", "--quiet").returncode == 0
+    assert git("add", "--all").returncode == 0
+    assert git("commit", "--quiet", "--message", "chore: start").returncode == 0
+    assert git("config", "core.hooksPath", ".githooks").returncode == 0
+    # Checks that say that they ran, and fail when FAIL is set.
+    (project / "scripts/check.sh").write_text(
+        'echo "The checks ran."\nexit "${FAIL:-0}"\n', encoding="utf-8", newline="\n"
+    )
+
+    monkeypatch.setenv("FAIL", "1")
+    failed = git("push", str(remote), "HEAD:refs/heads/main")
+    monkeypatch.delenv("FAIL")
+    passed = git("push", str(remote), "HEAD:refs/heads/main")
+
+    assert failed.returncode != 0, failed.stderr
+    assert "The checks ran." in failed.stdout + failed.stderr
+    assert "ignored" not in failed.stderr
+    assert passed.returncode == 0, passed.stderr
+    assert "The checks ran." in passed.stdout + passed.stderr
+
+
+def hooks_step(check: str) -> str:
+    start = check.index('step "Git hooks"')
+    return check[start : check.index('step "Shell scripts"', start)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_checks_look_at_the_modes_of_the_hooks(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # In every kind of project the same, right before the shell scripts.
+    assert check.index('\nstep "Git hooks"\n') < check.index('\nstep "Shell scripts"\n')
+    assert hooks_step(check) == hooks_step(generic)
+    contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`git update-index --chmod=+x .githooks/pre-push`" in contributing
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_while_git_would_skip_a_hook(
+    projects: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert BASH
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    script = check[: check.index('step "Text files"')] + hooks_step(check)
+    (repository / "scripts/hooks.sh").write_text(script, encoding="utf-8", newline="\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*arguments: str) -> None:
+        subprocess.run(["git", *arguments], cwd=repository, check=True)
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/hooks.sh"],
+            cwd=repository,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    git("init", "--quiet")
+    # The modes in Git alone, the same on every system: as on Windows, a new file is
+    # a plain one.
+    git("config", "core.fileMode", "false")
+    without_hooks = step()
+    (repository / ".githooks").mkdir()
+    for hook in ("pre-commit", "pre-push"):
+        (repository / ".githooks" / hook).write_text(
+            "#!/bin/sh\n", encoding="utf-8", newline="\n"
+        )
+    git("add", ".githooks")
+    plain = step()
+    git("update-index", "--chmod=+x", ".githooks/pre-push")
+    one_plain = step()
+    git("update-index", "--chmod=+x", ".githooks/pre-commit")
+    executable = step()
+
+    # Every plain hook, and the command that makes them executable.
+    assert (plain.returncode, plain.stdout) == (
+        1,
+        "\n== Git hooks\n"
+        ".githooks/pre-commit: is not executable, so git skips it\n"
+        ".githooks/pre-push: is not executable, so git skips it\n"
+        "Make it executable and commit that: git update-index --chmod=+x"
+        " .githooks/pre-commit .githooks/pre-push\n",
+    )
+    assert (one_plain.returncode, one_plain.stdout) == (
+        1,
+        "\n== Git hooks\n"
+        ".githooks/pre-commit: is not executable, so git skips it\n"
+        "Make it executable and commit that: git update-index --chmod=+x"
+        " .githooks/pre-commit\n",
+    )
+    for passed in (without_hooks, executable):
+        assert (passed.returncode, passed.stdout) == (
+            0,
+            "\n== Git hooks\nEvery hook in .githooks/ is executable.\n",
+        ), passed.stderr
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or BASH is None, reason="Windows has no executable files"
+)
+@pytest.mark.parametrize("file_mode", ["false", "true"])
+def test_the_dev_container_makes_the_hook_executable_where_git_ignores_modes(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_mode: str,
+) -> None:
+    assert BASH
+    repository = tmp_path / "repository"
+    (repository / ".devcontainer").mkdir(parents=True)
+    (repository / ".githooks").mkdir()
+    shutil.copy(
+        projects["generic"] / ".devcontainer/setup.sh",
+        repository / ".devcontainer/setup.sh",
+    )
+    hook = repository / ".githooks/pre-push"
+    hook.write_text("#!/bin/sh\n", encoding="utf-8", newline="\n")
+    # On disk, the hook of a repository whose hook Git has as a plain file.
+    hook.chmod(0o644)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", *IDENTITY, *arguments],
+            cwd=repository,
+            capture_output=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout
+
+    git("init", "--quiet")
+    git("config", "core.fileMode", file_mode)
+    git("add", "--all")
+    git("commit", "--quiet", "--message", "chore: start")
+    # Without mkdocs.yml, the set-up installs nothing.
+    setup = subprocess.run(
+        [BASH, ".devcontainer/setup.sh"],
+        cwd=repository,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert setup.returncode == 0, setup.stdout + setup.stderr
+    assert git("config", "core.hooksPath") == ".githooks\n"
+    # Executable where Git ignores the modes; elsewhere the mode in Git applies, so
+    # that the set-up changes nothing that Git would see.
+    assert bool(hook.stat().st_mode & 0o111) == (file_mode == "false")
+    assert git("status", "--porcelain") == ""
 
 
 def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
@@ -981,6 +1286,417 @@ def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
         assert remapped(url) == url
 
 
+class PullRequest(NamedTuple):
+    """A repository as the checkout of a pull request leaves it."""
+
+    repository: Path
+    # The squash commit that main got after the base that the event names.
+    squash: str
+    # The commits of the pull request, the oldest first; the last one is its head.
+    commits: list[str]
+
+
+def a_pull_request_on_a_newer_main(
+    tmp_path: Path, changes: dict[str, str | None], *signed_off: bool
+) -> PullRequest:
+    """A pull request whose branch starts on a newer main than the base that its event
+    names, as the branch of the release bot does when the bot builds it again. Main got
+    a squash commit since that base, which deletes docs/old.md and adds docs/main.md and
+    whose sign-off names another address than GitHub gives its author. The first commit
+    of the pull request makes the changes; each one has a sign-off or not. A change of
+    None deletes the file, one that starts with -> moves it. origin/main is the base
+    branch, HEAD the merge commit that the checkout of a pull request leaves."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    def git(*arguments: str) -> str:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        return subprocess.run(
+            ["git", *identity, "-c", "commit.gpgsign=false", *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    def commit(message: str, *options: str) -> str:
+        git("add", "--all")
+        git("commit", "--quiet", "--allow-empty", "-m", message, *options)
+        return git("rev-parse", "HEAD")
+
+    git("init", "--quiet", "--initial-branch=main")
+    for name in (
+        "README.md",
+        "docs/guide.md",
+        "docs/old.md",
+        "CHANGELOG.md",
+        "changelog.d/old.md",
+        "lychee.toml",
+    ):
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_text(f"{name}\n", encoding="utf-8", newline="\n")
+    commit("The base", "--signoff")
+    (repository / "docs/old.md").unlink()
+    (repository / "docs/main.md").write_text("main\n", encoding="utf-8", newline="\n")
+    # GitHub authors a squash commit with the noreply address of the account, while
+    # the sign-off of its pull request names the address of the commits there.
+    squash = commit(
+        "fix: a change of main (#1)\n\nSigned-off-by: Dev <dev@example.com>",
+        "--author=Dev <1+dev@users.noreply.github.com>",
+    )
+    git("switch", "--quiet", "--create", "feature")
+    for name, content in changes.items():
+        path = repository / name
+        if content is None:
+            path.unlink()
+        elif content.startswith("->"):
+            git("mv", name, content.removeprefix("->"))
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8", newline="\n")
+    commits = [
+        commit(
+            f"Commit {number} of the pull request", *(["--signoff"] if signed else [])
+        )
+        for number, signed in enumerate(signed_off, start=1)
+    ]
+    git("update-ref", "refs/remotes/origin/main", "main")
+    git("switch", "--quiet", "--detach", "main")
+    git("merge", "--quiet", "--no-ff", "-m", "Merge the pull request", commits[-1])
+    return PullRequest(repository, squash, commits)
+
+
+def choose_the_documents_to_check(
+    tmp_path: Path,
+    changes: dict[str, str | None],
+    event: str = "pull_request",
+    workflow: str = "links.yml",
+    step: str = "Choose the documents to check",
+) -> tuple[dict[str, str], str]:
+    """Runs the step of a workflow that chooses the documents, by default that of the
+    link check, in a repository whose pull request makes the changes, as GitHub does,
+    with tmp_path as its RUNNER_TEMP; returns its outputs and its summary."""
+    source = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+    repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    output.touch()
+    summary.touch()
+    (tmp_path / "step.sh").write_text(
+        script_of(source, step),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=repository,
+        env={
+            **os.environ,
+            "EVENT": event,
+            "BASE_REF": "main",
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "RUNNER_TEMP": tmp_path.as_posix(),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    outputs = dict(
+        line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+    )
+    return outputs, summary.read_text(encoding="utf-8")
+
+
+EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "event", "outputs"),
+    [
+        # The documents that the pull request adds or changes, by their paths, so that
+        # none reads as an option.
+        (
+            {"docs/guide.md": "changed\n"},
+            "pull_request",
+            {"files": "'./docs/guide.md' "},
+        ),
+        (
+            {"README.md": "changed\n", "docs/new.md": "new\n", "src/app.py": "\n"},
+            "pull_request",
+            {"files": "'./README.md' './docs/new.md' "},
+        ),
+        # The changelog alone is no document to check, and neither is code.
+        ({"CHANGELOG.md": "changed\n", "src/app.py": "\n"}, "pull_request", {}),
+        # Nor is a fragment of the changelog, which no document links to.
+        ({"changelog.d/dark-mode.md": "### Features\n"}, "pull_request", {}),
+        ({"changelog.d/old.md": None}, "pull_request", {}),
+        (
+            {"changelog.d/dark-mode.md": "x\n", "docs/guide.md": "changed\n"},
+            "pull_request",
+            {"files": "'./docs/guide.md' "},
+        ),
+        # New rules apply to every document.
+        (
+            {"lychee.toml": "max_retries = 5\n", "README.md": "x\n"},
+            "pull_request",
+            EVERY_DOCUMENT,
+        ),
+        # A document may link to a file that the pull request deletes or moves.
+        ({"docs/guide.md": None}, "pull_request", EVERY_DOCUMENT),
+        ({"docs/guide.md": "->docs/manual.md"}, "pull_request", EVERY_DOCUMENT),
+        # lychee gets the names through a shell.
+        ({"docs/it's $(here).md": "x\n"}, "pull_request", EVERY_DOCUMENT),
+        # Main deleted and added a document since the base that the event names; that
+        # is no change of the pull request.
+        ({}, "pull_request", {}),
+        # main and the weekly run check every document.
+        ({"docs/guide.md": "changed\n"}, "push", EVERY_DOCUMENT),
+        ({}, "schedule", EVERY_DOCUMENT),
+    ],
+)
+def test_the_link_check_of_a_pull_request_reads_the_documents_it_changes(
+    tmp_path: Path, changes: dict[str, str | None], event: str, outputs: dict[str, str]
+) -> None:
+    # A site that is down for a moment fails only the pull requests that link to it.
+    chosen, summary = choose_the_documents_to_check(tmp_path, changes, event)
+
+    assert chosen == outputs
+    if not outputs:
+        assert "changes no document" in summary
+
+
+def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
+    # The base that the event of a pull request names can be older than the commit of
+    # main that its branch starts on: the release bot builds its branch again on a
+    # newer main, and the event keeps the old base. The base branch, which the checkout
+    # fetches with the whole history, is current.
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    for workflow, name in ((lint, "dco"), (lint, "prose"), (links, "links")):
+        job = job_of(workflow, name)
+        assert "base.sha" not in job, name
+        assert "BASE_REF: ${{ github.event.pull_request.base.ref }}" in job, name
+        assert "fetch-depth: 0" in job or "'pull_request' && '0' ||" in job, name
+
+
+def check_the_sign_offs(
+    tmp_path: Path, *signed_off: bool
+) -> tuple[PullRequest, subprocess.CompletedProcess[str]]:
+    """Runs the DCO check, as GitHub does, on a pull request whose commits each have a
+    sign-off or not, on a newer main than the base that its event names."""
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    pull_request = a_pull_request_on_a_newer_main(tmp_path, {}, *signed_off)
+    (tmp_path / "step.sh").write_text(
+        script_of(lint, "Check the sign-off of every commit"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert BASH
+    return pull_request, subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=pull_request.repository,
+        env={
+            **os.environ,
+            "BASE_REF": "main",
+            "HEAD_SHA": pull_request.commits[-1],
+            "PR_AUTHOR": "dev",
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("signed_off", [(True,), (True, True)])
+def test_the_sign_off_check_passes_a_pull_request_on_a_newer_main(
+    tmp_path: Path, signed_off: tuple[bool, ...]
+) -> None:
+    # The squash commit of main lacks the sign-off of its author, but it is no commit
+    # of the pull request, though it came after the base that the event names.
+    pull_request, result = check_the_sign_offs(tmp_path, *signed_off)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"Checked the sign-off of {len(signed_off)} commit(s)." in result.stdout
+    assert pull_request.squash not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("signed_off", [(False,), (True, False), (False, True)])
+def test_the_sign_off_check_fails_a_commit_of_the_pull_request_without_one(
+    tmp_path: Path, signed_off: tuple[bool, ...]
+) -> None:
+    pull_request, result = check_the_sign_offs(tmp_path, *signed_off)
+    unsigned = pull_request.commits[signed_off.index(False)]
+
+    assert result.returncode == 1
+    assert (
+        f"::error::Commit {unsigned} lacks the sign-off "
+        "'Signed-off-by: Dev <dev@example.com>'. Commit with git commit -s."
+    ) in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "documents"),
+    [
+        # Main deleted and added a document since the base that the event names.
+        ({}, []),
+        (
+            {
+                "docs/guide.md": "changed\n",
+                "docs/a new guide.md": "new\n",
+                "CHANGELOG.md": "x\n",
+            },
+            ["docs/a new guide.md", "docs/guide.md"],
+        ),
+    ],
+)
+def test_the_prose_hints_give_vale_the_documents_that_the_pull_request_changes(
+    tmp_path: Path, changes: dict[str, str | None], documents: list[str]
+) -> None:
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    # The step before finds the documents; the hints run only when it found some.
+    outputs, _ = choose_the_documents_to_check(
+        tmp_path, changes, workflow="lint.yml", step="Find the changed documents"
+    )
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    # npm installs nothing; docker writes down the documents that Vale gets.
+    for name in ("npm", "docker"):
+        (stubs / name).write_text(
+            f'#!/usr/bin/env bash\necho "{name} $*" >> "$CALLS"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        (stubs / name).chmod(0o755)
+    (tmp_path / "calls").touch()
+    (tmp_path / "hints.sh").write_text(
+        script_of(lint, "Hint at the spelling and the style of the changed documents"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    if outputs.get("changed") == "true":
+        result = subprocess.run(
+            in_bash("-e", (tmp_path / "hints.sh").as_posix()),
+            cwd=tmp_path / "repository",
+            env={
+                **os.environ,
+                "STUBS": stubs.as_posix(),
+                "CALLS": (tmp_path / "calls").as_posix(),
+                "VALE": "vale",
+                "GITHUB_STEP_SUMMARY": (tmp_path / "summary").as_posix(),
+                "RUNNER_TEMP": tmp_path.as_posix(),
+            },
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    summary = (tmp_path / "summary").read_text(encoding="utf-8")
+    calls = (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+
+    if documents:
+        [docker] = [call for call in calls if call.startswith("docker ")]
+        assert docker.endswith(" sh " + " ".join(documents)), docker
+        assert f"in {len(documents)} changed document(s)." in summary
+    else:
+        assert calls == []
+        assert "No document changes." in summary
+
+
+def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    job = job_of(links, "links")
+    cache = job[job.index("      - name: Restore the answers of the sites\n") :]
+    assert "        uses: actions/cache@" in cache
+    assert "          path: .lycheecache\n" in cache
+    assert "          key: lychee-${{ github.run_id }}\n" in cache
+    assert "          restore-keys: lychee-\n" in cache
+    check = job[job.index("      - name: Check the links of the documentation\n") :]
+    assert (
+        "args: --config lychee.toml --no-progress --cache --max-cache-age 1d ${{ steps.documents.outputs.files }}\n"
+        in check
+    )
+    # Without a document to check, neither runs; a changed document may have no link.
+    for step in (cache, check):
+        assert "        if: steps.documents.outputs.files != ''\n" in step
+    assert "failIfEmpty: ${{ steps.documents.outputs.every == 'true' }}" in check
+    # A pull request compares its documents with its base.
+    assert (
+        "fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}" in job
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("changes", "documents"),
+    [
+        (
+            {
+                "README.md": "A changed README.\n",
+                "docs/a new guide.md": "A new guide.\n",
+                "CHANGELOG.md": "The changelog, which the release bot writes.\n",
+                "lychee.toml": "A file that isn't a document.\n",
+            },
+            ["README.md", "docs/a new guide.md"],
+        ),
+        ({"CHANGELOG.md": "Only the changelog.\n"}, []),
+        ({"docs/guide.md": None}, []),
+        ({}, []),
+    ],
+)
+def test_the_prose_hints_read_the_documents_that_a_pull_request_changes(
+    tmp_path: Path, changes: dict[str, str | None], documents: list[str]
+) -> None:
+    outputs, summary = choose_the_documents_to_check(
+        tmp_path, changes, workflow="lint.yml", step="Find the changed documents"
+    )
+
+    if documents:
+        assert outputs == {"changed": "true"}
+        # One name after the other, each ended by a NUL, which no name holds.
+        listed = (tmp_path / "documents").read_text(encoding="utf-8")
+        assert listed.split("\0") == [*documents, ""]
+        assert summary == ""
+    else:
+        assert outputs == {}
+        assert summary == "No document changes.\n"
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_prose_hints_install_their_tools_from_the_cache_of_npm(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    prose = job_of(
+        (folder / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "prose"
+    )
+    setup = step_of(prose, "      - uses: actions/setup-node@")
+    hints = step_of(
+        prose,
+        "      - name: Hint at the spelling and the style of the changed documents",
+    )
+    assert "          cache: npm\n" in setup
+    lock = re.search(r"\n          cache-dependency-path: (\S+)\n", setup)
+    assert lock
+    assert (folder / lock[1]).is_file()
+    install = re.search(r"\n +npm ci --prefix (\S+) ", hints)
+    assert install
+    assert install[1] == Path(lock[1]).parent.as_posix()
+    # Node and the packages come only for changed documents, the runs that install
+    # them, so that every run with npm's cache has one to save.
+    changed = "        if: steps.documents.outputs.changed == 'true'\n"
+    assert changed in setup
+    assert changed in hints
+    # The names that the step before found, which may hold spaces.
+    assert "\n          mapfile -d '' -t files < \"$RUNNER_TEMP/documents\"\n" in hints
+
+
 def test_a_nextcloud_app_packages_only_what_it_needs(
     projects: dict[str, Path],
 ) -> None:
@@ -990,6 +1706,8 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         ".devcontainer",
         ".githooks",
         ".lycheeignore",
+        # The fragments of the changelog, which the release takes into CHANGELOG.md.
+        "changelog.d",
         "lychee.toml",
         "mkdocs.yml",
         "screenshots",
@@ -1132,8 +1850,9 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     ]
     # Restored before the install, under a key that changes with krankerl; GitHub
     # saves it only after a run that passed, which checked it.
-    restore = workflow[workflow.index("uses: actions/cache@") :]
-    assert restore.index("- name: Install krankerl") > 0
+    restore = step_of(workflow, "      - name: Restore krankerl from the cache")
+    assert workflow.index(restore) < workflow.index("      - name: Install krankerl")
+    assert "uses: actions/cache@" in restore
     assert "path: ${{ runner.temp }}/krankerl\n" in restore
     assert (
         "key: krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}\n"
@@ -1188,6 +1907,150 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
 def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
     assert "vendor/bin/psalm --taint-analysis" in check
+
+
+def test_psalm_reads_ahead_only_the_packages_that_composer_cannot_load(
+    projects: dict[str, Path],
+) -> None:
+    # Psalm reads the files of extraFiles before it checks the code, and finds every
+    # other class through the autoloader of Composer when the code uses it. Reading
+    # all of vendor/, some 5,000 files, took 30 of the 35 seconds of each of its two
+    # runs, for the same findings; so it reads ahead the packages that the autoloader
+    # can't find, and only those.
+    project = projects["nextcloud-app"]
+    extra = (
+        ElementTree.parse(project / "psalm.xml")
+        .getroot()
+        .find("psalm:extraFiles", PSALM)
+    )
+    assert extra is not None
+    assert [entry.tag for entry in extra] == [f"{{{PSALM['psalm']}}}directory"]
+    read_ahead = [str(entry.get("name")) for entry in extra]
+    lock = json.loads((project / "composer.lock").read_text(encoding="utf-8"))
+    without_autoloader = sorted(
+        f"vendor/{package['name']}"
+        for package in (*lock["packages"], *lock["packages-dev"])
+        # A tool, such as the PHAR of php-cs-fixer, holds no code that the app uses.
+        if not package.get("autoload") and package.get("type", "library") == "library"
+    )
+    assert read_ahead == without_autoloader == ["vendor/nextcloud/ocp"]
+    # Neither run keeps a cache of its own, so that no result depends on one.
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert check.count(" --threads=1 --no-cache\n") == 2
+
+
+@pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("broken", [False, True])
+def test_the_syntax_check_of_a_nextcloud_app_reads_the_files_at_once(
+    projects: dict[str, Path], tmp_path: Path, broken: bool
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "PHP syntax"')
+    syntax = check[start : check.index('step "Coding standard"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (repository / "scripts/syntax.sh").write_text(
+        check[: check.index('step "Text files"')] + syntax,
+        encoding="utf-8",
+        newline="\n",
+    )
+    names = [
+        "appinfo/routes.php",
+        "lib/AppInfo/Application.php",
+        "lib/Service/A Service.php",
+        "tests/Unit/AppInfo/ApplicationTest.php",
+        *(["lib/Broken.php"] if broken else []),
+    ]
+    for name in [*names, "vendor/autoload.php"]:
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_text("<?php\n", encoding="utf-8")
+
+    # As PHP answers without a php.ini: everything on stdout, and 255 for an error,
+    # after which xargs starts no further PHP.
+    php = textwrap.dedent(
+        """\
+        if [[ "$2" == *Broken.php ]]; then
+          printf '\\nParse error: Unclosed "(" in %s on line 2\\n' "$2"
+          echo "Errors parsing $2"
+          exit 255
+        fi
+        echo "No syntax errors detected in $2"
+        """
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/syntax.sh\n",
+        repository,
+        {"php": php, "getconf": "echo 4\n"},
+    )
+
+    # One PHP for each file of the app, as many at once as there are processors, and
+    # only the errors show.
+    assert calls[0] == "getconf _NPROCESSORS_ONLN"
+    every = {f"php --syntax-check {name}" for name in names}
+    assert "No syntax errors detected" not in result.stdout
+    if broken:
+        assert result.returncode != 0
+        assert "php --syntax-check lib/Broken.php" in calls
+        assert set(calls[1:]) <= every
+        assert (
+            'Parse error: Unclosed "(" in lib/Broken.php on line 2\n' in result.stdout
+        )
+        assert "Errors parsing lib/Broken.php\n" in result.stdout
+        assert "Every PHP file parses." not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert sorted(calls[1:]) == sorted(every)
+        assert result.stdout == "\n== PHP syntax\nEvery PHP file parses.\n"
+
+
+def test_the_ci_of_a_nextcloud_app_keeps_the_packages_of_composer() -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    find = step_of(workflow, "      - name: Find the cache of Composer")
+    restore = step_of(
+        workflow, "      - name: Restore the packages of Composer from the cache"
+    )
+    install = workflow.index("      - name: Install the locked tools\n")
+    assert workflow.index(find) < workflow.index(restore) < install
+    assert "        id: composer\n" in find
+    assert (
+        '        run: echo "files=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"\n'
+        in find
+    )
+    assert "        uses: actions/cache@" in restore
+    assert "          path: ${{ steps.composer.outputs.files }}\n" in restore
+    # A changed lock file starts from the packages of the one before.
+    assert (
+        "          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}\n"
+        in restore
+    )
+    assert "          restore-keys: composer-${{ runner.os }}-\n" in restore
+
+
+def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
+    projects: dict[str, Path],
+) -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    restore = step_of(workflow, "      - name: Restore the cache of php-cs-fixer")
+    assert workflow.index(restore) < workflow.index("      - name: Run the checks\n")
+    assert "        uses: actions/cache@" in restore
+    assert "          path: .php-cs-fixer.cache\n" in restore
+    tools = "${{ hashFiles('composer.lock', '.php-cs-fixer.dist.php') }}"
+    # Every run saves what it checked; the next one starts from the latest.
+    assert f"          key: php-cs-fixer-{tools}-${{{{ github.sha }}}}\n" in restore
+    assert f"          restore-keys: php-cs-fixer-{tools}-\n" in restore
+    # php-cs-fixer keeps its cache there, as the configuration of the app leaves it,
+    # and Git ignores it.
+    project = projects["nextcloud-app"]
+    config = (project / ".php-cs-fixer.dist.php").read_text(encoding="utf-8")
+    assert "setCacheFile" not in config
+    assert "setUsingCache" not in config
+    assert "\n/.php-cs-fixer.cache\n" in (project / ".gitignore").read_text(
+        encoding="utf-8"
+    )
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "\nvendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -1351,7 +2214,10 @@ def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothin
         result.stdout,
         re.MULTILINE,
     )
-    assert f"\n+- Supports Nextcloud {newest}.\n" in result.stdout
+    # The entry in a fragment of its own, which no release conflicts with.
+    assert f"\n+++ b/changelog.d/nextcloud-{newest}.md\n" in result.stdout
+    assert f"\n+### Changed\n+\n+- Supports Nextcloud {newest}.\n" in result.stdout
+    assert "CHANGELOG.md" not in result.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -1385,6 +2251,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "Dockerfile",
         "img/app.svg",
         "tests/test_demo.py",
+        "tests/bootstrap.php",
         "custom_components/demo/__init__.py",
         ".github/labels.toml",
         "docs/security.md",
@@ -1400,6 +2267,8 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         ".github/docs-requirements.txt",
         "docs/README.md",
         "scripts/check.sh",
+        "scripts/diagrams.sh",
+        "changelog.d/.gitkeep",
         "AGENTS.md",
         "CLAUDE.md",
     ):
@@ -1451,7 +2320,13 @@ def test_every_project_tells_coding_agents_its_rules(
         assert command in agents, command
     for rule in (
         "`git commit -s`",
-        "`## Unreleased` in `CHANGELOG.md`",
+        # The entry of the changelog is a fragment, which conflicts with no other
+        # pull request, and a diagram a picture of its source, never a mermaid block.
+        "a new file `changelog.d/<branch>.md`",
+        "`python3 .github/blueprint.py fragments`",
+        "`docs/diagrams/<name>.mmd`",
+        "`bash scripts/diagrams.sh`",
+        "Never write a `mermaid` block",
         "Conventional Commit",
         "`fix` and `perf` a patch, `feat` a minor",
         "`Fixes #123`",
@@ -1489,7 +2364,11 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
         "bash scripts/check.sh",
         "coverage run -m pytest && coverage report",
         "`git commit -s`",
-        "`## Unreleased` in `CHANGELOG.md`",
+        "a new file `changelog.d/<branch>.md`",
+        "`python3 blueprint.py fragments`",
+        "`docs/diagrams/<name>.mmd`",
+        "`bash scripts/diagrams.sh`",
+        "Never write a `mermaid` block",
         "`Fixes #123`",
         "`README.md` and `README.de.md` together",
         "`tests/test_template.py`",
@@ -1503,6 +2382,9 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", agents):
         if not link.startswith("https://"):
             assert (ROOT / link).is_file(), link
+    notes = (ROOT / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert "`docs/diagrams/<name>.mmd`" in notes
+    assert "never a `mermaid` block" in notes
     # Its CLAUDE.md is the one of every repository, which test_the_blueprint_
     # follows_its_own_template keeps equal.
     claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
@@ -1575,7 +2457,7 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
 
 
-@pytest.mark.parametrize("kind", ["github-action", "home-assistant", "nextcloud-app"])
+@pytest.mark.parametrize("kind", KINDS)
 def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) -> None:
     # An update would bring the samples back that an adopted repository deleted.
     project = render(
@@ -1586,16 +2468,27 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         sample_code=False,
     )
     for sample in (
-        "tests",
         "fuzz",
         "docs/index.md",
         "src",
+        "test",
         "lib",
+        "app",
+        "Dockerfile",
         "custom_components",
         "action.yml",
         "demo.py",
     ):
         assert not (project / sample).exists(), sample
+    # No sample test either: a Nextcloud app gets only the files that its psalm.xml
+    # and phpunit.xml name, which belong to the blueprint.
+    assert sorted(files_of(project / "tests")) == (
+        ["bootstrap.php", "stubs/Emitter.php", "stubs/OC.php"]
+        if kind == "nextcloud-app"
+        else []
+    )
+    if kind == "nextcloud-app":
+        assert_psalm_and_phpunit_find_every_file_they_name(project)
     assert (project / "scripts/check.sh").exists()
     assert (project / ".github/workflows/ci.yml").exists()
     # The website waits for the pages of the project; the check docs passes until then.
@@ -1603,6 +2496,79 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     assert "sample_code: false" in (project / ".copier-answers.yml").read_text(
         encoding="utf-8"
     )
+
+
+def assert_psalm_and_phpunit_find_every_file_they_name(project: Path) -> None:
+    # psalm.xml and phpunit.xml belong to the blueprint and reach an app adopted
+    # without the sample code as well; psalm stops at a stub it can't find, phpunit
+    # at a missing bootstrap, before either looks at the code.
+    psalm = ElementTree.parse(project / "psalm.xml").getroot()
+    stubs = [
+        str(stub.get("name")) for stub in psalm.findall("psalm:stubs/psalm:file", PSALM)
+    ]
+    bootstrap = str(
+        ElementTree.parse(project / "phpunit.xml").getroot().get("bootstrap")
+    )
+    # The files that the bootstrap loads before the autoloader of Composer.
+    loaded = [
+        f"tests/{name}"
+        for name in re.findall(
+            r"^require_once __DIR__ \. '/([^']+)';$",
+            (project / bootstrap).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if not name.startswith("../vendor/")
+    ]
+    assert stubs == ["tests/stubs/Emitter.php"]
+    assert loaded == ["tests/stubs/Emitter.php", "tests/stubs/OC.php"]
+    for name in (*stubs, bootstrap, *loaded):
+        assert (project / name).is_file(), name
+
+
+def test_psalm_and_phpunit_find_every_file_they_name(projects: dict[str, Path]) -> None:
+    # With the sample code; test_an_existing_repository_takes_no_sample_code checks
+    # the app adopted without it.
+    assert_psalm_and_phpunit_find_every_file_they_name(projects["nextcloud-app"])
+
+
+def test_adopting_a_nextcloud_app_keeps_its_own_tests(tmp_path: Path) -> None:
+    # An app adopted before the blueprint brought its bootstrap carries its own;
+    # /tests in _skip_if_exists keeps every file of it, and only what is missing
+    # comes from the blueprint, on the copy as on every update.
+    own = {
+        "tests/bootstrap.php": "<?php\n\nrequire_once __DIR__ . '/stubs/Emitter.php';\n",
+        "tests/stubs/Emitter.php": "<?php\n\nnamespace OC\\Hooks;\n\ninterface Emitter {\n}\n",
+        "tests/Unit/ServiceTest.php": "<?php\n\nfinal class ServiceTest {\n}\n",
+    }
+    for name, text in own.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8", newline="\n")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        run_copy(
+            str(ROOT),
+            tmp_path,
+            data={
+                "project_name": "Demo",
+                "description": "A demo.",
+                "project_type": "nextcloud-app",
+                "sample_code": False,
+            },
+            defaults=True,
+            overwrite=True,
+            vcs_ref="HEAD",
+            quiet=True,
+        )
+
+    for name, text in own.items():
+        assert (tmp_path / name).read_text(encoding="utf-8") == text, name
+    assert (tmp_path / "tests/stubs/OC.php").is_file()
+    assert sorted(files_of(tmp_path / "tests")) == [
+        "Unit/ServiceTest.php",
+        "bootstrap.php",
+        "stubs/Emitter.php",
+        "stubs/OC.php",
+    ]
 
 
 def test_the_area_labels_of_pull_requests_exist() -> None:
@@ -2524,7 +3490,8 @@ def test_the_blueprint_bot_keeps_one_pull_request(
 
 def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
     """The step of the blueprint bot that finds the release to update to, with a gh
-    that knows the releases of the blueprint and of a fork."""
+    that knows the releases of the blueprint and of a fork, and their names as GitHub
+    spells them."""
     text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
     step = next(step for step in text.split("\n      - ") if "gh release view" in step)
     script = textwrap.dedent(step.split("        run: |\n", 1)[1])
@@ -2538,6 +3505,15 @@ def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
     gh.write_text(
         """#!/usr/bin/env bash
 case "$*" in
+  "api repos/"*" --jq .full_name")
+    name="${2#repos/}"
+    case "${name,,}" in
+      dennis-otto/repo-blueprint) echo Dennis-Otto/repo-blueprint ;;
+      someone/blueprint) echo Someone/blueprint ;;
+      someone/new) echo Someone/new ;;
+      *) echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+    esac
+    ;;
   "release view --repo Dennis-Otto/repo-blueprint --json tagName --jq .tagName") echo v1.2.0 ;;
   "release view --repo Someone/blueprint --json tagName --jq .tagName") echo v0.3.0 ;;
   "release view --repo Someone/new --json tagName --jq .tagName") ;;
@@ -2582,8 +3558,13 @@ esac
             "https://github.com/Someone/blueprint",
             "source=Someone/blueprint\ntag=v0.3.0\n",
         ),
-        # A blueprint that isn't on GitHub, a folder for a test, say.
-        ("/home/me/repo-blueprint", "source=Dennis-Otto/repo-blueprint\ntag=v1.2.0\n"),
+        (
+            "git@github.com:Someone/blueprint.git",
+            "source=Someone/blueprint\ntag=v0.3.0\n",
+        ),
+        # GitHub takes the name in any case, the signature of a tag only as GitHub
+        # spells it.
+        ("gh:someone/BLUEPRINT", "source=Someone/blueprint\ntag=v0.3.0\n"),
     ],
 )
 def test_the_blueprint_bot_updates_to_the_release_of_its_source(
@@ -2593,12 +3574,379 @@ def test_the_blueprint_bot_updates_to_the_release_of_its_source(
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "source",
+    [
+        # A blueprint elsewhere, or in a folder: no release there can be verified,
+        # and no other blueprint's release stands in for it.
+        "https://gitlab.com/Someone/blueprint.git",
+        "gl:Someone/blueprint",
+        "/home/me/repo-blueprint",
+    ],
+)
+def test_the_blueprint_bot_updates_only_from_a_blueprint_on_github(
+    tmp_path: Path, source: str
+) -> None:
+    code, output, stdout = run_the_release_step(tmp_path, source)
+
+    assert code == 1
+    assert output == ""
+    assert (
+        f"::error::The blueprint {source} is not a repository on GitHub; the bot"
+        " updates only to a release that it can verify there."
+    ) in stdout.splitlines()
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_blueprint_bot_needs_a_published_release(tmp_path: Path) -> None:
     code, output, stdout = run_the_release_step(tmp_path, "gh:Someone/new")
 
     assert code == 1
     assert output == ""
     assert "::error::The blueprint Someone/new has no published release" in stdout
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_blueprint_bot_verifies_the_release_before_it_updates(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    text = (project / ".github/workflows/blueprint-update.yml").read_text(
+        encoding="utf-8"
+    )
+    steps = text.split("\n      - ")
+    names = [step.split("\n", 1)[0] for step in steps]
+    release = names.index("name: Find the latest published release of the blueprint")
+    verify = names.index("name: Verify the release before updating to it")
+    update = names.index("name: Update to the latest release of the blueprint")
+    # Between finding the release and the update, and nothing renders before it.
+    assert release < verify < update
+    assert not any("copier update" in step for step in steps[1 : verify + 1])
+    step = steps[verify]
+    assert "SOURCE: ${{ steps.release.outputs.source }}" in step
+    assert "TAG: ${{ steps.release.outputs.tag }}" in step
+    # The job's own token reads the public blueprint; the step needs no secret.
+    assert "GH_TOKEN: ${{ github.token }}" in step
+    assert "secrets." not in step
+    assert 'ask "repos/$SOURCE/releases/tags/$TAG" --jq .immutable' in step
+    assert 'ask "repos/$SOURCE/compare/$commit...main" --jq .status' in step
+    # The tag's signature, checked by the script that checks the release tags of the
+    # repository itself, with gitsign pinned by version and checksum.
+    assert (
+        'bash .github/sign-tag.sh verify "$TAG" "$commit" "$SOURCE" || verified=$?'
+        in step
+    )
+    assert (project / ".github/sign-tag.sh").read_text(encoding="utf-8") == (
+        ROOT / ".github/sign-tag.sh"
+    ).read_text(encoding="utf-8")
+    # Copier updates to exactly the tag that was verified.
+    assert (
+        'copier update --defaults --conflict inline --vcs-ref "$TAG"' in steps[update]
+    )
+
+
+def run_the_verify_step(
+    tmp_path: Path,
+    immutable: str,
+    status: str,
+    signed: bool,
+    failures: int = 0,
+    unchecked: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+    """The step of the blueprint bot that verifies the release, with a gh that answers
+    for a release of a fork of the blueprint, after failing the first `failures` times
+    as GitHub does now and then, and a sign-tag.sh that only records how it is called
+    and fails where the tag isn't signed, or with 2 where it couldn't check it."""
+    text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
+    step = next(
+        step
+        for step in text.split("\n      - ")
+        if step.startswith("name: Verify the release before updating to it")
+    )
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/sign-tag.sh").write_text(
+        'echo "sign-tag.sh $*" >> "$CALLS"\n'
+        '[[ "$UNCHECKED" == true ]] && exit 2\n'
+        '[[ "$SIGNED" == true ]]\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+echo "gh $*" >> "$CALLS"
+failed=$(grep -c "^HTTP 502" "$CALLS" || true)
+if ((failed < FAILURES)); then
+  echo "HTTP 502" >> "$CALLS"
+  # As gh does: the body of the error on stdout, even with --jq.
+  echo '{"message":"Bad Gateway","status":"502"}'
+  echo "gh: Bad Gateway (HTTP 502)" >&2
+  exit 1
+fi
+case "$*" in
+  "api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable") echo "$IMMUTABLE" ;;
+  "api repos/Someone/blueprint/commits/v1.2.0 --jq .sha") echo abc123 ;;
+  "api repos/Someone/blueprint/compare/abc123...main --jq .status") echo "$STATUS" ;;
+  *) echo "unexpected: gh $*" >&2; exit 1 ;;
+esac
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    # The step waits 10 and 20 seconds between its questions; the test doesn't.
+    sleep = bin_dir / "sleep"
+    sleep.write_text(
+        '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    sleep.chmod(0o755)
+    calls = tmp_path / "calls"
+    summary = tmp_path / "summary"
+    for file in (calls, summary):
+        file.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "STUBS": str(bin_dir),
+        "CALLS": str(calls),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "SOURCE": "Someone/blueprint",
+        "TAG": "v1.2.0",
+        "IMMUTABLE": immutable,
+        "STATUS": status,
+        "SIGNED": "true" if signed else "false",
+        "UNCHECKED": "true" if unchecked else "false",
+        "FAILURES": str(failures),
+    }
+    # As GitHub runs a step: bash -e.
+    result = subprocess.run(
+        in_bash("-e", "step.sh"),
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return (
+        result,
+        calls.read_text(encoding="utf-8").splitlines(),
+        summary.read_text(encoding="utf-8"),
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "status",
+    [
+        # main is at the release, or has moved on from it.
+        "identical",
+        "ahead",
+    ],
+)
+def test_a_signed_immutable_release_on_main_passes(tmp_path: Path, status: str) -> None:
+    result, calls, summary = run_the_verify_step(tmp_path, "true", status, signed=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The signature of the tag, of the release workflow of the blueprint, at the commit
+    # that is on its main.
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert (
+        "The release v1.2.0 of Someone/blueprint is immutable, on its main and signed"
+        in summary
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("immutable", "status", "signed", "error"),
+    [
+        (
+            "false",
+            "ahead",
+            True,
+            "::error::The release v1.2.0 of Someone/blueprint is not immutable; the bot"
+            " updates only to an immutable release.",
+        ),
+        # The tag of a commit that main never had, or one past main.
+        (
+            "true",
+            "diverged",
+            True,
+            "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which is"
+            " not on its main (diverged).",
+        ),
+        (
+            "true",
+            "behind",
+            True,
+            "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which is"
+            " not on its main (behind).",
+        ),
+        # A lightweight tag, one at another commit, or one that another workflow
+        # signed: sign-tag.sh says which, in tests/test_sign_tag.py.
+        (
+            "true",
+            "ahead",
+            False,
+            "::error::The tag v1.2.0 of Someone/blueprint is not one that its release"
+            " workflow signed at abc123.",
+        ),
+    ],
+)
+def test_any_other_release_stops_the_update(
+    tmp_path: Path, immutable: str, status: str, signed: bool, error: str
+) -> None:
+    result, calls, summary = run_the_verify_step(tmp_path, immutable, status, signed)
+
+    assert result.returncode == 1
+    assert error in result.stdout.splitlines()
+    # The summary says why, what it means and what to do.
+    assert summary.startswith(
+        "### The blueprint bot refused the release v1.2.0 of Someone/blueprint\n\n"
+        f"{error.removeprefix('::error::')}\n\n"
+    )
+    assert "Nothing has changed here." in summary
+    assert (
+        "(https://github.com/Someone/blueprint/blob/main/SECURITY.md#verify-a-release)"
+        in summary
+    )
+    assert "is immutable, on its main and signed" not in summary
+    # The signature is checked last, only for an immutable release on main.
+    verified = [call for call in calls if call.startswith("sign-tag.sh ")]
+    assert verified == (
+        ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"] if not signed else []
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_verification_asks_github_again_after_a_failure(tmp_path: Path) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, failures=2
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls[:5] == [
+        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+        "HTTP 502",
+        "sleep 10",
+        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+        "HTTP 502",
+    ]
+    assert calls[5:7] == [
+        "sleep 20",
+        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+    ]
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert "is immutable, on its main and signed" in summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_every_question_gets_its_answer_after_a_failure(tmp_path: Path) -> None:
+    # One failure before the first answer, whose body gh prints too.
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, failures=1
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error::" not in result.stdout
+    # The commit, not the body of the error before it, goes into the comparison.
+    assert "gh api repos/Someone/blueprint/compare/abc123...main --jq .status" in calls
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert "is immutable, on its main and signed" in summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_signature_that_could_not_be_checked_fails_but_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, unchecked=True
+    )
+
+    assert result.returncode == 1
+    assert (
+        "::error::The signature of the release v1.2.0 of Someone/blueprint could not"
+        " be checked; nothing has changed, and the next run checks it again."
+    ) in result.stdout.splitlines()
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    # Not a refusal: gitsign, GitHub or Sigstore didn't answer.
+    assert summary == ""
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_github_without_an_answer_fails_the_update_but_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, failures=3
+    )
+
+    assert result.returncode == 1
+    assert "Bad Gateway" in result.stderr
+    assert "::error::" not in result.stdout
+    assert calls.count("HTTP 502") == 3
+    assert [call for call in calls if call.startswith("sleep")] == [
+        "sleep 10",
+        "sleep 20",
+    ]
+    # Not a refusal: GitHub didn't answer, and the next run asks again.
+    assert summary == ""
+    assert not any(call.startswith("sign-tag.sh") for call in calls)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_the_release_app_creates_the_release_tags_of_a_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    # The App ID next to the Client ID of the same app.
+    assert settings.variables["RELEASE_AUTOMATION_CLIENT_ID"] == "Iv23liP9PIEHOV74AiIA"
+    assert settings.variables["RELEASE_AUTOMATION_APP_ID"] == "4739928"
+    creation = next(
+        ruleset
+        for ruleset in settings.rulesets
+        if ruleset["name"] == "Release tag creation"
+    )
+    assert creation["rules"] == [{"type": "creation"}]
+    assert creation["bypass_actors"] == [
+        {"actor_id": 4739928, "actor_type": "Integration", "bypass_mode": "always"}
+    ]
+    # The blueprint has the same app.
+    blueprint = Settings.load(ROOT / ".github/repository.toml")
+    assert creation in blueprint.rulesets
+
+
+def test_every_release_tag_is_created_with_the_token_of_the_release_app() -> None:
+    # The only rule with an exception: a tag that the job token of a workflow created
+    # would fail the ruleset Release tag creation and stop the release.
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    steps = release.split("\n      - ")
+    creating = [
+        step
+        for step in steps
+        if "bash .github/sign-tag.sh" in step or "gh release create" in step
+    ]
+    # The tag of a release, and that of a beta, which gh release create only finds.
+    assert len(creating) == 2
+    for step in creating:
+        assert "GH_TOKEN: ${{ steps.app.outputs.token }}" in step
+        assert "steps.app.outputs.token != ''" in step
+    beta = next(step for step in creating if "gh release create" in step)
+    assert beta.index('bash .github/sign-tag.sh "v$version"') < beta.index(
+        "gh release create"
+    )
+    assert "--verify-tag" in beta
+    # release-please creates no tag: only a release on the tag that a run signed.
+    please = next(step for step in steps if "googleapis/release-please-action@" in step)
+    assert "skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}" in please
+    # The major tag of an action, such as v1, may move and is no release tag.
+    assert 'git tag -fa "$MAJOR"' in release
 
 
 def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
@@ -2654,7 +4002,15 @@ def after_the_checks_job(name: str) -> str:
 def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
     # The checks of every kind of project are only templates here, whose jobs skip.
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert watched_after_the_checks(after) == {"CI (python)", "Variants"} | OTHER_CHECKS
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (python)",
+            "Variants",
+            "Release",
+        }
+        | OTHER_CHECKS
+    )
     assert "github.event.workflow_run.run_attempt == 1" in after
 
 
@@ -2671,10 +4027,55 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
-    assert watched == names | OTHER_CHECKS
+    assert watched == names | OTHER_CHECKS | {"Release"}
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
+
+
+def test_the_bots_after_the_checks_watch_the_other_tests_that_a_project_names(
+    tmp_path: Path,
+) -> None:
+    # Visual tests or a bot that renders screenshots flake as the CI does.
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="home-assistant",
+        test_workflows=" Visual check,Screenshot bot , ",
+    )
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+
+    assert (
+        "    workflows: [CI (home-assistant), Docker E2E, Visual check, Screenshot bot, CodeQL,"
+        in after
+    )
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (home-assistant)",
+            "Docker E2E",
+            "Visual check",
+            "Screenshot bot",
+            "Release",
+        }
+        | OTHER_CHECKS
+    )
+
+
+@pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])
+def test_the_other_tests_of_a_project_are_named_as_their_workflows_are(
+    tmp_path: Path, names: str
+) -> None:
+    # The names go into a list of YAML in the workflow.
+    with pytest.raises(ValueError, match="test_workflows"):
+        render(
+            tmp_path,
+            project_name="Demo",
+            description="A demo.",
+            project_type="generic",
+            test_workflows=names,
+        )
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -2705,19 +4106,14 @@ def test_the_bot_for_cancelled_checks_watches_every_required_check(
 
 def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     # Their checks fail the same way again, or, as the changelog, pass once the pull
-    # request changed: no flaky test either way.
+    # request changed: no flaky test either way. The release has a bot of its own.
     for job in ("rerun", "report"):
         listed = re.search(
             r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
             after_the_checks_job(job),
         )
         assert listed, job
-        assert set(json.loads(listed[1])) == OTHER_CHECKS, job
-    # A run that the bot for cancelled checks started again failed at first in no test.
-    report = after_the_checks_job("report")
-    assert report.index('attempts/1" --jq .conclusion)" == cancelled') < report.index(
-        "gh issue create"
-    )
+        assert set(json.loads(listed[1])) == OTHER_CHECKS | {"Release"}, job
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
@@ -2828,6 +4224,742 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
+
+
+# jq, which gh runs for its option --jq: the steps that rely on its filters run with
+# it, on Linux and wherever else it is installed.
+JQ = shutil.which("jq")
+WITH_JQ = pytest.mark.skipif(
+    BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
+)
+# The answers of gh: an API call by its path, any other command by its first two
+# words, each through jq as gh does. The jq of gh ends its lines with LF on every
+# system, the jq of Windows with CRLF. What it is given to write, it keeps by the
+# words of its command, and the input of an API call as input. An answer with the
+# suffix .error is the error of gh, which fails.
+FAKE_GH = """#!/usr/bin/env bash
+echo "$*" >> "$CALLS"
+filter=""
+if [[ "$1" == api ]]; then
+  key=""
+  shift
+  while (($#)); do
+    case "$1" in
+      --jq) filter="$2"; shift 2 ;;
+      --input) cat -- "$2" >> "$WRITTEN/input"; shift 2 ;;
+      --method | -f | -F | -H) shift 2 ;;
+      --paginate | --silent) shift ;;
+      *) key="$1"; shift ;;
+    esac
+  done
+else
+  key="$1 $2"
+  shift 2
+  while (($#)); do
+    case "$1" in
+      --jq) filter="$2"; shift 2 ;;
+      --body) printf '%s' "$2" > "$WRITTEN/${key// /-}"; shift 2 ;;
+      --body-file) cp "$2" "$WRITTEN/${key// /-}"; shift 2 ;;
+      --state | --search | --json | --title | --label) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+fi
+answer="$ANSWERS/$(tr '/ ?' '___' <<<"$key")"
+if [[ -f "$answer.error" ]]; then
+  cat "$answer.error" >&2
+  exit 1
+fi
+if [[ ! -f "$answer" ]]; then
+  case "$key" in
+    "run rerun" | "issue comment" | "issue create") exit 0 ;;
+  esac
+  echo "gh has no answer for $key" >&2
+  exit 1
+fi
+if [[ -n "$filter" ]]; then
+  jq -r "$filter" "$answer" | tr -d '\\r'
+else
+  cat "$answer"
+fi
+"""
+TIMED_OUT = "The job has exceeded the maximum execution time of 30m0s"
+CANCELLED = "The operation was canceled."
+EXITED = "Process completed with exit code 1."
+
+
+def run_a_bot_after_the_checks(
+    tmp_path: Path, job: str, step: str, answers: dict[str, object], **variables: str
+) -> tuple[list[str], str, dict[str, str]]:
+    """Runs a step of a bot after the checks, as GitHub does, with the fake gh; returns
+    the calls of gh, the summary of the step and what gh was given to write."""
+    (tmp_path / "step.sh").write_text(
+        script_of(after_the_checks_job(job), step), encoding="utf-8", newline="\n"
+    )
+    folders = {name: tmp_path / name for name in ("bin", "answers", "written")}
+    for folder in folders.values():
+        folder.mkdir()
+    for key, answer in answers.items():
+        (folders["answers"] / re.sub(r"[/ ?]", "_", key)).write_text(
+            answer if isinstance(answer, str) else json.dumps(answer),
+            encoding="utf-8",
+            newline="\n",
+        )
+    gh = folders["bin"] / "gh"
+    gh.write_text(FAKE_GH, encoding="utf-8", newline="\n")
+    gh.chmod(0o755)
+    calls = tmp_path / "calls"
+    summary = tmp_path / "summary"
+    calls.touch()
+    summary.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
+        "GH_REPO": "o/r",
+        "RUN": "5",
+        "NAME": "CI (python)",
+        "BRANCH": "feature",
+        "SHA": "abc1234def",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "CALLS": str(calls),
+        "ANSWERS": str(folders["answers"]),
+        "WRITTEN": str(folders["written"]),
+        **variables,
+    }
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    written = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in folders["written"].iterdir()
+    }
+    return (
+        calls.read_text(encoding="utf-8").splitlines(),
+        summary.read_text(encoding="utf-8"),
+        written,
+    )
+
+
+def job_of_a_run(
+    number: int, name: str, conclusion: str, *steps: tuple[str, str]
+) -> dict[str, object]:
+    """A job as the API of the workflow runs answers it."""
+    return {
+        "id": number,
+        "name": name,
+        "conclusion": conclusion,
+        "html_url": f"https://github.com/o/r/actions/runs/5/job/{number}",
+        "steps": [{"name": step, "conclusion": result} for step, result in steps],
+    }
+
+
+def annotations_of_a_job(*messages: str) -> list[dict[str, str]]:
+    """The annotations of a job: its failures, and a notice of the runner."""
+    return [
+        *({"annotation_level": "failure", "message": message} for message in messages),
+        {"annotation_level": "notice", "message": "The ubuntu-latest label moves on."},
+    ]
+
+
+def runs_of_the_branch(*before: int, conclusion: str = "failure") -> dict[str, object]:
+    """The completed runs of the workflow for the branch, the newest first: a later one,
+    the run itself, another run of its commit, one of a fork's branch of the same name,
+    and those for the commits before, which ended with the conclusion."""
+
+    def run(
+        number: int, sha: str, repository: str = "o/r", end: str = "success"
+    ) -> dict[str, object]:
+        return {
+            "id": number,
+            "head_sha": sha,
+            "head_repository": {"full_name": repository},
+            "conclusion": end,
+        }
+
+    return {
+        "workflow_runs": [
+            run(6, "fedcba9"),
+            run(5, "abc1234def"),
+            run(4, "abc1234def"),
+            run(3, "1111111", "fork/r"),
+            *(run(number, f"{number:07}", end=conclusion) for number in before),
+        ]
+    }
+
+
+def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
+    job = after_the_checks_job("rerun")
+    condition = condition_of(job)
+    assert "github.event.workflow_run.run_attempt == 1" in condition
+    assert (
+        """contains(fromJSON('["failure", "cancelled"]'), github.event.workflow_run.conclusion)"""
+        in condition
+    )
+    # It reads the jobs of the runs and their annotations, and starts the failed jobs
+    # again; it checks out nothing.
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == [
+        "      actions: write",
+        "      checks: read",
+    ]
+    assert "actions/checkout" not in job
+    # The values of the event reach the script as variables only.
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("first", "messages", "before", "again"),
+    [
+        # A test failed at first.
+        ("failure", [EXITED], None, True),
+        # A job ran out of time: GitHub cancelled it at its time limit.
+        ("cancelled", [TIMED_OUT, CANCELLED], None, True),
+        # A newer run cancelled it: the bot for cancelled checks sees to it.
+        ("cancelled", [RACED], None, False),
+        # A person cancelled it.
+        ("cancelled", [CANCELLED], None, False),
+        # The run for the commit before ended with the same failure: a real one.
+        ("failure", [EXITED], ("failure", [EXITED]), False),
+        ("cancelled", [TIMED_OUT], ("cancelled", [TIMED_OUT]), False),
+        # A newer push cancelled the run for the commit before, or it passed.
+        ("failure", [EXITED], ("cancelled", [RACED]), True),
+        ("failure", [EXITED], ("success", []), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_the_failed_jobs_once_more(
+    tmp_path: Path,
+    first: str,
+    messages: list[str],
+    before: tuple[str, list[str]] | None,
+    again: bool,
+) -> None:
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", first),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/check-runs/11/annotations": annotations_of_a_job(*messages),
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+            *([2] if before else []), conclusion=before[0] if before else "failure"
+        ),
+    }
+    if before:
+        conclusion, earlier = before
+        answers["repos/o/r/actions/runs/2/jobs"] = {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", conclusion),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        }
+        answers["repos/o/r/check-runs/21/annotations"] = annotations_of_a_job(*earlier)
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION=first,
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    if before:
+        # The run for the commit before, on the same branch of the same repository.
+        assert any(
+            call.startswith("api repos/o/r/actions/runs/2/jobs ") for call in calls
+        )
+        assert not any(
+            "actions/runs/3/" in call or "actions/runs/4/" in call for call in calls
+        )
+        assert ("broke for the commit before" in summary) != again
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
+    tmp_path: Path,
+) -> None:
+    # The commit before broke one of the two jobs: the other may be flaky.
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "failure"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(2, 1),
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "failure"),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, _, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" in calls
+    runs = next(call for call in calls if "/workflows/3/runs" in call)
+    assert runs.startswith(
+        "api --method GET repos/o/r/actions/workflows/3/runs -f branch=main -f event=push -f status=completed "
+    )
+    # Only the latest run before counts.
+    assert not any("actions/runs/1/" in call for call in calls)
+
+
+def variants_of_a_run(
+    jobs: str, leg: str, messages: tuple[str, ...], first: int
+) -> dict[str, object]:
+    """The jobs of a run of Variants that was cancelled, such as run 38396054999, whose
+    legs a newer run cancelled: a leg that ended as given, one that was cancelled with
+    the messages, and the job that waits for the legs, which failed because they did
+    not pass."""
+    answers: dict[str, object] = {
+        jobs: {
+            "jobs": [
+                job_of_a_run(first, "variant (generic)", leg),
+                job_of_a_run(first + 1, "update (generic)", "cancelled"),
+                job_of_a_run(first + 2, "variants", "failure", ("Check", "failure")),
+            ]
+        },
+        f"repos/o/r/check-runs/{first + 1}/annotations": annotations_of_a_job(
+            *messages
+        ),
+        f"repos/o/r/check-runs/{first + 2}/annotations": annotations_of_a_job(EXITED),
+    }
+    if leg == "cancelled":
+        answers[f"repos/o/r/check-runs/{first}/annotations"] = annotations_of_a_job(
+            *messages
+        )
+    return answers
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("leg", "messages", "again"),
+    [
+        # A newer run cancelled it, after a leg had failed or before.
+        ("cancelled", (RACED, CANCELLED), False),
+        ("failure", (RACED, CANCELLED), False),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), False),
+        ("failure", (CANCELLED,), False),
+        # A leg ran out of time.
+        ("success", (TIMED_OUT, CANCELLED), True),
+    ],
+)
+def test_the_flaky_test_bot_runs_a_cancelled_run_again_only_when_it_ran_out_of_time(
+    tmp_path: Path, leg: str, messages: tuple[str, ...], again: bool
+) -> None:
+    # The job that waits for the legs failed only because they were cancelled; run
+    # again, the run for an older commit would cancel the one for the head.
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+        },
+        NAME="Variants",
+        CONCLUSION="cancelled",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("a newer run or a person cancelled it" in summary) != again
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("conclusion", "messages", "again"),
+    [
+        # A newer push cancelled the run for the commit before, after a leg had failed.
+        ("cancelled", (RACED, CANCELLED), True),
+        # A person cancelled it.
+        ("cancelled", (CANCELLED,), True),
+        # It failed: the same jobs broke.
+        ("failure", (CANCELLED,), False),
+    ],
+)
+def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
+    tmp_path: Path, conclusion: str, messages: tuple[str, ...], again: bool
+) -> None:
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(11, "variant (generic)", "failure"),
+                    job_of_a_run(12, "update (generic)", "success"),
+                    job_of_a_run(13, "variants", "failure"),
+                ]
+            },
+            "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(
+                2, conclusion=conclusion
+            ),
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/2/jobs", "failure", messages, 21
+            ),
+        },
+        NAME="Variants",
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert ("broke for the commit before" in summary) != again
+
+
+# The first attempt of a run of the tests, which passed when it ran again: a test that
+# failed, a job that ran out of time, one that failed in its build, one without a log,
+# and jobs that passed or that the failure of another cancelled.
+FIRST_ATTEMPT: dict[str, object] = {
+    "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+    "repos/o/r/actions/runs/5/attempts/1/jobs": {
+        "jobs": [
+            job_of_a_run(
+                11,
+                "test (3.12)",
+                "failure",
+                ("Set up Python", "success"),
+                ("Run the tests", "failure"),
+                ("Post Set up Python", "skipped"),
+            ),
+            job_of_a_run(12, "test (3.13)", "success", ("Run the tests", "success")),
+            job_of_a_run(
+                13,
+                "e2e (Safari)",
+                "cancelled",
+                ("Start Home Assistant", "success"),
+                ("Run the browser tests", "cancelled"),
+            ),
+            job_of_a_run(
+                14, "e2e (Chrome)", "cancelled", ("Run the browser tests", "cancelled")
+            ),
+            job_of_a_run(
+                15, "build", "failure", ("Pull", "failure"), ("Build", "failure")
+            ),
+            job_of_a_run(16, "docs", "failure", ("Build the website", "failure")),
+        ]
+    },
+    "repos/o/r/check-runs/11/annotations": annotations_of_a_job(EXITED),
+    "repos/o/r/check-runs/13/annotations": annotations_of_a_job(TIMED_OUT, CANCELLED),
+    "repos/o/r/check-runs/14/annotations": annotations_of_a_job(CANCELLED),
+    "repos/o/r/check-runs/15/annotations": annotations_of_a_job(
+        EXITED, "Error: the image   could not\nbe pulled"
+    ),
+    "repos/o/r/check-runs/16/annotations": annotations_of_a_job(EXITED),
+    "repos/o/r/actions/jobs/11/logs": (
+        "2026-10-12T09:15:58.0000000Z ===== short test summary info =====\n"
+        "2026-10-12T09:15:58.0000001Z \x1b[31mFAILED\x1b[0m"
+        " tests/test_cards.py::test_board[dark] - AssertionError: assert 1 == 2\n"
+        "2026-10-12T09:15:58.0000002Z FAILED tests/test_cards.py::test_score - TimeoutError\n"
+        "2026-10-12T09:15:58.0000003Z ERROR    homeassistant.setup:setup.py:12 no test\n"
+    ),
+    "repos/o/r/actions/jobs/13/logs": "2026-10-12T09:15:58.0000000Z Open the board\n",
+    "repos/o/r/actions/jobs/15/logs": "2026-10-12T09:15:58.0000000Z Pull the image\n",
+}
+# An empty cell of the table.
+NOTHING = "\N{EN DASH}"
+FLAKY_ROWS = [
+    "| [`test (3.12)`](https://github.com/o/r/actions/runs/5/job/11) | `Run the tests`"
+    " | `tests/test_cards.py::test_board[dark], tests/test_cards.py::test_score`"
+    " | `AssertionError: assert 1 == 2` |",
+    "| [`e2e (Safari)`](https://github.com/o/r/actions/runs/5/job/13)"
+    f" | `Run the browser tests` | {NOTHING} | `{TIMED_OUT}` |",
+    "| [`build`](https://github.com/o/r/actions/runs/5/job/15) | `Pull, Build`"
+    f" | {NOTHING} | `Error: the image could not be pulled` |",
+    "| [`docs`](https://github.com/o/r/actions/runs/5/job/16)"
+    f" | `Build the website` | {NOTHING} | `{EXITED}` |",
+]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
+    tmp_path: Path,
+) -> None:
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {**FIRST_ATTEMPT, "issue list": []},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-create"] == "\n".join(
+        [
+            "The flaky-test bot lists here every job that failed and then passed without"
+            " a change of the code, with the step, the test and the error that failed."
+            " Fix its test, then close this issue.",
+            "",
+            "**CI (python)** failed at first and passed when it ran again, on `feature`"
+            " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
+            "",
+            "| Job | Step | Test | Error |",
+            "| --- | --- | --- | --- |",
+            *FLAKY_ROWS,
+            "",
+        ]
+    )
+    assert any(
+        call.startswith("issue create --title Flaky tests --label maintenance ")
+        for call in calls
+    )
+    assert "\n".join(FLAKY_ROWS) in summary
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [
+                {"number": 8, "title": "Flaky tests of the website"},
+                {"number": 7, "title": "Flaky tests"},
+            ],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "issue-create" not in written
+    assert any(call.startswith("issue comment 7 --body ") for call in calls)
+    assert written["issue-comment"].endswith("\n".join(FLAKY_ROWS))
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_run_that_a_newer_one_cancelled(
+    tmp_path: Path,
+) -> None:
+    # The bot for cancelled checks started it again: no test failed.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11, "test (3.12)", "cancelled", ("Run the tests", "cancelled")
+                    ),
+                    job_of_a_run(
+                        12, "test (3.13)", "cancelled", ("Run the tests", "cancelled")
+                    ),
+                ]
+            },
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(RACED),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(RACED),
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+
+
+@WITH_JQ
+@pytest.mark.parametrize("leg", ["cancelled", "failure"])
+@pytest.mark.parametrize(
+    "messages", [(RACED, CANCELLED), (CANCELLED,)], ids=["raced", "by a person"]
+)
+def test_the_flaky_test_bot_reports_no_job_that_failed_because_others_were_cancelled(
+    tmp_path: Path, leg: str, messages: tuple[str, ...]
+) -> None:
+    # The bot for cancelled checks or a person started a cancelled run of Variants
+    # again, and it passed: the job that waits for the legs failed in no test.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs", leg, messages, 11
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert not written
+    assert not any(call.startswith("issue ") for call in calls)
+    assert not any("/logs" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_time(
+    tmp_path: Path,
+) -> None:
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "cancelled"},
+            **variants_of_a_run(
+                "repos/o/r/actions/runs/5/attempts/1/jobs",
+                "success",
+                (TIMED_OUT, CANCELLED),
+                11,
+            ),
+            "issue list": [],
+        },
+        NAME="Variants",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    # Not the job that waits for the legs.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| [")
+    ] == [
+        "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
+    ]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
+    tmp_path: Path,
+) -> None:
+    # A pull request names its jobs, its steps and its branch and writes its logs: none
+    # of them may end the code, the cell or the line, or mention anybody.
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11,
+                        "x` | @team\n[a](https://e.vil)",
+                        "failure",
+                        ("s`|\tt", "failure"),
+                    ),
+                    job_of_a_run(12, "long", "failure", ("Run", "failure")),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                "<b>`@team`</b>\r\n| y"
+            ),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job("é" * 200),
+            "repos/o/r/actions/jobs/11/logs": "FAILED tests/x.py::`@team` - z\n",
+            "issue list": [],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+        BRANCH="`@team`\n# x",
+    )
+
+    body = written["issue-create"]
+    assert "on `@team # x` at abc1234" in body
+    rows = body.splitlines()
+    assert (
+        "| [`x \\| @team\\n[a](https://e.vil)`](https://github.com/o/r/actions/runs/5/job/11)"
+        " | `s\\|\\tt` | `tests/x.py::@team` | `<b>@team</b> \\| y` |"
+    ) in rows
+    # An error fills a line at most.
+    assert (
+        "| [`long`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | `Run` | {NOTHING} | `{'é' * 149}\N{HORIZONTAL ELLIPSIS}` |"
+    ) in rows
+    # The code of the branch and of the cells.
+    assert body.count("`") == 2 * 8
+
+
+def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
+    # The failed push of the tag of v0.10.0 held the release and its rollout for 35
+    # minutes, until a person ran it again.
+    job = after_the_checks_job("release")
+    condition = condition_of(job)
+    for part in (
+        "!github.event.repository.fork",
+        "github.event.workflow_run.name == 'Release'",
+        "github.event.workflow_run.event == 'push'",
+        "github.event.workflow_run.conclusion == 'failure'",
+        "github.event.workflow_run.run_attempt == 1",
+    ):
+        assert part in condition
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert permissions.splitlines()[1:] == ["      actions: write"]
+    script = script_of(job, "Run the failed jobs of the release once more")
+    assert script.startswith('gh run rerun "$RUN" --failed\n')
+    assert "${{" not in job[job.index("        run: |\n") :]
+
+
+# The checks that take seconds, whose runs for different commits never cancel each
+# other, and some that take minutes, whose runs for a newer commit cancel the older.
+QUICK_CHECKS = [
+    "pull-request-title.yml",
+    "dependency-review.yml",
+    "secret-scan.yml",
+    "area-labels.yml",
+    "docs.yml",
+]
+LONG_CHECKS = ["ci-python.yml", "codeql.yml", "variants.yml", "lint.yml"]
+
+
+def concurrency_of(name: str) -> str:
+    workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    found = re.search(
+        r"^concurrency:\n  group: (.+)\n  cancel-in-progress: ", workflow, re.M
+    )
+    assert found, name
+    return found[1]
+
+
+@pytest.mark.parametrize("name", QUICK_CHECKS)
+def test_a_quick_check_never_cancels_the_run_for_another_commit(name: str) -> None:
+    # The release bot edits its pull request while release-please pushes to it, and a
+    # late run for the older commit cancelled the required checks of the head. Runs for
+    # the same commit, such as those of an edited title, still replace each other.
+    group = concurrency_of(name)
+    assert "github.event.pull_request.number" in group
+    assert group.endswith("-${{ github.event.pull_request.head.sha }}")
+
+
+@pytest.mark.parametrize("name", LONG_CHECKS)
+def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
+    # Their runners are worth more than the race, which the bot for cancelled checks
+    # repairs.
+    assert "head.sha" not in concurrency_of(name)
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:
@@ -2998,7 +5130,11 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
                 "composer.lock",
                 "osv-scanner.toml",
             )
-        return path.endswith(".md") and path != "CHANGELOG.md"
+        return (
+            path.endswith(".md")
+            and path != "CHANGELOG.md"
+            and not path.startswith("changelog.d/")
+        )
 
     for path in files_of(root):
         for scanner, patterns in filters.items():
@@ -3008,7 +5144,12 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
     # request, with the changelog and the version, starts none.
     for changed in (
         ["README.md", "docs/index.md"],
-        ["CHANGELOG.md", "version.txt", ".release-please-manifest.json"],
+        [
+            "CHANGELOG.md",
+            "changelog.d/dark-mode.md",
+            "version.txt",
+            ".release-please-manifest.json",
+        ],
     ):
         for scanner, patterns in filters.items():
             expected = scanner == "links.yml" and "README.md" in changed
@@ -3320,6 +5461,106 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
                 assert (page.parent / target).resolve().is_relative_to(pages), target
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_draws_its_diagrams_as_pictures(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The GitHub app and the stores show a ```mermaid block as code; a diagram is a
+    # source in docs/diagrams/ and pictures of it, which the blueprint's script draws.
+    project = projects[kind]
+    script = (project / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    assert script == (ROOT / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    # The image, by its digest, where the rules of Renovate find it.
+    assert re.search(
+        r'^image="minlag/mermaid-cli:[^"@]+@sha256:[0-9a-f]{64}"$', script, re.M
+    )
+    # The check of check.sh needs neither Docker nor Python, right after the text files.
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    step = check.index('\nstep "Diagrams"\n')
+    version = check.index('\nstep "Version"\n')
+    assert check.index('\nstep "Text files"\n') < step < version
+    assert "\nbash scripts/diagrams.sh --check\n" in check[step:version]
+    # The check that draws them anew, which every pull request must pass.
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert "diagrams" in settings["branch"]["required_checks"]
+    job = job_of(workflows(project)["lint.yml"], "diagrams")
+    assert "\n            bash scripts/diagrams.sh --extract\n" in job
+    assert "\n            git checkout --quiet --detach HEAD^2\n" in job
+    assert "          name: diagrams\n" in job
+    # The diagram bot commits what the check drew, onto a branch of the repository
+    # alone, as the release app, with the tool of main; it never checks out a pull
+    # request.
+    bot = job_of(workflows(project)["after-checks.yml"], "diagrams")
+    condition = condition_of(bot)
+    for part in (
+        "!github.event.repository.fork",
+        "github.event.workflow_run.name == 'Lint'",
+        "github.event.workflow_run.event == 'pull_request'",
+        "github.event.workflow_run.conclusion == 'failure'",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    ):
+        assert part in condition, part
+    assert "      name: release\n" in bot
+    assert "ref:" not in bot
+    assert "sparse-checkout: |\n            .github/blueprint\n" in bot
+    assert ' diagrams commit "$kept" --branch "$BRANCH" \\\n' in bot
+    assert '--head "$SHA"' in bot
+    # No expression in a script, where the name of a branch could run as code.
+    for script in bot.split("        run: |\n")[1:]:
+        assert "${{" not in script.split("\n      - ")[0]
+    # The diagram bot of main keeps one pull request from bot/diagrams, which merges
+    # itself; only the job that draws nothing has the release app.
+    main = workflows(project)["diagrams.yml"]
+    assert "  push:\n    branches: [main]\n" in main
+    assert "  schedule:\n" in main
+    assert "  BRANCH: bot/diagrams\n" in main
+    draw = job_of(main, "draw")
+    assert "\n          bash scripts/diagrams.sh --extract\n" in draw
+    assert "secrets." not in draw
+    assert "environment:" not in draw
+    opener = job_of(main, "pull-request")
+    assert "      name: release\n" in opener
+    assert "bash scripts/diagrams.sh" not in opener
+    assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
+    for script in opener.split("        run: |\n")[1:]:
+        assert "${{" not in script.split("\n      - ")[0]
+    # The website draws the sources live, and GitHub folds the pictures in diffs.
+    hooks = (project / ".github/mkdocs_blueprint.py").read_text(encoding="utf-8")
+    assert "def on_page_content(" in hooks
+    attributes = (project / ".gitattributes").read_text(encoding="utf-8")
+    assert "\ndocs/images/diagrams/*.svg linguist-generated=true\n" in attributes
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`bash scripts/diagrams.sh`" in contributing
+    assert "`docs/diagrams/" in contributing
+
+
+def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
+    # A new version of mermaid-cli may draw the pictures otherwise: Renovate updates
+    # its image on a branch of the repository, where the check draws them anew and
+    # the diagram bot commits them.
+    rules = renovate_rules(
+        (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    script = (ROOT / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    image = re.search(
+        r'^image="([^:"]+):([^@"]+)@(sha256:[0-9a-f]{64})"$', script, re.M
+    )
+    assert image
+    found = []
+    for manager in rules["customManagers"]:
+        files = [re.compile(name.strip("/")) for name in manager["managerFilePatterns"]]
+        if not any(name.search("scripts/diagrams.sh") for name in files):
+            continue
+        for pattern in manager["matchStrings"]:
+            for match in re.finditer(pattern.replace("(?<", "(?P<"), script):
+                found.append(
+                    (match["depName"], match["currentValue"], match["currentDigest"])
+                )
+    assert found == [image.groups()]
+
+
 def test_the_tools_of_the_website_install_on_windows() -> None:
     # The plugin for the dates requires tzdata on Windows alone. pip-compile on Linux
     # left it out of the lock, and with --require-hashes pip refused all of it there.
@@ -3332,6 +5573,30 @@ def test_the_tools_of_the_website_install_on_windows() -> None:
         lock,
         re.MULTILINE,
     )
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_website_takes_its_tools_from_the_cache_of_pip(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    # The check docs, and the build of the website that the next job publishes.
+    for name in ("docs", "pages"):
+        job = job_of(docs, name)
+        setup = step_of(job, "      - uses: actions/setup-python@")
+        assert "          cache: pip\n" in setup
+        # Under a key of the hash-pinned list that the job installs.
+        listed = re.search(r"\n          cache-dependency-path: (\S+)\n", setup)
+        installed = re.findall(
+            r"\n        run: pip install --require-hashes -r (\S+)\n", job
+        )
+        assert listed
+        assert installed == [listed[1]]
+        assert (folder / listed[1]).is_file()
+        assert job.index(setup) < job.index(
+            f"pip install --require-hashes -r {listed[1]}"
+        )
 
 
 def website_step(check: str) -> str:
@@ -3593,7 +5858,7 @@ def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = release[release.index("  release-please:") : release.index("\n  assets:")]
     step = job[
-        job.index("id: resume") : job.index("- name: Write the text of Unreleased")
+        job.index("id: resume") : job.index("- name: Write the text of Unreleased and")
     ]
     assert "github.event_name == 'workflow_dispatch'" in step
     assert "--json isDraft" in step
@@ -3602,6 +5867,512 @@ def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
             line for line in job.splitlines() if line.strip().startswith(f"{output}:")
         )
         assert "steps.resume.outputs." in line, output
+
+
+# Fragments of the changelog: the check of a pull request and the release bot.
+FEATURE_FRAGMENT = "### Features\n\n- **Dark mode:** the settings follow the system.\n"
+FIX_FRAGMENT = "### Bug fixes\n\n- **Token:** stays secret.\n"
+MAIN_CHANGELOG = (
+    "# Changelog\n\n## Unreleased\n\n### Features\n\n- **Voices:** a game by voice.\n\n"
+    "## 1.2.2\n\n### Bug fixes\n\n- An older fix.\n"
+)
+RELEASE_BRANCH = "release-please--branches--main"
+
+
+class Step(NamedTuple):
+    """What a step did with the fake gh: its result, the calls of gh, its summary, its
+    outputs and what gh was given to write."""
+
+    result: subprocess.CompletedProcess[str]
+    calls: list[str]
+    summary: str
+    output: str
+    written: dict[str, str]
+
+
+def run_a_step_with_the_fake_gh(
+    tmp_path: Path, script: str, answers: dict[str, object], **variables: str
+) -> Step:
+    """Runs the script of a step in tmp_path/checkout, as GitHub runs it, with the fake
+    gh, the Python of the tests as python3, and $RUNNER_TEMP in tmp_path/temp."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir(exist_ok=True)
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    folders = {name: tmp_path / name for name in ("bin", "answers", "written", "temp")}
+    for folder in folders.values():
+        folder.mkdir()
+    for key, answer in answers.items():
+        (folders["answers"] / re.sub(r"[/ ?]", "_", key)).write_text(
+            answer if isinstance(answer, str) else json.dumps(answer),
+            encoding="utf-8",
+            newline="\n",
+        )
+    for tool, body in {
+        "gh": FAKE_GH,
+        "python3": f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+    }.items():
+        (folders["bin"] / tool).write_text(body, encoding="utf-8", newline="\n")
+        (folders["bin"] / tool).chmod(0o755)
+    files = {name: tmp_path / name for name in ("calls", "summary", "output")}
+    for file in files.values():
+        file.touch()
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=checkout,
+        env={
+            **os.environ,
+            "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
+            "GH_REPO": "o/r",
+            "RUNNER_TEMP": str(folders["temp"]),
+            "GITHUB_STEP_SUMMARY": str(files["summary"]),
+            "GITHUB_OUTPUT": str(files["output"]),
+            "CALLS": str(files["calls"]),
+            "ANSWERS": str(folders["answers"]),
+            "WRITTEN": str(folders["written"]),
+            **variables,
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return Step(
+        result,
+        files["calls"].read_text(encoding="utf-8").splitlines(),
+        files["summary"].read_text(encoding="utf-8"),
+        files["output"].read_text(encoding="utf-8"),
+        {
+            path.name: path.read_text(encoding="utf-8")
+            for path in folders["written"].iterdir()
+        },
+    )
+
+
+def a_checkout_with_the_tool(tmp_path: Path, **fragments: str) -> Path:
+    """The checkout of main: blueprint.py, CHANGELOG.md and the fragments."""
+    checkout = tmp_path / "checkout"
+    (checkout / "blueprint").mkdir(parents=True)
+    for name in TOOL:
+        shutil.copy(ROOT / name, checkout / name)
+    (checkout / "CHANGELOG.md").write_text(MAIN_CHANGELOG, encoding="utf-8")
+    (checkout / "changelog.d").mkdir()
+    (checkout / "changelog.d/.gitkeep").touch()
+    for name, text in fragments.items():
+        (checkout / "changelog.d" / name).write_text(text, encoding="utf-8")
+    return checkout
+
+
+def pull_request_files(*files: tuple[str, str]) -> list[dict[str, str]]:
+    """The files of a pull request as the API lists them: each name and its status."""
+    return [{"filename": name, "status": status} for name, status in files]
+
+
+def changelog_check() -> str:
+    title = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
+        encoding="utf-8"
+    )
+    return job_of(title, "changelog")
+
+
+def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None:
+    job = changelog_check()
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert [
+        line.strip() for line in permissions.splitlines()[1:] if "#" not in line
+    ] == ["contents: read", "pull-requests: read"]
+    # The default branch, sparse, without credentials, and only for fragments.
+    checkout = job[job.index("      - uses: actions/checkout@") :]
+    checkout = checkout[: checkout.index("      - name:")]
+    assert "        if: steps.entry.outputs.fragments == 'true'\n" in checkout
+    assert "          persist-credentials: false\n" in checkout
+    assert (
+        "          sparse-checkout: |\n            .github\n            blueprint\n"
+        in (checkout)
+    )
+    assert "ref:" not in checkout
+    # The values of the event reach the scripts as variables only.
+    for step in (
+        "Require an entry in the changelog for a change for users",
+        "Check the fragments as the release takes them in",
+    ):
+        assert "${{" not in script_of(job, step), step
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("title", "author", "files", "code", "message", "fragments"),
+    [
+        ("docs: a guide", "User", [], 0, "changes nothing for users", []),
+        ("feat: a card", "Bot", [], 0, "Updates and bots write no entry.", []),
+        ("fix(deps): bump", "User", [], 0, "Updates and bots write no entry.", []),
+        # Whatever the type or the author, the release reads every fragment, so a
+        # pull request that needs no entry still has its fragments checked.
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/guide.md", "added"), ("CHANGELOG.md", "modified")],
+            0,
+            "changes nothing for users",
+            ["changelog.d/guide.md"],
+        ),
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/README.md", "added"), ("changelog.d/notes.txt", "added")],
+            1,
+            '::error::"changelog.d/notes.txt" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "feat: a card",
+            "Bot",
+            [("changelog.d/my fix.md", "added")],
+            1,
+            '::error::"changelog.d/my fix.md" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "chore(deps): bump",
+            "User",
+            [(f"changelog.d/f{number}.md", "added") for number in range(21)],
+            1,
+            "::error::This pull request adds 21 fragments of the changelog;",
+            [],
+        ),
+        (
+            "feat: a card",
+            "User",
+            [("CHANGELOG.md", "modified"), ("src/app.py", "added")],
+            0,
+            "CHANGELOG.md has the entry of this change.",
+            [],
+        ),
+        (
+            "fix!: the token",
+            "User",
+            [
+                ("changelog.d/token.md", "added"),
+                ("changelog.d/dark_mode.v2.md", "modified"),
+                ("src/app.py", "modified"),
+            ],
+            0,
+            "",
+            ["changelog.d/token.md", "changelog.d/dark_mode.v2.md"],
+        ),
+        # A hidden file, a fragment that goes, and other files are no entry.
+        (
+            "feat: a card",
+            "User",
+            [
+                ("changelog.d/.gitkeep", "added"),
+                ("changelog.d/old.md", "removed"),
+                ("docs/changelog.md", "added"),
+            ],
+            1,
+            "::error::Describe what changes for users in a new file of changelog.d/",
+            [],
+        ),
+        # A file of changelog.d/ that the release can't read is named, as JSON.
+        (
+            "perf: faster",
+            "User",
+            [
+                ("changelog.d/notes.txt", "added"),
+                ("changelog.d/my fix.md", "added"),
+                ("changelog.d/two\nlines.md", "added"),
+                ("changelog.d/sub/x.md", "added"),
+                ("changelog.d/fine.md", "added"),
+            ],
+            1,
+            '::error::"changelog.d/notes.txt" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "feat: many",
+            "User",
+            [(f"changelog.d/f{number}.md", "added") for number in range(21)],
+            1,
+            "::error::This pull request adds 21 fragments of the changelog;",
+            [],
+        ),
+    ],
+)
+def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
+    tmp_path: Path,
+    title: str,
+    author: str,
+    files: list[tuple[str, str]],
+    code: int,
+    message: str,
+    fragments: list[str],
+) -> None:
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            changelog_check(),
+            "Require an entry in the changelog for a change for users",
+        ),
+        {"repos/o/r/pulls/7/files": pull_request_files(*files)},
+        NUMBER="7",
+        TITLE=title,
+        AUTHOR=author,
+    )
+
+    assert step.result.returncode == code, step.result.stderr
+    assert message in step.result.stdout + step.summary
+    assert ("fragments=true" in step.output) == bool(fragments)
+    listed = tmp_path / "temp/fragments"
+    assert (listed.read_text(encoding="utf-8").splitlines() if fragments else []) == (
+        fragments
+    )
+    # Every pull request has its files listed, to check its fragments.
+    assert len(step.calls) == 1
+    assert step.calls[0].startswith("api repos/o/r/pulls/7/files --paginate --jq ")
+    # Only a change for users of a person needs an entry, and is told it has one.
+    required = title.startswith(("feat:", "fix!:", "perf:")) and author == "User"
+    if not required:
+        assert "::error::Describe what changes" not in step.result.stdout
+        assert "CHANGELOG.md has the entry" not in step.summary
+    if title == "perf: faster":
+        errors = [
+            line for line in step.result.stdout.splitlines() if "::error::" in line
+        ]
+        assert [error.split(" is no fragment")[0] for error in errors] == [
+            '::error::"changelog.d/notes.txt"',
+            '::error::"changelog.d/my fix.md"',
+            '::error::"changelog.d/two\\nlines.md"',
+            '::error::"changelog.d/sub/x.md"',
+        ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("fragments", "code", "summary", "errors"),
+    [
+        (
+            {"dark-mode.md": FEATURE_FRAGMENT, "token.md": FIX_FRAGMENT},
+            0,
+            "The 2 fragment(s) in changelog.d/ are fine.\n",
+            [],
+        ),
+        (
+            {"dark-mode.md": FEATURE_FRAGMENT, "typo.md": "### Fixes\n\n- A fix.\n"},
+            1,
+            "The release can't take in these fragments of the changelog:\n\n"
+            "- changelog.d/typo.md: `### Fixes` is no kind of change of the changelog.",
+            [
+                "::error file=changelog.d/typo.md,title=The fragment of the changelog::"
+                "`### Fixes` is no kind of change of the changelog. Did you mean "
+                "`### Fixed`?"
+            ],
+        ),
+    ],
+)
+def test_the_changelog_check_checks_each_fragment_as_the_release_takes_it_in(
+    tmp_path: Path,
+    fragments: dict[str, str],
+    code: int,
+    summary: str,
+    errors: list[str],
+) -> None:
+    # main has the tool and the changelog; the fragments come from the pull request.
+    a_checkout_with_the_tool(tmp_path)
+    step_script = script_of(
+        changelog_check(), "Check the fragments as the release takes them in"
+    )
+    # As the step before writes it, with LF on every system.
+    (tmp_path / "listed").write_text(
+        "".join(f"changelog.d/{name}\n" for name in fragments),
+        encoding="utf-8",
+        newline="\n",
+    )
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        f'cp "{(tmp_path / "listed").as_posix()}" "$RUNNER_TEMP/fragments"\n'
+        + step_script,
+        {
+            f"repos/o/r/contents/changelog.d/{name}?ref=abc123": text
+            for name, text in fragments.items()
+        },
+        HEAD_SHA="abc123",
+    )
+
+    assert step.result.returncode == code, step.result.stderr
+    assert step.summary.startswith(summary)
+    found = [
+        line for line in step.result.stdout.splitlines() if line.startswith("::error")
+    ]
+    assert len(found) == len(errors)
+    for line, error in zip(found, errors, strict=True):
+        assert line.startswith(error), line
+    assert step.calls == [
+        "api -H Accept: application/vnd.github.raw+json "
+        f"repos/o/r/contents/changelog.d/{name}?ref=abc123"
+        for name in fragments
+    ]
+
+
+def release_please_answers(branch: str, listed: list[str] | None) -> dict[str, object]:
+    """What GitHub answers the release bot: the release pull request of 1.3.0, the
+    changelog that release-please wrote on its branch, and the fragments there."""
+    answers: dict[str, object] = {
+        "pr list": [{"headRefName": RELEASE_BRANCH}],
+        f"repos/o/r/git/ref/heads/{RELEASE_BRANCH}": {"object": {"sha": "abc123"}},
+        "repos/o/r/contents/.release-please-manifest.json?ref=abc123": {".": "1.3.0"},
+        "repos/o/r/contents/CHANGELOG.md?ref=abc123": branch,
+        "graphql": {"data": {"createCommitOnBranch": {"commit": {"oid": "def456"}}}},
+    }
+    folder = "repos/o/r/contents/changelog.d?ref=abc123"
+    if listed is None:
+        answers[f"{folder}.error"] = "gh: Not Found (HTTP 404)\n"
+    else:
+        answers[folder] = [{"path": f"changelog.d/{name}"} for name in listed]
+    return answers
+
+
+def release_branch_changelog(main: str) -> str:
+    """What release-please writes on the branch: its section before the last one."""
+    index = main.index("## 1.2.2")
+    return f"{main[:index]}## [1.3.0](https://x/compare/v1.2.2...v1.3.0) (2026-10-13)\n\n### Features\n\n* a card\n\n{main[index:]}"
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("fragments", "listed", "deleted"),
+    [
+        # Every fragment that the release takes in leaves with the same commit.
+        (
+            ["a-dark-mode.md", "b-token.md"],
+            [".gitkeep", "a-dark-mode.md", "b-token.md"],
+            ["a-dark-mode.md", "b-token.md"],
+        ),
+        # Only those that the branch still has.
+        (
+            ["a-dark-mode.md", "b-token.md"],
+            [".gitkeep", "a-dark-mode.md"],
+            ["a-dark-mode.md"],
+        ),
+        # A branch without the folder has none, and without fragments nobody asks.
+        (["a-dark-mode.md"], None, []),
+        ([], [".gitkeep"], []),
+    ],
+)
+def test_the_release_bot_writes_the_fragments_into_the_release_and_deletes_them(
+    tmp_path: Path, fragments: list[str], listed: list[str] | None, deleted: list[str]
+) -> None:
+    texts = {"a-dark-mode.md": FEATURE_FRAGMENT, "b-token.md": FIX_FRAGMENT}
+    a_checkout_with_the_tool(tmp_path, **{name: texts[name] for name in fragments})
+    branch = release_branch_changelog(MAIN_CHANGELOG)
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            release,
+            "Write the text of Unreleased and of the fragments into the release pull request",
+        ),
+        release_please_answers(branch, listed),
+        PR="",
+    )
+
+    assert step.result.returncode == 0, step.result.stderr
+    assert (
+        f"Writing the changelog of 1.3.0 into {RELEASE_BRANCH}." in step.result.stdout
+    )
+    mutation = json.loads(step.written["input"])["variables"]["input"]
+    assert mutation["branch"] == {
+        "repositoryNameWithOwner": "o/r",
+        "branchName": RELEASE_BRANCH,
+    }
+    assert mutation["expectedHeadOid"] == "abc123"
+    assert mutation["message"] == {"headline": "chore: write the changelog of 1.3.0"}
+    changes = mutation["fileChanges"]
+    [addition] = changes["additions"]
+    assert addition["path"] == "CHANGELOG.md"
+    written = base64.b64decode(addition["contents"]).decode("utf-8")
+    assert written == release_changelog(
+        "1.3.0",
+        MAIN_CHANGELOG,
+        branch,
+        [Fragment(f"changelog.d/{name}", texts[name]) for name in fragments],
+    )
+    assert changes.get("deletions", []) == [
+        {"path": f"changelog.d/{name}"} for name in deleted
+    ]
+    asked = [call for call in step.calls if "contents/changelog.d?" in call]
+    assert len(asked) == (1 if fragments else 0)
+
+
+@WITH_JQ
+def test_the_release_bot_leaves_a_release_that_is_written_already(
+    tmp_path: Path,
+) -> None:
+    a_checkout_with_the_tool(tmp_path, **{"b-token.md": FIX_FRAGMENT})
+    branch = release_branch_changelog(MAIN_CHANGELOG)
+    fragments = [Fragment("changelog.d/b-token.md", FIX_FRAGMENT)]
+    written = release_changelog("1.3.0", MAIN_CHANGELOG, branch, fragments)
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    script = script_of(
+        release,
+        "Write the text of Unreleased and of the fragments into the release pull request",
+    )
+
+    # Written and without the fragment: nothing to do.
+    done = run_a_step_with_the_fake_gh(
+        tmp_path, script, release_please_answers(written, [".gitkeep"]), PR=""
+    )
+    assert done.result.returncode == 0, done.result.stderr
+    assert "The changelog of 1.3.0 is up to date." in done.result.stdout
+    assert "input" not in done.written
+
+
+@WITH_JQ
+def test_the_release_bot_stops_when_it_cannot_see_the_fragments_of_the_branch(
+    tmp_path: Path,
+) -> None:
+    a_checkout_with_the_tool(tmp_path, **{"b-token.md": FIX_FRAGMENT})
+    answers = release_please_answers(release_branch_changelog(MAIN_CHANGELOG), [])
+    answers.pop("repos/o/r/contents/changelog.d?ref=abc123")
+    answers["repos/o/r/contents/changelog.d?ref=abc123.error"] = (
+        "gh: Server Error (HTTP 502)\n"
+    )
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            release,
+            "Write the text of Unreleased and of the fragments into the release pull request",
+        ),
+        answers,
+        PR="",
+    )
+
+    # Rather no commit than a release whose fragments stay for the next one as well.
+    assert step.result.returncode != 0
+    assert "HTTP 502" in step.result.stderr
+    assert "input" not in step.written
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_gets_the_folder_of_the_fragments(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    assert (project / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for text in (
+        "in a new file in `changelog.d/` named after your branch",
+        "### The changelog",
+        "`python3 .github/blueprint.py fragments` checks them",
+    ):
+        assert text in contributing, text
+    template = (project / ".github/pull_request_template.md").read_text(
+        encoding="utf-8"
+    )
+    assert "a new file in `changelog.d/`" in template
+    # The blueprint follows its template.
+    assert (ROOT / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
 
 
 def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
