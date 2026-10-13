@@ -27,6 +27,7 @@ from blueprint.update import (
     LABEL,
     NOTICE,
     Change,
+    Outdated,
     answered_release,
     lost_modes,
     mode_command,
@@ -288,6 +289,8 @@ class FakeGitHub:
                 "auto_merge": None,
             }
             return 201, self.pull_json(created)
+        if method == "GET":
+            return 200, self.pull_json(int(number or 0))
         assert method == "PATCH"
         self.pulls[int(number or 0)].update(body)
         return 200, self.pull_json(int(number or 0))
@@ -296,13 +299,16 @@ class FakeGitHub:
         self, method: str, body: Any, number: str, size: str, page: str
     ) -> tuple[int, Any]:
         head = self.refs[self.pulls[int(number)]["head"]]
-        shas = self.git("rev-list", "--reverse", f"{self.refs['main']}..{head}").split()
+        lines = self.git(
+            "rev-list", "--reverse", "--parents", f"{self.refs['main']}..{head}"
+        ).splitlines()
         commits = [
             {
                 "sha": sha,
                 "author": {"login": self.authors[sha]} if sha in self.authors else None,
+                "parents": [{"sha": parent} for parent in parents],
             }
-            for sha in shas
+            for sha, *parents in (line.split() for line in lines)
         ]
         return self.page(commits, size, page)
 
@@ -369,7 +375,7 @@ class FakeGitHub:
         return 200, {"ref": f"refs/heads/{name}"}
 
     def contents(self, method: str, body: Any, path: str, ref: str) -> tuple[int, Any]:
-        text = self.git("show", f"{ref}:{path}") + "\n"
+        text = self.git("show", f"{self.refs.get(ref, ref)}:{path}") + "\n"
         # GitHub breaks its Base64 into lines.
         encoded = base64.encodebytes(text.encode()).decode()
         return 200, {"content": encoded, "encoding": "base64"}
@@ -477,8 +483,41 @@ def push(github: FakeGitHub, author: str | None, *, release: str = "") -> str:
     return commit
 
 
+def merge_main(
+    github: FakeGitHub, author: str, files: Mapping[str, str] | None = None
+) -> str:
+    """A merge of main into the branch of the update by the author's account, as the
+    button *Update branch* makes one, with the files changed in the merge."""
+    head = github.refs[BRANCH]
+    main = github.refs["main"]
+    # The tree that Git merges, with markers where the two conflict.
+    merged = subprocess.run(
+        ["git", "merge-tree", "--write-tree", head, main],
+        cwd=github.root,
+        capture_output=True,
+        check=False,
+    ).stdout.split()[0]
+
+    def apply() -> None:
+        for name, content in (files or {}).items():
+            sha = github.git("hash-object", "-w", "--stdin", data=content.encode())
+            github.git("update-index", "--add", "--cacheinfo", f"100644,{sha},{name}")
+
+    tree = github.write_tree(merged.decode(), apply)
+    commit = github.git(
+        "commit-tree", tree, "-p", head, "-p", main, "-m", "Merge branch 'main'"
+    )
+    github.authors[commit] = author
+    github.refs[BRANCH] = commit
+    return commit
+
+
 def requests(github: FakeGitHub, method: str, path: str) -> int:
     return github.calls.count((method, f"repos/{REPO}/{path}"))
+
+
+def gh_calls(github: FakeGitHub) -> list[str]:
+    return [call for kind, call in github.calls if kind == "gh"]
 
 
 # --------------------------------------------------------------------------- one pull request
@@ -702,6 +741,99 @@ def test_a_merge_of_the_branch_bot_while_the_bot_works_is_replaced(
     assert 1 not in github.comments
 
 
+def test_a_merge_of_main_by_the_maintainer_holds_nothing_to_keep(
+    github: FakeGitHub,
+) -> None:
+    # With BLUEPRINT_AUTOMERGE set to off, the branch bot leaves the pull request
+    # alone, and the maintainer brings it up to date with the button *Update branch*.
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github, automerge=False)
+    fresh_checkout(github, {"src.py": "print('new on main')\n"})
+    merged = merge_main(github, MAINTAINER)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    assert run(github, automerge=False) == (
+        "Moved on #1: the blueprint's v1.0.0 to v1.2.0."
+    )
+
+    assert github.refs[BRANCH] != merged
+    assert 1 not in github.comments
+
+
+@pytest.mark.parametrize(
+    ("main", "merge"),
+    [
+        # A change of its own in the merge.
+        ({"src.py": "print('new on main')\n"}, {"src.py": "print('by hand')\n"}),
+        # The resolution of a conflict with main.
+        ({"README.md": "# Demo of main\n"}, {"README.md": "# Demo of main, updated\n"}),
+    ],
+)
+def test_a_merge_with_changes_of_the_maintainer_is_theirs(
+    github: FakeGitHub, main: dict[str, str], merge: dict[str, str]
+) -> None:
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    fresh_checkout(github, main)
+    merged = merge_main(github, MAINTAINER, merge)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    assert run(github).startswith("#1 has commits of its own")
+
+    assert github.refs[BRANCH] == merged
+
+
+def test_a_pull_request_that_merges_while_the_bot_works_stays_merged(
+    github: FakeGitHub,
+) -> None:
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    def merge() -> None:
+        # Auto-merge squashes the update before, and GitHub deletes its branch.
+        head = github.refs[BRANCH]
+        github.refs["main"] = github.make_commit(
+            github.git("rev-parse", f"{head}^{{tree}}"),
+            [github.refs["main"]],
+            "chore: update to the blueprint v1.1.0 (#1)",
+        )
+        github.set_ref(BRANCH, None)
+
+    github.on_commit = merge
+
+    # The commit, made on the main before, would bring v1.1.0 a second time.
+    with pytest.raises(Outdated) as stopped:
+        run(github)
+
+    assert str(stopped.value) == (
+        "main moved from the blueprint's v1.0.0 to v1.1.0 while the bot worked; start"
+        " it again to bring v1.2.0."
+    )
+
+    assert BRANCH not in github.refs
+    assert github.pulls[1]["title"] == "chore: update to the blueprint v1.1.0"
+    assert list(github.pulls) == [1]
+
+
+def test_a_pull_request_closed_while_the_bot_works_stays_closed(
+    github: FakeGitHub,
+) -> None:
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    first = github.refs[BRANCH]
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+    github.on_commit = lambda: github.pulls[1].update(state="closed")
+
+    with pytest.raises(Outdated, match="#1 closed while the bot worked"):
+        run(github)
+
+    assert github.refs[BRANCH] == first
+    assert github.pulls[1]["title"] == "chore: update to the blueprint v1.1.0"
+
+
 # --------------------------------------------------------------------------- conflicts
 
 
@@ -744,6 +876,21 @@ def test_conflicts_turn_auto_merge_off_and_label_the_pull_request(
     assert pull["auto_merge"] is not None
 
 
+def test_markers_left_in_the_pull_request_never_merge(github: FakeGitHub) -> None:
+    stage(github.root, "v1.1.0", {"README.md": CONFLICT})
+    run(github)
+    # Switched on again by hand, with the markers still in the files.
+    github.pulls[1]["auto_merge"] = {"merge_method": "squash"}
+    fresh_checkout(github)
+    stage(github.root, "v1.1.0", {"README.md": CONFLICT})
+
+    assert run(github).startswith("Kept #1")
+
+    assert github.pulls[1]["auto_merge"] is None
+    assert github.pulls[1]["labels"] == [LABEL]
+    assert gh_calls(github) == [f"pr merge 1 --repo {REPO} --disable-auto"]
+
+
 def test_a_new_pull_request_with_conflicts_waits(github: FakeGitHub) -> None:
     stage(github.root, "v1.1.0", {"README.md": CONFLICT, "old.txt": None})
 
@@ -761,6 +908,70 @@ def test_automerge_off_leaves_the_merge_to_the_maintainer(github: FakeGitHub) ->
 
     assert github.pulls[1]["auto_merge"] is None
     assert not [call for call in github.calls if call[0] == "gh"]
+
+
+def test_automerge_off_holds_the_open_pull_request_too(github: FakeGitHub) -> None:
+    # Opened while BLUEPRINT_AUTOMERGE was on; the maintainer has set it to off since.
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+    github.calls.clear()
+
+    assert run(github, automerge=False) == (
+        "Moved on #1: the blueprint's v1.0.0 to v1.2.0."
+    )
+
+    assert github.pulls[1]["auto_merge"] is None
+    # Before the branch moves, so that the new changes can't merge on their own.
+    assert github.calls.index(
+        ("gh", f"pr merge 1 --repo {REPO} --disable-auto")
+    ) < github.calls.index(("PATCH", f"repos/{REPO}/git/refs/heads/{BRANCH}"))
+
+    # The weekly run with the same release leaves auto-merge to the maintainer, who
+    # may switch it on for this update.
+    github.pulls[1]["auto_merge"] = {"merge_method": "squash"}
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    assert run(github, automerge=False).startswith("Kept #1")
+
+    assert github.pulls[1]["auto_merge"] is not None
+    assert gh_calls(github) == [f"pr merge 1 --repo {REPO} --disable-auto"]
+
+
+def test_auto_merge_that_the_maintainer_turned_off_stays_off(
+    github: FakeGitHub,
+) -> None:
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    github.pulls[1]["auto_merge"] = None
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    assert run(github) == "Moved on #1: the blueprint's v1.0.0 to v1.2.0."
+
+    assert github.pulls[1]["auto_merge"] is None
+    assert gh_calls(github) == [f"pr merge 1 --repo {REPO} --auto --squash"]
+
+
+def test_conflicts_never_merge_when_the_bot_stops_after_the_move(
+    github: FakeGitHub,
+) -> None:
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": CONFLICT})
+    github.fail[("PATCH", "pulls/1")] = 500
+
+    with pytest.raises(GitHubError, match="GitHub answered 500"):
+        run(github)
+
+    # The markers are on the branch, but auto-merge went before them.
+    assert git(github.root, "show", f"{github.refs[BRANCH]}:README.md") == (
+        CONFLICT.rstrip("\n")
+    )
+    assert github.pulls[1]["auto_merge"] is None
 
 
 # --------------------------------------------------------------------------- modes
@@ -901,11 +1112,50 @@ def test_the_command_line(
 ) -> None:
     stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
     arguments = ["--repo", REPO, "update-commit", "--app", APP, "--automerge", "off"]
+    # A repository made from a fork of the blueprint links the fork's release.
+    arguments += ["--source", "Someone/blueprint"]
 
     assert cli.main(arguments, api=Api(github), root=github.root) == 0
 
     assert capsys.readouterr().out == "Opened #1: the blueprint's v1.0.0 to v1.1.0.\n"
     assert github.pulls[1]["auto_merge"] is None
+    assert (
+        "[v1.1.0](https://github.com/Someone/blueprint/releases/tag/v1.1.0)"
+        in github.pulls[1]["body"]
+    )
+
+
+def test_an_update_of_main_meanwhile_needs_a_new_run(
+    github: FakeGitHub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated\n"})
+
+    def update_by_hand() -> None:
+        main = github.refs["main"]
+        sha = github.git(
+            "hash-object", "-w", "--stdin", data=answers("v1.1.0").encode()
+        )
+
+        def apply() -> None:
+            github.git(
+                "update-index", "--add", "--cacheinfo", f"100644,{sha},{ANSWERS}"
+            )
+
+        github.refs["main"] = github.make_commit(
+            github.write_tree(main, apply), [main], "Update by hand"
+        )
+
+    github.on_commit = update_by_hand
+    arguments = ["--repo", REPO, "update-commit", "--app", APP]
+
+    assert cli.main(arguments, api=Api(github), root=github.root) == 2
+
+    assert capsys.readouterr().err == (
+        "blueprint.py: main moved from the blueprint's v1.0.0 to v1.1.0 while the bot"
+        " worked; start it again to bring v1.2.0.\n"
+    )
+    assert BRANCH not in github.refs
+    assert github.pulls == {}
 
 
 def test_the_command_line_names_what_failed(

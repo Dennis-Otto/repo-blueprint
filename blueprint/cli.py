@@ -22,7 +22,7 @@ from blueprint.coverage_comment import Coverage, coverage_comment
 from blueprint.github import Api, GitHubError, current_repo
 from blueprint.notices import third_party_notices
 from blueprint.settings import CONFIG, Settings, apply, check, describe
-from blueprint.update import update_pull_request
+from blueprint.update import SOURCE, Outdated, update_pull_request
 from blueprint.vex import openvex
 
 
@@ -174,6 +174,12 @@ def main(
         default="manual",
         help="names the branch that a commit without the modes of the files needs",
     )
+    update_parser.add_argument(
+        "--source",
+        default=SOURCE,
+        help="the blueprint on GitHub as OWNER/NAME, a fork perhaps, whose release the "
+        "pull request links",
+    )
     arguments = parser.parse_args(argv)
 
     if arguments.command == "coverage":
@@ -200,6 +206,7 @@ def main(
                     app=arguments.app,
                     automerge=arguments.automerge != "off",
                     run_id=arguments.run_id,
+                    source=arguments.source,
                 )
             )
             return 0
@@ -226,6 +233,6 @@ def main(
         if arguments.action == "check":
             print("python3 blueprint.py settings apply sets what the API can set.")
         return 2 if refused else 1
-    except (GitHubError, OSError, tomllib.TOMLDecodeError) as error:
+    except (GitHubError, OSError, tomllib.TOMLDecodeError, Outdated) as error:
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2

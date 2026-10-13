@@ -62,17 +62,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The blueprint that Copier updates from, as the answers name it: a fork
+          # perhaps, which has releases of its own.
+          source="$(sed -n 's/^_src_path: *//p' .copier-answers.yml)"
+          source="${source#gh:}"
+          source="${source#https://github.com/}"
+          source="${source%.git}"
+          if [[ ! "$source" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            source=Dennis-Otto/repo-blueprint
+          fi
           # Not the newest tag: the Release workflow pushes the tag before it publishes
           # the release, which may stay a draft or fail.
-          tag="$(gh release view --repo Dennis-Otto/repo-blueprint --json tagName --jq .tagName)"
+          tag="$(gh release view --repo "$source" --json tagName --jq .tagName)"
           if [[ -z "$tag" ]]; then
-            echo "::error::The blueprint has no published release to update to."
+            echo "::error::The blueprint $source has no published release to update to."
             exit 1
           fi
+          echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Update to the latest release of the blueprint
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          SOURCE: ${{ steps.release.outputs.source }}
           TAG: ${{ steps.release.outputs.tag }}
           APP: ${{ steps.app.outputs.app-slug }}
           AUTOMERGE: ${{ vars.BLUEPRINT_AUTOMERGE }}
@@ -98,4 +109,5 @@ jobs:
           # request stays open; it leaves a branch with commits of anyone else alone.
           # Conflicts turn auto-merge off and add the label merge-conflict.
           python3 "$tool/blueprint.py" --repo "$GITHUB_REPOSITORY" update-commit \
-            --app "${APP}[bot]" --automerge "$AUTOMERGE" --run-id "$GITHUB_RUN_ID"
+            --app "${APP}[bot]" --automerge "$AUTOMERGE" --run-id "$GITHUB_RUN_ID" \
+            --source "$SOURCE"

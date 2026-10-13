@@ -21,7 +21,8 @@ from pathlib import Path
 from blueprint.github import Api, GitHubError, Json
 
 BRANCH = "blueprint/update"
-SOURCE = "https://github.com/Dennis-Otto/repo-blueprint"
+# The blueprint on GitHub, unless the answers name a fork of it.
+SOURCE = "Dennis-Otto/repo-blueprint"
 ANSWERS = ".copier-answers.yml"
 # The label of the branch bot for a pull request that needs a person to merge it.
 LABEL = "merge-conflict"
@@ -91,6 +92,7 @@ def staged_changes(root: Path) -> list[Change]:
 class Update:
     """What `copier update` staged in the checkout of main."""
 
+    source: str
     base: str
     base_tree: str
     tree: str
@@ -102,9 +104,10 @@ class Update:
     conflicts: tuple[str, ...]
 
     @classmethod
-    def read(cls, root: Path) -> Update:
+    def read(cls, root: Path, source: str = SOURCE) -> Update:
         changes = staged_changes(root)
         return cls(
+            source=source,
             base=git(root, "rev-parse", "HEAD").decode().strip(),
             base_tree=git(root, "rev-parse", "HEAD^{tree}").decode().strip(),
             tree=git(root, "write-tree").decode().strip(),
@@ -124,7 +127,7 @@ class Update:
 
     @property
     def release(self) -> str:
-        return f"{SOURCE}/releases/tag/{self.after}"
+        return f"https://github.com/{self.source}/releases/tag/{self.after}"
 
     @property
     def summary(self) -> str:
@@ -176,13 +179,33 @@ def branch_head(api: Api, repo: str) -> str | None:
     return str(ref["object"]["sha"]) if ref else None
 
 
-def strangers(api: Api, repo: str, pull: Json, app: str) -> list[Json]:
+def clean_merge(root: Path, commit: Json) -> bool:
+    """A merge that only brings main into the branch, as the button *Update branch*
+    of a pull request makes one: its tree is the one that Git merges by itself. A merge
+    with a resolution or a change of its own, or one that the checkout doesn't have
+    yet, is a maintainer's."""
+    parents = [str(parent["sha"]) for parent in commit.get("parents") or []]
+    if len(parents) != 2:
+        return False
+    try:
+        merged = git(root, "merge-tree", "--write-tree", *parents).split()[0]
+        made = git(root, "rev-parse", f"{commit['sha']}^{{tree}}").strip()
+    except OSError:
+        return False
+    return merged == made
+
+
+def strangers(api: Api, repo: str, root: Path, pull: Json, app: str) -> list[Json]:
     """The commits of the pull request that the release app didn't make: those of a
     maintainer, which the bot never overwrites. The merges of the branch bot are the
-    app's."""
+    app's, and a merge of main that changes nothing else holds nothing to keep: the
+    bot makes the update on the newest main anyway."""
     commits = pages(api, f"repos/{repo}/pulls/{pull['number']}/commits")
     return [
-        commit for commit in commits if (commit.get("author") or {}).get("login") != app
+        commit
+        for commit in commits
+        if (commit.get("author") or {}).get("login") != app
+        and not clean_merge(root, commit)
     ]
 
 
@@ -322,6 +345,24 @@ def make_commit(
     return commit, lost_modes(update.changes)
 
 
+class Outdated(Exception):
+    """Main or the pull request changed while the bot worked, so that its commit,
+    made on the main before, no longer fits: a new run makes it again."""
+
+
+def check_main(api: Api, repo: str, update: Update) -> None:
+    """Main still has the release that the update started from: an update merged
+    meanwhile, such as the one of the open pull request, would conflict with the
+    commit, which brings the same changes on the main before it."""
+    answers = api.get(f"repos/{repo}/contents/{ANSWERS}?ref=main") or {}
+    now = answered_release(base64.b64decode(answers.get("content", "")).decode())
+    if now != update.before:
+        raise Outdated(
+            f"main moved from the blueprint's {update.before} to {now or 'none'} while"
+            f" the bot worked; start it again to bring {update.after}."
+        )
+
+
 def move_branch(api: Api, repo: str, commit: str, exists: bool) -> None:
     """Point blueprint/update at the commit. From the update before, the branch moves
     straight to the new one: a pull request whose branch is main for a moment closes."""
@@ -423,52 +464,82 @@ def write_pull(
     return int(created["number"])
 
 
+def hold(api: Api, repo: str, pull: Json) -> Json:
+    """Turn the auto-merge of the pull request off; the answer is the pull request
+    without it."""
+    gh(api, "pr", "merge", str(pull["number"]), "--repo", repo, "--disable-auto")
+    return {**pull, "auto_merge": None}
+
+
 def settle(
     api: Api, repo: str, number: int, pull: Json | None, update: Update, automerge: bool
 ) -> None:
-    """Conflicts turn auto-merge off and label the pull request: no check reads every
-    file, and markers in one of them would merge."""
+    """Conflicts turn auto-merge off, before they label the pull request: no check
+    reads every file, and markers in one of them would merge. Without conflicts, a new
+    pull request merges itself, and an open one gets its auto-merge back only when it
+    waited for conflicts: whoever else turned it off decides."""
+    merging = bool(pull and pull.get("auto_merge"))
     labels = {label["name"] for label in (pull or {}).get("labels", [])}
-    merging = bool((pull or {}).get("auto_merge"))
     if update.conflicts:
+        if merging:
+            hold(api, repo, pull)
         if LABEL not in labels:
             api.post(f"repos/{repo}/issues/{number}/labels", {"labels": [LABEL]})
-        if merging:
-            gh(api, "pr", "merge", str(number), "--repo", repo, "--disable-auto")
         return
     if LABEL in labels:
         label = urllib.parse.quote(LABEL, safe="")
         api.delete(f"repos/{repo}/issues/{number}/labels/{label}")
-    if automerge and not merging:
+    if automerge and not merging and (pull is None or LABEL in labels):
         gh(api, "pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
 
 
 def update_pull_request(
-    api: Api, repo: str, root: Path, *, app: str, automerge: bool, run_id: str
+    api: Api,
+    repo: str,
+    root: Path,
+    *,
+    app: str,
+    automerge: bool,
+    run_id: str,
+    source: str = SOURCE,
 ) -> str:
     """Commit what `copier update` staged in the checkout at root and bring its pull
     request to it; the answer says what happened."""
-    update = Update.read(root)
+    update = Update.read(root, source)
     if not update.changes:
         return f"The blueprint's {update.after} changes nothing in this repository."
     pull = open_pull(api, repo)
     modes: list[Change] = []
     if pull is None:
         commit, modes = make_commit(api, repo, root, update, run_id)
+        check_main(api, repo, update)
         move_branch(api, repo, commit, branch_head(api, repo) is not None)
         done = "Opened"
-    elif strangers(api, repo, pull, app):
+    elif strangers(api, repo, root, pull, app):
         return leave_alone(api, repo, pull, update)
     elif head_tree(api, repo, pull) == update.tree:
         done = "Kept"
     else:
+        number = pull["number"]
         commit, modes = make_commit(api, repo, root, update, run_id)
-        # The branch bot may have brought the branch up to date meanwhile, or a
-        # maintainer may have pushed to it.
+        # Meanwhile the pull request may have merged or closed, the branch bot may
+        # have brought its branch up to date, or a maintainer may have pushed to it.
+        check_main(api, repo, update)
         head = branch_head(api, repo)
-        if head != pull["head"]["sha"] and strangers(api, repo, pull, app):
+        state = (api.get(f"repos/{repo}/pulls/{number}") or {}).get("state")
+        if head is None or state != "open":
+            raise Outdated(
+                f"#{number} closed while the bot worked; start it again to bring"
+                f" {update.after}."
+            )
+        if head != pull["head"]["sha"] and strangers(api, repo, root, pull, app):
             return leave_alone(api, repo, pull, update)
-        move_branch(api, repo, commit, head is not None)
+        # New changes wait with conflicts, and with BLUEPRINT_AUTOMERGE set to off,
+        # whoever switched auto-merge on for the update before. It goes before the
+        # branch moves, so that nothing merges should the bot stop after the move.
+        if pull.get("auto_merge") and (update.conflicts or not automerge):
+            pull = hold(api, repo, pull)
+        move_branch(api, repo, commit, exists=True)
         done = "Moved on"
     number = write_pull(api, repo, pull, update, modes)
     settle(api, repo, number, pull, update, automerge)
