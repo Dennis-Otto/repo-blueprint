@@ -73,16 +73,16 @@ flowchart TB
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
 | **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates, the weekly refresh of the lock files and releases of dependency updates merge themselves once every check passes. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Coverage** | one comment on every pull request with the coverage of its tests against that of `main`, file by file | `after-checks.yml` |
-| **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a report, never a failure | `mutation.yml`: mutmut, Infection |
+| **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
 | **Flaky tests** | a test run that fails runs its failed jobs once more; a job that passes then is reported as flaky in one issue | `after-checks.yml` |
 | **Cancelled checks** | a run of a required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
 | **Fast checks** | a check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python checks the `main` of a Python project after every change and every week | the triggers and path filters of the workflows, `newest-python.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide with the coding standards and the rule that every change brings its tests, code of conduct, security policy with how to verify a release and an assurance case, the security design of the software (`docs/security.md`), support, governance with the roles and the continuity of the project, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
-| **Website** | the documentation in `docs/` as a website with search and a light and a dark theme, in English and, with German pages such as `index.de.md` next to the English ones, in German: every pull request builds it strictly, every change of `main` publishes it on GitHub Pages | MkDocs with the Material theme, `mkdocs.yml`, `docs.yml` |
+| **Website** | the documentation in `docs/` as a website with search and a light and a dark theme, in English and, with German pages such as `index.de.md` next to the English ones, in German: every pull request builds it strictly, and so does `scripts/check.sh` once the tools of its preview are installed, on Linux, macOS and Windows; every change of `main` publishes it on GitHub Pages | MkDocs with the Material theme, `mkdocs.yml`, `docs.yml` |
 | **Settings** | the settings of the repository as code: merges, rulesets, security, Actions, environments, variables, labels, GitHub Pages, and every file of the community standards of GitHub; the settings bot applies them after every change and every week | `.github/repository.toml` and `blueprint.py` |
 | **Clean-up** | every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month | `cleanup.yml` |
-| **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
+| **Development** | a dev container for VS Code and GitHub Codespaces with the tools of the checks and of the website, and a hook that runs them before every push | `.devcontainer/`, `.githooks/pre-push` |
 | **Updates** | right after every release of the blueprint, and every week, the blueprint bot runs `copier update` and opens a pull request | `blueprint-update.yml` |
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
 | **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it | `upstream.yml` |
@@ -166,6 +166,47 @@ flowchart TB
 - **After a merge:** `main` takes a pull request only when it is up to date with it, so the merge gives `main` the files that the checks of the pull request passed. `main` runs only the tests, whose coverage the coverage bot compares every pull request with, the analyses that code scanning compares with, and what publishes, such as the website and the release. Lint runs in the pull requests, the secret scan and the fuzzing there and every week, and the SBOM every week; every release has an SBOM of its own.
 - **The release pull request** changes only the changelog and the version, which can't change what a scanner finds. In the blueprint, the required check *variants* stands for the variants and updates of every kind of project: it passes when each passed, or when none had to run, as in the release pull request.
 - **The newest Python**, beta included, runs the checks of a Python project after every change of `main` and every week, in a workflow of its own that keeps the CI of `main` green. A new Python breaks every pull request alike, and none waits for it. A failure keeps an issue open, which the weekly run closes once the checks pass again.
+
+### Mutation tests
+
+The mutation tests show the lines that the tests run but don't check: every Saturday they change the code in thousands of small ways, the mutants, and run the tests that cover each one. A mutant that no test notices survives.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the mutation tests run
+    accDescr: Every Saturday, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. mutmut changes the Python in a copy of the repository and leaves out the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. When mutants ran, the summary shows the score and the surviving mutants, the artifact keeps them and the dashboard shows the score. A run that measured nothing fails and shows the last words of the tool.
+
+    start["Every Saturday · on demand<br>a pull request that changes<br><code>mutation.yml</code> or mutmut"]
+    python["mutmut<br>the Python, in a copy in <code>mutants/</code><br>without the tests marked <code>mutation_unsafe</code>"]
+    php["Infection<br>the PHP of a Nextcloud app<br>with <code>tests/bootstrap.php</code>"]
+    score["The summary and the artifact<br>the score · the surviving mutants"]
+    dashboard["The dashboard<br><i>mutants caught</i>"]
+    fail["The run fails<br>with the last words of the tool"]
+
+    start --> python
+    start --> php
+    python -- "mutants ran" --> score
+    php -- "mutants ran" --> score
+    score --> dashboard
+    python -. "nothing measured" .-> fail
+    php -. "nothing measured" .-> fail
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class python,php bot
+    class score,dashboard done
+```
+
+- **The score is the share of the mutants that a test noticed,** among those of the code that the tests run: for mutmut the killed among the killed and the survived, for Infection its *Covered Code MSI*. The dashboard shows it as *mutants caught*.
+- **A low score fails nothing,** not even below a minimum that the project's own configuration sets, but a run in which no mutant ran does, with the end of the output of mutmut or Infection in its summary: a broken configuration shows up in the week it breaks, not as an empty dashboard.
+- **A pull request that changes how the mutants run,** `mutation.yml` or the pinned mutmut, tries them, mutmut for a quarter of an hour, and shows a defect as a red check before the weekly run. The check isn't required, so a pull request that merges itself, such as an update of mutmut, doesn't wait for it: its red check is a warning to read.
+- **mutmut runs the tests in a copy of the repository,** `mutants/`, with the changed code and without Git. A test that can't work there, because it reads the code as text or asks Git, gets the marker `@pytest.mark.mutation_unsafe`, and the mutation tests leave it out; the `pyproject.toml` of a new Python project registers the marker.
+- **A configuration of the project wins:** a `[tool.mutmut]` table in `pyproject.toml` or a `[mutmut]` section in `setup.cfg` for mutmut, an `infection.json5` for Infection. Without one, mutmut mutates `custom_components/`, `src/` or the modules and packages of the root, and Infection mutates `lib/` on PHP 8.3, with `tests/bootstrap.php`, which loads the classes of Nextcloud.
 
 ## Kinds of projects
 

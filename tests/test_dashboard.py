@@ -211,12 +211,33 @@ def zipped(files: dict[str, str]) -> bytes:
 def successful(workflow: str) -> str:
     return (
         f"repos/Dennis-Otto/demo/actions/workflows/{workflow}/runs"
-        "?branch=main&status=success&per_page=1&exclude_pull_requests=true"
+        "?branch=main&status=success&per_page=10&exclude_pull_requests=true"
     )
 
 
 HEALTH: dict[str, tuple[int, Any]] = {
-    successful("ci.yml"): (200, {"workflow_runs": [{"id": 11}]}),
+    # A pull request from the main of a fork runs on a branch of that name too; it
+    # tells nothing about main.
+    successful("ci.yml"): (
+        200,
+        {
+            "workflow_runs": [
+                {
+                    "id": 10,
+                    "event": "pull_request",
+                    "run_started_at": "2026-10-06T09:00:00Z",
+                    "updated_at": "2026-10-06T10:00:00Z",
+                },
+                {
+                    "id": 11,
+                    "event": "push",
+                    "run_started_at": "2026-10-06T10:00:00Z",
+                    "updated_at": "2026-10-06T10:04:00Z",
+                },
+                {"run_started_at": None, "updated_at": "2026-10-06T10:04:00Z"},
+            ]
+        },
+    ),
     "repos/Dennis-Otto/demo/actions/runs/11/artifacts": (
         200,
         {
@@ -227,7 +248,19 @@ HEALTH: dict[str, tuple[int, Any]] = {
             ]
         },
     ),
-    successful("mutation.yml"): (200, {"workflow_runs": [{"id": 22}]}),
+    successful("mutation.yml"): (
+        200,
+        {
+            "workflow_runs": [
+                {"id": 21, "event": "pull_request_target"},
+                {"id": 22, "event": "workflow_dispatch"},
+            ]
+        },
+    ),
+    "repos/Dennis-Otto/demo/actions/runs/21/artifacts": (
+        200,
+        {"artifacts": [{"id": 5, "name": "mutation"}]},
+    ),
     "repos/Dennis-Otto/demo/actions/runs/22/artifacts": (
         200,
         {"artifacts": [{"id": 4, "name": "mutation"}]},
@@ -270,19 +303,6 @@ HEALTH: dict[str, tuple[int, Any]] = {
         ],
     ),
     "repos/Dennis-Otto/demo/issues/7/comments?per_page=30": (200, []),
-    "repos/Dennis-Otto/demo/actions/workflows/ci.yml/runs"
-    "?branch=main&status=success&per_page=10&exclude_pull_requests=true": (
-        200,
-        {
-            "workflow_runs": [
-                {
-                    "run_started_at": "2026-10-06T10:00:00Z",
-                    "updated_at": "2026-10-06T10:04:00Z",
-                },
-                {"run_started_at": None, "updated_at": "2026-10-06T10:04:00Z"},
-            ]
-        },
-    ),
 }
 
 
@@ -313,6 +333,19 @@ def test_a_repository_without_reports_has_no_health_values() -> None:
         (
             {"build/infection-summary.log": "Mutation Score Indicator (MSI): 81.5%\n"},
             81.5,
+        ),
+        # The artifact of a Nextcloud app: the output of Infection next to its logs.
+        # Its score is that of the code that the tests run, as that of mutmut, which
+        # leaves out the mutants that no test runs.
+        (
+            {
+                "infection-summary.log": "Total: 40\n\nKilled by Test Framework: 30\n",
+                "infection-output.log": "Metrics:\n"
+                "         Mutation Score Indicator (MSI): 75%\n"
+                "         Mutation Code Coverage: 87%\n"
+                "         Covered Code MSI: 86%\n",
+            },
+            86.0,
         ),
         ({"results.txt": "nothing ran\n"}, None),
         ({}, None),
