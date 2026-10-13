@@ -1048,6 +1048,9 @@ def test_copier_updates_without_the_maintenance_of_git_in_the_background(
         assert all(setting in step for setting in settings), name
 
 
+# It starts the tool, which in the copy of the mutation tests is the code with the
+# mutants, and the variables of mutmut switch them in that process too.
+@pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_blueprint_bot_keeps_one_pull_request(
     projects: dict[str, Path], kind: str
