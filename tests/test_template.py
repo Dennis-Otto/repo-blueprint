@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import configparser
 import hashlib
 import json
@@ -23,6 +24,7 @@ import pytest
 from copier import run_copy
 from shell import BASH, in_bash
 
+from blueprint.changelog import Fragment, release_changelog
 from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
@@ -1327,6 +1329,7 @@ def a_pull_request_on_a_newer_main(
         "docs/guide.md",
         "docs/old.md",
         "CHANGELOG.md",
+        "changelog.d/old.md",
         "lychee.toml",
     ):
         (repository / name).parent.mkdir(parents=True, exist_ok=True)
@@ -1427,6 +1430,14 @@ EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
         ),
         # The changelog alone is no document to check, and neither is code.
         ({"CHANGELOG.md": "changed\n", "src/app.py": "\n"}, "pull_request", {}),
+        # Nor is a fragment of the changelog, which no document links to.
+        ({"changelog.d/dark-mode.md": "### Features\n"}, "pull_request", {}),
+        ({"changelog.d/old.md": None}, "pull_request", {}),
+        (
+            {"changelog.d/dark-mode.md": "x\n", "docs/guide.md": "changed\n"},
+            "pull_request",
+            {"files": "'./docs/guide.md' "},
+        ),
         # New rules apply to every document.
         (
             {"lychee.toml": "max_retries = 5\n", "README.md": "x\n"},
@@ -1694,6 +1705,8 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         ".devcontainer",
         ".githooks",
         ".lycheeignore",
+        # The fragments of the changelog, which the release takes into CHANGELOG.md.
+        "changelog.d",
         "lychee.toml",
         "mkdocs.yml",
         "screenshots",
@@ -2200,7 +2213,10 @@ def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothin
         result.stdout,
         re.MULTILINE,
     )
-    assert f"\n+- Supports Nextcloud {newest}.\n" in result.stdout
+    # The entry in a fragment of its own, which no release conflicts with.
+    assert f"\n+++ b/changelog.d/nextcloud-{newest}.md\n" in result.stdout
+    assert f"\n+### Changed\n+\n+- Supports Nextcloud {newest}.\n" in result.stdout
+    assert "CHANGELOG.md" not in result.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -2244,6 +2260,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "docs/README.md",
         "scripts/check.sh",
         "scripts/diagrams.sh",
+        "changelog.d/.gitkeep",
     ):
         assert not matcher.match_file(updated), updated
 
@@ -4091,7 +4108,8 @@ WITH_JQ = pytest.mark.skipif(
 # The answers of gh: an API call by its path, any other command by its first two
 # words, each through jq as gh does. The jq of gh ends its lines with LF on every
 # system, the jq of Windows with CRLF. What it is given to write, it keeps by the
-# words of its command.
+# words of its command, and the input of an API call as input. An answer with the
+# suffix .error is the error of gh, which fails.
 FAKE_GH = """#!/usr/bin/env bash
 echo "$*" >> "$CALLS"
 filter=""
@@ -4101,7 +4119,8 @@ if [[ "$1" == api ]]; then
   while (($#)); do
     case "$1" in
       --jq) filter="$2"; shift 2 ;;
-      --method | -f | -F) shift 2 ;;
+      --input) cat -- "$2" >> "$WRITTEN/input"; shift 2 ;;
+      --method | -f | -F | -H) shift 2 ;;
       --paginate | --silent) shift ;;
       *) key="$1"; shift ;;
     esac
@@ -4119,7 +4138,11 @@ else
     esac
   done
 fi
-answer="$ANSWERS/$(tr '/ ' '__' <<<"$key")"
+answer="$ANSWERS/$(tr '/ ?' '___' <<<"$key")"
+if [[ -f "$answer.error" ]]; then
+  cat "$answer.error" >&2
+  exit 1
+fi
 if [[ ! -f "$answer" ]]; then
   case "$key" in
     "run rerun" | "issue comment" | "issue create") exit 0 ;;
@@ -4150,7 +4173,7 @@ def run_a_bot_after_the_checks(
     for folder in folders.values():
         folder.mkdir()
     for key, answer in answers.items():
-        (folders["answers"] / re.sub(r"[/ ]", "_", key)).write_text(
+        (folders["answers"] / re.sub(r"[/ ?]", "_", key)).write_text(
             answer if isinstance(answer, str) else json.dumps(answer),
             encoding="utf-8",
             newline="\n",
@@ -4980,7 +5003,11 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
                 "composer.lock",
                 "osv-scanner.toml",
             )
-        return path.endswith(".md") and path != "CHANGELOG.md"
+        return (
+            path.endswith(".md")
+            and path != "CHANGELOG.md"
+            and not path.startswith("changelog.d/")
+        )
 
     for path in files_of(root):
         for scanner, patterns in filters.items():
@@ -4990,7 +5017,12 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
     # request, with the changelog and the version, starts none.
     for changed in (
         ["README.md", "docs/index.md"],
-        ["CHANGELOG.md", "version.txt", ".release-please-manifest.json"],
+        [
+            "CHANGELOG.md",
+            "changelog.d/dark-mode.md",
+            "version.txt",
+            ".release-please-manifest.json",
+        ],
     ):
         for scanner, patterns in filters.items():
             expected = scanner == "links.yml" and "README.md" in changed
@@ -5699,7 +5731,7 @@ def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = release[release.index("  release-please:") : release.index("\n  assets:")]
     step = job[
-        job.index("id: resume") : job.index("- name: Write the text of Unreleased")
+        job.index("id: resume") : job.index("- name: Write the text of Unreleased and")
     ]
     assert "github.event_name == 'workflow_dispatch'" in step
     assert "--json isDraft" in step
@@ -5708,6 +5740,512 @@ def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
             line for line in job.splitlines() if line.strip().startswith(f"{output}:")
         )
         assert "steps.resume.outputs." in line, output
+
+
+# Fragments of the changelog: the check of a pull request and the release bot.
+FEATURE_FRAGMENT = "### Features\n\n- **Dark mode:** the settings follow the system.\n"
+FIX_FRAGMENT = "### Bug fixes\n\n- **Token:** stays secret.\n"
+MAIN_CHANGELOG = (
+    "# Changelog\n\n## Unreleased\n\n### Features\n\n- **Voices:** a game by voice.\n\n"
+    "## 1.2.2\n\n### Bug fixes\n\n- An older fix.\n"
+)
+RELEASE_BRANCH = "release-please--branches--main"
+
+
+class Step(NamedTuple):
+    """What a step did with the fake gh: its result, the calls of gh, its summary, its
+    outputs and what gh was given to write."""
+
+    result: subprocess.CompletedProcess[str]
+    calls: list[str]
+    summary: str
+    output: str
+    written: dict[str, str]
+
+
+def run_a_step_with_the_fake_gh(
+    tmp_path: Path, script: str, answers: dict[str, object], **variables: str
+) -> Step:
+    """Runs the script of a step in tmp_path/checkout, as GitHub runs it, with the fake
+    gh, the Python of the tests as python3, and $RUNNER_TEMP in tmp_path/temp."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir(exist_ok=True)
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    folders = {name: tmp_path / name for name in ("bin", "answers", "written", "temp")}
+    for folder in folders.values():
+        folder.mkdir()
+    for key, answer in answers.items():
+        (folders["answers"] / re.sub(r"[/ ?]", "_", key)).write_text(
+            answer if isinstance(answer, str) else json.dumps(answer),
+            encoding="utf-8",
+            newline="\n",
+        )
+    for tool, body in {
+        "gh": FAKE_GH,
+        "python3": f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+    }.items():
+        (folders["bin"] / tool).write_text(body, encoding="utf-8", newline="\n")
+        (folders["bin"] / tool).chmod(0o755)
+    files = {name: tmp_path / name for name in ("calls", "summary", "output")}
+    for file in files.values():
+        file.touch()
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        cwd=checkout,
+        env={
+            **os.environ,
+            "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
+            "GH_REPO": "o/r",
+            "RUNNER_TEMP": str(folders["temp"]),
+            "GITHUB_STEP_SUMMARY": str(files["summary"]),
+            "GITHUB_OUTPUT": str(files["output"]),
+            "CALLS": str(files["calls"]),
+            "ANSWERS": str(folders["answers"]),
+            "WRITTEN": str(folders["written"]),
+            **variables,
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return Step(
+        result,
+        files["calls"].read_text(encoding="utf-8").splitlines(),
+        files["summary"].read_text(encoding="utf-8"),
+        files["output"].read_text(encoding="utf-8"),
+        {
+            path.name: path.read_text(encoding="utf-8")
+            for path in folders["written"].iterdir()
+        },
+    )
+
+
+def a_checkout_with_the_tool(tmp_path: Path, **fragments: str) -> Path:
+    """The checkout of main: blueprint.py, CHANGELOG.md and the fragments."""
+    checkout = tmp_path / "checkout"
+    (checkout / "blueprint").mkdir(parents=True)
+    for name in TOOL:
+        shutil.copy(ROOT / name, checkout / name)
+    (checkout / "CHANGELOG.md").write_text(MAIN_CHANGELOG, encoding="utf-8")
+    (checkout / "changelog.d").mkdir()
+    (checkout / "changelog.d/.gitkeep").touch()
+    for name, text in fragments.items():
+        (checkout / "changelog.d" / name).write_text(text, encoding="utf-8")
+    return checkout
+
+
+def pull_request_files(*files: tuple[str, str]) -> list[dict[str, str]]:
+    """The files of a pull request as the API lists them: each name and its status."""
+    return [{"filename": name, "status": status} for name, status in files]
+
+
+def changelog_check() -> str:
+    title = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
+        encoding="utf-8"
+    )
+    return job_of(title, "changelog")
+
+
+def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None:
+    job = changelog_check()
+    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    assert [
+        line.strip() for line in permissions.splitlines()[1:] if "#" not in line
+    ] == ["contents: read", "pull-requests: read"]
+    # The default branch, sparse, without credentials, and only for fragments.
+    checkout = job[job.index("      - uses: actions/checkout@") :]
+    checkout = checkout[: checkout.index("      - name:")]
+    assert "        if: steps.entry.outputs.fragments == 'true'\n" in checkout
+    assert "          persist-credentials: false\n" in checkout
+    assert (
+        "          sparse-checkout: |\n            .github\n            blueprint\n"
+        in (checkout)
+    )
+    assert "ref:" not in checkout
+    # The values of the event reach the scripts as variables only.
+    for step in (
+        "Require an entry in the changelog for a change for users",
+        "Check the fragments as the release takes them in",
+    ):
+        assert "${{" not in script_of(job, step), step
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("title", "author", "files", "code", "message", "fragments"),
+    [
+        ("docs: a guide", "User", [], 0, "changes nothing for users", []),
+        ("feat: a card", "Bot", [], 0, "Updates and bots write no entry.", []),
+        ("fix(deps): bump", "User", [], 0, "Updates and bots write no entry.", []),
+        # Whatever the type or the author, the release reads every fragment, so a
+        # pull request that needs no entry still has its fragments checked.
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/guide.md", "added"), ("CHANGELOG.md", "modified")],
+            0,
+            "changes nothing for users",
+            ["changelog.d/guide.md"],
+        ),
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/README.md", "added"), ("changelog.d/notes.txt", "added")],
+            1,
+            '::error::"changelog.d/notes.txt" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "feat: a card",
+            "Bot",
+            [("changelog.d/my fix.md", "added")],
+            1,
+            '::error::"changelog.d/my fix.md" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "chore(deps): bump",
+            "User",
+            [(f"changelog.d/f{number}.md", "added") for number in range(21)],
+            1,
+            "::error::This pull request adds 21 fragments of the changelog;",
+            [],
+        ),
+        (
+            "feat: a card",
+            "User",
+            [("CHANGELOG.md", "modified"), ("src/app.py", "added")],
+            0,
+            "CHANGELOG.md has the entry of this change.",
+            [],
+        ),
+        (
+            "fix!: the token",
+            "User",
+            [
+                ("changelog.d/token.md", "added"),
+                ("changelog.d/dark_mode.v2.md", "modified"),
+                ("src/app.py", "modified"),
+            ],
+            0,
+            "",
+            ["changelog.d/token.md", "changelog.d/dark_mode.v2.md"],
+        ),
+        # A hidden file, a fragment that goes, and other files are no entry.
+        (
+            "feat: a card",
+            "User",
+            [
+                ("changelog.d/.gitkeep", "added"),
+                ("changelog.d/old.md", "removed"),
+                ("docs/changelog.md", "added"),
+            ],
+            1,
+            "::error::Describe what changes for users in a new file of changelog.d/",
+            [],
+        ),
+        # A file of changelog.d/ that the release can't read is named, as JSON.
+        (
+            "perf: faster",
+            "User",
+            [
+                ("changelog.d/notes.txt", "added"),
+                ("changelog.d/my fix.md", "added"),
+                ("changelog.d/two\nlines.md", "added"),
+                ("changelog.d/sub/x.md", "added"),
+                ("changelog.d/fine.md", "added"),
+            ],
+            1,
+            '::error::"changelog.d/notes.txt" is no fragment of the changelog.',
+            [],
+        ),
+        (
+            "feat: many",
+            "User",
+            [(f"changelog.d/f{number}.md", "added") for number in range(21)],
+            1,
+            "::error::This pull request adds 21 fragments of the changelog;",
+            [],
+        ),
+    ],
+)
+def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
+    tmp_path: Path,
+    title: str,
+    author: str,
+    files: list[tuple[str, str]],
+    code: int,
+    message: str,
+    fragments: list[str],
+) -> None:
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            changelog_check(),
+            "Require an entry in the changelog for a change for users",
+        ),
+        {"repos/o/r/pulls/7/files": pull_request_files(*files)},
+        NUMBER="7",
+        TITLE=title,
+        AUTHOR=author,
+    )
+
+    assert step.result.returncode == code, step.result.stderr
+    assert message in step.result.stdout + step.summary
+    assert ("fragments=true" in step.output) == bool(fragments)
+    listed = tmp_path / "temp/fragments"
+    assert (listed.read_text(encoding="utf-8").splitlines() if fragments else []) == (
+        fragments
+    )
+    # Every pull request has its files listed, to check its fragments.
+    assert len(step.calls) == 1
+    assert step.calls[0].startswith("api repos/o/r/pulls/7/files --paginate --jq ")
+    # Only a change for users of a person needs an entry, and is told it has one.
+    required = title.startswith(("feat:", "fix!:", "perf:")) and author == "User"
+    if not required:
+        assert "::error::Describe what changes" not in step.result.stdout
+        assert "CHANGELOG.md has the entry" not in step.summary
+    if title == "perf: faster":
+        errors = [
+            line for line in step.result.stdout.splitlines() if "::error::" in line
+        ]
+        assert [error.split(" is no fragment")[0] for error in errors] == [
+            '::error::"changelog.d/notes.txt"',
+            '::error::"changelog.d/my fix.md"',
+            '::error::"changelog.d/two\\nlines.md"',
+            '::error::"changelog.d/sub/x.md"',
+        ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("fragments", "code", "summary", "errors"),
+    [
+        (
+            {"dark-mode.md": FEATURE_FRAGMENT, "token.md": FIX_FRAGMENT},
+            0,
+            "The 2 fragment(s) in changelog.d/ are fine.\n",
+            [],
+        ),
+        (
+            {"dark-mode.md": FEATURE_FRAGMENT, "typo.md": "### Fixes\n\n- A fix.\n"},
+            1,
+            "The release can't take in these fragments of the changelog:\n\n"
+            "- changelog.d/typo.md: `### Fixes` is no kind of change of the changelog.",
+            [
+                "::error file=changelog.d/typo.md,title=The fragment of the changelog::"
+                "`### Fixes` is no kind of change of the changelog. Did you mean "
+                "`### Fixed`?"
+            ],
+        ),
+    ],
+)
+def test_the_changelog_check_checks_each_fragment_as_the_release_takes_it_in(
+    tmp_path: Path,
+    fragments: dict[str, str],
+    code: int,
+    summary: str,
+    errors: list[str],
+) -> None:
+    # main has the tool and the changelog; the fragments come from the pull request.
+    a_checkout_with_the_tool(tmp_path)
+    step_script = script_of(
+        changelog_check(), "Check the fragments as the release takes them in"
+    )
+    # As the step before writes it, with LF on every system.
+    (tmp_path / "listed").write_text(
+        "".join(f"changelog.d/{name}\n" for name in fragments),
+        encoding="utf-8",
+        newline="\n",
+    )
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        f'cp "{(tmp_path / "listed").as_posix()}" "$RUNNER_TEMP/fragments"\n'
+        + step_script,
+        {
+            f"repos/o/r/contents/changelog.d/{name}?ref=abc123": text
+            for name, text in fragments.items()
+        },
+        HEAD_SHA="abc123",
+    )
+
+    assert step.result.returncode == code, step.result.stderr
+    assert step.summary.startswith(summary)
+    found = [
+        line for line in step.result.stdout.splitlines() if line.startswith("::error")
+    ]
+    assert len(found) == len(errors)
+    for line, error in zip(found, errors, strict=True):
+        assert line.startswith(error), line
+    assert step.calls == [
+        "api -H Accept: application/vnd.github.raw+json "
+        f"repos/o/r/contents/changelog.d/{name}?ref=abc123"
+        for name in fragments
+    ]
+
+
+def release_please_answers(branch: str, listed: list[str] | None) -> dict[str, object]:
+    """What GitHub answers the release bot: the release pull request of 1.3.0, the
+    changelog that release-please wrote on its branch, and the fragments there."""
+    answers: dict[str, object] = {
+        "pr list": [{"headRefName": RELEASE_BRANCH}],
+        f"repos/o/r/git/ref/heads/{RELEASE_BRANCH}": {"object": {"sha": "abc123"}},
+        "repos/o/r/contents/.release-please-manifest.json?ref=abc123": {".": "1.3.0"},
+        "repos/o/r/contents/CHANGELOG.md?ref=abc123": branch,
+        "graphql": {"data": {"createCommitOnBranch": {"commit": {"oid": "def456"}}}},
+    }
+    folder = "repos/o/r/contents/changelog.d?ref=abc123"
+    if listed is None:
+        answers[f"{folder}.error"] = "gh: Not Found (HTTP 404)\n"
+    else:
+        answers[folder] = [{"path": f"changelog.d/{name}"} for name in listed]
+    return answers
+
+
+def release_branch_changelog(main: str) -> str:
+    """What release-please writes on the branch: its section before the last one."""
+    index = main.index("## 1.2.2")
+    return f"{main[:index]}## [1.3.0](https://x/compare/v1.2.2...v1.3.0) (2026-10-13)\n\n### Features\n\n* a card\n\n{main[index:]}"
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("fragments", "listed", "deleted"),
+    [
+        # Every fragment that the release takes in leaves with the same commit.
+        (
+            ["a-dark-mode.md", "b-token.md"],
+            [".gitkeep", "a-dark-mode.md", "b-token.md"],
+            ["a-dark-mode.md", "b-token.md"],
+        ),
+        # Only those that the branch still has.
+        (
+            ["a-dark-mode.md", "b-token.md"],
+            [".gitkeep", "a-dark-mode.md"],
+            ["a-dark-mode.md"],
+        ),
+        # A branch without the folder has none, and without fragments nobody asks.
+        (["a-dark-mode.md"], None, []),
+        ([], [".gitkeep"], []),
+    ],
+)
+def test_the_release_bot_writes_the_fragments_into_the_release_and_deletes_them(
+    tmp_path: Path, fragments: list[str], listed: list[str] | None, deleted: list[str]
+) -> None:
+    texts = {"a-dark-mode.md": FEATURE_FRAGMENT, "b-token.md": FIX_FRAGMENT}
+    a_checkout_with_the_tool(tmp_path, **{name: texts[name] for name in fragments})
+    branch = release_branch_changelog(MAIN_CHANGELOG)
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            release,
+            "Write the text of Unreleased and of the fragments into the release pull request",
+        ),
+        release_please_answers(branch, listed),
+        PR="",
+    )
+
+    assert step.result.returncode == 0, step.result.stderr
+    assert (
+        f"Writing the changelog of 1.3.0 into {RELEASE_BRANCH}." in step.result.stdout
+    )
+    mutation = json.loads(step.written["input"])["variables"]["input"]
+    assert mutation["branch"] == {
+        "repositoryNameWithOwner": "o/r",
+        "branchName": RELEASE_BRANCH,
+    }
+    assert mutation["expectedHeadOid"] == "abc123"
+    assert mutation["message"] == {"headline": "chore: write the changelog of 1.3.0"}
+    changes = mutation["fileChanges"]
+    [addition] = changes["additions"]
+    assert addition["path"] == "CHANGELOG.md"
+    written = base64.b64decode(addition["contents"]).decode("utf-8")
+    assert written == release_changelog(
+        "1.3.0",
+        MAIN_CHANGELOG,
+        branch,
+        [Fragment(f"changelog.d/{name}", texts[name]) for name in fragments],
+    )
+    assert changes.get("deletions", []) == [
+        {"path": f"changelog.d/{name}"} for name in deleted
+    ]
+    asked = [call for call in step.calls if "contents/changelog.d?" in call]
+    assert len(asked) == (1 if fragments else 0)
+
+
+@WITH_JQ
+def test_the_release_bot_leaves_a_release_that_is_written_already(
+    tmp_path: Path,
+) -> None:
+    a_checkout_with_the_tool(tmp_path, **{"b-token.md": FIX_FRAGMENT})
+    branch = release_branch_changelog(MAIN_CHANGELOG)
+    fragments = [Fragment("changelog.d/b-token.md", FIX_FRAGMENT)]
+    written = release_changelog("1.3.0", MAIN_CHANGELOG, branch, fragments)
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    script = script_of(
+        release,
+        "Write the text of Unreleased and of the fragments into the release pull request",
+    )
+
+    # Written and without the fragment: nothing to do.
+    done = run_a_step_with_the_fake_gh(
+        tmp_path, script, release_please_answers(written, [".gitkeep"]), PR=""
+    )
+    assert done.result.returncode == 0, done.result.stderr
+    assert "The changelog of 1.3.0 is up to date." in done.result.stdout
+    assert "input" not in done.written
+
+
+@WITH_JQ
+def test_the_release_bot_stops_when_it_cannot_see_the_fragments_of_the_branch(
+    tmp_path: Path,
+) -> None:
+    a_checkout_with_the_tool(tmp_path, **{"b-token.md": FIX_FRAGMENT})
+    answers = release_please_answers(release_branch_changelog(MAIN_CHANGELOG), [])
+    answers.pop("repos/o/r/contents/changelog.d?ref=abc123")
+    answers["repos/o/r/contents/changelog.d?ref=abc123.error"] = (
+        "gh: Server Error (HTTP 502)\n"
+    )
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    step = run_a_step_with_the_fake_gh(
+        tmp_path,
+        script_of(
+            release,
+            "Write the text of Unreleased and of the fragments into the release pull request",
+        ),
+        answers,
+        PR="",
+    )
+
+    # Rather no commit than a release whose fragments stay for the next one as well.
+    assert step.result.returncode != 0
+    assert "HTTP 502" in step.result.stderr
+    assert "input" not in step.written
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_gets_the_folder_of_the_fragments(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    assert (project / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for text in (
+        "in a new file in `changelog.d/` named after your branch",
+        "### The changelog",
+        "`python3 .github/blueprint.py fragments` checks them",
+    ):
+        assert text in contributing, text
+    template = (project / ".github/pull_request_template.md").read_text(
+        encoding="utf-8"
+    )
+    assert "a new file in `changelog.d/`" in template
+    # The blueprint follows its template.
+    assert (ROOT / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
 
 
 def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:

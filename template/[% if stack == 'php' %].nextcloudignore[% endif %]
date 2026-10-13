@@ -15,6 +15,7 @@
 .php-cs-fixer.dist.php
 .release-please-manifest.json
 /build
+/changelog.d
 /composer.json
 /composer.lock
 /docs

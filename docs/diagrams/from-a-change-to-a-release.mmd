@@ -5,11 +5,11 @@ config:
 ---
 flowchart TB
     accTitle: From a change to a release
-    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
+    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of the fragments and of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
 
     pr["Pull request<br>fix: · feat: · feat!:"]
     main["main"]
-    rpr["`Release pull request<br>chore: release x.y.z<br>notes from *Unreleased*`"]
+    rpr["`Release pull request<br>chore: release x.y.z<br>notes from changelog.d/<br>and *Unreleased*`"]
     beta["Beta x.y.z-beta.N<br>for testers"]
     tag["Signed tag<br>at the merge, by the next run<br>checked before the build"]
     build["Isolated build<br>SLSA Build Level 3"]
