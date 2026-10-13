@@ -17,7 +17,6 @@ from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.changelog import (
     FRAGMENTS,
     FragmentError,
-    add_unreleased,
     beta_notes,
     fragment_problems,
     read_fragments,
@@ -36,13 +35,6 @@ from blueprint.vex import openvex
 
 
 def changelog_command(arguments: argparse.Namespace) -> int:
-    if arguments.command == "unreleased":
-        path = Path(arguments.file)
-        text = path.read_text(encoding="utf-8")
-        path.write_text(
-            add_unreleased(text, arguments.heading, arguments.entry), encoding="utf-8"
-        )
-        return 0
     if arguments.command == "beta":
         text = Path(arguments.file).read_text(encoding="utf-8")
         fragments = read_fragments(Path(arguments.fragments))
@@ -215,12 +207,6 @@ def main(
         help="release: the file to write the paths of the fragments into that the "
         "release takes in, one on each line, for the release bot to delete",
     )
-    unreleased_parser = commands.add_parser(
-        "unreleased", help="add an entry under Unreleased in the changelog, for bots"
-    )
-    unreleased_parser.add_argument("heading", help="such as Changed, without ###")
-    unreleased_parser.add_argument("entry", help="the line, such as '- Supports ...'")
-    unreleased_parser.add_argument("--file", default="CHANGELOG.md")
     beta_parser = commands.add_parser(
         "beta", help="the notes of a beta of the next release, for the release bot"
     )
@@ -368,7 +354,6 @@ def main(
             return 2
     if arguments.command in (
         "changelog",
-        "unreleased",
         "beta",
         "fragments",
         "vex",
