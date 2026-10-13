@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **The hook runs the checks before every push on Linux, macOS, in the dev container and in Codespaces too:** `.githooks/pre-push` came as a plain file, and Git runs a hook only when it is executable, so outside Windows it skipped the hook with a hint and pushed without the checks. New repositories now get the hook executable, and `.devcontainer/setup.sh`, `.github/sign-tag.sh` and `.github/blueprint.py` too. `scripts/check.sh` now fails while Git has a hook in `.githooks/` as a plain file, as Windows adds a new one, and names the fix: `git update-index --chmod=+x .githooks/pre-push`, and a commit. In your repository, the blueprint bot of 0.10.2 and later makes the four files executable with its next update, or names the command where GitHub can't carry the mode. The bot of 0.10.1 and older can't: if your repository is on such a release, commit `git update-index --chmod=+x .githooks/pre-push .devcontainer/setup.sh .github/sign-tag.sh .github/blueprint.py` before the update, or its pull request keeps the hook a plain file and fails its checks until you do. Where Git ignores the modes of the files, the dev container makes the hook executable on disk.
+
 ## [0.10.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.1...v0.10.2) (2026-10-13)
 
 ### Changes

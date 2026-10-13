@@ -943,6 +943,8 @@ def test_every_project_has_a_dev_container(
         re.M,
     )
     assert "git config core.hooksPath .githooks" in setup
+    # Where Git ignores the modes of the files, the hook gets its mode on disk.
+    assert "chmod +x .githooks/*" in setup
     requirements = {
         "home-assistant": "requirements-test.txt",
         "python-package": "requirements-dev.txt",
@@ -952,6 +954,269 @@ def test_every_project_has_a_dev_container(
         assert f"-r {requirements[kind]}" in setup
         assert (project / requirements[kind]).exists()
         assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]
+
+
+def renders_a_script(path: Path) -> bool:
+    """Whether the file of the blueprint is, or renders as, a script with a shebang:
+    a file of the template that only includes another renders as that one."""
+    text = path.read_bytes()
+    include = re.fullmatch(rb'\[% include "([^"]+)" -%\]\n?', text)
+    if include:
+        text = (ROOT / include.group(1).decode()).read_bytes()
+    return text.startswith(b"#!")
+
+
+# It asks Git for the modes of the files, which the copy of the mutation tests has none
+# of.
+@pytest.mark.mutation_unsafe
+def test_every_script_of_the_blueprint_is_executable_in_git() -> None:
+    # Copier gives a file of a new repository the mode that Git has for it in the
+    # template, on Windows too, and the blueprint bot brings a new mode to an existing
+    # repository. Git runs a hook only when it is executable: the pre-push hook was a
+    # plain file, which Git on Linux, macOS, in the dev container and in Codespaces
+    # skipped, so that a push went through with failing checks.
+    listing = subprocess.run(
+        ["git", "ls-files", "--stage", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    modes = {}
+    for entry in listing.split("\0")[:-1]:
+        meta, path = entry.split("\t", 1)
+        mode = meta.split(" ", 1)[0]
+        # Files, not links or submodules.
+        if mode in ("100644", "100755"):
+            modes[path] = mode
+    scripts = {path for path in modes if renders_a_script(ROOT / path)}
+    executable = {path for path, mode in modes.items() if mode == "100755"}
+
+    assert executable == scripts
+    assert {
+        ".githooks/pre-push",
+        "template/.githooks/pre-push.jinja",
+        "template/.github/sign-tag.sh.jinja",
+        "template/.devcontainer/setup.sh.jinja",
+        "template/scripts/check.sh.jinja",
+    } <= scripts
+
+
+# Copier asks Git for the modes of the files of the template, which the copy of the
+# mutation tests has no Git for.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no executable files")
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_script_of_a_new_repository_is_executable(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    modes = {
+        path.relative_to(project).as_posix(): path.stat().st_mode & 0o111
+        for path in text_files(project)
+    }
+    scripts = {
+        name for name in modes if (project / name).read_bytes().startswith(b"#!")
+    }
+
+    assert {name for name, mode in modes.items() if mode} == scripts
+    assert all(modes[name] == 0o111 for name in scripts)
+    assert {".githooks/pre-push", ".devcontainer/setup.sh", "scripts/check.sh"} <= (
+        scripts
+    )
+
+
+# The author of the commits of the tests, whatever this computer has set up.
+IDENTITY = ("-c", "user.name=Dev", "-c", "user.email=dev@example.com")
+
+
+# It needs the modes that Copier takes from Git, which the copy of the mutation tests
+# has no Git for.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the hook runs bash, Git Bash on Windows")
+def test_the_hook_stops_a_push_whose_checks_fail(
+    projects: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert BASH
+    project = tmp_path / "project"
+    remote = tmp_path / "remote.git"
+    shutil.copytree(projects["generic"], project)
+    # No configuration of this computer, such as signed commits, gets in the way, and
+    # the hook finds the bash of the tests, Git Bash on Windows.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("PATH", f"{Path(BASH).parent}{os.pathsep}{os.environ['PATH']}")
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *IDENTITY, *arguments],
+            cwd=project,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    assert git("init", "--quiet", "--bare", str(remote)).returncode == 0
+    # A new repository as the README starts it, with the hook turned on as
+    # CONTRIBUTING.md and the dev container turn it on.
+    assert git("init", "--quiet").returncode == 0
+    assert git("add", "--all").returncode == 0
+    assert git("commit", "--quiet", "--message", "chore: start").returncode == 0
+    assert git("config", "core.hooksPath", ".githooks").returncode == 0
+    # Checks that say that they ran, and fail when FAIL is set.
+    (project / "scripts/check.sh").write_text(
+        'echo "The checks ran."\nexit "${FAIL:-0}"\n', encoding="utf-8", newline="\n"
+    )
+
+    monkeypatch.setenv("FAIL", "1")
+    failed = git("push", str(remote), "HEAD:refs/heads/main")
+    monkeypatch.delenv("FAIL")
+    passed = git("push", str(remote), "HEAD:refs/heads/main")
+
+    assert failed.returncode != 0, failed.stderr
+    assert "The checks ran." in failed.stdout + failed.stderr
+    assert "ignored" not in failed.stderr
+    assert passed.returncode == 0, passed.stderr
+    assert "The checks ran." in passed.stdout + passed.stderr
+
+
+def hooks_step(check: str) -> str:
+    start = check.index('step "Git hooks"')
+    return check[start : check.index('step "Shell scripts"', start)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_checks_look_at_the_modes_of_the_hooks(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # In every kind of project the same, right before the shell scripts.
+    assert check.index('\nstep "Git hooks"\n') < check.index('\nstep "Shell scripts"\n')
+    assert hooks_step(check) == hooks_step(generic)
+    contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`git update-index --chmod=+x .githooks/pre-push`" in contributing
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_while_git_would_skip_a_hook(
+    projects: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert BASH
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    script = check[: check.index('step "Text files"')] + hooks_step(check)
+    (repository / "scripts/hooks.sh").write_text(script, encoding="utf-8", newline="\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*arguments: str) -> None:
+        subprocess.run(["git", *arguments], cwd=repository, check=True)
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/hooks.sh"],
+            cwd=repository,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    git("init", "--quiet")
+    # The modes in Git alone, the same on every system: as on Windows, a new file is
+    # a plain one.
+    git("config", "core.fileMode", "false")
+    without_hooks = step()
+    (repository / ".githooks").mkdir()
+    for hook in ("pre-commit", "pre-push"):
+        (repository / ".githooks" / hook).write_text(
+            "#!/bin/sh\n", encoding="utf-8", newline="\n"
+        )
+    git("add", ".githooks")
+    plain = step()
+    git("update-index", "--chmod=+x", ".githooks/pre-push")
+    one_plain = step()
+    git("update-index", "--chmod=+x", ".githooks/pre-commit")
+    executable = step()
+
+    # Every plain hook, and the command that makes them executable.
+    assert (plain.returncode, plain.stdout) == (
+        1,
+        "\n== Git hooks\n"
+        ".githooks/pre-commit: is not executable, so git skips it\n"
+        ".githooks/pre-push: is not executable, so git skips it\n"
+        "Make it executable and commit that: git update-index --chmod=+x"
+        " .githooks/pre-commit .githooks/pre-push\n",
+    )
+    assert (one_plain.returncode, one_plain.stdout) == (
+        1,
+        "\n== Git hooks\n"
+        ".githooks/pre-commit: is not executable, so git skips it\n"
+        "Make it executable and commit that: git update-index --chmod=+x"
+        " .githooks/pre-commit\n",
+    )
+    for passed in (without_hooks, executable):
+        assert (passed.returncode, passed.stdout) == (
+            0,
+            "\n== Git hooks\nEvery hook in .githooks/ is executable.\n",
+        ), passed.stderr
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or BASH is None, reason="Windows has no executable files"
+)
+@pytest.mark.parametrize("file_mode", ["false", "true"])
+def test_the_dev_container_makes_the_hook_executable_where_git_ignores_modes(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_mode: str,
+) -> None:
+    assert BASH
+    repository = tmp_path / "repository"
+    (repository / ".devcontainer").mkdir(parents=True)
+    (repository / ".githooks").mkdir()
+    shutil.copy(
+        projects["generic"] / ".devcontainer/setup.sh",
+        repository / ".devcontainer/setup.sh",
+    )
+    hook = repository / ".githooks/pre-push"
+    hook.write_text("#!/bin/sh\n", encoding="utf-8", newline="\n")
+    # On disk, the hook of a repository whose hook Git has as a plain file.
+    hook.chmod(0o644)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", *IDENTITY, *arguments],
+            cwd=repository,
+            capture_output=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout
+
+    git("init", "--quiet")
+    git("config", "core.fileMode", file_mode)
+    git("add", "--all")
+    git("commit", "--quiet", "--message", "chore: start")
+    # Without mkdocs.yml, the set-up installs nothing.
+    setup = subprocess.run(
+        [BASH, ".devcontainer/setup.sh"],
+        cwd=repository,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert setup.returncode == 0, setup.stdout + setup.stderr
+    assert git("config", "core.hooksPath") == ".githooks\n"
+    # Executable where Git ignores the modes; elsewhere the mode in Git applies, so
+    # that the set-up changes nothing that Git would see.
+    assert bool(hook.stat().st_mode & 0o111) == (file_mode == "false")
+    assert git("status", "--porcelain") == ""
 
 
 def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
