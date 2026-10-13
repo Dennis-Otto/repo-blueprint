@@ -6,6 +6,8 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+## [0.10.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.1...v0.10.2) (2026-10-13)
+
 ### Changes
 
 - **Every job runs on `ubuntu-24.04`, named with its version:** GitHub moves `ubuntu-latest` to Ubuntu 26.04 from 19 October 2026, one job at a time over a month, so that the runs of one workflow would have landed on either image at random, with Python 3.14 instead of 3.12, ShellCheck 0.11 and Docker 29, and failed like flaky tests. The workflows of the blueprint now name `ubuntu-24.04` and keep it until the checks of every kind of project pass on Ubuntu 26.04, which the blueprint tries every week; then one release moves every job. The workflows of the issue assistant follow with its next release. A workflow of your own, such as one of end-to-end tests, and the action test `.github/workflows/action-test.yml` of a GitHub Action, which the update leaves alone, keep `ubuntu-latest` until you change their `runs-on:` to `ubuntu-24.04` as well.
@@ -38,27 +40,6 @@ the next release, or lists the pull requests when there is none.
 ### Performance
 
 - **Pull requests wait less for a runner:** a check now runs only where it can change a result, since an account runs about 20 jobs at once. The scanners run in the pull requests that change what they read: zizmor for a workflow, an action or the settings of Dependabot, OSV-Scanner for a lock file, the fuzzing for Python code, and the link check for a document, but not for the changelog alone. The SBOM comes every week and with every release, no longer with every pull request. The release pull request, which changes only the changelog and the version, runs no scanner. After a merge, `main` runs only what keeps a baseline or publishes: Lint, the secret scan, the SBOM and the fuzzing no longer run there, and the secret scan runs every week over the whole history instead. The checks with the newest Python move into a workflow of their own, Newest Python, which runs after every change of `main` and every week instead of in every pull request, so that a new Python no longer turns the CI of `main` red; a failure there keeps an issue open until the checks pass again. In the blueprint itself, a merge now starts 11 to 14 jobs instead of 36, the release pull request 17 instead of 37, and one required check, `variants`, stands for the 14 variants and updates, which the release pull request skips.
-
-## [0.10.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.1...v0.10.2) (2026-10-13)
-
-
-### Bug fixes
-
-* **ci:** recover by itself from timed-out jobs, failed release runs and cancelled title checks ([#167](https://github.com/Dennis-Otto/repo-blueprint/issues/167)) ([43b2d3c](https://github.com/Dennis-Otto/repo-blueprint/commit/43b2d3cc2ff784ed0ffe8df0b40c0808ccaa81dc))
-* **ci:** retry and cache the downloads of the workflows, so a GitHub 504 no longer fails CI or a release ([#165](https://github.com/Dennis-Otto/repo-blueprint/issues/165)) ([40a31a2](https://github.com/Dennis-Otto/repo-blueprint/commit/40a31a220fe298c00f2605692101c1b34c133e6c))
-* **ci:** validate Home Assistant integrations without branch-pinned actions, so Findings turns green ([#147](https://github.com/Dennis-Otto/repo-blueprint/issues/147)) ([ae7d286](https://github.com/Dennis-Otto/repo-blueprint/commit/ae7d286d97d195ed9d21481e9a3074cb19512a03))
-* **deps:** let Renovate maintain every lock file, and let the weekly lock refresh wait for review ([#166](https://github.com/Dennis-Otto/repo-blueprint/issues/166)) ([bf97c37](https://github.com/Dennis-Otto/repo-blueprint/commit/bf97c3737fbc1d60954137f9d811de8d50d9fd4f))
-* **docs:** make the website preview and a local website check work on Windows ([#156](https://github.com/Dennis-Otto/repo-blueprint/issues/156)) ([cd0523d](https://github.com/Dennis-Otto/repo-blueprint/commit/cd0523dc015b5ec991ddb5450c84031ac98014e7))
-* keep the blueprint update pull request open across releases and never auto-merge conflicts ([#149](https://github.com/Dennis-Otto/repo-blueprint/issues/149)) ([448fafc](https://github.com/Dennis-Otto/repo-blueprint/commit/448fafc2b91d930431595ab1f8eca14a268c06b2))
-* make the weekly mutation tests produce a score in every Python and PHP repository ([#151](https://github.com/Dennis-Otto/repo-blueprint/issues/151)) ([4980711](https://github.com/Dennis-Otto/repo-blueprint/commit/498071197e8d848458a49109190a6b69aa5266f1))
-* roll every release out to every repository, one at a time, and report the ones the Rollout misses ([#158](https://github.com/Dennis-Otto/repo-blueprint/issues/158)) ([2c493d4](https://github.com/Dennis-Otto/repo-blueprint/commit/2c493d46191f2c2229ed115548293c7ffc58ad92))
-* sign the release tag in every run that makes a release, and retry transient tag push failures ([#148](https://github.com/Dennis-Otto/repo-blueprint/issues/148)) ([8ba4e59](https://github.com/Dennis-Otto/repo-blueprint/commit/8ba4e59a262cac752048d1411dea211e7538202d))
-* **test:** run the workflow step tests with Git Bash on Windows, and test on Windows every week ([#145](https://github.com/Dennis-Otto/repo-blueprint/issues/145)) ([82c7399](https://github.com/Dennis-Otto/repo-blueprint/commit/82c739914c577663cb88894177c97c4357000a02))
-
-
-### Performance
-
-* **ci:** skip CI that cannot change a result: release pull request rebuilds, re-runs on main and unrelated paths ([#155](https://github.com/Dennis-Otto/repo-blueprint/issues/155)) ([139fba0](https://github.com/Dennis-Otto/repo-blueprint/commit/139fba0488b59425bb53ce3dc742cf7cd26bf457))
 
 ## [0.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.0...v0.10.1) (2026-10-12)
 
