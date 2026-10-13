@@ -167,7 +167,8 @@ jobs:
         if: steps.kind.outputs.kind == 'php'
         run: |
           composer install --no-interaction --prefer-dist --no-progress
-          curl --fail --location --silent --show-error --output "$RUNNER_TEMP/infection.phar" \
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
+            --connect-timeout 15 --max-time 300 --output "$RUNNER_TEMP/infection.phar" \
             "https://github.com/infection/infection/releases/download/$INFECTION_VERSION/infection.phar"
           echo "$INFECTION_SHA256  $RUNNER_TEMP/infection.phar" | sha256sum --check --strict
       - name: Run the mutants against the tests

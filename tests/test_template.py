@@ -20,7 +20,7 @@ from typing import Any
 import pathspec
 import pytest
 from copier import run_copy
-from shell import BASH
+from shell import BASH, in_bash
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -1167,9 +1167,330 @@ def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
     assert pins[0] == pins[1]
 
 
+# Each curl of a script or of a step, with the lines it continues on; not one that a
+# comment names.
+CURL = re.compile(r"^[^#\n]*?\bcurl ((?:.*\\\n)*.*)$", re.MULTILINE)
+# Where the blueprint and every repository made from it run curl.
+SCRIPTS = (
+    ".github/workflows/*.yml",
+    ".github/*.sh",
+    "scripts/*.sh",
+    ".devcontainer/*.sh",
+    ".githooks/*",
+)
+# What every download needs so that a passing error of GitHub or of another server,
+# like the 504 of a release download that failed the checks of a Nextcloud app on
+# main (Dennis-Otto/paperless-unified-search#94), fails no run: an answer with an
+# error status is an error (--fail); every error, a reset connection too, brings
+# another try after a pause that doubles each time (--retry, --retry-all-errors); a
+# connection that hangs fails and tries again instead of holding the job until its
+# time limit (--connect-timeout, --max-time); and the download goes into a file, which
+# curl empties before it tries again, where in a pipe the start of a broken try would
+# stay in front of the next one (--output).
+DOWNLOAD = (
+    "--fail",
+    "--retry ",
+    "--retry-all-errors",
+    "--connect-timeout ",
+    "--max-time ",
+    "--output ",
+)
+
+
+def run_workflow_step(
+    tmp_path: Path,
+    script: str,
+    cwd: Path,
+    tools: dict[str, str],
+    without: tuple[str, ...] = (),
+    **variables: str,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Runs the script of a step as GitHub does, with bash -e and stand-ins for its
+    tools, which write what they are called with to $CALLS, and without the variables
+    named; the result, and the calls. The stand-ins come first on the PATH even in the
+    bash of Git for Windows, which puts its own curl in front of it (in_bash)."""
+    step = tmp_path / "step.sh"
+    step.write_text(script, encoding="utf-8", newline="\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool, body in tools.items():
+        (bin_dir / tool).write_text(
+            f'#!/usr/bin/env bash\necho "{tool} $*" >> "$CALLS"\n{body}',
+            encoding="utf-8",
+            newline="\n",
+        )
+        (bin_dir / tool).chmod(0o755)
+    calls = tmp_path / "calls"
+    calls.touch()
+    environment = {
+        **{key: value for key, value in os.environ.items() if key not in without},
+        "STUBS": bin_dir.as_posix(),
+        "CALLS": calls.as_posix(),
+        **variables,
+    }
+    result = subprocess.run(
+        in_bash("-e", step.as_posix()),
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return result, calls.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_every_download_tries_again_after_a_passing_error(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    downloads = 0
+    for pattern in SCRIPTS:
+        for path in sorted(folder.glob(pattern)):
+            for found in CURL.findall(path.read_text(encoding="utf-8")):
+                command = re.sub(r"\\\n\s*", "", found)
+                # An upload retries only where its API takes a second one without
+                # harm, as the release in the App Store does.
+                if "--request POST" in command:
+                    continue
+                downloads += 1
+                for option in DOWNLOAD:
+                    assert option in command, f"{path.name}: curl {command}"
+    # The gitsign of the signed release tags, in every repository.
+    assert downloads > 0
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("cache", ["empty", "krankerl", "changed"])
+def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
+    tmp_path: Path, cache: str
+) -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    version = dict(re.findall(r"(KRANKERL_(?:VERSION|SHA256)): (\S+)", workflow))[
+        "KRANKERL_VERSION"
+    ]
+    # Restored before the install, under a key that changes with krankerl; GitHub
+    # saves it only after a run that passed, which checked it.
+    restore = workflow[workflow.index("uses: actions/cache@") :]
+    assert restore.index("- name: Install krankerl") > 0
+    assert "path: ${{ runner.temp }}/krankerl\n" in restore
+    assert (
+        "key: krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}\n"
+        in restore
+    )
+    package = b"the package of krankerl\n"
+    temp = tmp_path / "temp"
+    deb = temp / f"krankerl/krankerl_{version}_amd64.deb"
+    if cache != "empty":
+        deb.parent.mkdir(parents=True)
+        deb.write_bytes(package if cache == "krankerl" else b"a changed package\n")
+    script = script_of(
+        workflow, "Install krankerl, which builds the package of the app"
+    )
+
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "curl": textwrap.dedent(
+                """\
+                while (($# > 0)); do
+                  if [[ "$1" == --output ]]; then echo "the package of krankerl" > "$2"; fi
+                  shift
+                done
+                """
+            ),
+            "sudo": "",
+        },
+        RUNNER_TEMP=temp.as_posix(),
+        KRANKERL_VERSION=version,
+        KRANKERL_SHA256=hashlib.sha256(package).hexdigest(),
+    )
+
+    downloads = [call for call in calls if call.startswith("curl ")]
+    installs = [call for call in calls if call.startswith("sudo ")]
+    if cache == "changed":
+        # The checksum is checked for a package of the cache too.
+        assert result.returncode != 0
+        assert downloads == []
+        assert installs == []
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(downloads) == (1 if cache == "empty" else 0)
+    for download in downloads:
+        assert all(option in download for option in DOWNLOAD), download
+        assert f"--output {deb.as_posix()} " in download
+    assert installs == [f"sudo dpkg --install {deb.as_posix()}"]
+
+
 def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
     assert "vendor/bin/psalm --taint-analysis" in check
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("ci", "reachable", "code", "message"),
+    [
+        ("true", True, 0, "appinfo/info.xml follows the schema of the App Store."),
+        ("", True, 0, "appinfo/info.xml follows the schema of the App Store."),
+        # Locally, the CI checks it then.
+        (
+            "",
+            False,
+            0,
+            "The schema of the App Store is out of reach here; the CI checks it.",
+        ),
+        # In the CI, nothing else would: a broken info.xml could merge while the App
+        # Store is down.
+        (
+            "true",
+            False,
+            1,
+            "The schema of the App Store is out of reach, and the CI checks"
+            " appinfo/info.xml against it; run the checks again once"
+            " apps.nextcloud.com answers.",
+        ),
+    ],
+)
+def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    ci: str,
+    reachable: bool,
+    code: int,
+    message: str,
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "App metadata"')
+    metadata = check[start : check.index('step "PHP syntax"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (repository / "scripts/metadata.sh").write_text(
+        check[: check.index('step "Text files"')] + metadata,
+        encoding="utf-8",
+        newline="\n",
+    )
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    curl = (
+        textwrap.dedent(
+            """\
+            while (($# > 0)); do
+              if [[ "$1" == --output ]]; then echo "<xs:schema/>" > "$2"; fi
+              shift
+            done
+            """
+        )
+        if reachable
+        else 'echo "curl: (22) The requested URL returned error: 504" >&2\nexit 22\n'
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/metadata.sh\n",
+        repository,
+        {"curl": curl, "php": ""},
+        without=("CI",),
+        TMPDIR=temporary.as_posix(),
+        **({"CI": ci} if ci else {}),
+    )
+
+    assert result.returncode == code, result.stdout + result.stderr
+    assert result.stdout.endswith(f"\n{message}\n")
+    assert len(calls) == (2 if reachable else 1), calls
+    assert all(option in calls[0] for option in DOWNLOAD), calls[0]
+    # PHP checks info.xml against the schema that curl downloaded.
+    assert [call.split(" ", 2)[:2] for call in calls[1:]] == (
+        [["php", "-r"]] if reachable else []
+    )
+    # The schema goes again.
+    assert list(temporary.iterdir()) == []
+
+
+# It starts the tool, which in the copy of the mutation tests is the code with the
+# mutants, and the variables of mutmut switch them in that process too.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothing(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    project = projects["nextcloud-app"]
+    work = tmp_path / "work"
+    for name in ("appinfo/info.xml", "CHANGELOG.md", ".github/blueprint.py"):
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(project / name, work / name)
+    shutil.copytree(project / ".github/blueprint", work / ".github/blueprint")
+    supported = re.search(
+        r'max-version="(\d+)"', (work / "appinfo/info.xml").read_text(encoding="utf-8")
+    )
+    assert supported
+    # The next major version of Nextcloud is out.
+    newest = int(supported[1]) + 1
+    for command in (
+        ["init", "--quiet"],
+        ["config", "core.autocrlf", "false"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--message",
+            "start",
+        ],
+    ):
+        subprocess.run(["git", *command], cwd=work, check=True)
+    script = script_of(
+        (ROOT / ".github/workflows/upstream.yml").read_text(encoding="utf-8"),
+        "Raise max-version to the newest major version of Nextcloud",
+    )
+
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        work,
+        {
+            # Only what a dry run may ask; it writes nothing to GitHub.
+            "gh": textwrap.dedent(
+                f"""\
+                case "$*" in
+                  "api repos/nextcloud/server/releases/latest --jq .tag_name") echo v{newest}.0.1 ;;
+                  "pr list --head upstream/nextcloud-{newest} --state open --json number --jq .[].number") ;;
+                  *) exit 1 ;;
+                esac
+                """
+            ),
+            "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+        },
+        GH_TOKEN="token",
+        GH_REPO="Someone/app",
+        AUTOMERGE="",
+        DRY_RUN="true",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [call for call in calls if call.startswith("gh ")] == [
+        "gh api repos/nextcloud/server/releases/latest --jq .tag_name",
+        f"gh pr list --head upstream/nextcloud-{newest} --state open --json number"
+        " --jq .[].number",
+    ]
+    assert (
+        f'A dry run: the pull request "feat: support Nextcloud {newest}" from the'
+        f" branch upstream/nextcloud-{newest} would make this change."
+    ) in result.stdout
+    # The change of the commit that it would make.
+    assert re.search(
+        rf'^\+\t\t<nextcloud min-version="\d+" max-version="{newest}"/>$',
+        result.stdout,
+        re.MULTILINE,
+    )
+    assert f"\n+- Supports Nextcloud {newest}.\n" in result.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
