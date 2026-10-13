@@ -14,4 +14,6 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0006](0006-beta-channel.md) | Publish a beta of the next release after every change for users, where a project wants it | accepted |
 | [0007](0007-one-update-pull-request.md) | Keep one update pull request, move it on with each release, and leave a maintainer's commits alone | accepted |
 | [0008](0008-no-action-pinned-to-a-branch.md) | Pin no action to a branch: run a tool that follows its branch as an image | accepted |
+| [0009](0009-run-a-check-only-where-it-can-change-a-result.md) | Run a check only where it can change a result | accepted |
+| [0010](0010-roll-out-one-repository-at-a-time.md) | Roll out each release one repository at a time, and report every repository that misses it | accepted |
 | [0011](0011-downloads-try-again-and-checks-cache-their-tools.md) | Every download tries again, the checks cache what they download, and the CI skips no check for an unreachable server | accepted |

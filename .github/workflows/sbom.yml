@@ -1,23 +1,16 @@
 name: SBOM
 
-# A software bill of materials of the repository in SPDX, for every change and every
-# week; the release workflow attaches one to each release.
+# A software bill of materials of the repository in SPDX, every week; the release
+# workflow attaches one to each release. Not for every change: no pull request reads
+# it, and the dependency review checks what a pull request brings in.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "47 4 * * 3"
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   sbom:

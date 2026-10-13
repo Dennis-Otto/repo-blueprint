@@ -25,9 +25,9 @@ If a fix needs longer, for example because the cause lies in an upstream project
 
 ## How the project keeps itself secure
 
-- Every pull request and every push to `main` runs CodeQL, a Gitleaks secret scan and, for changed dependencies, a review against known vulnerabilities. OpenSSF Scorecard checks the practices of the repository every week.
+- Every pull request runs CodeQL, a Gitleaks secret scan of its commits and, for changed dependencies, a review against known vulnerabilities. CodeQL runs after every change of `main` as well, Gitleaks every week over the whole history, and GitHub's secret scanning with push protection stops a known kind of secret before it lands. OpenSSF Scorecard checks the practices of the repository every week.
 - Actions are pinned to commit hashes, tokens get the least permissions they need, and Renovate keeps actions, dependencies and images current, with the updates that fix a vulnerability at once.
-- OSV-Scanner checks every lock file against the OSV database of known vulnerabilities, on every pull request and every week.
+- OSV-Scanner checks every lock file against the OSV database of known vulnerabilities: in every pull request that changes a lock file, after every change of `main` and every week.
 - Harden-Runner records the network traffic of every job of the workflows, so that a connection that doesn't belong there shows.
 - Releases carry an SBOM as SPDX and as CycloneDX, the licenses of their third-party components (`THIRD_PARTY_NOTICES.md`), an OpenVEX document of the advisories that the project accepts with their reasons, and the signed provenance of an isolated build (SLSA Build Level 3); their tags are signed without a key by the release workflow (gitsign), which builds no release on a tag that it didn't sign; they are immutable once published and are verified as their users can after every release and every week.
 

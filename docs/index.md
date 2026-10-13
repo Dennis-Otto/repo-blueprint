@@ -25,7 +25,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit and the title of every pull request are checked as well. A passing error of GitHub fails no run: every download tries again.
+    `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit and the title of every pull request are checked as well. A passing error of a download fails no run: every download tries again.
 
 - :material-shield-lock-outline:{ .lg .middle } **Security**
 

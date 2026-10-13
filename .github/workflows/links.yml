@@ -4,7 +4,9 @@ name: Links
 # Markdown file, and every week, since sites move without a change here. A broken
 # link fails the check of a pull request; the weekly run keeps one issue with the
 # broken links open until they are fixed, and closes it then. lychee.toml holds the
-# rules, .lycheeignore the exceptions of this repository.
+# rules, .lycheeignore the exceptions of this repository. The entry in the changelog
+# that most pull requests bring starts no check on its own; the weekly run checks the
+# links of the changelog.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -12,12 +14,14 @@ on:
     branches: [main]
     paths:
       - "**/*.md"
+      - "!CHANGELOG.md"
       - lychee.toml
       - .lycheeignore
       - .github/workflows/links.yml
   pull_request:
     paths:
       - "**/*.md"
+      - "!CHANGELOG.md"
       - lychee.toml
       - .lycheeignore
       - .github/workflows/links.yml
@@ -34,6 +38,10 @@ concurrency:
 jobs:
   links:
     name: links
+    # Not in the release pull request: the branch of the release bot in this repository.
+    if: >-
+      !startsWith(github.head_ref, 'release-please--') ||
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

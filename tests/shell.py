@@ -26,3 +26,12 @@ def find_bash() -> str | None:
 
 
 BASH = find_bash()
+
+
+def in_bash(*arguments: str) -> list[str]:
+    """The command that runs bash with the stubs of the folder $STUBS first on its PATH.
+    The bash of Git for Windows puts its own folders, with git, curl and sleep, in front
+    of the PATH that it gets from PowerShell or an IDE, so they go in front once more."""
+    assert BASH
+    first = 'PATH="$(cd "$STUBS" && pwd):$PATH" && exec "$BASH" "$@"'
+    return [BASH, "-c", first, "stubs", *arguments]

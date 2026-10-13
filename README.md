@@ -67,7 +67,7 @@ flowchart TB
 
 | Area | What runs | How |
 | --- | --- | --- |
-| **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging; a passing error of GitHub or of another server fails no run, because every download of the workflows tries again, and the CI keeps the tools it downloads in its cache | the tools of each kind of project, hash-pinned |
+| **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging; a passing error of a download fails no run, because every download of the workflows tries again, and the checks of a Nextcloud app keep krankerl in the cache of the CI | the tools of each kind of project, hash-pinned |
 | **Lint** | the workflows (actionlint), the license of every file (REUSE), the Markdown of every document (markdownlint), hints at the spelling in English and German (cspell) and at the style of the English (Vale) of the changed documents, the sign-off of every commit (DCO), the title of every pull request (Conventional Commits), an entry under *Unreleased* for every change for users | `lint.yml`, `pull-request-title.yml` |
 | **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOMs as SPDX and CycloneDX, OpenVEX, release tags signed without a key (gitsign) and checked before every build, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
 | **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
@@ -76,6 +76,7 @@ flowchart TB
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
 | **Flaky tests** | a test run that fails runs its failed jobs once more; a job that passes then is reported as flaky in one issue | `after-checks.yml` |
 | **Cancelled checks** | a run of a required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
+| **Fast checks** | a check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python checks the `main` of a Python project after every change and every week | the triggers and path filters of the workflows, `newest-python.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
 | **Community** | README, contributing guide with the coding standards and the rule that every change brings its tests, code of conduct, security policy with how to verify a release and an assurance case, the security design of the software (`docs/security.md`), support, governance with the roles and the continuity of the project, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
 | **Website** | the documentation in `docs/` as a website with search and a light and a dark theme, in English and, with German pages such as `index.de.md` next to the English ones, in German: every pull request builds it strictly, and so does `scripts/check.sh` once the tools of its preview are installed, on Linux, macOS and Windows; every change of `main` publishes it on GitHub Pages | MkDocs with the Material theme, `mkdocs.yml`, `docs.yml` |
@@ -124,6 +125,47 @@ flowchart TB
     class rpr bot
     class release done
 ```
+
+### When the checks run
+
+A check runs only where it can change a result, because an account of GitHub runs about 20 jobs at once, and each job that can't fail keeps a pull request waiting for a runner:
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When the checks run
+    accDescr: Every pull request runs the required checks, and the scanners of what it changes: zizmor for a workflow, OSV-Scanner for a lock file, fuzzing for Python code and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs the scanners in full, the secret scan of the whole history, the SBOM and the newest Python.
+
+    pr["Pull request"]
+    rpr["Release pull request<br>changelog and version"]
+    required["Required checks<br>tests · lint · docs · CodeQL<br>dependency review · secret scan"]
+    scanners["Scanners of what it changes<br>workflows: zizmor · lock files: OSV-Scanner<br>Python: fuzzing · documents: links"]
+    main["<code>main</code>"]
+    baseline["What keeps a baseline or publishes<br>tests with coverage · newest Python<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>website · release · branch bot"]
+    weekly["Scanners in full · fuzzing for 15 minutes<br>secret scan of the whole history<br>SBOM · newest Python"]
+
+    pr --> required
+    pr -- "changes what they read" --> scanners
+    rpr -- "no scanner" --> required
+    required -- "every check passes" --> main
+    main -- "after a merge" --> baseline
+    main -- "every week" --> weekly
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class pr person
+    class rpr bot
+    class main done
+```
+
+- **After a merge:** `main` takes a pull request only when it is up to date with it, so the merge gives `main` the files that the checks of the pull request passed. `main` runs only the tests, whose coverage the coverage bot compares every pull request with, the analyses that code scanning compares with, and what publishes, such as the website and the release. Lint runs in the pull requests, the secret scan and the fuzzing there and every week, and the SBOM every week; every release has an SBOM of its own.
+- **The release pull request** changes only the changelog and the version, which can't change what a scanner finds. In the blueprint, the required check *variants* stands for the variants and updates of every kind of project: it passes when each passed, or when none had to run, as in the release pull request.
+- **The newest Python**, beta included, runs the checks of a Python project after every change of `main` and every week, in a workflow of its own that keeps the CI of `main` green. A new Python breaks every pull request alike, and none waits for it. A failure keeps an issue open, which the weekly run closes once the checks pass again.
 
 ### Mutation tests
 
@@ -299,6 +341,41 @@ flowchart TB
 
 The blueprint bot (`blueprint-update.yml`) runs `copier update` every week, and right after every release of the blueprint, whose Rollout workflow starts it in every repository of the release app. It takes the latest published release of the blueprint that `.copier-answers.yml` names, a fork of it perhaps, never a tag whose release is still a draft, and keeps one pull request on the branch `blueprint/update`: a newer release moves that pull request on, with its number and its auto-merge, instead of replacing it. Without conflicts it merges itself once every check passes. Conflicts stay in it as markers for the maintainer, in the files that the update touched; they turn its auto-merge off and add the label `merge-conflict`. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
 
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a release of the blueprint rolls out
+    accDescr: Once the Release workflow has published and verified a release, the Rollout workflow takes the repositories of the release app one after the other, the quickest checks first. It starts the blueprint bot of a repository and waits up to 15 minutes for the bot and the checks of its update pull request, then goes on with the next one. A repository whose bot it can't start, or whose bot fails, fails the run by its name, and the others still get the release.
+
+    release(["Release workflow<br>publishes and verifies<br>a release"])
+    next["Next repository<br>the quickest checks first"]
+    start["Starts its<br>blueprint bot"]
+    wait["Waits up to 15 minutes<br>for the bot and the checks<br>of its pull request"]
+    failed(["The run fails<br>by the name of<br>the repository"])
+    more{"Another<br>repository?"}
+    finished["Every repository<br>has the release<br>in a pull request"]
+
+    release --> next --> start --> wait --> more
+    start -- "GitHub fails<br>three times" --> failed
+    wait -- "the bot fails" --> failed
+    failed -. "the others<br>go on" .-> more
+    more -- "yes" --> next
+    more -- "no" --> finished
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class release,next,start,wait bot
+    class failed person
+    class finished done
+```
+
+The Rollout workflow of the blueprint brings each release to the repositories of the release app one after the other, those with the quickest checks first: it starts the blueprint bot of a repository and gives the bot and the checks of its update pull request up to 15 minutes before it starts the next one, so that the update pull requests don't all wait for the runners of the account at once. A repository whose bot it can't start, or whose bot fails, fails the run by its name; the others still get the release. It rolls out every release that a run of the Release workflow published, whether the merge of the release pull request started that run, the hourly schedule or a start by hand; a release that the run of a later merge finished, because the run of its own merge was lost, waits for a start by hand (Actions → Rollout) or the weekly run of the bots. Started by hand itself, it rolls out the latest release. Rollouts of releases that come close together overlap, but never in the same repository: there, the newer release takes the place of an older one that still waits.
+
 Once you commit to the branch of the pull request, to resolve the markers for example, the bot leaves the branch to you: when a newer release is out, it says so in one comment, and after you merge or close the pull request, its next run brings the rest. A merge of `main` with the button *Update branch* doesn't count as your commit, and an auto-merge that you switch off stays off. An update that only records a new release in `.copier-answers.yml` comes as a pull request too, and the updates carry the modes of files, such as a script that becomes executable.
 
 The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
@@ -400,7 +477,7 @@ flowchart TB
 - The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Renovate keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.
 - `blueprint.py` starts the tool of the settings as code, the checklist and the bots. Its code is in `blueprint/`, a module for each task, with a `ruff.toml` of its own, so that the Ruff settings of a project don't apply to it.
 - `stacks/` holds the dependency manifests and lock files of each kind of project, which Renovate keeps current; a new project starts from them.
-- `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools, and also updates a repository of each kind from the latest release to the commit, which must bring every file of the blueprint as a new repository has it and pass the same checks. The Windows workflow runs `scripts/check.sh` on Windows as well, in Git Bash like a contributor there, every week and for each pull request that changes the code or the tests.
+- `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools, and also updates a repository of each kind from the latest release to the commit, which must bring every file of the blueprint as a new repository has it and pass the same checks: in every pull request but the release pull request, and every week. The Windows workflow runs `scripts/check.sh` on Windows as well, in Git Bash like a contributor there, every week and for each pull request that changes the code or the tests.
 - `docs/` makes this documentation the website of the blueprint: its pages include the READMEs, and the Dashboard workflow publishes them with the dashboard under `dashboard/`.
 
 Where the blueprint is heading: [the roadmap](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/roadmap.md). What it protects and trusts: [its security design](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/security.md).
