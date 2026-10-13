@@ -161,7 +161,7 @@ flowchart TB
 
 - **A low score fails nothing,** but a run in which no mutant ran does, with the end of the output of mutmut or Infection in its summary: a broken configuration shows up in the week it breaks, not as an empty dashboard.
 - **A pull request that changes how the mutants run,** `mutation.yml` or the pinned mutmut, tries them, mutmut for a quarter of an hour, so that a defect fails it rather than the next weekly run.
-- **mutmut runs the tests in a copy of the repository,** `mutants/`, with the changed code and without Git. A test that can't work there, because it reads the code as text or asks Git, gets the marker `@pytest.mark.mutation_unsafe`, and the mutation tests leave it out; every Python project registers the marker in `pyproject.toml`.
+- **mutmut runs the tests in a copy of the repository,** `mutants/`, with the changed code and without Git. A test that can't work there, because it reads the code as text or asks Git, gets the marker `@pytest.mark.mutation_unsafe`, and the mutation tests leave it out; the `pyproject.toml` of a new Python project registers the marker.
 - **A configuration of the project wins:** a `[tool.mutmut]` table in `pyproject.toml` or a `[mutmut]` section in `setup.cfg` for mutmut, an `infection.json5` for Infection. Without one, mutmut mutates `custom_components/`, `src/` or the modules and packages of the root, and Infection mutates `lib/` on PHP 8.3, with `tests/bootstrap.php`, which loads the classes of Nextcloud.
 
 ## Kinds of projects

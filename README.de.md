@@ -155,7 +155,7 @@ flowchart TB
 
 - **Ein niedriger Wert lässt nichts fehlschlagen,** aber ein Lauf, in dem kein Mutant lief, schon, mit dem Ende der Ausgabe von mutmut oder Infection in seiner Zusammenfassung: Eine kaputte Konfiguration zeigt sich in der Woche, in der sie kaputtgeht, nicht als leeres Dashboard.
 - **Ein Pull Request, der ändert, wie die Mutanten laufen,** `mutation.yml` oder das gepinnte mutmut, probiert sie aus, mutmut eine Viertelstunde lang, damit ein Fehler ihn scheitern lässt und nicht den nächsten wöchentlichen Lauf.
-- **mutmut führt die Tests in einer Kopie des Repositorys aus,** `mutants/`, mit dem geänderten Code und ohne Git. Ein Test, der dort nicht funktionieren kann, weil er den Code als Text liest oder Git fragt, bekommt die Markierung `@pytest.mark.mutation_unsafe`, und die Mutationstests lassen ihn aus; jedes Python-Projekt registriert die Markierung in `pyproject.toml`.
+- **mutmut führt die Tests in einer Kopie des Repositorys aus,** `mutants/`, mit dem geänderten Code und ohne Git. Ein Test, der dort nicht funktionieren kann, weil er den Code als Text liest oder Git fragt, bekommt die Markierung `@pytest.mark.mutation_unsafe`, und die Mutationstests lassen ihn aus; die `pyproject.toml` eines neuen Python-Projekts registriert die Markierung.
 - **Eine Konfiguration des Projekts hat Vorrang:** eine Tabelle `[tool.mutmut]` in `pyproject.toml` oder ein Abschnitt `[mutmut]` in `setup.cfg` für mutmut, eine `infection.json5` für Infection. Ohne sie mutiert mutmut `custom_components/`, `src/` oder die Module und Pakete der Wurzel, und Infection mutiert `lib/` auf PHP 8.3, mit `tests/bootstrap.php`, das die Klassen von Nextcloud lädt.
 
 ## Arten von Projekten
