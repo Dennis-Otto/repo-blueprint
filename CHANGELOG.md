@@ -6,6 +6,10 @@ the next release, or lists the pull requests when there is none.
 
 ## Unreleased
 
+### Changes
+
+- **Every job runs on `ubuntu-24.04`, named with its version:** GitHub moves `ubuntu-latest` to Ubuntu 26.04 from 19 October 2026, one job at a time over a month, so that the runs of one workflow would have landed on either image at random, with Python 3.14 instead of 3.12, ShellCheck 0.11 and Docker 29, and failed like flaky tests. The workflows of the blueprint now name `ubuntu-24.04` and keep it until the checks of every kind of project pass on Ubuntu 26.04, which the blueprint tries every week; then one release moves every job. The workflows of the issue assistant follow with its next release. A workflow of your own, such as one of end-to-end tests, keeps `ubuntu-latest` until you change its `runs-on:` to `ubuntu-24.04` as well.
+
 ### Bug fixes
 
 - **The blueprint bot keeps its pull request open, and your commits on it:** with every new release, the bot put its branch back on `main` before it committed the update, so GitHub closed the open update pull request and the bot opened a new one, as with Dennis-Otto/ha-autodarts#225 and Dennis-Otto/ha-autodarts#226; commits with which a maintainer had resolved conflicts on the branch were lost. The bot now moves its branch straight from the update before to the new one: the pull request stays open with its number and its auto-merge, and an auto-merge that you switched off stays off. Once someone else has committed to the branch, other than with a plain merge of `main` such as the button *Update branch* makes, the bot leaves it alone and says in one comment that a newer release is out; merge or close the pull request, and its next run brings the rest.

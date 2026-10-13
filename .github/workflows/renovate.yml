@@ -33,7 +33,7 @@ jobs:
   validate:
     name: renovate rules
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -58,7 +58,7 @@ jobs:
   renovate:
     name: renovate
     if: github.repository == 'Dennis-Otto/repo-blueprint' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     # The environment holds the private key of the release app; only main may use it.
     environment:

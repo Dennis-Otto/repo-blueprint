@@ -23,7 +23,7 @@ jobs:
     name: check (github-action)
     # Not in the blueprint itself; generated repositories don't have this line.
     if: github.repository != 'Dennis-Otto/repo-blueprint'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Record the network traffic of the job

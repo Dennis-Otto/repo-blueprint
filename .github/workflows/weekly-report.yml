@@ -21,7 +21,7 @@ jobs:
   report:
     name: weekly report
     if: github.repository == 'Dennis-Otto/repo-blueprint'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
