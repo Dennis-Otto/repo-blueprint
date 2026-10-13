@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import textwrap
@@ -17,6 +16,7 @@ from pathlib import Path
 import pathspec
 import pytest
 from copier import run_copy
+from shell import BASH
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -46,28 +46,6 @@ TOOL = sorted(
         ),
     ]
 )
-
-
-# The bash that the tests run the steps of the workflows in, by its full path. Windows
-# looks for a bare "bash" in System32 before the PATH, and has the launcher of WSL as
-# bash.exe there and in WindowsApps, which runs the step in Linux without the variables
-# of the test. So the search leaves out these two folders and ends with the bash of Git
-# for Windows next to its git: the PATH of Git Bash, which scripts/check.sh runs in,
-# has that bash first, while the PATH of PowerShell or of the test runner of an IDE
-# has only its git.
-def find_bash() -> str | None:
-    path = [
-        entry
-        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
-        if Path(entry).name.casefold() not in {"system32", "windowsapps"}
-    ]
-    git = shutil.which("git")
-    if git:
-        path.append(str(Path(git).parents[1] / "bin"))
-    return shutil.which("bash", path=os.pathsep.join(path))
-
-
-BASH = find_bash()
 
 
 def render(destination: Path, **data: str | bool) -> Path:
@@ -1295,10 +1273,14 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 def test_the_tests_start_the_bash_of_the_path() -> None:
     # A bare "bash" ran the steps in WSL on Windows, and scripts/check.sh failed there:
     # the first argument of a call or of a list or tuple, alone or after env; only the
-    # search for it may name it.
+    # search for it may name it. A search of the whole PATH finds the same WSL from
+    # PowerShell or an IDE: every test takes BASH of tests/shell.py.
     bare = re.compile(r'(?:\[|(?<!which)\()\s*(?:"/usr/bin/env",\s*)?"bash"\s*[,\])]')
+    anywhere = re.compile(r'which\(\s*"bash"\s*\)')
     for path in sorted((ROOT / "tests").glob("*.py")):
-        assert not bare.search(path.read_text(encoding="utf-8")), path.name
+        text = path.read_text(encoding="utf-8")
+        assert not bare.search(text), path.name
+        assert not anywhere.search(text), path.name
 
 
 def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
@@ -1524,8 +1506,19 @@ def test_every_release_run_signs_the_tag_of_a_merged_release() -> None:
     # doesn't lag behind a merge as their search does.
     assert 'pullRequests(labels: ["autorelease: pending"], states: MERGED' in step
     assert "gh pr list" not in step
-    # A tag that exists already must be the signed one at the commit of the merge.
-    assert 'bash .github/sign-tag.sh verify "$tag" "$commit"' in step
+    # A tag that exists already must be the signed one at the commit of the merge,
+    # which sign-tag.sh checks (tests/test_sign_tag.py).
+    assert 'bash .github/sign-tag.sh "$tag" "$commit"' in step
+    # release-please creates a release only on a tag that the step signed: never on a
+    # tag of its own, without a signature, for a release pull request merged after the
+    # step looked, or in a run without the release app.
+    assert "        id: sign\n" in step
+    assert '          echo "signed=true" >> "$GITHUB_OUTPUT"\n' in step
+    please = release[release.index("        id: release\n") :]
+    please = please[: please.index("      - name:")]
+    assert "googleapis/release-please-action@" in please
+    skip = "skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}"
+    assert f"          {skip}\n" in please
 
 
 def test_the_build_checks_the_tag_before_it_builds() -> None:

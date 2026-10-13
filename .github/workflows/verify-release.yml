@@ -87,7 +87,8 @@ jobs:
           fi
           # The tag, signed without a key by the release workflow (gitsign, as in
           # .github/sign-tag.sh); releases made before have a tag without a signature,
-          # which the weekly run only notes.
+          # which the weekly run only notes. It checks the tag on its own, as a user
+          # would, not with the verify of sign-tag.sh, one of the scripts it checks.
           gitsign="$RUNNER_TEMP/gitsign"
           curl --fail --location --silent --show-error --output "$gitsign" \
             "https://github.com/sigstore/gitsign/releases/download/v$GITSIGN_VERSION/gitsign_${GITSIGN_VERSION}_linux_amd64"

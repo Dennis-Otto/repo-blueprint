@@ -102,10 +102,11 @@ jobs:
       # A merged release pull request: its tag comes first, signed, and release-please
       # creates the release on it. Every run looks, not only the push of the merge, so
       # that a run that is lost or fails early leaves the signing to the next one; a tag
-      # is locked for good once a release stands on it. It runs right before
-      # release-please: a release pull request merged in the seconds between the two
-      # would get a tag without a signature, which the build refuses.
+      # is locked for good once a release stands on it. A tag that exists already must
+      # be the one that the release workflow signed at the merge, such as that of a run
+      # that failed after it pushed the tag; any other stops the release here.
       - name: Sign the tag of a release that a merged release pull request makes
+        id: sign
         if: steps.app.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -113,29 +114,34 @@ jobs:
           set -euo pipefail
           # The merged release pull requests that wait for their release, as release-please
           # finds them, each with the commit of its merge and the version it releases. The
-          # list of pull requests, unlike their search, doesn't lag behind a merge.
-          # The variables of the query are GraphQL's, not the shell's.
-          # shellcheck disable=SC2016
-          pending="$(gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
-            -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
-              pullRequests(labels: ["autorelease: pending"], states: MERGED, baseRefName: "main", first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
-                nodes { mergeCommit { oid file(path: ".release-please-manifest.json") { object { ... on Blob { text } } } } } } } }' \
-            --jq '.data.repository.pullRequests.nodes[].mergeCommit | "\(.oid) \(.file.object.text | fromjson | .["."])"')"
+          # list of pull requests, unlike their search, doesn't lag behind a merge. GitHub
+          # fails for a moment now and then, so it asks three times.
+          for attempt in 1 2 3; do
+            # The variables of the query are GraphQL's, not the shell's.
+            # shellcheck disable=SC2016
+            if pending="$(gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
+              -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {
+                pullRequests(labels: ["autorelease: pending"], states: MERGED, baseRefName: "main", first: 10, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                  nodes { mergeCommit { oid file(path: ".release-please-manifest.json") { object { ... on Blob { text } } } } } } } }' \
+              --jq '.data.repository.pullRequests.nodes[].mergeCommit | "\(.oid) \(.file.object.text | fromjson | .["."])"')"; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::The merged release pull requests could not be read."
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           if [[ -z "$pending" ]]; then
             echo "No merged release pull request waits for its release."
             exit 0
           fi
           while read -r -u 3 commit version; do
             tag="v$version"
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
-              # The tag of a run that failed after signing it is fine; any other tag
-              # stops the release before release-please makes it the tag of the release.
-              bash .github/sign-tag.sh verify "$tag" "$commit"
-            else
-              bash .github/sign-tag.sh "$tag" "$commit"
-            fi
+            bash .github/sign-tag.sh "$tag" "$commit"
             echo "The tag $tag is signed." >> "$GITHUB_STEP_SUMMARY"
           done 3<<<"$pending"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
       - name: Update the release pull request, or create the release
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -145,6 +151,11 @@ jobs:
           token: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Releases only on the tags that the step above signed: a release pull request
+          # merged after it looked, or a run without the release app, would get a tag
+          # without a signature, which the build refuses and nobody can delete. Its
+          # release waits for the next run, which signs the tag first.
+          skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}
       - name: Take up a release that an earlier run left as a draft
         id: resume
         # A run that failed after the release was created leaves it as a draft, with
