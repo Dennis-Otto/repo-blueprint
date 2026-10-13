@@ -252,7 +252,7 @@ flowchart TB
     class passed done
 ```
 
-- **In der Prüfung:** Ein Job, der scheitert, endet mit einem Schritt, der die Erklärung seiner Prüfung in die Zusammenfassung und als Annotation schreibt, die die Liste der Prüfungen zeigt. `scripts/check.sh` macht dasselbe für den Schritt, an dem es scheitert, auch auf deinem Rechner, und in der CI zeigen die Dateien des Pull Requests die Probleme der Textdateien und von Ruff an ihren Zeilen.
+- **In der Prüfung:** Ein Job, der scheitert, endet mit einem Schritt, der die Erklärung seiner Prüfung in die Zusammenfassung und als Annotation schreibt, die die Liste der Prüfungen zeigt. `scripts/check.sh` macht dasselbe für den Schritt, an dem es scheitert, auch auf deinem Rechner, und in der CI zeigen die Dateien des Pull Requests die Probleme der Textdateien, von Ruff und von actionlint an ihren Zeilen.
 - **Ein Kommentar, auch für einen Fork:** Die Läufe eines Pull Requests aus einem Fork können nicht in ihn schreiben, deshalb läuft der Coach nach den Prüfungen, im Repository selbst. Er hält einen Kommentar mit einem Abschnitt für jede gescheiterte Prüfung, den Funden ihrer Annotationen und einem Link zu ihrem Log, und einem Vorschlag für den Titel, wenn der Titel kein Conventional Commit ist. Ein Pull Request, dessen Prüfungen nie gescheitert sind, bekommt keinen Kommentar; sobald jede Prüfung besteht, wird ein Kommentar, der Fehler gezeigt hat, zu einer kurzen Entwarnung.
 - **Sicher mit jedem Pull Request:** Der Coach liest die Check-Runs und ihre Annotationen über die API und checkt nur die Erklärungen des Standard-Branches aus; er führt keinen Code des Pull Requests aus. Text, den ein Pull Request bestimmt, etwa ein Dateiname, eine Meldung oder ein Titel, erscheint nur als Code, auf eine kurze Länge gekürzt, sodass er niemanden erwähnen, nirgendwohin verlinken und den Kommentar nicht kaputt machen kann.
 - **Jede Prüfung erklärt sich:** Die Erklärungen stehen in `.github/checks.toml`, die der Blueprint aktuell hält, und die der eigenen Prüfungen eines Projekts in `.github/checks.project.toml`, die dem Projekt gehört und Vorrang hat. Ein Test des Blueprints scheitert an einer vorgeschriebenen Prüfung oder einem Schritt von `scripts/check.sh` ohne Erklärung, und `python3 .github/blueprint.py coach verify` listet sie in einem Repository auf.
@@ -496,7 +496,7 @@ flowchart TB
     subgraph repo ["Dein Repository"]
         theirs["<b>Die Dateien des Blueprints</b><br>Workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>Community-Dateien"]
         mine["<b>Die Dateien des Projekts</b><br>README · CHANGELOG · <code>docs/</code><br>Code und Tests<br>Manifeste und Lock-Dateien<br>Issue-Formulare · Labels"]
-        adds["<b>Was das Projekt ergänzt</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br>eigene Workflows"]
+        adds["<b>Was das Projekt ergänzt</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br><code>.github/checks.project.toml</code><br>eigene Workflows"]
     end
 
     blueprint -- "<code>copier update</code><br>Zeile für Zeile zusammengeführt" --> theirs
@@ -514,6 +514,7 @@ Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt
 - **Änderungen an den Dateien des Blueprints überstehen Updates:** `copier update` führt die Änderungen des Blueprints und die des Repositorys Zeile für Zeile zusammen und markiert nur dort einen Konflikt, wo beide dieselben Zeilen geändert haben.
 - **Einstellungen nur dieses Projekts** gehören in `.github/repository.project.toml`, etwa die Prüfungen seiner End-to-End-Tests oder ein Environment mit seinen Secrets. `blueprint.py` und der Settings-Bot ergänzen damit `.github/repository.toml`.
 - **Prüfungen nur dieses Projekts** gehören in `scripts/check-project.sh`, das `scripts/check.sh` zuletzt ausführt; **Workflows nur dieses Projekts** sind eigene Workflow-Dateien.
+- **Erklärungen der Prüfungen nur dieses Projekts,** die der PR-Coach zeigt, wenn eine scheitert, gehören in `.github/checks.project.toml`; sie haben Vorrang vor denen von `.github/checks.toml`.
 - **Mehrere Copyright-Inhaber,** etwa die Autoren eines Forks, sind die Antwort `copyright`, durch Semikolons getrennt; LICENSE und REUSE.toml nennen jeden von ihnen.
 - **Dateien unter einer anderen Lizenz,** etwa Grafiken Dritter, bekommen eine `.license`-Datei daneben, wie REUSE es beschreibt.
 - **Das Paket einer Nextcloud-App** prüft `scripts/check-package.sh ARCHIV unsigned|signed`, wenn das Projekt eines hat: `scripts/check.sh` führt es für das Paket aus, das krankerl baut, das Release für das Paket vor und nach dem Signieren.

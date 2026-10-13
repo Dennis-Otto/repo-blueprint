@@ -515,16 +515,6 @@ preview, which the section Website of CONTRIBUTING.md sets up:"""
 commands = [".venv-docs/bin/mkdocs build --strict"]
 docs = "CONTRIBUTING.md#website"
 
-[step.Diagrams]
-problem = """A Markdown document has a ```` ```mermaid ```` block, or a diagram of
-`docs/diagrams/` lacks one of its pictures, or a picture its source."""
-why = """GitHub draws Mermaid only in the browser; its app and other readers of Markdown
-show the source as code. A picture drawn from each source reaches every reader."""
-fix = """Turn every Mermaid block into a source with its pictures, or draw the pictures
-of every source anew, with Docker:"""
-commands = ["bash scripts/diagrams.sh --extract", "bash scripts/diagrams.sh"]
-docs = "CONTRIBUTING.md#website"
-
 [step."Checks of this project"]
 problem = """A check of this project alone, in `scripts/check-project.sh`, failed; its
 output above says which and why."""

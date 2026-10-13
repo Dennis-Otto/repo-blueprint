@@ -31,6 +31,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # actionlint's problem matcher, as its documentation has it, shows each error as
+      # an annotation at its line, in the files of the pull request too.
+      - name: Show each error at its line
+        run: |
+          cat > "$RUNNER_TEMP/actionlint.json" <<'EOF'
+          {"problemMatcher": [{"owner": "actionlint", "pattern": [{"regexp": "^(.+?):(\\d+):(\\d+): (.+) \\[(.+)\\]$", "file": 1, "line": 2, "column": 3, "message": 4, "code": 5}]}]}
+          EOF
+          echo "::add-matcher::$RUNNER_TEMP/actionlint.json"
       - name: Lint the workflows
         uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       # The PR coach: what failed, why it matters and how to fix it, in the summary

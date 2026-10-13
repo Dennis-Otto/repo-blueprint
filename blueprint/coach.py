@@ -137,7 +137,8 @@ class Catalog:
     def load(cls, root: Path) -> Catalog:
         checks: dict[str, Entry] = {}
         steps: dict[str, Entry] = {}
-        for path in (root / CATALOG, root / PROJECT_CATALOG):
+        # The project's first, so that its patterns match before the blueprint's.
+        for path in (root / PROJECT_CATALOG, root / CATALOG):
             if not path.is_file():
                 continue
             source = path.relative_to(root).as_posix()
@@ -153,7 +154,8 @@ class Catalog:
                 if not isinstance(tables, dict):
                     raise CatalogError(f"{source}: {kind} is no table of tables")
                 for key, table in tables.items():
-                    entries[key] = Entry.parse(kind, key, table, source)
+                    entry = Entry.parse(kind, key, table, source)
+                    entries.setdefault(key, entry)
         return cls(checks, steps)
 
     def check(self, name: str) -> Entry | None:
@@ -248,10 +250,12 @@ def escape_property(text: str) -> str:
 
 def annotation(entry: Entry, step: bool) -> str:
     """The annotation of the check, which GitHub shows with its log and in the files of
-    the pull request."""
+    the pull request. That of a step of scripts/check.sh is a notice: GitHub keeps only
+    the first 10 errors of a step, which the tools of the step may have written."""
     message = "\n".join([entry.problem, f"How to fix it: {entry.fix}", *entry.commands])
     title = escape_property(heading(entry, step))
-    return f"::error title={title}::{escape_data(message)}"
+    level = "notice" if step else "error"
+    return f"::{level} title={title}::{escape_data(message)}"
 
 
 def unknown(name: str, step: bool) -> str:
@@ -432,7 +436,8 @@ def check_runs(api: Api, repo: str, sha: str) -> list[Run]:
 
 
 def findings(api: Api, repo: str, run: Run) -> list[Finding]:
-    """The errors that a check run reports as annotations, without GitHub's own."""
+    """The errors that a check run reports as annotations, without GitHub's own, and
+    the explanations of the coach."""
     if not run.annotations:
         return []
     items = paged(api, f"repos/{repo}/check-runs/{run.id}/annotations")
@@ -440,6 +445,7 @@ def findings(api: Api, repo: str, run: Run) -> list[Finding]:
         Finding.parse(item)
         for item in items
         if item.get("annotation_level") == "failure"
+        or str(item.get("title") or "").startswith(PREFIX)
     ]
     return [finding for finding in found if not GENERIC.fullmatch(finding.message)]
 
@@ -533,13 +539,11 @@ def render(
         lines += ["⏳ No check fails any more.", ""]
     else:
         lines += ["✅ **Every check passed.** Thank you!", ""]
-    if pending == 1:
-        lines += ["1 check is still running; this comment follows when it ends.", ""]
-    elif pending:
-        lines += [
-            f"{pending} checks are still running; this comment follows when they end.",
-            "",
-        ]
+    # No promise that the comment follows: the coach starts only after the workflows
+    # that it watches, and a check may belong to another one or to an app.
+    if pending:
+        running = "1 check is" if pending == 1 else f"{pending} checks are"
+        lines += [f"{running} still running.", ""]
     body = "\n".join([*lines, ""])
     left = len(failed)
     for run in failed:
@@ -576,11 +580,15 @@ def report(api: Api, repo: str, sha: str, number: int | None, catalog: Catalog) 
         return f"No check of #{number} failed; it needs no report.\n"
     found = {run.id: findings(api, repo, run) for run in runs if run.failed}
     body = render(repo, sha, pull, runs, found, catalog)
+    if comment is not None and comment.get("body") == body:
+        return f"The report of #{number} is up to date:\n\n{body}"
+    # A push while the coach read the checks: the report of the new head follows, and
+    # this one neither overwrites it nor adds a second comment next to it.
+    if find_pull(api, repo, sha, number) is None:
+        return f"{sha[:7]} is no longer the head of #{number}; no report.\n"
     if comment is None:
         api.post(f"repos/{repo}/issues/{number}/comments", {"body": body})
         return f"The report of #{number}:\n\n{body}"
-    if comment.get("body") == body:
-        return f"The report of #{number} is up to date:\n\n{body}"
     api.patch(f"repos/{repo}/issues/comments/{comment['id']}", {"body": body})
     return f"The report of #{number}, updated:\n\n{body}"
 

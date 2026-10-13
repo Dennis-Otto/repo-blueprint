@@ -49,12 +49,20 @@ problems=0
 # line that matches the pattern, or at the end of the file, which the files of a pull
 # request show at their place.
 problem() {
-  local line name
-  echo "$1: $2"
+  local line name shown
+  # The name on one line of the log, where no name can start a command of the runner:
+  # its line breaks as \r and \n, and ./ before a name that starts with a blank, a
+  # colon or another sign.
+  shown="${1//$'\r'/\\r}"
+  shown="${shown//$'\n'/\\n}"
+  if [[ "$shown" != [[:alnum:]._-]* ]]; then
+    shown="./$shown"
+  fi
+  printf '%s: %s\n' "$shown" "$2"
   problems=$((problems + 1))
   if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
     if [[ -n "${3:-}" ]]; then
-      line="$(grep -nU -m 1 -E "$3" "$1")"
+      line="$(grep -nU -m 1 -E -- "$3" "$1")"
       line="${line%%:*}"
     else
       line="$(($(wc -l <"$1") + 1))"

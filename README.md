@@ -258,7 +258,7 @@ flowchart TB
     class passed done
 ```
 
-- **In the check:** a job that fails ends with a step that writes the explanation of its check into the summary and as an annotation, which the list of the checks shows. `scripts/check.sh` does the same for the step that stopped it, on your machine as well, and in the CI the files of the pull request show the problems of the text files and of Ruff at their lines.
+- **In the check:** a job that fails ends with a step that writes the explanation of its check into the summary and as an annotation, which the list of the checks shows. `scripts/check.sh` does the same for the step that stopped it, on your machine as well, and in the CI the files of the pull request show the problems of the text files, of Ruff and of actionlint at their lines.
 - **One comment, also for a fork:** the runs of a pull request from a fork can't write to it, so the coach runs after the checks, in the repository itself. It keeps one comment with a section for each check that failed, the findings of its annotations and a link to its log, and a suggested title when the title is no Conventional Commit. A pull request whose checks never failed gets no comment; once every check passes, a comment that listed failures turns into a short all-clear.
 - **Safe with any pull request:** the coach reads the check runs and their annotations from the API and checks out only the explanations of the default branch; it runs no code of the pull request. Text that a pull request controls, such as a file name, a message or a title, appears only as code, cut to a short length, so it can't mention anybody, link anywhere or break the comment.
 - **Every check explains itself:** the explanations are in `.github/checks.toml`, which the blueprint keeps current, and those of a project's own checks in `.github/checks.project.toml`, which belongs to the project and wins. A test of the blueprint fails for a required check or a step of `scripts/check.sh` without an explanation, and `python3 .github/blueprint.py coach verify` lists them in a repository.
@@ -502,7 +502,7 @@ flowchart TB
     subgraph repo ["Your repository"]
         theirs["<b>The blueprint's files</b><br>workflows · <code>scripts/check.sh</code><br><code>.github/repository.toml</code><br>community files"]
         mine["<b>The project's files</b><br>README · CHANGELOG · <code>docs/</code><br>code and tests<br>manifests and lock files<br>issue forms · labels"]
-        adds["<b>What the project adds</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br>workflows of its own"]
+        adds["<b>What the project adds</b><br><code>scripts/check-project.sh</code><br><code>.github/repository.project.toml</code><br><code>.github/checks.project.toml</code><br>workflows of its own"]
     end
 
     blueprint -- "<code>copier update</code><br>merged line by line" --> theirs
@@ -520,6 +520,7 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 - **Changes in the blueprint's files survive updates:** `copier update` merges the changes of the blueprint with those of the repository, line by line, and marks a conflict only where both changed the same lines.
 - **Settings of the project alone** go into `.github/repository.project.toml`, such as the checks of its end-to-end tests or an environment with its secrets. `blueprint.py` and the settings bot add them to `.github/repository.toml`.
 - **Checks of the project alone** go into `scripts/check-project.sh`, which `scripts/check.sh` runs last; **workflows of the project alone** are workflow files of their own.
+- **Explanations of the checks of the project alone,** which the PR coach shows when one fails, go into `.github/checks.project.toml`; they win over those of `.github/checks.toml`.
 - **Several copyright holders,** such as the authors of a fork, are the answer `copyright`, separated by semicolons; LICENSE and REUSE.toml name each of them.
 - **Files under another license,** such as third-party artwork, get a `.license` file next to them, as REUSE describes.
 - **The package of a Nextcloud app** is checked by `scripts/check-package.sh ARCHIVE unsigned|signed` if the project has one: `scripts/check.sh` runs it on the package that krankerl builds, the release on the package before and after signing.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+import fnmatch
 import hashlib
 import json
 import os
@@ -3050,12 +3051,46 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
         == {
             "CI (python)",
             "Variants",
+            "Windows",
             "Release",
         }
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
     )
     assert "github.event.workflow_run.run_attempt == 1" in after
+
+
+# The workflows of the pull requests of the blueprint that the bots after the checks
+# leave alone: the bots of the pull requests themselves, and the tools that check only
+# their own set-up, in the pull requests that change it.
+UNWATCHED = {
+    "Area labels",
+    "Dependabot maintenance",
+    "Issue lifecycle",
+    "Welcome",
+    "Mutation",
+    "Renovate",
+}
+
+
+def test_the_pr_coach_follows_the_checks_of_a_pull_request_of_the_blueprint() -> None:
+    folder = ROOT / ".github/workflows"
+    watched = watched_after_the_checks(
+        (folder / "after-checks.yml").read_text(encoding="utf-8")
+    )
+    names = set()
+    for path in folder.glob("*.yml"):
+        text = path.read_text(encoding="utf-8")
+        name = re.search(r"^name: (.+)$", text, re.M)
+        assert name, path
+        names.add(name[1])
+        # The checks of the other kinds of project are only templates here.
+        template = path.name.startswith("ci-") or path.name == "action-test.yml"
+        if template and name[1] != "CI (python)":
+            continue
+        if re.search(r"^  pull_request(?:_target)?:", text, re.M):
+            assert (name[1] in watched) != (name[1] in UNWATCHED), path.name
+    assert names >= UNWATCHED
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -3319,6 +3354,33 @@ def test_every_project_gets_the_pr_coach(projects: dict[str, Path], kind: str) -
     # A step that fails is explained; nothing else sets the trap of the script.
     assert check.count("\ntrap coach EXIT\n") == 1
     assert re.findall(r"^trap ", check, re.M) == ["trap "]
+
+
+def test_every_explanation_belongs_to_a_check_or_a_step(
+    projects: dict[str, Path],
+) -> None:
+    # Of a job of a workflow, of a step of scripts/check.sh of some kind of project,
+    # or of CodeQL, the check of GitHub's code scanning, which no workflow names.
+    names = {"CodeQL"}
+    steps = set()
+    for root in (ROOT, *projects.values()):
+        for text in workflows(root).values():
+            names.update(re.findall(r"^    name: (.+)$", text, re.M))
+        check = (root / "scripts/check.sh").read_text(encoding="utf-8")
+        steps.update(re.findall(r'^ *step "(.+)"$', check, re.M))
+    # A name of a matrix, with its expressions, stands for every name it can be.
+    matrix = [
+        re.compile(".+".join(map(re.escape, re.split(r"\$\{\{.+?\}\}", name))))
+        for name in names
+        if "${{" in name
+    ]
+    explained = Catalog.load(ROOT)
+    for key in explained.checks:
+        sample = key.replace("*", "x")
+        assert any(fnmatch.fnmatchcase(name, key) for name in names) or any(
+            pattern.fullmatch(sample) for pattern in matrix
+        ), key
+    assert set(explained.steps) <= steps, set(explained.steps) - steps
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants.

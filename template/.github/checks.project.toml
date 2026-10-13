@@ -3,7 +3,9 @@
 # explanation in the summary of the check, as its annotation and in its comment on the
 # pull request, also on a pull request from a fork; scripts/check.sh shows those of its
 # steps on your machine too. Explain every check that you add to the required checks
-# of .github/repository.project.toml, so that the next person sees how to fix it.
+# of .github/repository.project.toml, so that the next person sees how to fix it. The
+# comment follows a workflow of this project alone, such as one of visual tests, once
+# the answer test_workflows of .copier-answers.yml names it.
 # https://github.com/Dennis-Otto/repo-blueprint#the-pr-coach
 
 # A check by the name that GitHub shows, where a * stands for any text. Each has a

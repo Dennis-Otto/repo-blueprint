@@ -115,10 +115,10 @@
   "annotations": {
     "52000000001": [
       {
-        "path": "scripts/check.sh",
+        "path": ".github",
         "start_line": 1,
         "end_line": 1,
-        "annotation_level": "failure",
+        "annotation_level": "notice",
         "title": "PR coach: Ruff (scripts/check.sh)",
         "message": "The Python code isn't in the format of Ruff.\nHow to fix it: ...",
         "raw_details": ""

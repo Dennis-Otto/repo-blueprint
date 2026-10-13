@@ -164,7 +164,8 @@ def test_the_explanations_of_the_project_win(tmp_path: Path) -> None:
         ".github/checks.project.toml",
         '[check.docs]\ntitle = "Our docs"\nproblem = "P."\nwhy = "W."\nfix = """Run\n'
         '  it:"""\ncommands = ["make docs"]\ndocs = "https://example.com/"\n'
-        '[step.Ruff]\ntitle = "Lint"\nproblem = "P."\nwhy = "W."\nfix = "F."\n',
+        '[step.Ruff]\ntitle = "Lint"\nproblem = "P."\nwhy = "W."\nfix = "F."\n'
+        f'[check."check (e2e*)"]{ENTRY}',
     )
     explained = Catalog.load(tmp_path)
 
@@ -183,6 +184,10 @@ def test_the_explanations_of_the_project_win(tmp_path: Path) -> None:
     pattern = explained.check("check (python)")
     assert pattern is not None
     assert pattern.key == "check (*)"
+    # A pattern of the project wins over one of the blueprint that matches too.
+    e2e = explained.check("check (e2e Firefox)")
+    assert e2e is not None
+    assert e2e.key == "check (e2e*)"
     assert explained.check("checks") is None
     assert explained.step("Mypy") is None
 
@@ -280,6 +285,10 @@ def test_the_annotation_keeps_its_title_and_lines() -> None:
 
     assert line == (
         "::error title=PR coach%3A A%3A b%2C c::100%25 broken.%0AHow to fix it: Run:%0Aa%0D%0Ab"
+    )
+    # A step's is a notice, which the errors of its tools can't push out.
+    assert annotation(entry, step=True).startswith(
+        "::notice title=PR coach%3A x (scripts/check.sh)::100%25 broken."
     )
     assert escape_data("50%\n") == "50%25%0A"
     assert escape_property("a:b,c") == "a%3Ab%2Cc"
@@ -474,14 +483,23 @@ def test_the_ci_shows_each_problem_of_a_text_file_at_its_line(tmp_path: Path) ->
 @pytest.mark.skipif(BASH is None, reason="needs bash")
 @pytest.mark.skipif(os.name == "nt", reason="Windows takes no colon in a file name")
 def test_no_name_of_a_file_ends_the_command_of_the_runner(tmp_path: Path) -> None:
-    result = check_the_text_files(tmp_path, {"a:b\n::warning::x": b"x \n"}, ci=True)
+    files = {"a:b\n::warning::x": b"x \n", "::notice::y": b"y \n", " ::debug::z": b"z"}
+
+    result = check_the_text_files(tmp_path, files, ci=True)
 
     assert result.returncode == 1
     assert (
         "::error file=a%3Ab%0A%3A%3Awarning%3A%3Ax,line=1,title=Text files"
         "::has trailing whitespace\n"
     ) in result.stdout
-    assert "\n::warning::" not in result.stdout
+    # The log names each file on one line that starts no command of the runner.
+    lines = result.stdout.splitlines()
+    assert "a:b\\n::warning::x: has trailing whitespace" in lines
+    assert "./::notice::y: has trailing whitespace" in lines
+    assert "./ ::debug::z: lacks the line break at its end" in lines
+    commands = [line for line in lines if line.lstrip().startswith("::")]
+    assert len(commands) == 3
+    assert all(line.startswith("::error file=") for line in commands)
 
 
 @pytest.mark.skipif(BASH is None, reason="needs bash")
@@ -491,6 +509,46 @@ def test_the_text_files_have_no_annotations_outside_the_ci(tmp_path: Path) -> No
     assert result.returncode == 1
     assert "spaces.txt: has trailing whitespace" in result.stdout
     assert "::error" not in result.stdout
+
+
+def test_the_lint_of_the_workflows_shows_each_error_at_its_line() -> None:
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    found = re.search(r"/actionlint\.json\" <<'EOF'\n(.+)\n +EOF\n", lint)
+    assert found
+    pattern = json.loads(found[1])["problemMatcher"][0]["pattern"][0]
+    regexp = re.compile(pattern["regexp"])
+    # Lines of actionlint 1.7.12: its errors, and the source that it shows below each.
+    errors = {
+        '.github/workflows/x.yml:3:5: unexpected key "branch" for "push" section. '
+        'expected one of "branches", "tags" [syntax-check]': (
+            ".github/workflows/x.yml",
+            "3",
+            "5",
+            'unexpected key "branch" for "push" section. expected one of "branches", '
+            '"tags"',
+            "syntax-check",
+        ),
+        "ci.yml:8:9: shellcheck reported issue in this script: SC2086:info:1:6: "
+        "Double quote to prevent globbing and word splitting [shellcheck]": (
+            "ci.yml",
+            "8",
+            "9",
+            "shellcheck reported issue in this script: SC2086:info:1:6: "
+            "Double quote to prevent globbing and word splitting",
+            "shellcheck",
+        ),
+    }
+    for line, expected in errors.items():
+        match = regexp.match(line)
+        assert match, line
+        keys = ("file", "line", "column", "message", "code")
+        assert tuple(match[pattern[key]] for key in keys) == expected
+    for source in ("  |", "3 |     branch: main", "  |     ^~~~~~~"):
+        assert not regexp.match(source)
+    # The job registers it before actionlint runs.
+    assert lint.index("::add-matcher::$RUNNER_TEMP/actionlint.json") < lint.index(
+        "uses: docker://rhysd/actionlint"
+    )
 
 
 # ---------------------------------------------------------------- untrusted text
@@ -690,9 +748,7 @@ def test_a_pull_request_from_a_fork_gets_one_report() -> None:
     assert github.writes() == [("POST", f"repos/{REPO}/issues/42/comments")]
     body = body_of(github)
     assert body.startswith(f"{MARKER}\n### PR coach\n\n**5 checks failed.**")
-    assert (
-        "\n\n1 check is still running; this comment follows when it ends.\n\n<details>"
-    ) in body
+    assert "\n\n1 check is still running.\n\n<details>" in body
     # Five sections, closed, as there are more than three.
     assert body.count("<details>") == 5
     assert "<details open>" not in body
@@ -826,8 +882,7 @@ def test_the_report_follows_the_checks_in_its_one_comment() -> None:
     github.runs[8]["status"] = "in_progress"
     run_report(github)
     assert (
-        "⏳ No check fails any more.\n\n2 checks are still running; this comment "
-        "follows when they end.\n\n<sub>"
+        "⏳ No check fails any more.\n\n2 checks are still running.\n\n<sub>"
     ) in body_of(github)
 
     # Every check passed.
@@ -860,6 +915,37 @@ def test_a_report_only_for_the_head_of_an_open_pull_request() -> None:
     github.pulls[0]["state"] = "closed"
     assert "no longer the head" in run_report(github, 42)
     assert github.writes() == []
+
+
+class PushedGitHub(FakeGitHub):
+    """GitHub, where a push to the pull request comes while the coach reads the
+    annotations of its checks."""
+
+    pushed = False
+
+    def route(self, method: str, path: str, body: Any) -> tuple[int, Any]:
+        if self.pushed and "/annotations" in path:
+            self.pulls[0]["head"]["sha"] = "0" * 40
+        return super().route(method, path, body)
+
+
+def test_a_push_while_the_coach_reads_leaves_the_comment_to_the_new_head() -> None:
+    github = PushedGitHub()
+    github.pushed = True
+
+    # Neither a second comment next to that of the new head, nor an old report
+    # over it.
+    assert "is no longer the head of #42; no report" in run_report(github, 42)
+    assert github.writes() == []
+    github.pulls[0]["head"]["sha"] = SHA
+    github.pushed = False
+    run_report(github, 42)
+    first = body_of(github)
+    github.pushed = True
+    github.runs[0]["conclusion"] = "success"
+    assert "is no longer the head of #42; no report" in run_report(github, 42)
+    assert body_of(github) == first
+    assert [method for method, _ in github.writes()] == ["POST"]
 
 
 def test_a_comment_of_someone_else_stays_as_it_is() -> None:
