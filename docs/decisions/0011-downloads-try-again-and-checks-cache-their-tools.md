@@ -21,35 +21,10 @@ Option 3. Every download in the workflows and scripts runs `curl --fail --retry 
 
 The checks of a Nextcloud app keep krankerl in the cache of GitHub Actions, under a key of its version and checksum, and check the checksum of the cached package too. GitHub saves the cache only after a run that passed. A release builds without any cache, so that nothing a pull request saved can reach a signed package.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the checks of a Nextcloud app get krankerl
-    accDescr: The checks restore krankerl from the cache under a key of its version and checksum. Without a cached package they download it, trying again after a passing error. Either way the checksum is checked before krankerl is installed, and GitHub saves the cache after a run that passed. A release always downloads krankerl and uses no cache.
-
-    restore["Restore from the cache<br>key: version + checksum"]
-    hit{"In the cache?"}
-    download["Download<br>tries again after a passing error"]
-    verify["Check the checksum"]
-    install["Install krankerl"]
-    save["GitHub saves the cache<br>after a run that passed"]
-    release["A release: always the download<br>never a cache"]
-
-    restore --> hit
-    hit -- "yes" --> verify
-    hit -- "no" --> download --> verify
-    verify --> install --> save
-    release --> download
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class restore,download,verify bot
-    class install,save done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-checks-of-a-nextcloud-app-get-krankerl.dark.svg">
+  <img src="../images/diagrams/how-the-checks-of-a-nextcloud-app-get-krankerl.svg" alt="How the checks of a Nextcloud app get krankerl: The checks restore krankerl from the cache under a key of its version and checksum. Without a cached package they download it, trying again after a passing error. Either way the checksum is checked before krankerl is installed, and GitHub saves the cache after a run that passed. A release always downloads krankerl and uses no cache.">
+</picture>
 
 `scripts/check.sh` still passes a check that needs a server out of reach on a computer of a developer, and says that the CI makes it. In the CI, where `CI` is set, such a check fails and says to run it again later, because no other check would follow.
 

@@ -261,3 +261,69 @@ def test_both_plugins_that_download_try_again_and_nothing_else_changes(
     assert isinstance(requests_of(search), Network)
     # The rest of requests is the same.
     assert retrying.Timeout is Network.Timeout
+
+
+SOURCE = 'flowchart TB\n    a["one<br>two"] --> b["A & B"]\n'
+
+
+def picture(src: str, dark: str = "") -> str:
+    """A <picture> of a diagram, as scripts/diagrams.sh --extract writes it."""
+    dark = dark or src.replace(".svg", ".dark.svg")
+    return (
+        "<picture>\n"
+        f'  <source media="(prefers-color-scheme: dark)" srcset="{dark}">\n'
+        f'  <img src="{src}" alt="Steps: one and two">\n'
+        "</picture>"
+    )
+
+
+def live(source: str = SOURCE) -> str:
+    escaped = source.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return f'<pre class="mermaid"><code>{escaped}</code></pre>'
+
+
+def draw(tmp_path: Path, html: str) -> str:
+    docs = tmp_path / "docs"
+    (docs / "diagrams").mkdir(parents=True, exist_ok=True)
+    (docs / "diagrams/steps.mmd").write_text(SOURCE, encoding="utf-8")
+    (docs / "diagrams/steps.de.mmd").write_text(
+        "flowchart TB\n  a --> b\n", encoding="utf-8"
+    )
+    result: str = hooks().on_page_content(
+        html, page=None, config=SimpleNamespace(docs_dir=str(docs)), files=None
+    )
+    return result
+
+
+def test_the_website_draws_a_diagram_from_its_source(tmp_path: Path) -> None:
+    # A README, which names the pictures from the root of the repository, and a page
+    # of docs/, which names them from its folder.
+    html = (
+        "<h1>Demo</h1>\n"
+        f"<p>{picture('docs/images/diagrams/steps.svg')}</p>\n"
+        "<p>Text.</p>\n"
+        f"<p>\n{picture('../images/diagrams/steps.de.svg')}\n</p>\n"
+    )
+
+    assert draw(tmp_path, html) == (
+        "<h1>Demo</h1>\n"
+        f"{live()}\n"
+        "<p>Text.</p>\n"
+        f"{live('flowchart TB' + chr(10) + '  a --> b' + chr(10))}\n"
+    )
+
+
+def test_a_picture_in_a_paragraph_with_text_keeps_the_paragraph(tmp_path: Path) -> None:
+    html = f"<p>Before\n{picture('images/diagrams/steps.svg')}\nafter.</p>"
+
+    assert draw(tmp_path, html) == f"<p>Before\n{live()}\nafter.</p>"
+
+
+def test_other_pictures_stay_as_they_are(tmp_path: Path) -> None:
+    html = (
+        f"<p>{picture('images/diagrams/missing.svg')}</p>\n"
+        f"<p>{picture('images/card.png', 'images/card-dark.png')}</p>\n"
+        '<p><img src="images/diagrams/steps.svg" alt="Steps"></p>\n'
+    )
+
+    assert draw(tmp_path, html) == html

@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the jobs move to the next runner
+    accDescr: Every job runs on the runner named with its version. Every Thursday, the Next runner workflow runs the variants on the next runner; a failure keeps an issue open until they pass. Once they pass, one pull request of the blueprint moves every job, and the release brings the move to every repository through the blueprint bot.
+
+    jobs["Every job<br>runs-on: ubuntu-24.04"]
+    weekly["Next runner, every Thursday<br>the 14 variants on ubuntu-26.04"]
+    issue["An issue stays open<br>until they pass"]
+    move["One pull request of the blueprint<br>moves every job to ubuntu-26.04"]
+    release["The release<br>the blueprint bot brings it<br>to every repository"]
+
+    jobs --> weekly
+    weekly -- "fail" --> issue
+    issue -- "fixed" --> weekly
+    weekly -- "pass" --> move --> release
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class weekly bot
+    class issue,move person
+    class release done

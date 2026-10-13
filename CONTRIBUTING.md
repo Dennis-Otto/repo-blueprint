@@ -30,30 +30,10 @@ A new check runs only where it can change a result, as [decision 0009](docs/deci
 
 ## Workflow
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: The way of a contribution
-    accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry in a new file of changelog.d, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.
-
-    issue["Issue<br>for anything larger"]
-    branch["Branch from <code>main</code>"]
-    change["The change with its tests<br>an entry in <code>changelog.d/</code><br>every commit signed off"]
-    pr["Pull request<br><code>feat: …</code> · <code>fix: …</code> · <code>feat!: …</code>"]
-    checks{"Every required<br>check passes?"}
-    main["Squashed into <code>main</code><br>the title decides<br>the next version"]
-
-    issue --> branch --> change --> pr --> checks
-    checks -- "yes" --> main
-    checks -- "no: fix and push" --> change
-
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class main done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-way-of-a-contribution.dark.svg">
+  <img src="docs/images/diagrams/the-way-of-a-contribution.svg" alt="The way of a contribution: An issue first for anything larger, a branch from main, the change with its tests and an entry in a new file of changelog.d, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.">
+</picture>
 
 1. Open an issue first for anything larger than a small fix, so we can agree on the approach.
 2. Create a branch from `main`.
@@ -107,7 +87,7 @@ On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place
 
 Pictures make the documentation easier to follow:
 
-- **Diagrams** are Mermaid in a `mermaid` block of the Markdown, which GitHub and the website both draw. They run from top to bottom (`flowchart TB`), so that they keep their size in the column of a page, and have `accTitle` and `accDescr` for screen readers. Their colors are tints that read in the light and the dark theme: blue (`#526cfe`) the blueprint and its bots, orange (`#f59e0b`) you and what is yours, green (`#16a34a`) what comes out. A diagram in a README comes in English and in German.
+- **Diagrams** are pictures of Mermaid sources, because the GitHub app and other renderers of Markdown show a `mermaid` block as code ([decision 0016](docs/decisions/0016-diagrams-as-pictures-of-their-sources.md)). A source is `docs/diagrams/<name>.mmd`, and `bash scripts/diagrams.sh` draws it, with Docker, as `docs/images/diagrams/<name>.svg` and `<name>.dark.svg`, which the Markdown shows with a `<picture>` and the website draws live from the source; `bash scripts/diagrams.sh --extract` turns a `mermaid` block into a source and its picture. The check *diagrams* draws the pictures anew in a pull request that changes a diagram or adds a `mermaid` block, and on a branch of this repository the diagram bot commits the sources and pictures that it made; on `main`, the Diagrams workflow keeps one pull request from `bot/diagrams` that fixes what is left and merges itself. You need no Docker for a diagram: change its source, push, and let the bot draw it. Diagrams run from top to bottom (`flowchart TB`), so that they keep their size in the column of a page and on a phone, and have `accTitle` and `accDescr` for screen readers, which the `alt` of the picture repeats. Labels are text in the pictures: `<br>` breaks a line, and a label in `` "`…`" `` takes `**bold**` and `*italic*`. Their colors are tints that read in the light and the dark theme: blue (`#526cfe`) the blueprint and its bots, orange (`#f59e0b`) you and what is yours, green (`#16a34a`) what comes out. A diagram in a README comes in English and in German, the German one as `<name>.de.mmd`.
 - **Pictures** are files in `docs/images/`. A page of `docs/` names one as `images/…`, a README as `docs/images/…`, and a hook of the website (`.github/mkdocs_project.py`) shows it there too.
 - **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker: run it again after the questions of `copier.yml`, the output of Copier or the dashboard change.
 
