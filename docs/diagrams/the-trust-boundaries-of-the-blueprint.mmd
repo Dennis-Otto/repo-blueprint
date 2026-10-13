@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: The trust boundaries of the blueprint
-    accDescr: Five boundaries. 1, this repository to every repository made from it, through the blueprint bot and the checks of each repository. 2, the template to Copier on your machine, as data for its sandboxed Jinja. 3, blueprint.py to GitHub, with the login of whoever starts it, reading every answer as untrusted. 4, Renovate to every repository, through pull requests without administration. 5, the dashboard to the public, with every value escaped.
+    accDescr: Five boundaries. 1, this repository to every repository made from it, through a release that the blueprint bot of each repository verifies and the checks of that repository. 2, the template to Copier on your machine, as data for its sandboxed Jinja. 3, blueprint.py to GitHub, with the login of whoever starts it, reading every answer as untrusted. 4, Renovate to every repository, through pull requests without administration. 5, the dashboard to the public, with every value escaped.
 
     subgraph blueprint ["This repository"]
         template["Template"]
@@ -28,7 +28,7 @@ flowchart TB
     public(["The public"])
 
     template -- "2 · data for the<br>sandboxed Jinja" --> copier
-    template -- "1 · a release tag" --> updater --> checks --> main
+    template -- "1 · a signed release tag<br>verified first" --> updater --> checks --> main
     renovate -- "4 · pull requests<br>no administration" --> checks
     tool -- "3 · your login<br>answers untrusted" --> github
     dashboard -- "5 · public data<br>every value escaped" --> public

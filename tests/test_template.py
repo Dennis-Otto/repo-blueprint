@@ -25,6 +25,7 @@ from copier import run_copy
 from shell import BASH, in_bash
 
 from blueprint.changelog import Fragment, release_changelog
+from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -664,7 +665,31 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
             own = own.replace(
                 "stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"
             )
+        if name == "SECURITY.md":
+            own = as_an_action(own)
         assert own == (project / name).read_text(encoding="utf-8"), name
+
+
+def as_an_action(security: str) -> str:
+    """The security policy of the blueprint as that of the GitHub Action it is
+    rendered as: the blueprint is a template, so a repository made from it receives a
+    fix with its blueprint bot, which verifies the signed tag of a release, where users
+    of an action pin a commit."""
+    security, supported = re.subn(
+        r"A repository made from the blueprint receives a fix .*",
+        "Repositories that use the action pin its commit hash; merge the update pull"
+        " request of Dependabot or Renovate for a new release to receive a fix.",
+        security,
+    )
+    security, verified = re.subn(
+        r"Copier renders a repository from the tag of a release.*?\n```\n",
+        "Repositories that use the action pin the commit hash of a release;"
+        " `gh release verify` shows which commit the tag of a release stands for.\n",
+        security,
+        flags=re.DOTALL,
+    )
+    assert (supported, verified) == (1, 1)
+    return security
 
 
 @pytest.mark.parametrize("kind", ["python-package", "github-action"])
@@ -3338,7 +3363,8 @@ def test_the_blueprint_bot_keeps_one_pull_request(
 
 def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
     """The step of the blueprint bot that finds the release to update to, with a gh
-    that knows the releases of the blueprint and of a fork."""
+    that knows the releases of the blueprint and of a fork, and their names as GitHub
+    spells them."""
     text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
     step = next(step for step in text.split("\n      - ") if "gh release view" in step)
     script = textwrap.dedent(step.split("        run: |\n", 1)[1])
@@ -3352,6 +3378,15 @@ def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
     gh.write_text(
         """#!/usr/bin/env bash
 case "$*" in
+  "api repos/"*" --jq .full_name")
+    name="${2#repos/}"
+    case "${name,,}" in
+      dennis-otto/repo-blueprint) echo Dennis-Otto/repo-blueprint ;;
+      someone/blueprint) echo Someone/blueprint ;;
+      someone/new) echo Someone/new ;;
+      *) echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+    esac
+    ;;
   "release view --repo Dennis-Otto/repo-blueprint --json tagName --jq .tagName") echo v1.2.0 ;;
   "release view --repo Someone/blueprint --json tagName --jq .tagName") echo v0.3.0 ;;
   "release view --repo Someone/new --json tagName --jq .tagName") ;;
@@ -3396,8 +3431,13 @@ esac
             "https://github.com/Someone/blueprint",
             "source=Someone/blueprint\ntag=v0.3.0\n",
         ),
-        # A blueprint that isn't on GitHub, a folder for a test, say.
-        ("/home/me/repo-blueprint", "source=Dennis-Otto/repo-blueprint\ntag=v1.2.0\n"),
+        (
+            "git@github.com:Someone/blueprint.git",
+            "source=Someone/blueprint\ntag=v0.3.0\n",
+        ),
+        # GitHub takes the name in any case, the signature of a tag only as GitHub
+        # spells it.
+        ("gh:someone/BLUEPRINT", "source=Someone/blueprint\ntag=v0.3.0\n"),
     ],
 )
 def test_the_blueprint_bot_updates_to_the_release_of_its_source(
@@ -3407,12 +3447,379 @@ def test_the_blueprint_bot_updates_to_the_release_of_its_source(
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "source",
+    [
+        # A blueprint elsewhere, or in a folder: no release there can be verified,
+        # and no other blueprint's release stands in for it.
+        "https://gitlab.com/Someone/blueprint.git",
+        "gl:Someone/blueprint",
+        "/home/me/repo-blueprint",
+    ],
+)
+def test_the_blueprint_bot_updates_only_from_a_blueprint_on_github(
+    tmp_path: Path, source: str
+) -> None:
+    code, output, stdout = run_the_release_step(tmp_path, source)
+
+    assert code == 1
+    assert output == ""
+    assert (
+        f"::error::The blueprint {source} is not a repository on GitHub; the bot"
+        " updates only to a release that it can verify there."
+    ) in stdout.splitlines()
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_blueprint_bot_needs_a_published_release(tmp_path: Path) -> None:
     code, output, stdout = run_the_release_step(tmp_path, "gh:Someone/new")
 
     assert code == 1
     assert output == ""
     assert "::error::The blueprint Someone/new has no published release" in stdout
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_blueprint_bot_verifies_the_release_before_it_updates(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    text = (project / ".github/workflows/blueprint-update.yml").read_text(
+        encoding="utf-8"
+    )
+    steps = text.split("\n      - ")
+    names = [step.split("\n", 1)[0] for step in steps]
+    release = names.index("name: Find the latest published release of the blueprint")
+    verify = names.index("name: Verify the release before updating to it")
+    update = names.index("name: Update to the latest release of the blueprint")
+    # Between finding the release and the update, and nothing renders before it.
+    assert release < verify < update
+    assert not any("copier update" in step for step in steps[1 : verify + 1])
+    step = steps[verify]
+    assert "SOURCE: ${{ steps.release.outputs.source }}" in step
+    assert "TAG: ${{ steps.release.outputs.tag }}" in step
+    # The job's own token reads the public blueprint; the step needs no secret.
+    assert "GH_TOKEN: ${{ github.token }}" in step
+    assert "secrets." not in step
+    assert 'ask "repos/$SOURCE/releases/tags/$TAG" --jq .immutable' in step
+    assert 'ask "repos/$SOURCE/compare/$commit...main" --jq .status' in step
+    # The tag's signature, checked by the script that checks the release tags of the
+    # repository itself, with gitsign pinned by version and checksum.
+    assert (
+        'bash .github/sign-tag.sh verify "$TAG" "$commit" "$SOURCE" || verified=$?'
+        in step
+    )
+    assert (project / ".github/sign-tag.sh").read_text(encoding="utf-8") == (
+        ROOT / ".github/sign-tag.sh"
+    ).read_text(encoding="utf-8")
+    # Copier updates to exactly the tag that was verified.
+    assert (
+        'copier update --defaults --conflict inline --vcs-ref "$TAG"' in steps[update]
+    )
+
+
+def run_the_verify_step(
+    tmp_path: Path,
+    immutable: str,
+    status: str,
+    signed: bool,
+    failures: int = 0,
+    unchecked: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+    """The step of the blueprint bot that verifies the release, with a gh that answers
+    for a release of a fork of the blueprint, after failing the first `failures` times
+    as GitHub does now and then, and a sign-tag.sh that only records how it is called
+    and fails where the tag isn't signed, or with 2 where it couldn't check it."""
+    text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
+    step = next(
+        step
+        for step in text.split("\n      - ")
+        if step.startswith("name: Verify the release before updating to it")
+    )
+    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/sign-tag.sh").write_text(
+        'echo "sign-tag.sh $*" >> "$CALLS"\n'
+        '[[ "$UNCHECKED" == true ]] && exit 2\n'
+        '[[ "$SIGNED" == true ]]\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+echo "gh $*" >> "$CALLS"
+failed=$(grep -c "^HTTP 502" "$CALLS" || true)
+if ((failed < FAILURES)); then
+  echo "HTTP 502" >> "$CALLS"
+  # As gh does: the body of the error on stdout, even with --jq.
+  echo '{"message":"Bad Gateway","status":"502"}'
+  echo "gh: Bad Gateway (HTTP 502)" >&2
+  exit 1
+fi
+case "$*" in
+  "api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable") echo "$IMMUTABLE" ;;
+  "api repos/Someone/blueprint/commits/v1.2.0 --jq .sha") echo abc123 ;;
+  "api repos/Someone/blueprint/compare/abc123...main --jq .status") echo "$STATUS" ;;
+  *) echo "unexpected: gh $*" >&2; exit 1 ;;
+esac
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    # The step waits 10 and 20 seconds between its questions; the test doesn't.
+    sleep = bin_dir / "sleep"
+    sleep.write_text(
+        '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    sleep.chmod(0o755)
+    calls = tmp_path / "calls"
+    summary = tmp_path / "summary"
+    for file in (calls, summary):
+        file.touch()
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "STUBS": str(bin_dir),
+        "CALLS": str(calls),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "SOURCE": "Someone/blueprint",
+        "TAG": "v1.2.0",
+        "IMMUTABLE": immutable,
+        "STATUS": status,
+        "SIGNED": "true" if signed else "false",
+        "UNCHECKED": "true" if unchecked else "false",
+        "FAILURES": str(failures),
+    }
+    # As GitHub runs a step: bash -e.
+    result = subprocess.run(
+        in_bash("-e", "step.sh"),
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return (
+        result,
+        calls.read_text(encoding="utf-8").splitlines(),
+        summary.read_text(encoding="utf-8"),
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "status",
+    [
+        # main is at the release, or has moved on from it.
+        "identical",
+        "ahead",
+    ],
+)
+def test_a_signed_immutable_release_on_main_passes(tmp_path: Path, status: str) -> None:
+    result, calls, summary = run_the_verify_step(tmp_path, "true", status, signed=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The signature of the tag, of the release workflow of the blueprint, at the commit
+    # that is on its main.
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert (
+        "The release v1.2.0 of Someone/blueprint is immutable, on its main and signed"
+        in summary
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("immutable", "status", "signed", "error"),
+    [
+        (
+            "false",
+            "ahead",
+            True,
+            "::error::The release v1.2.0 of Someone/blueprint is not immutable; the bot"
+            " updates only to an immutable release.",
+        ),
+        # The tag of a commit that main never had, or one past main.
+        (
+            "true",
+            "diverged",
+            True,
+            "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which is"
+            " not on its main (diverged).",
+        ),
+        (
+            "true",
+            "behind",
+            True,
+            "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which is"
+            " not on its main (behind).",
+        ),
+        # A lightweight tag, one at another commit, or one that another workflow
+        # signed: sign-tag.sh says which, in tests/test_sign_tag.py.
+        (
+            "true",
+            "ahead",
+            False,
+            "::error::The tag v1.2.0 of Someone/blueprint is not one that its release"
+            " workflow signed at abc123.",
+        ),
+    ],
+)
+def test_any_other_release_stops_the_update(
+    tmp_path: Path, immutable: str, status: str, signed: bool, error: str
+) -> None:
+    result, calls, summary = run_the_verify_step(tmp_path, immutable, status, signed)
+
+    assert result.returncode == 1
+    assert error in result.stdout.splitlines()
+    # The summary says why, what it means and what to do.
+    assert summary.startswith(
+        "### The blueprint bot refused the release v1.2.0 of Someone/blueprint\n\n"
+        f"{error.removeprefix('::error::')}\n\n"
+    )
+    assert "Nothing has changed here." in summary
+    assert (
+        "(https://github.com/Someone/blueprint/blob/main/SECURITY.md#verify-a-release)"
+        in summary
+    )
+    assert "is immutable, on its main and signed" not in summary
+    # The signature is checked last, only for an immutable release on main.
+    verified = [call for call in calls if call.startswith("sign-tag.sh ")]
+    assert verified == (
+        ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"] if not signed else []
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_verification_asks_github_again_after_a_failure(tmp_path: Path) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, failures=2
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls[:5] == [
+        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+        "HTTP 502",
+        "sleep 10",
+        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+        "HTTP 502",
+    ]
+    assert calls[5:7] == [
+        "sleep 20",
+        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+    ]
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert "is immutable, on its main and signed" in summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_every_question_gets_its_answer_after_a_failure(tmp_path: Path) -> None:
+    # One failure before the first answer, whose body gh prints too.
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, failures=1
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error::" not in result.stdout
+    # The commit, not the body of the error before it, goes into the comparison.
+    assert "gh api repos/Someone/blueprint/compare/abc123...main --jq .status" in calls
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert "is immutable, on its main and signed" in summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_signature_that_could_not_be_checked_fails_but_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, unchecked=True
+    )
+
+    assert result.returncode == 1
+    assert (
+        "::error::The signature of the release v1.2.0 of Someone/blueprint could not"
+        " be checked; nothing has changed, and the next run checks it again."
+    ) in result.stdout.splitlines()
+    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    # Not a refusal: gitsign, GitHub or Sigstore didn't answer.
+    assert summary == ""
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_github_without_an_answer_fails_the_update_but_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, failures=3
+    )
+
+    assert result.returncode == 1
+    assert "Bad Gateway" in result.stderr
+    assert "::error::" not in result.stdout
+    assert calls.count("HTTP 502") == 3
+    assert [call for call in calls if call.startswith("sleep")] == [
+        "sleep 10",
+        "sleep 20",
+    ]
+    # Not a refusal: GitHub didn't answer, and the next run asks again.
+    assert summary == ""
+    assert not any(call.startswith("sign-tag.sh") for call in calls)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_the_release_app_creates_the_release_tags_of_a_project(
+    projects: dict[str, Path], kind: str
+) -> None:
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    # The App ID next to the Client ID of the same app.
+    assert settings.variables["RELEASE_AUTOMATION_CLIENT_ID"] == "Iv23liP9PIEHOV74AiIA"
+    assert settings.variables["RELEASE_AUTOMATION_APP_ID"] == "4739928"
+    creation = next(
+        ruleset
+        for ruleset in settings.rulesets
+        if ruleset["name"] == "Release tag creation"
+    )
+    assert creation["rules"] == [{"type": "creation"}]
+    assert creation["bypass_actors"] == [
+        {"actor_id": 4739928, "actor_type": "Integration", "bypass_mode": "always"}
+    ]
+    # The blueprint has the same app.
+    blueprint = Settings.load(ROOT / ".github/repository.toml")
+    assert creation in blueprint.rulesets
+
+
+def test_every_release_tag_is_created_with_the_token_of_the_release_app() -> None:
+    # The only rule with an exception: a tag that the job token of a workflow created
+    # would fail the ruleset Release tag creation and stop the release.
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    steps = release.split("\n      - ")
+    creating = [
+        step
+        for step in steps
+        if "bash .github/sign-tag.sh" in step or "gh release create" in step
+    ]
+    # The tag of a release, and that of a beta, which gh release create only finds.
+    assert len(creating) == 2
+    for step in creating:
+        assert "GH_TOKEN: ${{ steps.app.outputs.token }}" in step
+        assert "steps.app.outputs.token != ''" in step
+    beta = next(step for step in creating if "gh release create" in step)
+    assert beta.index('bash .github/sign-tag.sh "v$version"') < beta.index(
+        "gh release create"
+    )
+    assert "--verify-tag" in beta
+    # release-please creates no tag: only a release on the tag that a run signed.
+    please = next(step for step in steps if "googleapis/release-please-action@" in step)
+    assert "skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}" in please
+    # The major tag of an action, such as v1, may move and is no release tag.
+    assert 'git tag -fa "$MAJOR"' in release
 
 
 def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
