@@ -159,8 +159,9 @@ flowchart TB
     class score,dashboard done
 ```
 
-- **A low score fails nothing,** but a run in which no mutant ran does, with the end of the output of mutmut or Infection in its summary: a broken configuration shows up in the week it breaks, not as an empty dashboard.
-- **A pull request that changes how the mutants run,** `mutation.yml` or the pinned mutmut, tries them, mutmut for a quarter of an hour, so that a defect fails it rather than the next weekly run.
+- **The score is the share of the mutants that a test noticed,** among those of the code that the tests run: for mutmut the killed among the killed and the survived, for Infection its *Covered Code MSI*. The dashboard shows it as *mutants caught*.
+- **A low score fails nothing,** not even below a minimum that the project's own configuration sets, but a run in which no mutant ran does, with the end of the output of mutmut or Infection in its summary: a broken configuration shows up in the week it breaks, not as an empty dashboard.
+- **A pull request that changes how the mutants run,** `mutation.yml` or the pinned mutmut, tries them, mutmut for a quarter of an hour, and shows a defect as a red check before the weekly run. The check isn't required, so a pull request that merges itself, such as an update of mutmut, doesn't wait for it: its red check is a warning to read.
 - **mutmut runs the tests in a copy of the repository,** `mutants/`, with the changed code and without Git. A test that can't work there, because it reads the code as text or asks Git, gets the marker `@pytest.mark.mutation_unsafe`, and the mutation tests leave it out; the `pyproject.toml` of a new Python project registers the marker.
 - **A configuration of the project wins:** a `[tool.mutmut]` table in `pyproject.toml` or a `[mutmut]` section in `setup.cfg` for mutmut, an `infection.json5` for Infection. Without one, mutmut mutates `custom_components/`, `src/` or the modules and packages of the root, and Infection mutates `lib/` on PHP 8.3, with `tests/bootstrap.php`, which loads the classes of Nextcloud.
 

@@ -6,7 +6,8 @@ name: Mutation
 # the PHP of a Nextcloud app. The run reports the score and the surviving mutants in
 # its summary and keeps the details as an artifact; a low score fails nothing, a run
 # that measures nothing fails. A pull request that changes how the mutants run tries
-# them, so that a defect fails it and not the next weekly run.
+# them and shows a defect as a red check. That check isn't required: a pull request
+# that merges itself, such as an update of mutmut, doesn't wait for it.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -186,21 +187,30 @@ jobs:
               echo "}"
             } > infection.json5
           fi
-          # Its output has the score, "Mutation Score Indicator (MSI): 87%", which no log
-          # of Infection has and which it prints only --with-uncovered: with the mutants
-          # of code that no test runs, which it counts but doesn't run. The artifact
-          # keeps the output for the dashboard. An error of Infection fails the step,
-          # through tee and tail.
+          # Its output has the score, "Covered Code MSI: 87%", the share of the mutants
+          # of the code that the tests run which a test noticed, as the score of mutmut;
+          # no log of Infection has it. --with-uncovered adds the mutants of code that
+          # no test runs, which it counts but doesn't run, and with them the MSI of all
+          # the code and its coverage. The artifact keeps the output for the dashboard.
+          # A low score fails nothing, also where the project's own configuration sets
+          # a minimum; an error of Infection fails the step, through tee and tail.
           mkdir -p build
           set -o pipefail
-          php "$RUNNER_TEMP/infection.phar" --threads=max --with-uncovered --min-msi=0 --no-progress \
-            --no-interaction --logger-github=false 2>&1 | tee build/infection-output.log | tail -n 20
+          php "$RUNNER_TEMP/infection.phar" --threads=max --with-uncovered --min-msi=0 --min-covered-msi=0 \
+            --no-progress --no-interaction --no-ansi --logger-github=false 2>&1 |
+            tee build/infection-output.log | tail -n 20
       - name: Report the score
         if: always() && steps.kind.outputs.kind == 'php'
         run: |
+          # "40 mutations were generated:", in the output of Infection with any configuration.
+          generated="$(sed -nE '/^ *[0-9]+ mutations were generated/{s/^ *([0-9]+).*/\1/p;q;}' build/infection-output.log 2>/dev/null || true)"
+          scored=false
+          if ((${generated:-0} > 0)) && grep -qs 'Covered Code MSI' build/infection-output.log; then
+            scored=true
+          fi
           {
             echo "### Mutation tests (Infection)"
-            if grep -qs 'Mutation Score Indicator' build/infection-output.log; then
+            if [[ "$scored" == true ]]; then
               grep -E '(Mutation Score Indicator|Mutation Code Coverage|Covered Code MSI)' build/infection-output.log \
                 | sed 's/^ */- /'
             else
@@ -217,6 +227,11 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+          # A run that measures nothing, not a low score, fails: no mutant, such as of a
+          # configuration whose code is missing, or no score that it could read.
+          if [[ "$scored" != true ]]; then
+            exit 1
+          fi
       - name: Keep the results
         if: always() && steps.kind.outputs.kind == 'php'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

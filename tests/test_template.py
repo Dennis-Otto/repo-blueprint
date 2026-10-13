@@ -1902,8 +1902,12 @@ def test_infection_runs_with_the_bootstrap_of_the_tests(
     assert config["logs"]["summary"] == "build/infection-summary.log"
     # The score of the output, which no log of Infection has, for the dashboard.
     output = (project / "build/infection-output.log").read_text(encoding="utf-8")
-    assert "Mutation Score Indicator (MSI): 87%" in output
-    assert " --min-msi=0 " in calls.read_text(encoding="utf-8")
+    assert "Covered Code MSI: 87%" in output
+    call = calls.read_text(encoding="utf-8")
+    # A low score fails nothing, whatever minimum the project's configuration sets.
+    assert " --min-msi=0 --min-covered-msi=0 " in call
+    # The plain text that the report and the dashboard read, without colors.
+    assert " --no-ansi " in call
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -1924,32 +1928,69 @@ def test_an_error_of_infection_fails_the_run(tmp_path: Path) -> None:
     assert (project / "infection.json5").read_text(encoding="utf-8") == "{}\n"
 
 
+# The end of the output of Infection when its configuration finds no code to change;
+# it ends well with a minimum score of 0.
+NO_MUTANTS = """\
+0 mutations were generated:
+       0 mutants were killed by Test Framework
+
+Metrics:
+         Mutation Score Indicator (MSI): 0%
+         Mutation Code Coverage: 0%
+         Covered Code MSI: 0%
+
+No mutations were generated for the selected code. Set a minimum MSI score to make this outcome fail.
+"""
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("output", "expected"),
+    ("output", "code", "expected"),
     [
         (
             INFECTION,
+            0,
             "- Mutation Score Indicator (MSI): 87%\n- Mutation Code Coverage: 100%\n"
             "- Covered Code MSI: 87%\n",
         ),
+        # A run that measures nothing fails: an error of Infection, no mutant, or
+        # no output at all, as when its installation failed.
         (
             'Class "OCP\\AppFramework\\App" not found\n',
+            1,
             'Infection reported no score. The end of its output:\n\n```text\nClass "OCP',
+        ),
+        (
+            NO_MUTANTS,
+            1,
+            "Infection reported no score. The end of its output:\n\n```text\n"
+            "0 mutations were generated:\n",
+        ),
+        (
+            None,
+            1,
+            "Infection reported no score. The end of its output:\n\n```text\n```\n",
+        ),
+        # A later Infection that names its score in other words.
+        (
+            INFECTION.replace("Covered Code MSI", "Score"),
+            1,
+            "Infection reported no score.",
         ),
     ],
 )
 def test_the_score_of_infection_or_why_it_has_none(
-    tmp_path: Path, output: str, expected: str
+    tmp_path: Path, output: str | None, code: int, expected: str
 ) -> None:
     build = tmp_path / "project/build"
     build.mkdir(parents=True)
-    (build / "infection-output.log").write_text(output, encoding="utf-8")
+    if output is not None:
+        (build / "infection-output.log").write_text(output, encoding="utf-8")
     (build / "infection-summary.log").write_text("Total: 40\n", encoding="utf-8")
 
-    code, summary = run_mutation_step(tmp_path, "Report the score", "php", {})
+    exit_code, summary = run_mutation_step(tmp_path, "Report the score", "php", {})
 
-    assert code == 0
+    assert exit_code == code
     assert summary.startswith("### Mutation tests (Infection)\n")
     assert expected in summary
     assert summary.endswith("```text\nTotal: 40\n```\n")
