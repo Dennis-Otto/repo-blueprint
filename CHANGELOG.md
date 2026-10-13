@@ -8,7 +8,6 @@ the next release, or lists the pull requests when there is none.
 
 ## [0.11.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.11.0...v0.11.1) (2026-10-13)
 
-
 ### Performance
 
 * **ci:** narrow Psalm's extraFiles and cache Composer, php-cs-fixer and pip ([#192](https://github.com/Dennis-Otto/repo-blueprint/issues/192)) ([510c461](https://github.com/Dennis-Otto/repo-blueprint/commit/510c46119512ec06b168e4a66d422a2a20df5c66))
