@@ -5541,6 +5541,9 @@ def test_every_project_draws_its_diagrams_as_pictures(
     assert "sparse-checkout: |\n            .github/blueprint\n" in bot
     assert ' diagrams commit "$kept" --branch "$BRANCH" \\\n' in bot
     assert '--head "$SHA"' in bot
+    # Its commit lands on top of the branch and never needs to change a workflow.
+    assert "permission-workflows" not in bot
+    assert "      - name: Say on the pull request that the bot failed\n" in bot
     # No expression in a script, where the name of a branch could run as code.
     for script in bot.split("        run: |\n")[1:]:
         assert "${{" not in script.split("\n      - ")[0]
@@ -5557,6 +5560,8 @@ def test_every_project_draws_its_diagrams_as_pictures(
     opener = job_of(main, "pull-request")
     assert "      name: release\n" in opener
     assert "bash scripts/diagrams.sh" not in opener
+    # Its branch moves from an older main to the newest, across changes of workflows.
+    assert "\n          permission-workflows: write\n" in opener
     assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
     for script in opener.split("        run: |\n")[1:]:
         assert "${{" not in script.split("\n      - ")[0]
@@ -5568,6 +5573,9 @@ def test_every_project_draws_its_diagrams_as_pictures(
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/diagrams.sh`" in contributing
     assert "`docs/diagrams/" in contributing
+    # The colors of the blueprint's diagrams, the same in every repository.
+    for color in ("`#526cfe`", "`#f59e0b`", "`#16a34a`"):
+        assert color in contributing, color
 
 
 def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
