@@ -76,7 +76,13 @@ exec "$REAL_GIT" "${arguments[@]}"
     # GITHUB_WORKFLOW_REF, unless the plan fails it, and checks a signed tag's identity.
     "gitsign": NEXT
     + """if [[ "$1" == verify-tag ]]; then
+  next verify
   echo "verify-tag $2" >> "$CALLS"
+  # Sigstore doesn't answer.
+  if [[ "$outcome" == offline ]]; then
+    echo "Error: Get \"https://rekor.sigstore.dev/api/v1/log/entries\": dial tcp: lookup rekor.sigstore.dev: no such host" >&2
+    exit 1
+  fi
   tag="$(git cat-file tag "$2")" || exit 1
   [[ "$tag" == *"identity $4 issuer $6"* ]]
   exit
@@ -91,15 +97,26 @@ fi
 printf -- '-----BEGIN SIGNED MESSAGE-----\\nidentity https://github.com/%s issuer https://token.actions.githubusercontent.com\\n-----END SIGNED MESSAGE-----\\n' "$GITHUB_WORKFLOW_REF"
 printf '\\n[GNUPG:] SIG_CREATED D 1 8 00 0 STUB\\n' >&2
 """,
-    "curl": """#!/usr/bin/env bash
+    # The download of gitsign, which fails when the plan says so.
+    "curl": NEXT
+    + """next download
 echo "curl $*" >> "$CALLS"
+if [[ "$outcome" == fail ]]; then
+  echo "curl: (22) The requested URL returned error: 502" >&2
+  exit 22
+fi
 while (($# > 0)); do
   if [[ "$1" == --output ]]; then cp "$STUBS/gitsign" "$2"; fi
   shift
 done
 """,
-    "sha256sum": """#!/usr/bin/env bash
+    "sha256sum": NEXT
+    + """next checksum
 echo "sha256sum $* $(cat)" >> "$CALLS"
+if [[ "$outcome" == fail ]]; then
+  echo "sha256sum: WARNING: 1 computed checksum did NOT match" >&2
+  exit 1
+fi
 """,
     "sleep": """#!/usr/bin/env bash
 echo "sleep $*" >> "$CALLS"
@@ -171,7 +188,15 @@ def github(tmp_path: Path) -> GitHub:
     for name, text in STUBS.items():
         (stubs / name).write_text(text, encoding="utf-8", newline="\n")
         (stubs / name).chmod(0o755)
-    for plan in ("push", "sign", "ls-remote", "fetch"):
+    for plan in (
+        "push",
+        "sign",
+        "ls-remote",
+        "fetch",
+        "download",
+        "checksum",
+        "verify",
+    ):
         (stubs / plan).touch()
     (tmp_path / "runner").mkdir()
     (tmp_path / "gitconfig").touch()
@@ -367,22 +392,46 @@ def test_github_is_asked_again_when_it_fails_for_a_moment(
 
 
 @pytest.mark.parametrize(
-    ("command", "arguments", "error"),
+    ("command", "arguments", "error", "code"),
     [
-        ("ls-remote", ("v1.0.0",), "The tags on GitHub could not be read."),
-        ("fetch", ("verify", "v1.0.0"), "The tag v1.0.0 could not be fetched"),
+        ("ls-remote", ("v1.0.0",), "The tags on GitHub could not be read.", 1),
+        # The verification couldn't check the tag, which says nothing about it.
+        ("fetch", ("verify", "v1.0.0"), "The tag v1.0.0 could not be fetched", 2),
     ],
 )
 def test_github_that_keeps_failing_fails(
-    github: GitHub, command: str, arguments: tuple[str, ...], error: str
+    github: GitHub, command: str, arguments: tuple[str, ...], error: str, code: int
 ) -> None:
     github.plan(command, "fail", "fail", "fail")
 
     result = github.sign_tag(*arguments, github.release)
 
-    assert result.returncode == 1
+    assert result.returncode == code
     assert f"::error::{error}" in result.stdout
     assert github.git("tag", "--list") == ""
+
+
+@pytest.mark.parametrize(
+    ("stub", "error"),
+    [
+        ("download", "gitsign 0.17.1 could not be downloaded."),
+        ("checksum", "The download of gitsign 0.17.1 doesn't have the checksum"),
+    ],
+)
+@pytest.mark.parametrize("arguments", [("v1.0.0",), ("verify", "v1.0.0")])
+def test_without_gitsign_nothing_is_signed_or_verified(
+    github: GitHub, stub: str, error: str, arguments: tuple[str, ...]
+) -> None:
+    github.plan(stub, "fail")
+
+    result = github.sign_tag(*arguments, github.release)
+
+    # 2, as for a verification that couldn't check the tag.
+    assert result.returncode == 2
+    assert f"::error::{error}" in result.stdout
+    assert github.git("tag", "--list") == ""
+    calls = github.calls.read_text(encoding="utf-8").splitlines()
+    assert not any(call.startswith(("fetch ", "ls-remote ", "sign ")) for call in calls)
 
 
 def test_a_signature_that_fails_for_a_moment_is_made_anew(github: GitHub) -> None:
@@ -409,6 +458,40 @@ def test_a_tag_of_the_release_workflow_at_the_release_verifies(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "The tag v1.0.0 is signed by the release workflow" in result.stdout
+
+
+def test_sigstore_that_fails_for_a_moment_is_asked_again(github: GitHub) -> None:
+    github.signs("v1.0.0", github.release)
+    github.plan("verify", "offline", "offline")
+
+    result = github.sign_tag("verify", "v1.0.0", github.release)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "The tag v1.0.0 is signed by the release workflow" in result.stdout
+    calls = github.calls.read_text(encoding="utf-8").splitlines()
+    assert [call for call in calls if call.startswith(("verify-tag ", "sleep "))] == [
+        "verify-tag v1.0.0",
+        "sleep 10",
+        "verify-tag v1.0.0",
+        "sleep 20",
+        "verify-tag v1.0.0",
+    ]
+
+
+def test_sigstore_that_keeps_failing_leaves_the_tag_unchecked(github: GitHub) -> None:
+    github.signs("v1.0.0", github.release)
+    github.plan("verify", "offline", "offline", "offline")
+
+    result = github.sign_tag("verify", "v1.0.0", github.release)
+
+    # 2: the tag may well be signed, which the next run can check.
+    assert result.returncode == 2
+    assert (
+        "::error::The signature of the tag v1.0.0 could not be checked: Sigstore"
+        " didn't answer." in result.stdout
+    )
+    assert "dial tcp: lookup rekor.sigstore.dev: no such host" in result.stdout
+    assert "isn't one of the release workflow" not in result.stdout
 
 
 @pytest.mark.parametrize(

@@ -65,13 +65,19 @@ jobs:
         run: |
           # The blueprint that Copier updates from, as the answers name it: a fork
           # perhaps, which has releases of its own.
-          source="$(sed -n 's/^_src_path: *//p' .copier-answers.yml)"
-          source="${source#gh:}"
+          path="$(sed -n 's/^_src_path: *//p' .copier-answers.yml)"
+          source="${path#gh:}"
           source="${source#https://github.com/}"
+          source="${source#git@github.com:}"
           source="${source%.git}"
+          # The release is verified on GitHub, so a blueprint elsewhere can't be.
           if [[ ! "$source" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-            source=Dennis-Otto/repo-blueprint
+            echo "::error::The blueprint $path is not a repository on GitHub; the bot updates only to a release that it can verify there."
+            exit 1
           fi
+          # GitHub takes a name in any case, but the signature of a tag names the
+          # repository as GitHub spells it.
+          source="$(gh api "repos/$source" --jq .full_name)"
           # Not the newest tag: the Release workflow pushes the tag before it publishes
           # the release, which may stay a draft or fail.
           tag="$(gh release view --repo "$source" --json tagName --jq .tagName)"
@@ -95,10 +101,12 @@ jobs:
           set -euo pipefail
           # GitHub fails for a moment now and then, so every question is asked three
           # times; a question still without an answer fails the run, but refuses nothing.
+          # gh prints the body of an error as well, so only an answer gets through.
           ask() {
-            local attempt
+            local attempt answer
             for attempt in 1 2 3; do
-              if gh api "$@"; then
+              if answer="$(gh api "$@")"; then
+                printf '%s\n' "$answer"
                 return 0
               fi
               if ((attempt == 3)); then
@@ -130,9 +138,16 @@ jobs:
           if [[ "$status" != identical && "$status" != ahead ]]; then
             refuse "The tag $TAG of $SOURCE points at $commit, which is not on its main ($status)."
           fi
-          # .github/sign-tag.sh names what is wrong with the tag; it tries three times too.
-          if ! bash .github/sign-tag.sh verify "$TAG" "$commit" "$SOURCE"; then
+          # .github/sign-tag.sh names what is wrong with the tag, and exits with 2 when
+          # it could not check it, without gitsign or an answer of GitHub or Sigstore;
+          # it tries three times too.
+          verified=0
+          bash .github/sign-tag.sh verify "$TAG" "$commit" "$SOURCE" || verified=$?
+          if ((verified == 1)); then
             refuse "The tag $TAG of $SOURCE is not one that its release workflow signed at $commit."
+          elif ((verified != 0)); then
+            echo "::error::The signature of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
+            exit 1
           fi
           echo "The release $TAG of $SOURCE is immutable, on its main and signed by its release workflow." >> "$GITHUB_STEP_SUMMARY"
       - name: Update to the latest release of the blueprint
