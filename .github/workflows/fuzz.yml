@@ -31,7 +31,7 @@ jobs:
     if: >-
       !startsWith(github.head_ref, 'release-please--') ||
       github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Record the network traffic of the job

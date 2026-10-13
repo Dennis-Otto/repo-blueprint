@@ -34,7 +34,7 @@ jobs:
   validate:
     name: renovate rules
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Each pull request checks on its own: it waits neither for the bot nor for the
     # other pull requests, such as the lock files that Renovate updates in one run.
@@ -125,7 +125,7 @@ jobs:
   renovate:
     name: renovate
     if: github.repository == 'Dennis-Otto/repo-blueprint' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     # One run of the bot at a time; the next one waits for it.
     concurrency:

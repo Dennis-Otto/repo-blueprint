@@ -25,7 +25,7 @@ jobs:
     name: register the app
     # Not in the blueprint itself; generated repositories don't have this line.
     if: github.repository != 'Dennis-Otto/repo-blueprint'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     # The environment holds the key of the app's certificate; only main may use it.
     environment:

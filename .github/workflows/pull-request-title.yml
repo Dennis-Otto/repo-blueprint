@@ -22,7 +22,7 @@ jobs:
   title:
     name: conventional title
     if: ${{ !github.event.repository.fork }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       issues: write
@@ -80,7 +80,7 @@ jobs:
   changelog:
     name: changelog
     if: ${{ !github.event.repository.fork }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       pull-requests: read

@@ -248,6 +248,175 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
 
 
+# The runner of the jobs, named with its version, and the one that the Next runner
+# workflow tries every week before the jobs move to it. A move changes both here.
+RUNNER = "ubuntu-24.04"
+NEXT_RUNNER = "ubuntu-26.04"
+# The issue assistant's templates, which its check keeps equal to the action's: the
+# issue assistant names their runners in its own repository.
+ISSUE_ASSISTANT_WORKFLOWS = {
+    "issue-assistant.yml",
+    "issue-lifecycle.yml",
+    "labels.yml",
+    "findings.yml",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_runs_on_a_runner_named_with_its_version(
+    projects: dict[str, Path], project: str
+) -> None:
+    # GitHub moves ubuntu-latest to a new image one job at a time, over weeks: the
+    # runs of one workflow would land on either image at random, and what the new one
+    # breaks would look like a flaky test in every repository. Only a pull request
+    # moves the jobs, once the variants pass on the next runner.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    assert set(flows) >= ISSUE_ASSISTANT_WORKFLOWS
+    # In workflows of the blueprint alone, which no project has.
+    exceptions = {
+        # The checks of the blueprint on Windows, as a contributor there runs them.
+        ("windows.yml", "windows-2025"),
+        # The variants, on the runner that a run by hand or the Next runner names.
+        ("variants.yml", f"${{{{ inputs.runner || '{RUNNER}' }}}}"),
+    }
+    for name, text in flows.items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        jobs = re.findall(r"^  [\w-]+:$", text.split("\njobs:\n", 1)[1], re.M)
+        runners = re.findall(r"^    runs-on: (.+)$", text, re.M)
+        callers = re.findall(r"^    uses: ", text, re.M)
+        # Every job names its runner, but one that calls a workflow, whose jobs do: the
+        # Variants, the build and the check of a release here, and OSV-Scanner its own.
+        assert len(runners) + len(callers) == len(jobs), name
+        for runner in runners:
+            assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
+
+
+def test_the_next_runner_runs_the_variants_every_week(
+    projects: dict[str, Path],
+) -> None:
+    flows = workflows(ROOT)
+    next_runner, variants = flows["next-runner.yml"], flows["variants.yml"]
+    # Every week and by hand, not in pull requests: the next image breaks main and every
+    # pull request alike, and none waits for it.
+    assert set(triggers(next_runner)) == {"schedule", "workflow_dispatch"}
+    job = job_of(next_runner, "next-runner")
+    assert "    uses: ./.github/workflows/variants.yml\n" in job
+    assert f"    with:\n      runner: {NEXT_RUNNER}\n" in job
+    # The issue of a failure names the runner that failed.
+    assert f"          RUNNER: {NEXT_RUNNER}\n" in job_of(next_runner, "report")
+    # The Variants take the runner from their caller or from a run by hand, and run on
+    # the runner of the jobs otherwise: in pull requests and in their own weekly run.
+    assert set(triggers(variants)) == {
+        "pull_request",
+        "schedule",
+        "workflow_dispatch",
+        "workflow_call",
+    }
+    assert (
+        "        type: choice\n"
+        f"        options: [{RUNNER}, {NEXT_RUNNER}]\n"
+        f"        default: {RUNNER}\n"
+    ) in variants
+    assert f"    runs-on: ${{{{ inputs.runner || '{RUNNER}' }}}}\n" in job_of(
+        variants, "variant"
+    )
+    # Neither the required check variants nor any other waits for the next runner.
+    settings = tomllib.loads(
+        (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    names = re.findall(r"^    name: (.+)$", next_runner, re.M)
+    assert names == ["next runner", "report"]
+    assert not set(names) & set(settings["branch"]["required_checks"])
+    # The workflow of the blueprint alone, whose variants are those of every project.
+    for project in projects.values():
+        assert not (project / ".github/workflows/next-runner.yml").exists()
+
+
+def run_with_a_fake_gh(tmp_path: Path, script: str, environment: dict[str, str]) -> str:
+    """Runs the script of a step with a gh that answers `issue list` with $OPEN and
+    writes down every other call, and returns those calls."""
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1 $2" == "issue list" ]]; then
+  echo "$OPEN"
+  exit 0
+fi
+echo "$*" >> calls
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    gh.chmod(0o755)
+    (tmp_path / "calls").touch()
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "URL": "https://github.com/o/r/actions/runs/1",
+            **environment,
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return (tmp_path / "calls").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "open_issue", "call"),
+    [
+        # A failure opens the issue, or brings the open one up to date.
+        ("failure", "", "issue create --title The variants fail on the next runner"),
+        ("failure", "7", "issue edit 7 --body"),
+        # The next run closes it once the variants pass again.
+        ("success", "7", f"issue close 7 --comment The variants pass on {NEXT_RUNNER}"),
+        ("success", "", ""),
+    ],
+)
+def test_a_failure_on_the_next_runner_keeps_an_issue_open(
+    tmp_path: Path, result: str, open_issue: str, call: str
+) -> None:
+    # No pull request shows the run, so its warning needs a place of its own.
+    next_runner = (ROOT / ".github/workflows/next-runner.yml").read_text(
+        encoding="utf-8"
+    )
+    report = job_of(next_runner, "report")
+    assert "\n    needs: next-runner\n" in report
+    assert condition_of(report) == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        """contains(fromJSON('["success", "failure"]'), needs.next-runner.result)"""
+    )
+    # Only the job that runs no code of the variants may write issues.
+    assert "\n    permissions:\n      issues: write\n    steps:" in report
+    assert next_runner.count("issues: write") == 1
+    calls = run_with_a_fake_gh(
+        tmp_path,
+        script_of(next_runner, "Keep the issue of the next runner current"),
+        {"RESULT": result, "OPEN": open_issue, "RUNNER": NEXT_RUNNER},
+    )
+
+    assert calls.startswith(call), calls
+    assert (call == "") == (calls == "")
+    assert ("--label maintenance" in calls) == (call.startswith("issue create"))
+    assert (f"The Variants workflow fails on {NEXT_RUNNER}," in calls) == (
+        result == "failure"
+    )
+    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
+        result == "failure"
+    )
+
+
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
 def test_the_required_checks_exist(projects: dict[str, Path], project: str) -> None:
     root = ROOT if project == "blueprint" else projects[project]
@@ -2243,7 +2412,7 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     # Contributors on Windows run scripts/check.sh in Git Bash; the other workflows
     # run on Linux only.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
-    assert "    runs-on: windows-latest\n" in windows
+    assert "    runs-on: windows-2025\n" in windows
     assert "    shell: bash\n" in windows
     assert "run: pip install --require-hashes -r requirements-dev.txt\n" in windows
     assert "run: bash scripts/check.sh\n" in windows
@@ -2480,45 +2649,12 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
     # Only the job without the code of the project may write issues.
     assert "\n    permissions:\n      issues: write\n    steps:" in report
     assert newest.count("issues: write") == 1
-    (tmp_path / "step.sh").write_text(
+    calls = run_with_a_fake_gh(
+        tmp_path,
         script_of(newest, "Keep the issue of the newest Python current"),
-        encoding="utf-8",
-        newline="\n",
-    )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-if [[ "$1 $2" == "issue list" ]]; then
-  echo "$OPEN"
-  exit 0
-fi
-echo "$*" >> calls
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
-    gh.chmod(0o755)
-    (tmp_path / "calls").touch()
-    assert BASH
-    done = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "RESULT": result,
-            "OPEN": open_issue,
-            "URL": "https://github.com/o/r/actions/runs/1",
-        },
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+        {"RESULT": result, "OPEN": open_issue},
     )
 
-    assert done.returncode == 0, done.stderr
-    calls = (tmp_path / "calls").read_text(encoding="utf-8")
     if not call:
         assert calls == ""
         return
