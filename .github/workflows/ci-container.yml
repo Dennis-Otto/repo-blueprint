@@ -32,9 +32,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Hadolint in its image, by tag and digest, which Renovate keeps current, with
+      # the rules of the project's .hadolint.yaml where it has one. Its action would
+      # build an image of its own at the start of the job. The problem matcher of the
+      # action shows each finding as an annotation.
       - name: Lint the Dockerfile
-        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
-        with:
-          dockerfile: Dockerfile
+        timeout-minutes: 5
+        run: |
+          cat > "$RUNNER_TEMP/hadolint.json" <<'EOF'
+          {"problemMatcher": [{"owner": "hadolint", "pattern": [{"regexp": "^(.+):(\\d+)\\s(\\S+)\\s(error|warning|info|style):\\s(.+)$", "file": 1, "line": 2, "code": 3, "severity": 4, "message": 5}]}]}
+          EOF
+          echo "::add-matcher::$RUNNER_TEMP/hadolint.json"
+          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo \
+            ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
+            hadolint --no-color Dockerfile
       - name: Build the image and run its self-test
         run: bash scripts/check.sh

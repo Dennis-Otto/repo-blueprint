@@ -58,7 +58,9 @@ jobs:
     # The runner of every job, or the one that a run by hand or the Next runner
     # workflow names.
     runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    # A few times its longest run, so that a run that hangs ends early; a step that
+    # installs, builds or downloads ends after five minutes.
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -79,14 +81,28 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+      # uv installs every hash-pinned tool of the variant, Copier, the website's and
+      # the project's, from its cache, which GitHub keeps for each kind under a key of
+      # the lock files of the blueprint, and checks the hash of a cached package too.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.12.17"
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements-dev.txt
+            stacks/**/requirements*.txt
+          cache-suffix: ${{ matrix.kind }}
       - name: Install the hash-pinned Copier
-        run: pip install --require-hashes -r requirements-dev.txt
+        timeout-minutes: 5
+        run: uv pip install --system --require-hashes -r requirements-dev.txt
       - name: Render the project from this commit
         if: matrix.start == 'new'
+        timeout-minutes: 5
         run: |
           copier copy --defaults --vcs-ref HEAD \
             --data project_name="Demo Project" \
@@ -97,6 +113,7 @@ jobs:
           git -C "$PROJECT" add --all
       - name: Render the project from the latest release and update it to this commit
         if: matrix.start == 'update'
+        timeout-minutes: 5
         # As the blueprint bot runs Copier: without the maintenance that Git starts in
         # the background after a commit, which Copier's update would collide with.
         env:
@@ -183,32 +200,38 @@ jobs:
           sys.exit(1 if problems else 0)
           PYTHON
       # The website of the Docs workflow, with the tools the project gets, in an
-      # environment of its own and the Python they are compiled for.
+      # environment of its own and the Python of the blueprint, which they are
+      # compiled for, whatever Python the project names.
       - name: Build the website of the project
         working-directory: ${{ env.PROJECT }}
+        timeout-minutes: 5
         env:
           NO_MKDOCS_2_WARNING: "true"
         run: |
-          python -m venv "$RUNNER_TEMP/docs"
-          "$RUNNER_TEMP/docs/bin/pip" install --require-hashes -r .github/docs-requirements.txt
+          uv venv --no-project --python "$(command -v python)" "$RUNNER_TEMP/docs"
+          uv pip install --python "$RUNNER_TEMP/docs/bin/python" --require-hashes -r .github/docs-requirements.txt
           "$RUNNER_TEMP/docs/bin/mkdocs" build --strict --site-dir "$RUNNER_TEMP/site"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
+        timeout-minutes: 5
         with:
           python-version-file: ${{ env.PROJECT }}/.python-version
+      # Into the Python of the project, which is first on the PATH from here on.
       - name: Install the hash-pinned tools of the project
         if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
         working-directory: ${{ env.PROJECT }}
+        timeout-minutes: 5
         run: |
           requirements="requirements-dev.txt"
           if [[ -f requirements-test.txt ]]; then
             requirements="requirements-test.txt"
           fi
-          pip install --require-hashes -r "$requirements"
+          uv pip install --system --require-hashes -r "$requirements"
 
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         if: matrix.kind == 'nextcloud-app'
+        timeout-minutes: 5
         with:
           php-version: "8.2"
           extensions: dom, libxml, mbstring, xml
@@ -217,46 +240,61 @@ jobs:
       - name: Install the locked tools of the app
         if: matrix.kind == 'nextcloud-app'
         working-directory: ${{ env.PROJECT }}
+        timeout-minutes: 5
         run: |
           composer validate --strict
           composer install --no-interaction --prefer-dist --no-progress
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: matrix.kind == 'node-package'
+        timeout-minutes: 5
         with:
           node-version-file: ${{ env.PROJECT }}/.nvmrc
       - name: Install the locked packages
         if: matrix.kind == 'node-package'
         working-directory: ${{ env.PROJECT }}
+        timeout-minutes: 5
         run: npm ci --ignore-scripts
 
+      # Hadolint as the CI of a container runs it, in its image, which only this
+      # step pulls.
       - name: Lint the Dockerfile
         if: matrix.kind == 'container'
-        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
-        with:
-          dockerfile: ${{ env.PROJECT }}/Dockerfile
+        timeout-minutes: 5
+        run: |
+          docker run --rm --volume "$PWD/$PROJECT:/repo:ro" --workdir /repo \
+            ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
+            hadolint --no-color Dockerfile
 
       - name: Run the checks of the project
         working-directory: ${{ env.PROJECT }}
         run: bash scripts/check.sh
       - name: Lint the workflows of the project
+        timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/repo" --workdir /repo \
             rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       # The markdownlint-cli2 of the action of the Lint workflow, in its image.
       - name: Lint the Markdown of the project
+        timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/workdir" \
             davidanson/markdownlint-cli2:v0.23.3@sha256:d5f3f3f04b2e285dcbcdcd13b4454d119e273e3c393a9dabd163dba4abad526d \
             "**/*.md"
       # The Renovate of the Renovate workflow, which reads the rules of every project.
+      # In a new repository only: an update gives every file of the blueprint as a new
+      # repository has it, which its own step compares, and keeps renovate.json5 of
+      # the project.
       - name: Validate the rules of Renovate of the project
+        if: matrix.start == 'new'
+        timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/usr/src/app" --workdir /usr/src/app \
             ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435 \
             renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5
       - name: Validate the integration with hassfest
         if: matrix.kind == 'home-assistant'
+        timeout-minutes: 5
         # Home Assistant's current image on purpose, as in the CI of the integrations:
         # it validates against the rules that apply today.
         run: docker run --rm --volume "$PWD/$PROJECT:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest

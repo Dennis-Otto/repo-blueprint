@@ -23,3 +23,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0016](0016-diagrams-as-pictures-of-their-sources.md) | Show every diagram as a picture drawn from its Mermaid source, because the GitHub app draws no Mermaid | accepted |
 | [0017](0017-cache-what-a-check-can-verify-never-a-finding.md) | Cache what a check can verify, never a finding: downloads by their lock files, php-cs-fixer by content, Psalm without a cache | accepted |
 | [0018](0018-changelog-fragments.md) | Each pull request writes its entry of the changelog into a file of its own | accepted |
+| [0020](0020-install-with-uv-and-bound-every-step.md) | Install the tools with uv from a cache of their lock files, start mypy from its cache, and end every step that installs, builds or downloads after five minutes | accepted |
