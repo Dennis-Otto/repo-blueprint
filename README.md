@@ -314,6 +314,15 @@ An existing repository takes the blueprint on a branch, in one pull request:
 4. Put the checks of the project alone, such as its end-to-end tests, into `.github/repository.project.toml` and `scripts/check-project.sh`; remove the workflows, scripts and tests that the blueprint replaces, and delete files of the template that the project doesn't need, such as a sample test. A repository without `docs/` has no website until it writes `docs/index.md`; `mkdocs.yml` shows how German pages join it.
 5. Open the pull request. Once its new checks pass, `blueprint.py settings apply` switches the required checks, the variables and the labels, and the pull request can merge.
 
+The configuration of the checks belongs to the blueprint and looks for the code where a new project of the same kind has it. Every file it names comes with the blueprint, also without the sample code:
+
+| Kind | Code | Tests | From the blueprint |
+| --- | --- | --- | --- |
+| Nextcloud app | `lib/` | PHPUnit tests in `tests/Unit/` | `psalm.xml` and `phpunit.xml`, with the `tests/bootstrap.php` and `tests/stubs/` that they load |
+| Node package | `src/`, built into `dist/` | `test/`, typechecked by `tsconfig.json`; the `npm test` of a new project runs `test/**/*.test.ts` | `tsconfig.json` and `tsconfig.build.json`, which need `typescript` and `@types/node` in the `package.json` of the project |
+
+The other kinds set these places in files of their own, such as `pyproject.toml`. What lies in `tests/` belongs to the project: the copy and every update add only the files that are missing there, so an app with its own bootstrap keeps it.
+
 ## Settings as code
 
 ```mermaid

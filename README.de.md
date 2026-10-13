@@ -308,6 +308,15 @@ Ein bestehendes Repository übernimmt den Blueprint auf einem Branch, in einem P
 4. Die Prüfungen nur dieses Projekts, etwa seine End-to-End-Tests, in `.github/repository.project.toml` und `scripts/check-project.sh` eintragen; die Workflows, Skripte und Tests entfernen, die der Blueprint ersetzt, und Dateien der Vorlage löschen, die das Projekt nicht braucht, etwa einen Beispieltest. Ein Repository ohne `docs/` hat keine Website, bis es `docs/index.md` schreibt; `mkdocs.yml` zeigt, wie deutsche Seiten dazukommen.
 5. Den Pull Request öffnen. Sobald seine neuen Prüfungen bestehen, stellt `blueprint.py settings apply` die Pflicht-Prüfungen, Variablen und Labels um, und der Pull Request kann mergen.
 
+Die Konfiguration der Prüfungen gehört dem Blueprint und sucht den Code dort, wo ihn ein neues Projekt derselben Art hat. Jede Datei, die sie nennt, kommt mit dem Blueprint, auch ohne den Beispielcode:
+
+| Art | Code | Tests | Vom Blueprint |
+| --- | --- | --- | --- |
+| Nextcloud-App | `lib/` | PHPUnit-Tests in `tests/Unit/` | `psalm.xml` und `phpunit.xml`, mit den `tests/bootstrap.php` und `tests/stubs/`, die sie laden |
+| Node-Paket | `src/`, gebaut nach `dist/` | `test/`, von `tsconfig.json` typgeprüft; das `npm test` eines neuen Projekts führt `test/**/*.test.ts` aus | `tsconfig.json` und `tsconfig.build.json`, die `typescript` und `@types/node` in der `package.json` des Projekts brauchen |
+
+Die anderen Arten legen diese Orte in eigenen Dateien fest, etwa in `pyproject.toml`. Was in `tests/` liegt, gehört dem Projekt: Die Kopie und jedes Update ergänzen dort nur die Dateien, die fehlen, und eine App mit eigenem Bootstrap behält ihn.
+
 ## Einstellungen als Code
 
 ```mermaid
