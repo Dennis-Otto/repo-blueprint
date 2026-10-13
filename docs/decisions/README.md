@@ -13,4 +13,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0005](0005-renovate-instead-of-dependabot.md) | Keep the dependencies current with a self-hosted Renovate | accepted |
 | [0006](0006-beta-channel.md) | Publish a beta of the next release after every change for users, where a project wants it | accepted |
 | [0007](0007-one-update-pull-request.md) | Keep one update pull request, move it on with each release, and leave a maintainer's commits alone | accepted |
+| [0008](0008-no-action-pinned-to-a-branch.md) | Pin no action to a branch: run a tool that follows its branch as an image | accepted |
 | [0010](0010-roll-out-one-repository-at-a-time.md) | Roll out each release one repository at a time, and report every repository that misses it | accepted |
