@@ -1,0 +1,21 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What the checks of a Nextcloud app take from a cache
+    accDescr: The downloads of Composer, pip and npm come from caches under a key of their lock files, and the tools check them against the lock. php-cs-fixer starts from its cache and checks every file whose content changed. Psalm and its taint analysis use no cache and read the public API of Nextcloud ahead, everything else through the autoloader.
+
+    lock["The lock files<br>composer.lock · pip · npm"]
+    downloads["Downloads from the cache<br>checked against the lock"]
+    fixer["php-cs-fixer<br>skips content it knows as clean"]
+    psalm["Psalm and its taint analysis<br>no cache · read ahead: vendor/nextcloud/ocp"]
+    result["The same findings<br>in a few seconds"]
+
+    lock --> downloads --> fixer --> psalm --> result
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class downloads,fixer,psalm bot
+    class result done

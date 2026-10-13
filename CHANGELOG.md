@@ -16,6 +16,11 @@ the next release, or lists the pull requests when there is none.
 
 - **Pull requests no longer fail the sign-off check for commits that are already on main:** the check *dco* read the commits since the base that GitHub named for the pull request, and that base can be older than the commit of `main` that the branch starts on, as with the release pull request, which the release bot builds again on a newer `main` (Dennis-Otto/paperless-sync#96). The check then also read squash commits of `main`, which GitHub authors with the noreply address of the account while their sign-off names another, and failed. It now reads only the commits of the pull request that the base branch doesn't have; a commit of the pull request without a sign-off still fails it. The hints at the spelling and the style and the link check of a pull request now look the same way at the documents that the pull request changes, no longer at those that only `main` changed.
 
+### Performance
+
+- **The checks of a Nextcloud app take a fraction of the time:** Psalm and its taint analysis read all of `vendor/`, some 5,000 files of Psalm, PHPUnit and php-cs-fixer, before they looked at the app, and took more than half of `check (php)`, 23 seconds each in paperless-sync. `psalm.xml` now reads ahead only `vendor/nextcloud/ocp`, the public API of Nextcloud, whose package has no autoloader, and Psalm finds everything else through the autoloader of Composer when the code uses it: a tenth of the time, with the same findings. Both still run without a cache, so that no result depends on one. The CI now keeps the packages of Composer in its cache, and the cache of php-cs-fixer, which then checks only the files that changed; the check of the PHP syntax runs one PHP for each processor. The update brings all of this.
+- **The website and the hints at the spelling install their tools from a cache:** the check *docs* and the build of the website take the packages of pip from the cache of the CI, and the hints at the spelling and the style those of npm. A pull request that changes no document no longer sets up Node for the hints at all.
+
 ## [0.10.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.10.2...v0.10.3) (2026-10-13)
 
 ### Bug fixes
