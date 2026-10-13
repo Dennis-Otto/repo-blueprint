@@ -57,6 +57,12 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     The documentation in `docs/` as a website with search and a light and a dark theme, in English and German. Every pull request builds it strictly, every change of `main` publishes it on GitHub Pages.
 
+- :material-sitemap-outline:{ .lg .middle } **Diagrams**
+
+    ---
+
+    Every diagram as a picture that every reader sees, also in the GitHub app and the stores, drawn from its Mermaid source; the website draws the source live. The bots fix them by themselves: in a pull request, on `main` and after an update of the renderer.
+
 - :material-cog-outline:{ .lg .middle } **Settings as code**
 
     ---
@@ -77,7 +83,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
 </div>
 
-The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, the clean-up and the dev container as well.
+The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, failed releases, the clean-up and the dev container as well.
 
 ## Kinds of projects
 

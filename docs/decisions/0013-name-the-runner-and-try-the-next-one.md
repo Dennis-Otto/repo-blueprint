@@ -20,34 +20,10 @@ Renovate leaves the runners alone (its `github-runners` updates are off in `.git
 
 Option 3. Every job names `ubuntu-24.04`, the checks on Windows name `windows-2025`, and `test_every_job_runs_on_a_runner_named_with_its_version` keeps it so in the blueprint and in every kind of project. The Next runner workflow calls the Variants every Thursday with the runner `ubuntu-26.04`: all 14 legs, each kind of project new and updated from the latest release, with their real tools, the same that a pull request of the move would run. A failure keeps one issue open until a run passes again. The Variants also take a runner when they are started by hand.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the jobs move to the next runner
-    accDescr: Every job runs on the runner named with its version. Every Thursday, the Next runner workflow runs the variants on the next runner; a failure keeps an issue open until they pass. Once they pass, one pull request of the blueprint moves every job, and the release brings the move to every repository through the blueprint bot.
-
-    jobs["Every job<br><code>runs-on: ubuntu-24.04</code>"]
-    weekly["Next runner, every Thursday<br>the 14 variants on <code>ubuntu-26.04</code>"]
-    issue["An issue stays open<br>until they pass"]
-    move["One pull request of the blueprint<br>moves every job to <code>ubuntu-26.04</code>"]
-    release["The release<br>the blueprint bot brings it<br>to every repository"]
-
-    jobs --> weekly
-    weekly -- "fail" --> issue
-    issue -- "fixed" --> weekly
-    weekly -- "pass" --> move --> release
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class weekly bot
-    class issue,move person
-    class release done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-jobs-move-to-the-next-runner.dark.svg">
+  <img src="../images/diagrams/how-the-jobs-move-to-the-next-runner.svg" alt="How the jobs move to the next runner: Every job runs on the runner named with its version. Every Thursday, the Next runner workflow runs the variants on the next runner; a failure keeps an issue open until they pass. Once they pass, one pull request of the blueprint moves every job, and the release brings the move to every repository through the blueprint bot.">
+</picture>
 
 Two kinds of jobs keep the runner that others name. The issue assistant's templates (`issue-assistant.yml`, `issue-lifecycle.yml`, `labels.yml` and `findings.yml`) must stay equal to those of the issue assistant, whose check compares them byte for byte, so their runners change in [Dennis-Otto/issue-assistant](https://github.com/Dennis-Otto/issue-assistant) and reach the blueprint with its templates. The reusable workflows of OSV-Scanner name their own runner; they run the image of OSV-Scanner, which doesn't depend on the tools of the runner.
 

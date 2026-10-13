@@ -21,34 +21,10 @@ Once the pull request has a commit of a maintainer, the bot no longer touches it
 
 The code of the bot moved from the workflow into `blueprint.py update-commit`, with tests of every path against a simulated GitHub. It runs from `main`, copied before `copier update` changes it: updating runs no code of the blueprint before the checks of the repository have passed it.
 
-```mermaid
----
-config:
-  flowchart:
-    wrappingWidth: 400
----
-flowchart TB
-    accTitle: How the blueprint bot brings a new release to its open pull request
-    accDescr: If the open pull request has commits of anyone but the release app, the branch stays as it is and the bot says once that a newer release is out. Otherwise the bot makes the commit of the new update on main, signed by GitHub and with the mode of every file, and moves the branch straight from the update before to the new commit, so the pull request stays open with its number.
-
-    update(["New release<br><code>copier update</code>"])
-    yours{"Commits of anyone<br>but the release app<br>on the branch?"}
-    note(["Branch stays as it is<br>one comment:<br>a newer release is out"])
-    commit["Commit of the update on <code>main</code><br>signed by GitHub<br>with the mode of every file"]
-    move["<code>blueprint/update</code> moves<br>from the update before<br>to the new commit"]
-    open["The same pull request<br>open, with its number<br>and its auto-merge"]
-
-    update --> yours
-    yours -- "yes" --> note
-    yours -- "no" --> commit --> move --> open
-
-    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
-    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class update,commit,move bot
-    class note person
-    class open done
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-blueprint-bot-brings-a-new-release-to-its-open-pull-request.dark.svg">
+  <img src="../images/diagrams/how-the-blueprint-bot-brings-a-new-release-to-its-open-pull-request.svg" alt="How the blueprint bot brings a new release to its open pull request: If the open pull request has commits of anyone but the release app, the branch stays as it is and the bot says once that a newer release is out. Otherwise the bot makes the commit of the new update on main, signed by GitHub and with the mode of every file, and moves the branch straight from the update before to the new commit, so the pull request stays open with its number.">
+</picture>
 
 ## Consequences
 
