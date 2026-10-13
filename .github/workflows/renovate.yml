@@ -30,16 +30,17 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: renovate
-  cancel-in-progress: false
-
 jobs:
   validate:
     name: renovate rules
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Each pull request checks on its own: it waits neither for the bot nor for the
+    # other pull requests, such as the lock files that Renovate updates in one run.
+    concurrency:
+      group: renovate-rules-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -70,24 +71,28 @@ jobs:
           # but without a token and without looking anything up. The platform "local"
           # has no presets: the rules of the blueprint come in as those of the bot.
           git archive --output="$RUNNER_TEMP/repository.tar" HEAD
+          # Renovate ends with exit code 1 after an error in its log; the log says which.
+          status=0
           docker run --rm --volume "$RUNNER_TEMP/repository.tar:/tmp/repository.tar:ro" \
             --env LOG_LEVEL=info --env LOG_FORMAT=json --env RENOVATE_GITHUB_TOKEN_WARN=false \
             --env RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 "$IMAGE" \
             bash -c '
               mkdir /tmp/repository && cd /tmp/repository && tar -xf /tmp/repository.tar
               sed -i "s#\"local>[^\"]*\"##" .github/renovate.json5
-              renovate --platform=local --dry-run=extract' > "$RUNNER_TEMP/extract.json"
+              renovate --platform=local --dry-run=extract' > "$RUNNER_TEMP/extract.json" || status=$?
           # The lock files of pip-compile, as managerFilePatterns finds them.
-          lock_files="$(git ls-files | grep -cE '(^|/)requirements[^/]*\.txt$' || true)"
-          python3 - "$RUNNER_TEMP/extract.json" "$lock_files" <<'PYTHON'
+          git ls-files | grep -E '(^|/)requirements[^/]*\.txt$' > "$RUNNER_TEMP/lock-files" || true
+          python3 - "$RUNNER_TEMP/extract.json" "$RUNNER_TEMP/lock-files" "$status" <<'PYTHON'
           import json
           import os
           import sys
 
-          log, expected = sys.argv[1], int(sys.argv[2])
+          log, lock_files, status = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          with open(lock_files, encoding="utf-8") as names:
+              expected = set(names.read().split())
           # What every line of the log has, besides its message and its details.
           common = {"name", "hostname", "pid", "level", "logContext", "repository", "time", "v"}
-          problems, found = [], None
+          problems, read = [], None
           with open(log, encoding="utf-8") as lines:
               for line in lines:
                   try:
@@ -99,18 +104,22 @@ jobs:
                   if entry.get("level", 0) >= 40:
                       details = {key: value for key, value in entry.items() if key not in common}
                       problems.append(f"{message}: {json.dumps(details)}")
-                  elif message == "Dependency extraction complete":
-                      found = entry["stats"]["managers"].get("pip-compile", {}).get("fileCount", 0)
-          if found is None:
+                  elif message == "Extracted dependencies":
+                      # One package file per source of pip-compile, with its lock files.
+                      packages = entry["packageFiles"].get("pip-compile", [])
+                      read = {name for package in packages for name in package.get("lockFiles", [])}
+          if read is None:
               problems.append("Renovate didn't finish reading the files.")
-          elif found != expected:
-              problems.append(f"Renovate read {found} of the {expected} lock files of pip-compile.")
+          else:
+              problems += [f"Renovate doesn't read the lock file {name}." for name in sorted(expected - read)]
+          if status:
+              problems.append(f"Renovate ended with exit code {status}.")
           for problem in problems:
               print(f"::error title=Renovate::{problem}")
           if problems:
               sys.exit(1)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"Renovate reads every file, the {expected} lock files of pip-compile among them.\n")
+              summary.write(f"Renovate reads every file, the {len(expected)} lock files of pip-compile among them.\n")
           PYTHON
 
   renovate:
@@ -118,6 +127,10 @@ jobs:
     if: github.repository == 'Dennis-Otto/repo-blueprint' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # One run of the bot at a time; the next one waits for it.
+    concurrency:
+      group: renovate
+      cancel-in-progress: false
     # The environment holds the private key of the release app; only main may use it.
     environment:
       name: release

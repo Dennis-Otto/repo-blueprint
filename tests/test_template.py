@@ -1482,11 +1482,14 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
         for rule in rules
         if rule.get("matchUpdateTypes") == ["lockFileMaintenance"]
     ]
+    # Renovate builds it anew only in its window: a change of main after the review
+    # doesn't bring versions that the maintainer hasn't seen.
     assert refresh == [
         {
             "matchUpdateTypes": ["lockFileMaintenance"],
             "minimumReleaseAge": None,
             "automerge": False,
+            "updateNotScheduled": False,
         }
     ]
     for rule in rules:
@@ -1504,10 +1507,37 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("log", "errors"),
+    ("log", "status", "errors"),
     [
         (
-            [{"level": 30, "msg": "Dependency extraction complete", "count": 2}],
+            [
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {
+                        "requirements.in": ["requirements.txt"],
+                        "stacks/demo/requirements.in": ["stacks/demo/requirements.txt"],
+                    },
+                }
+            ],
+            0,
+            [],
+        ),
+        (
+            # Two lock files of one source are one package file of Renovate.
+            [
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {
+                        "requirements.in": [
+                            "requirements.txt",
+                            "stacks/demo/requirements.txt",
+                        ]
+                    },
+                }
+            ],
+            0,
             [],
         ),
         (
@@ -1519,30 +1549,51 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
                     "matchedFile": "stacks/demo/requirements.txt",
                     "errorMessage": "Option --unsafe-package=coverage not supported (yet)",
                 },
-                {"level": 30, "msg": "Dependency extraction complete", "count": 1},
+                {
+                    "level": 30,
+                    "msg": "Extracted dependencies",
+                    "sources": {"requirements.in": ["requirements.txt"]},
+                },
             ],
+            0,
             [
                 'pip-compile error: {"matchedFile": "stacks/demo/requirements.txt",'
                 ' "errorMessage": "Option --unsafe-package=coverage not supported'
                 ' (yet)"}',
-                "Renovate read 1 of the 2 lock files of pip-compile.",
+                "Renovate doesn't read the lock file stacks/demo/requirements.txt.",
             ],
         ),
         (
-            [{"level": 30, "msg": "Dependency extraction complete", "count": 0}],
-            ["Renovate read 0 of the 2 lock files of pip-compile."],
+            [{"level": 30, "msg": "Extracted dependencies", "sources": {}}],
+            0,
+            [
+                "Renovate doesn't read the lock file requirements.txt.",
+                "Renovate doesn't read the lock file stacks/demo/requirements.txt.",
+            ],
         ),
         (
+            # Renovate ends with exit code 1 after an error, as with broken rules.
             [{"level": 60, "msg": "Repository has invalid config"}],
+            1,
             [
                 "Repository has invalid config: {}",
                 "Renovate didn't finish reading the files.",
+                "Renovate ended with exit code 1.",
+            ],
+        ),
+        (
+            # docker can't start Renovate at all.
+            [],
+            125,
+            [
+                "Renovate didn't finish reading the files.",
+                "Renovate ended with exit code 125.",
             ],
         ),
     ],
 )
 def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
-    tmp_path: Path, log: list[dict[str, object]], errors: list[str]
+    tmp_path: Path, log: list[dict[str, object]], status: int, errors: list[str]
 ) -> None:
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
     job = job_of(workflow, "validate")
@@ -1562,23 +1613,32 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
     ):
         subprocess.run(["git", *command], cwd=checkout, check=True)
     (checkout / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    # Renovate's log as JSON lines, with the files it found of pip-compile, and a
-    # line of its own; docker notes what it gets, python3 is the Python of the tests.
+    # Renovate's log as JSON lines, with the package files it found of pip-compile,
+    # and a line of its own; docker notes what it gets and ends as Renovate does,
+    # python3 is the Python of the tests.
     lines = []
     for entry in log:
-        if "count" in entry:
-            count = entry.pop("count")
-            entry["stats"] = {"managers": {"pip-compile": {"fileCount": count}}}
+        if "sources" in entry:
+            sources = entry.pop("sources")
+            assert isinstance(sources, dict)
+            entry["packageFiles"] = {
+                "pip-compile": [
+                    {"packageFile": source, "lockFiles": locks, "deps": []}
+                    for source, locks in sources.items()
+                ],
+                "pip_requirements": [{"packageFile": "requirements.txt"}],
+            }
         lines.append(json.dumps({"name": "renovate", "pid": 7, "v": 0, **entry}))
     (tmp_path / "log").write_text(
-        "Starting Renovate\n" + "\n".join(lines) + "\n", encoding="utf-8"
+        "Starting Renovate\n" + "".join(f"{line}\n" for line in lines),
+        encoding="utf-8",
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for tool, body in {
         # The archive that it mounts, and its arguments.
         "docker": 'tar -tf - < "${4%:/tmp/repository.tar:ro}" > "$CALLS.tar"\n'
-        'printf \'%s\\n\' "$@" > "$CALLS"\ncat "$LOG"\n',
+        'printf \'%s\\n\' "$@" > "$CALLS"\ncat "$LOG"\nexit "$STATUS"\n',
         "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
     }.items():
         (bin_dir / tool).write_text(
@@ -1597,6 +1657,7 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
         "IMAGE": "renovate",
         "CALLS": calls.as_posix(),
         "LOG": (tmp_path / "log").as_posix(),
+        "STATUS": str(status),
     }
     # As GitHub runs a step: bash -e.
     assert BASH
@@ -1652,14 +1713,30 @@ def test_the_renovate_rules_run_for_every_change_of_a_lock_file() -> None:
         '"**/requirements*.in"',
     ):
         assert f"      - {path}\n" in events, path
-    # The step counts the lock files as Renovate finds them.
+    # The step lists the lock files as Renovate finds them.
     step = workflow[
         workflow.index("      - name: Read every file of the dependencies") :
     ]
-    pattern = re.search(r"grep -cE '([^']+)'", step)
+    pattern = re.search(r"grep -E '([^']+)'", step)
     assert pattern
     rules = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     assert f'managerFilePatterns: ["/{json.dumps(pattern[1])[1:-1]}/"]' in rules
+
+
+def test_a_pull_request_checks_the_renovate_rules_without_waiting_for_the_bot() -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    # Renovate's run opens several pull requests of lock files at once: a group of
+    # the whole workflow would let them wait for the bot and cancel each other.
+    assert not re.search(r"^concurrency:", workflow, re.M)
+    assert (
+        "    concurrency:\n"
+        "      group: renovate-rules-${{ github.event.pull_request.number }}\n"
+        "      cancel-in-progress: true\n"
+    ) in job_of(workflow, "validate")
+    # One run of the bot at a time, and a waiting one isn't cancelled by a check.
+    assert (
+        "    concurrency:\n      group: renovate\n      cancel-in-progress: false\n"
+    ) in job_of(workflow, "renovate")
 
 
 def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
