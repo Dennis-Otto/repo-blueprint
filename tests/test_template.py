@@ -1098,6 +1098,9 @@ def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
     assert list(temporary.iterdir()) == []
 
 
+# It starts the tool, which in the copy of the mutation tests is the code with the
+# mutants, and the variables of mutmut switch them in that process too.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothing(
     projects: dict[str, Path], tmp_path: Path
