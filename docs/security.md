@@ -87,4 +87,4 @@ flowchart TB
 - The maintainer's account and the private key of the release app are the keys to every repository made from the blueprint; whoever holds them can change all of them.
 - A change that is wrong but passes every check reaches every repository with the next release of the blueprint. The maintainer's review of every release that is not only dependency updates is the last guard.
 - Copier and the GitHub CLI run with the permissions of whoever starts them.
-- The rules of the release tags block their update and deletion, not their creation: a token that may push can create the tag of a version that no release has yet. The release workflow builds no release on such a tag, but `copier update` takes the latest tag of the blueprint as it finds it.
+- The rules of the release tags block their update and deletion, not their creation: a token that may push can create the tag of a version that no release has yet. The release workflow builds no release on such a tag, and the blueprint bot takes only the tag of the latest published release; but a token that may create releases could publish one on such a tag, and the bot doesn't check the signature of the tag.
