@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import textwrap
@@ -17,6 +16,7 @@ from pathlib import Path
 import pathspec
 import pytest
 from copier import run_copy
+from shell import BASH
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -46,28 +46,6 @@ TOOL = sorted(
         ),
     ]
 )
-
-
-# The bash that the tests run the steps of the workflows in, by its full path. Windows
-# looks for a bare "bash" in System32 before the PATH, and has the launcher of WSL as
-# bash.exe there and in WindowsApps, which runs the step in Linux without the variables
-# of the test. So the search leaves out these two folders and ends with the bash of Git
-# for Windows next to its git: the PATH of Git Bash, which scripts/check.sh runs in,
-# has that bash first, while the PATH of PowerShell or of the test runner of an IDE
-# has only its git.
-def find_bash() -> str | None:
-    path = [
-        entry
-        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
-        if Path(entry).name.casefold() not in {"system32", "windowsapps"}
-    ]
-    git = shutil.which("git")
-    if git:
-        path.append(str(Path(git).parents[1] / "bin"))
-    return shutil.which("bash", path=os.pathsep.join(path))
-
-
-BASH = find_bash()
 
 
 def render(destination: Path, **data: str | bool) -> Path:
@@ -1423,10 +1401,14 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 def test_the_tests_start_the_bash_of_the_path() -> None:
     # A bare "bash" ran the steps in WSL on Windows, and scripts/check.sh failed there:
     # the first argument of a call or of a list or tuple, alone or after env; only the
-    # search for it may name it.
+    # search for it may name it. A search of the whole PATH finds the same WSL from
+    # PowerShell or an IDE: every test takes BASH of tests/shell.py.
     bare = re.compile(r'(?:\[|(?<!which)\()\s*(?:"/usr/bin/env",\s*)?"bash"\s*[,\])]')
+    anywhere = re.compile(r'which\(\s*"bash"\s*\)')
     for path in sorted((ROOT / "tests").glob("*.py")):
-        assert not bare.search(path.read_text(encoding="utf-8")), path.name
+        text = path.read_text(encoding="utf-8")
+        assert not bare.search(text), path.name
+        assert not anywhere.search(text), path.name
 
 
 def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
@@ -1591,8 +1573,12 @@ def test_a_release_is_built_in_isolation() -> None:
     build = (workflows_dir / "build-release.yml").read_text(encoding="utf-8")
     assets = release[release.index("  assets:") : release.index("\n  publish:")]
     assert "uses: ./.github/workflows/build-release.yml" in assets
-    # The build gets the tag and version as inputs, nothing else of the caller.
+    # The build gets the tag, its commit and the version as inputs, nothing else of
+    # the caller.
     assert "needs." not in build
+    for name in ("tag", "sha", "version"):
+        line = f"      {name}: ${{{{ needs.release-please.outputs.{name} }}}}\n"
+        assert line in assets, name
     assert "workflow_call:" in build
     verify = (workflows_dir / "verify-release.yml").read_text(encoding="utf-8")
     assert 'build="$GH_REPO/.github/workflows/build-release.yml"' in verify
@@ -1610,7 +1596,7 @@ def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
     ]
     assert "github.event_name == 'workflow_dispatch'" in step
     assert "--json isDraft" in step
-    for output in ("created", "tag", "version", "major"):
+    for output in ("created", "tag", "sha", "version", "major"):
         line = next(
             line for line in job.splitlines() if line.strip().startswith(f"{output}:")
         )
@@ -1630,9 +1616,79 @@ def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
     job = release[release.index("  release-please:") : release.index("\n  assets:")]
     assert "id-token: write" in job
     # The signed tag is there before release-please creates the release on it.
-    assert job.index('bash .github/sign-tag.sh "$tag"') < job.index(
+    assert job.index('bash .github/sign-tag.sh "$tag" "$commit"') < job.index(
         "googleapis/release-please-action"
     )
+
+
+def test_every_release_run_signs_the_tag_of_a_merged_release() -> None:
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    start = release.index("      - name: Sign the tag of a release")
+    step = release[start : release.index("      - name:", start + 1)]
+    # Not only the push of the merge, which can be lost: the next run, a schedule or a
+    # dispatch, signs the tag before release-please creates the release on it.
+    assert "        if: steps.app.outputs.token != ''\n" in step
+    assert "event_name" not in step
+    assert "head_commit" not in step
+    # The merged release pull requests come from the list of pull requests, which
+    # doesn't lag behind a merge as their search does.
+    assert 'pullRequests(labels: ["autorelease: pending"], states: MERGED' in step
+    assert "gh pr list" not in step
+    # A tag that exists already must be the signed one at the commit of the merge,
+    # which sign-tag.sh checks (tests/test_sign_tag.py).
+    assert 'bash .github/sign-tag.sh "$tag" "$commit"' in step
+    # release-please creates a release only on a tag that the step signed: never on a
+    # tag of its own, without a signature, for a release pull request merged after the
+    # step looked, or in a run without the release app.
+    assert "        id: sign\n" in step
+    assert '          echo "signed=true" >> "$GITHUB_OUTPUT"\n' in step
+    please = release[release.index("        id: release\n") :]
+    please = please[: please.index("      - name:")]
+    assert "googleapis/release-please-action@" in please
+    skip = "skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}"
+    assert f"          {skip}\n" in please
+
+
+def test_the_build_checks_the_tag_before_it_builds() -> None:
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    inputs = build[build.index("    inputs:") : build.index("permissions:")]
+    assert (
+        "      sha:\n"
+        "        description: The commit that the tag has to point at\n"
+        "        required: true\n"
+    ) in inputs
+    step = build[
+        build.index("      - name: Verify the tag before building") : build.index(
+            "actions/checkout@"
+        )
+    ]
+    # The script of the commit that runs the workflow, not the one of the tag.
+    assert "contents/.github/sign-tag.sh?ref=$GITHUB_SHA" in step
+    assert 'bash "$RUNNER_TEMP/sign-tag.sh" verify "$TAG" "$SHA"' in step
+    assert "SHA: ${{ inputs.sha }}" in step
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    # The release at the merge, a beta at the commit of the run, and a draft taken up
+    # at the last commit that changed the version.
+    outputs = ("release", "beta", "resume")
+    line = " || ".join(f"steps.{step}.outputs.sha" for step in outputs)
+    assert f"      sha: ${{{{ {line} }}}}\n" in release
+    assert 'echo "sha=$GITHUB_SHA"\n' in release
+    manifest = "commits?path=.release-please-manifest.json&sha=$GITHUB_SHA&per_page=1"
+    assert manifest in release
+
+
+def test_a_release_of_an_hourly_run_is_verified_in_full() -> None:
+    # Called by the release workflow, verify-release.yml has the event of its run,
+    # which may be the hourly schedule; only its own weekly run is lenient.
+    verify = (ROOT / ".github/workflows/verify-release.yml").read_text(encoding="utf-8")
+    weekly = "github.event_name == 'schedule' && inputs.tag == ''"
+    assert f"          WEEKLY: ${{{{ {weekly} }}}}\n" in verify
+    assert "GITHUB_EVENT_NAME" not in verify
+    assert verify.count('[[ "$WEEKLY" == true ]]') == 4
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    job = release[release.index("\n  verify:") :]
+    assert "uses: ./.github/workflows/verify-release.yml" in job
+    assert "      tag: ${{ needs.release-please.outputs.tag }}" in job
 
 
 @pytest.mark.parametrize("kind", KINDS)
