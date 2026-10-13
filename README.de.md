@@ -62,9 +62,9 @@ flowchart TB
 | Bereich | Was läuft | Womit |
 | --- | --- | --- |
 | **Prüfungen** | `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint, Paketbau; ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern, weil jeder Download der Workflows es erneut versucht, und die Prüfungen einer Nextcloud-App halten krankerl im Cache der CI | die Werkzeuge der jeweiligen Projektart, per Hash gepinnt |
-| **Lint** | Workflows (actionlint), Lizenz jeder Datei (REUSE), das Markdown jedes Dokuments (markdownlint), Hinweise zur Rechtschreibung auf Englisch und Deutsch (cspell) und zum Stil des Englischen (Vale) der geänderten Dokumente, Sign-off jedes Commits (DCO), Titel jedes Pull Requests (Conventional Commits), ein Eintrag unter *Unreleased* für jede Änderung für Nutzer | `lint.yml`, `pull-request-title.yml` |
+| **Lint** | Workflows (actionlint), Lizenz jeder Datei (REUSE), das Markdown jedes Dokuments (markdownlint), Hinweise zur Rechtschreibung auf Englisch und Deutsch (cspell) und zum Stil des Englischen (Vale) der geänderten Dokumente, Sign-off jedes Commits (DCO), Titel jedes Pull Requests (Conventional Commits), ein Eintrag im Changelog für jede Änderung für Nutzer, ein Fragment in `changelog.d/` oder eine Zeile unter *Unreleased*, geprüft so, wie das Release ihn übernimmt | `lint.yml`, `pull-request-title.yml` |
 | **Sicherheit** | CodeQL, OpenSSF Scorecard, Dependency Review, Secret Scan, SBOMs als SPDX und CycloneDX, OpenVEX, schlüssellos signierte und vor jedem Build geprüfte Release-Tags (gitsign), Findings-Wächter, die Sicherheitsprüfung der Workflows (zizmor), jede Lock-Datei gegen die OSV-Datenbank (OSV-Scanner), der Netzwerkverkehr jedes Jobs (Harden-Runner) | jede Action auf einen Commit-Hash gepinnt |
-| **Releases** | ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major), und dem Text von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und der signierten Provenance eines isolierten Builds (SLSA Build Level 3), liefert es aus und prüft es danach so, wie es seine Nutzer können, auch jede Woche; wo die Repository-Variable `BETA_CHANNEL` auf true steht, wird außerdem jede Änderung für Nutzer zu einer Beta des nächsten Releases, einem Prerelease für Tester | release-please, die Release-App, unveränderliche Releases, `verify-release.yml` |
+| **Releases** | ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major), und dem Text der Fragmente in `changelog.d/` und von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und der signierten Provenance eines isolierten Builds (SLSA Build Level 3), liefert es aus und prüft es danach so, wie es seine Nutzer können, auch jede Woche; wo die Repository-Variable `BETA_CHANNEL` auf true steht, wird außerdem jede Änderung für Nutzer zu einer Beta des nächsten Releases, einem Prerelease für Tester | release-please, die Release-App, unveränderliche Releases, `verify-release.yml` |
 | **Abhängigkeiten** | Renovate, das der Blueprint alle zwei Stunden für jedes Repository als Release-App ausführt: Actions, Abhängigkeiten, Images und die Pins der Workflows, eine Woche nach ihrem Release, und sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt; Routine-Updates und Releases, die nur Abhängigkeiten aktualisieren, mergen sich selbst, sobald alle Prüfungen grün sind, während die wöchentliche Auffrischung jeder Lock-Datei, die die neuesten Versionen ohne die Woche Wartezeit bringt, auf den Maintainer wartet; der Blueprint prüft, dass Renovate jede Lock-Datei liest, die er mitbringt. Dependabot pflegt die Features des Dev-Containers. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Abdeckung** | ein Kommentar an jedem Pull Request mit der Abdeckung seiner Tests im Vergleich zu `main`, Datei für Datei | `after-checks.yml` |
 | **Mutationstests** | jede Woche laufen Tausende kleiner Änderungen des Codes gegen die Tests, und die Zusammenfassung zeigt den Anteil, den sie bemerken, und die überlebenden Mutanten; ein niedriger Wert ist ein Bericht, nie ein Fehlschlag, aber ein Lauf, der nichts misst, schlägt fehl; ein Pull Request, der ändert, wie sie laufen, probiert sie aus | `mutation.yml`: mutmut, Infection |
@@ -96,11 +96,11 @@ config:
 ---
 flowchart TB
     accTitle: Von einer Änderung zum Release
-    accDescr: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text von Unreleased. Sein Merge signiert zuerst seinen Tag, im nächsten Lauf des Release-Bots, baut dann das Release isoliert, sobald der Tag geprüft ist, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.
+    accDescr: Ein Pull Request mit dem Titel fix, feat oder feat! merged in main, sobald alle Prüfungen grün sind. Der Release-Bot hält einen Release-Pull-Request mit der nächsten Version und dem Text der Fragmente und von Unreleased. Sein Merge signiert zuerst seinen Tag, im nächsten Lauf des Release-Bots, baut dann das Release isoliert, sobald der Tag geprüft ist, signiert und veröffentlicht es, liefert es aus und prüft es, sofort und jede Woche. Mit BETA_CHANNEL wird außerdem jede Änderung für Nutzer zu einer Beta.
 
     pr["Pull Request<br><code>fix:</code> · <code>feat:</code> · <code>feat!:</code>"]
     main["main"]
-    rpr["Release-Pull-Request<br><code>chore: release x.y.z</code><br>Notes aus <i>Unreleased</i>"]
+    rpr["Release-Pull-Request<br><code>chore: release x.y.z</code><br>Notes aus <code>changelog.d/</code><br>und <i>Unreleased</i>"]
     beta["Beta <code>x.y.z-beta.N</code><br>für Tester"]
     tag["Signierter Tag<br>am Merge, vom nächsten Lauf<br>vor dem Build geprüft"]
     build["Isolierter Build<br>SLSA Build Level 3"]
@@ -119,6 +119,37 @@ flowchart TB
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class rpr bot
     class release done
+```
+
+Ein Pull Request beschreibt, was er für Nutzer ändert, in einer eigenen Datei, einem Fragment in `changelog.d/`, etwa `changelog.d/dark-mode.md`, unter der Überschrift seiner Art von Änderung, etwa `### Features`. Eine neue Datei kollidiert mit nichts, also mergen Pull Requests, die gleichzeitig laufen, nacheinander, ohne dass jemand `main` in jeden von ihnen mergt, und ein Release kollidiert nicht mehr mit den wartenden Pull Requests. Die Prüfung *changelog* prüft jedes Fragment so, wie das Release es übernimmt, und der Release-Bot verschiebt jedes Fragment in den Abschnitt des Releases und löscht es im selben Commit. Eine Zeile unter `## Unreleased` in `CHANGELOG.md` funktioniert weiterhin.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Der Changelog ohne Konflikte
+    accDescr: Zwei Pull Requests fügen je eine eigene Datei zu changelog.d hinzu, also mergen sie nacheinander ohne Konflikt in main. Der Release-Bot schreibt den Abschnitt des nächsten Releases aus den Fragmenten und dem Text von Unreleased in CHANGELOG.md des Release-Pull-Requests und löscht die Fragmente im selben Commit. Sein Merge macht diesen Abschnitt zu den Notes des Releases.
+
+    a["Pull Request<br><code>changelog.d/dark-mode.md</code>"]
+    b["Pull Request<br><code>changelog.d/token-secret.md</code>"]
+    main["main<br>eine Datei je Änderung"]
+    rpr["Release-Pull-Request<br>der Abschnitt von x.y.z in <code>CHANGELOG.md</code><br>die Fragmente gelöscht"]
+    notes["Release-Notes<br>jede Art von Änderung unter einer Überschrift"]
+
+    a -- "gemergt" --> main
+    b -- "gemergt, ohne Konflikt" --> main
+    main -- "Release-Bot" --> rpr
+    rpr -- "gemergt" --> notes
+
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class a,b person
+    class rpr bot
+    class notes done
 ```
 
 ### Wann die Prüfungen laufen

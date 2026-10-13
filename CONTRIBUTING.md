@@ -38,11 +38,11 @@ config:
 ---
 flowchart TB
     accTitle: The way of a contribution
-    accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry under Unreleased, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.
+    accDescr: An issue first for anything larger, a branch from main, the change with its tests and an entry in a new file of changelog.d, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.
 
     issue["Issue<br>for anything larger"]
     branch["Branch from <code>main</code>"]
-    change["The change with its tests<br>an entry under <i>Unreleased</i><br>every commit signed off"]
+    change["The change with its tests<br>an entry in <code>changelog.d/</code><br>every commit signed off"]
     pr["Pull request<br><code>feat: …</code> · <code>fix: …</code> · <code>feat!: …</code>"]
     checks{"Every required<br>check passes?"}
     main["Squashed into <code>main</code><br>the title decides<br>the next version"]
@@ -57,9 +57,21 @@ flowchart TB
 
 1. Open an issue first for anything larger than a small fix, so we can agree on the approach.
 2. Create a branch from `main`.
-3. Describe what changes for users under `## Unreleased` in `CHANGELOG.md`, in the words of a user; the check *changelog* asks for it in every `feat`, `fix` or `perf` pull request.
+3. Describe what changes for users, in the words of a user, in a new file in `changelog.d/` named after your branch, such as `changelog.d/dark-mode.md`, below the heading of its kind of change, such as `### Features` or `### Bug fixes`. The check *changelog* asks for it in every `feat`, `fix` or `perf` pull request, and checks it as the release takes it in. A file of its own conflicts with no other pull request; a line under `## Unreleased` in `CHANGELOG.md` works as well, but conflicts with each pull request that adds one at the same place.
 4. A change that makes or changes a decision that shapes the blueprint records it in [`docs/decisions/`](docs/decisions/README.md).
 5. Open a pull request whose title is a [Conventional Commit](https://www.conventionalcommits.org/), such as `feat(settings): add a dark mode` or `fix: keep the token secret`. Mark a breaking change with `!`. Pull requests are squashed into one commit named after the title, and the title decides the next version: `fix` a patch, `feat` a minor, `!` a major version.
+
+### The changelog
+
+A fragment holds the entries of one pull request, each below the heading of its kind of change:
+
+```markdown
+### Features
+
+- **Dark mode:** the settings follow the theme of the system.
+```
+
+The headings are those of the blueprint, `Breaking changes`, `Features`, `Changes`, `Bug fixes` and `Performance`, those of [Keep a Changelog](https://keepachangelog.com/), `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` and `Security`, and every other one that `CHANGELOG.md` has already. The release bot moves the entries of every fragment and of Unreleased into the section of the next release, each kind of change below one heading, and deletes the fragments in the same commit of the release pull request. `python3 blueprint.py fragments` checks them as the release takes them in.
 
 ## Checks
 
@@ -101,8 +113,8 @@ Pictures make the documentation easier to follow:
 
 ## Releases
 
-The release bot keeps a pull request titled `chore: release x.y.z` with the next version, up to date with `main` and decided anew with every merge. Its section of the changelog is the text of Unreleased; without one, it lists the pull requests. Merging it creates the release with its package, SBOM and signed provenance. New repositories copy the blueprint from its release tags, and the blueprint bot brings every repository made from it up to the new release. A release of dependency updates merges and publishes itself.
+The release bot keeps a pull request titled `chore: release x.y.z` with the next version, up to date with `main` and decided anew with every merge. Its section of the changelog is the text of the fragments in `changelog.d/` and of Unreleased, and it deletes the fragments; without such text, it lists the pull requests. Merging it creates the release with its package, SBOM and signed provenance. New repositories copy the blueprint from its release tags, and the blueprint bot brings every repository made from it up to the new release. A release of dependency updates merges and publishes itself.
 
-A line `Release-As: 2.0.0-beta.1` in the description of a pull request sets the version of the next release, for a prerelease for example. A prerelease keeps the text of Unreleased for the release that follows it.
+A line `Release-As: 2.0.0-beta.1` in the description of a pull request sets the version of the next release, for a prerelease for example. A prerelease leaves the fragments and the text of Unreleased to the release that follows it.
 
 By contributing, you agree that your contribution is licensed under the MIT-0 license of this project.

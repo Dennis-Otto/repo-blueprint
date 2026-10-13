@@ -1,10 +1,15 @@
 # Changelog
 
 All notable changes, by release. Each pull request that changes something for
-users describes it under Unreleased. The release bot makes that text the section of
-the next release, or lists the pull requests when there is none.
+users describes it in a file of its own in `changelog.d/`, or under Unreleased. The
+release bot makes that text the section of the next release, or lists the pull
+requests when there is none.
 
 ## Unreleased
+
+### Features
+
+- **Pull requests no longer conflict over the changelog:** every `feat`, `fix` or `perf` pull request wrote its entry under `## Unreleased` in `CHANGELOG.md`, so each merge, and each release, which empties Unreleased, conflicted with every pull request that waited: its auto-merge stopped until someone merged `main` by hand, and every check ran again. All 12 conflicts that the branch bot ever labeled in the blueprint came from there, and a merge of `main` once put an entry into the section of a release that was out already (#183). A pull request now writes its entry into a file of its own, a fragment in `changelog.d/` named after its branch, such as `changelog.d/dark-mode.md`, below the heading of its kind of change, such as `### Features` or `### Bug fixes`; a new file conflicts with nothing. The check *changelog* accepts it and checks it as the release takes it in: a typo such as `### Fixes` fails at the fragment, with the heading it likely meant, and `python3 .github/blueprint.py fragments` checks the fragments on your machine. The release bot moves every fragment and the text of Unreleased into the section of the next release, each kind of change below one heading, and deletes the fragments in the same commit of the release pull request; a prerelease leaves them to the release, and the notes of a beta show them. Entries under Unreleased keep working, and the link check of a pull request leaves the fragments out, as it does the changelog. Every repository gets the folder `changelog.d/` with the update, which a Nextcloud app leaves out of its package, and CONTRIBUTING.md shows the format; the headings that a fragment may use are those of the blueprint, those of Keep a Changelog and every other one that your `CHANGELOG.md` has already. The check runs `blueprint.py` of your default branch on the text of the fragments and nothing of the pull request, also for a pull request from a fork.
 
 ### Bug fixes
 

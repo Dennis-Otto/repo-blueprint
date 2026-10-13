@@ -19,4 +19,4 @@ Option 3. The version follows from the Conventional Commit titles (`fix` a patch
 
 ## Consequences
 
-There is one release action: merging the release pull request. The release bot has to rebuild its pull request on every merge, which `release.yml` does.
+There is one release action: merging the release pull request. The release bot has to rebuild its pull request on every merge, which `release.yml` does. [Decision 0017](0017-changelog-fragments.md) lets each pull request write its entry into a file of its own in `changelog.d/`, which conflicts with no other.

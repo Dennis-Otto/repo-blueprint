@@ -40,7 +40,7 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 - **0.7:** the settings that every website shares, from the blueprint, and a successor that the owner designated on GitHub, who can carry the project on.
 - **0.8:** websites in more than one language, issue forms that point to the documentation, and the website of the owner itself made from the blueprint.
 - **OpenSSF Best Practices:** the blueprint holds [the Silver level](https://www.bestpractices.dev/projects/15284) of the badge.
-- **The next release:** what the section *Unreleased* of the changelog lists.
+- **The next release:** what the fragments in `changelog.d/` and the section *Unreleased* of the changelog list.
 
 ## Next
 
@@ -57,6 +57,6 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 ## Not planned
 
 - **Forges other than GitHub.** The blueprint builds on the rulesets, environments, attestations, immutable releases and the API of GitHub.
-- **Releases by hand.** Versions follow the titles of the pull requests, and the notes are the text that they write under *Unreleased*.
+- **Releases by hand.** Versions follow the titles of the pull requests, and the notes are the text that they write in their fragments of the changelog or under *Unreleased*.
 - **Bots that merge what nobody approved.** Only updates that pass every check merge on their own; every other change waits for a person.
 - **Secrets in files.** `blueprint.py` never reads or sets the value of a secret, and no file of the blueprint holds one.

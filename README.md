@@ -68,9 +68,9 @@ flowchart TB
 | Area | What runs | How |
 | --- | --- | --- |
 | **Checks** | `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, types, lint, packaging; a passing error of a download fails no run, because every download of the workflows tries again, and the checks of a Nextcloud app keep krankerl in the cache of the CI | the tools of each kind of project, hash-pinned |
-| **Lint** | the workflows (actionlint), the license of every file (REUSE), the Markdown of every document (markdownlint), hints at the spelling in English and German (cspell) and at the style of the English (Vale) of the changed documents, the sign-off of every commit (DCO), the title of every pull request (Conventional Commits), an entry under *Unreleased* for every change for users | `lint.yml`, `pull-request-title.yml` |
+| **Lint** | the workflows (actionlint), the license of every file (REUSE), the Markdown of every document (markdownlint), hints at the spelling in English and German (cspell) and at the style of the English (Vale) of the changed documents, the sign-off of every commit (DCO), the title of every pull request (Conventional Commits), an entry in the changelog for every change for users, a fragment in `changelog.d/` or a line under *Unreleased*, checked as the release takes it in | `lint.yml`, `pull-request-title.yml` |
 | **Security** | CodeQL, OpenSSF Scorecard, dependency review, secret scan, SBOMs as SPDX and CycloneDX, OpenVEX, release tags signed without a key (gitsign) and checked before every build, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner) | every action pinned to a commit hash |
-| **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
+| **Releases** | a pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version), and the text of the fragments in `changelog.d/` and of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers | release-please, the release app, immutable releases, `verify-release.yml` |
 | **Dependencies** | Renovate, which the blueprint runs for every repository every two hours as the release app: the actions, the dependencies, the images and the pins of the workflows, a week after their release, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows; routine updates and releases of dependency updates merge themselves once every check passes, while the weekly refresh of every lock file, which brings the newest versions without the week of waiting, waits for the maintainer; the blueprint checks that Renovate reads every lock file that it brings. Dependabot keeps the Features of the dev container. | `renovate.json5`, `renovate-blueprint.json5`, `dependabot.yml` |
 | **Coverage** | one comment on every pull request with the coverage of its tests against that of `main`, file by file | `after-checks.yml` |
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, and the summary shows the share they notice and the mutants that survive; a low score is a report, never a failure, but a run that measures nothing fails; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
@@ -102,11 +102,11 @@ config:
 ---
 flowchart TB
     accTitle: From a change to a release
-    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
+    accDescr: A pull request whose title is fix, feat or feat! merges into main once every check passes. The release bot keeps a release pull request with the next version and the text of the fragments and of Unreleased. Merging it signs its tag first, in the next run of the release bot, then builds the release in isolation once the tag checks out, signs and publishes it, delivers it and verifies it, then and every week. With BETA_CHANNEL, every change for users also becomes a beta.
 
     pr["Pull request<br><code>fix:</code> · <code>feat:</code> · <code>feat!:</code>"]
     main["main"]
-    rpr["Release pull request<br><code>chore: release x.y.z</code><br>notes from <i>Unreleased</i>"]
+    rpr["Release pull request<br><code>chore: release x.y.z</code><br>notes from <code>changelog.d/</code><br>and <i>Unreleased</i>"]
     beta["Beta <code>x.y.z-beta.N</code><br>for testers"]
     tag["Signed tag<br>at the merge, by the next run<br>checked before the build"]
     build["Isolated build<br>SLSA Build Level 3"]
@@ -125,6 +125,37 @@ flowchart TB
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class rpr bot
     class release done
+```
+
+A pull request describes what it changes for users in a file of its own, a fragment in `changelog.d/`, such as `changelog.d/dark-mode.md`, below the heading of its kind of change, such as `### Features`. A new file conflicts with nothing, so pull requests that run at the same time merge one after another, without a person who merges `main` into each of them, and a release no longer conflicts with the pull requests that wait. The check *changelog* checks each fragment as the release takes it in, and the release bot moves every fragment into the section of the release and deletes it in the same commit. A line under `## Unreleased` in `CHANGELOG.md` still works.
+
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The changelog without conflicts
+    accDescr: Two pull requests each add a file of their own to changelog.d, so they merge into main one after the other without a conflict. The release bot writes the section of the next release from the fragments and the text of Unreleased into CHANGELOG.md of the release pull request, and deletes the fragments in the same commit. Merging it makes that section the notes of the release.
+
+    a["Pull request<br><code>changelog.d/dark-mode.md</code>"]
+    b["Pull request<br><code>changelog.d/token-secret.md</code>"]
+    main["main<br>one file for each change"]
+    rpr["Release pull request<br>the section of x.y.z in <code>CHANGELOG.md</code><br>the fragments deleted"]
+    notes["Release notes<br>each kind of change below one heading"]
+
+    a -- "merged" --> main
+    b -- "merged, without a conflict" --> main
+    main -- "release bot" --> rpr
+    rpr -- "merged" --> notes
+
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class a,b person
+    class rpr bot
+    class notes done
 ```
 
 ### When the checks run
