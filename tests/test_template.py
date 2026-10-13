@@ -143,6 +143,18 @@ def test_every_action_is_pinned_to_a_commit(
             assert PINNED.match(line), f"{name}: {line}"
 
 
+def test_no_workflow_pins_an_action_to_a_branch() -> None:
+    # zizmor reports a commit pin whose comment names no version (ref-version-mismatch)
+    # as soon as the branch in the comment moves on, and the Findings workflow fails
+    # until the pin catches up. A tool that follows its branch on purpose runs as an
+    # image. Every workflow of a new repository is one of these.
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        for action, comment in re.findall(r"uses: (\S+@[0-9a-f]{40})( # \S+)?", text):
+            # As Renovate tells a version from a branch: v1, 1.2.3.
+            assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_required_checks_exist(projects: dict[str, Path], kind: str) -> None:
     project = projects[kind]
@@ -444,6 +456,156 @@ def test_the_readme_of_an_integration_works_in_hacs(projects: dict[str, Path]) -
 
     for target in re.findall(r"\]\(([^)\s]+)\)", readme):
         assert target.startswith(("https://", "#")), target
+
+
+def job_of(workflow: str, name: str) -> str:
+    start = workflow.index(f"\n  {name}:\n")
+    end = re.compile(r"\n\n  [\w-]+:\n").search(workflow, start + 1)
+    return workflow[start : end.start() if end else len(workflow)]
+
+
+def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
+    projects: dict[str, Path],
+) -> None:
+    ci = (projects["home-assistant"] / ".github/workflows/ci.yml").read_text(
+        encoding="utf-8"
+    )
+    # Their moving images, as their actions run them, but without the actions: a pin
+    # to a commit of their branches falls behind with every commit to them.
+    assert "uses: hacs/action" not in ci
+    assert "uses: home-assistant/actions" not in ci
+    hacs = job_of(ci, "hacs")
+    assert hacs.endswith("\n            ghcr.io/hacs/action:main")
+    # HACS reads the repository through the API, so the job checks nothing out.
+    assert "actions/checkout" not in hacs
+    # hassfest checks the checkout, read-only, exactly as the Variants workflow does.
+    command = (
+        'docker run --rm --volume "$PWD:/github/workspace:ro"'
+        " ghcr.io/home-assistant/hassfest:latest\n"
+    )
+    assert command in job_of(ci, "hassfest")
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    assert command.replace("$PWD", "$PWD/$PROJECT") in variants
+
+
+def run_the_step_with_docker(
+    tmp_path: Path, job: str, environment: dict[str, str]
+) -> tuple[str, list[str]]:
+    # The step runs in the folder workspace/, as in the checkout of a runner.
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    script = textwrap.dedent(
+        job[job.index("        run: |\n") + len("        run: |\n") :]
+    )
+    (workspace / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    # docker writes down what the container would get: its variables, its mounts,
+    # with the folder of the step as $PWD, and its image.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        """#!/usr/bin/env bash
+[[ "$1" == run ]] || exit 1
+shift
+while (($#)); do
+  case "$1" in
+    --rm) ;;
+    --env) shift; if [[ "$1" == *=* ]]; then echo "env $1"; else echo "env $1=${!1}"; fi ;;
+    --volume) shift; echo "volume ${1/#"$PWD"/\\$PWD}" ;;
+    *) echo "image $1" ;;
+  esac
+  shift
+done >> "$CALLS"
+""",
+        encoding="utf-8",
+        newline="\n",
+    )
+    docker.chmod(0o755)
+    calls = tmp_path / "calls"
+    calls.touch()
+    # As GitHub runs a step: bash -e.
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=workspace,
+        env={
+            **os.environ,
+            **environment,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "CALLS": str(calls),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout, calls.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_hacs_gets_the_inputs_of_its_action(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    ci = (projects["home-assistant"] / ".github/workflows/ci.yml").read_text(
+        encoding="utf-8"
+    )
+    hacs = job_of(ci, "hacs")
+    # The inputs of the action reach its image as INPUT_ variables, as GitHub passes
+    # them, and the event as a file, from which it reads the branch to validate.
+    inputs = {
+        name: value.strip('"').replace("${{ github.token }}", "the token")
+        for name, value in re.findall(r"^          (INPUT_\w+): (.+)$", hacs, re.M)
+    }
+    event = (tmp_path / "event.json").as_posix()
+
+    _, calls = run_the_step_with_docker(
+        tmp_path,
+        hacs,
+        {**inputs, "GITHUB_REPOSITORY": "o/r", "GITHUB_EVENT_PATH": event},
+    )
+
+    assert calls == [
+        "env INPUT_CATEGORY=integration",
+        "env INPUT_COMMENT=false",
+        "env INPUT_GITHUB_TOKEN=the token",
+        "env GITHUB_REPOSITORY=o/r",
+        "env GITHUB_EVENT_PATH=/github/workflow/event.json",
+        f"volume {event}:/github/workflow/event.json:ro",
+        "image ghcr.io/hacs/action:main",
+    ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_hassfest_shows_its_errors_as_annotations(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    ci = (projects["home-assistant"] / ".github/workflows/ci.yml").read_text(
+        encoding="utf-8"
+    )
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+
+    output, calls = run_the_step_with_docker(
+        tmp_path, job_of(ci, "hassfest"), {"RUNNER_TEMP": runner_temp.as_posix()}
+    )
+
+    assert calls == [
+        "volume $PWD:/github/workspace:ro",
+        "image ghcr.io/home-assistant/hassfest:latest",
+    ]
+    # The problem matcher of its action turns each error and warning into one.
+    assert f"::add-matcher::{runner_temp.as_posix()}/hassfest.json\n" in output
+    matcher = json.loads((runner_temp / "hassfest.json").read_text(encoding="utf-8"))
+    pattern = matcher["problemMatcher"][0]["pattern"][0]
+    error = re.match(
+        pattern["regexp"],
+        "* [ERROR] [MANIFEST] Invalid manifest: value must be one of"
+        " ['assumed_state', 'calculated'] at 'iot_class'. Got 'nonsense'",
+    )
+    assert error
+    assert error[pattern["severity"]] == "ERROR"
+    assert error[pattern["message"]].startswith("[MANIFEST] Invalid manifest: ")
+    assert not re.match(pattern["regexp"], "Integrations: 1")
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -914,6 +1076,33 @@ def test_renovate_keeps_every_project_current(
     assert re.findall(r"package-ecosystem: (\S+)", dependabot) == ["devcontainers"]
     settings = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "dependabot_security_updates = false" in settings
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_renovate_follows_an_action_pinned_to_a_branch_at_once(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # A workflow of the project may still pin an action to a commit of a branch, with
+    # the branch in its comment. Renovate looks such a pin up as a github-digest, for
+    # which every commit to the branch is a new release: with the week of waiting, a
+    # branch that moves every few days would never be followed, and zizmor reports
+    # the pin all the while.
+    rules = (projects[kind] / ".github/renovate-blueprint.json5").read_text(
+        encoding="utf-8"
+    )
+    rule = re.search(
+        r'\{\n(?:\s+//.*\n)+\s+matchManagers: \["github-actions"\],\n'
+        r'\s+matchDatasources: \["github-digest"\],\n'
+        r"\s+minimumReleaseAge: null,\n"
+        r'\s+schedule: \["at any time"\],\n'
+        r"\s+automerge: true,\n"
+        r'\s+groupName: "the actions that follow a branch",\n\s+\},',
+        rules,
+    )
+    assert rule
+    # After the groups of the actions, so that its own group and schedule apply.
+    for group in ("the actions", "the actions to a new major version"):
+        assert rules.index(f'groupName: "{group}"') < rule.start(), group
 
 
 # It asks Git for the files of the repository, which the copy of the mutation tests
