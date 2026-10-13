@@ -1252,26 +1252,65 @@ def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
         assert expected in (ROOT / name).read_text(encoding="utf-8"), name
 
 
-def test_every_release_of_the_blueprint_rolls_out_at_once(
+def test_every_release_of_the_blueprint_rolls_out_one_repository_at_a_time(
     projects: dict[str, Path],
 ) -> None:
     rollout = (ROOT / ".github/workflows/rollout.yml").read_text(encoding="utf-8")
-    # After a successful run of the Release workflow on main, for a merge or started
-    # by hand: its hourly runs make no release.
+    plan = rollout[rollout.index("\n  plan:\n") : rollout.index("\n  rollout:\n")]
+    job = rollout[rollout.index("\n  rollout:\n") :]
+    # After a successful run of the Release workflow on main, and only in the blueprint.
     assert "workflows: [Release]" in rollout
     assert "branches: [main]" in rollout
-    assert "github.event.workflow_run.conclusion == 'success'" in rollout
+    assert "github.event.workflow_run.conclusion == 'success'" in plan
+    assert "github.repository == 'Dennis-Otto/repo-blueprint'" in plan
+    # A run of any event can make a release: for a push only the merge of a release
+    # pull request, whose title the merge commit starts with, so that the merges of
+    # every other pull request start no runner.
+    assert "github.event.workflow_run.event != 'push' ||" in plan
+    prefix = "chore: release "
     assert (
-        """contains(fromJSON('["push", "workflow_dispatch"]'), """
-        "github.event.workflow_run.event)"
-    ) in rollout
-    # Only for the commit of the latest release, and only in the blueprint.
-    assert '"$commit" != "$HEAD_SHA"' in rollout
-    assert "github.repository == 'Dennis-Otto/repo-blueprint'" in rollout
-    # A token that can only start workflows and read, for the bot of each repository.
-    permissions = re.findall(r"^\s+permission-([\w-]+): (\w+)$", rollout, re.M)
-    assert permissions == [("actions", "write"), ("contents", "read")]
-    assert "gh workflow run blueprint-update.yml" in rollout
+        f"startsWith(github.event.workflow_run.head_commit.message, '{prefix}')" in plan
+    )
+    config = json.loads(
+        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+    )
+    assert config["packages"]["."]["pull-request-title-pattern"].startswith(prefix)
+    # The release that the run published, not the one at its commit: the job of the
+    # Release workflow that makes it public tells.
+    assert "HEAD_SHA" not in rollout
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "    name: publish the release\n" in release
+    assert 'select(.name == "publish the release")' in plan
+    # One repository after the other, every one of them, each with a token of its own
+    # that can only start workflows and read; 15 looks at most before the next one.
+    assert "      max-parallel: 1\n      fail-fast: false\n" in job
+    assert "repository: ${{ fromJSON(needs.plan.outputs.repositories) }}" in job
+    assert "repositories: ${{ matrix.repository }}" in job
+    permissions = re.findall(r"^\s+permission-([\w-]+): (\w+)$", plan, re.M)
+    assert permissions == [("metadata", "read")]
+    permissions = re.findall(r"^\s+permission-([\w-]+): (\w+)$", job, re.M)
+    assert permissions == [
+        ("actions", "write"),
+        ("checks", "read"),
+        ("contents", "read"),
+        ("pull-requests", "read"),
+        ("statuses", "read"),
+    ]
+    assert "looks=15\n" in job
+    assert "    timeout-minutes: 25\n" in job
+    assert "gh workflow run blueprint-update.yml" in job
+    # One rollout at a time in each repository, never for the whole workflow: GitHub
+    # starts a Rollout run after every run of the Release workflow, and a group of the
+    # workflow would let one that rolls nothing out cancel the waiting rollout of a
+    # release. The group is on the job that a run without a release skips.
+    assert not re.search(r"^concurrency:", rollout, re.M)
+    assert re.findall(r"^\s+concurrency:$", rollout, re.M) == ["    concurrency:"]
+    assert (
+        "    concurrency:\n"
+        "      group: rollout-${{ matrix.repository }}\n"
+        "      cancel-in-progress: false\n"
+    ) in job
+    assert "    if: needs.plan.outputs.repositories != ''\n" in job
     zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
     assert "      - rollout.yml\n" in zizmor
     # The bot it starts can be started by hand; a project has no rollout of its own.

@@ -341,6 +341,41 @@ flowchart TB
 
 The blueprint bot (`blueprint-update.yml`) runs `copier update` every week, and right after every release of the blueprint, whose Rollout workflow starts it in every repository of the release app. It takes the latest published release of the blueprint that `.copier-answers.yml` names, a fork of it perhaps, never a tag whose release is still a draft, and keeps one pull request on the branch `blueprint/update`: a newer release moves that pull request on, with its number and its auto-merge, instead of replacing it. Without conflicts it merges itself once every check passes. Conflicts stay in it as markers for the maintainer, in the files that the update touched; they turn its auto-merge off and add the label `merge-conflict`. The repository variable `BLUEPRINT_AUTOMERGE` set to `off` makes every update wait for the maintainer. Run it by hand under *Actions → Blueprint update*, or locally with `copier update`.
 
+```mermaid
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a release of the blueprint rolls out
+    accDescr: Once the Release workflow has published and verified a release, the Rollout workflow takes the repositories of the release app one after the other, the quickest checks first. It starts the blueprint bot of a repository and waits up to 15 minutes for the bot and the checks of its update pull request, then goes on with the next one. A repository whose bot it can't start, or whose bot fails, fails the run by its name, and the others still get the release.
+
+    release(["Release workflow<br>publishes and verifies<br>a release"])
+    next["Next repository<br>the quickest checks first"]
+    start["Starts its<br>blueprint bot"]
+    wait["Waits up to 15 minutes<br>for the bot and the checks<br>of its pull request"]
+    failed(["The run fails<br>by the name of<br>the repository"])
+    more{"Another<br>repository?"}
+    finished["Every repository<br>has the release<br>in a pull request"]
+
+    release --> next --> start --> wait --> more
+    start -- "GitHub fails<br>three times" --> failed
+    wait -- "the bot fails" --> failed
+    failed -. "the others<br>go on" .-> more
+    more -- "yes" --> next
+    more -- "no" --> finished
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class release,next,start,wait bot
+    class failed person
+    class finished done
+```
+
+The Rollout workflow of the blueprint brings each release to the repositories of the release app one after the other, those with the quickest checks first: it starts the blueprint bot of a repository and gives the bot and the checks of its update pull request up to 15 minutes before it starts the next one, so that the update pull requests don't all wait for the runners of the account at once. A repository whose bot it can't start, or whose bot fails, fails the run by its name; the others still get the release. It rolls out every release that a run of the Release workflow published, whether the merge of the release pull request started that run, the hourly schedule or a start by hand; a release that the run of a later merge finished, because the run of its own merge was lost, waits for a start by hand (Actions → Rollout) or the weekly run of the bots. Started by hand itself, it rolls out the latest release. Rollouts of releases that come close together overlap, but never in the same repository: there, the newer release takes the place of an older one that still waits.
+
 Once you commit to the branch of the pull request, to resolve the markers for example, the bot leaves the branch to you: when a newer release is out, it says so in one comment, and after you merge or close the pull request, its next run brings the rest. A merge of `main` with the button *Update branch* doesn't count as your commit, and an auto-merge that you switch off stays off. An update that only records a new release in `.copier-answers.yml` comes as a pull request too, and the updates carry the modes of files, such as a script that becomes executable.
 
 The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, and accepted findings. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
