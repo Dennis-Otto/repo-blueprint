@@ -16,7 +16,7 @@ python3 -m venv .venv
 
 On Windows, run them in Git Bash, with `py -3` in place of `python3` and `.venv/Scripts/` in place of `.venv/bin/`. While you work, the quicker steps of the checks:
 
-- `coverage run -m pytest && coverage report`: the tests, with every line and branch covered.
+- `pytest -n auto --cov`: the tests on every core, with every line and branch covered, as `scripts/check.sh` runs them.
 - `pytest tests/test_template.py -k name`: one test; the tests of the template render every kind of project, which takes a while.
 - `ruff format . && ruff check --fix .`: the format of the code, and the fixes that Ruff can make.
 - `python3 blueprint.py fix run`: every fix that a command makes for a step of `scripts/check.sh`, such as those of the text files, the pages and Ruff, as the fix bot makes them in a pull request.

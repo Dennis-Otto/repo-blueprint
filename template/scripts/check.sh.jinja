@@ -207,7 +207,16 @@ step "Mypy"
 mypy
 
 step "Tests, with every line and branch covered"
-coverage run -m pytest
+# On every core with pytest-xdist, whose processes pytest-cov measures and brings
+# together, or one after the other without them. coverage report then applies the
+# settings of [tool.coverage] either way, such as fail_under, and lists what no test
+# runs. PYTEST_XDIST_AUTO_NUM_WORKERS sets the number of processes, -n auto one for
+# each core.
+if python -c 'import pytest, pytest_cov, xdist' 2>/dev/null; then
+  python -m pytest -n auto --cov --cov-report= --cov-fail-under=0
+else
+  coverage run -m pytest
+fi
 coverage report
 [%- endif %]
 [%- if project_type == 'python-package' %]
