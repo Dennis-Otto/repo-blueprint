@@ -103,7 +103,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.12.17"
+          version: "0.12.18"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: stacks/docs/requirements-docs.txt
@@ -156,7 +156,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.12.17"
+          version: "0.12.18"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: stacks/docs/requirements-docs.txt
