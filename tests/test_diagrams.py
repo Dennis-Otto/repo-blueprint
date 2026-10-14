@@ -1069,6 +1069,7 @@ def test_the_check_finds_the_blocks_that_extract_takes_out(tmp_path: Path) -> No
     )
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_check_compares_the_alt_of_each_picture_with_its_source(
     tmp_path: Path,
@@ -1397,6 +1398,7 @@ DIFFER = ("lint.yml", "diagrams", "Report the diagrams that differ")
 SAME_REPOSITORY = {"EVENT": "pull_request", "APP": "Iv23li", "HEAD_REPOSITORY": "o/r"}
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize(
     ("head", "app", "fix"),
@@ -1437,6 +1439,7 @@ def test_the_check_promises_the_bot_only_where_it_commits(
     assert f"with Docker. {fix} The summary of this run" in reported.stdout
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_alt_of_a_page_follows_its_source(tmp_path: Path) -> None:
     # A pull request that tells a diagram in other words: its picture says them too.
@@ -1458,6 +1461,7 @@ def test_the_alt_of_a_page_follows_its_source(tmp_path: Path) -> None:
     }
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_a_changed_picture_is_checked_too(tmp_path: Path) -> None:
     # A pull request that changes only the alt of a picture by hand.
