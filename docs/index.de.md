@@ -81,6 +81,12 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     README, Beitragsleitfaden, Verhaltenskodex, Sicherheitsrichtlinie und Sicherheitsdesign, Governance, Issue-Formulare, Aufzeichnungen der Entscheidungen und Discussions mit einer Ankündigung jedes Releases.
 
+- :material-head-cog-outline:{ .lg .middle } **Coding-Agents**
+
+    ---
+
+    `AGENTS.md` gibt Claude Code, Codex, GitHub Copilot und Cursor die Befehle, die Regeln für Pull Requests und das Changelog, und welche Dateien dem Projekt gehören und welche dem Blueprint. Die Notizen des Projekts kommen aus `.github/agents.project.md` dazu.
+
 </div>
 
 Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, gescheiterte Releases, das Aufräumen und den Dev-Container.

@@ -81,6 +81,12 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     README, contributing guide, code of conduct, security policy and security design, governance, issue forms, records of the decisions, and discussions with an announcement of every release.
 
+- :material-head-cog-outline:{ .lg .middle } **Coding agents**
+
+    ---
+
+    `AGENTS.md` gives Claude Code, Codex, GitHub Copilot and Cursor the commands, the rules of pull requests and the changelog, and which files belong to the project and which to the blueprint. The notes of the project join it from `.github/agents.project.md`.
+
 </div>
 
 The [guide](guide.md#what-a-new-repository-gets) lists every area, with the coverage of every pull request, mutation tests, flaky tests, cancelled checks, failed releases, the clean-up and the dev container as well.

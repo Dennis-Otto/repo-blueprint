@@ -5,6 +5,7 @@ Participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and project deci
 Use [SUPPORT.md](SUPPORT.md) to choose the correct public support channel and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 All changes reach the protected `main` branch through pull requests that pass every required check.
+Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with what a change of the template reaches; a change of a rule here changes it there as well.
 
 ## Requirements for changes
 
