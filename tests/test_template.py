@@ -481,6 +481,23 @@ def test_the_versions_agree(projects: dict[str, Path], kind: str) -> None:
 
 
 @pytest.mark.parametrize("kind", KINDS)
+def test_a_breaking_change_below_1_0_0_is_said_to_raise_the_minor_version(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Below 1.0.0 the release bot raises the minor version for a breaking change, and
+    # the release pull request and the contributing guide say so, here and downstream.
+    for root in (ROOT, projects[kind]):
+        config = json.loads(
+            (root / "release-please-config.json").read_text(encoding="utf-8")
+        )["packages"]["."]
+        assert config["bump-minor-pre-major"] is True
+        said = "a major version, or a minor one while the version is below 1.0.0"
+        assert f"BREAKING CHANGE: {said})" in config["pull-request-header"]
+        contributing = (root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        assert f"`!` {said}." in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_dependabot_watches_existing_folders(
     projects: dict[str, Path], kind: str
 ) -> None:
