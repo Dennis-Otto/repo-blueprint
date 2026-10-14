@@ -124,7 +124,7 @@ jobs:
       - name: Name the cache of this week
         id: week
         if: steps.site.outputs.build == 'true'
-        run: echo "id=$(date --utc '+%G-%V')" >> "$GITHUB_OUTPUT"
+        run: echo "id=$(date -u '+%G-%V')" >> "$GITHUB_OUTPUT"
       - name: Restore the downloads of the website
         id: cache
         if: steps.site.outputs.build == 'true'
@@ -134,6 +134,15 @@ jobs:
           path: .cache
           key: mkdocs-material-${{ steps.week.outputs.id }}-${{ hashFiles('mkdocs.yml', '.github/mkdocs-blueprint.yml', 'stacks/docs/requirements-docs.txt') }}
           restore-keys: mkdocs-material-${{ steps.week.outputs.id }}-
+      # The privacy plugin never downloads a file again that it has in its cache. Fonts,
+      # stylesheets and scripts may be a week old, but status badges and other pictures
+      # show the state of now: a failing CI badge or an old score must not stay up for
+      # a week, so the build downloads everything else anew.
+      - name: Download the badges and pictures anew
+        if: steps.site.outputs.build == 'true'
+        run: |
+          folder=.cache/plugin/privacy
+          [[ ! -d "$folder" ]] || find "$folder" -type f ! -name '*.woff2' ! -name '*.woff'             ! -name '*.ttf' ! -name '*.css' ! -name '*.js' -delete
       - name: Build the website
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5

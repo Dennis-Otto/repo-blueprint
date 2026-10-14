@@ -6339,6 +6339,10 @@ def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_wee
     assert "uses: actions/cache/restore@" in restore
     assert "uses: actions/cache/save@" in save
     assert job.index(restore) < build < job.index(save) < job.index(upload)
+    # Badges and pictures show the state of now, so the build downloads them anew.
+    fresh = step_of(job, "      - name: Download the badges and pictures anew")
+    assert setting_of(fresh, "if") == "steps.site.outputs.build == 'true'"
+    assert job.index(restore) < job.index(fresh) < build
     installed = UV_PIP.search(job)
     assert installed
     lock = LOCK.search(installed[1])
@@ -6385,6 +6389,47 @@ def test_the_cache_of_the_website_belongs_to_the_iso_week(tmp_path: Path) -> Non
 
     weeks = {f"id={day.year}-{day.week:02d}\n" for day in (before, after)}
     assert output.read_text(encoding="utf-8") in weeks
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_website_downloads_its_badges_anew_and_keeps_its_fonts(
+    tmp_path: Path,
+) -> None:
+    docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    step = step_of(docs, "      - name: Download the badges and pictures anew")
+    block = step.split("        run: |\n", 1)[1]
+    script = "".join(line[10:] for line in block.splitlines(keepends=True))
+    assert "find " in script
+    assert BASH
+    # Without a cache there is nothing to clean up, and the step still passes.
+    subprocess.run([BASH, "-c", script], cwd=tmp_path, check=True)
+
+    external = tmp_path / ".cache/plugin/privacy/assets/external"
+    kept = [
+        "fonts.gstatic.com/s/roboto/v51/a.woff2",
+        "fonts.gstatic.com/s/roboto/v51/b.woff",
+        "fonts.gstatic.com/s/roboto/v51/c.ttf",
+        "fonts.googleapis.com/css.49ea35f2.css",
+        "unpkg.com/mermaid@11/dist/mermaid.min.js",
+    ]
+    dropped = [
+        "github.com/owner/name/actions/workflows/ci.yml/badge.svg",
+        "api.scorecard.dev/projects/github.com/owner/name/badge.svg",
+        "raw.githubusercontent.com/owner/name/main/_github/social-preview.png",
+        "example.org/picture.jpg",
+    ]
+    for name in (*kept, *dropped):
+        (external / name).parent.mkdir(parents=True, exist_ok=True)
+        (external / name).write_text("x", encoding="utf-8")
+    social = tmp_path / ".cache/plugin/social/card.png"
+    social.parent.mkdir(parents=True)
+    social.write_text("x", encoding="utf-8")
+
+    subprocess.run([BASH, "-c", script], cwd=tmp_path, check=True)
+
+    assert [name for name in kept if not (external / name).is_file()] == []
+    assert [name for name in dropped if (external / name).exists()] == []
+    assert social.is_file()
 
 
 @pytest.mark.parametrize("kind", KINDS)
