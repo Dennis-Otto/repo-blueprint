@@ -95,9 +95,13 @@ jobs:
         id: draw
         env:
           EVENT: ${{ github.event_name }}
+          # The diagram bot commits onto a branch of this repository as the release app.
+          APP: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           paths=(docs/diagrams docs/images/diagrams scripts/diagrams.sh)
-          fence='^\+[[:space:]]*(```+|~~~+)[[:space:]]*mermaid([[:space:]]|$)'
+          # A new block, also in a quote, or a changed picture, such as its alt.
+          fence='^\+[[:space:]>]*(```+|~~~+)[[:space:]]*mermaid([[:space:]]|$)|^\+.*images/diagrams/'
           if [[ "$EVENT" == pull_request ]]; then
             added="$(git diff HEAD^1 HEAD -- '*.md' | grep -E "$fence" || true)"
             if [[ -z "$added" ]] && git diff --quiet HEAD^1 HEAD -- "${paths[@]}"; then
@@ -125,15 +129,27 @@ jobs:
             echo "Every diagram is a picture of its source, as drawn." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # The diagram bot commits only onto a branch of this repository, and only
+          # with the release app.
+          if [[ "$EVENT" != pull_request || "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]]; then
+            fix="The artifact \`diagrams\` of this run holds the files."
+          elif [[ -n "$APP" ]]; then
+            fix="The diagram bot commits it onto this branch in a minute; the artifact \`diagrams\` of this run holds the files as well."
+          else
+            fix="No bot commits it here, because this repository has no release app (the variable RELEASE_AUTOMATION_CLIENT_ID); the artifact \`diagrams\` of this run holds the files."
+          fi
           {
             echo "### Diagrams"
             echo "The GitHub app shows a \`mermaid\` block as code, and a picture that differs from its source shows something else than the source says. \`bash scripts/diagrams.sh --extract\` changes these files:"
             echo
             echo "$changed"
             echo
-            echo "Run it with Docker and commit what it changes. On a branch of this repository, the diagram bot commits it for you in a minute; the artifact \`diagrams\` of this run holds the files as well."
+            echo "Run it with Docker and commit what it changes. $fix"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "stale=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "stale=true"
+            echo "fix=$fix"
+          } >> "$GITHUB_OUTPUT"
       - name: Keep the diagrams for the diagram bot
         if: steps.draw.outputs.stale == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -146,8 +162,10 @@ jobs:
           retention-days: 3
       - name: Report the diagrams that differ
         if: steps.draw.outputs.stale == 'true'
+        env:
+          FIX: ${{ steps.draw.outputs.fix }}
         run: |
-          echo "::error::Diagrams that not every reader sees: a \`\`\`mermaid block, which the GitHub app shows as code, or pictures that differ from their sources in docs/diagrams/. bash scripts/diagrams.sh --extract fixes them, with Docker; for a branch of this repository, the diagram bot commits the fix in a minute. The summary of this run lists the files."
+          echo "::error::Diagrams that not every reader sees: a \`\`\`mermaid block, which the GitHub app shows as code, or pictures that differ from their sources in docs/diagrams/. bash scripts/diagrams.sh --extract fixes them, with Docker. $FIX The summary of this run lists the files."
           exit 1
 
   # Hints at the spelling (cspell, English and German) and the style of the English
