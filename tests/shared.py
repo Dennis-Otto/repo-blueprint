@@ -23,6 +23,31 @@ PATIENCE = 600.0
 # How often a process that waits looks whether the folder is done.
 INTERVAL = 0.05
 
+ROOT = Path(__file__).parents[1]
+# The variables that point Git at a repository whatever folder it runs in, such as
+# GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE: Git sets GIT_DIR for its hooks in a
+# worktree, such as the one before a push that runs these tests, and an agent sets
+# GIT_DIR and GIT_WORK_TREE for a worktree in a container. tests/conftest.py takes them
+# from every test, or the git init and the commits of a test in a repository of its own
+# would land in the blueprint's: its configuration rewritten, its branch with the
+# commits of the test.
+GIT_REPOSITORY_VARIABLES = subprocess.run(
+    ["git", "rev-parse", "--local-env-vars"], capture_output=True, check=True, text=True
+).stdout.split()
+# Their values as the run got them, before any test: they may be what finds the
+# blueprint's own checkout, as in a container.
+OWN_REPOSITORY = {
+    name: os.environ[name] for name in GIT_REPOSITORY_VARIABLES if name in os.environ
+}
+
+
+def git_environment(repository: Path) -> dict[str, str]:
+    """The environment of git in the repository: in the blueprint's own checkout with
+    the variables that point Git at it, as the run got them, in any other without."""
+    if repository.resolve() == ROOT.resolve():
+        return {**os.environ, **OWN_REPOSITORY}
+    return dict(os.environ)
+
 
 def run_folder(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The temporary folder of the whole run: with pytest-xdist, the folder that holds
@@ -73,6 +98,7 @@ def copy_of(repository: Path, folder: Path) -> None:
         cwd=repository,
         capture_output=True,
         check=True,
+        env=git_environment(repository),
     ).stdout.decode("utf-8")
     folder.mkdir(parents=True, exist_ok=True)
     for name in filter(None, listed.split("\0")):

@@ -52,6 +52,7 @@ Turn on the hook of the repository once with `git config core.hooksPath .githook
 
 [% if stack != 'generic' -%]
 - **Tests come with every change of behavior,** in the same pull request, and a bug fix comes with a test that fails without the fix.[% if stack in ['python', 'home-assistant'] %] `scripts/check.sh` fails when a line or a branch of the code runs in no test.[% elif stack == 'node' %] `scripts/check.sh` fails when a line, a branch or a function of the code runs in no test.[% elif stack == 'php' %] `scripts/check.sh` fails when a line of `lib/` runs in no test.[% elif stack == 'container' %] The self-test of the image covers what the image needs to run.[% endif %]
+- **A test that makes a Git repository of its own** first clears the variables that point Git at another, such as `GIT_DIR`, which Git sets for its hooks in a worktree and an agent sets for a worktree in a container; otherwise its `git init` and its commits land in the repository that runs the tests. A shell script clears them with `unset $(git rev-parse --local-env-vars)`, a test in Python runs git with an environment without them.
 [% endif -%]
 - **The coding standards** of [CONTRIBUTING.md](CONTRIBUTING.md#coding-standards) apply; an exception to a rule is rare and has its reason in a comment at its place.
 - **The documentation changes with the code:** `README.md` and the pages in `docs/`, and with an English page its German one, such as `README.de.md`, where the project has one.

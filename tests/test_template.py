@@ -29,7 +29,7 @@ import pytest
 from copier import _main as copier_main
 from copier import run_copy
 from mypy import api as mypy_api
-from shared import copy_of, once, run_folder
+from shared import copy_of, git_environment, once, run_folder
 from shell import BASH, in_bash
 
 from blueprint.bot_health import (
@@ -245,6 +245,7 @@ def files_of(root: Path) -> list[str]:
             capture_output=True,
             check=True,
             text=True,
+            env=git_environment(ROOT),
         ).stdout
         return [name for name in listed.split("\0") if name]
     return [
@@ -1205,6 +1206,7 @@ def test_every_script_of_the_blueprint_is_executable_in_git() -> None:
         cwd=ROOT,
         capture_output=True,
         check=True,
+        env=git_environment(ROOT),
     ).stdout.decode()
     modes = {}
     for entry in listing.split("\0")[:-1]:
@@ -1302,6 +1304,76 @@ def test_the_hook_stops_a_push_whose_checks_fail(
     assert "ignored" not in failed.stderr
     assert passed.returncode == 0, passed.stderr
     assert "The checks ran." in passed.stdout + passed.stderr
+
+
+# It needs the modes that Copier takes from Git, which the copy of the mutation tests
+# has no Git for.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the hook runs bash, Git Bash on Windows")
+def test_the_checks_of_the_hook_find_the_repository_from_its_folder(
+    projects: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # In a worktree, Git hands the hook GIT_DIR, which every git of the checks would
+    # follow: also git init and the commits of a test in a throwaway repository, which
+    # landed in the repository that ran the checks. Only where the variables alone find
+    # the repository, as for a worktree in a container, the checks keep them.
+    assert BASH
+    project = tmp_path / "project"
+    worktree = tmp_path / "worktree"
+    remote = tmp_path / "remote.git"
+    shutil.copytree(projects["generic"], project)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setenv("PATH", f"{Path(BASH).parent}{os.pathsep}{os.environ['PATH']}")
+    # Checks that say what GIT_DIR named for them.
+    (project / "scripts/check.sh").write_text(
+        'echo "GIT_DIR=${GIT_DIR-}."\n', encoding="utf-8", newline="\n"
+    )
+
+    def git(folder: Path, *arguments: str) -> str:
+        return subprocess.run(
+            ["git", *IDENTITY, *arguments],
+            cwd=folder,
+            capture_output=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout.strip()
+
+    git(project, "init", "--quiet", "--bare", str(remote))
+    git(project, "init", "--quiet")
+    git(project, "add", "--all")
+    git(project, "commit", "--quiet", "--message", "chore: start")
+    git(project, "config", "core.hooksPath", ".githooks")
+    git(project, "worktree", "add", "--quiet", "-b", "change", str(worktree))
+    gitdir = git(worktree, "rev-parse", "--absolute-git-dir")
+    pushed = subprocess.run(
+        ["git", "push", str(remote), "HEAD:refs/heads/change"],
+        cwd=worktree,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    # A worktree in a container: its .git names the folder of another computer, so
+    # only GIT_DIR and GIT_WORK_TREE find the repository. Git on Windows hides the file,
+    # which Windows then lets no one overwrite, only delete.
+    (worktree / ".git").unlink()
+    (worktree / ".git").write_text(
+        "gitdir: /elsewhere/.git/worktrees/worktree\n", encoding="utf-8"
+    )
+    contained = subprocess.run(
+        [BASH, ".githooks/pre-push", str(remote), str(remote)],
+        cwd=worktree,
+        capture_output=True,
+        encoding="utf-8",
+        env={**os.environ, "GIT_DIR": gitdir, "GIT_WORK_TREE": str(worktree)},
+        check=False,
+    )
+
+    assert pushed.returncode == 0, pushed.stderr
+    assert "GIT_DIR=." in pushed.stdout + pushed.stderr
+    assert contained.returncode == 0, contained.stderr
+    assert contained.stdout == f"GIT_DIR={gitdir}.\n"
 
 
 def hooks_step(check: str) -> str:
@@ -2824,6 +2896,11 @@ def test_every_project_tells_coding_agents_its_rules(
         "`python3 .github/blueprint.py fix run`",
     ):
         assert rule in agents, rule
+    # A test's own repository leaves the one that runs the tests alone; a generic
+    # project has no tests.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    clear = "`unset $(git rev-parse --local-env-vars)`"
+    assert (clear in agents, clear in contributing) == (kind != "generic",) * 2
     # The files of the project are exactly those that an update never overwrites,
     # so that the list for coding agents can't drift from copier.yml.
     listed = listed_files_of_the_project(agents)
@@ -2863,6 +2940,7 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
         "`tests/test_template.py`",
         "`_skip_if_exists`",
         "`template/AGENTS.md.jinja`",
+        "`git_environment` of `tests/shared.py`",
     ):
         assert rule in agents, rule
     assert agents.endswith(
@@ -3289,7 +3367,12 @@ def test_renovate_compiles_every_lock_file_for_its_own_python() -> None:
     pip_compile = {}
     uv = {}
     tracked = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True, text=True
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+        env=git_environment(ROOT),
     ).stdout.split("\0")
     for name in tracked:
         if not re.search(r"(^|/)requirements[^/]*\.txt$", name):
@@ -3492,7 +3575,12 @@ def test_the_guard_of_the_lock_files_finds_what_renovate_skips(
 @pytest.mark.mutation_unsafe
 def test_renovate_reads_every_lock_file_of_the_blueprint() -> None:
     tracked = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True, text=True
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        text=True,
+        env=git_environment(ROOT),
     ).stdout.split("\0")
     names = lock_files_of_pip_compile(tracked)
 
