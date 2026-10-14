@@ -9,10 +9,12 @@ import subprocess
 import sys
 import tomllib
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
+from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.changelog import (
     FRAGMENTS,
     FragmentError,
@@ -94,6 +96,21 @@ def coverage_command(arguments: argparse.Namespace) -> int:
         else None
     )
     sys.stdout.write(coverage_comment(head, base))
+    return 0
+
+
+def bot_health_command(
+    api: Api, repo: str, arguments: argparse.Namespace, root: Path
+) -> int:
+    now = datetime.now(UTC)
+    if arguments.action == "run":
+        print(watch_run(api, repo, arguments.run_id, now))
+        return 0
+    if arguments.action == "sweep":
+        summary, healthy = sweep(api, repo, root, now)
+        print(summary, end="")
+        return 0 if healthy else 1
+    print(renovate_report(api, repo, Path(arguments.log), arguments.run), end="")
     return 0
 
 
@@ -307,6 +324,30 @@ def main(
         help="the blueprint on GitHub as OWNER/NAME, a fork perhaps, whose release the "
         "pull request links",
     )
+    health_parser = commands.add_parser(
+        "bot-health",
+        help="one issue for each bot that fails on the default branch, for the "
+        "bot-health bot",
+    )
+    health = health_parser.add_subparsers(dest="action", required=True)
+    run_parser = health.add_parser(
+        "run",
+        help="the end of a run of a watched workflow: run its failed jobs once more, "
+        "or keep its issue current",
+    )
+    run_parser.add_argument("run_id", type=int, metavar="RUN", help="the id of the run")
+    health.add_parser(
+        "sweep",
+        help="the latest run of every workflow, and the workflows whose schedule "
+        "GitHub missed, once a day",
+    )
+    renovate_parser = health.add_parser(
+        "renovate", help="the warnings and errors of a run of Renovate, in one issue"
+    )
+    renovate_parser.add_argument("log", help="the log of Renovate in JSON")
+    renovate_parser.add_argument(
+        "--run", required=True, help="the link of the run of Renovate"
+    )
     diagrams_parser = commands.add_parser(
         "diagrams",
         help="the ```mermaid blocks of the Markdown as sources in docs/diagrams/ and "
@@ -410,6 +451,8 @@ def main(
                 )
             )
             return 0
+        if arguments.command == "bot-health":
+            return bot_health_command(api, repo, arguments, root)
         settings = Settings.load(root / arguments.config)
         if arguments.command == "checklist":
             print(f"The set-up of {repo}:")

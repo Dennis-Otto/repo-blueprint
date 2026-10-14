@@ -1,0 +1,33 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What the bot-health bot does when a bot fails
+    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or switched off.
+
+    run(["A run of a bot ends<br>on main"])
+    nightly(["Every night<br>the latest run of every workflow"])
+    passed{"Passed?"}
+    first{"A first failure<br>that a second try can fix?"}
+    again["Runs the failed jobs<br>once more"]
+    issue["One issue for the workflow<br>the failed jobs · their steps<br>their first errors"]
+    closed["Closes the issue<br>passes again in the run"]
+    missed["Starts a workflow<br>whose schedule GitHub missed"]
+
+    run --> passed
+    nightly --> passed
+    nightly -- "a schedule missed<br>or switched off" --> missed
+    passed -- "yes" --> closed
+    passed -- "no" --> first
+    first -- "yes" --> again
+    again -. "its end" .-> run
+    first -- "no" --> issue
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class run,nightly,again,missed bot
+    class issue person
+    class closed done
