@@ -11,6 +11,24 @@ requests when there is none.
 
 - **Pull requests no longer conflict over the changelog:** every `feat`, `fix` or `perf` pull request wrote its entry under `## Unreleased` in `CHANGELOG.md`, so each merge, and each release, which empties Unreleased, conflicted with every pull request that waited: its auto-merge stopped until someone merged `main` by hand, and every check ran again. All 12 conflicts that the branch bot ever labeled in the blueprint came from there, and a merge of `main` once put an entry into the section of a release that was out already (#183). A pull request now writes its entry into a file of its own, a fragment in `changelog.d/` named after its branch, such as `changelog.d/dark-mode.md`, below the heading of its kind of change, such as `### Features` or `### Bug fixes`; a new file conflicts with nothing. The check *changelog* accepts it and checks it as the release takes it in: a typo such as `### Fixes` fails at the fragment, with the heading it likely meant, and `python3 .github/blueprint.py fragments` checks the fragments on your machine. Since the release reads every fragment, the check also checks those of a pull request that needs no entry, such as a `docs:` pull request or one of a bot. The release bot moves every fragment and the text of Unreleased into the section of the next release, each kind of change below one heading, and deletes the fragments in the same commit of the release pull request; a prerelease leaves them to the release, and the notes of a beta show them. Entries under Unreleased keep working, and the link check of a pull request leaves the fragments out, as it does the changelog. Every repository gets the folder `changelog.d/` with the update, which a Nextcloud app leaves out of its package, CONTRIBUTING.md shows the format, and the upstream bot of a Nextcloud app writes its entry into a fragment too; the headings that a fragment may use are those of the blueprint, those of Keep a Changelog and every other one that your `CHANGELOG.md` has already. The check runs `blueprint.py` of your default branch on the text of the fragments and nothing of the pull request, also for a pull request from a fork.
 
+## [0.12.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.11.1...v0.12.0) (2026-10-14)
+
+
+### Features
+
+* a PR coach that explains every failed check in its summary and in one comment, also on pull requests from forks ([#189](https://github.com/Dennis-Otto/repo-blueprint/issues/189)) ([0edeabd](https://github.com/Dennis-Otto/repo-blueprint/commit/0edeabd294df9cb30e91c08ccd456bbba85fb008))
+* AGENTS.md for coding agents in every repository ([#178](https://github.com/Dennis-Otto/repo-blueprint/issues/178)) ([1eafe08](https://github.com/Dennis-Otto/repo-blueprint/commit/1eafe080020b09973cbb98a9911edb76dbee6770))
+* changelog fragments, so parallel pull requests stop conflicting ([#193](https://github.com/Dennis-Otto/repo-blueprint/issues/193)) ([d416244](https://github.com/Dennis-Otto/repo-blueprint/commit/d416244ad04041c8974f5bc6d44e4a6d0414db1f))
+* open one issue per failing bot and close it when the bot recovers ([#173](https://github.com/Dennis-Otto/repo-blueprint/issues/173)) ([dc9d5d9](https://github.com/Dennis-Otto/repo-blueprint/commit/dc9d5d937b9b15cf9745fce5d65e397e95bbdf26))
+* READMEs and docs stay single-column, so they read well on phones and in the GitHub app ([#209](https://github.com/Dennis-Otto/repo-blueprint/issues/209)) ([182d33f](https://github.com/Dennis-Otto/repo-blueprint/commit/182d33f0b262d968984a8bf35705307d7803845e))
+
+
+### Bug fixes
+
+* **changelog:** fragments reach the release as the check takes them in ([#206](https://github.com/Dennis-Otto/repo-blueprint/issues/206)) ([859d330](https://github.com/Dennis-Otto/repo-blueprint/commit/859d3307ab8e1060029bb64a632e8897e007a298))
+* keep the diagram bot's pull request current when main changes a workflow ([#205](https://github.com/Dennis-Otto/repo-blueprint/issues/205)) ([565d69a](https://github.com/Dennis-Otto/repo-blueprint/commit/565d69ada7a6bbc235cf70e9a962fb39dbf4f8e7))
+* **security:** verify a blueprint release before updating to it, and let only the release app create release tags ([#186](https://github.com/Dennis-Otto/repo-blueprint/issues/186)) ([ba6a5f5](https://github.com/Dennis-Otto/repo-blueprint/commit/ba6a5f533e1664dda70d08a7cf7c55ff52ece37a))
+
 ## [0.11.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.11.0...v0.11.1) (2026-10-13)
 
 ### Performance
