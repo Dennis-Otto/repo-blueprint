@@ -27,6 +27,12 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits und der Titel jedes Pull Requests geprüft. Ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern: Jeder Download versucht es erneut.
 
+- :material-lightbulb-on-outline:{ .lg .middle } **PR-Coach**
+
+    ---
+
+    Jede Prüfung, die scheitert, sagt, was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür: in der Prüfung und in einem Kommentar am Pull Request, der jedem Push folgt, auch an einem Pull Request aus einem Fork.
+
 - :material-shield-lock-outline:{ .lg .middle } **Sicherheit**
 
     ---
@@ -89,7 +95,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
 </div>
 
-Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, gescheiterte Releases, das Aufräumen und den Dev-Container.
+Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, auch den PR-Coach, die Abdeckung jedes Pull Requests, Mutationstests, wackelige Tests, abgebrochene Prüfungen, gescheiterte Releases, das Aufräumen und den Dev-Container.
 
 ## Arten von Projekten
 

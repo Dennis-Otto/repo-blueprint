@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The PR coach
+    accDescr: A push to a pull request, also one from a fork, runs the checks. A check that fails explains itself in its summary and as its annotation, from the explanations of .github/checks.toml and .github/checks.project.toml. After the checks, the PR coach reads the check runs and their annotations from the API, without running any code of the pull request, and keeps one comment on the pull request up to date: a section for each check that failed, with the problem, why it matters, the fix and its commands. You push the fix, and once every check passes, the comment says so.
+
+    push(["A push to a pull request<br>also from a fork"])
+    checks{"Every check<br>passes?"}
+    explain["The check that failed explains itself<br>in its summary and as its annotation"]
+    coach["The PR coach after the checks<br>reads the check runs from the API<br>and runs no code of the pull request"]
+    comment["One comment on the pull request<br>for each check: the problem, why it matters,<br>the fix and its commands"]
+    passed["The comment says<br>every check passed"]
+    catalog[(".github/checks.toml<br>.github/checks.project.toml")]
+
+    push --> checks
+    checks -- "no" --> explain --> coach --> comment
+    comment -- "you push the fix" --> push
+    checks -- "yes" --> passed
+    catalog -.-> explain
+    catalog -.-> coach
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class explain,coach,comment bot
+    class push person
+    class passed done

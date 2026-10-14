@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -26,6 +27,20 @@ from blueprint.changelog import (
     released_fragments,
 )
 from blueprint.checklist import checklist, describe_steps
+from blueprint.coach import (
+    PROJECT_CATALOG,
+    Catalog,
+    CatalogError,
+    check_steps,
+    link,
+    missing,
+    plain,
+    required_checks,
+    summary,
+    unknown,
+)
+from blueprint.coach import annotation as coach_annotation
+from blueprint.coach import report as coach_report
 from blueprint.coverage_comment import Coverage, coverage_comment
 from blueprint.diagrams import (
     SOURCES,
@@ -104,6 +119,46 @@ def coverage_command(arguments: argparse.Namespace) -> int:
         else None
     )
     sys.stdout.write(coverage_comment(head, base))
+    return 0
+
+
+def explain_command(arguments: argparse.Namespace, root: Path) -> int:
+    """What failed and how to fix it: in the log, and in the CI also in the summary
+    of the job and as an annotation, from the variables that GitHub sets."""
+    catalog = Catalog.load(root)
+    if arguments.action == "verify":
+        gaps = missing(catalog, required_checks(root), check_steps(root))
+        for gap in gaps:
+            print(
+                f"blueprint.py: {gap} has no explanation; add it to "
+                f"{PROJECT_CATALOG.as_posix()}",
+                file=sys.stderr,
+            )
+        if gaps:
+            return 1
+        print("Every required check and every step of scripts/check.sh is explained.")
+        return 0
+    step = arguments.step
+    entry = catalog.step(arguments.name) if step else catalog.check(arguments.name)
+    if entry is None:
+        text = unknown(arguments.name, step)
+        sys.stdout.write(text)
+    else:
+        repo = os.environ.get("GITHUB_REPOSITORY") or None
+        entry = entry.within(repo)
+        sys.stdout.write(plain(entry, step))
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(coach_annotation(entry, step))
+        url = link(
+            entry.docs,
+            repo,
+            os.environ.get("GITHUB_SERVER_URL") or "https://github.com",
+        )
+        text = summary(entry, step, url)
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if target:
+        with Path(target).open("a", encoding="utf-8") as file:
+            file.write(text + "\n")
     return 0
 
 
@@ -352,6 +407,37 @@ def main(
         help="the blueprint on GitHub as OWNER/NAME, a fork perhaps, whose release the "
         "pull request links",
     )
+    coach_parser = commands.add_parser(
+        "coach",
+        help="the PR coach: how to fix a check that failed, in its summary and in one "
+        "comment on the pull request",
+    )
+    coach_actions = coach_parser.add_subparsers(dest="action", required=True)
+    explain_parser = coach_actions.add_parser(
+        "explain",
+        help="what a check or a step of scripts/check.sh found and how to fix it; in "
+        "the CI also in the summary and as an annotation of the job",
+    )
+    explain_parser.add_argument(
+        "name", help="the name of the check, such as markdown, or of the step"
+    )
+    explain_parser.add_argument(
+        "--step", action="store_true", help="the name is a step of scripts/check.sh"
+    )
+    coach_report_parser = coach_actions.add_parser(
+        "report",
+        help="keep the one comment of the PR coach on the pull request of a commit up "
+        "to date, for the bots after the checks",
+    )
+    coach_report_parser.add_argument("sha", help="the head of the pull request")
+    coach_report_parser.add_argument(
+        "--pull", default="", help="its number, when the run of the checks names it"
+    )
+    coach_actions.add_parser(
+        "verify",
+        help="whether every required check and every step of scripts/check.sh has "
+        "its explanation",
+    )
     health_parser = commands.add_parser(
         "bot-health",
         help="one issue for each bot that fails on the default branch, for the "
@@ -442,6 +528,21 @@ def main(
         except (OSError, ElementTree.ParseError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
+    if arguments.command == "coach" and arguments.action != "report":
+        try:
+            return explain_command(arguments, root)
+        except (OSError, CatalogError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "coach" and not (
+        re.fullmatch(r"[0-9a-f]{40}", arguments.sha)
+        and re.fullmatch(r"[0-9]*", arguments.pull)
+    ):
+        print(
+            "blueprint.py: a commit is 40 hex digits, a pull request a number",
+            file=sys.stderr,
+        )
+        return 2
     if arguments.command == "diagrams":
         try:
             return diagrams_command(arguments, root)
@@ -473,6 +574,11 @@ def main(
     api = api or Api()
     try:
         repo = arguments.repo or current_repo(api)
+        if arguments.command == "coach":
+            number = int(arguments.pull) if arguments.pull else None
+            catalog = Catalog.load(root)
+            sys.stdout.write(coach_report(api, repo, arguments.sha, number, catalog))
+            return 0
         if arguments.command == "update-commit":
             print(
                 update_pull_request(
@@ -517,6 +623,7 @@ def main(
         tomllib.TOMLDecodeError,
         ConfigError,
         Outdated,
+        CatalogError,
     ) as error:
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2
