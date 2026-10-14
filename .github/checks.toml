@@ -432,6 +432,8 @@ check it again (in the blueprint itself, the tool is `blueprint.py` without
 `.github/`):"""
 commands = ["python3 .github/blueprint.py fragments"]
 docs = "CONTRIBUTING.md#the-changelog"
+autofix = """Which kind of change an entry is and how a user reads it is the decision of
+a person; the log names the fragment and its problem."""
 
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
