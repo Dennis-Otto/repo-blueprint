@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import configparser
 import contextlib
+import datetime
 import fnmatch
 import hashlib
 import json
@@ -6427,8 +6428,8 @@ echo "$PAGES"
     [
         # Every pull request builds the website as the check docs.
         ("generic", "pull_request", "workflow", False, "build=true\n", ""),
-        # main publishes it where GitHub Pages publishes from a workflow.
-        ("generic", "push", "workflow", False, "publish=true\n", ""),
+        # main publishes what it built where GitHub Pages publishes from a workflow.
+        ("generic", "push", "workflow", False, "build=true\npublish=true\n", ""),
         (
             "generic",
             "push",
@@ -6447,7 +6448,7 @@ echo "$PAGES"
             "dashboard.yml publishes",
         ),
         # A fork of the blueprint runs no Dashboard, so its Docs publishes the website.
-        ("blueprint", "push", "workflow", True, "publish=true\n", ""),
+        ("blueprint", "push", "workflow", True, "build=true\npublish=true\n", ""),
         ("none", "push", "workflow", False, "", "No website here"),
     ],
 )
@@ -6470,6 +6471,135 @@ def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
 
     assert written == output
     assert (notice in printed) if notice else printed == ""
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_week(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    # The check builds the website, and on main the same job hands it to GitHub Pages:
+    # no job builds it a second time, and the required check keeps its name.
+    assert jobs_of(docs) == ["docs", "deploy"]
+    job = job_of(docs, "docs")
+    assert "\n    name: docs\n" in job
+    assert "      publish: ${{ steps.site.outputs.publish }}\n" in job
+    deploy = job_of(docs, "deploy")
+    assert "\n    needs: docs\n" in deploy
+    assert condition_of(deploy) == "needs.docs.outputs.publish == 'true'"
+    # An artifact needs no permission: the job of the check still only reads.
+    assert "    permissions:\n      contents: read\n      pages: read #" in job
+    assert ": write" not in job
+    build = job.index("      - name: Build the website\n")
+    upload = step_of(job, "      - name: Hand the website to GitHub Pages")
+    assert setting_of(upload, "if") == "steps.site.outputs.publish == 'true'"
+    assert "uses: actions/upload-pages-artifact@" in upload
+    assert "          path: site\n" in upload
+    # Files and folders whose name starts with a dot, such as .well-known for
+    # security.txt, reach the website; the action leaves them out otherwise.
+    assert "          include-hidden-files: true\n" in upload
+    assert job.index(upload) > build
+
+    # Material's cache of what its plugins download, as its documentation has it: one
+    # for each ISO week and each configuration, which a run restores before the build,
+    # or else the latest one of the same week, and which only a push saves, once.
+    restore = step_of(job, "      - name: Restore the downloads of the website")
+    save = step_of(job, "      - name: Keep the downloads of the website for the week")
+    assert "uses: actions/cache/restore@" in restore
+    assert "uses: actions/cache/save@" in save
+    assert job.index(restore) < build < job.index(save) < job.index(upload)
+    # Badges and pictures show the state of now, so the build downloads them anew.
+    fresh = step_of(job, "      - name: Download the badges and pictures anew")
+    assert setting_of(fresh, "if") == "steps.site.outputs.build == 'true'"
+    assert job.index(restore) < job.index(fresh) < build
+    installed = UV_PIP.search(job)
+    assert installed
+    lock = LOCK.search(installed[1])
+    assert lock
+    files = ("mkdocs.yml", ".github/mkdocs-blueprint.yml", lock[0])
+    for name in files:
+        assert (folder / name).is_file(), name
+    week = "mkdocs-material-${{ steps.week.outputs.id }}-"
+    hashed = ", ".join(f"'{name}'" for name in files)
+    assert f"          key: {week}${{{{ hashFiles({hashed}) }}}}\n" in restore
+    assert f"          restore-keys: {week}\n" in restore
+    assert "          key: ${{ steps.cache.outputs.cache-primary-key }}\n" in save
+    saved_when = save.split("        if: >-\n", 1)[1].split("        uses: ", 1)[0]
+    assert " ".join(saved_when.split()) == (
+        "steps.site.outputs.build == 'true' && github.event_name == 'push' &&"
+        " steps.cache.outputs.cache-hit != 'true'"
+    )
+    # Where the plugins of Material keep their downloads, which no website moves, and
+    # which git ignores.
+    for step in (restore, save):
+        assert "          path: .cache\n" in step
+    base = (folder / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+    assert "cache_dir" not in base
+    assert "/.cache/" in (folder / ".gitignore").read_text(encoding="utf-8").split("\n")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_cache_of_the_website_belongs_to_the_iso_week(tmp_path: Path) -> None:
+    docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    step = step_of(docs, "      - name: Name the cache of this week")
+    script = setting_of(step, "run")
+    assert script
+    output = tmp_path / "output"
+    output.touch()
+    assert BASH
+    # The week of the ISO calendar, with its own year: 2026-W53 ends on 2027-01-03.
+    before = datetime.datetime.now(datetime.UTC).isocalendar()
+    subprocess.run(
+        [BASH, "-c", script],
+        env={**os.environ, "GITHUB_OUTPUT": str(output)},
+        check=True,
+    )
+    after = datetime.datetime.now(datetime.UTC).isocalendar()
+
+    weeks = {f"id={day.year}-{day.week:02d}\n" for day in (before, after)}
+    assert output.read_text(encoding="utf-8") in weeks
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_website_downloads_its_badges_anew_and_keeps_its_fonts(
+    tmp_path: Path,
+) -> None:
+    docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    step = step_of(docs, "      - name: Download the badges and pictures anew")
+    block = step.split("        run: |\n", 1)[1]
+    script = "".join(line[10:] for line in block.splitlines(keepends=True))
+    assert "find " in script
+    assert BASH
+    # Without a cache there is nothing to clean up, and the step still passes.
+    subprocess.run([BASH, "-c", script], cwd=tmp_path, check=True)
+
+    external = tmp_path / ".cache/plugin/privacy/assets/external"
+    kept = [
+        "fonts.gstatic.com/s/roboto/v51/a.woff2",
+        "fonts.gstatic.com/s/roboto/v51/b.woff",
+        "fonts.gstatic.com/s/roboto/v51/c.ttf",
+        "fonts.googleapis.com/css.49ea35f2.css",
+        "unpkg.com/mermaid@11/dist/mermaid.min.js",
+    ]
+    dropped = [
+        "github.com/owner/name/actions/workflows/ci.yml/badge.svg",
+        "api.scorecard.dev/projects/github.com/owner/name/badge.svg",
+        "raw.githubusercontent.com/owner/name/main/_github/social-preview.png",
+        "example.org/picture.jpg",
+    ]
+    for name in (*kept, *dropped):
+        (external / name).parent.mkdir(parents=True, exist_ok=True)
+        (external / name).write_text("x", encoding="utf-8")
+    social = tmp_path / ".cache/plugin/social/card.png"
+    social.parent.mkdir(parents=True)
+    social.write_text("x", encoding="utf-8")
+
+    subprocess.run([BASH, "-c", script], cwd=tmp_path, check=True)
+
+    assert [name for name in kept if not (external / name).is_file()] == []
+    assert [name for name in dropped if (external / name).exists()] == []
+    assert social.is_file()
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -6946,7 +7076,7 @@ WORK = re.compile(
 )
 SETUP = re.compile(
     r"uses: (?:actions/setup-\w+|astral-sh/setup-uv|shivammathur/setup-php"
-    r"|actions/cache)@"
+    r"|actions/cache(?:/restore|/save)?)@"
 )
 
 

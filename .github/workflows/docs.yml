@@ -2,13 +2,15 @@ name: Docs
 
 # The documentation website. MkDocs with the Material theme builds it from mkdocs.yml
 # and the pages in docs/, strictly, so that a link or an anchor that leads nowhere
-# fails: in every pull request as the check docs, and on main for GitHub Pages. A
+# fails: in every pull request as the check docs, and on main, where the same job
+# hands the website that it built to GitHub Pages, and a second one publishes it. A
 # repository without mkdocs.yml or a home page in docs/ has no website, and the
 # check passes, so that it can be required everywhere. Where another workflow
 # publishes GitHub Pages, as the Dashboard of the blueprint does with its dashboard,
 # a run on main only builds the website; in a fork, where the Dashboard doesn't run,
 # Docs publishes it. The tools are the hash-pinned ones of
-# stacks/docs/requirements-docs.txt, which the blueprint keeps current.
+# stacks/docs/requirements-docs.txt, which the blueprint keeps current, and the files
+# that Material downloads for the website stay in a cache for a week.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -52,9 +54,11 @@ jobs:
           persist-credentials: false
           # The date of the last change of every page comes from the history.
           fetch-depth: 0
-      # A run on main publishes the website, and the next job builds it for that;
-      # every other run builds it here, as the check, and so does a run on main where
-      # another workflow publishes the website.
+      # Every run builds the website here, as the check. A run on main where GitHub
+      # Pages publishes from this workflow hands the same build to the job that
+      # publishes it, so that it is built once; so does a fork of the blueprint, where
+      # the Dashboard doesn't run. Where another workflow publishes the website, a run
+      # on main only builds it.
       - name: Look for the website
         id: site
         timeout-minutes: 5
@@ -67,6 +71,7 @@ jobs:
             echo "::notice::No website here: it needs mkdocs.yml and a home page, docs/index.md."
             exit 0
           fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
           if [[ "$EVENT" != pull_request && "$GITHUB_REF" == refs/heads/main ]]; then
             # GitHub Pages has one website, and the other workflow publishes it; not in
             # a fork, where the Dashboard of the blueprint doesn't run.
@@ -74,7 +79,6 @@ jobs:
               if [[ "$FORK" != true && "$workflow" != .github/workflows/docs.yml ]] &&
                 grep -qF 'actions/deploy-pages@' "$workflow"; then
                 echo "::notice::$workflow publishes this website; this run only builds it."
-                echo "build=true" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
             done
@@ -87,7 +91,6 @@ jobs:
             fi
             echo "::notice::GitHub Pages doesn't publish from GitHub Actions here yet; the website waits for a run on main after it does."
           fi
-          echo "build=true" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5
@@ -111,10 +114,62 @@ jobs:
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5
         run: uv pip install --system --require-hashes -r stacks/docs/requirements-docs.txt
+      # The privacy and social plugins of Material download the fonts and scripts of
+      # the pages, about 30 files, into .cache, which the build takes from there, so a
+      # warm cache saves most of its time and the downloads that fail now and then. As
+      # Material's documentation has it, the cache belongs to an ISO week: the first
+      # run of a week downloads everything again, so that no file is older than a
+      # week, and a change of the configuration or the tools starts from the cache of
+      # the same week.
+      - name: Name the cache of this week
+        id: week
+        if: steps.site.outputs.build == 'true'
+        run: echo "id=$(date -u '+%G-%V')" >> "$GITHUB_OUTPUT"
+      - name: Restore the downloads of the website
+        id: cache
+        if: steps.site.outputs.build == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: .cache
+          key: mkdocs-material-${{ steps.week.outputs.id }}-${{ hashFiles('mkdocs.yml', '.github/mkdocs-blueprint.yml', 'stacks/docs/requirements-docs.txt') }}
+          restore-keys: mkdocs-material-${{ steps.week.outputs.id }}-
+      # The privacy plugin never downloads a file again that it has in its cache. Fonts,
+      # stylesheets and scripts may be a week old, but status badges and other pictures
+      # show the state of now: a failing CI badge or an old score must not stay up for
+      # a week, so the build downloads everything else anew.
+      - name: Download the badges and pictures anew
+        if: steps.site.outputs.build == 'true'
+        run: |
+          folder=.cache/plugin/privacy
+          [[ ! -d "$folder" ]] || find "$folder" -type f ! -name '*.woff2' ! -name '*.woff'             ! -name '*.ttf' ! -name '*.css' ! -name '*.js' -delete
       - name: Build the website
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5
         run: mkdocs build --strict
+      # Only a push saves the cache: one of main, which every pull request reads, since
+      # a cache of a pull request stays with its branch. It saves it once for each
+      # key, so a run that restored its own key saves nothing.
+      - name: Keep the downloads of the website for the week
+        if: >-
+          steps.site.outputs.build == 'true' && github.event_name == 'push' &&
+          steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: .cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      # The website that this job built and checked is the one that GitHub Pages
+      # publishes. Files and folders whose name starts with a dot, such as
+      # .well-known/security.txt, are part of it; the action leaves out only .git
+      # and .github.
+      - name: Hand the website to GitHub Pages
+        if: steps.site.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        timeout-minutes: 5
+        with:
+          path: site
+          include-hidden-files: true
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure
@@ -126,53 +181,10 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" coach explain "$CHECK"
 
-  pages:
-    name: build the website
-    needs: docs
-    if: needs.docs.outputs.publish == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # The date of the last change of every page comes from the history.
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        timeout-minutes: 5
-        with:
-          python-version: "3.12"
-      # uv installs the hash-pinned tools in seconds and checks the hash of each
-      # package. Its cache keeps only the wheels that it built from source, under a
-      # key of the lock file: pre-built ones download faster than a cache restores
-      # them.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        timeout-minutes: 5
-        with:
-          # renovate: datasource=pypi depName=uv
-          version: "0.12.18"
-          enable-cache: true
-          prune-cache: true
-          cache-dependency-glob: stacks/docs/requirements-docs.txt
-      - name: Install the hash-pinned tools of the website
-        timeout-minutes: 5
-        run: uv pip install --system --require-hashes -r stacks/docs/requirements-docs.txt
-      - name: Build the website
-        timeout-minutes: 5
-        run: mkdocs build --strict
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: site
-
   deploy:
     name: publish the website
-    needs: pages
+    needs: docs
+    if: needs.docs.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:

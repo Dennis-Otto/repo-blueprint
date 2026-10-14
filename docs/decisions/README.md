@@ -31,3 +31,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0023](0023-pull-requests-fix-themselves.md) | Pull requests fix what a command can fix by themselves: the check fixes, the fix bot commits, suggests or opens a pull request for main | accepted |
 | [0024](0024-take-over-each-verified-release-of-the-issue-assistant.md) | Take over each verified release of the issue assistant with a bot of the blueprint, not with Renovate | accepted |
 | [0025](0025-run-the-tests-on-every-core.md) | Run the tests of Python projects on every core, with the same coverage gate | accepted |
+| [0026](0026-build-the-website-once-and-keep-its-downloads-a-week.md) | Build the website once, in the job of the check, and keep the downloads of Material for a week | accepted |
