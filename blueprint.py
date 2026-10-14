@@ -13,6 +13,7 @@ each task is a module of the package blueprint/ next to this file.
     python3 blueprint.py diagrams extract   the ```mermaid blocks as sources and pictures
     python3 blueprint.py diagrams ...       keep, commit and report (the diagram bots)
     python3 blueprint.py pages [--fix]      the READMEs and docs in one column, for phones
+    python3 blueprint.py coach ...          how to fix a failed check, in one comment (the PR coach)
 """
 
 import sys
