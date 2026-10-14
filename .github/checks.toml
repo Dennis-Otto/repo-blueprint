@@ -69,13 +69,13 @@ docs = "CONTRIBUTING.md#coding-standards"
 title = "The diagrams"
 problem = """A page has a `mermaid` block, which the GitHub app shows as code, or a
 picture in `docs/images/diagrams/` differs from what its source in `docs/diagrams/`
-draws; the summary of the check lists the files."""
+draws or says in its `alt`; the summary of the check lists the files."""
 why = """The GitHub app, HACS, the stores of the projects and the e-mails of GitHub draw
 no Mermaid, so only a picture of its source shows a diagram to every reader, and the
 picture has to show what its source says."""
-fix = """On a branch of this repository, the diagram bot commits the fix in a minute.
-From a fork, turn the blocks into sources and draw their pictures with Docker, then
-commit what changed:"""
+fix = """On a branch of this repository with the release app, the diagram bot commits
+the fix in a minute. Otherwise, and from a fork, turn the blocks into sources and draw
+their pictures with Docker, then commit what changed:"""
 commands = ["bash scripts/diagrams.sh --extract"]
 docs = "CONTRIBUTING.md#diagrams"
 
@@ -344,13 +344,14 @@ docs = "CONTRIBUTING.md#coding-standards"
 
 [step.Diagrams]
 problem = """A page has a `mermaid` block, which the GitHub app shows as code, a source
-in `docs/diagrams/` lacks one of its two pictures, or a picture in
-`docs/images/diagrams/` has no source; the log names each one."""
+that a page shows lacks one of its two pictures, a picture in `docs/images/diagrams/`
+has no source, or the `alt` of a picture isn't what its source says; the log names
+each one."""
 why = """Only a picture of its source shows a diagram to every reader, also in the
 GitHub app, and only a picture with its source can be drawn again."""
 fix = """Turn the blocks into sources and draw their pictures with Docker, then commit
-what changed; without Docker, push, and on a branch of this repository the diagram bot
-draws them for you:"""
+what changed; without Docker, push, and on a branch of this repository with the
+release app the diagram bot draws them for you:"""
 commands = ["bash scripts/diagrams.sh --extract"]
 docs = "CONTRIBUTING.md#diagrams"
 
