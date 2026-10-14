@@ -1834,6 +1834,9 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         ".lycheeignore",
         # The fragments of the changelog, which the release takes into CHANGELOG.md.
         "changelog.d",
+        # The configuration of the mutation tests that a project commits, which the
+        # weekly Mutation workflow reads in place of the one it writes.
+        "infection.json5",
         "lychee.toml",
         "mkdocs.yml",
         "screenshots",
