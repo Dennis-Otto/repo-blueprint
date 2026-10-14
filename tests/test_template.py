@@ -1220,6 +1220,11 @@ def test_the_checks_fail_while_git_would_skip_a_hook(
 
 def pages_step(check: str) -> str:
     start = check.index('step "Pages in one column"')
+    return check[start : check.index('step "Changelog fragments"', start)]
+
+
+def fragments_step(check: str) -> str:
+    start = check.index('step "Changelog fragments"')
     return check[start : check.index('step "Version"', start)]
 
 
@@ -1319,6 +1324,86 @@ def test_the_checks_fail_on_a_page_with_columns_side_by_side(
         '\nThe card\n\n<img src="docs/images/card.png" alt="The card">\n'
     )
     assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_every_fragment_of_its_changelog(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # Right after the pages, whose Python and blueprint.py it takes, the same in every
+    # kind of project and in the blueprint, over the whole folder, without Docker.
+    assert check.index('\nstep "Pages in one column"\n') < check.index(
+        '\nstep "Changelog fragments"\n'
+    )
+    assert fragments_step(check) == fragments_step(generic) == fragments_step(own)
+    assert '  "$python" "$tool" fragments\n' in fragments_step(check)
+    assert "--folder" not in fragments_step(check)
+    assert "docker" not in fragments_step(check)
+    contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_a_fragment_that_the_release_cannot_take_in(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, the step of the pages, which finds the Python, and the step.
+    script = (
+        check[: check.index('step "Text files"')]
+        + pages_step(check)
+        + fragments_step(check)
+    )
+    (project / "scripts/fragments.sh").write_text(
+        script, encoding="utf-8", newline="\n"
+    )
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    # The Python of the tests first, without the variables of a run of the CI.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("CI", "GITHUB_ACTIONS")
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/fragments.sh"],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    # A new repository has the folder, without a fragment.
+    empty = step()
+    folder = project / "changelog.d"
+    (folder / "dark-mode.md").write_text(FEATURE_FRAGMENT, encoding="utf-8")
+    fine = step()
+    # A fragment that waits on main for the release, such as one that a pull request
+    # wrote before the rules got stricter, fails here, before the release does.
+    (folder / "typo.md").write_text("### Fixes\n\n- A fix.\n", encoding="utf-8")
+    failed = step()
+
+    assert empty.returncode == 0, empty.stdout + empty.stderr
+    assert "\n== Changelog fragments\n" in empty.stdout
+    assert "The 0 fragment(s) in changelog.d/ are fine." in empty.stdout
+    assert fine.returncode == 0, fine.stdout + fine.stderr
+    assert "The 1 fragment(s) in changelog.d/ are fine." in fine.stdout
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert (
+        "\nchangelog.d/typo.md: `### Fixes` is no kind of change of the changelog. "
+        "Did you mean `### Fixed`?" in failed.stdout
+    )
 
 
 @pytest.mark.skipif(
@@ -6311,7 +6396,8 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
             "User",
             [(f"changelog.d/f{number}.md", "added") for number in range(21)],
             1,
-            "::error::This pull request adds 21 fragments of the changelog;",
+            "::error title=Too many fragments::This pull request adds 21 fragments of "
+            "the changelog;",
             [],
         ),
         (
@@ -6331,8 +6417,53 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
                 ("src/app.py", "modified"),
             ],
             0,
-            "",
+            "::warning file=changelog.d/dark_mode.v2.md,title=The entry of another "
+            "pull request::main has changelog.d/dark_mode.v2.md already",
             ["changelog.d/token.md", "changelog.d/dark_mode.v2.md"],
+        ),
+        # A fragment that main has already is the entry of another pull request, which
+        # this one would take over, or push out of the release: it is checked, but it
+        # is no entry of this pull request.
+        (
+            "feat: a card",
+            "User",
+            [("changelog.d/ci.md", "modified")],
+            1,
+            "::warning file=changelog.d/ci.md,title=The entry of another pull "
+            "request::main has changelog.d/ci.md already",
+            [],
+        ),
+        (
+            "fix: the token",
+            "User",
+            [("changelog.d/token-2.md", "renamed"), ("src/app.py", "modified")],
+            1,
+            "::error title=No entry in the changelog::Describe what changes",
+            [],
+        ),
+        (
+            "fix: the token",
+            "User",
+            [("changelog.d/ci.md", "modified"), ("CHANGELOG.md", "modified")],
+            0,
+            "CHANGELOG.md has the entry of this change.",
+            ["changelog.d/ci.md"],
+        ),
+        (
+            "perf: a faster start",
+            "User",
+            [("changelog.d/ci.md", "modified"), ("changelog.d/faster.md", "copied")],
+            0,
+            "::warning file=changelog.d/ci.md,",
+            ["changelog.d/ci.md", "changelog.d/faster.md"],
+        ),
+        (
+            "docs: a guide",
+            "User",
+            [("changelog.d/ci.md", "modified")],
+            0,
+            "::warning file=changelog.d/ci.md,",
+            ["changelog.d/ci.md"],
         ),
         # A hidden file, a fragment that goes, and other files are no entry.
         (
@@ -6344,7 +6475,8 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
                 ("docs/changelog.md", "added"),
             ],
             1,
-            "::error::Describe what changes for users in a new file of changelog.d/",
+            "::error title=No entry in the changelog::Describe what changes for users "
+            "in a new file of changelog.d/",
             [],
         ),
         # A file of changelog.d/ that the release can't read is named, as JSON.
@@ -6367,7 +6499,8 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
             "User",
             [(f"changelog.d/f{number}.md", "added") for number in range(21)],
             1,
-            "::error::This pull request adds 21 fragments of the changelog;",
+            "::error title=Too many fragments::This pull request adds 21 fragments of "
+            "the changelog;",
             [],
         ),
     ],
@@ -6404,10 +6537,39 @@ def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
     assert len(step.calls) == 1
     assert step.calls[0].startswith("api repos/o/r/pulls/7/files --paginate --jq ")
     # Only a change for users of a person needs an entry, and is told it has one.
-    required = title.startswith(("feat:", "fix!:", "perf:")) and author == "User"
+    required = bool(re.match(r"(feat|fix|perf)!?: ", title)) and author == "User"
     if not required:
-        assert "::error::Describe what changes" not in step.result.stdout
+        assert "Describe what changes" not in step.result.stdout
         assert "CHANGELOG.md has the entry" not in step.summary
+    # Each fragment that main has already, changed or renamed here, is named in a
+    # warning, and is no entry of this pull request.
+    name = re.compile(r"changelog\.d/[A-Za-z0-9][A-Za-z0-9._-]*\.md")
+    theirs = [
+        path
+        for path, status in files
+        if status in ("modified", "renamed") and name.fullmatch(path)
+    ]
+    warnings = [
+        line for line in step.result.stdout.splitlines() if line.startswith("::warning")
+    ]
+    assert [warning.split(",")[0] for warning in warnings] == [
+        f"::warning file={path}" for path in theirs
+    ]
+    for warning in warnings:
+        assert "describe the change of this pull request in a new fragment" in warning
+    # Every failure says in the summary what to do about it.
+    if code:
+        assert step.summary.strip()
+    if "::error title=No entry in the changelog::" in step.result.stdout:
+        assert (
+            "Add a new file to `changelog.d/`, named after the branch without its type, "
+            "such as `changelog.d/dark-mode.md` for the branch `feat/dark-mode`"
+            in step.summary
+        )
+        assert "\n```markdown\n### Features\n\n- **Dark mode:**" in step.summary
+        assert ("they don't count as its own" in step.summary) == bool(theirs)
+    if "::error title=Too many fragments::" in step.result.stdout:
+        assert "Put its entries into one fragment, or a few" in step.summary
     if title == "perf: faster":
         errors = [
             line for line in step.result.stdout.splitlines() if "::error::" in line
@@ -6673,7 +6835,10 @@ def test_every_repository_gets_the_folder_of_the_fragments(
         "named after your branch without its type, such as `changelog.d/dark-mode.md` "
         "for the branch `feat/dark-mode`",
         "### The changelog",
-        "`python3 .github/blueprint.py fragments` checks them",
+        "`bash scripts/check.sh` checks every fragment as the release takes it in, "
+        "those that wait on `main` for the next release too, with "
+        "`python3 .github/blueprint.py fragments`.",
+        "The check *changelog* takes only a new fragment as the entry of a pull request",
     ):
         assert text in contributing, text
     template = (project / ".github/pull_request_template.md").read_text(

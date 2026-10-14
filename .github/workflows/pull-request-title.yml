@@ -119,10 +119,11 @@ jobs:
           fi
           # Whatever its type or author, a pull request that adds or changes a fragment
           # has it checked: the release reads every file of changelog.d/.
-          # The files of the changelog that the pull request adds or changes, each as a
-          # JSON string on a line of its own, so that no name spans two lines. A hidden
-          # file, such as changelog.d/.gitkeep, is no fragment.
-          filter='.[] | select(.status != "removed") | .filename | select(. == "CHANGELOG.md" or test("^changelog\\.d/[^.]")) | @json'
+          # The files of the changelog that the pull request adds or changes, each with
+          # its status and its name as a JSON string on a line of its own, so that no
+          # name spans two lines. A hidden file, such as changelog.d/.gitkeep, is no
+          # fragment.
+          filter='.[] | select(.status != "removed") | select(.filename == "CHANGELOG.md" or (.filename | test("^changelog\\.d/[^.]"))) | "\(.status) \(.filename | @json)"'
           # Every pull request asks, also those of bots, which need no entry; GitHub fails
           # for a moment now and then, so it asks three times before the check fails.
           for attempt in 1 2 3; do
@@ -138,16 +139,29 @@ jobs:
           fragment='^"(changelog\.d/[A-Za-z0-9][A-Za-z0-9._-]*\.md)"$'
           changelog=false
           fragments=()
+          # Only a new fragment is the entry of this pull request. One that main has
+          # already, changed or renamed here, is the entry of another pull request that
+          # waits for its release.
+          own=0
+          theirs=()
           others=()
-          while read -r name; do
+          while read -r status name; do
             if [[ "$name" == '"CHANGELOG.md"' ]]; then
               changelog=true
             elif [[ "$name" =~ $fragment ]]; then
               fragments+=("${BASH_REMATCH[1]}")
+              if [[ "$status" == added || "$status" == copied ]]; then
+                own=$((own + 1))
+              else
+                theirs+=("${BASH_REMATCH[1]}")
+              fi
             else
               others+=("$name")
             fi
           done < "$RUNNER_TEMP/changed"
+          for path in "${theirs[@]}"; do
+            echo "::warning file=$path,title=The entry of another pull request::main has $path already: the entry of another pull request that waits for its release. Leave its text to it, and describe the change of this pull request in a new fragment, such as changelog.d/<your branch without its type>.md, or the same name with -2 before .md."
+          done
           # The release reads every file of changelog.d/; one that it can't take in fails
           # here, by its name as JSON.
           for name in "${others[@]}"; do
@@ -159,11 +173,33 @@ jobs:
           fi
           # Each fragment is one question to the API in the next step.
           if ((${#fragments[@]} > 20)); then
-            echo "::error::This pull request adds ${#fragments[@]} fragments of the changelog; describe its change in one, or a few."
+            echo "::error title=Too many fragments::This pull request adds ${#fragments[@]} fragments of the changelog; describe its change in one, or a few."
+            {
+              echo "This pull request adds or changes ${#fragments[@]} fragments of the changelog; the check reads each of them, and 20 at most."
+              echo
+              echo "Put its entries into one fragment, or a few: a fragment holds every entry of a pull request, each below the heading of its kind of change."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          if [[ "$required" == true && "$changelog" == false ]] && ((${#fragments[@]} == 0)); then
-            echo "::error::Describe what changes for users in a new file of changelog.d/, such as changelog.d/dark-mode.md, below a heading such as '### Features' or '### Bug fixes', or under '## Unreleased' in CHANGELOG.md; it becomes the notes of the next release."
+          if [[ "$required" == true && "$changelog" == false ]] && ((own == 0)); then
+            echo "::error title=No entry in the changelog::Describe what changes for users in a new file of changelog.d/, such as changelog.d/dark-mode.md, below a heading such as '### Features' or '### Bug fixes', or under '## Unreleased' in CHANGELOG.md; it becomes the notes of the next release."
+            {
+              echo "This pull request changes something for users, and the notes of the next release are the entries of the changelog; it has none of its own yet."
+              echo
+              echo "Add a new file to \`changelog.d/\`, named after the branch without its type, such as \`changelog.d/dark-mode.md\` for the branch \`feat/dark-mode\`, with the heading of its kind of change and an entry below it, in the words of a user:"
+              echo
+              echo "\`\`\`markdown"
+              echo "### Features"
+              echo
+              echo "- **Dark mode:** the settings follow the theme of the system."
+              echo "\`\`\`"
+              echo
+              echo "A line under \`## Unreleased\` in \`CHANGELOG.md\` works as well, but conflicts with each pull request that adds one at the same place."
+              if ((${#theirs[@]} > 0)); then
+                echo
+                echo "The fragments that this pull request changes are the entries of other pull requests, which main has already; they don't count as its own."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           if [[ "$required" == true && "$changelog" == true ]]; then
