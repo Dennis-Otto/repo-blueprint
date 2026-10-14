@@ -1318,6 +1318,9 @@ def test_every_repository_checks_that_its_pages_have_one_column(
     assert "`python3 .github/blueprint.py pages --fix`" in contributing
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_checks_fail_on_a_page_with_columns_side_by_side(
     projects: dict[str, Path], tmp_path: Path
