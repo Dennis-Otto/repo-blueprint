@@ -124,7 +124,7 @@ jobs:
               echo
               echo "$1"
               echo
-              echo "The bot updates only to a release that the release workflow of the blueprint made: an immutable release whose tag points at a commit of its \`main\` and that its release workflow signed. Otherwise, whoever could push a tag could bring workflows of their own to this repository. Nothing has changed here. If $SOURCE didn't publish this release with its release workflow, tell its maintainers; the next release that passes lets the bot update again. [Verify a release](https://github.com/$SOURCE/blob/main/SECURITY.md#verify-a-release) shows how to check one yourself."
+              echo "The bot updates only to a release that the release workflow of the blueprint made: an immutable release whose tag points at a commit of its \`main\` no older than the version this repository has and that its release workflow signed. Otherwise, whoever could push a tag could bring workflows of their own to this repository, or take it back to an older blueprint. Nothing has changed here. If $SOURCE didn't publish this release with its release workflow, tell its maintainers; the next release that passes lets the bot update again. [Verify a release](https://github.com/$SOURCE/blob/main/SECURITY.md#verify-a-release) shows how to check one yourself."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           }
@@ -138,6 +138,26 @@ jobs:
           if [[ "$status" != identical && "$status" != ahead ]]; then
             refuse "The tag $TAG of $SOURCE points at $commit, which is not on its main ($status)."
           fi
+          # Nor an older commit of main under a newer version: whoever could sign a tag
+          # as the release workflow could otherwise take every repository back to a
+          # blueprint without its later fixes. Copier names the version that this
+          # repository has as git describe does: v1.2.0, or v1.2.0-3-gabc1234 past a tag.
+          old="$(sed -n 's/^_commit: *//p' .copier-answers.yml)"
+          if [[ "$old" =~ -[0-9]+-g([0-9a-f]+)$ ]]; then
+            old="${BASH_REMATCH[1]}"
+          fi
+          if [[ -z "$old" ]]; then
+            echo "::error::.copier-answers.yml doesn't name the version of the blueprint that this repository has, so the bot can't tell whether $TAG comes after it; nothing has changed."
+            exit 1
+          fi
+          if ! since="$(ask "repos/$SOURCE/compare/$old...$commit" --jq .status)"; then
+            echo "::error::GitHub could not compare $old, the version of $SOURCE that this repository has, with the tag $TAG; nothing has changed, and the next run asks again."
+            exit 1
+          fi
+          # identical: this repository has the release already; ahead: it comes after.
+          if [[ "$since" != identical && "$since" != ahead ]]; then
+            refuse "The tag $TAG of $SOURCE points at $commit, which doesn't come after $old, the version this repository has ($since)."
+          fi
           # .github/sign-tag.sh names what is wrong with the tag, and exits with 2 when
           # it could not check it, without gitsign or an answer of GitHub or Sigstore;
           # it tries three times too.
@@ -149,7 +169,7 @@ jobs:
             echo "::error::The signature of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
             exit 1
           fi
-          echo "The release $TAG of $SOURCE is immutable, on its main and signed by its release workflow." >> "$GITHUB_STEP_SUMMARY"
+          echo "The release $TAG of $SOURCE is immutable, on its main, no older than $old and signed by its release workflow." >> "$GITHUB_STEP_SUMMARY"
       - name: Update to the latest release of the blueprint
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}

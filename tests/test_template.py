@@ -3833,6 +3833,9 @@ def test_the_blueprint_bot_verifies_the_release_before_it_updates(
     assert "secrets." not in step
     assert 'ask "repos/$SOURCE/releases/tags/$TAG" --jq .immutable' in step
     assert 'ask "repos/$SOURCE/compare/$commit...main" --jq .status' in step
+    # Not a commit before the version that the repository has.
+    assert "old=\"$(sed -n 's/^_commit: *//p' .copier-answers.yml)\"" in step
+    assert 'since="$(ask "repos/$SOURCE/compare/$old...$commit" --jq .status)"' in step
     # The tag's signature, checked by the script that checks the release tags of the
     # repository itself, with gitsign pinned by version and checksum.
     assert (
@@ -3855,11 +3858,16 @@ def run_the_verify_step(
     signed: bool,
     failures: int = 0,
     unchecked: bool = False,
+    since: str = "ahead",
+    old: str = "v1.1.0",
+    base: str = "v1.1.0",
 ) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
     """The step of the blueprint bot that verifies the release, with a gh that answers
     for a release of a fork of the blueprint, after failing the first `failures` times
     as GitHub does now and then, and a sign-tag.sh that only records how it is called
-    and fails where the tag isn't signed, or with 2 where it couldn't check it."""
+    and fails where the tag isn't signed, or with 2 where it couldn't check it. The
+    repository has the version `old` of the blueprint, which gh knows as `base` and
+    compares with the release as `since`, or doesn't know where `since` is "missing"."""
     text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
     step = next(
         step
@@ -3868,6 +3876,13 @@ def run_the_verify_step(
     )
     script = textwrap.dedent(step.split("        run: |\n", 1)[1])
     (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    (tmp_path / ".copier-answers.yml").write_text(
+        "# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY\n"
+        + (f"_commit: {old}\n" if old else "")
+        + "_src_path: gh:Someone/blueprint\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github/sign-tag.sh").write_text(
         'echo "sign-tag.sh $*" >> "$CALLS"\n'
@@ -3894,6 +3909,13 @@ case "$*" in
   "api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable") echo "$IMMUTABLE" ;;
   "api repos/Someone/blueprint/commits/v1.2.0 --jq .sha") echo abc123 ;;
   "api repos/Someone/blueprint/compare/abc123...main --jq .status") echo "$STATUS" ;;
+  "api repos/Someone/blueprint/compare/$BASE...abc123 --jq .status")
+    if [[ "$SINCE" == missing ]]; then
+      echo '{"message":"Not Found","status":"404"}'
+      echo "gh: Not Found (HTTP 404)" >&2
+      exit 1
+    fi
+    echo "$SINCE" ;;
   *) echo "unexpected: gh $*" >&2; exit 1 ;;
 esac
 """,
@@ -3923,6 +3945,8 @@ esac
         "TAG": "v1.2.0",
         "IMMUTABLE": immutable,
         "STATUS": status,
+        "SINCE": since,
+        "BASE": base,
         "SIGNED": "true" if signed else "false",
         "UNCHECKED": "true" if unchecked else "false",
         "FAILURES": str(failures),
@@ -3945,32 +3969,45 @@ esac
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    "status",
+    ("status", "since", "old", "base"),
     [
         # main is at the release, or has moved on from it.
-        "identical",
-        "ahead",
+        ("identical", "ahead", "v1.1.0", "v1.1.0"),
+        ("ahead", "ahead", "v1.1.0", "v1.1.0"),
+        # The repository has the release already.
+        ("ahead", "identical", "v1.2.0", "v1.2.0"),
+        # A repository made from a commit past a tag, as git describe names it.
+        ("ahead", "ahead", "v1.1.0-3-gdef4567", "def4567"),
     ],
 )
-def test_a_signed_immutable_release_on_main_passes(tmp_path: Path, status: str) -> None:
-    result, calls, summary = run_the_verify_step(tmp_path, "true", status, signed=True)
+def test_a_signed_immutable_release_on_main_passes(
+    tmp_path: Path, status: str, since: str, old: str, base: str
+) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", status, signed=True, since=since, old=old, base=base
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
+    # Compared with the version that the repository has.
+    assert (
+        f"gh api repos/Someone/blueprint/compare/{base}...abc123 --jq .status" in calls
+    )
     # The signature of the tag, of the release workflow of the blueprint, at the commit
     # that is on its main.
     assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
     assert (
-        "The release v1.2.0 of Someone/blueprint is immutable, on its main and signed"
-        in summary
-    )
+        "The release v1.2.0 of Someone/blueprint is immutable, on its main, no older"
+        f" than {base} and signed by its release workflow."
+    ) in summary
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("immutable", "status", "signed", "error"),
+    ("immutable", "status", "since", "signed", "error"),
     [
         (
             "false",
+            "ahead",
             "ahead",
             True,
             "::error::The release v1.2.0 of Someone/blueprint is not immutable; the bot"
@@ -3980,6 +4017,7 @@ def test_a_signed_immutable_release_on_main_passes(tmp_path: Path, status: str) 
         (
             "true",
             "diverged",
+            "ahead",
             True,
             "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which is"
             " not on its main (diverged).",
@@ -3987,14 +4025,34 @@ def test_a_signed_immutable_release_on_main_passes(tmp_path: Path, status: str) 
         (
             "true",
             "behind",
+            "ahead",
             True,
             "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which is"
             " not on its main (behind).",
+        ),
+        # An older commit of main under a newer version, or one that the version of the
+        # repository isn't part of: either would take the repository back.
+        (
+            "true",
+            "ahead",
+            "behind",
+            True,
+            "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which"
+            " doesn't come after v1.1.0, the version this repository has (behind).",
+        ),
+        (
+            "true",
+            "ahead",
+            "diverged",
+            True,
+            "::error::The tag v1.2.0 of Someone/blueprint points at abc123, which"
+            " doesn't come after v1.1.0, the version this repository has (diverged).",
         ),
         # A lightweight tag, one at another commit, or one that another workflow
         # signed: sign-tag.sh says which, in tests/test_sign_tag.py.
         (
             "true",
+            "ahead",
             "ahead",
             False,
             "::error::The tag v1.2.0 of Someone/blueprint is not one that its release"
@@ -4003,9 +4061,11 @@ def test_a_signed_immutable_release_on_main_passes(tmp_path: Path, status: str) 
     ],
 )
 def test_any_other_release_stops_the_update(
-    tmp_path: Path, immutable: str, status: str, signed: bool, error: str
+    tmp_path: Path, immutable: str, status: str, since: str, signed: bool, error: str
 ) -> None:
-    result, calls, summary = run_the_verify_step(tmp_path, immutable, status, signed)
+    result, calls, summary = run_the_verify_step(
+        tmp_path, immutable, status, signed, since=since
+    )
 
     assert result.returncode == 1
     assert error in result.stdout.splitlines()
@@ -4019,8 +4079,9 @@ def test_any_other_release_stops_the_update(
         "(https://github.com/Someone/blueprint/blob/main/SECURITY.md#verify-a-release)"
         in summary
     )
-    assert "is immutable, on its main and signed" not in summary
-    # The signature is checked last, only for an immutable release on main.
+    assert "is immutable, on its main, no older than" not in summary
+    # The signature is checked last, only for an immutable release on main that
+    # comes after the version of the repository.
     verified = [call for call in calls if call.startswith("sign-tag.sh ")]
     assert verified == (
         ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"] if not signed else []
@@ -4046,7 +4107,7 @@ def test_the_verification_asks_github_again_after_a_failure(tmp_path: Path) -> N
         "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
     ]
     assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
-    assert "is immutable, on its main and signed" in summary
+    assert "is immutable, on its main, no older than v1.1.0 and signed" in summary
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -4061,7 +4122,7 @@ def test_every_question_gets_its_answer_after_a_failure(tmp_path: Path) -> None:
     # The commit, not the body of the error before it, goes into the comparison.
     assert "gh api repos/Someone/blueprint/compare/abc123...main --jq .status" in calls
     assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
-    assert "is immutable, on its main and signed" in summary
+    assert "is immutable, on its main, no older than v1.1.0 and signed" in summary
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -4099,6 +4160,46 @@ def test_a_github_without_an_answer_fails_the_update_but_refuses_nothing(
         "sleep 20",
     ]
     # Not a refusal: GitHub didn't answer, and the next run asks again.
+    assert summary == ""
+    assert not any(call.startswith("sign-tag.sh") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_version_that_github_doesnt_know_fails_but_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    # The version of the repository isn't in the blueprint, or GitHub doesn't answer.
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, since="missing"
+    )
+
+    assert result.returncode == 1
+    assert (
+        "::error::GitHub could not compare v1.1.0, the version of Someone/blueprint"
+        " that this repository has, with the tag v1.2.0; nothing has changed, and the"
+        " next run asks again."
+    ) in result.stdout.splitlines()
+    assert "Not Found" in result.stderr
+    # Asked three times, as every question.
+    compare = "gh api repos/Someone/blueprint/compare/v1.1.0...abc123 --jq .status"
+    assert calls.count(compare) == 3
+    assert summary == ""
+    assert not any(call.startswith("sign-tag.sh") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_answers_without_a_version_fail_but_refuse_nothing(tmp_path: Path) -> None:
+    result, calls, summary = run_the_verify_step(
+        tmp_path, "true", "ahead", signed=True, old=""
+    )
+
+    assert result.returncode == 1
+    assert (
+        "::error::.copier-answers.yml doesn't name the version of the blueprint that"
+        " this repository has, so the bot can't tell whether v1.2.0 comes after it;"
+        " nothing has changed."
+    ) in result.stdout.splitlines()
+    assert not any("...abc123" in call for call in calls)
     assert summary == ""
     assert not any(call.startswith("sign-tag.sh") for call in calls)
 

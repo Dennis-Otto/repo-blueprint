@@ -43,11 +43,15 @@ A release is immutable once it is published, and GitHub signs an attestation of 
 gh release verify vX.Y.Z --repo Dennis-Otto/repo-blueprint
 ```
 
-Copier renders a repository from the tag of a release, so the tag must be the one the release workflow made. Only the release app may create a release tag, and the release workflow signs every tag without a key ([gitsign](https://github.com/sigstore/gitsign)). Before every update, the blueprint bot of each repository checks that the release is immutable, that its tag points at a commit of `main` and that the release workflow of the blueprint signed the tag; it refuses any other release. With gitsign, you check the signature of a tag yourself:
+Copier renders a repository from the tag of a release, so the tag must be the one the release workflow made. Only the release app may create a release tag, and the release workflow signs every tag without a key ([gitsign](https://github.com/sigstore/gitsign)). Before every update, the blueprint bot of each repository checks that the release is immutable, that its tag points at a commit of `main` no older than the version the repository has, and that the release workflow of the blueprint signed the tag under the name of that release; it refuses any other release. You check a tag the same way with git and gitsign, where `vA.B.C` is the version your repository has, the `_commit` of its `.copier-answers.yml`; `gh release verify` above holds only for an immutable release:
 
 ```sh
 git clone --quiet --no-checkout --filter=blob:none https://github.com/Dennis-Otto/repo-blueprint.git blueprint
 cd blueprint
+# The name inside the tag, which the signature covers: it must print vX.Y.Z.
+git cat-file tag vX.Y.Z | sed -n '/^$/q; s/^tag //p'
+git merge-base --is-ancestor vX.Y.Z origin/main && echo "on main"
+git merge-base --is-ancestor vA.B.C vX.Y.Z && echo "no older than vA.B.C"
 gitsign verify-tag vX.Y.Z \
   --certificate-identity https://github.com/Dennis-Otto/repo-blueprint/.github/workflows/release.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
