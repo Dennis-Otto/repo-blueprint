@@ -124,6 +124,15 @@
       groupName: "the actions that follow a branch",
     },
     {
+      // The issue assistant comes with its templates, with which its check compares
+      // the workflows: a pin that moved alone would fail the check issue-assistant.
+      // The sync bot of the blueprint takes over each verified release, workflows and
+      // pins together, and the blueprint bot brings it to every repository.
+      matchManagers: ["github-actions"],
+      matchDepNames: ["Dennis-Otto/issue-assistant"],
+      enabled: false,
+    },
+    {
       // The versions of Python, Node and PHP that the workflows set up, and the
       // runners, follow the blueprint.
       matchDepTypes: ["uses-with"],

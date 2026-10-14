@@ -1,0 +1,29 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a release of the issue assistant reaches every repository
+    accDescr: Every morning, the sync bot of the blueprint takes the latest published release of the issue assistant and verifies it: the release must be immutable, GitHub's attestation of it must hold, its tag must point at a commit of the main branch of the issue assistant, and its release workflow must have signed the tag. Any other release fails the run, and nothing changes. Otherwise the bot runs install of the release in the root of the blueprint, which writes the four workflows and the firewall policy of the release and moves every pin of the action, and keeps one pull request with the result, which merges itself once every check passes. The next release of the blueprint brings it to every repository with the blueprint bot.
+
+    release(["A release of the<br>issue assistant"])
+    bot(["Sync bot<br>every morning"])
+    verified{"Immutable, attested,<br>on main, signed by<br>its release workflow?"}
+    refused(["Fails the run<br>nothing changes"])
+    install["install of the release<br>in the blueprint: the four workflows,<br>the firewall policy, every pin"]
+    pr["Pull request from<br>bot/issue-assistant<br>merges itself once<br>every check passes"]
+    blueprint["The next release<br>of the blueprint"]
+    fleet["Every repository,<br>with its blueprint bot"]
+
+    release --> bot
+    bot -- "the latest<br>published release" --> verified
+    verified -- "no" --> refused
+    verified -- "yes" --> install --> pr --> blueprint --> fleet
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot,install,pr,blueprint bot
+    class release,refused person
+    class fleet done

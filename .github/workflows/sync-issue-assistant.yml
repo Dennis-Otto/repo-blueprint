@@ -1,0 +1,390 @@
+name: Issue assistant sync
+
+# The sync bot of the issue assistant, in the blueprint alone. The four workflows of
+# the issue assistant and its firewall policy are templates of its release, with which
+# the check issue-assistant compares every repository; the blueprint keeps the copies
+# in .github/ that every repository made from it renders. Every morning, and on
+# demand, this workflow takes the latest published release of the issue assistant and,
+# once it has verified that the release workflow of the issue assistant made it, runs
+# install of that release in the root of the blueprint, takes over its firewall policy
+# and moves every pin of the action to it, that of the check in the Lint workflow too,
+# with sync_issue_assistant.py. It keeps one pull request with the result from the
+# branch bot/issue-assistant, as the release app, which merges itself once every check
+# passes; the next release of the blueprint brings it to every repository. A release
+# that it can't verify changes nothing and fails the run. Installing runs without
+# secrets; only the job of the pull request has the release app, and it runs nothing
+# of the release. A pull request that changes the bot runs it without a pull request
+# of its own, as a start by hand with dry_run does. The bot-health bot keeps one issue
+# open about a failed run, with the reason that it gave, which the next run that passes
+# closes.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  schedule:
+    - cron: "20 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Verify and install the latest release and show what changes, without a pull request
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/sync-issue-assistant.yml
+      - .github/sign-tag.sh
+      - sync_issue_assistant.py
+
+permissions: {}
+
+# One run at a time, which ends what it started with the branch and the pull request.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The issue assistant, and the branch of the pull request.
+  SOURCE: Dennis-Otto/issue-assistant
+  BRANCH: bot/issue-assistant
+  # A pull request and a start by hand with dry_run open no pull request.
+  DRY_RUN: ${{ github.event_name == 'pull_request' || inputs.dry_run == true }}
+
+jobs:
+  adopt:
+    name: adopt the latest release
+    if: "!github.event.repository.fork"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      url: ${{ steps.release.outputs.url }}
+      changed: ${{ steps.adopt.outputs.changed }}
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Find the latest published release of the issue assistant
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # GitHub fails for a moment now and then, so every question is asked three
+          # times. gh prints the body of an error as well, so only an answer gets
+          # through.
+          ask() {
+            local attempt answer
+            for attempt in 1 2 3; do
+              if answer="$(gh "$@")"; then
+                printf '%s\n' "$answer"
+                return 0
+              fi
+              if ((attempt == 3)); then
+                return 1
+              fi
+              sleep $((attempt * 10))
+            done
+          }
+          # Not the newest tag: the Release workflow pushes the tag before it publishes
+          # the release, which may stay a draft or fail.
+          tag="$(ask release view --repo "$SOURCE" --json tagName --jq .tagName)"
+          if [[ -z "$tag" ]]; then
+            echo "::error::The issue assistant has no published release to take over."
+            exit 1
+          fi
+          commit="$(ask api "repos/$SOURCE/commits/$tag" --jq .sha)"
+          {
+            echo "tag=$tag"
+            echo "commit=$commit"
+            echo "url=https://github.com/$SOURCE/releases/tag/$tag"
+          } >> "$GITHUB_OUTPUT"
+          # Every pin of the action already names the release: nothing to take over.
+          pinned="$(python3 sync_issue_assistant.py pinned)"
+          if [[ "$pinned" == "$commit $tag" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            echo "The blueprint has the issue assistant $tag, the latest release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # GitHub calls the release latest by its date or by hand, not by its version:
+          # a fix of an older line published later, or an older release marked latest
+          # again, would take the blueprint and every repository back. The bot never
+          # goes back to an older release.
+          for have in $(printf '%s\n' "$pinned" | cut -d ' ' -f 2); do
+            if [[ "$have" != "$tag" && "$(printf '%s\n%s\n' "$have" "$tag" | sort -V | tail -n 1)" == "$have" ]]; then
+              echo "::error::The latest release $tag of $SOURCE is older than $have, which the blueprint has; the bot never goes back to an older release."
+              {
+                echo "### The sync bot refused the release $tag of $SOURCE"
+                echo
+                echo "The latest release $tag of $SOURCE is older than $have, which the blueprint has. GitHub calls the release latest by its date or by hand, not by its version; the bot never goes back to an older release. Nothing has changed here; the next newer release lets the bot take it over."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+      # Whoever can push a tag to the issue assistant could otherwise bring workflows of
+      # their own into the blueprint, and with its next release into every repository
+      # made from it. So the bot takes only a release that the release workflow of the
+      # issue assistant made: an immutable release, whose attestation by GitHub holds,
+      # on a commit of its main, and with a tag that the workflow signed, as the
+      # blueprint bot checks a release of the blueprint. A dry run checks the release
+      # also when the blueprint has it already.
+      - name: Verify the release before taking it over
+        if: steps.release.outputs.current != 'true' || env.DRY_RUN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # Every question is asked three times, as above; a question still without an
+          # answer fails the run, but refuses nothing.
+          ask() {
+            local attempt answer
+            for attempt in 1 2 3; do
+              if answer="$(gh api "$@")"; then
+                printf '%s\n' "$answer"
+                return 0
+              fi
+              if ((attempt == 3)); then
+                return 1
+              fi
+              sleep $((attempt * 10))
+            done
+          }
+          # Stops the run with the reason, as an annotation and in the summary, which
+          # says what it means and what to do.
+          refuse() {
+            echo "::error::$1"
+            {
+              echo "### The sync bot refused the release $TAG of $SOURCE"
+              echo
+              echo "$1"
+              echo
+              echo "The bot takes over only a release that the release workflow of the issue assistant made: an immutable release whose attestation by GitHub holds, whose tag points at a commit of its \`main\` and that its release workflow signed. Otherwise, whoever could push a tag could bring workflows of their own into the blueprint and every repository made from it. Nothing has changed here. If $SOURCE didn't publish this release with its release workflow, tell its maintainers; the next release that passes lets the bot take it over. [Verify a release](https://github.com/$SOURCE/blob/main/SECURITY.md#verify-a-release) shows how to check one yourself."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          immutable="$(ask "repos/$SOURCE/releases/tags/$TAG" --jq .immutable)"
+          if [[ "$immutable" != true ]]; then
+            refuse "The release $TAG of $SOURCE is not immutable; the bot takes over only an immutable release."
+          fi
+          # identical: main is at the release; ahead: main has moved on from it.
+          status="$(ask "repos/$SOURCE/compare/$COMMIT...main" --jq .status)"
+          if [[ "$status" != identical && "$status" != ahead ]]; then
+            refuse "The tag $TAG of $SOURCE points at $COMMIT, which is not on its main ($status)."
+          fi
+          # GitHub attests every immutable release, with its tag, its commit and the
+          # digests of its assets; gh checks the attestation and the assets.
+          attested=1
+          for attempt in 1 2 3; do
+            if gh release verify "$TAG" --repo "$SOURCE" > "$RUNNER_TEMP/attestation" 2>&1; then
+              attested=0
+              break
+            fi
+            if ((attempt < 3)); then
+              sleep $((attempt * 10))
+            fi
+          done
+          cat "$RUNNER_TEMP/attestation"
+          if ((attested != 0)); then
+            # An answer of GitHub that never came is no verdict on the release.
+            if grep -qiE 'HTTP 5[0-9]{2}|timed? ?out|connection (refused|reset)|no such host|TLS handshake|unexpected EOF' "$RUNNER_TEMP/attestation"; then
+              echo "::error::GitHub's attestation of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
+              exit 1
+            fi
+            refuse "GitHub's attestation of the release $TAG of $SOURCE doesn't hold; the log of the run shows what gh release verify says."
+          fi
+          # .github/sign-tag.sh names what is wrong with the tag, and exits with 2 when
+          # it could not check it, without gitsign or an answer of GitHub or Sigstore;
+          # it tries three times too.
+          verified=0
+          bash .github/sign-tag.sh verify "$TAG" "$COMMIT" "$SOURCE" || verified=$?
+          if ((verified == 1)); then
+            refuse "The tag $TAG of $SOURCE is not one that its release workflow signed at $COMMIT."
+          elif ((verified != 0)); then
+            echo "::error::The signature of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
+            exit 1
+          fi
+          echo "The release $TAG of $SOURCE is immutable, attested by GitHub, on its main and signed by its release workflow." >> "$GITHUB_STEP_SUMMARY"
+      - name: Install the release in the root of the blueprint
+        id: adopt
+        if: steps.release.outputs.current != 'true' || env.DRY_RUN == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # Exactly the commit that was verified, whatever the tag says by now.
+          release="$RUNNER_TEMP/issue-assistant"
+          git init --quiet "$release"
+          for attempt in 1 2 3; do
+            if git -C "$release" fetch --quiet --depth=1 "https://github.com/$SOURCE.git" "$COMMIT"; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::The commit $COMMIT of $SOURCE could not be fetched; nothing has changed, and the next run tries again."
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+          git -C "$release" checkout --quiet --detach FETCH_HEAD
+          python3 sync_issue_assistant.py adopt "$release" --ref "$COMMIT" --version "$TAG" \
+            --out "$RUNNER_TEMP/sync" > "$RUNNER_TEMP/changes.md"
+          if [[ ! -s "$RUNNER_TEMP/changes.md" ]]; then
+            echo "The blueprint has every template of the issue assistant $TAG." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git add --all --intent-to-add
+          {
+            echo "### The issue assistant $TAG"
+            echo
+            echo "\`install\` of the release in the root of the blueprint changes these files:"
+            echo
+            cat "$RUNNER_TEMP/changes.md"
+            echo
+            echo "<details><summary>The changes</summary>"
+            echo
+            echo "~~~diff"
+            git diff
+            echo "~~~"
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the changes for the pull request
+        if: steps.adopt.outputs.changed == 'true' && env.DRY_RUN != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: issue-assistant
+          path: ${{ runner.temp }}/sync/
+          # The workflows are in .github/.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  pull-request:
+    name: keep the pull request of the release
+    needs: adopt
+    # Once the release was adopted, to open, update or close the pull request.
+    if: vars.RELEASE_AUTOMATION_CLIENT_ID != '' && github.event_name != 'pull_request' && inputs.dry_run != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # The environment holds the private key of the release app; only main may use it.
+    environment:
+      name: release
+      deployment: false
+    permissions:
+      contents: read
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      # sync_issue_assistant.py, which checks what the job adopt kept, and the workflows
+      # of main, which its description compares with them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+            template/.github/workflows
+      - name: Fetch the changes that the job adopt kept
+        if: needs.adopt.outputs.changed == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: issue-assistant
+          path: ${{ runner.temp }}/sync
+      - name: Create a token of the release app
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          # Only what the branch and the pull request need, workflows included.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      - name: Open, update or close the pull request of the release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          CHANGED: ${{ needs.adopt.outputs.changed }}
+          TAG: ${{ needs.adopt.outputs.tag }}
+          URL: ${{ needs.adopt.outputs.url }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # An update of what every repository runs: a fix, so that the blueprint
+          # releases it, and one of dependencies, so that the release merges itself.
+          headline="fix(deps): update the issue assistant to $TAG"
+          # The open pull request of the branch, as its number and title, or nothing.
+          open="$(gh pr list --head "$BRANCH" --state open --json number,title \
+            --jq '.[0] | select(.) | "\(.number)\t\(.title)"')"
+          number="${open%%$'\t'*}"
+          title="${open#*$'\t'}"
+          if [[ "$CHANGED" != true ]]; then
+            if [[ -n "$number" ]]; then
+              gh pr close "$number" --delete-branch \
+                --comment "\`main\` has the issue assistant $TAG without this pull request: $RUN"
+              echo "main has the issue assistant $TAG; closed #$number." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+          if [[ -n "$number" ]]; then
+            # Someone else's commit stays: the bot leaves the branch alone, a newer
+            # release too, until the pull request is merged or closed. Merges only bring
+            # main into the branch, as those of the branch bot.
+            others="$(gh api "repos/$GH_REPO/pulls/$number/commits" --paginate \
+              --jq ".[] | select((.parents | length) == 1 and .author.login != \"${APP_SLUG}[bot]\") | .sha")"
+            if [[ -n "$others" ]]; then
+              echo "Someone else committed to $BRANCH, so the bot leaves #$number as it is: merge or close it, and the next run brings the latest release." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            # The same release: the branch bot keeps the pull request current with main.
+            if [[ "$title" == "$headline" ]]; then
+              gh pr merge "$number" --auto --squash
+              echo "#$number brings the issue assistant $TAG already, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          # Points a branch at a commit, new or moved.
+          point() {
+            if gh api "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
+              gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
+            else
+              gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
+            fi
+          }
+          # The commit starts from the commit that was adopted, so that there is one pull
+          # request with one commit for a release. It is made on a branch of its own, and
+          # the branch of the pull request moves to it in one step: a pull request whose
+          # head is a commit of main would be closed by GitHub.
+          scratch="$BRANCH-next"
+          point "$scratch" "$SHA"
+          # The commit goes through GitHub's API as the release app: GitHub signs it, as
+          # main requires, and it starts the checks. The sign-off names the app's
+          # account, which is the author of the commit.
+          user_id="$(gh api "users/${APP_SLUG}[bot]" --jq .id)"
+          body="Installed from the verified release $URL by the Issue assistant sync: $RUN
+
+          Signed-off-by: ${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
+          python3 sync_issue_assistant.py commit "$RUNNER_TEMP/sync" --repo "$GH_REPO" \
+            --branch "$scratch" --head "$SHA" --headline "$headline" --body "$body" > "$RUNNER_TEMP/commit.json"
+          commit="$(gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
+          point "$BRANCH" "$commit"
+          gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
+          python3 sync_issue_assistant.py report "$RUNNER_TEMP/sync" --version "$TAG" --url "$URL" > "$RUNNER_TEMP/body.md"
+          if [[ -n "$number" ]]; then
+            gh pr edit "$number" --title "$headline" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$headline" --body-file "$RUNNER_TEMP/body.md"
+          fi
+          gh pr merge "$BRANCH" --auto --squash
+          echo "The pull request of the issue assistant $TAG from $BRANCH has the commit $commit, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"

@@ -384,6 +384,22 @@ it."""
 docs = "CONTRIBUTING.md#tests"
 autofix = """It passes once every `variant (…)` and `update (…)` passes."""
 
+[check."adopt the latest release"]
+title = "The sync of the issue assistant"
+problem = """The sync bot refused the latest release of the issue assistant, or its
+`install` failed or changed more than the workflows, the firewall policy and the pins;
+the summary of the run says which, with the reason."""
+why = """The blueprint takes over only a release of the issue assistant that its release
+workflow made, and brings it to every repository; a release that the bot refuses
+changes nothing here."""
+fix = """Read the summary of the run. A refused release changes nothing: tell the
+maintainers of the issue assistant, or wait for its next release. When GitHub was only
+unreachable, run the dry run again:"""
+commands = ["gh workflow run sync-issue-assistant.yml -f dry_run=true"]
+docs = "https://github.com/Dennis-Otto/repo-blueprint#the-issue-assistant"
+autofix = """Whether a release of the issue assistant may reach the blueprint is decided
+by its verification, never by a command of the pull request."""
+
 # ---------------------------------------------------------------- the steps of scripts/check.sh
 
 [step."Text files"]

@@ -2918,6 +2918,42 @@ def test_the_website_of_the_owner_lives_at_the_root(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_issue_assistant_shows_its_limits_of_the_ai_runs(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The defaults of the issue assistant since 1.3.0, which config.toml shows, so a
+    # maintainer finds them; the blueprint's own config has them too.
+    for root in (projects[kind], ROOT):
+        config = tomllib.loads(
+            (root / ".github/issue-assistant/config.toml").read_text(encoding="utf-8")
+        )
+        assert config["engine"] == {
+            "name": "claude",
+            "max_per_day": 20,
+            "max_per_author_per_day": 3,
+            "release_replies": 2,
+        }
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_actionlint_ignores_only_the_queue_of_the_issue_assistant(
+    projects: dict[str, Path], kind: str
+) -> None:
+    config = (projects[kind] / ".github/actionlint.yaml").read_text(encoding="utf-8")
+    assert config == (ROOT / ".github/actionlint.yaml").read_text(encoding="utf-8")
+    # actionlint 1.7.12 doesn't know the queue of a concurrency group, which the issue
+    # assistant uses since 1.3.0: only that message, and only in its workflow.
+    paths = config[config.index("\npaths:\n") + 1 :]
+    assert paths.startswith(
+        "paths:\n  .github/workflows/issue-assistant.yml:\n    ignore:\n"
+    )
+    ignored = [
+        line.strip() for line in paths.splitlines() if line.strip().startswith("- ")
+    ]
+    assert ignored == ['- \'unexpected key "queue" for "concurrency" section\'']
+
+
 def test_the_issue_forms_point_to_the_documentation(tmp_path: Path) -> None:
     project = render(
         tmp_path,
@@ -3386,6 +3422,58 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
         if "lockFileMaintenance" in types and not about_a_dependency:
             automerge = rule.get("automerge", automerge)
     assert automerge is False
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_leaves_the_issue_assistant_to_the_sync_bot(
+    projects: dict[str, Path], kind: str
+) -> None:
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    # A pin that moved alone would fail the check issue-assistant, which compares the
+    # workflows with the templates of the pinned release; the sync bot of the blueprint
+    # moves both together. No later rule turns the updates on again.
+    action = "Dennis-Otto/issue-assistant"
+    off = [
+        index
+        for index, rule in enumerate(rules)
+        if action in rule.get("matchDepNames", [])
+    ]
+    assert len(off) == 1
+    assert rules[off[0]] == {
+        "matchManagers": ["github-actions"],
+        "matchDepNames": [action],
+        "enabled": False,
+    }
+
+    def about_the_action(rule: dict[str, Any]) -> bool:
+        names = rule.get("matchDepNames")
+        managers = rule.get("matchManagers")
+        files = rule.get("matchFileNames")
+        return (
+            (names is None or action in names)
+            and (managers is None or "github-actions" in managers)
+            and (
+                files is None
+                or any(
+                    name == "**" or name.startswith(".github/workflows")
+                    for name in files
+                )
+            )
+        )
+
+    assert not any(
+        rule.get("enabled") and about_the_action(rule) for rule in rules[off[0] + 1 :]
+    )
+    # The sync bot is the blueprint's alone: a repository gets the release with the
+    # update of the blueprint.
+    if kind != "blueprint":
+        assert not (root / ".github/workflows/sync-issue-assistant.yml").exists()
+        assert not (root / "sync_issue_assistant.py").exists()
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -4426,6 +4514,7 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
             "Variants",
             "Windows",
             "Release",
+            "Issue assistant sync",
         }
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
@@ -4953,7 +5042,13 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
-BLUEPRINT_BOTS = {"Dashboard", "Renovate", "Rollout", "Weekly report"}
+BLUEPRINT_BOTS = {
+    "Dashboard",
+    "Issue assistant sync",
+    "Renovate",
+    "Rollout",
+    "Weekly report",
+}
 
 
 def names_of_workflows(root: Path) -> dict[str, str]:
