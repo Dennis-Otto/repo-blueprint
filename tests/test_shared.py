@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -120,3 +122,89 @@ def test_the_copy_of_a_repository_has_its_files_as_git_sees_them(
     assert (tmp_path / "copy/changed.md").read_text(encoding="utf-8") == (
         "Not yet committed.\n"
     )
+
+
+def test_no_test_sees_the_repository_that_runs_the_tests() -> None:
+    assert "GIT_DIR" in shared.GIT_REPOSITORY_VARIABLES
+    assert not set(shared.GIT_REPOSITORY_VARIABLES) & set(os.environ)
+
+
+# It runs the tests in a copy of the repository again, which the copy of the mutation
+# tests has no configuration of pytest for; it tests no code of the blueprint.
+@pytest.mark.mutation_unsafe
+def test_the_tests_leave_the_repository_that_git_dir_names_alone(
+    tmp_path: Path,
+) -> None:
+    # Git sets GIT_DIR for its hooks in a worktree, such as the one before a push that
+    # runs the tests, and an agent sets GIT_DIR and GIT_WORK_TREE for a worktree in a
+    # container. A test that makes a repository of its own with git init and commits
+    # must still leave that one alone: its commits, branches, configuration and
+    # checkout.
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    environment = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Dev",
+                "-c",
+                "user.email=dev@example.com",
+                *arguments,
+            ],
+            cwd=outer,
+            capture_output=True,
+            encoding="utf-8",
+            env=environment,
+            check=True,
+        ).stdout
+
+    def state() -> str:
+        return (
+            git("for-each-ref")
+            + git("status", "--porcelain", "--untracked-files=all")
+            + (outer / ".git/config").read_text(encoding="utf-8")
+        )
+
+    (outer / "README.md").write_text(
+        "The repository that runs the tests.\n", encoding="utf-8"
+    )
+    git("init", "--quiet")
+    git("add", "README.md")
+    git("commit", "--quiet", "--message", "The start")
+    # A change not yet committed, which a git add --all of a test would take in.
+    (outer / "notes.md").write_text("Not yet committed.\n", encoding="utf-8")
+    before = state()
+    # A test that commits in a repository of its own.
+    run = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            f"--basetemp={tmp_path / 'run'}",
+            "tests/test_shared.py::"
+            "test_the_copy_of_a_repository_has_its_files_as_git_sees_them",
+        ],
+        cwd=shared.ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        env={
+            **environment,
+            "GIT_DIR": str(outer / ".git"),
+            "GIT_WORK_TREE": str(outer),
+            "GIT_INDEX_FILE": str(outer / ".git/index"),
+        },
+        check=False,
+    )
+
+    assert state() == before
+    assert run.returncode == 0, run.stdout + run.stderr

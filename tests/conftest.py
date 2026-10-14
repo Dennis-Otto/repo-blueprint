@@ -6,6 +6,20 @@ import os
 from collections.abc import Iterator
 
 import pytest
+from shared import GIT_REPOSITORY_VARIABLES
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_repository_of_the_run() -> Iterator[None]:
+    """No test sees the variables that point Git at the repository that runs the
+    tests, such as GIT_DIR, which Git sets for the hook before a push in a worktree:
+    git init in a test's own repository would rewrite the configuration of that one,
+    and the commits of the test would land on its branch. git in the blueprint's own
+    checkout gets them back from shared.git_environment()."""
+    with pytest.MonkeyPatch.context() as patch:
+        for name in GIT_REPOSITORY_VARIABLES:
+            patch.delenv(name, raising=False)
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)
