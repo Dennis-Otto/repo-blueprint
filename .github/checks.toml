@@ -102,7 +102,10 @@ commits them onto a branch of this repository."""
 [check.docs]
 title = "The website"
 problem = """The website doesn't build strictly: a link or an anchor leads nowhere, a
-page is missing from the navigation of `mkdocs.yml`, or MkDocs warns about a page."""
+page is missing from the navigation of `mkdocs.yml`, or MkDocs warns about a page. When
+the log names a font or a script that Material couldn't download, its server had a
+hiccup: that usually passes when the job runs again, and a build that finds them in
+the cache of the week, which a push to `main` saves, downloads nothing."""
 why = """A strict build keeps every link of the documentation working; a warning
 today is a broken page for a reader tomorrow."""
 fix = """Fix what the log of the check names. Install the tools of the website as the

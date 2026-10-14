@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the website reaches GitHub Pages
+    accDescr: The job docs, the required check, restores the downloads of Material from the cache of this ISO week and builds the website strictly, in every pull request and on main. Only a push saves the cache, once for each key. On main, where GitHub Pages publishes from the workflow, the same job hands the website that it built to GitHub Pages, with its files whose name starts with a dot, and a second job publishes it.
+
+    change["A pull request or a push to main"]
+    restore["docs: restore the downloads of Material<br>from the cache of this ISO week"]
+    build["docs: mkdocs build --strict<br>the required check"]
+    save["A push saves the cache<br>once for each key"]
+    upload["On main: hand the website to GitHub Pages<br>with .well-known and other dot folders"]
+    deploy["publish the website<br>the second and last job"]
+
+    change --> restore --> build
+    build --> save
+    build --> upload --> deploy
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class change you
+    class restore,build,save,upload bot
+    class deploy done
