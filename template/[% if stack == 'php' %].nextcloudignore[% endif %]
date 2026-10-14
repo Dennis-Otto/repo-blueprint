@@ -19,6 +19,7 @@
 /composer.json
 /composer.lock
 /docs
+/infection.json5
 /krankerl.toml
 /LICENSES
 /lychee.toml
