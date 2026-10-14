@@ -24,7 +24,9 @@ jobs:
     # Not in the blueprint itself; generated repositories don't have this line.
     if: github.repository != 'Dennis-Otto/repo-blueprint'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # A few times its longest run, so that a run that hangs ends early; a step that
+    # installs, builds or downloads ends after five minutes.
+    timeout-minutes: 8
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -37,12 +39,34 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+      # uv installs the hash-pinned tools in seconds and checks the hash of each
+      # package. Its cache keeps only the wheels that it built from source, under a
+      # key of the lock file: pre-built ones download faster than a cache restores
+      # them.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.12.17"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: requirements-dev.txt
       - name: Install the hash-pinned tools
-        run: pip install --require-hashes -r requirements-dev.txt
+        timeout-minutes: 5
+        run: uv pip install --system --require-hashes -r requirements-dev.txt
+      # mypy starts from what it knew of the code at the last run that passed, and
+      # checks again what changed and what depends on it. It keeps no module with an
+      # error, so the cache hides no finding.
+      - name: Restore the cache of mypy
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-${{ hashFiles('**/*.py') }}
+          restore-keys: mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-
       - name: Run the checks
         run: bash scripts/check.sh
       - name: Show the coverage

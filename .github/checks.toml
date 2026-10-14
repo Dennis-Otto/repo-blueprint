@@ -29,7 +29,10 @@
 title = "The checks of scripts/check.sh"
 problem = """One of the checks of `scripts/check.sh` failed, such as the format, the
 lint or the types of the code, its tests and their coverage, the package or the
-website. The summary of the check names the step that stopped it."""
+website. The summary of the check names the step that stopped it. When that step
+comes before the checks, such as the one that installs the tools or pulls an image,
+a download failed or hung until the step ran out of its time: that usually passes
+when the job runs again, which the flaky-test bot does once by itself."""
 why = """These are the checks that run on your machine as well, so a change that passes
 them here passes them everywhere, and every commit of `main` stays ready for a
 release."""
@@ -342,7 +345,10 @@ the decision of a person."""
 [check."variant (*)"]
 title = "A new repository of one kind"
 problem = """A repository of this kind, made from the template of the pull request, fails
-its checks; the log names the step and the summary how to fix it."""
+its checks; the log names the step and the summary how to fix it. When that step
+comes before the checks, such as the one that installs the tools or pulls an image,
+a download failed or hung until the step ran out of its time: that usually passes
+when the job runs again, which the flaky-test bot does once by itself."""
 why = """Every repository made from the blueprint must pass its own checks from its first
 commit."""
 fix = """The log of the check shows the step that failed in the project of that kind.
@@ -355,7 +361,10 @@ autofix = """A kind of project that fails its checks needs a fix of the template
 title = "The update of a repository of one kind"
 problem = """A repository of this kind, made from the latest release and brought to the
 pull request with `copier update`, conflicts or fails its checks; the log names the
-step."""
+step. When that step comes before the checks, such as the one that installs the tools
+or pulls an image, a download failed or hung until the step ran out of its time: that
+usually passes when the job runs again, which the flaky-test bot does once by
+itself."""
 why = """The blueprint bot brings every release to every repository; an update that
 fails there holds up all of them."""
 fix = """Read the log of the check: it shows the conflict or the step that failed. Fix

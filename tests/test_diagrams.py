@@ -973,6 +973,10 @@ def drawn(root: Path) -> dict[str, str]:
 needs_bash = pytest.mark.skipif(
     BASH is None or GIT is None, reason="the script runs in bash, Git Bash on Windows"
 )
+# In the copy of the mutation tests, the tool that a test copies into a repository
+# is the code with the mutants, which the variables of mutmut switch in the process
+# that the test starts, outside of the copy, where mutmut finds no configuration.
+runs_a_copy_of_the_tool = pytest.mark.mutation_unsafe
 
 
 @needs_bash
@@ -1045,6 +1049,7 @@ def test_the_check_fails_on_what_doesnt_match(tmp_path: Path) -> None:
     )
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_check_finds_the_blocks_that_extract_takes_out(tmp_path: Path) -> None:
     # Examples in blocks of code and in comments stay; a block in a note is a diagram.
@@ -1064,6 +1069,7 @@ def test_the_check_finds_the_blocks_that_extract_takes_out(tmp_path: Path) -> No
     )
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_check_compares_the_alt_of_each_picture_with_its_source(
     tmp_path: Path,
@@ -1102,6 +1108,7 @@ def test_the_check_compares_the_alt_of_each_picture_with_its_source(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_script_takes_out_checks_and_draws_the_diagrams(tmp_path: Path) -> None:
     root = repository(
@@ -1338,6 +1345,7 @@ def files_of(folder: Path) -> dict[str, str]:
     }
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
     root = with_tools(
@@ -1391,6 +1399,7 @@ DIFFER = ("lint.yml", "diagrams", "Report the diagrams that differ")
 SAME_REPOSITORY = {"EVENT": "pull_request", "APP": "Iv23li", "HEAD_REPOSITORY": "o/r"}
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize(
     ("head", "app", "fix"),
@@ -1431,6 +1440,7 @@ def test_the_check_promises_the_bot_only_where_it_commits(
     assert f"with Docker. {fix} The summary of this run" in reported.stdout
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_alt_of_a_page_follows_its_source(tmp_path: Path) -> None:
     # A pull request that tells a diagram in other words: its picture says them too.
@@ -1452,6 +1462,7 @@ def test_the_alt_of_a_page_follows_its_source(tmp_path: Path) -> None:
     }
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_a_changed_picture_is_checked_too(tmp_path: Path) -> None:
     # A pull request that changes only the alt of a picture by hand.
@@ -1471,6 +1482,7 @@ def test_a_changed_picture_is_checked_too(tmp_path: Path) -> None:
     assert files_of(tmp_path / "runner/diagrams") == {"files/README.md": readme}
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize(
     ("change", "drawn", "message"),
@@ -1505,6 +1517,7 @@ def test_the_check_passes_when_every_diagram_is_a_picture(
     assert (tmp_path / "calls").exists() == drawn
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_a_block_waits_for_main_until_the_first_source(tmp_path: Path) -> None:
     # Right after the update of the blueprint, before the Diagrams workflow of main
@@ -1525,6 +1538,7 @@ def test_a_block_waits_for_main_until_the_first_source(tmp_path: Path) -> None:
     assert not (tmp_path / "calls").exists()
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_update_leaves_sources_that_a_project_draws_itself(tmp_path: Path) -> None:
     # A repository that kept Mermaid sources in docs/diagrams/ before, drawn by a
@@ -1709,6 +1723,7 @@ def calls(tmp_path: Path) -> list[str]:
     return (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_diagram_bot_commits_the_pictures_onto_the_branch(tmp_path: Path) -> None:
     root = with_tools(tmp_path / "main")
@@ -1756,6 +1771,7 @@ def test_the_diagram_bot_commits_the_pictures_onto_the_branch(tmp_path: Path) ->
     assert not any(call.startswith("gh pr ") for call in calls(tmp_path))
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize(
     "files",
@@ -1776,6 +1792,7 @@ def test_the_diagram_bot_commits_nothing_but_diagrams(
     assert not (tmp_path / "request.json").exists()
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_diagram_bot_leaves_a_branch_that_moved_on(tmp_path: Path) -> None:
     folder = kept(tmp_path / "kept", {"docs/images/diagrams/steps.svg": "<svg >\n"})
@@ -1843,6 +1860,7 @@ def applied(root: Path, request: dict[str, Any]) -> None:
     commit(root, request["variables"]["input"]["message"]["headline"])
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
     root = with_tools(
@@ -1916,6 +1934,7 @@ def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
     assert check.returncode == 0, check.stdout + check.stderr
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_a_new_renderer_draws_the_pictures_anew(tmp_path: Path) -> None:
     # Renovate updates the image of mermaid-cli on a branch of the repository, and
@@ -1952,6 +1971,7 @@ PULL_REQUEST = (
 )
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize("app", ["Iv23li", ""])
 def test_the_diagrams_of_main_are_drawn_for_their_pull_request(
@@ -1998,6 +2018,7 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(
     assert summary == "Every diagram of main is a picture of its source, as drawn.\n"
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize(
     ("change", "commits", "drawn"),
@@ -2074,6 +2095,7 @@ def run_the_bot_of_main(
     return result, summary, calls(tmp_path)
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_bot_of_main_opens_one_pull_request_that_merges_itself(
     tmp_path: Path,
@@ -2114,6 +2136,7 @@ def test_the_bot_of_main_opens_one_pull_request_that_merges_itself(
     )
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_bot_of_main_updates_its_pull_request(tmp_path: Path) -> None:
     # A branch for the commit that a failed run left behind starts again, too.
@@ -2146,6 +2169,7 @@ def test_the_bot_of_main_updates_its_pull_request(tmp_path: Path) -> None:
     assert made[-1] == "gh pr merge bot/diagrams --auto --squash"
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 @pytest.mark.parametrize("open_number", ["9", ""])
 def test_the_bot_of_main_closes_its_pull_request_once_main_is_fixed(
