@@ -84,6 +84,8 @@ REPO = "{repo}"
 GENERIC = re.compile(r"Process completed with exit code \d+\.")
 # What the report shows of a pull request at most: GitHub takes 65536 characters.
 FINDINGS = 10
+# The checks that failed which the report explains, each one with what it found.
+SECTIONS = 20
 FINDING_LENGTH = 300
 NAME_LENGTH = 100
 BODY_LENGTH = 60000
@@ -452,16 +454,24 @@ def find_pull(api: Api, repo: str, sha: str, number: int | None) -> Json | None:
 
 
 def check_runs(api: Api, repo: str, sha: str) -> list[Run]:
-    """The latest check run of each check of a commit."""
-    runs: list[Run] = []
+    """The latest check run of each check of a commit. Each run of a workflow is a
+    check suite of its own, and the API lists the runs of every suite: a check that ran
+    again, as the title check does after an edit of the title, counts with its newest
+    run alone. Two apps may name a check alike, so the app is part of the check."""
+    latest: dict[tuple[str, str], Run] = {}
     page = 1
     while True:
         data = api.get(
             f"repos/{repo}/commits/{sha}/check-runs?per_page={PAGE}&page={page}"
         ) or {"check_runs": []}
-        runs += [Run.parse(item) for item in data["check_runs"]]
+        for item in data["check_runs"]:
+            run = Run.parse(item)
+            key = (run.app, run.name)
+            # The ids of check runs grow, so the highest is the newest.
+            if key not in latest or run.id > latest[key].id:
+                latest[key] = run
         if len(data["check_runs"]) < PAGE:
-            return sorted(runs, key=lambda run: (run.name, run.id))
+            return sorted(latest.values(), key=lambda run: (run.name, run.id))
         page += 1
 
 
@@ -556,9 +566,11 @@ def halted(stopped: list[Run]) -> list[str]:
         "from its log:",
         "",
     ]
-    for run in stopped:
+    for run in stopped[:FINDINGS]:
         log = f" · [its log]({run.url})" if run.url else ""
         lines.append(f"- {code(run.name, NAME_LENGTH)}{log}")
+    if len(stopped) > FINDINGS:
+        lines.append(f"- … and {len(stopped) - FINDINGS} more")
     return lines
 
 
@@ -603,16 +615,17 @@ def render(
     if stopped:
         lines += [*halted(stopped), ""]
     body = "\n".join([*lines, ""])
-    left = len(failed)
-    for run in failed:
+    shown = 0
+    for run in failed[:SECTIONS]:
         part = section(
             run, found.get(run.id, []), catalog, pull, repo, len(failed) <= 3
         )
         if len(body) + len(part) > BODY_LENGTH:
-            body += f"… and {left} more; their logs say what they found.\n\n"
             break
         body += part + "\n"
-        left -= 1
+        shown += 1
+    if shown < len(failed):
+        body += f"… and {len(failed) - shown} more; their logs say what they found.\n\n"
     return body + footer(repo, sha)
 
 
@@ -656,7 +669,10 @@ def report(
     comment = find_comment(api, repo, number)
     if comment is None and not any(run.failed for run in runs):
         return f"No check of #{number} failed; it needs no report.\n"
-    found = {run.id: findings(api, repo, run) for run in runs if run.failed}
+    # What the checks found, only of those that the report can show: each check that
+    # failed has one annotation at least, and the API takes only so many requests.
+    failed = [run for run in runs if run.failed]
+    found = {run.id: findings(api, repo, run) for run in failed[:SECTIONS]}
     body = render(repo, sha, pull, runs, found, catalog)
     if comment is not None and comment.get("body") == body:
         return f"The report of #{number} is up to date:\n\n{body}"

@@ -96,7 +96,10 @@ Pictures make the documentation easier to follow, and so do [diagrams](#diagrams
 
 - **Pictures** are files in `docs/images/`. A page of `docs/` names one as `images/…`, a README as `docs/images/…`, and a hook of the website (`.github/mkdocs_project.py`) shows it there too.
 - **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker: run it again after the questions of `copier.yml`, the output of Copier or the dashboard change.
-- **Pages have one column,** so that they read well in the GitHub app and on a phone, which keep columns side by side and squeeze them until the text is a few words wide and the pictures tiny. A table holds tabular data, never a layout: no `<table>` that sets a picture beside text, and no `<td width="…">`. A picture or a GIF comes at full width below the text that it illustrates, and a long list goes into `<details>` with a `<summary>` that names it. `scripts/check.sh` fails on such a table and such a cell in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line, and `python3 blueprint.py pages --fix` puts the cells of a layout table one below the other, the text before its picture, and leaves out the widths.
+
+### Pages in one column
+
+Pages have one column, so that they read well in the GitHub app and on a phone, which keep columns side by side and squeeze them until the text is a few words wide and the pictures tiny. A table holds tabular data, never a layout: no `<table>` that sets a picture beside text, and no `<td width="…">`. A picture or a GIF comes at full width below the text that it illustrates, and a long list goes into `<details>` with a `<summary>` that names it. `scripts/check.sh` fails on such a table and such a cell in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line, and `python3 blueprint.py pages --fix` puts the cells of a layout table one below the other, the text before its picture, and leaves out the widths.
 
 ## Diagrams
 

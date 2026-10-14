@@ -354,6 +354,19 @@ draws them for you:"""
 commands = ["bash scripts/diagrams.sh --extract"]
 docs = "CONTRIBUTING.md#diagrams"
 
+[step."Pages in one column"]
+problem = """A README, a CONTRIBUTING file or a page of `docs/` sets columns side by
+side: a `<table>` that puts a picture beside text, or a cell with a width; the log names
+each file and line."""
+why = """The GitHub app and phones keep such columns side by side and squeeze them until
+the text is a few words wide and the pictures are tiny."""
+fix = """Put the cells one below the other, the text before its picture, and leave out
+the widths; a table holds tabular data only. The command that the log names does this
+for you, then commit what changed (in the blueprint itself, the tool is `blueprint.py`
+without `.github/`):"""
+commands = ["python3 .github/blueprint.py pages --fix"]
+docs = "CONTRIBUTING.md#pages-in-one-column"
+
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
 version the release bot writes into every file that has one."""

@@ -951,6 +951,61 @@ def test_a_cancelled_check_has_not_passed() -> None:
     assert "evil.example" not in body
 
 
+def test_a_check_that_ran_again_counts_with_its_newest_run() -> None:
+    github = FakeGitHub()
+    run_report(github)
+    github.finish()
+    # The contributor edits the title, as the report says: the title check runs again
+    # in a check suite of its own and passes, and the API still lists the run that
+    # failed. An edit just before had cancelled an older run of another check.
+    title, reuse = github.runs[3], github.runs[5]
+    github.runs.append(title | {"id": title["id"] - 100, "conclusion": "failure"})
+    github.runs.insert(0, reuse | {"id": reuse["id"] - 100, "conclusion": "cancelled"})
+
+    run_report(github)
+
+    body = body_of(github)
+    assert "✅ **Every check passed.** Thank you!" in body
+    assert "stopped before the end" not in body
+
+    # A check of another app with the same name is a check of its own.
+    other = reuse | {"id": reuse["id"] + 100, "app": {"slug": "another-app"}}
+    github.runs.append(other | {"conclusion": "failure"})
+    run_report(github)
+    body = body_of(github)
+    assert "**1 check failed.**" in body
+    assert "<summary>❌ <b>" in body
+
+
+def test_many_checks_keep_the_report_and_its_requests_within_bounds() -> None:
+    github = FakeGitHub()
+    # A fork may add a matrix of hundreds of legs that fail or are cancelled.
+    markdown = github.runs[1]
+    github.runs = [
+        markdown
+        | {
+            "id": 60000000000 + index,
+            "name": f"leg ({index:03})",
+            "conclusion": "failure" if index % 2 else "cancelled",
+        }
+        for index in range(600)
+    ]
+
+    run_report(github)
+
+    body = body_of(github)
+    assert len(body) < 65536
+    assert "**300 checks failed.**" in body
+    assert "**300 checks stopped before the end**" in body
+    assert "- `leg (008)`" in body
+    assert "- `leg (020)`" not in body
+    assert "\n- … and 290 more\n" in body
+    assert body.count("<details>") == 20
+    assert "… and 280 more; their logs say what they found." in body
+    annotations = [path for method, path in github.calls if "/annotations?" in path]
+    assert len(annotations) == 20
+
+
 def test_the_coach_waits_for_the_checks_of_other_apps() -> None:
     github = FakeGitHub()
     run_report(github)
