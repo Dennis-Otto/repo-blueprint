@@ -1108,6 +1108,7 @@ def test_the_check_compares_the_alt_of_each_picture_with_its_source(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@runs_a_copy_of_the_tool
 @needs_bash
 def test_the_script_takes_out_checks_and_draws_the_diagrams(tmp_path: Path) -> None:
     root = repository(
