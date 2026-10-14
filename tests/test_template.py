@@ -968,8 +968,12 @@ def test_hadolint_runs_in_its_image_and_shows_its_findings_as_annotations(
         f"image {image[0]}",
         "command hadolint --no-color Dockerfile",
     ]
-    # The problem matcher of its action turns each finding into an annotation.
+    # The problem matcher of its action turns each finding into an annotation, of
+    # this step alone: it goes when the step ends, also when Hadolint fails, before
+    # the checks of the image, whose output it would otherwise read as findings too.
     assert f"::add-matcher::{runner_temp.as_posix()}/hadolint.json\n" in output
+    assert output.endswith("::remove-matcher owner=hadolint::\n")
+    assert "trap 'echo \"::remove-matcher owner=hadolint::\"' EXIT\n" in step
     matcher = json.loads((runner_temp / "hadolint.json").read_text(encoding="utf-8"))
     pattern = matcher["problemMatcher"][0]["pattern"][0]
     # As Hadolint 2.15 writes a finding without colors.
@@ -6373,6 +6377,32 @@ def test_renovate_keeps_uv_and_hadolint_current() -> None:
         assert len(hadolint) == len(HADOLINT.findall(text)), path.name
 
 
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_uv_of_the_workflows_follows_the_blueprint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The workflows that set uv up belong to the blueprint: the blueprint's Renovate
+    # moves their uv, and the next release brings it to every repository. A pull
+    # request of a repository's own Renovate for each weekly release of uv would
+    # change the blueprint's files and conflict with its next update.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    enabled = True
+    for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
+        if "uv" in rule.get("matchDepNames", []):
+            assert rule == {
+                "matchManagers": ["custom.regex"],
+                "matchDepNames": ["uv"],
+                "matchFileNames": [".github/workflows/**"],
+                "enabled": rule["enabled"],
+            }
+            enabled = rule["enabled"]
+    assert enabled is (kind == "blueprint")
+
+
 # Each job ends after a few times its longest run, and each step that installs, builds
 # or downloads after five minutes: a build of the website that hung on 2026-10-12 held
 # a pull request for half an hour, until the Variants ran out of time.
@@ -6419,6 +6449,37 @@ def test_every_step_that_installs_builds_or_downloads_has_a_time_limit(
                 assert int(minutes) < int(limit[1])
             bounded += 1
     assert bounded
+
+
+@pytest.mark.parametrize(
+    "check", ["check (python)", "variant (home-assistant)", "update (container)"]
+)
+def test_the_pr_coach_explains_a_step_before_the_checks_that_ran_out_of_time(
+    check: str,
+) -> None:
+    # When the install of the tools or the pull of an image hangs, its step stops
+    # after five minutes, before scripts/check.sh ever ran: the coach says that the
+    # job runs again, rather than only pointing at the checks.
+    entry = Catalog.load(ROOT).check(check)
+    assert entry
+    assert (
+        "When that step comes before the checks, such as the one that installs the"
+        " tools or pulls an image, a download failed or hung until the step ran out"
+        " of its time: that usually passes when the job runs again, which the"
+        " flaky-test bot does once by itself."
+    ) in entry.problem
+    # As the bot does for the checks of CI and the Variants.
+    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    rerun = job_of(after, "rerun")
+    assert 'gh run rerun "$RUN" --failed' in rerun
+    left_out = re.search(
+        r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
+        rerun,
+    )
+    assert left_out
+    names = json.loads(left_out[1])
+    assert not [name for name in names if name.startswith(("CI", "Variants"))]
+    assert "    workflows: [CI (python), Variants, " in after
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])

@@ -35,7 +35,8 @@ jobs:
       # Hadolint in its image, by tag and digest, which Renovate keeps current, with
       # the rules of the project's .hadolint.yaml where it has one. Its action would
       # build an image of its own at the start of the job. The problem matcher of the
-      # action shows each finding as an annotation.
+      # action shows each finding as an annotation, and only those of this step: the
+      # step removes it when it ends, also when Hadolint fails.
       - name: Lint the Dockerfile
         timeout-minutes: 5
         run: |
@@ -43,6 +44,7 @@ jobs:
           {"problemMatcher": [{"owner": "hadolint", "pattern": [{"regexp": "^(.+):(\\d+)\\s(\\S+)\\s(error|warning|info|style):\\s(.+)$", "file": 1, "line": 2, "code": 3, "severity": 4, "message": 5}]}]}
           EOF
           echo "::add-matcher::$RUNNER_TEMP/hadolint.json"
+          trap 'echo "::remove-matcher owner=hadolint::"' EXIT
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo \
             ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
             hadolint --no-color Dockerfile
