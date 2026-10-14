@@ -22,6 +22,8 @@ from blueprint.cli import main
 from blueprint.diagrams import (
     LONGEST,
     Changes,
+    Extracted,
+    Followed,
     Names,
     alt_text,
     changes,
@@ -30,6 +32,7 @@ from blueprint.diagrams import (
     dedent,
     diagrams_of,
     extract,
+    follow,
     heading_before,
     keep,
     labels,
@@ -50,6 +53,8 @@ flowchart TB
 
     pr["Pull request"] --> main["main"]
 """
+# What the diagram bot says of a page that it changed.
+PAGE = "its diagrams are pictures of their sources, alt and all"
 GERMAN = """\
 flowchart TB
     accTitle: Wie eine Änderung ausgeliefert wird
@@ -290,6 +295,54 @@ def test_a_block_may_name_more_than_mermaid() -> None:
 
 def test_the_lines_of_a_block_lose_the_indentation_of_its_fence() -> None:
     assert dedent("   a\n\n      b  \n  c\n", "   ") == "a\n\n   b\n  c\n"
+    assert dedent("> a\n>\n>     b\n", "> ") == "a\n\n    b\n"
+
+
+NOTED = DIAGRAM.replace("ships", "is noted")
+# A diagram in a comment, without an arrow --> that would end the comment.
+OLD = 'flowchart TB\n    old["An old step"]\n'
+# The diagram in a quote, such as a note of GitHub.
+QUOTED = "".join(
+    f"> {line}\n" if line else ">\n"
+    for line in ["```mermaid", *NOTED.splitlines(), "```"]
+)
+# A page that shows how to write a diagram, in a block of code and in a comment, and a
+# diagram in a note.
+EXAMPLES = (
+    "# Guide\n\n"
+    "````markdown\n" + block(DIAGRAM) + "````\n\n"
+    "~~~\n" + picture("example", Path("README.md"), "An example") + "~~~\n\n"
+    "<!-- An old diagram:\n" + block(OLD) + "-->\n\n"
+    "<!-- A note --> and text\n\n"
+    "> [!NOTE]\n> A note.\n>\n" + QUOTED + "\n"
+    "```text\nnever closed\n" + block(DIAGRAM)
+)
+
+
+def test_a_block_in_an_example_or_a_comment_is_no_diagram() -> None:
+    found = diagrams_of(EXAMPLES)
+
+    assert [(diagram.indent, diagram.source) for diagram in found] == [("> ", NOTED)]
+    assert EXAMPLES[found[0].start : found[0].end] == QUOTED
+    assert not diagrams_of("<!--\n" + block(DIAGRAM))
+
+
+@pytest.mark.skipif(GIT is None, reason="the Markdown is what git lists")
+def test_extract_takes_out_only_the_diagrams_that_a_page_shows(tmp_path: Path) -> None:
+    root = repository(tmp_path, {"docs/guide.md": EXAMPLES})
+
+    extracted = extract(root)
+
+    name = "how-a-change-is-noted"
+    assert extracted == [
+        Extracted(Path("docs/guide.md"), Path(f"docs/diagrams/{name}.mmd"), True)
+    ]
+    assert (root / f"docs/diagrams/{name}.mmd").read_text(encoding="utf-8") == NOTED
+    text = (root / "docs/guide.md").read_text(encoding="utf-8")
+    assert text == EXAMPLES.replace(
+        QUOTED, picture(name, Path("docs/guide.md"), alt_text(NOTED), "> ")
+    )
+    assert extract(root) == []
 
 
 def test_a_picture_names_its_files_from_the_folder_of_its_page() -> None:
@@ -475,6 +528,90 @@ def test_the_command_fails_outside_a_repository(
 ) -> None:
     assert main(["diagrams", "extract"], root=tmp_path / "missing") == 2
     assert capsys.readouterr().err.startswith("blueprint.py: ")
+
+
+# A diagram whose description changed after its picture was taken out, and one whose
+# labels hold HTML.
+RETOLD = DIAGRAM.replace("merges, and", "merges once it is green, and")
+BOLD = 'flowchart TB\n    a["<b>A</b>"] --> b\n'
+EXAMPLE = picture("steps", Path("README.md"), "An example")
+FOLLOWING = {
+    "README.md": "# Demo\n\n"
+    + picture("steps", Path("README.md"), alt_text(DIAGRAM))
+    + '<picture>\n  <img src="docs/images/diagrams/bare.svg">\n</picture>\n'
+    + "<picture>\n"
+    + '  <img src="docs/images/diagrams/noted.svg" alt=\'Old\' width="600">\n'
+    + "</picture>\n"
+    + picture("bold", Path("README.md"), "Written by hand")
+    + f"```html\n{EXAMPLE}```\n",
+    "docs/diagrams/steps.mmd": RETOLD,
+    "docs/diagrams/bare.mmd": NOTED,
+    "docs/diagrams/noted.mmd": NOTED,
+    "docs/diagrams/bold.mmd": BOLD,
+    # A source of the project's own, which no page shows.
+    "docs/diagrams/own.en.mmd": BOLD,
+}
+
+
+@pytest.mark.skipif(GIT is None, reason="the Markdown is what git lists")
+def test_the_pictures_follow_what_their_sources_say(tmp_path: Path) -> None:
+    root = repository(tmp_path, FOLLOWING)
+    readme, bold = Path("README.md"), Path("docs/diagrams/bold.mmd")
+
+    assert follow(root, write=False) == [
+        Followed(bold, bold),
+        Followed(readme, Path("docs/diagrams/steps.mmd"), 5),
+        Followed(readme, Path("docs/diagrams/bare.mmd"), 8),
+        Followed(readme, Path("docs/diagrams/noted.mmd"), 11),
+    ]
+    assert {
+        name: (root / name).read_text(encoding="utf-8") for name in FOLLOWING
+    } == FOLLOWING
+
+    assert len(follow(root)) == 4
+    noted = alt_text(NOTED)
+    assert (root / "README.md").read_text(encoding="utf-8") == (
+        "# Demo\n\n"
+        + picture("steps", readme, alt_text(RETOLD))
+        + f'<picture>\n  <img alt="{noted}" src="docs/images/diagrams/bare.svg">\n'
+        + "</picture>\n<picture>\n"
+        + f'  <img src="docs/images/diagrams/noted.svg" alt="{noted}" width="600">\n'
+        + "</picture>\n"
+        + picture("bold", readme, "Written by hand")
+        + f"```html\n{EXAMPLE}```\n"
+    )
+    assert (root / bold).read_text(encoding="utf-8") == without_html(BOLD)
+    assert (root / "docs/diagrams/own.en.mmd").read_text(encoding="utf-8") == BOLD
+    assert follow(root) == []
+
+
+@pytest.mark.skipif(GIT is None, reason="the Markdown is what git lists")
+def test_the_commands_say_what_differs_from_the_sources(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repository(tmp_path, FOLLOWING)
+
+    assert main(["diagrams", "check"], root=root) == 1
+    stale = (
+        "the alt of the picture of docs/diagrams/{}.mmd isn't its accTitle and"
+        " accDescr; bash scripts/diagrams.sh --extract writes them into it\n"
+    )
+    assert capsys.readouterr().out == (
+        f"README.md:5: {stale.format('steps')}"
+        f"README.md:8: {stale.format('bare')}"
+        f"README.md:11: {stale.format('noted')}"
+    )
+    assert main(["diagrams", "extract"], root=root) == 0
+    assert capsys.readouterr().out == (
+        "docs/diagrams/bold.mmd: its labels lost their HTML, which the pictures show"
+        " as text\n"
+        "README.md:5: the alt of the picture repeats docs/diagrams/steps.mmd again\n"
+        "README.md:8: the alt of the picture repeats docs/diagrams/bare.mmd again\n"
+        "README.md:11: the alt of the picture repeats docs/diagrams/noted.mmd again\n"
+        "No ```mermaid block in the Markdown.\n"
+    )
+    assert main(["diagrams", "check"], root=root) == 0
+    assert capsys.readouterr().out == ""
 
 
 # What the diagram bots commit
@@ -677,7 +814,7 @@ def test_the_bot_says_which_blocks_became_pictures(tmp_path: Path) -> None:
         },
     )
     listed = (
-        "- `README.md`: its `mermaid` blocks are pictures now\n"
+        f"- `README.md`: {PAGE}\n"
         "- `docs/diagrams/steps.mmd`: the source of a diagram\n"
         "- `docs/images/diagrams/steps.svg`: drawn anew\n"
     )
@@ -764,7 +901,7 @@ PYTHON3 = '#!/usr/bin/env bash\nexec "$PYTHON" "$@"\n'
 
 
 # What the script needs besides the commands that a test takes away.
-NEEDED = ("git", "tar", "sed", "grep", "mktemp", "cp", "basename")
+NEEDED = ("git", "tar", "sed", "grep", "awk", "mktemp", "cp", "basename")
 
 
 def without(*commands: str) -> str:
@@ -907,11 +1044,69 @@ def test_the_check_fails_on_what_doesnt_match(tmp_path: Path) -> None:
         "docs/images/diagrams/orphan.dark.svg: its source docs/diagrams/orphan.mmd is missing\n"
         "1 diagram(s) in a ```mermaid block; bash scripts/diagrams.sh --extract turns each"
         " into a picture of a source in docs/diagrams/.\n"
-        "bash scripts/diagrams.sh draws the pictures of every source again, with Docker.\n"
+        "bash scripts/diagrams.sh --extract fixes what it can, with Docker: it takes the"
+        " blocks out, writes the alt of each picture and draws the pictures anew.\n"
     )
 
 
 @runs_a_copy_of_the_tool
+@needs_bash
+def test_the_check_finds_the_blocks_that_extract_takes_out(tmp_path: Path) -> None:
+    # Examples in blocks of code and in comments stay; a block in a note is a diagram.
+    page = EXAMPLES.replace(
+        "~~~\n" + picture("example", Path("README.md"), "An example") + "~~~\n", ""
+    )
+    root = repository(tmp_path / "repository", {"docs/guide.md": page})
+
+    result = script(root, tmp_path, "--check")
+
+    line = page.splitlines().index("> ```mermaid") + 1
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        f"docs/guide.md:{line}: a ```mermaid block, which the GitHub app shows as code\n"
+        "A warning for now: bash scripts/diagrams.sh --extract turns each into a picture"
+        " of a source in docs/diagrams/.\n"
+    )
+
+
+@needs_bash
+def test_the_check_compares_the_alt_of_each_picture_with_its_source(
+    tmp_path: Path,
+) -> None:
+    root = with_tools(
+        repository(
+            tmp_path / "repository",
+            {**MAIN, "README.md": picture("steps", Path("README.md"), "Old")},
+        )
+    )
+
+    result = script(root, tmp_path, "--check")
+
+    assert result.returncode == 1
+    assert result.stdout == (
+        "README.md:3: the alt of the picture of docs/diagrams/steps.mmd isn't its"
+        " accTitle and accDescr; bash scripts/diagrams.sh --extract writes them into"
+        " it\n"
+        "bash scripts/diagrams.sh --extract fixes what it can, with Docker: it takes the"
+        " blocks out, writes the alt of each picture and draws the pictures anew.\n"
+    )
+
+    # A tool that fails says so, and the check fails with it.
+    (root / ".github/blueprint.py").write_text(
+        "raise SystemExit(2)\n", encoding="utf-8"
+    )
+    result = script(root, tmp_path, "--check")
+    assert result.returncode == 1
+    assert result.stdout.startswith(
+        ".github/blueprint.py diagrams check failed; the error above says why.\n"
+    )
+
+    # Without blueprint.py, the CI compares them.
+    (root / ".github/blueprint.py").unlink()
+    result = script(root, tmp_path, "--check")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @needs_bash
 def test_the_script_takes_out_checks_and_draws_the_diagrams(tmp_path: Path) -> None:
     root = repository(
@@ -1173,7 +1368,7 @@ def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == "stale=true\n"
+    assert output == f"stale=true\nfix={ARTIFACT}\n"
     name = "how-a-change-merges"
     assert files_of(tmp_path / "runner/diagrams") == {
         "deleted.txt": "docs/images/diagrams/gone.svg\n",
@@ -1185,9 +1380,101 @@ def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
         "files/docs/images/diagrams/steps.svg": "<svg steps>\n",
     }
     assert summary.startswith("### Diagrams\nThe GitHub app shows a `mermaid` block")
-    assert "- `README.md`: its `mermaid` blocks are pictures now\n" in summary
+    assert f"- `README.md`: {PAGE}\n" in summary
     assert "- `docs/images/diagrams/gone.svg`: deleted, its source is gone\n" in summary
-    assert "the diagram bot commits it for you in a minute" in summary
+    assert summary.endswith(
+        f"Run it with Docker and commit what it changes. {ARTIFACT}\n"
+    )
+
+
+ARTIFACT = "The artifact `diagrams` of this run holds the files."
+BOT = (
+    "The diagram bot commits it onto this branch in a minute; the artifact `diagrams`"
+    " of this run holds the files as well."
+)
+DIFFER = ("lint.yml", "diagrams", "Report the diagrams that differ")
+# A pull request from a branch of this repository, which has the release app.
+SAME_REPOSITORY = {"EVENT": "pull_request", "APP": "Iv23li", "HEAD_REPOSITORY": "o/r"}
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("head", "app", "fix"),
+    [
+        ("o/r", "Iv23li", BOT),
+        (
+            "o/r",
+            "",
+            "No bot commits it here, because this repository has no release app (the"
+            " variable RELEASE_AUTOMATION_CLIENT_ID); the artifact `diagrams` of this"
+            " run holds the files.",
+        ),
+        ("someone/r", "Iv23li", ARTIFACT),
+    ],
+)
+def test_the_check_promises_the_bot_only_where_it_commits(
+    tmp_path: Path, head: str, app: str, fix: str
+) -> None:
+    root = with_tools(repository(tmp_path / "repository", MAIN))
+    commit(root, "Main")
+    pull_request(root, {"README.md": "# Demo\n\n" + block(MERGES)})
+
+    result, output, summary = run_step(
+        workflow_step(*DRAW),
+        root,
+        tmp_path,
+        {"docker": DOCKER},
+        EVENT="pull_request",
+        APP=app,
+        HEAD_REPOSITORY=head,
+    )
+    reported, _, _ = run_step(workflow_step(*DIFFER), root, tmp_path, {}, FIX=fix)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output == f"stale=true\nfix={fix}\n"
+    assert summary.endswith(f"Run it with Docker and commit what it changes. {fix}\n")
+    assert reported.returncode == 1
+    assert f"with Docker. {fix} The summary of this run" in reported.stdout
+
+
+@needs_bash
+def test_the_alt_of_a_page_follows_its_source(tmp_path: Path) -> None:
+    # A pull request that tells a diagram in other words: its picture says them too.
+    readme = picture("steps", Path("README.md"), alt_text(DIAGRAM))
+    root = with_tools(
+        repository(tmp_path / "repository", {**MAIN, "README.md": readme})
+    )
+    commit(root, "Main")
+    pull_request(root, {"docs/diagrams/steps.mmd": RETOLD})
+
+    result, output, _ = run_step(
+        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.startswith("stale=true\n")
+    assert files_of(tmp_path / "runner/diagrams") == {
+        "files/README.md": readme.replace(alt_text(DIAGRAM), alt_text(RETOLD))
+    }
+
+
+@needs_bash
+def test_a_changed_picture_is_checked_too(tmp_path: Path) -> None:
+    # A pull request that changes only the alt of a picture by hand.
+    readme = picture("steps", Path("README.md"), alt_text(DIAGRAM))
+    root = with_tools(
+        repository(tmp_path / "repository", {**MAIN, "README.md": readme})
+    )
+    commit(root, "Main")
+    pull_request(root, {"README.md": readme.replace(alt_text(DIAGRAM), "Steps")})
+
+    result, output, _ = run_step(
+        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.startswith("stale=true\n")
+    assert files_of(tmp_path / "runner/diagrams") == {"files/README.md": readme}
 
 
 @runs_a_copy_of_the_tool
@@ -1289,14 +1576,40 @@ def test_the_update_leaves_sources_that_a_project_draws_itself(tmp_path: Path) -
     assert not (root / "docs/images/diagrams").exists()
     assert script(root, tmp_path, "--adopted").returncode == 1
 
-    # Once a page shows a picture, the sources need theirs.
+    # Once a page shows a diagram of the blueprint, that diagram needs its pictures,
+    # while the sources of the project's own stay as they are.
     (root / "docs/guide.md").write_text(
-        picture("steps", Path("docs/guide.md"), "Steps"), encoding="utf-8"
+        "# Guide\n\n" + block(DIAGRAM), encoding="utf-8"
+    )
+    extracted = script(root, tmp_path, "--extract")
+    assert extracted.returncode == 0, extracted.stdout + extracted.stderr
+    assert extracted.stdout == (
+        "docs/guide.md: docs/diagrams/how-a-change-ships.mmd\n"
+        "1 diagram(s) became pictures of their sources in docs/diagrams/.\n"
+        "Drew the 1 diagram(s) of docs/diagrams/ into docs/images/diagrams/.\n"
+    )
+    assert drawn(root) == {
+        "how-a-change-ships.dark.svg": "<svg how-a-change-ships dark>\n",
+        "how-a-change-ships.svg": "<svg how-a-change-ships>\n",
+    }
+    assert (root / "docs/diagrams/steps.en.mmd").read_text(encoding="utf-8") == (
+        'flowchart TB\n    a["<b>A</b>"] --> b\n'
     )
     assert script(root, tmp_path, "--adopted").returncode == 0
     check = script(root, tmp_path, "--check")
-    assert check.returncode == 1
-    assert "docs/diagrams/steps.en.mmd: its picture" in check.stdout
+    assert check.returncode == 0, check.stdout + check.stderr
+    assert check.stdout == (
+        "Each of the 1 diagram(s) in docs/diagrams/ that a page shows has its"
+        " pictures; no page shows the other 1 source(s), which are left as they are.\n"
+    )
+    # The project's own script draws its sources into pictures of its own, which
+    # the checks leave alone as well.
+    (root / "docs/images/en").mkdir(parents=True)
+    (root / "docs/images/en/steps-light.png").write_bytes(b"PNG")
+    assert script(root, tmp_path).stdout == (
+        "Drew the 1 diagram(s) of docs/diagrams/ into docs/images/diagrams/.\n"
+    )
+    assert script(root, tmp_path, "--check").returncode == 0
 
 
 # gh, as the API answers after the filters of jq.
@@ -1559,11 +1872,15 @@ def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
     checked.mkdir()
 
     result, output, _ = run_step(
-        workflow_step(*DRAW), root, checked, {"docker": DOCKER}, EVENT="pull_request"
+        workflow_step(*DRAW),
+        root,
+        checked,
+        {"docker": DOCKER},
+        **SAME_REPOSITORY,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == "stale=true\n"
+    assert output == f"stale=true\nfix={BOT}\n"
     # The bot commits what the check kept onto the head of the pull request.
     bot = tmp_path / "bot"
     bot.mkdir()
@@ -1585,7 +1902,7 @@ def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
     # One comment says which blocks became pictures.
     assert "gh pr comment 7 --body-file " in "\n".join(calls(bot))
     comment = (bot / "body.md").read_text(encoding="utf-8")
-    assert "- `README.md`: its `mermaid` blocks are pictures now\n" in comment
+    assert f"- `README.md`: {PAGE}\n" in comment
 
     git_in(root, "switch", "--quiet", "feature")
     assert git_in(root, "rev-parse", "HEAD") == head
@@ -1628,12 +1945,12 @@ def test_a_new_renderer_draws_the_pictures_anew(tmp_path: Path) -> None:
         root,
         tmp_path,
         {"docker": DOCKER},
-        EVENT="pull_request",
+        **SAME_REPOSITORY,
         STYLE=" v2",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == "stale=true\n"
+    assert output == f"stale=true\nfix={BOT}\n"
     assert files_of(tmp_path / "runner/diagrams") == {
         "files/docs/images/diagrams/steps.svg": "<svg steps v2>\n",
         "files/docs/images/diagrams/steps.dark.svg": "<svg steps dark v2>\n",
@@ -1682,7 +1999,7 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(
         assert (
             "::warning::main has diagrams that not every reader sees" in result.stdout
         )
-    assert "- `docs/guide.md`: its `mermaid` blocks are pictures now\n" in summary
+    assert f"- `docs/guide.md`: {PAGE}\n" in summary
     assert "files/docs/guide.md" in files_of(tmp_path / "runner/diagrams")
 
     commit(root, "Drawn")
