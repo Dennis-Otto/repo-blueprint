@@ -49,7 +49,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant): eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält.
+    Der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant): eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält. Ein Bot, der auf `main` fehlschlägt, öffnet ein eigenes Issue, das sich schließt, sobald der Bot wieder besteht.
 
 - :material-web:{ .lg .middle } **Website**
 

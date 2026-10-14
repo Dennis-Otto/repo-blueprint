@@ -137,6 +137,8 @@ jobs:
       deployment: false
     permissions:
       contents: read
+      # The one issue with the warnings and errors of Renovate.
+      issues: write
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -172,3 +174,19 @@ jobs:
           renovate-version: 44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435
         env:
           LOG_LEVEL: info
+          # The warnings and errors once more, in JSON, for the next step; the action
+          # shares /tmp with the container of Renovate.
+          RENOVATE_LOG_FILE: /tmp/renovate/problems.json
+          RENOVATE_LOG_FILE_LEVEL: warn
+      # A warning, such as a lock file that Renovate can't read, ends no run with a
+      # failure, and the bot then skips that file in every run: one issue lists them
+      # and closes after three runs in a row without a problem.
+      - name: Keep the issue of Renovate's problems current
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -o pipefail
+          python3 blueprint.py --repo "$GITHUB_REPOSITORY" bot-health renovate /tmp/renovate/problems.json --run "$RUN_URL" |
+            tee -a "$GITHUB_STEP_SUMMARY"

@@ -9,8 +9,9 @@
 #   topic      cross-cutting topics the assistant may add
 #   lifecycle  set and removed by the issue assistant's rules
 #   decision   set by the maintainer only
-#   release    set by the pull request title check and the release bot; Dependabot
-#              sets dependencies too, Renovate no label
+#   release    set by the bots: the pull request title check, the release bot, the
+#              branch bot and the bot-health bot; Dependabot sets dependencies too,
+#              Renovate no label
 #
 # ask = false keeps the assistant from asking reporters of that kind for information.
 
@@ -181,4 +182,10 @@ group = "release"
 name = "merge-conflict"
 color = "b60205"
 description = "Needs a person: it conflicts with main, or a blueprint update has conflict markers"
+group = "release"
+
+[[label]]
+name = "bot-failure"
+color = "d93f0b"
+description = "A bot or a scheduled workflow fails on the default branch; closes when it passes again"
 group = "release"
