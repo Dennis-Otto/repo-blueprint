@@ -55,7 +55,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    The [issue assistant](https://github.com/Dennis-Otto/issue-assistant): a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix.
+    The [issue assistant](https://github.com/Dennis-Otto/issue-assistant): a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix. A bot that fails on `main` opens one issue of its own, which closes once the bot passes again.
 
 - :material-web:{ .lg .middle } **Website**
 
@@ -86,6 +86,12 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
     ---
 
     README, contributing guide, code of conduct, security policy and security design, governance, issue forms, records of the decisions, and discussions with an announcement of every release.
+
+- :material-head-cog-outline:{ .lg .middle } **Coding agents**
+
+    ---
+
+    `AGENTS.md` gives Claude Code, Codex, GitHub Copilot and Cursor the commands, the rules of pull requests and the changelog, and which files belong to the project and which to the blueprint. The notes of the project join it from `.github/agents.project.md`.
 
 </div>
 

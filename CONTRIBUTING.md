@@ -5,6 +5,7 @@ Participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and project deci
 Use [SUPPORT.md](SUPPORT.md) to choose the correct public support channel and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 All changes reach the protected `main` branch through pull requests that pass every required check.
+Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with what a change of the template reaches; a change of a rule here changes it there as well.
 
 ## Requirements for changes
 
@@ -77,7 +78,7 @@ The dev container in `.devcontainer/` has all of this set up, for VS Code and fo
 
 A check that fails explains itself. The PR coach writes what the check found, why that matters and how to fix it, with the commands to run, into the summary of the check and as its annotation; the pull request also shows the annotations of a tool at the lines that it names. After the checks, the coach keeps one comment on the pull request up to date with a section for each check that failed, also on a pull request from a fork, and a title that is no Conventional Commit gets one that passes. The comment follows every push and says so once every check passes. On your machine, `scripts/check.sh` explains the step that stopped it in the same words.
 
-The explanations are in [`.github/checks.toml`](.github/checks.toml). A new check, or a new step of `scripts/check.sh`, comes with its explanation there, in the same pull request: what it found, why that matters and how to fix it, with the commands and a link to read more. A test fails for a required check or a step without one, and `python3 blueprint.py coach verify` lists them. The coach runs no code of a pull request and shows the text of its checks only as code, as [decision 0019](docs/decisions/0019-every-check-explains-its-failure.md) describes.
+The explanations are in [`.github/checks.toml`](.github/checks.toml). A new check, or a new step of `scripts/check.sh`, comes with its explanation there, in the same pull request: what it found, why that matters and how to fix it, with the commands and a link to read more. A test fails for a required check or a step without one, and `python3 blueprint.py coach verify` lists them. The coach runs no code of a pull request and shows the text of its checks only as code, as [decision 0022](docs/decisions/0022-every-check-explains-its-failure.md) describes.
 
 ## Website
 
@@ -95,6 +96,7 @@ Pictures make the documentation easier to follow, and so do [diagrams](#diagrams
 
 - **Pictures** are files in `docs/images/`. A page of `docs/` names one as `images/…`, a README as `docs/images/…`, and a hook of the website (`.github/mkdocs_project.py`) shows it there too.
 - **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker: run it again after the questions of `copier.yml`, the output of Copier or the dashboard change.
+- **Pages have one column,** so that they read well in the GitHub app and on a phone, which keep columns side by side and squeeze them until the text is a few words wide and the pictures tiny. A table holds tabular data, never a layout: no `<table>` that sets a picture beside text, and no `<td width="…">`. A picture or a GIF comes at full width below the text that it illustrates, and a long list goes into `<details>` with a `<summary>` that names it. `scripts/check.sh` fails on such a table and such a cell in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line, and `python3 blueprint.py pages --fix` puts the cells of a layout table one below the other, the text before its picture, and leaves out the widths.
 
 ## Diagrams
 

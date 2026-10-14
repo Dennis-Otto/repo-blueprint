@@ -55,7 +55,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant): eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält.
+    Der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant): eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält. Ein Bot, der auf `main` fehlschlägt, öffnet ein eigenes Issue, das sich schließt, sobald der Bot wieder besteht.
 
 - :material-web:{ .lg .middle } **Website**
 
@@ -86,6 +86,12 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
     ---
 
     README, Beitragsleitfaden, Verhaltenskodex, Sicherheitsrichtlinie und Sicherheitsdesign, Governance, Issue-Formulare, Aufzeichnungen der Entscheidungen und Discussions mit einer Ankündigung jedes Releases.
+
+- :material-head-cog-outline:{ .lg .middle } **Coding-Agents**
+
+    ---
+
+    `AGENTS.md` gibt Claude Code, Codex, GitHub Copilot und Cursor die Befehle, die Regeln für Pull Requests und das Changelog, und welche Dateien dem Projekt gehören und welche dem Blueprint. Die Notizen des Projekts kommen aus `.github/agents.project.md` dazu.
 
 </div>
 

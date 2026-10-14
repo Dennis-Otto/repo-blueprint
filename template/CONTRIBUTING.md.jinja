@@ -5,6 +5,7 @@ Participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and project deci
 Use [SUPPORT.md](SUPPORT.md) to choose the correct public support channel and [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 All changes reach the protected `main` branch through pull requests that pass every required check.
+Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with the files that belong to the blueprint and are changed there.
 
 ## Requirements for changes
 
@@ -87,6 +88,16 @@ python3 -m venv .venv-docs
 ```
 
 On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place of `.venv-docs/bin/`; the dev container sets these tools up on its own. With them, `bash scripts/check.sh` builds the website strictly as well, as the check *docs* does, and without them it leaves that to the CI. The preview cards for social media come from the CI alone, because they need the Cairo library, which Windows doesn't have; where it is installed, `CI=true` before the command draws them too.
+
+## Pages in one column
+
+The READMEs, this guide and the pages of `docs/` have one column, so that they read well in the GitHub app and on a phone, which keep columns side by side and squeeze them until the text is a few words wide and the pictures tiny:
+
+- A table holds tabular data, never a layout: no `<table>` that sets a picture beside text, and no `<td width="…">`.
+- A picture or a GIF comes at full width below the text that it illustrates.
+- A long list, such as every option or every entity, goes into `<details>` with a `<summary>` that names it, so that the page stays short.
+
+`scripts/check.sh` fails on a `<table>` with a picture and on a cell with a width in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line. `python3 .github/blueprint.py pages --fix` puts the cells of such a table one below the other, the text before its picture, and leaves out the widths; a table inside a table it leaves to you.
 
 ## Diagrams
 

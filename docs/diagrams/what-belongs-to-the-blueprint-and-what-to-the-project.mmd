@@ -5,14 +5,14 @@ config:
 ---
 flowchart TB
     accTitle: What belongs to the blueprint and what to the project
-    accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings and workflows of its own beside those of the blueprint.
+    accDescr: copier update brings the changes of the blueprint's files, merged line by line with the changes of the repository, and never overwrites the files of the project. A project adds checks, settings, notes for coding agents and workflows of its own beside those of the blueprint.
 
     blueprint[("Repo Blueprint")]
 
     subgraph repo ["Your repository"]
-        theirs["`**The blueprint's files**<br>workflows · scripts/check.sh<br>.github/repository.toml<br>community files`"]
+        theirs["`**The blueprint's files**<br>workflows · scripts/check.sh<br>.github/repository.toml<br>community files · AGENTS.md`"]
         mine["`**The project's files**<br>README · CHANGELOG · docs/<br>code and tests<br>manifests and lock files<br>issue forms · labels`"]
-        adds["`**What the project adds**<br>scripts/check-project.sh<br>.github/repository.project.toml<br>.github/checks.project.toml<br>workflows of its own`"]
+        adds["`**What the project adds**<br>scripts/check-project.sh<br>.github/repository.project.toml<br>.github/agents.project.md<br>.github/checks.project.toml<br>workflows of its own`"]
     end
 
     blueprint -- "copier update<br>merged line by line" --> theirs
