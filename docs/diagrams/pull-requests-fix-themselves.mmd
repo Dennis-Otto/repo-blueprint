@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Pull requests fix themselves
+    accDescr: A check fails. Where a command fixes what it found, such as the format of the code, the whitespace of a text file or the rules of markdownlint, the job of the check runs the commands of autofix from .github/checks.toml and keeps the files that they changed. After the checks, the fix bot takes these files as data, only text files that the commit has: on a pull request from a branch of the repository, also one of Renovate, it commits them as one commit onto the branch, and the checks run again; on a pull request from a fork, it suggests them at their lines; on main, it keeps one pull request from bot/self-heal that merges itself. What no command fixes, the PR coach explains.
+
+    failed(["A check fails"])
+    command{"A command<br>fixes it?"}
+    fix["The job of the check runs the commands of autofix<br>and keeps the files that they changed"]
+    bot["The fix bot after the checks<br>takes only text files that the commit has"]
+    branch["A branch of this repository, also Renovate's:<br>one commit, and the checks run again"]
+    fork["A pull request from a fork:<br>suggestions at their lines"]
+    main["main: one pull request from bot/self-heal<br>that merges itself"]
+    coach["The PR coach explains<br>what no command fixes"]
+    green(["Every check passes"])
+    catalog[(".github/checks.toml<br>autofix")]
+
+    failed --> command
+    command -- "yes" --> fix --> bot
+    command -- "no" --> coach
+    bot --> branch
+    bot --> fork
+    bot --> main
+    branch --> green
+    main --> green
+    fork -- "you commit the suggestions" --> green
+    catalog -.-> fix
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class fix,bot,branch,fork,main,coach bot
+    class failed person
+    class green done

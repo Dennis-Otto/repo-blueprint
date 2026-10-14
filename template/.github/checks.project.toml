@@ -10,7 +10,11 @@
 
 # A check by the name that GitHub shows, where a * stands for any text. Each has a
 # title, problem, why and fix, and may have commands, one per line, and docs, a link or
-# a file of the repository with its anchor:
+# a file of the repository with its anchor. Each says in autofix how it fixes itself:
+# the commands that fix what it finds, or the reason why no command can. The fix bot
+# commits only the fixes of the runs of Lint and of the CI, not yet those of a
+# workflow of the project's own (Dennis-Otto/repo-blueprint#225), so a person runs
+# the commands of such a check:
 # [check."e2e (*)"]
 # title = "The end-to-end tests"
 # problem = """A test of the whole app in a real browser failed; the summary of the
@@ -19,6 +23,8 @@
 # fix = """Run the test that failed on your machine, fix what it shows, and push."""
 # commands = ["bash tests/e2e/run.sh"]
 # docs = "CONTRIBUTING.md#checks"
+# autofix = """A test in a browser that fails needs a person, who knows what the app
+# should do."""
 
 # A step of scripts/check.sh by the name that it prints, such as the step that runs
 # scripts/check-project.sh, to explain the checks of this project there:
@@ -26,3 +32,4 @@
 # problem = """..."""
 # why = """..."""
 # fix = """..."""
+# autofix = ["npm run lint -- --fix"]

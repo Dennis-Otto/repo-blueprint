@@ -37,6 +37,7 @@ from blueprint.coach import (
     plain,
     required_checks,
     summary,
+    undeclared,
     unknown,
 )
 from blueprint.coach import annotation as coach_annotation
@@ -51,6 +52,22 @@ from blueprint.diagrams import (
     listing,
     report,
 )
+from blueprint.fixes import (
+    Fixes,
+    FixLoop,
+    collect,
+    commit_onto_branch,
+    downloader,
+    fix_text,
+    fixers,
+    heal_main,
+    load,
+    plan,
+    report_kept,
+    run_until_done,
+    suggest,
+)
+from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, current_repo
 from blueprint.notices import third_party_notices
 from blueprint.pages import Layout, annotation, command, fixed, layouts, pages
@@ -134,9 +151,19 @@ def explain_command(arguments: argparse.Namespace, root: Path) -> int:
                 f"{PROJECT_CATALOG.as_posix()}",
                 file=sys.stderr,
             )
-        if gaps:
+        silent = undeclared(catalog)
+        for gap in silent:
+            print(
+                f"blueprint.py: the explanation of {gap} has no autofix: the commands "
+                "that fix what it finds, or the reason why no command can",
+                file=sys.stderr,
+            )
+        if gaps or silent:
             return 1
-        print("Every required check and every step of scripts/check.sh is explained.")
+        print(
+            "Every required check and every step of scripts/check.sh is explained, "
+            "and every explanation says how it fixes itself or why it can't."
+        )
         return 0
     step = arguments.step
     entry = catalog.step(arguments.name) if step else catalog.check(arguments.name)
@@ -229,6 +256,115 @@ def diagrams_command(arguments: argparse.Namespace, root: Path) -> int:
         )
     else:
         print("No ```mermaid block in the Markdown.")
+    return 0
+
+
+def fix_command(arguments: argparse.Namespace, root: Path) -> int:
+    """The fixes that a command makes, on your machine and in the check that failed."""
+    if arguments.action == "text":
+        fixed = fix_text(root)
+        for path in fixed:
+            print(
+                f"{path}: LF line endings, no trailing whitespace, a line break at its end"
+            )
+        print(
+            f"{len(fixed)} text file(s) fixed."
+            if fixed
+            else "Every text file is clean."
+        )
+        return 0
+    if arguments.action == "keep":
+        print("\n".join(report_kept(keep_fixes(root, arguments.folder), kept=True)))
+        return 0
+    catalog = Catalog.load(root)
+    commands = fixers(catalog, root, arguments.check)
+    what = arguments.check or "the steps of scripts/check.sh"
+    if not commands:
+        print(f"No command of the explanations fixes what {what} found.")
+        return 0
+    lines = [
+        "### Fixed by a command",
+        "",
+        f"The commands that fix what {what} found, from `.github/checks.toml`:",
+        "",
+        *run_until_done(commands, root),
+        "",
+    ]
+    if arguments.keep is None:
+        lines.append("`git diff` shows what they changed; commit it.")
+    else:
+        lines += report_kept(keep_fixes(root, arguments.keep), kept=True)
+    print("\n".join(lines))
+    return 0
+
+
+def kept_fixes(folder: Path) -> Fixes:
+    """The fixes that fix collect downloaded into folder, one folder for each check."""
+    if not folder.is_dir():
+        return Fixes({})
+    return load(sorted(path for path in folder.iterdir() if path.is_dir()))
+
+
+def fix_bot_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
+    """The fix bot after the checks: collect the fixes of a commit and decide, then
+    commit them, suggest them or keep the pull request of main."""
+    if arguments.action == "collect":
+        folders = collect(
+            api,
+            repo,
+            arguments.run,
+            arguments.sha,
+            arguments.event,
+            arguments.folder,
+            downloader(api, repo),
+        )
+        fixes = load(folders)
+        number = int(arguments.pull) if arguments.pull else None
+        try:
+            decided = plan(
+                api,
+                repo,
+                arguments.sha,
+                arguments.event,
+                arguments.branch,
+                number,
+                fixes,
+            )
+        except FixLoop as error:
+            # The annotation in the log, the reason in the summary as well.
+            print(f"::error::{error}", file=sys.stderr)
+            print(error)
+            return 1
+        if arguments.output:
+            with Path(arguments.output).open("a", encoding="utf-8") as file:
+                file.write(f"action={decided.action}\n")
+                file.write(f"pull={decided.number or ''}\n")
+        sys.stdout.write(decided.text)
+        return 0
+    fixes = kept_fixes(arguments.folder)
+    if arguments.action == "commit":
+        said = commit_onto_branch(
+            api,
+            repo,
+            arguments.branch,
+            arguments.sha,
+            fixes,
+            arguments.app,
+            arguments.url,
+        )
+    elif arguments.action == "suggest":
+        said = suggest(api, repo, int(arguments.pull), arguments.sha, fixes)
+    else:
+        said = heal_main(
+            api,
+            repo,
+            arguments.sha,
+            arguments.base,
+            fixes,
+            arguments.app,
+            arguments.url,
+        )
+    sys.stdout.write(said)
     return 0
 
 
@@ -508,6 +644,80 @@ def main(
         help="comment: on the pull request whose blocks became pictures; "
         "pull-request: the description of the bot's pull request for main",
     )
+    fix_parser = commands.add_parser(
+        "fix",
+        help="the fix bot: the commands that fix what a check found, and the commits "
+        "and suggestions of their fixes after the checks",
+    )
+    fix_actions = fix_parser.add_subparsers(dest="action", required=True)
+    fix_run_parser = fix_actions.add_parser(
+        "run",
+        help="run the commands of autofix that fix what a check found, by default "
+        "those of each step of scripts/check.sh",
+    )
+    fix_run_parser.add_argument(
+        "check", nargs="?", help="the name of the check that failed, such as markdown"
+    )
+    fix_run_parser.add_argument(
+        "--keep",
+        type=Path,
+        help="a folder to copy the files that they changed into, for the fix bot",
+    )
+    fix_keep_parser = fix_actions.add_parser(
+        "keep",
+        help="copy the files of the commit that a fix changed into a folder, for the "
+        "fix bot",
+    )
+    fix_keep_parser.add_argument("folder", type=Path)
+    fix_actions.add_parser(
+        "text",
+        help="give every text file LF line endings, no trailing whitespace and a line "
+        "break at its end",
+    )
+    collect_parser = fix_actions.add_parser(
+        "collect",
+        help="download the fixes of the checks of a commit once they ended, and "
+        "decide what the fix bot does with them",
+    )
+    collect_parser.add_argument("run", type=int, help="the run that ended")
+    commit_fixes_parser = fix_actions.add_parser(
+        "commit",
+        help="commit the fixes onto the branch of a pull request, as the release app",
+    )
+    suggest_parser = fix_actions.add_parser(
+        "suggest",
+        help="suggest the fixes at their lines of a pull request from a fork",
+    )
+    main_parser = fix_actions.add_parser(
+        "main",
+        help="keep the one pull request from bot/self-heal with the fixes of main",
+    )
+    for bot_parser in (
+        collect_parser,
+        commit_fixes_parser,
+        suggest_parser,
+        main_parser,
+    ):
+        bot_parser.add_argument("--sha", required=True, help="the commit of the checks")
+        bot_parser.add_argument(
+            "--folder", type=Path, required=True, help="the fixes, one folder per check"
+        )
+    collect_parser.add_argument(
+        "--event", required=True, choices=["pull_request", "push"]
+    )
+    collect_parser.add_argument("--branch", required=True, help="the branch of the run")
+    collect_parser.add_argument("--pull", default="", help="the pull request, if named")
+    collect_parser.add_argument(
+        "--output", help="the file of the outputs of the step, $GITHUB_OUTPUT"
+    )
+    commit_fixes_parser.add_argument("--branch", required=True)
+    suggest_parser.add_argument("--pull", required=True)
+    main_parser.add_argument("--base", required=True, help="the default branch")
+    for bot_parser in (commit_fixes_parser, main_parser):
+        bot_parser.add_argument(
+            "--app", required=True, help="the slug of the release app, which commits"
+        )
+        bot_parser.add_argument("--url", required=True, help="the run of the checks")
     pages_parser = commands.add_parser(
         "pages",
         help="the READMEs, CONTRIBUTING files and pages of docs/ in one column, for "
@@ -549,6 +759,21 @@ def main(
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
+    if arguments.command == "fix" and arguments.action in ("run", "keep", "text"):
+        try:
+            return fix_command(arguments, root)
+        except (OSError, CatalogError, subprocess.CalledProcessError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "fix" and not (
+        re.fullmatch(r"[0-9a-f]{40}", arguments.sha)
+        and re.fullmatch(r"[0-9]*", getattr(arguments, "pull", ""))
+    ):
+        print(
+            "blueprint.py: a commit is 40 hex digits, a pull request a number",
+            file=sys.stderr,
+        )
+        return 2
     if arguments.command == "pages":
         try:
             return pages_command(arguments, root)
@@ -594,6 +819,8 @@ def main(
             return 0
         if arguments.command == "bot-health":
             return bot_health_command(api, repo, arguments, root)
+        if arguments.command == "fix":
+            return fix_bot_command(api, repo, arguments)
         settings = Settings.load(root / arguments.config)
         if arguments.command == "checklist":
             print(f"The set-up of {repo}:")

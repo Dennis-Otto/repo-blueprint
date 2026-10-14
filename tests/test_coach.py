@@ -23,6 +23,7 @@ import blueprint.coach
 from blueprint import cli
 from blueprint.coach import (
     BOT,
+    FIX_HEADLINE,
     MARKER,
     Catalog,
     CatalogError,
@@ -42,6 +43,7 @@ from blueprint.coach import (
     required_checks,
     suggest_title,
     summary,
+    undeclared,
 )
 from blueprint.github import Api
 
@@ -72,6 +74,7 @@ title = "The thing"
 problem = "It broke."
 why = "It matters."
 fix = "Mend it."
+autofix = "Only a person mends it."
 """
 
 
@@ -241,7 +244,89 @@ def test_an_incomplete_explanation_is_an_error(
         Catalog.load(tmp_path)
 
 
+def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
+    explained = catalog()
+
+    assert undeclared(explained) == []
+    for entry in [*explained.checks.values(), *explained.steps.values()]:
+        assert bool(entry.autofix) != bool(entry.manual), entry.key
+        # A reason is a whole sentence; a command of the blueprint is run by it.
+        assert not entry.manual or entry.manual.endswith("."), entry.key
+        for command in entry.autofix:
+            assert "python3" not in command, (entry.key, command)
+    fixed = [key for key, entry in explained.steps.items() if entry.autofix]
+    assert fixed == ["Text files", "Pages in one column", "Ruff", "Coding standard"]
+    markdown = explained.check("markdown")
+    assert markdown
+    assert markdown.autofix == ('npx markdownlint-cli2 --fix "**/*.md"',)
+
+
+def test_an_explanation_without_its_autofix_fails_the_verification(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    silent = ENTRY.replace('autofix = "Only a person mends it."\n', "")
+    write(tmp_path, ".github/checks.toml", f"[check.lint]{silent}[step.Ruff]{ENTRY}")
+    write(tmp_path, "scripts/check.sh", 'step "Ruff"\n')
+
+    assert undeclared(Catalog.load(tmp_path)) == ["the check lint"]
+    assert cli.main(["coach", "verify"], root=tmp_path) == 1
+    assert capsys.readouterr().err == (
+        "blueprint.py: the explanation of the check lint has no autofix: the commands "
+        "that fix what it finds, or the reason why no command can\n"
+    )
+    write(tmp_path, ".github/checks.toml", f"[check.lint]{silent}")
+    assert undeclared(Catalog.load(tmp_path)) == ["the check lint"]
+    write(tmp_path, ".github/checks.toml", f"[step.Mypy]{silent}")
+    assert undeclared(Catalog.load(tmp_path)) == ["the step Mypy of scripts/check.sh"]
+
+
+@pytest.mark.parametrize(
+    ("autofix", "commands", "manual"),
+    [
+        (
+            '["ruff format .", "ruff check --fix ."]',
+            ("ruff format .", "ruff check --fix ."),
+            "",
+        ),
+        ('"""Only a person\nknows."""', (), "Only a person knows."),
+    ],
+)
+def test_an_autofix_is_commands_or_a_reason(
+    tmp_path: Path, autofix: str, commands: tuple[str, ...], manual: str
+) -> None:
+    text = ENTRY.replace('"Only a person mends it."', autofix)
+    write(tmp_path, ".github/checks.toml", f"[check.lint]{text}")
+
+    entry = Catalog.load(tmp_path).check("lint")
+
+    assert entry
+    assert (entry.autofix, entry.manual, entry.declared) == (commands, manual, True)
+
+
+@pytest.mark.parametrize("autofix", ["[]", '[""]', "[1]", '" "', "3", "{}"])
+def test_an_autofix_of_nothing_is_an_error(tmp_path: Path, autofix: str) -> None:
+    text = ENTRY.replace('"Only a person mends it."', autofix)
+    write(tmp_path, ".github/checks.toml", f"[check.lint]{text}")
+
+    with pytest.raises(CatalogError, match="has an autofix that is neither a list"):
+        Catalog.load(tmp_path)
+
+
 # ---------------------------------------------------------------- the summary of a check
+
+
+def test_a_check_that_fixes_itself_says_so() -> None:
+    ruff = catalog().step("Ruff")
+    mypy = catalog().step("Mypy")
+    assert ruff
+    assert mypy
+
+    assert (
+        "\n\n**It fixes itself:** after the checks, the fix bot commits the fix onto a "
+        "branch of this repository, and suggests it at its lines on a pull request "
+        "from a fork.\n\n**How to fix it:**"
+    ) in summary(ruff, step=True, url="")
+    assert "It fixes itself" not in summary(mypy, step=True, url="")
 
 
 def test_the_summary_of_a_failed_check() -> None:
@@ -321,7 +406,7 @@ def test_explain_shows_the_fix_in_the_terminal(
 
     out = capsys.readouterr().out
     assert out.startswith("PR coach: Ruff (scripts/check.sh)\n  What is wrong:")
-    assert "\n      ruff format .\n      ruff check --fix .\n" in out
+    assert "\n      ruff check --fix .\n      ruff format .\n" in out
     assert "  More: CONTRIBUTING.md#coding-standards\n" in out
     assert "::error" not in out
 
@@ -688,6 +773,12 @@ class FakeGitHub:
         self.runs: list[dict[str, Any]] = recorded["check_runs"]
         self.annotations: dict[str, list[dict[str, Any]]] = recorded["annotations"]
         self.comments: list[dict[str, Any]] = []
+        # The head of the pull request, a commit of a person.
+        self.commit: dict[str, Any] = {
+            "commit": {"message": "Add a feature"},
+            "author": {"login": "contributor", "type": "User"},
+            "files": [{"filename": "src/app.py"}],
+        }
         self.calls: list[tuple[str, str]] = []
         self.waits: list[float] = []
         # What happens while the coach waits for the checks of other apps.
@@ -721,6 +812,8 @@ class FakeGitHub:
                 "total_count": len(runs),
                 "check_runs": self.page(runs, found[2], found[3]),
             }
+        if found := re.fullmatch(r"commits/(\w+)", path):
+            return (200, self.commit) if found[1] == SHA else (404, {})
         if found := re.fullmatch(rf"check-runs/(\d+)/annotations\?{paged}", path):
             items = self.annotations.get(found[1], [])
             return 200, self.page(items, found[2], found[3])
@@ -804,7 +897,7 @@ def test_the_report_explains_the_step_of_the_checks_that_failed() -> None:
 
     part = sections(body_of(github))["check (python)"]
     assert "It stopped at the step **Ruff** of `scripts/check.sh`." in part
-    assert "```sh\nruff format .\nruff check --fix .\n```" in part
+    assert "```sh\nruff check --fix .\nruff format .\n```" in part
     assert "Then run every check on your machine with `bash scripts/check.sh`" in part
     # The step, not the whole check, and no annotation of the coach or of GitHub.
     assert "One of the checks of `scripts/check.sh` failed" not in part
@@ -1073,6 +1166,43 @@ def test_the_fix_rebases_onto_the_main_of_the_repository() -> None:
     assert gitleaks.within(None).commands[0] == (
         "git fetch https://github.com/OWNER/NAME.git main"
     )
+
+
+@pytest.mark.parametrize("count", [0, 1, 12])
+def test_the_report_names_the_commit_of_the_fix_bot(count: int) -> None:
+    github = FakeGitHub()
+    github.commit = {
+        "commit": {"message": f"{FIX_HEADLINE}\n\nMade by the commands"},
+        "author": {"login": "app[bot]", "type": "Bot"},
+        "files": [{"filename": f"f{number:02}.py"} for number in range(count)],
+    }
+
+    body = (run_report(github, 42), body_of(github))[1]
+
+    note = re.search(r"🔧 (.+)\n", body)
+    assert note
+    if count == 0:
+        assert note[1] == (
+            f"**The fix bot committed the automatic fixes** in {SHA[:7]}. They are "
+            "what the commands of the checks make; pull the branch before you push "
+            "again."
+        )
+    elif count == 1:
+        assert f"in {SHA[:7]}: `f00.py`. They are" in note[1]
+    else:
+        assert "`f09.py` and 2 more. They are" in note[1]
+        assert "`f10.py`" not in note[1]
+
+
+def test_a_commit_of_another_bot_or_of_a_person_is_no_fix() -> None:
+    github = FakeGitHub()
+    github.commit = {"commit": {"message": FIX_HEADLINE}, "author": {"type": "User"}}
+    run_report(github, 42)
+    assert "🔧" not in body_of(github)
+    github = FakeGitHub()
+    github.commit = {"commit": {"message": "chore: x"}, "author": {"type": "Bot"}}
+    run_report(github, 42)
+    assert "🔧" not in body_of(github)
 
 
 def test_a_pull_request_whose_checks_never_failed_gets_no_comment() -> None:

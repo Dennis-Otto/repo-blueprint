@@ -28,3 +28,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0020](0020-update-only-to-a-verified-release.md) | Update only to a release that the release workflow made, and let only the release app create release tags | accepted |
 | [0021](0021-install-with-uv-and-bound-every-step.md) | Install the tools with uv, start mypy from its cache, and end every step that installs, builds or downloads after five minutes | accepted |
 | [0022](0022-every-check-explains-its-failure.md) | Every check explains its failure, in the check and in one comment, also on a pull request from a fork | accepted |
+| [0023](0023-pull-requests-fix-themselves.md) | Pull requests fix what a command can fix by themselves: the check fixes, the fix bot commits, suggests or opens a pull request for main | accepted |

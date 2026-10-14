@@ -37,7 +37,8 @@ from blueprint.bot_health import (
     after_pull_requests,
 )
 from blueprint.changelog import Fragment, release_changelog
-from blueprint.coach import Catalog, missing
+from blueprint.coach import Catalog, missing, undeclared
+from blueprint.fixes import fixers
 from blueprint.pages import layouts, shown
 from blueprint.settings import Settings
 
@@ -2644,6 +2645,7 @@ def test_every_project_tells_coding_agents_its_rules(
         "`--no-verify`",
         "`scripts/check-project.sh`",
         "`.github/repository.project.toml`",
+        "`python3 .github/blueprint.py fix run`",
     ):
         assert rule in agents, rule
     # The files of the project are exactly those that an update never overwrites,
@@ -4729,6 +4731,58 @@ def test_every_project_gets_the_pr_coach(projects: dict[str, Path], kind: str) -
     # A step that fails is explained; nothing else sets the trap of the script.
     assert check.count("\ntrap coach EXIT\n") == 1
     assert re.findall(r"^trap ", check, re.M) == ["trap "]
+
+
+# What each kind of project fixes by a command when its checks fail, besides the text
+# files and the pages of every kind.
+FIXED_STEPS = {
+    "python": ["Ruff"],
+    "github-action": ["Ruff"],
+    "home-assistant": ["Ruff"],
+    "php": ["Coding standard"],
+    "node": [],
+    "container": [],
+    "generic": [],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_fixes_what_a_command_can_fix(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    github = project / ".github"
+    # The tool of the fix bot, as the blueprint has it.
+    assert (github / "blueprint/fixes.py").read_text(encoding="utf-8") == (
+        ROOT / "blueprint/fixes.py"
+    ).read_text(encoding="utf-8")
+    # Every explanation says how it fixes itself, or why it can't.
+    explained = Catalog.load(project)
+    assert undeclared(explained) == []
+    # The check of the project runs the commands of its steps when it fails, on the
+    # head of the pull request, and keeps what they fixed before it explains itself.
+    ci = (github / "workflows/ci.yml").read_text(encoding="utf-8")
+    check = job_alone(ci, "check")
+    name = re.search(r"^    name: (check \(.+\))$", check, re.M)
+    assert name
+    stack = name[1].removeprefix("check (").removesuffix(")")
+    assert "          fetch-depth: 2\n" in check
+    fix = check.index("      - name: Fix what a command can fix\n")
+    keep = check.index("      - name: Keep the fixes for the fix bot\n")
+    assert fix < keep < check.index("      - name: Explain the failure\n")
+    assert f'          CHECK: "{name[1]}"\n' in check[fix:keep]
+    steps = [step for step, _ in fixers(explained, project, name[1])]
+    expected = ["Text files", "Pages in one column", *FIXED_STEPS.get(stack, [])]
+    assert list(dict.fromkeys(steps)) == expected, stack
+    # Lint keeps what markdownlint fixed, and the fix bot after the checks takes the
+    # fixes of both, with the CI of this kind among the workflows that it follows.
+    lint = (github / "workflows/lint.yml").read_text(encoding="utf-8")
+    assert "          name: fixes-markdown\n" in job_alone(lint, "markdown")
+    after = (github / "workflows/after-checks.yml").read_text(encoding="utf-8")
+    assert {name[1].replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
+    bot = job_alone(after, "fixes")
+    assert "startsWith(github.event.workflow_run.name, 'CI (')" in bot
+    assert "Dennis-Otto" not in bot
 
 
 def test_every_explanation_belongs_to_a_check_or_a_step(
