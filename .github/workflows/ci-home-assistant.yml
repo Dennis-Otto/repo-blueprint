@@ -92,6 +92,16 @@ jobs:
           name: coverage
           path: ${{ runner.temp }}/coverage.xml
           retention-days: 14
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: "check (home-assistant)"
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
 
   hacs:
     name: hacs
@@ -122,6 +132,24 @@ jobs:
             --env GITHUB_REPOSITORY --env GITHUB_EVENT_PATH=/github/workflow/event.json \
             --volume "$GITHUB_EVENT_PATH:/github/workflow/event.json:ro" \
             ghcr.io/hacs/action:main
+      # The PR coach needs blueprint.py and .github/checks.toml, nothing else.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: failure()
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            blueprint
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: hacs
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
 
   hassfest:
     name: hassfest
@@ -148,3 +176,13 @@ jobs:
           EOF
           echo "::add-matcher::$RUNNER_TEMP/hassfest.json"
           docker run --rm --volume "$PWD:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: hassfest
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"

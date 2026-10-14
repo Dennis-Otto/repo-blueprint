@@ -115,6 +115,16 @@ jobs:
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5
         run: mkdocs build --strict
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: docs
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
 
   pages:
     name: build the website
