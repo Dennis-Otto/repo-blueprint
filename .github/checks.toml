@@ -64,8 +64,8 @@ fix = """Add the path of the file to an entry of `REUSE.toml`, or give the file 
 header. The REUSE tool lists every file that lacks one:"""
 commands = ["pipx run reuse lint"]
 docs = "https://reuse.software/tutorial/"
-autofix = """Under which license a file stands, and whose copyright it carries, is the
-decision of its author."""
+autofix = """Not yet: `reuse annotate` with the defaults of `REUSE.toml` follows in
+Dennis-Otto/repo-blueprint#225; until then, a person adds the header or the entry."""
 
 [check.markdown]
 title = "The Markdown of the documents"
@@ -157,8 +157,8 @@ refactor, test, ci, build, chore, style or revert, a scope in parentheses if you
 `!` for a breaking change, a colon and what the change does. The check runs again by
 itself."""
 docs = "CONTRIBUTING.md#workflow"
-autofix = """What a change does, and so its type, only its author knows; the PR coach
-suggests a title that passes."""
+autofix = """Not yet: on a branch of this repository, the bot setting the title that
+the PR coach suggests follows in Dennis-Otto/repo-blueprint#225; until then, the PR coach suggests it."""
 
 [check.changelog]
 title = "The entry in the changelog"
@@ -173,8 +173,8 @@ after your branch, such as `changelog.d/dark-mode.md`, below a heading such as
 A change that users don't notice takes another type in the title, such as `refactor:`,
 `docs:` or `test:`."""
 docs = "CONTRIBUTING.md#workflow"
-autofix = """The entry is for users, in their words, and only the author knows what
-changed for them."""
+autofix = """Not yet: a draft entry from the title of the pull request follows in
+Dennis-Otto/repo-blueprint#225; the words for users stay the author's."""
 
 [check."analyze (*)"]
 title = "The CodeQL analysis"
@@ -426,8 +426,8 @@ release bot decides the version from the titles of the pull requests."""
 fix = """Set the version that the log names back to that of the manifest. The release bot
 changes the version, a pull request doesn't."""
 docs = "CONTRIBUTING.md#workflow"
-autofix = """The version changes with a release alone, whose bot writes it into every
-file."""
+autofix = """Not yet: writing the version of the manifest back into the file follows
+in Dennis-Otto/repo-blueprint#225."""
 
 [step."Git hooks"]
 problem = """A hook in `.githooks/` is a plain file in Git, not an executable one, as Git
@@ -513,8 +513,8 @@ commands = [
   "composer audit",
 ]
 docs = "CONTRIBUTING.md#checks"
-autofix = """A new lock file or another version of a package changes what the app
-ships, which a person decides."""
+autofix = """Not yet: `composer update --lock`, which only refreshes the hash of the
+lock file, follows in Dennis-Otto/repo-blueprint#225; another version of a package stays a person's decision."""
 
 [step."App metadata"]
 problem = """`appinfo/info.xml` doesn't follow the schema of the Nextcloud App Store; the

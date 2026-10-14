@@ -55,7 +55,7 @@ name: After the checks
 # lines, at most ten in one review, never one twice; on main, it keeps one pull
 # request from bot/self-heal with them, which merges itself, and closes it once main
 # needs no fix. blueprint.py of main lets through only text files that the commit has
-# already, outside .git and the workflows. It never commits onto its own commit again,
+# already, outside .git and the workflows. It commits at most twice in a row onto its own commits,
 # and leaves a pull request with the label no-bot-fixes alone. When the bot fails, it
 # says so on the pull request; on main, it keeps one issue open until it passes again.
 #

@@ -2466,6 +2466,7 @@ def test_every_project_tells_coding_agents_its_rules(
         "`--no-verify`",
         "`scripts/check-project.sh`",
         "`.github/repository.project.toml`",
+        "`python3 .github/blueprint.py fix run`",
     ):
         assert rule in agents, rule
     # The files of the project are exactly those that an update never overwrites,

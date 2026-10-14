@@ -274,7 +274,8 @@ def load(folders: Iterable[Path]) -> Fixes:
                 if path.is_dir() and not path.is_symlink():
                     continue
                 # Where two checks fixed a file, the first one wins; the checks of the
-                # commit of the bot find what the other one fixes, and it follows.
+                # commit of the bot find what the other one fixes, and the bot's next
+                # commit, the one more that it makes onto its own, brings it.
                 if relative in files:
                     continue
                 reason = refused(path, relative)
@@ -455,6 +456,13 @@ def open_pull_of_main(api: Api, repo: str) -> Json | None:
     return pulls[0] if pulls else None
 
 
+def parent_of(api: Api, repo: str, sha: str) -> str:
+    """The first parent of a commit."""
+    commit = api.get(f"repos/{repo}/commits/{sha}") or {}
+    parents = commit.get("parents") or [{}]
+    return str(parents[0].get("sha") or "")
+
+
 def plan(
     api: Api,
     repo: str,
@@ -493,10 +501,14 @@ def plan(
     head = pull.get("head") or {}
     if str((head.get("repo") or {}).get("full_name") or "") != repo:
         return Plan("suggest", f"#{number} comes from a fork.\n", number)
-    if fixed_by_bot(api, repo, sha) is not None:
+    # One more commit onto its own is fine: the checks of a commit end at different
+    # times, and a check may fix a file after another one did. Two in a row are not.
+    if fixed_by_bot(api, repo, sha) is not None and (
+        fixed_by_bot(api, repo, parent_of(api, repo, sha)) is not None
+    ):
         raise FixLoop(
-            f"The commands of the checks changed the files of the fix bot's own commit "
-            f"{sha[:7]} again, so they don't fix the same way twice; the bot stops."
+            f"The commands of the checks changed the files of the fix bot's own commits "
+            f"up to {sha[:7]} again, so they don't fix the same way twice; the bot stops."
         )
     return Plan(
         "commit", f"#{number} comes from a branch of this repository.\n", number
@@ -606,13 +618,20 @@ class Suggestion:
         )
 
 
+def lines_of(text: str) -> list[str]:
+    """The lines of a text as GitHub numbers them: split at each newline only, not at
+    a form feed or any other character that str.splitlines() takes for one."""
+    parts = text.split("\n")
+    return parts[:-1] if text.endswith("\n") or not text else parts
+
+
 def suggestions_of(path: str, before: str, after: str) -> tuple[list[Suggestion], bool]:
     """The suggestions that turn the lines of before into those of after, and whether
     the fix changes more than they show: line endings, the end of the file, or lines
     too many for one suggestion."""
     if "\r" in before or not before.strip("\n"):
         return [], True
-    old, new = before.splitlines(), after.splitlines()
+    old, new = lines_of(before), lines_of(after)
     rest = before.endswith("\n") != after.endswith("\n")
     found = []
     matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)

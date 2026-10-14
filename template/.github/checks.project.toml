@@ -11,9 +11,10 @@
 # A check by the name that GitHub shows, where a * stands for any text. Each has a
 # title, problem, why and fix, and may have commands, one per line, and docs, a link or
 # a file of the repository with its anchor. Each says in autofix how it fixes itself:
-# the commands that fix what it finds, which the job of the check runs when it fails
-# and whose fixes the fix bot commits after the checks, or the reason why no command
-# can:
+# the commands that fix what it finds, or the reason why no command can. The fix bot
+# commits only the fixes of the runs of Lint and of the CI, not yet those of a
+# workflow of the project's own (Dennis-Otto/repo-blueprint#225), so a person runs
+# the commands of such a check:
 # [check."e2e (*)"]
 # title = "The end-to-end tests"
 # problem = """A test of the whole app in a real browser failed; the summary of the

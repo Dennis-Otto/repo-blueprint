@@ -595,6 +595,8 @@ class FakeGitHub:
             "author": {"type": "User"},
             "files": [],
         }
+        # Commits by their ids, where they differ from the one above.
+        self.commits: dict[str, dict[str, Any]] = {}
         self.graphql: list[dict[str, Any]] = []
         self.graphql_fails = False
         # What happens to the branches while the bot commits, as a push would.
@@ -655,7 +657,7 @@ class FakeGitHub:
             self.refs[name] = body["sha"]
             return 201, {"ref": body["ref"]}
         if found := re.fullmatch(r"commits/(\w+)", path):
-            return 200, self.commit
+            return 200, self.commits.get(found[1], self.commit)
         if found := re.fullmatch(r"users/(.+)", path):
             return 200, {"id": 41898282, "login": found[1]}
         if found := re.fullmatch(rf"pulls\?state=open&{paged}", path):
@@ -933,14 +935,32 @@ def test_the_bot_leaves_a_commit_that_is_no_head_alone() -> None:
     assert decided.text == "aaaaaaa is no longer the head of an open pull request.\n"
 
 
-def test_the_bot_never_fixes_its_own_fixes_again() -> None:
-    github = FakeGitHub()
-    github.pull()
-    github.commit = {
+def bot_commit(parent: str) -> dict[str, Any]:
+    return {
         "commit": {"message": f"{FIX_HEADLINE}\n\n{MADE_BY} x"},
         "author": {"type": "Bot"},
         "files": [{"filename": "app.py"}],
+        "parents": [{"sha": parent}],
     }
+
+
+def test_the_bot_makes_one_more_commit_onto_its_own() -> None:
+    # The checks of the bot's commit find what another check fixes: a Ruff fix after
+    # the CI ended late, or markdownlint's fix of a file whose text the CI fixed.
+    github = FakeGitHub()
+    github.pull()
+    github.commits[SHA] = bot_commit("b" * 40)
+
+    decided = plan(api_of(github), REPO, SHA, "pull_request", "feature", 42, FIXES)
+
+    assert (decided.action, decided.number) == ("commit", 42)
+
+
+def test_the_bot_never_fixes_its_own_fixes_again() -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.commits[SHA] = bot_commit("b" * 40)
+    github.commits["b" * 40] = bot_commit("c" * 40)
 
     with pytest.raises(FixLoop, match="don't fix the same way twice"):
         plan(api_of(github), REPO, SHA, "pull_request", "feature", 42, FIXES)
@@ -1123,6 +1143,8 @@ def test_a_suggestion_of_one_line_and_of_several() -> None:
         # Line endings, and a file of no lines.
         ("a\r\nb\r\n", "a\nb\n", [], True),
         ("", "\n", [], True),
+        # GitHub counts lines by newlines only: a form feed is no line of its own.
+        ("a\fb\nc  \n", "a\fb\nc\n", [(2, 2, ("c",))], False),
     ],
 )
 def test_the_suggestions_of_a_fix(
@@ -1480,7 +1502,8 @@ def test_fix_collect_stops_a_loop(
     github.runs = [run_of(1, "CI (python)")]
     github.artifacts = {1: [{"name": "fixes-check"}]}
     github.downloads = {(1, "fixes-check"): {"app.py": b"x = 2\n"}}
-    github.commit = {"commit": {"message": FIX_HEADLINE}, "author": {"type": "Bot"}}
+    github.commits[SHA] = bot_commit("b" * 40)
+    github.commits["b" * 40] = bot_commit("c" * 40)
 
     code = cli.main(
         [

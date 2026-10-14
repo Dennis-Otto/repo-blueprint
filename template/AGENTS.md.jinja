@@ -44,6 +44,8 @@ On Windows, run them in Git Bash. They need Docker: `scripts/check.sh` builds th
 On Windows, run them in Git Bash. This repository has no build and no tests of its own: `scripts/check.sh` checks the text files, the shell scripts, the diagrams and the website.
 [%- endif %]
 
+`python3 .github/blueprint.py fix run` makes every fix that a command makes for a step of `scripts/check.sh`, as the fix bot makes it in a pull request.
+
 Turn on the hook of the repository once with `git config core.hooksPath .githooks`, and it runs the checks before every push.
 
 ## Changes
