@@ -1425,6 +1425,9 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "`bash scripts/check.sh` checks every fragment" in contributing
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_checks_fail_on_a_fragment_that_the_release_cannot_take_in(
     projects: dict[str, Path], tmp_path: Path
