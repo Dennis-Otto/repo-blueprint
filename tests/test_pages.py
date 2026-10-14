@@ -581,6 +581,8 @@ def test_a_page_that_cannot_be_read_fails_the_check(
         assert main(["pages"], root=root) == 2
 
 
+# The pages are the files that Git knows, and the copy of the mutation tests has no Git.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(GIT is None, reason="the pages are the files that git knows")
 def test_the_pages_of_the_blueprint_have_one_column() -> None:
     found = {

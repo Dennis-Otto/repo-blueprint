@@ -23,6 +23,7 @@ from xml.etree import ElementTree
 import pathspec
 import pytest
 from copier import run_copy
+from mypy import api as mypy_api
 from shell import BASH, in_bash
 
 from blueprint.bot_health import (
@@ -841,7 +842,7 @@ def run_the_step_with_docker(
     script = textwrap.dedent(step[: end.start()] if end else step)
     (workspace / "step.sh").write_text(script, encoding="utf-8", newline="\n")
     # docker writes down what the container would get: its variables, its mounts,
-    # with the folder of the step as $PWD, and its image.
+    # with the folder of the step as $PWD, its folder, its image and its command.
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
@@ -854,7 +855,8 @@ while (($#)); do
     --rm) ;;
     --env) shift; if [[ "$1" == *=* ]]; then echo "env $1"; else echo "env $1=${!1}"; fi ;;
     --volume) shift; echo "volume ${1/#"$PWD"/\\$PWD}" ;;
-    *) echo "image $1" ;;
+    --workdir) shift; echo "workdir $1" ;;
+    *) echo "image $1"; shift; if (($#)); then echo "command $*"; fi; break ;;
   esac
   shift
 done >> "$CALLS"
@@ -948,6 +950,72 @@ def test_hassfest_shows_its_errors_as_annotations(
     assert error[pattern["severity"]] == "ERROR"
     assert error[pattern["message"]].startswith("[MANIFEST] Invalid manifest: ")
     assert not re.match(pattern["regexp"], "Integrations: 1")
+
+
+HADOLINT = re.compile(r"ghcr\.io/hadolint/hadolint:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_hadolint_runs_in_its_image_and_shows_its_findings_as_annotations(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # Not by its action, whose Dockerfile every job that names it built at its start,
+    # in the Variants all fourteen, although only the container needs it.
+    for folder in (ROOT, *projects.values()):
+        for name, text in workflows(folder).items():
+            assert "hadolint/hadolint-action" not in text, name
+    ci = (projects["container"] / ".github/workflows/ci.yml").read_text(
+        encoding="utf-8"
+    )
+    step = step_of(ci, "      - name: Lint the Dockerfile")
+    image = HADOLINT.search(step)
+    assert image
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+
+    output, calls = run_the_step_with_docker(
+        tmp_path, step, {"RUNNER_TEMP": runner_temp.as_posix()}
+    )
+
+    # In the checkout, read-only, where Hadolint finds the .hadolint.yaml of the
+    # project and names the file as GitHub knows it.
+    assert calls == [
+        "volume $PWD:/repo:ro",
+        "workdir /repo",
+        f"image {image[0]}",
+        "command hadolint --no-color Dockerfile",
+    ]
+    # The problem matcher of its action turns each finding into an annotation, of
+    # this step alone: it goes when the step ends, also when Hadolint fails, before
+    # the checks of the image, whose output it would otherwise read as findings too.
+    assert f"::add-matcher::{runner_temp.as_posix()}/hadolint.json\n" in output
+    assert output.endswith("::remove-matcher owner=hadolint::\n")
+    assert "trap 'echo \"::remove-matcher owner=hadolint::\"' EXIT\n" in step
+    matcher = json.loads((runner_temp / "hadolint.json").read_text(encoding="utf-8"))
+    pattern = matcher["problemMatcher"][0]["pattern"][0]
+    # As Hadolint 2.15 writes a finding without colors.
+    finding = re.match(
+        pattern["regexp"],
+        "Dockerfile:2 DL3018 warning: Pin versions in apk add."
+        " Instead of `apk add <package>` use `apk add <package>=<version>`",
+    )
+    assert finding
+    assert finding[pattern["file"]] == "Dockerfile"
+    assert finding[pattern["line"]] == "2"
+    assert finding[pattern["code"]] == "DL3018"
+    assert finding[pattern["severity"]] == "warning"
+    assert finding[pattern["message"]].startswith("Pin versions in apk add.")
+    assert not re.match(
+        pattern["regexp"], "Dockerfile:2 DL3018 \x1b[93mwarning\x1b[0m: x"
+    )
+    # The Variants workflow runs the same image in the container it renders, and only
+    # there.
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    lint = step_of(variants, "      - name: Lint the Dockerfile")
+    assert "        if: matrix.kind == 'container'\n" in lint
+    command = step[step.index("docker run ") :].rstrip()
+    assert lint.rstrip().endswith(command.replace('"$PWD:', '"$PWD/$PROJECT:'))
+    assert HADOLINT.findall(variants) == [image[0]]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -1283,6 +1351,9 @@ def test_every_repository_checks_that_its_pages_have_one_column(
     assert "`python3 .github/blueprint.py pages --fix`" in contributing
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_checks_fail_on_a_page_with_columns_side_by_side(
     projects: dict[str, Path], tmp_path: Path
@@ -1371,6 +1442,9 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "`bash scripts/check.sh` checks every fragment" in contributing
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_checks_fail_on_a_fragment_that_the_release_cannot_take_in(
     projects: dict[str, Path], tmp_path: Path
@@ -6175,7 +6249,10 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
     )
     assert "mkdocs-material==" in tools
     docs = workflows(project)["docs.yml"]
-    assert "pip install --require-hashes -r .github/docs-requirements.txt" in docs
+    assert (
+        "uv pip install --system --require-hashes -r .github/docs-requirements.txt"
+        in docs
+    )
     assert "repo-blueprint" not in docs.replace(
         "https://github.com/Dennis-Otto/repo-blueprint", ""
     )
@@ -6323,28 +6400,379 @@ def test_the_tools_of_the_website_install_on_windows() -> None:
     )
 
 
+# The workflows that install Python tools: the CI of the Python stacks, which a project
+# gets as its ci.yml, the website, the fuzzing, the property and the mutation tests, the
+# dashboard and the variants.
+UV_WORKFLOWS = [
+    "ci-python.yml",
+    "ci-github-action.yml",
+    "ci-home-assistant.yml",
+    "docs.yml",
+    "dashboard.yml",
+    "fuzz.yml",
+    "properties.yml",
+    "mutation.yml",
+    "variants.yml",
+]
+PIP = re.compile(r'(?<!\buv )\bpip3?"? install\b')
+UV_PIP = re.compile(r"\buv pip install (?:--system|--python \S+) (.+)")
+LOCK = re.compile(r"[\w./-]*requirements[\w.-]*\.txt")
+# The lock files that the Variants workflow installs in the project it renders, by the
+# lock file of the blueprint that the project gets as each.
+RENDERED_FROM = {
+    ".github/docs-requirements.txt": "stacks/docs/requirements-docs.txt",
+    "requirements-dev.txt": "stacks/python/requirements-dev.txt",
+    "requirements-test.txt": "stacks/home-assistant/requirements-test.txt",
+}
+UV_VERSION = re.compile(
+    r'\n          # renovate: datasource=pypi depName=uv\n          version: "(\d+\.\d+\.\d+)"\n'
+)
+
+
+def jobs_of(workflow: str) -> list[str]:
+    """The names of the jobs of a workflow, in their order."""
+    return re.findall(r"^  ([\w-]+):\n", workflow.split("\njobs:\n", 1)[1], re.M)
+
+
+def steps_of(job: str) -> list[str]:
+    """The steps of a job of a workflow, each with the comments above it."""
+    steps: list[str] = []
+    comments = ""
+    for line in job.split("\n    steps:\n", 1)[1].splitlines(keepends=True):
+        if line.startswith("      - "):
+            steps.append(comments + line)
+            comments = ""
+        elif line.startswith("      #"):
+            comments += line
+        elif steps:
+            steps[-1] += line
+    return steps
+
+
+def setting_of(step: str, name: str) -> str | None:
+    """A setting of a step on one line, such as its if or its timeout-minutes."""
+    found = re.search(rf"^(?:      - |        ){name}: (.+)$", step, re.M)
+    return found[1] if found else None
+
+
+def matches_glob(pattern: str, path: str) -> bool:
+    """Whether a pattern of @actions/glob, as setup-uv reads its cache-dependency-glob,
+    matches a path from the root of the workspace."""
+    parts = re.split(r"(\*\*/|\*)", pattern)
+    wildcards = {"**/": "(?:.*/)?", "*": "[^/]*"}
+    expression = "".join(wildcards.get(part, re.escape(part)) for part in parts)
+    return re.fullmatch(expression, path) is not None
+
+
+def test_a_glob_of_setup_uv_matches_as_the_action_does() -> None:
+    assert matches_glob("requirements-dev.txt", "requirements-dev.txt")
+    assert not matches_glob(
+        "requirements-dev.txt", "stacks/python/requirements-dev.txt"
+    )
+    assert matches_glob(
+        "stacks/**/requirements*.txt", "stacks/docs/requirements-docs.txt"
+    )
+    assert matches_glob("stacks/**/requirements*.txt", "stacks/requirements.txt")
+    assert not matches_glob(
+        "stacks/**/requirements*.txt", "stacks/docs/requirements.in"
+    )
+
+
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
-def test_the_website_takes_its_tools_from_the_cache_of_pip(
+def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # uv installs the hash-pinned tools in seconds, where pip took a minute for those
+    # of Home Assistant even with its cache, and checks the hash of each package.
+    # GitHub keeps the cache of uv under a key of the lock files that the job installs,
+    # pruned to the wheels that uv built from source: in the Variants, uv downloaded
+    # the tools of Home Assistant in 6 seconds, while a cache with them, 232 MB, took
+    # 7 to 11 seconds to restore.
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    found = workflows(folder)
+    installs, versions = 0, set()
+    for name in ("ci.yml", *UV_WORKFLOWS):
+        if name not in found:
+            continue
+        workflow = found[name]
+        assert not PIP.search(workflow), name
+        # No cache of pip's downloads either.
+        assert "cache: pip" not in workflow, name
+        for job_name in jobs_of(workflow):
+            job = job_of(workflow, job_name)
+            steps = steps_of(job)
+            for index, step in enumerate(steps):
+                commands = UV_PIP.findall(step)
+                if not commands:
+                    continue
+                assert all("--require-hashes " in command for command in commands)
+                setups = [
+                    setup
+                    for setup in steps[:index]
+                    if "uses: astral-sh/setup-uv@" in setup
+                ]
+                assert len(setups) == 1, f"{name}: {job_name}"
+                setup = setups[0]
+                assert setting_of(setup, "if") in (None, setting_of(step, "if"))
+                assert "          enable-cache: true\n" in setup
+                assert "          prune-cache: true\n" in setup
+                version = UV_VERSION.search(setup)
+                assert version, setup
+                versions.add(version[1])
+                # After the Python that uv installs into.
+                python = [
+                    position
+                    for position, other in enumerate(steps)
+                    if "uses: actions/setup-python@" in other
+                ]
+                assert python
+                assert python[0] < steps.index(setup)
+                glob = re.search(
+                    r"\n          cache-dependency-glob: (?:\|\n((?:            .+\n)+)|(.+)\n)",
+                    setup,
+                )
+                assert glob, setup
+                patterns = glob[1].split() if glob[1] else [glob[2]]
+                in_project = (
+                    setting_of(step, "working-directory") == "${{ env.PROJECT }}"
+                )
+                locks = [
+                    RENDERED_FROM[lock] if in_project else lock
+                    for lock in LOCK.findall(step[step.index("        run: ") :])
+                ]
+                assert locks, step
+                for lock in locks:
+                    assert any(matches_glob(pattern, lock) for pattern in patterns), (
+                        f"{name}: {lock}"
+                    )
+                # A step that always runs here installs a lock file that is here.
+                guarded = "github.repository != 'Dennis-Otto/repo-blueprint'" in job
+                if not guarded and setting_of(step, "if") is None:
+                    assert any((folder / lock).is_file() for lock in locks), locks
+                installs += len(commands)
+    # Every kind has a website, whose tools uv installs.
+    assert installs
+    # One uv, which Renovate keeps current.
+    assert len(versions) == 1
+
+
+def test_renovate_keeps_uv_and_hadolint_current() -> None:
+    rules = renovate_rules(
+        (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        found: list[dict[str, str | None]] = []
+        for manager in rules["customManagers"]:
+            files = [
+                re.compile(name.strip("/")) for name in manager["managerFilePatterns"]
+            ]
+            if not any(name.search(f".github/workflows/{path.name}") for name in files):
+                continue
+            for pattern in manager["matchStrings"]:
+                for match in re.finditer(pattern.replace("(?<", "(?P<"), text):
+                    found.append(match.groupdict())
+        uv = [dependency for dependency in found if dependency["depName"] == "uv"]
+        assert len(uv) == text.count("uses: astral-sh/setup-uv@"), path.name
+        for dependency in uv:
+            assert dependency["datasource"] == "pypi"
+            assert re.fullmatch(r"\d+\.\d+\.\d+", dependency["currentValue"] or "")
+        hadolint = [
+            dependency
+            for dependency in found
+            if dependency["depName"] == "ghcr.io/hadolint/hadolint"
+            and dependency["currentDigest"]
+        ]
+        assert len(hadolint) == len(HADOLINT.findall(text)), path.name
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_uv_of_the_workflows_follows_the_blueprint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The workflows that set uv up belong to the blueprint: the blueprint's Renovate
+    # moves their uv, and the next release brings it to every repository. A pull
+    # request of a repository's own Renovate for each weekly release of uv would
+    # change the blueprint's files and conflict with its next update.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    enabled = True
+    for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
+        if "uv" in rule.get("matchDepNames", []):
+            assert rule == {
+                "matchManagers": ["custom.regex"],
+                "matchDepNames": ["uv"],
+                "matchFileNames": [".github/workflows/**"],
+                "enabled": rule["enabled"],
+            }
+            enabled = rule["enabled"]
+    assert enabled is (kind == "blueprint")
+
+
+# Each job ends after a few times its longest run, and each step that installs, builds
+# or downloads after five minutes: a build of the website that hung on 2026-10-12 held
+# a pull request for half an hour, until the Variants ran out of time.
+JOB_LIMITS = {
+    ("variants.yml", "variant"): 10,
+    ("ci-python.yml", "check"): 8,
+    ("ci-github-action.yml", "check"): 8,
+    ("ci-home-assistant.yml", "check"): 15,
+}
+WORK = re.compile(
+    r"\b(?:uv (?:pip install|venv)|npm ci|composer install|docker run|curl"
+    r"|mkdocs build|copier (?:copy|update)|gh api)\b"
+)
+SETUP = re.compile(
+    r"uses: (?:actions/setup-\w+|astral-sh/setup-uv|shivammathur/setup-php"
+    r"|actions/cache)@"
+)
+
+
+@pytest.mark.parametrize("name", [*UV_WORKFLOWS, "ci-container.yml"])
+def test_every_step_that_installs_builds_or_downloads_has_a_time_limit(
+    name: str,
+) -> None:
+    workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    bounded = 0
+    for job_name in jobs_of(workflow):
+        job = job_of(workflow, job_name)
+        limit = re.search(r"^    timeout-minutes: (.+)$", job, re.M)
+        assert limit, f"{name}: {job_name}"
+        if (name, job_name) in JOB_LIMITS:
+            assert limit[1] == str(JOB_LIMITS[name, job_name])
+        for step in steps_of(job):
+            code = "".join(
+                line
+                for line in step.splitlines(keepends=True)
+                if not line.lstrip().startswith("#")
+            )
+            if not (WORK.search(code) or SETUP.search(code)):
+                continue
+            minutes = setting_of(step, "timeout-minutes")
+            assert minutes, f"{name}: {step}"
+            assert int(minutes) <= 10
+            if limit[1].isdigit():
+                assert int(minutes) < int(limit[1])
+            bounded += 1
+    assert bounded
+
+
+@pytest.mark.parametrize(
+    "check", ["check (python)", "variant (home-assistant)", "update (container)"]
+)
+def test_the_pr_coach_explains_a_step_before_the_checks_that_ran_out_of_time(
+    check: str,
+) -> None:
+    # When the install of the tools or the pull of an image hangs, its step stops
+    # after five minutes, before scripts/check.sh ever ran: the coach says that the
+    # job runs again, rather than only pointing at the checks.
+    entry = Catalog.load(ROOT).check(check)
+    assert entry
+    assert (
+        "When that step comes before the checks, such as the one that installs the"
+        " tools or pulls an image, a download failed or hung until the step ran out"
+        " of its time: that usually passes when the job runs again, which the"
+        " flaky-test bot does once by itself."
+    ) in entry.problem
+    # As the bot does for the checks of CI and the Variants.
+    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    rerun = job_of(after, "rerun")
+    assert 'gh run rerun "$RUN" --failed' in rerun
+    left_out = re.search(
+        r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
+        rerun,
+    )
+    assert left_out
+    names = json.loads(left_out[1])
+    assert not [name for name in names if name.startswith(("CI", "Variants"))]
+    assert "    workflows: [CI (python), Variants, " in after
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_mypy_starts_from_the_cache_of_the_last_run_that_passed(
     projects: dict[str, Path], kind: str
 ) -> None:
     folder = ROOT if kind == "blueprint" else projects[kind]
-    docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
-    # The check docs, and the build of the website that the next job publishes.
-    for name in ("docs", "pages"):
-        job = job_of(docs, name)
-        setup = step_of(job, "      - uses: actions/setup-python@")
-        assert "          cache: pip\n" in setup
-        # Under a key of the hash-pinned list that the job installs.
-        listed = re.search(r"\n          cache-dependency-path: (\S+)\n", setup)
-        installed = re.findall(
-            r"\n        run: pip install --require-hashes -r (\S+)\n", job
+    name = "ci-python.yml" if kind == "blueprint" else "ci.yml"
+    ci = (folder / ".github/workflows" / name).read_text(encoding="utf-8")
+    if "\nmypy\n" not in (folder / "scripts/check.sh").read_text(encoding="utf-8"):
+        assert "mypy" not in ci
+        return
+    job = job_of(ci, "check")
+    cache = step_of(job, "      - name: Restore the cache of mypy")
+    assert "uses: actions/cache@" in cache
+    # Where mypy keeps it, which no project moves.
+    assert "          path: .mypy_cache\n" in cache
+    config = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "cache_dir" not in config["tool"]["mypy"]
+    assert ".mypy_cache/" in (folder / ".gitignore").read_text(encoding="utf-8")
+    # Its own cache when no Python file changed, else the latest one of the same tools;
+    # GitHub saves it after a run that passed.
+    key = re.search(r"\n          key: (.+)\n", cache)
+    restore = re.search(r"\n          restore-keys: (.+)\n", cache)
+    assert key
+    assert restore
+    assert restore[1] == "mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-"
+    assert key[1] == restore[1] + "${{ hashFiles('**/*.py') }}"
+    assert job.index(cache) < job.index("      - name: Run the checks\n")
+
+
+def test_mypy_keeps_no_finding_in_its_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # mypy checks a module from its cache again when the module or one that it uses
+    # changed, and keeps no module with an error, so the cache of the CI hides none.
+    monkeypatch.chdir(tmp_path)
+    Path("mypy.ini").write_text("[mypy]\nstrict = True\n", encoding="utf-8")
+    Path("wrong.py").write_text('def f() -> int:\n    return "x"\n', encoding="utf-8")
+    Path("used.py").write_text("def g() -> int:\n    return 1\n", encoding="utf-8")
+    Path("user.py").write_text(
+        "from used import g\n\n\ndef h() -> int:\n    return g()\n", encoding="utf-8"
+    )
+
+    def errors() -> list[str]:
+        output, _, _ = mypy_api.run(
+            [
+                "--config-file=mypy.ini",
+                "--cache-dir=cache",
+                "--no-error-summary",
+                "used.py",
+                "user.py",
+                "wrong.py",
+            ]
         )
-        assert listed
-        assert installed == [listed[1]]
-        assert (folder / listed[1]).is_file()
-        assert job.index(setup) < job.index(
-            f"pip install --require-hashes -r {listed[1]}"
-        )
+        return sorted(line.split(":", 1)[0] for line in output.splitlines())
+
+    assert errors() == ["wrong.py"]
+    assert Path("cache").is_dir()
+    assert errors() == ["wrong.py"]
+    Path("used.py").write_text('def g() -> str:\n    return "1"\n', encoding="utf-8")
+    assert errors() == ["user.py", "wrong.py"]
+
+
+def test_each_leg_of_the_variants_does_only_what_it_alone_can_show() -> None:
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    job = job_of(variants, "variant")
+    # An update must give every file of the blueprint as a new repository has it, and
+    # keeps .github/renovate.json5 of the project: the rules of Renovate are checked
+    # in the new repository of each kind.
+    update = step_of(
+        job,
+        "      - name: Render the project from the latest release and update it to this commit",
+    )
+    assert "the update gives it another content than a new repository has" in update
+    renovate = step_of(
+        job, "      - name: Validate the rules of Renovate of the project"
+    )
+    assert setting_of(renovate, "if") == "matrix.start == 'new'"
+    # Both legs of a kind fill one cache of uv, with the tools of that kind.
+    setup = step_of(job, "      - uses: astral-sh/setup-uv@")
+    assert "          cache-suffix: ${{ matrix.kind }}\n" in setup
+    # No action that builds an image of its own when the job starts.
+    assert "uses: hadolint/" not in job
 
 
 def website_step(check: str) -> str:
@@ -7007,6 +7435,9 @@ def test_the_changelog_check_asks_github_three_times_for_the_files(
     assert "fragments=true" not in step.output
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("fragments", "code", "summary", "errors"),
@@ -7098,6 +7529,9 @@ def release_branch_changelog(main: str) -> str:
     return f"{main[:index]}## [1.3.0](https://x/compare/v1.2.2...v1.3.0) (2026-10-13)\n\n### Features\n\n* a card\n\n{main[index:]}"
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @WITH_JQ
 @pytest.mark.parametrize(
     ("fragments", "listed", "deleted"),
@@ -7165,6 +7599,9 @@ def test_the_release_bot_writes_the_fragments_into_the_release_and_deletes_them(
     assert len(asked) == (1 if fragments else 0)
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @WITH_JQ
 def test_the_release_bot_leaves_a_release_that_is_written_already(
     tmp_path: Path,
@@ -7188,6 +7625,9 @@ def test_the_release_bot_leaves_a_release_that_is_written_already(
     assert "input" not in done.written
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @WITH_JQ
 def test_the_release_bot_stops_when_it_cannot_see_the_fragments_of_the_branch(
     tmp_path: Path,

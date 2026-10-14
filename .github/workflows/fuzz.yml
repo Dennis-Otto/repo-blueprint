@@ -42,13 +42,25 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 5
         with:
           # Atheris supports Python 3.12.
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: stacks/fuzz/requirements.txt
+      # uv installs the hash-pinned tools in seconds and checks the hash of each
+      # package. Its cache keeps only the wheels that it built from source, under a
+      # key of the lock file: pre-built ones download faster than a cache restores
+      # them.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.12.17"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: stacks/fuzz/requirements.txt
       - name: Install the hash-pinned Atheris
-        run: pip install --require-hashes -r stacks/fuzz/requirements.txt
+        timeout-minutes: 5
+        run: uv pip install --system --require-hashes -r stacks/fuzz/requirements.txt
       - name: Fuzz every target
         env:
           SECONDS_TO_FUZZ: ${{ github.event_name == 'schedule' && '900' || '60' }}

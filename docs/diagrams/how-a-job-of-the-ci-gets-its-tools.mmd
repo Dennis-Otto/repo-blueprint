@@ -1,0 +1,27 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a job of the CI gets its tools
+    accDescr: setup-uv restores the wheels that uv built from source, under a key of the lock files that the job installs, and uv downloads every other package, each checked against the hash of the lock file. mypy starts from its cache of the last run that passed and checks again what changed. Every step that installs, builds or downloads ends after five minutes. After a run that passed, GitHub saves both caches.
+
+    lock["The lock files<br>requirements-*.txt with hashes"]
+    uv["setup-uv<br>restores what uv built from source, under their key"]
+    install["uv pip install --require-hashes<br>downloads in parallel, checks every hash"]
+    mypy["mypy from its cache of the last run that passed<br>checks again what changed"]
+    checks["scripts/check.sh"]
+    save["GitHub saves both caches<br>after a run that passed"]
+    limit["Every step that installs, builds or downloads<br>ends after five minutes"]
+
+    lock --> uv --> install --> mypy --> checks --> save
+    limit -.-> uv
+    limit -.-> install
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class lock you
+    class uv,install,mypy,checks,limit bot
+    class save done

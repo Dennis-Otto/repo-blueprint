@@ -27,6 +27,13 @@
       groupName: "the tools of the prose check",
     },
     {
+      // The uv that the workflows set up, which every repository gets from here.
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["uv"],
+      matchFileNames: [".github/workflows/**"],
+      enabled: true,
+    },
+    {
       matchFileNames: ["requirements-dev.txt"],
       semanticCommitType: "chore",
       groupName: "the tools of the blueprint's tests",

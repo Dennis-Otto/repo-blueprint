@@ -134,6 +134,13 @@
       enabled: false,
     },
     {
+      // So does the uv that they set up, on its line "# renovate:".
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["uv"],
+      matchFileNames: [".github/workflows/**"],
+      enabled: false,
+    },
+    {
       // The tools of the prose check belong to the blueprint, which keeps them current.
       matchFileNames: [".github/prose/**"],
       enabled: false,
