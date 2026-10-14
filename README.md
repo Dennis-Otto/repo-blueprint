@@ -289,7 +289,7 @@ The blueprint keeps the shared parts of every repository equal; a project adds i
 ## Tools in every repository
 
 - `bash scripts/check.sh`: the checks of the CI, locally.
-- `bash scripts/diagrams.sh`: draws every diagram of `docs/diagrams/` as its pictures in `docs/images/diagrams/`, with Docker; `--extract` first turns every `mermaid` block of the Markdown into a source and its picture, and `--check` checks without Docker what `scripts/check.sh` checks.
+- `bash scripts/diagrams.sh`: draws every diagram of `docs/diagrams/` that a page shows as its pictures in `docs/images/diagrams/`, with Docker, and leaves the other sources alone; `--extract` first turns every `mermaid` block of the Markdown into a source and its picture and writes the `alt` of each picture from its source, and `--check` checks without Docker what `scripts/check.sh` checks.
 - `bash scripts/social-preview.sh`: renders `.github/social-preview.html` into the 1280×640 image that GitHub shows for links to the repository; upload it under *Settings → Social preview*.
 
 ## Dashboard
