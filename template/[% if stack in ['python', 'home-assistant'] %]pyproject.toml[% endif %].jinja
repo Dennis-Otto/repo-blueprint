@@ -35,14 +35,14 @@ testpaths = ["tests"]
 pythonpath = ["[% if project_type == 'python-package' %]src[% else %].[% endif %]"]
 addopts = ["--strict-markers", "--strict-config"]
 xfail_strict = true
+# A hanging test fails instead of blocking the run, locally as in the CI.
+timeout = 30
 markers = [
     "mutation_unsafe: fails in the copy of the repository with the mutants, which has no Git and other code; the Mutation workflow leaves it out",
 ]
 [%- if stack == 'home-assistant' %]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-# A hanging test fails instead of blocking the run, locally as in the CI.
-timeout = 30
 # Warnings of the integration's own code are errors.
 filterwarnings = ['error:::custom_components\.{= ha_domain =}']
 [%- else %]

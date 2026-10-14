@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import configparser
+import contextlib
 import datetime
 import fnmatch
 import hashlib
@@ -17,14 +18,18 @@ import sys
 import textwrap
 import tomllib
 import warnings
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
+from unittest import mock
 from xml.etree import ElementTree
 
 import pathspec
 import pytest
+from copier import _main as copier_main
 from copier import run_copy
 from mypy import api as mypy_api
+from shared import copy_of, once, run_folder
 from shell import BASH, in_bash
 
 from blueprint.bot_health import (
@@ -77,27 +82,83 @@ TOOL = sorted(
 )
 
 
-def render(destination: Path, **data: str | bool) -> Path:
-    with warnings.catch_warnings():
-        # Uncommitted changes of the blueprint render too, with a warning.
+class Template:
+    """The blueprint as Copier renders it in the tests: the repository itself until the
+    fixture template has made a copy of its files, which renders faster."""
+
+    folder = ROOT
+
+
+def render(destination: Path, *, overwrite: bool = False, **data: str | bool) -> Path:
+    with warnings.catch_warnings(), contextlib.ExitStack() as stack:
+        # Uncommitted changes of a repository render too, with a warning.
         warnings.simplefilter("ignore")
+        # Copier asks Git for each file that it renders whether the index of the
+        # destination needs its executable bit: a process for each file, which takes
+        # seconds for a project on Windows. The destination of a test is no
+        # repository, where Git never needs it.
+        if hasattr(copier_main, "is_git_available"):
+            stack.enter_context(
+                mock.patch.object(copier_main, "is_git_available", return_value=False)
+            )
         run_copy(
-            str(ROOT), destination, data=data, defaults=True, vcs_ref="HEAD", quiet=True
+            str(Template.folder),
+            destination,
+            data=data,
+            defaults=True,
+            overwrite=overwrite,
+            vcs_ref="HEAD",
+            quiet=True,
         )
     return destination
 
 
-@pytest.fixture(scope="module")
-def projects(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    return {
-        kind: render(
-            tmp_path_factory.mktemp(kind),
-            project_name="Demo Project",
-            description=f'A {kind} of the tests, with "quotes" and Ümlauts.',
-            project_type=kind,
+@pytest.fixture(scope="session", autouse=True)
+def template(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """The files of the blueprint, copied once for the whole run into a folder without
+    Git, from which render() renders. The copy of the Mutation workflow has no Git, and
+    renders as it is."""
+    if (ROOT / ".git").exists():
+        Template.folder = once(
+            run_folder(tmp_path_factory) / "copy-of-the-blueprint",
+            lambda folder: copy_of(ROOT, folder),
         )
-        for kind in KINDS
-    }
+    yield Template.folder
+    Template.folder = ROOT
+
+
+class Projects(Mapping[str, Path]):
+    """The project of each kind, rendered when a test first asks for it, once for the
+    whole run: with pytest-xdist, the first process that needs a kind renders it, and
+    the others wait for it. The tests only read them; one that changes a project works
+    on a copy."""
+
+    def __init__(self, folder: Path) -> None:
+        self.folder = folder
+
+    def __getitem__(self, kind: str) -> Path:
+        if kind not in KINDS:
+            raise KeyError(kind)
+        return once(
+            self.folder / kind,
+            lambda project: render(
+                project,
+                project_name="Demo Project",
+                description=f'A {kind} of the tests, with "quotes" and Ümlauts.',
+                project_type=kind,
+            ),
+        )
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(KINDS)
+
+    def __len__(self) -> int:
+        return len(KINDS)
+
+
+@pytest.fixture(scope="session")
+def projects(tmp_path_factory: pytest.TempPathFactory) -> Mapping[str, Path]:
+    return Projects(run_folder(tmp_path_factory) / "projects")
 
 
 def text_files(project: Path) -> list[Path]:
@@ -769,14 +830,18 @@ def test_every_repository_gets_the_settings_tool(
 @pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_settings_tool_runs_in_every_repository(
-    projects: dict[str, Path], kind: str
+    projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
+    # On a copy, and without the folder for bytecode of the run, so that a tool that
+    # wrote __pycache__ would write it here, and not into the project of every test.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
     # As the workflows run it: the script imports the package next to it.
     result = subprocess.run(
         [sys.executable, ".github/blueprint.py", "--help"],
-        cwd=projects[kind],
+        cwd=project,
         capture_output=True,
         encoding="utf-8",
+        env=without_bytecode_prefix(os.environ),
         check=False,
     )
 
@@ -784,7 +849,19 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
-    assert not (projects[kind] / ".github/blueprint/__pycache__").exists()
+    assert not (project / ".github/blueprint/__pycache__").exists()
+
+
+def without_bytecode_prefix(environment: Mapping[str, str]) -> dict[str, str]:
+    """The environment in which Python writes __pycache__ next to the code: without
+    PYTHONPYCACHEPREFIX, which the run sets for every test, and without
+    PYTHONDONTWRITEBYTECODE, which a machine may set. Either would keep __pycache__ out
+    of the repository whatever the tool does."""
+    return {
+        name: value
+        for name, value in environment.items()
+        if name not in {"PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE"}
+    }
 
 
 def test_the_settings_tool_keeps_the_ruff_settings_of_the_blueprint() -> None:
@@ -1504,6 +1581,101 @@ def test_the_checks_fail_on_a_fragment_that_the_release_cannot_take_in(
         "\nchangelog.d/typo.md: `### Fixes` is no kind of change of the changelog. "
         "Did you mean `### Fixed`?" in failed.stdout
     )
+
+
+def step_of_the_tests(check: str) -> str:
+    start = check.index('step "Tests, with every line and branch covered"')
+    return check[start : check.index("\nstep ", start) + 1]
+
+
+@pytest.mark.parametrize("plugins", [True, False])
+def test_the_tests_of_a_python_project_run_on_every_core(
+    projects: dict[str, Path], tmp_path: Path, plugins: bool
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["python-package"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (project / "scripts/tests.sh").write_text(
+        check[: check.index('step "Text files"')] + step_of_the_tests(check),
+        encoding="utf-8",
+        newline="\n",
+    )
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    if not plugins:
+        # The Python of a project made before the blueprint brought pytest-xdist and
+        # pytest-cov, whose lock file is its own and lacks them.
+        stub = stubs / "python"
+        stub.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8", newline="\n")
+        stub.chmod(0o755)
+    # The tools of the tests first, two processes for -n auto, and none of the
+    # variables of the pytest that runs this test.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(("PYTEST_", "COV_CORE_", "COVERAGE_"))
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+    environment["STUBS"] = stubs.as_posix()
+    environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] = "2"
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            in_bash("scripts/tests.sh"),
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    passed = step()
+    # A function that no test calls.
+    module = project / "src/demo_project/__init__.py"
+    with module.open("a", encoding="utf-8", newline="\n") as code:
+        code.write("\n\ndef untested() -> int:\n    return 1\n")
+    failed = step()
+
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+    assert ("created: 2/2 workers" in passed.stdout) is plugins, passed.stdout
+    assert re.search(r"^TOTAL .* 100%$", passed.stdout, re.M), passed.stdout
+    # The data that the CI shows in the summary of the check.
+    assert (project / ".coverage").is_file()
+    # [tool.coverage] of pyproject.toml applies either way: fail_under fails the
+    # step, and the report names the line that no test runs.
+    assert failed.returncode != 0
+    assert ("created: 2/2 workers" in failed.stdout) is plugins, failed.stdout
+    assert re.search(
+        r"^src[\\/]demo_project[\\/]__init__\.py .* \d+$", failed.stdout, re.M
+    ), failed.stdout
+    assert "Coverage failure: total of" in failed.stdout + failed.stderr
+
+
+@pytest.mark.parametrize("kind", ["home-assistant", "github-action", "python-package"])
+def test_every_python_project_can_run_its_tests_on_every_core(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    tools = (
+        "requirements-test.txt" if kind == "home-assistant" else "requirements-dev.txt"
+    )
+    lock = (project / tools).read_text(encoding="utf-8")
+    settings = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    pytest_settings = settings["tool"]["pytest"]["ini_options"]
+
+    # pytest-xdist runs the tests on every core, pytest-cov measures each process,
+    # and pytest-timeout fails a test that hangs.
+    for plugin in ("pytest-xdist", "pytest-cov", "pytest-timeout"):
+        assert re.search(rf"^{plugin}==\S+ \\$", lock, re.M), (kind, plugin)
+    assert pytest_settings["timeout"] == 30
+    # -n stays out of the settings, because mutmut runs pytest within its own process.
+    assert not any(option.startswith("-n") for option in pytest_settings["addopts"])
+    assert "python -m pytest -n auto --cov --cov-report= --cov-fail-under=0" in (
+        project / "scripts/check.sh"
+    ).read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(
@@ -2606,15 +2778,18 @@ AGENT_COMMANDS = {
     "home-assistant": [
         "pip install --require-hashes -r requirements-test.txt",
         "coverage run -m pytest && coverage report",
+        "`pytest -n auto --cov` runs them on every core",
     ],
     "nextcloud-app": ["composer install", "vendor/bin/phpunit"],
     "github-action": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
+        "`pytest -n auto --cov` runs them on every core",
     ],
     "python-package": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
+        "`pytest -n auto --cov` runs them on every core",
     ],
     "node-package": ["npm ci", "`npm test`"],
     "container": ["docker run --rm demo-project:check --self-test"],
@@ -2676,7 +2851,7 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     for rule in (
         "bash scripts/check.sh",
-        "coverage run -m pytest && coverage report",
+        "`pytest -n auto --cov`",
         "`git commit -s`",
         "a new file `changelog.d/<branch>.md`",
         "`python3 blueprint.py fragments`",
@@ -2857,22 +3032,14 @@ def test_adopting_a_nextcloud_app_keeps_its_own_tests(tmp_path: Path) -> None:
     for name, text in own.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(text, encoding="utf-8", newline="\n")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        run_copy(
-            str(ROOT),
-            tmp_path,
-            data={
-                "project_name": "Demo",
-                "description": "A demo.",
-                "project_type": "nextcloud-app",
-                "sample_code": False,
-            },
-            defaults=True,
-            overwrite=True,
-            vcs_ref="HEAD",
-            quiet=True,
-        )
+    render(
+        tmp_path,
+        overwrite=True,
+        project_name="Demo",
+        description="A demo.",
+        project_type="nextcloud-app",
+        sample_code=False,
+    )
 
     for name, text in own.items():
         assert (tmp_path / name).read_text(encoding="utf-8") == text, name
@@ -4906,17 +5073,20 @@ def test_every_explanation_belongs_to_a_check_or_a_step(
 @pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_pr_coach_runs_in_every_repository(
-    projects: dict[str, Path], kind: str
+    projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
+    # On a copy and without the folder for bytecode of the run, as the settings tool.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+
     def coach(*arguments: str) -> subprocess.CompletedProcess[str]:
         environment = {
             name: value
-            for name, value in os.environ.items()
+            for name, value in without_bytecode_prefix(os.environ).items()
             if not name.startswith("GITHUB_")
         }
         return subprocess.run(
             [sys.executable, ".github/blueprint.py", "coach", *arguments],
-            cwd=projects[kind],
+            cwd=project,
             capture_output=True,
             encoding="utf-8",
             env=environment,
@@ -4928,7 +5098,7 @@ def test_the_pr_coach_runs_in_every_repository(
     explained = coach("explain", "--step", "Text files")
     assert explained.returncode == 0, explained.stderr
     assert explained.stdout.startswith("PR coach: Text files (scripts/check.sh)\n")
-    assert not (projects[kind] / ".github/blueprint/__pycache__").exists()
+    assert not (project / ".github/blueprint/__pycache__").exists()
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:

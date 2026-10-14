@@ -4,6 +4,9 @@
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = ["--strict-markers", "--strict-config"]
+# A test that hangs fails after five minutes instead of blocking the run, locally as
+# in the CI; a test of the template that renders a project takes seconds.
+timeout = 300
 xfail_strict = true
 filterwarnings = ["error"]
 markers = [
@@ -17,9 +20,10 @@ branch = true
 # is the package blueprint/, which the script blueprint.py only starts, and
 # mkdocs_blueprint and mkdocs_project the hooks of the website in .github/.
 source_pkgs = ["blueprint", "dashboard", "weekly", "sync_issue_assistant", "mkdocs_blueprint", "mkdocs_project"]
-# The tests render the template, and Jinja runs its includes of the tool as
-# templates of the same names in a temporary clone; that is no code of the tool.
-omit = ["*/copier._vcs.clone*/*"]
+# The tests render the template from a copy of the blueprint, and Jinja runs its
+# includes of the tool, such as blueprint.py, as templates of the same names there;
+# that is no code of the tool.
+omit = ["*/copy-of-the-blueprint/*"]
 
 [tool.coverage.report]
 fail_under = 100

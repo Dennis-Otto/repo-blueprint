@@ -1,10 +1,14 @@
-# The development tools: tests, coverage, property tests, type checks, lint and
-# the packaging with its build backend. Renovate keeps this list and the
-# hash-pinned requirements-dev.txt current.
+# The development tools: tests, run on every core (pytest-xdist) with their coverage
+# (pytest-cov) and a time limit for each (pytest-timeout), coverage, property tests,
+# type checks, lint and the packaging with its build backend. Renovate keeps this
+# list and the hash-pinned requirements-dev.txt current.
 build
 coverage
 hatchling
 hypothesis
 mypy
 pytest
+pytest-cov
+pytest-timeout
+pytest-xdist
 ruff

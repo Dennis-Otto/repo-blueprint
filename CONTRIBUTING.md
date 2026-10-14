@@ -17,6 +17,8 @@ Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with what a c
 
 New functionality comes with tests in the automated test suite, in the same pull request, and so does every change of behavior. A bug fix comes with a test that fails without the fix, so that the bug can't return unnoticed. `scripts/check.sh` fails when a line or a branch of the code runs in no test. A pull request without the tests it needs is not merged.
 
+`scripts/check.sh` runs the tests on every core with pytest-xdist, so each test stands on its own, without the state or the order of another one. A folder that many tests read and that takes long to make, such as the project of each kind that the tests of the template render, is made once for the whole run with `once` of `tests/shared.py`, and a test that changes such a folder works on a copy of it. pytest-timeout fails a test that hangs after five minutes.
+
 A change of the template comes with a test in `tests/test_template.py` that renders it, and the Variants workflow runs the checks of every kind of project with its real tools, for a new repository and for one that the update brings from the latest release. A change that the files of a project must follow, which an update never touches, says in the changelog how an existing project makes it.
 
 A new check runs only where it can change a result, as [decision 0009](docs/decisions/0009-run-a-check-only-where-it-can-change-a-result.md) describes: a required check in every pull request and without a path filter, a scanner in the pull requests that change what it reads, and on `main` only what keeps a baseline or publishes.

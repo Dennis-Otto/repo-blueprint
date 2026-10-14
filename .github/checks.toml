@@ -525,12 +525,18 @@ autofix = """Only a person knows which type is right."""
 
 [step."Tests, with every line and branch covered"]
 problem = """A test fails, or a line or a branch of the code runs in no test; the
-coverage report names the files and lines that it misses."""
+coverage report names the files and lines that it misses. A test also fails when it runs
+longer than the `timeout` of `pyproject.toml` (the log says `Timeout`), or when it depends
+on another test: the tests run in parallel, in another order on each worker."""
 why = """Every line and branch under test means that every change of behavior shows in a
 test, so that a bug can't come back unnoticed."""
 fix = """Fix the test that fails, or the code that it catches, and write a test for each
-line and branch that the report lists as missing:"""
-commands = ["coverage run -m pytest", "coverage report"]
+line and branch that the report lists as missing. Make a slow test faster, or let it wait
+for a condition instead of a time; give a test that shares state with another one its own
+files and settings, such as `tmp_path`. `coverage run -m pytest` runs the tests one after
+another; `python -m pytest -n auto --cov` runs them in parallel as CI does, where
+pytest-xdist and pytest-cov are installed:"""
+commands = ["coverage run -m pytest", "coverage report", "python -m pytest -n auto --cov"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """A test that fails, or code without a test, needs a person, who knows what the code should do."""
 
