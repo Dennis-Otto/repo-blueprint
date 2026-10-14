@@ -4514,6 +4514,7 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
             "Variants",
             "Windows",
             "Release",
+            "Issue assistant sync",
         }
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
@@ -4531,7 +4532,6 @@ UNWATCHED = {
     "Welcome",
     "Mutation",
     "Renovate",
-    "Issue assistant sync",
 }
 
 

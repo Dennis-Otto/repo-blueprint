@@ -104,10 +104,27 @@ jobs:
             echo "url=https://github.com/$SOURCE/releases/tag/$tag"
           } >> "$GITHUB_OUTPUT"
           # Every pin of the action already names the release: nothing to take over.
-          if [[ "$(python3 sync_issue_assistant.py pinned)" == "$commit $tag" ]]; then
+          pinned="$(python3 sync_issue_assistant.py pinned)"
+          if [[ "$pinned" == "$commit $tag" ]]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
             echo "The blueprint has the issue assistant $tag, the latest release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          # GitHub calls the release latest by its date or by hand, not by its version:
+          # a fix of an older line published later, or an older release marked latest
+          # again, would take the blueprint and every repository back. The bot never
+          # goes back to an older release.
+          for have in $(printf '%s\n' "$pinned" | cut -d ' ' -f 2); do
+            if [[ "$have" != "$tag" && "$(printf '%s\n%s\n' "$have" "$tag" | sort -V | tail -n 1)" == "$have" ]]; then
+              echo "::error::The latest release $tag of $SOURCE is older than $have, which the blueprint has; the bot never goes back to an older release."
+              {
+                echo "### The sync bot refused the release $tag of $SOURCE"
+                echo
+                echo "The latest release $tag of $SOURCE is older than $have, which the blueprint has. GitHub calls the release latest by its date or by hand, not by its version; the bot never goes back to an older release. Nothing has changed here; the next newer release lets the bot take it over."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
       # Whoever can push a tag to the issue assistant could otherwise bring workflows of
       # their own into the blueprint, and with its next release into every repository
       # made from it. So the bot takes only a release that the release workflow of the
@@ -174,6 +191,11 @@ jobs:
           done
           cat "$RUNNER_TEMP/attestation"
           if ((attested != 0)); then
+            # An answer of GitHub that never came is no verdict on the release.
+            if grep -qiE 'HTTP 5[0-9]{2}|timed? ?out|connection (refused|reset)|no such host|TLS handshake|unexpected EOF' "$RUNNER_TEMP/attestation"; then
+              echo "::error::GitHub's attestation of the release $TAG of $SOURCE could not be checked; nothing has changed, and the next run checks it again."
+              exit 1
+            fi
             refuse "GitHub's attestation of the release $TAG of $SOURCE doesn't hold; the log of the run shows what gh release verify says."
           fi
           # .github/sign-tag.sh names what is wrong with the tag, and exits with 2 when

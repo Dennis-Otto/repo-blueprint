@@ -74,7 +74,7 @@ on:
   workflow_run:
     # The workflows of the checks of this repository; the blueprint sets them for each kind of project.
     # Then those of the other required checks and of the scanners, the same in every repository, and the release.
-    workflows: [CI (python), Variants, Windows, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security, Release]
+    workflows: [CI (python), Variants, Windows, Issue assistant sync, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security, Release]
     types: [completed]
 
 permissions: {}

@@ -793,10 +793,13 @@ case "$1 $2" in
     if [[ "$outcome" == fail ]]; then
       echo "No attestations for tag $3"
       exit 1
+    elif [[ "$outcome" == down ]]; then
+      echo "gh: Bad Gateway (HTTP 502)"
+      exit 1
     fi
     echo "Release $3 verified!"
     ;;
-  "api repos/Dennis-Otto/issue-assistant/commits/v1.3.1") echo "$COMMIT" ;;
+  "api repos/Dennis-Otto/issue-assistant/commits/"*) echo "$COMMIT" ;;
   "api repos/Dennis-Otto/issue-assistant/releases/tags/v1.3.1")
     next immutable "${IMMUTABLE:-true}"
     [[ "$outcome" == fail ]] && fail
@@ -1095,6 +1098,60 @@ def test_a_question_without_an_answer_refuses_nothing(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert summary == ""
+
+
+@needs_bash
+def test_an_attestation_that_github_could_not_check_refuses_nothing(
+    tmp_path: Path,
+) -> None:
+    result, _, summary = verify(tmp_path, plans={"attestation": "down\ndown\ndown\n"})
+
+    assert result.returncode == 1
+    assert (
+        "::error::GitHub's attestation of the release v1.3.1 of"
+        " Dennis-Otto/issue-assistant could not be checked; nothing has changed, and"
+        " the next run checks it again."
+    ) in result.stdout.splitlines()
+    assert summary == ""
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("have", "latest", "older"),
+    [
+        ("v1.3.1", "v1.2.2", True),
+        ("v1.10.0", "v1.9.3", True),
+        ("v1.9.3", "v1.10.0", False),
+        ("v1.2.2", "v1.3.1", False),
+    ],
+)
+def test_the_sync_never_goes_back_to_an_older_release(
+    tmp_path: Path, have: str, latest: str, older: bool
+) -> None:
+    lint = LINT.replace(pin(OLD, "v1.2.2"), pin(OLD, have))
+    root = with_script(
+        written(tmp_path / "blueprint", {".github/workflows/lint.yml": lint})
+    )
+
+    result, _, output, summary = run_step(
+        step(*FIND), root, tmp_path, TAG=latest, COMMIT=NEW
+    )
+
+    if older:
+        assert result.returncode == 1
+        assert (
+            f"::error::The latest release {latest} of Dennis-Otto/issue-assistant is"
+            f" older than {have}, which the blueprint has; the bot never goes back to"
+            " an older release."
+        ) in result.stdout.splitlines()
+        assert summary.startswith(
+            f"### The sync bot refused the release {latest} of"
+            " Dennis-Otto/issue-assistant\n"
+        )
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert summary == ""
+    assert "current=true" not in output
 
 
 # git for the step that installs the release: the fetch of the verified commit and its
