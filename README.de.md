@@ -300,7 +300,7 @@ Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt
 ## Werkzeuge in jedem Repository
 
 - `bash scripts/check.sh`: die Prüfungen der CI, lokal.
-- `bash scripts/diagrams.sh`: zeichnet jedes Diagramm aus `docs/diagrams/` als seine Bilder in `docs/images/diagrams/`, mit Docker; `--extract` macht vorher aus jedem `mermaid`-Block des Markdowns eine Quelle und ihr Bild, und `--check` prüft ohne Docker, was `scripts/check.sh` prüft.
+- `bash scripts/diagrams.sh`: zeichnet jedes Diagramm aus `docs/diagrams/`, das eine Seite zeigt, als seine Bilder in `docs/images/diagrams/`, mit Docker, und lässt die anderen Quellen, wie sie sind; `--extract` macht vorher aus jedem `mermaid`-Block des Markdowns eine Quelle und ihr Bild und schreibt das `alt` jedes Bildes aus seiner Quelle, und `--check` prüft ohne Docker, was `scripts/check.sh` prüft.
 - `bash scripts/social-preview.sh`: rendert `.github/social-preview.html` in das 1280×640-Bild, das GitHub bei Links auf das Repository zeigt; hochladen unter *Settings → Social preview*.
 
 ## Dashboard

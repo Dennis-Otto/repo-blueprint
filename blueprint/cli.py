@@ -43,7 +43,15 @@ from blueprint.coach import (
 from blueprint.coach import annotation as coach_annotation
 from blueprint.coach import report as coach_report
 from blueprint.coverage_comment import Coverage, coverage_comment
-from blueprint.diagrams import SOURCES, commit_request, extract, keep, listing, report
+from blueprint.diagrams import (
+    SOURCES,
+    commit_request,
+    extract,
+    follow,
+    keep,
+    listing,
+    report,
+)
 from blueprint.fixes import (
     Fixes,
     FixLoop,
@@ -217,6 +225,26 @@ def diagrams_command(arguments: argparse.Namespace, root: Path) -> int:
     if arguments.action == "report":
         print(report(arguments.folder, arguments.kind), end="")
         return 0
+    if arguments.action == "check":
+        stale = [found for found in follow(root, write=False) if found.line]
+        for found in stale:
+            print(
+                f"{found.path.as_posix()}:{found.line}: the alt of the picture of "
+                f"{found.source.as_posix()} isn't its accTitle and accDescr; bash "
+                "scripts/diagrams.sh --extract writes them into it"
+            )
+        return 1 if stale else 0
+    for found in follow(root):
+        if found.line:
+            print(
+                f"{found.path.as_posix()}:{found.line}: the alt of the picture repeats "
+                f"{found.source.as_posix()} again"
+            )
+        else:
+            print(
+                f"{found.path.as_posix()}: its labels lost their HTML, which the "
+                "pictures show as text"
+            )
     extracted = extract(root)
     for diagram in extracted:
         known = "" if diagram.new else ", which was there already"
@@ -577,7 +605,14 @@ def main(
     )
     diagrams_actions = diagrams_parser.add_subparsers(dest="action", required=True)
     diagrams_actions.add_parser(
-        "extract", help="every ```mermaid block as a source and the <picture> of it"
+        "extract",
+        help="every ```mermaid block as a source and the <picture> of it, the labels "
+        "of the sources without HTML, and the alt of each picture as its source says",
+    )
+    diagrams_actions.add_parser(
+        "check",
+        help="whether the alt of each picture repeats the accTitle and accDescr of "
+        "its source, for scripts/diagrams.sh --check",
     )
     keep_parser = diagrams_actions.add_parser(
         "keep",
