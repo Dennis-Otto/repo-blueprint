@@ -20,6 +20,7 @@ import pytest
 from shell import BASH, in_bash
 
 import sync_issue_assistant as sync
+from blueprint.bot_health import ONE_TRY, OWN_ISSUE
 
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github/workflows/sync-issue-assistant.yml"
@@ -733,12 +734,23 @@ def test_the_job_of_the_pull_request_runs_nothing_of_the_release() -> None:
     )
 
 
-def test_a_failed_run_keeps_one_issue_open() -> None:
-    report = job("report")
-    assert "    needs: [adopt, pull-request]\n" in report
-    assert "github.event_name != 'pull_request'" in report
-    assert "    permissions:\n      issues: write\n" in report
-    assert 'title="The issue assistant sync fails"' in report
+def test_the_bot_health_bot_keeps_the_issue_of_a_failed_run() -> None:
+    # One issue per failing bot, from the bot-health bot, with the reason of a refusal
+    # from its annotation: the sync keeps no issue of its own, which would be a second.
+    content = WORKFLOW.read_text(encoding="utf-8")
+    assert "issues: write" not in content
+    assert re.findall(r"^  ([a-z-]+):\n    name: ", content, re.M) == [
+        "adopt",
+        "pull-request",
+    ]
+    assert 'echo "::error::$1"' in step(
+        "adopt", "Verify the release before taking it over"
+    )
+    health = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    watched = re.search(r"^    workflows: \[(.+)\]$", health, re.M)
+    assert watched
+    assert "Issue assistant sync" in watched[1].split(", ")
+    assert "Issue assistant sync" not in OWN_ISSUE | ONE_TRY
 
 
 GH = """#!/usr/bin/env bash

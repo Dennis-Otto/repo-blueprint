@@ -1088,7 +1088,14 @@ def test_the_inputs_that_start_a_workflow_as_its_schedule_does() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["findings.yml", "issue-lifecycle.yml", "properties.yml", "release.yml"]
+    "name",
+    [
+        "findings.yml",
+        "issue-lifecycle.yml",
+        "properties.yml",
+        "release.yml",
+        "sync-issue-assistant.yml",
+    ],
 )
 def test_the_workflows_of_the_blueprint_start_as_their_schedules_do(
     name: str,
@@ -1097,7 +1104,7 @@ def test_the_workflows_of_the_blueprint_start_as_their_schedules_do(
 
     inputs = dispatch_inputs(text)
 
-    dry = name in ("findings.yml", "issue-lifecycle.yml")
+    dry = name in ("findings.yml", "issue-lifecycle.yml", "sync-issue-assistant.yml")
     assert inputs == ({"dry_run": "false"} if dry else {})
     assert missed_time(text, NOW)[0] is not None
 

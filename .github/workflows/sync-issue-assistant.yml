@@ -14,8 +14,9 @@ name: Issue assistant sync
 # that it can't verify changes nothing and fails the run. Installing runs without
 # secrets; only the job of the pull request has the release app, and it runs nothing
 # of the release. A pull request that changes the bot runs it without a pull request
-# of its own, as a start by hand with dry_run does. A failed run opens an issue, which
-# the next run that passes closes.
+# of its own, as a start by hand with dry_run does. The bot-health bot keeps one issue
+# open about a failed run, with the reason that it gave, which the next run that passes
+# closes.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -365,43 +366,3 @@ jobs:
           fi
           gh pr merge "$BRANCH" --auto --squash
           echo "The pull request of the issue assistant $TAG from $BRANCH has the commit $commit, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"
-
-  # The issue of a failed run of the bot: a failure opens it or brings it up to date,
-  # and the next run that passes closes it.
-  report:
-    name: report
-    needs: [adopt, pull-request]
-    if: "!cancelled() && !github.event.repository.fork && github.event_name != 'pull_request'"
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      issues: write
-    steps:
-      - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - name: Keep the issue of the sync bot current
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          FAILED: ${{ contains(needs.*.result, 'failure') }}
-          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="The issue assistant sync fails"
-          number="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
-            --jq "map(select(.title == \"$title\"))[0].number // empty")"
-          if [[ "$FAILED" != true ]]; then
-            if [[ -n "$number" ]]; then
-              gh issue close "$number" --comment "The issue assistant sync passes again: $URL"
-            fi
-            exit 0
-          fi
-          body="$(printf '%s\n\n%s\n' \
-            "The Issue assistant sync failed, so the blueprint may lack the latest release of the issue assistant, with its fixes. The summary of the run says why: a release that the bot refused, which changes nothing here, or a step that failed. The next run that passes closes this issue." \
-            "The latest failure: $URL")"
-          if [[ -n "$number" ]]; then
-            gh issue edit "$number" --body "$body"
-          else
-            gh issue create --title "$title" --label maintenance --body "$body"
-          fi

@@ -55,7 +55,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    The [issue assistant](https://github.com/Dennis-Otto/issue-assistant): a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix. A bot that fails on `main` opens one issue of its own, which closes once the bot passes again.
+    The [issue assistant](https://github.com/Dennis-Otto/issue-assistant): a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix. Each new release of the assistant reaches every repository by itself, once a bot has verified that its release workflow made it. A bot that fails on `main` opens one issue of its own, which closes once the bot passes again.
 
 - :material-web:{ .lg .middle } **Website**
 

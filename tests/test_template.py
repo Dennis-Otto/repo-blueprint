@@ -4531,6 +4531,7 @@ UNWATCHED = {
     "Welcome",
     "Mutation",
     "Renovate",
+    "Issue assistant sync",
 }
 
 
@@ -5041,7 +5042,13 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
-BLUEPRINT_BOTS = {"Dashboard", "Renovate", "Rollout", "Weekly report"}
+BLUEPRINT_BOTS = {
+    "Dashboard",
+    "Issue assistant sync",
+    "Renovate",
+    "Rollout",
+    "Weekly report",
+}
 
 
 def names_of_workflows(root: Path) -> dict[str, str]:
