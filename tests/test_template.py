@@ -25,7 +25,18 @@ from copier import run_copy
 from mypy import api as mypy_api
 from shell import BASH, in_bash
 
+from blueprint.bot_health import (
+    FAILED,
+    LABEL,
+    LABEL_COLOR,
+    LABEL_DESCRIPTION,
+    OWN_ISSUE,
+    RENOVATE_LABEL,
+    TYPE,
+    after_pull_requests,
+)
 from blueprint.changelog import Fragment, release_changelog
+from blueprint.pages import layouts, shown
 from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
@@ -238,6 +249,11 @@ def test_the_workflows_are_the_blueprints_own(
         if name == "after-checks.yml":
             # The workflows it watches; the bots after the checks test them.
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
+            source = re.sub(watched, "", source)
+            text = re.sub(watched, "", text)
+        if name == "bot-health.yml":
+            # The bots it watches, without those of the blueprint alone in a project.
+            watched = r"    # The bots and the scheduled workflows of every repository.*\n    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
         assert text == source, name
@@ -624,6 +640,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".gitattributes",
         ".gitignore",
         ".python-version",
+        "CLAUDE.md",
         "CODE_OF_CONDUCT.md",
         "GOVERNANCE.md",
         "LICENSE",
@@ -1263,6 +1280,109 @@ def test_the_checks_fail_while_git_would_skip_a_hook(
             0,
             "\n== Git hooks\nEvery hook in .githooks/ is executable.\n",
         ), passed.stderr
+
+
+def pages_step(check: str) -> str:
+    start = check.index('step "Pages in one column"')
+    return check[start : check.index('step "Version"', start)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_its_pages_have_one_column(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # In every kind of project the same, right after the diagrams, without Docker.
+    assert check.index('\nstep "Diagrams"\n') < check.index(
+        '\nstep "Pages in one column"\n'
+    )
+    assert pages_step(check) == pages_step(generic) == pages_step(own)
+    assert '"$python" "$tool" pages\n' in pages_step(check)
+    assert "docker" not in pages_step(check)
+    # The pages that a new repository starts with have one column.
+    checked = [
+        page
+        for page in project.rglob("*.md")
+        if ".git" not in page.parts and shown(page.relative_to(project))
+    ]
+    assert project / "README.md" in checked
+    assert project / "CONTRIBUTING.md" in checked
+    for page in checked:
+        assert layouts(page.read_text(encoding="utf-8")) == [], page
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "## Pages in one column" in contributing
+    assert "`python3 .github/blueprint.py pages --fix`" in contributing
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_a_page_with_columns_side_by_side(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    script = check[: check.index('step "Text files"')] + pages_step(check)
+    (project / "scripts/pages.sh").write_text(script, encoding="utf-8", newline="\n")
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    # The Python of the tests first, without the variables of a run of the CI.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("CI", "GITHUB_ACTIONS")
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/pages.sh"],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    passed = step()
+    readme = project / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    readme.write_text(
+        text
+        + '\n<table><tr>\n<td width="50%">The card</td>\n'
+        + '<td><img src="docs/images/card.png" alt="The card"></td>\n</tr></table>\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    failed = step()
+    fix = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "pages", "--fix"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    fixed = step()
+
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+    assert "page(s) that GitHub shows have one column." in passed.stdout
+    line = text.count("\n") + 2
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert f"\nREADME.md:{line}: a <table> that sets a picture beside" in failed.stdout
+    assert (
+        "python3 .github/blueprint.py pages --fix puts 1 of them in one column"
+        in failed.stdout
+    )
+    assert fix.returncode == 0, fix.stdout + fix.stderr
+    assert readme.read_text(encoding="utf-8").endswith(
+        '\nThe card\n\n<img src="docs/images/card.png" alt="The card">\n'
+    )
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
 
 
 @pytest.mark.skipif(
@@ -2294,12 +2414,18 @@ def test_secrets_stay_out_of_git(projects: dict[str, Path], kind: str) -> None:
         assert pattern in ignored, pattern
 
 
+def files_of_the_project() -> list[str]:
+    """The patterns of _skip_if_exists in copier.yml: the files that belong to a
+    project after its first copy, which an update never overwrites."""
+    config = (ROOT / "copier.yml").read_text(encoding="utf-8")
+    block = config.split("_skip_if_exists:", 1)[1].split("\n\n", 1)[0]
+    return re.findall(r'^  - "?([^"\n]+?)"?$', block, re.MULTILINE)
+
+
 def test_updates_reach_every_file_of_the_blueprint() -> None:
     # Copier matches _skip_if_exists like .gitignore; a pattern without a slash
     # would match at any depth and keep the blueprint's files from their updates.
-    config = (ROOT / "copier.yml").read_text(encoding="utf-8")
-    block = config.split("_skip_if_exists:", 1)[1].split("\n\n", 1)[0]
-    skip = re.findall(r'^  - "?([^"\n]+?)"?$', block, re.MULTILINE)
+    skip = files_of_the_project()
     assert "/*.py" in skip
     # The patterns as Copier reads them.
     matcher = pathspec.PathSpec.from_lines("gitignore", skip)
@@ -2316,6 +2442,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "custom_components/demo/__init__.py",
         ".github/labels.toml",
         "docs/security.md",
+        ".github/agents.project.md",
     ):
         assert matcher.match_file(owned), owned
     for updated in (
@@ -2329,8 +2456,127 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         "scripts/check.sh",
         "scripts/diagrams.sh",
         "changelog.d/.gitkeep",
+        "AGENTS.md",
+        "CLAUDE.md",
     ):
         assert not matcher.match_file(updated), updated
+
+
+def listed_files_of_the_project(agents: str) -> list[str]:
+    """The patterns that the list of the files of the project in an AGENTS.md names,
+    one per code span, from the line that introduces the list to the next heading."""
+    start = agents.index("\nThe files of this project, as `_skip_if_exists`")
+    end = agents.index("\n## ", start)
+    patterns = []
+    for line in agents[start:end].splitlines()[1:]:
+        if line.startswith("- **"):
+            patterns += re.findall(r"`([^`]+)`", line.split(":** ", 1)[1])
+    return patterns
+
+
+# The commands that set up the tools of each kind of project and run its tests,
+# which AGENTS.md names for coding agents.
+AGENT_COMMANDS = {
+    "home-assistant": [
+        "pip install --require-hashes -r requirements-test.txt",
+        "coverage run -m pytest && coverage report",
+    ],
+    "nextcloud-app": ["composer install", "vendor/bin/phpunit"],
+    "github-action": [
+        "pip install --require-hashes -r requirements-dev.txt",
+        "coverage run -m pytest && coverage report",
+    ],
+    "python-package": [
+        "pip install --require-hashes -r requirements-dev.txt",
+        "coverage run -m pytest && coverage report",
+    ],
+    "node-package": ["npm ci", "`npm test`"],
+    "container": ["docker run --rm demo-project:check --self-test"],
+    "generic": ["no build and no tests of its own"],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_tells_coding_agents_its_rules(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    # The commands of the kind of project, and the rules of every pull request.
+    for command in (*AGENT_COMMANDS[kind], "bash scripts/check.sh"):
+        assert command in agents, command
+    for rule in (
+        "`git commit -s`",
+        # The entry of the changelog is a fragment, which conflicts with no other
+        # pull request, and a diagram a picture of its source, never a mermaid block.
+        "a new file `changelog.d/<branch>.md`",
+        "`python3 .github/blueprint.py fragments`",
+        "`docs/diagrams/<name>.mmd`",
+        "`bash scripts/diagrams.sh`",
+        "Never write a `mermaid` block",
+        "Conventional Commit",
+        "`fix` and `perf` a patch, `feat` a minor",
+        "`Fixes #123`",
+        "`--no-verify`",
+        "`scripts/check-project.sh`",
+        "`.github/repository.project.toml`",
+    ):
+        assert rule in agents, rule
+    # The files of the project are exactly those that an update never overwrites,
+    # so that the list for coding agents can't drift from copier.yml.
+    listed = listed_files_of_the_project(agents)
+    assert sorted(listed) == sorted(files_of_the_project())
+    assert len(listed) == len(set(listed))
+    # It ends with the notes of the project, which belong to the project.
+    assert agents.endswith(
+        "## Project notes\n\nSee [.github/agents.project.md](.github/agents.project.md).\n"
+    )
+    notes = (project / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert "Demo Project: A " in notes
+    assert "## Where things are" in notes
+    # Every link of AGENTS.md to a file of the repository leads to one.
+    for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", agents):
+        if not link.startswith("https://"):
+            assert (project / link).is_file(), link
+    # Claude Code reads AGENTS.md and the notes through the imports of CLAUDE.md,
+    # each on a line of its own; Codex and GitHub Copilot read AGENTS.md directly.
+    claude = (project / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    assert "@AGENTS.md" in claude
+    assert "@.github/agents.project.md" in claude
+
+
+def test_the_blueprint_tells_coding_agents_its_rules() -> None:
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    for rule in (
+        "bash scripts/check.sh",
+        "coverage run -m pytest && coverage report",
+        "`git commit -s`",
+        "a new file `changelog.d/<branch>.md`",
+        "`python3 blueprint.py fragments`",
+        "`docs/diagrams/<name>.mmd`",
+        "`bash scripts/diagrams.sh`",
+        "Never write a `mermaid` block",
+        "`Fixes #123`",
+        "`README.md` and `README.de.md` together",
+        "`tests/test_template.py`",
+        "`_skip_if_exists`",
+        "`template/AGENTS.md.jinja`",
+    ):
+        assert rule in agents, rule
+    assert agents.endswith(
+        "## Project notes\n\nSee [.github/agents.project.md](.github/agents.project.md).\n"
+    )
+    for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", agents):
+        if not link.startswith("https://"):
+            assert (ROOT / link).is_file(), link
+    notes = (ROOT / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert "`docs/diagrams/<name>.mmd`" in notes
+    assert "never a `mermaid` block" in notes
+    # Its CLAUDE.md is the one of every repository, which test_the_blueprint_
+    # follows_its_own_template keeps equal.
+    claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    assert "@AGENTS.md" in claude
+    assert "@.github/agents.project.md" in claude
 
 
 def test_copying_runs_no_code_of_the_blueprint() -> None:
@@ -4165,6 +4411,148 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
+
+
+# The bots of the blueprint alone, which a project's bot-health bot leaves out.
+BLUEPRINT_BOTS = {"Dashboard", "Renovate", "Rollout", "Weekly report"}
+
+
+def names_of_workflows(root: Path) -> dict[str, str]:
+    """The workflows of a repository by their names."""
+    named = {}
+    for text in workflows(root).values():
+        name = re.search(r"^name: (.+)$", text, re.MULTILINE)
+        assert name
+        named[name[1]] = text
+    return named
+
+
+def watched_by_bot_health(root: Path) -> set[str]:
+    text = (root / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    watched = re.search(r"^    workflows: \[(.+)\]$", text, re.MULTILINE)
+    assert watched
+    return set(watched[1].split(", "))
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_health_bot_watches_every_bot(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    watched = watched_by_bot_health(root)
+
+    # Each is the name of a workflow of the blueprint: a typo would watch nothing.
+    assert watched <= set(names_of_workflows(ROOT))
+    if project == "blueprint":
+        assert watched >= BLUEPRINT_BOTS
+    else:
+        assert not watched & BLUEPRINT_BOTS
+    # Every workflow on a schedule that pull requests don't run, whose every run is
+    # one of the default branch; Diagrams, Newest Python and the Next runner keep an
+    # issue of their own.
+    for name, text in names_of_workflows(root).items():
+        events = set(triggers(text))
+        if "schedule" in events and not events & {
+            "pull_request",
+            "pull_request_target",
+        }:
+            assert name in watched | OWN_ISSUE | {"Bot health"}, name
+    # Not the checks of pull requests, each of whose runs would start a run of the
+    # bot that skips: the daily look covers their runs on the default branch.
+    assert not watched & OTHER_CHECKS
+    assert "Bot health" not in watched
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
+    projects: dict[str, Path], project: str
+) -> None:
+    # GitHub gives a run that the end of a check of a pull request starts the default
+    # branch and its latest commit. A watched workflow that such an end starts, as
+    # CodeQL starts Findings, skips those runs in each of its jobs, so that they end
+    # skipped; the daily look counts only the other runs of such a workflow.
+    root = ROOT if project == "blueprint" else projects[project]
+    named = names_of_workflows(root)
+    after_checks = after_pull_requests(named.items())
+    assert {"After the checks", "Findings"} <= after_checks
+    for name in watched_by_bot_health(root) & after_checks:
+        text = named[name]
+        for job in re.findall(r"^  ([\w-]+):$", text.split("\njobs:\n", 1)[1], re.M):
+            condition = condition_of(job_of(text, job))
+            assert (
+                "github.event.workflow_run.head_branch == "
+                "github.event.repository.default_branch" in condition
+            ), (name, job)
+
+
+def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
+    text = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    assert set(triggers(text)) == {"workflow_run", "schedule", "workflow_dispatch"}
+    run = job_of(text, "run")
+    condition = condition_of(run)
+    for part in (
+        "github.event_name == 'workflow_run'",
+        "!github.event.repository.fork",
+        "github.event.workflow_run.head_branch == github.event.repository.default_branch",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+        '!contains(fromJSON(\'["pull_request", "pull_request_target"]\'), '
+        "github.event.workflow_run.event)",
+    ):
+        assert part in condition, part
+    ends = re.search(
+        r"contains\(fromJSON\('(\[[^\]]+\])'\), github\.event\.workflow_run\.conclusion\)",
+        condition,
+    )
+    assert ends
+    assert set(json.loads(ends[1])) == FAILED | {"success"}
+    assert "github.event_name != 'workflow_run'" in condition_of(job_of(text, "sweep"))
+    # One run at a time per workflow, set on the job: a run that skips, for a pull
+    # request, never replaces the waiting one for the default branch.
+    assert "\nconcurrency:" not in text
+    assert (
+        "group: ${{ github.workflow }}-${{ github.event.workflow_run.workflow_id }}"
+        in run
+    )
+    for name in ("run", "sweep"):
+        job = job_of(text, name)
+        # The default branch, without the token in the checkout.
+        assert "persist-credentials: false" in job, name
+        assert "ref:" not in job, name
+        assert "bot-health" in job, name
+        assert "issues: write" in job, name
+    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
+    assert "      - bot-health.yml\n" in dangerous
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_repository_has_the_labels_of_the_bot_health_bot(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    text = (root / ".github/labels.toml").read_text(encoding="utf-8")
+    labels = {label["name"]: label for label in tomllib.loads(text)["label"]}
+
+    assert {TYPE, RENOVATE_LABEL} <= set(labels)
+    # The bot creates the label where a repository's own labels.toml lacks it.
+    assert labels[LABEL]["color"] == LABEL_COLOR
+    assert labels[LABEL]["description"] == LABEL_DESCRIPTION
+
+
+def test_renovate_reports_its_problems_in_one_issue() -> None:
+    text = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_of(text, "renovate")
+    log = re.search(r"RENOVATE_LOG_FILE: (\S+)", job)
+    # Renovate reads the path in lower case, and the action shares /tmp with it.
+    assert log
+    assert log[1].startswith("/tmp/")
+    assert log[1] == log[1].lower()
+    assert "RENOVATE_LOG_FILE_LEVEL: warn" in job
+    step = "Keep the issue of Renovate's problems current"
+    assert job.index(f"- name: {step}") > job.index("- name: Run Renovate")
+    assert f"bot-health renovate {log[1]} " in script_of(text, step)
+    assert "if: ${{ !cancelled() }}" in job.split(f"- name: {step}", 1)[1]
+    assert "issues: write" in job
 
 
 # jq, which gh runs for its option --jq: the steps that rely on its filters run with
