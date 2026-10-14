@@ -62,3 +62,13 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.txt
       - name: Run the checks
         run: bash scripts/check.sh
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: "check (Windows)"
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python "$script" coach explain "$CHECK"
