@@ -5,23 +5,26 @@ config:
 ---
 flowchart TB
     accTitle: How the blueprint bot verifies a release before it updates
-    accDescr: The blueprint bot takes the latest published release of its source. It checks that the release is immutable, that its tag points at a commit of the main branch of the source, and that the release workflow of the source signed the tag with gitsign. Only when all three hold does Copier update to exactly that tag; otherwise the run fails and nothing changes. In the source, only the release app may create a release tag, and nobody may move or delete one.
+    accDescr: The blueprint bot takes the latest published release of its source. It checks that the release is immutable, that its tag points at a commit of the main branch of the source, that this commit is no older than the version the repository has, and that the release workflow of the source signed the tag with gitsign. Only when all four hold does Copier update to exactly that tag; otherwise the run fails and nothing changes. In the source, only the release app may create a release tag, and nobody may move or delete one.
 
     app(["Release app<br>the only one that creates<br>a release tag"])
     tag["Release tag of the blueprint<br>signed by its release workflow"]
     bot(["Blueprint bot<br>of each repository"])
     immutable{"Release<br>immutable?"}
     main{"Tag on<br>main?"}
+    newer{"No older than the<br>version of the<br>repository?"}
     signed{"Signed by its<br>release workflow?"}
     refused(["The run fails<br>nothing changes"])
     update["copier update --vcs-ref<br>to exactly that tag"]
 
     app --> tag --> bot --> immutable
     immutable -- "yes" --> main
-    main -- "yes" --> signed
+    main -- "yes" --> newer
+    newer -- "yes" --> signed
     signed -- "yes" --> update
     immutable -- "no" --> refused
     main -- "no" --> refused
+    newer -- "no" --> refused
     signed -- "no" --> refused
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
