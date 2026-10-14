@@ -1,0 +1,188 @@
+{
+  "event": {
+    "action": "completed",
+    "workflow_run": {
+      "id": 18542117702,
+      "name": "Lint",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_branch": "patch-1",
+      "head_sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+      "run_attempt": 1,
+      "pull_requests": [],
+      "head_repository": {"full_name": "contributor/demo", "fork": true},
+      "repository": {"full_name": "Dennis-Otto/demo", "fork": false},
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117702"
+    }
+  },
+  "pull": {
+    "number": 42,
+    "state": "open",
+    "title": "Dark mode for the settings.",
+    "user": {"login": "contributor", "type": "User"},
+    "head": {
+      "ref": "feature/dark-mode",
+      "sha": "3f786850e387550fdab836ed7e6dc881de23001b",
+      "repo": {"full_name": "contributor/demo", "fork": true}
+    },
+    "base": {"ref": "main", "repo": {"full_name": "Dennis-Otto/demo"}}
+  },
+  "check_runs": [
+    {
+      "id": 52000000001,
+      "name": "check (python)",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117700/job/52000000001",
+      "details_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117700/job/52000000001",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 3}
+    },
+    {
+      "id": 52000000002,
+      "name": "markdown",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117702/job/52000000002",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 2}
+    },
+    {
+      "id": 52000000003,
+      "name": "dco",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117702/job/52000000003",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 1}
+    },
+    {
+      "id": 52000000004,
+      "name": "conventional title",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117703/job/52000000004",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 1}
+    },
+    {
+      "id": 52000000005,
+      "name": "e2e (Firefox)",
+      "status": "completed",
+      "conclusion": "timed_out",
+      "html_url": "https://evil.example/Dennis-Otto/demo/job/52000000005",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 0}
+    },
+    {
+      "id": 52000000006,
+      "name": "reuse",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117702/job/52000000006",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 0}
+    },
+    {
+      "id": 52000000007,
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "neutral",
+      "html_url": "https://github.com/Dennis-Otto/demo/runs/52000000007",
+      "app": {"slug": "github-advanced-security"},
+      "output": {"title": "No new alerts", "summary": "", "annotations_count": 0}
+    },
+    {
+      "id": 52000000008,
+      "name": "gitleaks",
+      "status": "in_progress",
+      "conclusion": null,
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117704/job/52000000008",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 0}
+    },
+    {
+      "id": 52000000009,
+      "name": "codeql",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "html_url": "https://github.com/Dennis-Otto/demo/actions/runs/18542117705/job/52000000009",
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null, "annotations_count": 0}
+    }
+  ],
+  "annotations": {
+    "52000000001": [
+      {
+        "path": ".github",
+        "start_line": 1,
+        "end_line": 1,
+        "annotation_level": "notice",
+        "title": "PR coach: Ruff (scripts/check.sh)",
+        "message": "The Python code isn't in the format of Ruff.\nHow to fix it: ...",
+        "raw_details": ""
+      },
+      {
+        "path": ".github",
+        "start_line": 1,
+        "end_line": 1,
+        "annotation_level": "failure",
+        "title": "PR coach: The checks of scripts/check.sh",
+        "message": "One of the checks of scripts/check.sh failed.",
+        "raw_details": ""
+      },
+      {
+        "path": ".github",
+        "start_line": 1,
+        "end_line": 1,
+        "annotation_level": "failure",
+        "title": "",
+        "message": "Process completed with exit code 1.",
+        "raw_details": ""
+      }
+    ],
+    "52000000002": [
+      {
+        "path": "docs/guide.md",
+        "start_line": 12,
+        "end_line": 12,
+        "annotation_level": "failure",
+        "title": "MD022/blanks-around-headings",
+        "message": "Headings should be surrounded by blank lines [Expected: 1; Actual: 0; Below]",
+        "raw_details": ""
+      },
+      {
+        "path": "docs/guide.md",
+        "start_line": 3,
+        "end_line": 3,
+        "annotation_level": "warning",
+        "title": "Spelling",
+        "message": "Unknown word (colour)",
+        "raw_details": ""
+      }
+    ],
+    "52000000003": [
+      {
+        "path": ".github",
+        "start_line": 1,
+        "end_line": 1,
+        "annotation_level": "failure",
+        "title": "",
+        "message": "Commit 1234567 lacks the sign-off 'Signed-off-by: <img src=x onerror=alert(1)> @Dennis-Otto ``` </details> [x](javascript:alert(1)) <x@example.com>'. Commit with git commit -s.",
+        "raw_details": ""
+      }
+    ],
+    "52000000004": [
+      {
+        "path": ".github",
+        "start_line": 1,
+        "end_line": 1,
+        "annotation_level": "failure",
+        "title": "",
+        "message": "Use a Conventional Commit title such as 'feat(settings): add a dark mode' or 'fix: keep the token secret'.",
+        "raw_details": ""
+      }
+    ]
+  }
+}

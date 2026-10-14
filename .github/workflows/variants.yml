@@ -260,6 +260,16 @@ jobs:
         # Home Assistant's current image on purpose, as in the CI of the integrations:
         # it validates against the rules that apply today.
         run: docker run --rm --volume "$PWD/$PROJECT:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: "${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})"
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
 
   # The rules of main require this one check, not each variant: a matrix that its
   # condition skips reports none of its legs.
@@ -280,3 +290,21 @@ jobs:
         run: |
           echo "The variants: $RESULT"
           [[ "$RESULT" == success || "$RESULT" == skipped ]]
+      # The PR coach needs blueprint.py and .github/checks.toml, nothing else.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: failure()
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            blueprint
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: variants
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
