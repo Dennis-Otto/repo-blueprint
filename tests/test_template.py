@@ -829,14 +829,18 @@ def test_every_repository_gets_the_settings_tool(
 @pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_settings_tool_runs_in_every_repository(
-    projects: dict[str, Path], kind: str
+    projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
+    # On a copy, and without the folder for bytecode of the run, so that a tool that
+    # wrote __pycache__ would write it here, and not into the project of every test.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
     # As the workflows run it: the script imports the package next to it.
     result = subprocess.run(
         [sys.executable, ".github/blueprint.py", "--help"],
-        cwd=projects[kind],
+        cwd=project,
         capture_output=True,
         encoding="utf-8",
+        env=without_bytecode_prefix(os.environ),
         check=False,
     )
 
@@ -844,7 +848,19 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
-    assert not (projects[kind] / ".github/blueprint/__pycache__").exists()
+    assert not (project / ".github/blueprint/__pycache__").exists()
+
+
+def without_bytecode_prefix(environment: Mapping[str, str]) -> dict[str, str]:
+    """The environment in which Python writes __pycache__ next to the code: without
+    PYTHONPYCACHEPREFIX, which the run sets for every test, and without
+    PYTHONDONTWRITEBYTECODE, which a machine may set. Either would keep __pycache__ out
+    of the repository whatever the tool does."""
+    return {
+        name: value
+        for name, value in environment.items()
+        if name not in {"PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE"}
+    }
 
 
 def test_the_settings_tool_keeps_the_ruff_settings_of_the_blueprint() -> None:
@@ -5056,17 +5072,20 @@ def test_every_explanation_belongs_to_a_check_or_a_step(
 @pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_pr_coach_runs_in_every_repository(
-    projects: dict[str, Path], kind: str
+    projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
+    # On a copy and without the folder for bytecode of the run, as the settings tool.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+
     def coach(*arguments: str) -> subprocess.CompletedProcess[str]:
         environment = {
             name: value
-            for name, value in os.environ.items()
+            for name, value in without_bytecode_prefix(os.environ).items()
             if not name.startswith("GITHUB_")
         }
         return subprocess.run(
             [sys.executable, ".github/blueprint.py", "coach", *arguments],
-            cwd=projects[kind],
+            cwd=project,
             capture_output=True,
             encoding="utf-8",
             env=environment,
@@ -5078,7 +5097,7 @@ def test_the_pr_coach_runs_in_every_repository(
     explained = coach("explain", "--step", "Text files")
     assert explained.returncode == 0, explained.stderr
     assert explained.stdout.startswith("PR coach: Text files (scripts/check.sh)\n")
-    assert not (projects[kind] / ".github/blueprint/__pycache__").exists()
+    assert not (project / ".github/blueprint/__pycache__").exists()
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
