@@ -148,8 +148,9 @@ for them, and the release stops at a fragment that it can't take in."""
 fix = """Describe the change in the words of a user in a new file of `changelog.d/`, named
 after your branch, such as `changelog.d/dark-mode.md`, below a heading such as
 `### Features` or `### Bug fixes`, and push; a fragment that fails says what to change.
-A change that users don't notice takes another type in the title, such as `refactor:`,
-`docs:` or `test:`."""
+A fragment that `main` has already is the entry of another pull request and doesn't
+count; give yours a name of its own. A change that users don't notice takes another
+type in the title, such as `refactor:`, `docs:` or `test:`."""
 docs = "CONTRIBUTING.md#workflow"
 
 [check."analyze (*)"]
@@ -376,6 +377,20 @@ for you, then commit what changed (in the blueprint itself, the tool is `bluepri
 without `.github/`):"""
 commands = ["python3 .github/blueprint.py pages --fix"]
 docs = "CONTRIBUTING.md#pages-in-one-column"
+
+[step."Changelog fragments"]
+problem = """A fragment in `changelog.d/` is one that the release can't take in: a name
+that it reads differently, no entry, text outside a heading, a `## ` heading, or a
+heading that is no kind of change; the log names each fragment and its problem. The
+step checks every fragment, also those that other pull requests left on `main` for the
+next release."""
+why = """The release bot takes in every fragment and stops at one that it can't, so no
+release comes until the fragment is fixed."""
+fix = """Change the fragment as the log says, for example `### Fixes` to `### Fixed`, and
+check it again (in the blueprint itself, the tool is `blueprint.py` without
+`.github/`):"""
+commands = ["python3 .github/blueprint.py fragments"]
+docs = "CONTRIBUTING.md#the-changelog"
 
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
