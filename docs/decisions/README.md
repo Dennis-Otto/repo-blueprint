@@ -27,3 +27,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0019](0019-a-failing-bot-keeps-one-issue-open.md) | A bot that fails keeps one issue open until it passes again | accepted |
 | [0020](0020-update-only-to-a-verified-release.md) | Update only to a release that the release workflow made, and let only the release app create release tags | accepted |
 | [0022](0022-every-check-explains-its-failure.md) | Every check explains its failure, in the check and in one comment, also on a pull request from a fork | accepted |
+| [0023](0023-pull-requests-fix-themselves.md) | Pull requests fix what a command can fix by themselves: the check fixes, the fix bot commits, suggests or opens a pull request for main | accepted |

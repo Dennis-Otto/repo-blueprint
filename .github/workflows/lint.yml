@@ -89,6 +89,9 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The merge of a pull request into main, and its head as the second
+          # parent, onto which the fix bot commits.
+          fetch-depth: 2
           persist-credentials: false
       # The files are in .markdownlint-cli2.jsonc, the rules in .markdownlint.jsonc.
       # Locally: npx markdownlint-cli2@0.23.2
@@ -96,6 +99,40 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: "**/*.md"
+      # The fix bot: markdownlint fixes what it can of what it found, on the head of
+      # the pull request, and after the checks the bot commits the files that it
+      # changed onto a branch of this repository, or suggests them on a pull request
+      # from a fork; the command of autofix in .github/checks.toml does the same.
+      - name: Check out the head of the pull request for the fixes
+        id: head
+        if: failure() && github.event_name == 'pull_request'
+        # Onto which the bot commits, not its merge into main.
+        run: git checkout --quiet --force --detach HEAD^2
+      - name: Fix what markdownlint can fix
+        if: failure() && steps.head.outcome == 'success'
+        # Findings that no command fixes stay for a person; the check failed already.
+        continue-on-error: true
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.md"
+          fix: true
+      - name: Keep the files that markdownlint fixed
+        id: fix
+        if: failure() && steps.head.outcome == 'success'
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" fix keep "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the fixes for the fix bot
+        if: failure() && steps.fix.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fixes-markdown
+          path: ${{ runner.temp }}/fixes/
+          # Fixes of files in .github/ as well.
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure

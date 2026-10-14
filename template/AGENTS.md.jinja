@@ -80,7 +80,7 @@ Turn on the hook of the repository once with `git config core.hooksPath .githook
 The project adds its own beside the files of the blueprint:
 
 - Checks of this project alone go into `scripts/check-project.sh`, which `scripts/check.sh` runs last.
-- Explanations of the checks of this project alone, which the PR coach shows when one fails, go into `.github/checks.project.toml`: what the check found, why that matters and how to fix it. `python3 .github/blueprint.py coach verify` lists each required check and each step of `scripts/check.sh` without one.
+- Explanations of the checks of this project alone, which the PR coach shows when one fails, go into `.github/checks.project.toml`: what the check found, why that matters and how to fix it, and in `autofix` the commands that fix it, which the fix bot runs, or the reason why no command can. `python3 .github/blueprint.py coach verify` lists each required check and each step of `scripts/check.sh` without one, and each explanation without its `autofix`.
 - Settings of this repository alone, such as the required checks of its end-to-end tests or an environment with its secrets, go into `.github/repository.project.toml`, never into `.github/repository.toml`.
 - Workflows of this project alone are workflow files of their own in `.github/workflows/`.
 - Notes for coding agents go into `.github/agents.project.md`, those for the issue assistant into `.github/issue-assistant/project.md`.

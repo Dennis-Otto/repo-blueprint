@@ -80,6 +80,12 @@ A check that fails explains itself. The PR coach writes what the check found, wh
 
 The explanations are in [`.github/checks.toml`](.github/checks.toml). A new check, or a new step of `scripts/check.sh`, comes with its explanation there, in the same pull request: what it found, why that matters and how to fix it, with the commands and a link to read more. A test fails for a required check or a step without one, and `python3 blueprint.py coach verify` lists them. The coach runs no code of a pull request and shows the text of its checks only as code, as [decision 0022](docs/decisions/0022-every-check-explains-its-failure.md) describes.
 
+## Pull requests fix themselves
+
+What a command can fix, a pull request fixes by itself. When a check fails, its job runs the commands of `autofix` from `.github/checks.toml` on the head of the pull request, such as `ruff format .` or the fix of the text files, and keeps the files that they changed. After the checks, the fix bot commits them as one commit onto a branch of this repository, also one of Renovate, and the checks run again: pull the branch before you push again. On a pull request from a fork, it suggests the fixes at their lines, and **Commit suggestion** takes each. A pull request with the label `no-bot-fixes` gets no commit of the bot. On your machine, `python3 blueprint.py fix run` runs the same commands, and `python3 blueprint.py fix text` fixes the text files alone.
+
+Every explanation in `.github/checks.toml` says in `autofix` how its check fixes itself: the commands, a list in which `{blueprint}` stands for `python3` and the `blueprint.py` of the repository, or a sentence with the reason why no command can. A new check, or a new step of `scripts/check.sh`, comes with its `autofix` as well; a test fails without one, and `python3 blueprint.py coach verify` lists the gaps. The bot runs nothing of a pull request with a token that can write, and commits only text files that the commit has already, outside `.git` and the workflows, as [decision 0023](docs/decisions/0023-pull-requests-fix-themselves.md) describes.
+
 ## Website
 
 MkDocs builds the website of the blueprint from `mkdocs.yml` and the pages in `docs/`, which include the READMEs and the changelog. The check *docs* builds it strictly in every pull request, and the Dashboard workflow publishes it with the dashboard. To see it while you write, at <http://127.0.0.1:8000>:

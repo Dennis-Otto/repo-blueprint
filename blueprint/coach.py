@@ -19,7 +19,7 @@ import re
 import textwrap
 import time
 import tomllib
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,8 @@ STEP_SUFFIX = " (scripts/check.sh)"
 BOT = "github-actions[bot]"
 # The check of the title of a pull request; its section suggests a title that passes.
 TITLE_CHECK = "conventional title"
+# The first line of each commit of the fix bot, by which the report names its fixes.
+FIX_HEADLINE = "style: apply the automatic fixes"
 TYPES = (
     "feat",
     "fix",
@@ -112,13 +114,23 @@ class Entry:
     fix: str
     commands: tuple[str, ...] = ()
     docs: str = ""
+    # The commands that fix what the check finds, which the fix bot runs, or, where
+    # no command can, the reason why not; an explanation without either has yet to
+    # answer the question.
+    autofix: tuple[str, ...] = ()
+    manual: str = ""
+
+    @property
+    def declared(self) -> bool:
+        """Whether the explanation says how the fix bot fixes it, or why it can't."""
+        return bool(self.autofix or self.manual)
 
     @classmethod
     def parse(cls, kind: str, key: str, table: Json, source: str) -> Entry:
         where = f"{source}: [{kind}.{key!r}]"
         if not isinstance(table, dict):
             raise CatalogError(f"{where} is no table")
-        unknown = sorted(set(table) - {*FIELDS, "commands", "docs"})
+        unknown = sorted(set(table) - {*FIELDS, "commands", "docs", "autofix"})
         if unknown:
             raise CatalogError(f"{where} has unknown keys: {', '.join(unknown)}")
         # A step is named by its line in scripts/check.sh, which is its title.
@@ -135,9 +147,12 @@ class Entry:
         docs = table.get("docs", "")
         if not isinstance(docs, str):
             raise CatalogError(f"{where} has docs that are no link")
+        autofix, manual = parse_autofix(table.get("autofix"), where)
         # The texts may wrap over several lines of the file.
         title, problem, why, fix = (" ".join(texts[name].split()) for name in FIELDS)
-        return cls(key, title, problem, why, fix, tuple(commands), docs)
+        return cls(
+            key, title, problem, why, fix, tuple(commands), docs, autofix, manual
+        )
 
     def within(self, repo: str | None) -> Entry:
         """The explanation for a repository: {repo} in a command becomes its name, so
@@ -145,6 +160,25 @@ class Entry:
         name = repo or "OWNER/NAME"
         commands = tuple(command.replace(REPO, name) for command in self.commands)
         return replace(self, commands=commands)
+
+
+def parse_autofix(value: Json, where: str) -> tuple[tuple[str, ...], str]:
+    """The commands of autofix, a list, or the reason why no command fixes the check,
+    a sentence; nothing when the explanation doesn't say yet."""
+    if value is None:
+        return (), ""
+    if isinstance(value, str) and value.strip():
+        return (), " ".join(value.split())
+    if (
+        isinstance(value, list)
+        and value
+        and all(isinstance(command, str) and command.strip() for command in value)
+    ):
+        return tuple(value), ""
+    raise CatalogError(
+        f"{where} has an autofix that is neither a list of commands nor the reason "
+        "why no command fixes it"
+    )
 
 
 @dataclass(frozen=True)
@@ -217,6 +251,13 @@ def fence(language: str, lines: Iterable[str]) -> str:
     return f"{mark}{language}\n{text}\n{mark}"
 
 
+# What the summary and the report say of a check whose findings a command fixes.
+FIXES_ITSELF = (
+    "**It fixes itself:** after the checks, the fix bot commits the fix onto a branch "
+    "of this repository, and suggests it at its lines on a pull request from a fork."
+)
+
+
 def details(entry: Entry, url: str) -> list[str]:
     """The explanation as Markdown, for the summary of a check and for the report."""
     lines = [
@@ -224,9 +265,10 @@ def details(entry: Entry, url: str) -> list[str]:
         "",
         f"**Why it matters:** {entry.why}",
         "",
-        f"**How to fix it:** {entry.fix}",
-        "",
     ]
+    if entry.autofix:
+        lines += [FIXES_ITSELF, ""]
+    lines += [f"**How to fix it:** {entry.fix}", ""]
     if entry.commands:
         lines += [fence("sh", entry.commands), ""]
     if url:
@@ -574,6 +616,18 @@ def halted(stopped: list[Run]) -> list[str]:
     return lines
 
 
+def fix_note(sha: str, fixed: Sequence[str]) -> str:
+    """What the report says of a head that is a commit of the fix bot."""
+    shown = ", ".join(code(path, NAME_LENGTH) for path in fixed[:FINDINGS])
+    more = f" and {len(fixed) - FINDINGS} more" if len(fixed) > FINDINGS else ""
+    files = f": {shown}{more}" if shown else ""
+    return (
+        f"🔧 **The fix bot committed the automatic fixes** in {sha[:7]}{files}. They "
+        "are what the commands of the checks make; pull the branch before you push "
+        "again."
+    )
+
+
 def footer(repo: str, sha: str) -> str:
     guide = link("CONTRIBUTING.md#when-a-check-fails", repo)
     return (
@@ -589,8 +643,10 @@ def render(
     runs: list[Run],
     found: dict[int, list[Finding]],
     catalog: Catalog,
+    fixed: Sequence[str] | None = None,
 ) -> str:
-    """The comment of the PR coach on a pull request."""
+    """The comment of the PR coach on a pull request; fixed holds the files of the
+    head when the fix bot made it."""
     failed = [run for run in runs if run.failed]
     stopped = [run for run in runs if run.stopped]
     pending = sum(1 for run in runs if run.pending)
@@ -614,6 +670,8 @@ def render(
         lines += [f"{running} still running.", ""]
     if stopped:
         lines += [*halted(stopped), ""]
+    if fixed is not None:
+        lines += [fix_note(sha, fixed), ""]
     body = "\n".join([*lines, ""])
     shown = 0
     for run in failed[:SECTIONS]:
@@ -627,6 +685,16 @@ def render(
     if shown < len(failed):
         body += f"… and {len(failed) - shown} more; their logs say what they found.\n\n"
     return body + footer(repo, sha)
+
+
+def fixed_by_bot(api: Api, repo: str, sha: str) -> list[str] | None:
+    """The files of sha when it is a commit of the fix bot, an app with its headline."""
+    commit = api.get(f"repos/{repo}/commits/{sha}") or {}
+    message = str((commit.get("commit") or {}).get("message") or "")
+    headline = message.partition("\n")[0]
+    if (commit.get("author") or {}).get("type") != "Bot" or headline != FIX_HEADLINE:
+        return None
+    return [str(item.get("filename") or "") for item in commit.get("files") or []]
 
 
 def find_comment(api: Api, repo: str, number: int) -> Json | None:
@@ -673,7 +741,8 @@ def report(
     # failed has one annotation at least, and the API takes only so many requests.
     failed = [run for run in runs if run.failed]
     found = {run.id: findings(api, repo, run) for run in failed[:SECTIONS]}
-    body = render(repo, sha, pull, runs, found, catalog)
+    fixed = fixed_by_bot(api, repo, sha)
+    body = render(repo, sha, pull, runs, found, catalog, fixed)
     if comment is not None and comment.get("body") == body:
         return f"The report of #{number} is up to date:\n\n{body}"
     # A push while the coach read the checks: the report of the new head follows, and
@@ -706,6 +775,23 @@ def check_steps(root: Path) -> list[str]:
     path = root / "scripts/check.sh"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     return re.findall(r'^step "([^"$`\\]+)"$', text, re.M)
+
+
+def undeclared(catalog: Catalog) -> list[str]:
+    """The explanations that say neither how the fix bot fixes their check nor why no
+    command can."""
+    return [
+        *(
+            f"the check {key}"
+            for key, entry in catalog.checks.items()
+            if not entry.declared
+        ),
+        *(
+            f"the step {key} of scripts/check.sh"
+            for key, entry in catalog.steps.items()
+            if not entry.declared
+        ),
+    ]
 
 
 def missing(catalog: Catalog, checks: Iterable[str], steps: Iterable[str]) -> list[str]:

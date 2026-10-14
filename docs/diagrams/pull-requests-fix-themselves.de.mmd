@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Pull Requests reparieren sich selbst
+    accDescr: Eine Prüfung scheitert. Wo ein Befehl behebt, was sie gefunden hat, etwa das Format des Codes, die Leerzeichen einer Textdatei oder die Regeln von markdownlint, führt der Job der Prüfung die Befehle von autofix aus .github/checks.toml aus und behält die Dateien, die sie geändert haben. Nach den Prüfungen nimmt der Fix-Bot diese Dateien als Daten, nur Textdateien, die der Commit schon hat: An einem Pull Request aus einem Branch des Repositorys, auch einem von Renovate, committet er sie als einen Commit auf den Branch, und die Prüfungen laufen erneut; an einem Pull Request aus einem Fork schlägt er sie an ihren Zeilen vor; auf main hält er einen Pull Request von bot/self-heal, der sich selbst merged. Was kein Befehl behebt, erklärt der PR-Coach.
+
+    failed(["Eine Prüfung scheitert"])
+    command{"Behebt es<br>ein Befehl?"}
+    fix["Der Job der Prüfung führt die Befehle von autofix aus<br>und behält die Dateien, die sie geändert haben"]
+    bot["Der Fix-Bot nach den Prüfungen<br>nimmt nur Textdateien, die der Commit hat"]
+    branch["Ein Branch dieses Repositorys, auch von Renovate:<br>ein Commit, und die Prüfungen laufen erneut"]
+    fork["Ein Pull Request aus einem Fork:<br>Vorschläge an ihren Zeilen"]
+    main["main: ein Pull Request von bot/self-heal,<br>der sich selbst merged"]
+    coach["Der PR-Coach erklärt,<br>was kein Befehl behebt"]
+    green(["Jede Prüfung besteht"])
+    catalog[(".github/checks.toml<br>autofix")]
+
+    failed --> command
+    command -- "ja" --> fix --> bot
+    command -- "nein" --> coach
+    bot --> branch
+    bot --> fork
+    bot --> main
+    branch --> green
+    main --> green
+    fork -- "du committest die Vorschläge" --> green
+    catalog -.-> fix
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class fix,bot,branch,fork,main,coach bot
+    class failed person
+    class green done

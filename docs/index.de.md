@@ -31,7 +31,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Jede Prüfung, die scheitert, sagt, was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür: in der Prüfung und in einem Kommentar am Pull Request, der jedem Push folgt, auch an einem Pull Request aus einem Fork.
+    Jede Prüfung, die scheitert, sagt, was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür: in der Prüfung und in einem Kommentar am Pull Request, der jedem Push folgt, auch an einem Pull Request aus einem Fork. Was ein Befehl beheben kann, behebt der Pull Request selbst: Der Fix-Bot committet es, schlägt es an einem Fork vor und hält `main` repariert.
 
 - :material-shield-lock-outline:{ .lg .middle } **Sicherheit**
 

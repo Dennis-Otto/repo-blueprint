@@ -34,6 +34,9 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The merge of a pull request into main, and its head as the second
+          # parent, onto which the fix bot commits.
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -66,6 +69,36 @@ jobs:
           name: coverage
           path: ${{ runner.temp }}/coverage.xml
           retention-days: 14
+      # The fix bot: the commands of autofix in .github/checks.toml fix what they
+      # can of what the checks found, on the head of the pull request or on main.
+      # After the checks, the bot commits the files that they changed onto a branch
+      # of this repository, suggests them on a pull request from a fork, or keeps one
+      # pull request with the fixes of main.
+      - name: Fix what a command can fix
+        id: fix
+        if: failure() && contains(fromJSON('["pull_request", "push"]'), github.event_name)
+        env:
+          CHECK: "check (home-assistant)"
+          EVENT: ${{ github.event_name }}
+        run: |
+          # The head of the pull request, onto which the bot commits, not its merge
+          # into main.
+          if [[ "$EVENT" == pull_request ]]; then
+            git checkout --quiet --force --detach HEAD^2
+          fi
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" fix run "$CHECK" --keep "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the fixes for the fix bot
+        if: failure() && steps.fix.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fixes-check
+          path: ${{ runner.temp }}/fixes/
+          # Fixes of files in .github/ as well.
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure

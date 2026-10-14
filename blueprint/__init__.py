@@ -13,6 +13,7 @@ and the changelog of its releases.
     python3 blueprint.py diagrams ...       keep, commit and report (the diagram bots)
     python3 blueprint.py pages [--fix]      the READMEs and docs in one column, for phones
     python3 blueprint.py coach ...          how to fix a failed check, in one comment (the PR coach)
+    python3 blueprint.py fix run            fix what a command can fix of the checks (the fix bot)
 
 Run it in the root of a repository made from the blueprint, with the GitHub CLI `gh`
 signed in as an administrator. It needs Python 3.12 and nothing else. It never reads,

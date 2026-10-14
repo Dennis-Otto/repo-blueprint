@@ -31,7 +31,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    Every check that fails says what it found, why that matters and how to fix it, with the commands to run: in the check, and in one comment on the pull request that follows every push, also on a pull request from a fork.
+    Every check that fails says what it found, why that matters and how to fix it, with the commands to run: in the check, and in one comment on the pull request that follows every push, also on a pull request from a fork. What a command can fix, the pull request fixes by itself: the fix bot commits it, suggests it on a fork, and keeps `main` fixed.
 
 - :material-shield-lock-outline:{ .lg .middle } **Security**
 
