@@ -392,7 +392,7 @@ jobs:
       # The labels, issue forms, workflows and notice of the issue assistant fit the
       # templates of its release: https://github.com/Dennis-Otto/issue-assistant
       - name: Check the issue assistant's set-up
-        uses: Dennis-Otto/issue-assistant@a12fb7227ff7d966809cad4e043e159977fccfcd # v1.2.2
+        uses: Dennis-Otto/issue-assistant@1f39474ecec19a599e6e7a6ab53357b36d0ea99f # v1.5.0
         with:
           command: check
       # The PR coach: what failed, why it matters and how to fix it, in the summary
