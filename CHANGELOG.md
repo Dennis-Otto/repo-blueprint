@@ -7,6 +7,36 @@ requests when there is none.
 
 ## Unreleased
 
+## [0.13.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.12.0...v0.13.0) (2026-10-17)
+
+
+### Features
+
+* bring every verified issue-assistant release into the blueprint automatically ([#211](https://github.com/Dennis-Otto/repo-blueprint/issues/211)) ([befd812](https://github.com/Dennis-Otto/repo-blueprint/commit/befd812c7c2580a8f773126e96c07fd88c769a36))
+* pull requests fix their format, whitespace and Markdown by themselves, also on forks and main ([#224](https://github.com/Dennis-Otto/repo-blueprint/issues/224)) ([f317d12](https://github.com/Dennis-Otto/repo-blueprint/commit/f317d12bb07bc7ec4fd58d3887ba596e8812385d))
+
+
+### Bug fixes
+
+* **changelog:** check every waiting fragment, and count only a new one as a pull request's entry ([#214](https://github.com/Dennis-Otto/repo-blueprint/issues/214)) ([ff3547c](https://github.com/Dennis-Otto/repo-blueprint/commit/ff3547ccf4872ec938b0c2c8e1d0b3e9c8f502e4))
+* **deps:** update dependency uv [security] ([#233](https://github.com/Dennis-Otto/repo-blueprint/issues/233)) ([a219ca6](https://github.com/Dennis-Otto/repo-blueprint/commit/a219ca64cac1426607d7ea54436cc869d3535f59))
+* **deps:** update the issue assistant to v1.5.0 ([#236](https://github.com/Dennis-Otto/repo-blueprint/issues/236)) ([add5616](https://github.com/Dennis-Otto/repo-blueprint/commit/add5616a88bf795bc583bd49b27b79c5f798973c))
+* keep the tests' own Git repositories out of the repository that runs them ([#235](https://github.com/Dennis-Otto/repo-blueprint/issues/235)) ([6148f2c](https://github.com/Dennis-Otto/repo-blueprint/commit/6148f2cc69fccf60abb6dca751e388a9dd8dc727))
+* leave a project's own diagram sources alone, and keep each picture's alt in step with its source ([#220](https://github.com/Dennis-Otto/repo-blueprint/issues/220)) ([ed778d3](https://github.com/Dennis-Otto/repo-blueprint/commit/ed778d35dc08de181982dafa8f2d5b9de6c5fb20))
+* **nextcloud:** leave a committed infection.json5 out of the app package ([#223](https://github.com/Dennis-Otto/repo-blueprint/issues/223)) ([8400443](https://github.com/Dennis-Otto/repo-blueprint/commit/840044369c51c252fe14ab4ae1254ea4af5ace31))
+* say that a breaking change raises the minor version while a project is below 1.0.0 ([#227](https://github.com/Dennis-Otto/repo-blueprint/issues/227)) ([4a80ff5](https://github.com/Dennis-Otto/repo-blueprint/commit/4a80ff52d52e5b1520428edfc423700b9ef91b98))
+* **security:** escape untrusted file and branch names in bot comments and issues ([#240](https://github.com/Dennis-Otto/repo-blueprint/issues/240)) ([12159be](https://github.com/Dennis-Otto/repo-blueprint/commit/12159be6e439523f5b1a48823d679f044b04fd7e))
+* **security:** refuse a blueprint release older than the version a repository has ([#215](https://github.com/Dennis-Otto/repo-blueprint/issues/215)) ([005805c](https://github.com/Dennis-Otto/repo-blueprint/commit/005805cc5bd2fffb013508d4214c582097ba754e))
+
+
+### Performance
+
+* **ci:** bring one auto-merge pull request up to date at a time, and react when auto-merge is enabled ([#241](https://github.com/Dennis-Otto/repo-blueprint/issues/241)) ([55a98ae](https://github.com/Dennis-Otto/repo-blueprint/commit/55a98ae1e0794cd55698541a47022b0f5a950822))
+* **ci:** fold the lint, CodeQL and title jobs into fewer jobs ([#238](https://github.com/Dennis-Otto/repo-blueprint/issues/238)) ([f4c26ab](https://github.com/Dennis-Otto/repo-blueprint/commit/f4c26abb613d8e332f1306313f7f6c81ca9e8b17))
+* **ci:** install tools with uv and a lock-keyed cache, bound every step, and stop repeating docker work in each Variants leg ([#207](https://github.com/Dennis-Otto/repo-blueprint/issues/207)) ([fb04666](https://github.com/Dennis-Otto/repo-blueprint/commit/fb046663c4336e52b14599330ef6dbb7511b4813))
+* **docs:** build and publish the website in one job and keep Material's downloads in a cache ([#231](https://github.com/Dennis-Otto/repo-blueprint/issues/231)) ([51d3f5f](https://github.com/Dennis-Otto/repo-blueprint/commit/51d3f5f33ffa18ec460edf6566e605ed41645883))
+* run the tests in parallel with pytest-xdist in every Python repository and in the blueprint ([#230](https://github.com/Dennis-Otto/repo-blueprint/issues/230)) ([8329897](https://github.com/Dennis-Otto/repo-blueprint/commit/83298971be608668821a75265add6caeea4ba63f))
+
 ## [0.12.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.11.1...v0.12.0) (2026-10-14)
 
 ### Features
