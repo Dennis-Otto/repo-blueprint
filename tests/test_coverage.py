@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from blueprint import cli
 from blueprint.coverage_comment import (
     COVERAGE_MARKER,
+    MOST_FILES,
     Coverage,
     coverage_comment,
     percent,
@@ -23,7 +29,9 @@ def report(**files: tuple[int, int]) -> str:
             f'<line number="{number}" hits="{1 if number <= covered else 0}"/>'
             for number in range(1, lines + 1)
         )
-        classes.append(f'<class filename="{name}.py"><lines>{hits}</lines></class>')
+        classes.append(
+            f"<class filename={quoteattr(name + '.py')}><lines>{hits}</lines></class>"
+        )
     return (
         '<?xml version="1.0" ?><coverage><packages><package><classes>'
         + "".join(classes)
@@ -108,6 +116,150 @@ def test_without_a_report_of_main_the_comment_shows_the_pull_request() -> None:
     assert "main has no coverage report yet" in comment
 
 
+# The names of the files and the hits of each line come from the coverage.xml of the
+# pull request, which a pull request from a fork writes as it likes.
+
+
+def cells(row: str) -> list[str]:
+    """The cells of a row of a table, as GitHub splits it: at every pipe that no
+    backslash escapes, also inside code."""
+    assert row.startswith("| ")
+    assert row.endswith(" |")
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", row)[1:-1]]
+
+
+def is_code(text: str) -> bool:
+    """Whether the text is one span of code, which shows the rest as it is: it ends
+    only at a run of backticks as long as the one it starts with."""
+    found = re.fullmatch(r"(`+)( ?)(.*)\2\1", text, re.S)
+    if not found:
+        return False
+    return len(found[1]) not in {len(run) for run in re.findall(r"`+", found[3])}
+
+
+def one_file(name: str, covered: int) -> Coverage:
+    """The report of one file of two lines, named as in the attribute of its class."""
+    return Coverage.parse(
+        "<coverage><packages><package><classes>"
+        f"<class filename={quoteattr(name)}><lines>"
+        f'<line number="1" hits="1"/><line number="2" hits="{covered - 1}"/>'
+        "</lines></class></classes></package></packages></coverage>"
+    )
+
+
+def rows_of_files(comment: str) -> list[str]:
+    table = comment[comment.index("| File | main | This pull request |") :]
+    return [line for line in table.splitlines()[2:] if line.startswith("| ")]
+
+
+@pytest.mark.parametrize(
+    ("name", "shown"),
+    [
+        # A heading, a link and a mention, after the code and the cell ended.
+        (
+            "a` | [x](https://e.vil) @team\n# Approved",
+            r"``a` \| [x](https://e.vil) @team # Approved``",
+        ),
+        ("``b``", "``` ``b`` ```"),
+        ("c\\|d", r"`c\\|d`"),
+        ("<img src=x onerror=alert(1)>", "`<img src=x onerror=alert(1)>`"),
+        ("e\r\n| --- |\N{LINE SEPARATOR}f", r"`e \| --- \| f`"),
+        ("", "(unnamed file)"),
+        (" \t\n", "(unnamed file)"),
+        ("x" * 300, f"`{'x' * 199}\N{HORIZONTAL ELLIPSIS}`"),
+    ],
+)
+def test_a_crafted_file_name_stays_code_in_its_cell(name: str, shown: str) -> None:
+    (row,) = rows_of_files(coverage_comment(one_file(name, 1), one_file(name, 2)))
+
+    assert cells(row) == [shown, "100.00 %", "50.00 %"]
+
+
+@given(st.text())
+def test_no_file_name_ends_its_code_its_cell_or_its_line(name: str) -> None:
+    comment = coverage_comment(Coverage({name: (1, 2)}), Coverage({}))
+
+    (row,) = rows_of_files(comment)
+    shown, before, now = cells(row)
+    assert is_code(shown) or shown == "(unnamed file)"
+    assert (before, now) == ("new", "50.00 %")
+    assert len(comment.splitlines()) == 11
+
+
+def test_the_table_shows_the_first_files_and_counts_the_others() -> None:
+    names = [f"f{number:03}" for number in range(MOST_FILES + 23)]
+    head = Coverage.parse(report(**dict.fromkeys(names, (1, 2))))
+    base = Coverage.parse(report(**dict.fromkeys(names, (2, 2))))
+
+    comment = coverage_comment(head, base)
+
+    rows = rows_of_files(comment)
+    assert len(rows) == MOST_FILES
+    assert rows[-1].startswith(f"| `f{MOST_FILES - 1:03}.py` |")
+    assert comment.endswith(
+        " |\n\n23 more files change their coverage; the artifact coverage of the"
+        " checks has the whole report.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # The longest code: a run of backticks, inside a run longer by one, of a
+        # name cut to its longest length or just below it.
+        lambda number: "`" * 300 + str(number),
+        lambda number: "`" * 199 + chr(0x4E00 + number),
+        lambda number: f"{number:03}" + "`" * 300,
+    ],
+)
+def test_the_longest_comment_fits_into_one_comment_of_github(
+    name: Callable[[int], str],
+) -> None:
+    names = [name(number) for number in range(2 * MOST_FILES)]
+    head = Coverage(dict.fromkeys(names, (1, 2)))
+
+    comment = coverage_comment(head, Coverage({}))
+
+    assert len(rows_of_files(comment)) == MOST_FILES
+    assert len(comment) < 65536
+
+
+@pytest.mark.parametrize(
+    ("hits", "covered"),
+    [
+        ("1", 1),
+        ("1.5", 1),
+        ("1e3", 1),
+        ("0.0", 0),
+        ("-1", 0),
+        ("x", 0),
+        ("", 0),
+        ("nan", 0),
+    ],
+)
+def test_hits_that_are_no_count_count_as_a_number_or_as_0(
+    hits: str, covered: int
+) -> None:
+    text = (
+        '<coverage><packages><package><classes><class filename="a.py"><lines>'
+        f'<line number="1" hits="{hits}"/><line number="2"/></lines></class>'
+        "</classes></package></packages></coverage>"
+    )
+
+    assert Coverage.parse(text).files == {"a.py": (covered, 2)}
+
+
+@given(st.text(st.characters(codec="utf-8", exclude_categories=("Cc", "Cs", "Cn"))))
+def test_no_hits_stop_the_bot(hits: str) -> None:
+    text = (
+        '<coverage><packages><package><classes><class filename="a.py"><lines>'
+        f"<line number='1' hits={quoteattr(hits)}/></lines></class>"
+        "</classes></package></packages></coverage>"
+    )
+
+    assert Coverage.parse(text).files["a.py"] in {(0, 1), (1, 1)}
+
+
 def test_the_command_line_writes_the_comment(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -137,11 +289,13 @@ def test_the_command_line_names_the_paths_from_where_it_runs(
     }
 
 
+# A report that is no XML, and one that is no text of UTF-8.
+@pytest.mark.parametrize("content", [b"<coverage>", b"<coverage>\xff</coverage>"])
 def test_the_command_line_names_a_broken_report(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: bytes
 ) -> None:
     broken = tmp_path / "broken.xml"
-    broken.write_text("<coverage>", encoding="utf-8")
+    broken.write_bytes(content)
 
     assert cli.main(["coverage", str(broken)]) == 2
     assert "blueprint.py:" in capsys.readouterr().err
