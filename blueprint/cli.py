@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 
 import blueprint
 from blueprint.bot_health import renovate_report, sweep, watch_run
+from blueprint.branches import next_branch
 from blueprint.changelog import (
     FRAGMENTS,
     FragmentError,
@@ -554,6 +555,17 @@ def main(
         help="the blueprint on GitHub as OWNER/NAME, a fork perhaps, whose release the "
         "pull request links",
     )
+    next_branch_parser = commands.add_parser(
+        "next-branch",
+        help="bring the next pull request that waits for auto-merge up to date, one "
+        "at a time, for the branch bot",
+    )
+    next_branch_parser.add_argument(
+        "--warnings-only",
+        action="store_true",
+        help="pass even when GitHub refused a request, with the warnings alone, as "
+        "in a run that shows as a check of a pull request",
+    )
     coach_parser = commands.add_parser(
         "coach",
         help="the PR coach: how to fix a check that failed, in its summary and in one "
@@ -839,6 +851,12 @@ def main(
             return 0
         if arguments.command == "bot-health":
             return bot_health_command(api, repo, arguments, root)
+        if arguments.command == "next-branch":
+            outcome = next_branch(api, repo)
+            for warning in outcome.warnings:
+                print(warning, file=sys.stderr)
+            print(outcome.summary, end="")
+            return 1 if outcome.warnings and not arguments.warnings_only else 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments)
         settings = Settings.load(root / arguments.config)
