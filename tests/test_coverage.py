@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
@@ -201,9 +202,20 @@ def test_the_table_shows_the_first_files_and_counts_the_others() -> None:
     )
 
 
-def test_the_longest_comment_fits_into_one_comment_of_github() -> None:
-    # The longest code: a run of backticks, inside a run longer by one.
-    names = [f"{number:03}" + "`" * 300 for number in range(2 * MOST_FILES)]
+@pytest.mark.parametrize(
+    "name",
+    [
+        # The longest code: a run of backticks, inside a run longer by one, of a
+        # name cut to its longest length or just below it.
+        lambda number: "`" * 300 + str(number),
+        lambda number: "`" * 199 + chr(0x4E00 + number),
+        lambda number: f"{number:03}" + "`" * 300,
+    ],
+)
+def test_the_longest_comment_fits_into_one_comment_of_github(
+    name: Callable[[int], str],
+) -> None:
+    names = [name(number) for number in range(2 * MOST_FILES)]
     head = Coverage(dict.fromkeys(names, (1, 2)))
 
     comment = coverage_comment(head, Coverage({}))

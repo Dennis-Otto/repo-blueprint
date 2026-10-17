@@ -6326,6 +6326,45 @@ def test_the_check_variants_passes_when_every_variant_passed_or_none_ran(
     assert (done.returncode == 0) == passes, done.stderr
 
 
+@pytest.mark.parametrize("targets", [1, 2, 5])
+@pytest.mark.parametrize("weekly", [True, False])
+def test_the_fuzzing_ends_within_its_timeout_however_many_targets(
+    tmp_path: Path, targets: int, weekly: bool
+) -> None:
+    # Every week the targets share one budget, so a new target doesn't push the job
+    # past its timeout; a pull request fuzzes each one for a minute.
+    workflow = (ROOT / ".github/workflows/fuzz.yml").read_text(encoding="utf-8")
+    timeout = re.search(r"timeout-minutes: (\d+)\n    steps:", workflow)
+    weekly_budget = re.search(r"'schedule' && '(\d+)'", workflow)
+    assert timeout, "the fuzzing has a timeout"
+    assert weekly_budget, "the weekly fuzzing has a budget"
+    weekly_seconds = int(weekly_budget[1])
+    # Five minutes are left for the setup and for the end of the last run.
+    assert weekly_seconds + 5 * 60 <= int(timeout[1]) * 60
+    repository = tmp_path / "repository"
+    (repository / "fuzz").mkdir(parents=True)
+    for number in range(targets):
+        (repository / f"fuzz/fuzz_{number}.py").write_text("", encoding="utf-8")
+    result, calls = run_workflow_step(
+        tmp_path,
+        script_of(workflow, "Fuzz every target"),
+        repository,
+        {"python": ""},
+        RUNNER_TEMP=(tmp_path / "temp").as_posix(),
+        WEEKLY_SECONDS=str(weekly_seconds) if weekly else "",
+    )
+    assert result.returncode == 0, result.stderr
+    budgets = [
+        int(found) for found in re.findall(r"-max_total_time=(\d+)", "\n".join(calls))
+    ]
+    assert len(budgets) == targets
+    if weekly:
+        assert sum(budgets) <= weekly_seconds
+        assert budgets == [weekly_seconds // targets] * targets
+    else:
+        assert budgets == [60] * targets
+
+
 def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
     # main takes a pull request only when it is up to date, so a merge gives main the
     # tree that the checks of the pull request passed with.

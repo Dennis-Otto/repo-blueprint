@@ -1,8 +1,9 @@
 name: Fuzzing
 
 # Coverage-guided fuzzing with Atheris of every target in fuzz/: a minute each in
-# every pull request that changes the code, the targets or the tools, a quarter of an
-# hour each every week. Not after a merge, which gives main the tree that its pull
+# every pull request that changes the code, the targets or the tools, and every week
+# 25 minutes shared by all targets, so the job ends within its timeout however many
+# targets there are. Not after a merge, which gives main the tree that its pull
 # request fuzzed. A finding fails the run, with the input that caused it in the log.
 # https://github.com/Dennis-Otto/repo-blueprint
 
@@ -63,10 +64,17 @@ jobs:
         run: uv pip install --system --require-hashes -r stacks/fuzz/requirements.txt
       - name: Fuzz every target
         env:
-          SECONDS_TO_FUZZ: ${{ github.event_name == 'schedule' && '900' || '60' }}
+          # The weekly budget is shared by every target, a pull request gives each one
+          # a minute: the job's timeout of 30 minutes covers the setup as well.
+          WEEKLY_SECONDS: ${{ github.event_name == 'schedule' && '1500' || '' }}
         run: |
           shopt -s nullglob
-          for target in fuzz/fuzz_*.py; do
+          targets=(fuzz/fuzz_*.py)
+          SECONDS_TO_FUZZ=60
+          if [ -n "$WEEKLY_SECONDS" ] && [ "${#targets[@]}" -gt 0 ]; then
+            SECONDS_TO_FUZZ=$(( WEEKLY_SECONDS / ${#targets[@]} ))
+          fi
+          for target in "${targets[@]}"; do
             echo "::group::$target"
             corpus="$RUNNER_TEMP/corpus/$(basename "$target" .py)"
             mkdir -p "$corpus"

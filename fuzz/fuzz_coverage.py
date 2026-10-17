@@ -22,7 +22,7 @@ import atheris
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 with atheris.instrument_imports():
-    from blueprint.coverage_comment import Coverage, coverage_comment
+    from blueprint.coverage_comment import MOST_FILES, Coverage, coverage_comment
 
 # The cells of a row, at every pipe that no backslash escapes, as GitHub splits it.
 CELL = re.compile(r"(?<!\\)\|")
@@ -35,7 +35,14 @@ def report(provider: atheris.FuzzedDataProvider) -> str:
     if provider.ConsumeBool():
         return provider.ConsumeUnicodeNoSurrogates(4000)
     classes = []
-    for _ in range(provider.ConsumeIntInRange(0, 8)):
+    # Now and then more files than the table shows, so that its cap and the length
+    # of the comment are fuzzed too.
+    files = (
+        provider.ConsumeIntInRange(0, 8)
+        if provider.ConsumeBool()
+        else provider.ConsumeIntInRange(MOST_FILES, 2 * MOST_FILES)
+    )
+    for _ in range(files):
         name = quoteattr(provider.ConsumeUnicodeNoSurrogates(300))
         lines = "".join(
             f"<line number='1' hits={quoteattr(provider.ConsumeUnicodeNoSurrogates(8))}/>"
