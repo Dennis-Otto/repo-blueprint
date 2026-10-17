@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The line of the branch bot
+    accDescr: A merge into main, auto-merge turned on or off, or a required check of a pull request that fails starts the branch bot. It takes the pull requests that wait for auto-merge in the order in which it was turned on. One that conflicts with main gets the label merge-conflict and one comment. While the checks of one that is up to date run, the others wait in line. Otherwise one whose required check failed waits for a fix, and the bot brings the first other one that is behind up to date, as the release app. Its checks run, and once they pass it merges, which starts the bot again for the next one.
+
+    start["A merge into main · auto-merge turned on or off<br>a required check that fails · the schedule"]
+    line["The pull requests that wait for auto-merge,<br>in the order in which it was turned on"]
+    conflict["Each one that conflicts with main gets<br>the label merge-conflict and one comment"]
+    flight["While one that is up to date runs its checks,<br>the others wait in line"]
+    failed["Otherwise one whose required check failed<br>waits for a fix and leaves its place"]
+    update["The first other one that is behind is brought<br>up to date, as the release app"]
+    merge["Its checks pass and it merges,<br>which starts the bot again"]
+
+    start --> line
+    line --> conflict
+    conflict --> flight
+    flight --> failed
+    failed --> update
+    update --> merge
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class line,flight,update bot
+    class conflict,failed person
+    class merge done

@@ -61,7 +61,7 @@ Every change, yours or a bot's, is a pull request that merges once every check p
 | **App Store** | for a Nextcloud app: the registration of its id with its certificate, once, by hand | `register-app.yml` |
 | **Upstream** | for a Nextcloud app, every week: when Nextcloud has a new major version, a pull request raises `max-version` and merges itself once every check, the end-to-end tests included, passes against it; started by hand as a dry run, it shows the pull request it would open and changes nothing | `upstream.yml` |
 | **Area labels** | every pull request gets the labels of the areas whose files it changes, by the paths in `.github/labeler.yml`, which belongs to the project | `area-labels.yml` |
-| **Branches** | after every change of `main`, the branch bot brings each pull request that waits for auto-merge up to date, Renovate's too, so that it merges once its checks pass | `update-branches.yml` |
+| **Branches** | the branch bot keeps the pull requests that wait for auto-merge in a line, Renovate's too, and brings one at a time up to date with `main`, right after a merge and when auto-merge is turned on, so that each merges once its checks pass and no check runs for a pull request that can't merge next | `update-branches.yml`, `blueprint.py next-branch` |
 
 ### From a change to a release
 
@@ -108,6 +108,21 @@ A check that a runner, a site or GitHub fails for a moment, or that a race of tw
 - **The quick checks run once for each commit:** the title and the changelog, the dependency review, the secret scan, the area labels and the website. A late run for an older commit, such as one that an edit of the release pull request starts while release-please pushes to it, no longer cancels them for the head. The checks that take minutes, the tests, Lint, CodeQL and the variants, still cancel the run for an older commit; the bot for cancelled checks repairs a race there.
 - **Other workflows of tests** that a repository has, such as visual tests, join the CI and Docker E2E with `copier update --data "test_workflows=Visual check, Screenshot bot"`.
 - **The link check of a pull request** reads the documents that it changes, and every document when it changes the rules, or moves or deletes a file that a document may link to. lychee keeps the answers of the sites for a day and asks again for a link that failed, so that a site that is down for a moment fails only the pull requests that link to it.
+
+### Pull requests that wait for auto-merge
+
+`main` takes a pull request only when it is up to date with it, so only one of the pull requests that wait for auto-merge can merge next, and each merge leaves the others behind again. Bringing all of them up to date after every merge ran every check of each of them for the one that merged: about n²/2 runs of the checks for n pull requests, which kept the runners of the account busy and made every pull request wait longer. The branch bot keeps them in a line instead, as Kodiak and Bulldozer do, in the order in which their auto-merge was turned on, and brings only the first one up to date that can merge:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-line-of-the-branch-bot.dark.svg">
+  <img src="docs/images/diagrams/the-line-of-the-branch-bot.svg" alt="The line of the branch bot: A merge into main, auto-merge turned on or off, or a required check of a pull request that fails starts the branch bot. It takes the pull requests that wait for auto-merge in the order in which it was turned on. One that conflicts with main gets the label merge-conflict and one comment. While the checks of one that is up to date run, the others wait in line. Otherwise one whose required check failed waits for a fix, and the bot brings the first other one that is behind up to date, as the release app. Its checks run, and once they pass it merges, which starts the bot again for the next one.">
+</picture>
+
+- **One at a time:** while the checks of the pull request at the front run, the bot brings no other one up to date. Its merge starts the next run of the bot, which brings the next one up to date, so they still merge one after the other without a person. Each pull request had to run its checks again after the merge before it anyway, so the line delays a merge only when the pull request before it fails, by one run of the checks, and with fewer jobs at once the runners of the account take every job sooner.
+- **At once:** turning auto-merge on starts the bot, so a pull request that is behind and first in the line is brought up to date within about a minute; a merge into `main`, turning auto-merge off and a required check that fails start it as well. The schedule of every half hour is only a safety net, since GitHub runs schedules as it can, often hours late.
+- **A failed check leaves its place:** a pull request whose required check failed waits for a fix, and the next one moves up; so does one that is up to date and whose checks ended, but that something else holds up, such as a conversation to resolve. A check that isn't required holds up nothing. After a fix, the pull request takes its place again in the next run of the bot.
+- **Conflicts and errors:** a pull request that conflicts with `main` gets the label `merge-conflict` and one comment, and the next one moves up; Renovate builds a branch of its own that conflicts anew. A request that GitHub refuses is a warning about that pull request, never a conflict, and the bot goes on with the next one; the run then fails, so that the bot-health bot hears of it.
+- **The summary of every run** shows the line: which pull request the bot brought up to date or runs its checks, and why each other one waits. `blueprint.py next-branch` holds the logic, and the workflow checks out only `main` for it, also when auto-merge is turned on.
 
 ### The PR coach
 

@@ -312,8 +312,9 @@ def test_the_workflows_are_the_blueprints_own(
                 source,
             )
             text = re.sub(r"        language: \[.*\]\n", "", text)
-        if name == "after-checks.yml":
-            # The workflows it watches; the bots after the checks test them.
+        if name in ("after-checks.yml", "update-branches.yml"):
+            # The workflows they watch; the bots after the checks and the branch bot
+            # test them.
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
@@ -4709,18 +4710,83 @@ def test_every_release_tag_is_created_with_the_token_of_the_release_app() -> Non
 
 def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
-    # Renovate's pull requests are brought up to date, but not the release bot's.
-    assert 'startswith("renovate/")' not in text
-    assert 'startswith("release-please--") | not' in text
-    # A conflicting one Renovate builds anew: no label and no comment of the bot.
-    skip = '[[ "$branch" == renovate/* && "$mergeable" == CONFLICTING ]]'
-    assert text.index(skip) < text.index("--add-label merge-conflict")
+    # Renovate's pull requests take their place in the line, but not the release bot's,
+    # and a conflicting one of Renovate gets no label and no comment: blueprint.py
+    # next-branch decides, which tests/test_branches.py tests.
+    assert "next-branch" in text
     # The bot's merge commits come from the release app, as Renovate's own commits
     # do, so Renovate doesn't take the branch for edited and keeps it current.
     assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in text
     bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     assert 'username: "dennis-otto-release-automation[bot]"' in bot
     assert 'gitAuthor: "dennis-otto-release-automation[bot] <' in bot
+
+
+def test_the_branch_bot_moves_its_line_on_at_once() -> None:
+    text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
+    events = triggers(text)
+    assert set(events) == {
+        "push",
+        "pull_request_target",
+        "workflow_run",
+        "schedule",
+        "workflow_dispatch",
+    }
+    # Turning auto-merge on or off, and a check that fails, move the line on; a merge
+    # into main does too, and the schedule is the safety net.
+    assert events["pull_request_target"] == [
+        "    types: [auto_merge_enabled, auto_merge_disabled]"
+    ]
+    assert "    types: [completed]" in events["workflow_run"]
+    assert "often hours late" in text
+    job = job_of(text, "update")
+    condition = condition_of(job)
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in (
+        condition
+    )
+    assert (
+        "github.event.pull_request.base.ref == github.event.repository.default_branch"
+        in condition
+    )
+    assert "github.event.workflow_run.event == 'pull_request'" in condition
+    assert (
+        """contains(fromJSON('["failure", "timed_out", "startup_failure"]'), """
+        "github.event.workflow_run.conclusion)" in condition
+    )
+    # A group on the job: a run whose job skips, as after checks that passed, would
+    # otherwise cancel the run that updates.
+    assert not re.search(r"^concurrency:", text, re.M)
+    assert (
+        "    concurrency:\n      group: update-branches\n      cancel-in-progress: true\n"
+        in job
+    )
+    # It checks out the default branch, without the token, and runs nothing of a pull
+    # request: no value of the event reaches a command.
+    assert "persist-credentials: false" in job
+    assert "ref:" not in job
+    run = job[job.index("        run: |") :]
+    assert "${{" not in run
+    assert 'next-branch | tee -a "$GITHUB_STEP_SUMMARY"' in run
+    assert "set -o pipefail" in run
+    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
+    assert "      - update-branches.yml\n" in dangerous
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_failed_check_moves_the_line_of_the_branch_bot_on(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The branch bot follows the workflows of the checks that the bots after the
+    # checks follow, of every kind of project, but not the release.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = root / ".github/workflows"
+    after = (flows / "after-checks.yml").read_text(encoding="utf-8")
+    update = (flows / "update-branches.yml").read_text(encoding="utf-8")
+    assert watched_after_the_checks(update) == watched_after_the_checks(after) - {
+        "Release"
+    }
+    assert ("the blueprint sets them" in update) == (project == "blueprint")
 
 
 def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
@@ -4783,6 +4849,7 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
 # their own set-up, in the pull requests that change it.
 UNWATCHED = {
     "Area labels",
+    "Update branches",
     "Dependabot maintenance",
     "Issue lifecycle",
     "Welcome",
@@ -5368,7 +5435,11 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     named = names_of_workflows(root)
     after_checks = after_pull_requests(named.items())
     assert {"After the checks", "Findings"} <= after_checks
-    for name in watched_by_bot_health(root) & after_checks:
+    # The branch bot is the one that acts on such an end: a failed check of a pull
+    # request moves its line on, which is a run of the bot on the default branch like
+    # any other, and one that fails is a failure of the bot.
+    assert "Update branches" in after_checks
+    for name in watched_by_bot_health(root) & after_checks - {"Update branches"}:
         text = named[name]
         for job in re.findall(r"^  ([\w-]+):$", text.split("\njobs:\n", 1)[1], re.M):
             condition = condition_of(job_of(text, job))
