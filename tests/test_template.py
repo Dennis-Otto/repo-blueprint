@@ -5701,7 +5701,7 @@ def test_codeql_files_the_results_of_each_language_under_its_category(
     )
     results = tmp_path / "codeql"
     results.mkdir()
-    for language in ("python", "actions"):
+    for language in ("python", "actions", "javascript", "java", "cpp"):
         (results / f"{language}.sarif").write_text(
             json.dumps({"runs": [{"tool": {"driver": {"name": "CodeQL"}}}]}),
             encoding="utf-8",
@@ -5722,10 +5722,20 @@ def test_codeql_files_the_results_of_each_language_under_its_category(
     )
 
     assert done.returncode == 0, done.stderr
-    for language in ("python", "actions"):
-        sarif = json.loads((results / f"{language}.sarif").read_text(encoding="utf-8"))
+    # The extractor names map back to the configured names, which the matrix used.
+    for extractor, language in (
+        ("python", "python"),
+        ("actions", "actions"),
+        ("javascript", "javascript-typescript"),
+        ("java", "java-kotlin"),
+        ("cpp", "c-cpp"),
+    ):
+        sarif = json.loads((results / f"{extractor}.sarif").read_text(encoding="utf-8"))
         assert sarif["runs"][0]["automationDetails"] == {"id": f"/language:{language}/"}
     assert "- python: `/language:python`" in summary.read_text(encoding="utf-8")
+    assert "- javascript-typescript: `/language:javascript-typescript`" in summary.read_text(
+        encoding="utf-8"
+    )
 
     # Without results, the step fails rather than uploading nothing.
     for found in results.iterdir():
@@ -7955,6 +7965,11 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
         "Check the fragments as the release takes them in",
     ):
         assert "${{" not in script_of(job, step), step
+    # The job may write, so the parser of the fragments, which the pull request
+    # controls, never sees the token.
+    script = script_of(job, "Check the fragments as the release takes them in")
+    assert 'env -u GH_TOKEN python3 "$script" fragments' in script
+    assert script.count("python3 ") == 1
 
 
 @WITH_JQ

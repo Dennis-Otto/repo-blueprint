@@ -61,7 +61,14 @@ jobs:
           fi
           echo "The categories of the analyses:" >> "$GITHUB_STEP_SUMMARY"
           for file in "${files[@]}"; do
+            # CodeQL names each file after the extractor; the category keeps the
+            # name of the language as configured, as the matrix uploaded it.
             language="$(basename "$file" .sarif)"
+            case "$language" in
+              javascript) language=javascript-typescript ;;
+              java) language=java-kotlin ;;
+              cpp) language=c-cpp ;;
+            esac
             jq --arg id "/language:$language/" '.runs[].automationDetails = {id: $id}' \
               "$file" > "$file.json"
             mv "$file.json" "$file"
