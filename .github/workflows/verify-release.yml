@@ -50,6 +50,7 @@ jobs:
           # hourly schedule, but always a tag, and checks in full.
           WEEKLY: ${{ github.event_name == 'schedule' && inputs.tag == '' }}
           # The gitsign of .github/sign-tag.sh.
+          # renovate: datasource=github-releases depName=sigstore/gitsign extractVersion=^v(?<version>.+)$
           GITSIGN_VERSION: 0.17.1
           GITSIGN_SHA256: 69213a8a0813a151e5a47d0060862952ff833a845d57309dff76f7ba6600abae
         run: |

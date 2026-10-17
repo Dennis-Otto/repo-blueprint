@@ -2,9 +2,9 @@
 // .github/renovate-blueprint.json5, then its own below. What new repositories copy,
 // or what reaches every repository through the blueprint bot, is committed as
 // fix(deps) and leads to a patch release that merges itself once every check
-// passes: the actions of the workflows, the images, Copier and the tools of each
-// kind of project in stacks/. The tools of the blueprint's own tests stay
-// chore(deps) and wait for the next release.
+// passes: the actions of the workflows, the images, the tools that the workflows
+// download, Copier and the tools of each kind of project in stacks/. The tools of
+// the blueprint's own tests stay chore(deps) and wait for the next release.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["local>Dennis-Otto/repo-blueprint//.github/renovate-blueprint.json5"],
@@ -32,6 +32,22 @@
       matchDepNames: ["uv"],
       matchFileNames: [".github/workflows/**"],
       enabled: true,
+    },
+    {
+      // The tools that the workflows and .github/sign-tag.sh download and check by
+      // their sha256, which every repository gets from here. Renovate can't know the
+      // checksum of a new release: after it moved a version, pins.py downloads the
+      // release and writes its sha256 beside the version and into .github/pins.toml,
+      // so that the update merges on its own like any other.
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["sigstore/gitsign", "infection/infection", "ChristophWurst/krankerl", "nextcloud/server"],
+      matchFileNames: [".github/workflows/**", ".github/sign-tag.sh"],
+      enabled: true,
+      postUpgradeTasks: {
+        commands: ["python3 pins.py"],
+        fileFilters: [".github/pins.toml", ".github/sign-tag.sh", ".github/workflows/*.yml"],
+        executionMode: "branch",
+      },
     },
     {
       matchFileNames: ["requirements-dev.txt"],

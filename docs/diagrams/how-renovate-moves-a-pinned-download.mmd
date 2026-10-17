@@ -1,0 +1,23 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How Renovate moves a pinned download
+    accDescr: A week after a new release of gitsign, Infection, krankerl or Nextcloud, Renovate moves its version in the workflows and in .github/sign-tag.sh. Then pins.py downloads the new release and writes its sha256 beside the version and into .github/pins.toml, and Renovate commits both. The tests check that every version has the sha256 of the record. Once every check passes, the update merges on its own as fix(deps), and the next release of the blueprint brings it to every repository.
+
+    release(["New release<br>of a tool"])
+    renovate["Renovate moves the version,<br>a week after the release"]
+    pins["pins.py downloads the release<br>and writes its sha256"]
+    checks{"Every version has<br>its sha256"}
+    merge["Merges on its own<br>as fix(deps)"]
+    everywhere["The next release brings it<br>to every repository"]
+
+    release --> renovate --> pins --> checks
+    checks -- "every check passes" --> merge --> everywhere
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class release,renovate,pins,checks bot
+    class merge,everywhere done

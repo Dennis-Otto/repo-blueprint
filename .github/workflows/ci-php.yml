@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 15
     env:
       # The same krankerl as the release workflow's.
+      # renovate: datasource=github-releases depName=ChristophWurst/krankerl extractVersion=^v(?<version>.+)$
       KRANKERL_VERSION: 0.14.0
       KRANKERL_SHA256: 9bee5a756a83c5a6b1f040e9a2ade9e902e4a57211afc174cd8ac5c4f913958f
     steps:

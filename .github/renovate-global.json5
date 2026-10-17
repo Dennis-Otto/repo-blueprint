@@ -15,5 +15,11 @@
   gitAuthor: "dennis-otto-release-automation[bot] <321826887+dennis-otto-release-automation[bot]@users.noreply.github.com>",
   // The package managers write the lock files with their scripts switched off.
   allowScripts: false,
+  // The one command that a rule may run after an update: pins.py of the blueprint,
+  // which writes the sha256 of a tool that Renovate moved to a new release. It runs
+  // without a shell and without the bot's environment, but the checkout it runs in
+  // still holds the token of the release app in .git/config: pins.py runs nothing
+  // that it downloads, and a change of it is reviewed like one of a workflow.
+  allowedCommands: ["^python3 pins\\.py$"],
   binarySource: "install",
 }
