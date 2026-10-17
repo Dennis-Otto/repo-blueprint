@@ -43,17 +43,15 @@ fork_pr_approval = "all_external_contributors"
 required_checks = [
   "check ({= ci_workflow =})",[% if project_type == 'github-action' %]
   "action",[% endif %][% if stack == 'home-assistant' %]
-  "hacs",
-  "hassfest",[% endif %]
-  "workflow-lint",
-  "reuse",
-  "markdown",
+  # HACS and hassfest.
+  "home-assistant",[% endif %]
+  # Every linter, the workflows, the licenses, the Markdown, the issue assistant
+  # and the sign-off of every commit, in one job.
+  "lint",
   "diagrams",
   "docs",
-  "dco",
-  "issue-assistant",
+  # The title of the pull request and its entry in the changelog.
   "conventional title",
-  "changelog",
   "codeql",
   "dependency-review",
   "gitleaks",

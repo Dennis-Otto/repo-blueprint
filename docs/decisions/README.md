@@ -32,3 +32,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0024](0024-take-over-each-verified-release-of-the-issue-assistant.md) | Take over each verified release of the issue assistant with a bot of the blueprint, not with Renovate | accepted |
 | [0025](0025-run-the-tests-on-every-core.md) | Run the tests of Python projects on every core, with the same coverage gate | accepted |
 | [0026](0026-build-the-website-once-and-keep-its-downloads-a-week.md) | Build the website once, in the job of the check, and keep the downloads of Material for a week | accepted |
+| [0027](0027-few-jobs-that-each-run-several-checks.md) | Few jobs that each run several checks, so that a pull request waits for fewer runners, in two releases | accepted |
