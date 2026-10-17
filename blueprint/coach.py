@@ -231,9 +231,14 @@ class Catalog:
 # ---------------------------------------------------------------- the text of the coach
 
 
-def heading(entry: Entry, step: bool) -> str:
-    """The title of the annotation and of the summary of a check or a step."""
-    return f"{PREFIX}{entry.key}{STEP_SUFFIX}" if step else f"{PREFIX}{entry.title}"
+def heading(entry: Entry, step: bool, within: str = "") -> str:
+    """The title of the annotation and of the summary of a check or a step; that of a
+    check that the job of another one runs, as lint runs markdown, names that one."""
+    if step:
+        return f"{PREFIX}{entry.key}{STEP_SUFFIX}"
+    if within and within != entry.key:
+        return f"{PREFIX}{entry.title} (in {within})"
+    return f"{PREFIX}{entry.title}"
 
 
 def link(docs: str, repo: str | None, server: str = "https://github.com") -> str:
@@ -277,12 +282,12 @@ def details(entry: Entry, url: str) -> list[str]:
     return lines
 
 
-def summary(entry: Entry, step: bool, url: str) -> str:
+def summary(entry: Entry, step: bool, url: str, within: str = "") -> str:
     """The explanation in the summary of a job that failed."""
-    return "\n".join([f"### {heading(entry, step)}", "", *details(entry, url)])
+    return "\n".join([f"### {heading(entry, step, within)}", "", *details(entry, url)])
 
 
-def plain(entry: Entry, step: bool) -> str:
+def plain(entry: Entry, step: bool, within: str = "") -> str:
     """The explanation in the log, and in the terminal of a person."""
 
     def wrap(label: str, text: str) -> str:
@@ -291,7 +296,7 @@ def plain(entry: Entry, step: bool) -> str:
         )
 
     lines = [
-        heading(entry, step),
+        heading(entry, step, within),
         wrap("What is wrong:", entry.problem),
         wrap("Why it matters:", entry.why),
         wrap("How to fix it:", entry.fix),
@@ -312,12 +317,12 @@ def escape_property(text: str) -> str:
     return escape_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
-def annotation(entry: Entry, step: bool) -> str:
+def annotation(entry: Entry, step: bool, within: str = "") -> str:
     """The annotation of the check, which GitHub shows with its log and in the files of
     the pull request. That of a step of scripts/check.sh is a notice: GitHub keeps only
     the first 10 errors of a step, which the tools of the step may have written."""
     message = "\n".join([entry.problem, f"How to fix it: {entry.fix}", *entry.commands])
-    title = escape_property(heading(entry, step))
+    title = escape_property(heading(entry, step, within))
     level = "notice" if step else "error"
     return f"::{level} title={title}::{escape_data(message)}"
 
@@ -532,6 +537,17 @@ def findings(api: Api, repo: str, run: Run) -> list[Finding]:
     return [finding for finding in found if not GENERIC.fullmatch(finding.message)]
 
 
+def parts_of(found: Iterable[Finding], catalog: Catalog, check: str) -> list[Entry]:
+    """The checks that the job of a check runs and that the coach explained in its
+    annotations, such as each linter that failed in lint."""
+    titles = {finding.title for finding in found if finding.coach}
+    return [
+        entry
+        for entry in catalog.checks.values()
+        if heading(entry, False, check) in titles
+    ]
+
+
 def section(
     run: Run,
     found: list[Finding],
@@ -556,6 +572,11 @@ def section(
         for step in dict.fromkeys(finding.step for finding in found)
         if step in catalog.steps
     ]
+    # A check that runs several others, as lint runs every linter, is explained by
+    # each of them that failed, and by its own explanation only when it gave that too.
+    explained = parts_of(found, catalog, run.name)
+    parts = [part for part in explained if entry is None or part.key != entry.key]
+    itself = len(parts) < len(explained) or not parts
     # A check that runs scripts/check.sh of this repository is explained by the step
     # that stopped it. Another one that runs a scripts/check.sh, as a variant runs that
     # of the project that it made, keeps its own explanation and names the step.
@@ -570,19 +591,22 @@ def section(
             "explains each step that fails as well.",
             "",
         ]
-    if entry and not (own and steps):
+    if entry and itself and not (own and steps):
         lines += details(entry, link(entry.docs, repo))
-    if not entry and not steps:
+    if not entry and not steps and not parts:
         lines += [
             "The PR coach has no explanation of this check yet; its log says what it "
             f"found. Maintainers explain it in `{PROJECT_CATALOG.as_posix()}`.",
             "",
         ]
-    if entry and entry.key == TITLE_CHECK:
+    if entry and itself and entry.key == TITLE_CHECK:
         suggestion = suggest_title(
             str(pull.get("title") or ""), str(pull["head"]["ref"])
         )
         lines += ["**A title that passes:**", "", fence("text", [suggestion]), ""]
+    for part in parts:
+        lines += [f"**{html.escape(part.title)}** · {html_code(part.key)}", ""]
+        lines += details(part.within(repo), link(part.docs, repo))
     others = [finding for finding in found if not finding.coach]
     if others:
         lines += ["**What the check found:**", ""]

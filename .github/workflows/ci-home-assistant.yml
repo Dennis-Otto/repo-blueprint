@@ -136,6 +136,75 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" coach explain "$CHECK"
 
+  # HACS and hassfest in one job, which takes one runner instead of two; each step
+  # runs also when the other failed, so that the check reports both, and the PR coach
+  # explains each one that failed.
+  home-assistant:
+    name: home-assistant
+    # Not in the blueprint itself; generated repositories don't have this line.
+    if: github.repository != 'Dennis-Otto/repo-blueprint'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+        with:
+          persist-credentials: false
+      # HACS' moving ghcr.io/hacs/action:main image on purpose: it always validates
+      # against the rules HACS applies to new submissions today. The step runs it as
+      # the action hacs/action does, with the inputs as INPUT_ variables and the event
+      # as a file, but without the action itself: a pin to a commit of its branch
+      # falls behind with every commit there, which zizmor reports. The image reads
+      # the repository through the API, at the branch of the event.
+      - name: Validate the HACS metadata
+        id: hacs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        env:
+          INPUT_CATEGORY: integration
+          INPUT_COMMENT: "false"
+          INPUT_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --env INPUT_CATEGORY --env INPUT_COMMENT --env INPUT_GITHUB_TOKEN \
+            --env GITHUB_REPOSITORY --env GITHUB_EVENT_PATH=/github/workflow/event.json \
+            --volume "$GITHUB_EVENT_PATH:/github/workflow/event.json:ro" \
+            ghcr.io/hacs/action:main
+      # hassfest runs Home Assistant's current image, for the same reasons and as its
+      # action home-assistant/actions/hassfest does, with the problem matcher of the
+      # action, which shows each error and warning as an annotation.
+      - name: Validate the integration
+        id: hassfest
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          cat > "$RUNNER_TEMP/hassfest.json" <<'EOF'
+          {"problemMatcher": [{"owner": "hassfest", "pattern": [{"regexp": "^\\*\\s\\[(ERROR|WARNING)\\]\\s(.*)$", "severity": 1, "message": 2}]}]}
+          EOF
+          echo "::add-matcher::$RUNNER_TEMP/hassfest.json"
+          docker run --rm --volume "$PWD:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml: each check
+      # of the job that failed, or the job itself when none of them did.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: home-assistant
+          FAILED: |
+            ${{ steps.hacs.outcome == 'failure' && 'hacs' || '' }}
+            ${{ steps.hassfest.outcome == 'failure' && 'hassfest' || '' }}
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          mapfile -t parts < <(grep . <<<"$FAILED" || true)
+          python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"
+
+  # HACS and hassfest one job each, as the rulesets of the repositories require them
+  # until the settings bot applies the required checks of this release, which take
+  # the job home-assistant instead; the next release of the blueprint removes them.
   hacs:
     name: hacs
     # Not in the blueprint itself; generated repositories don't have this line.

@@ -16,9 +16,10 @@ each pull request has to run its checks again after the merge before it anyway.
 A pull request whose required check failed waits for a fix and leaves its place to the
 next one. One that conflicts with the default branch gets the label merge-conflict and
 one comment, which stays for the history; the label goes once it no longer conflicts.
-Renovate builds a branch of its own that conflicts anew. A request that GitHub refuses
-is a warning about that pull request, never a conflict, and the bot goes on with the
-next one.
+Renovate builds a branch of its own that conflicts anew. One that waits for a review,
+or for its conversations to be resolved, can't merge whatever its checks say, so the
+bot doesn't bring it up to date either. A request that GitHub refuses is a warning
+about that pull request, and the bot goes on with the next one.
 """
 
 from __future__ import annotations
@@ -48,7 +49,20 @@ RENOVATE_BRANCH = "renovate/"
 # What the bot needs of each open pull request, in one request.
 FIELDS = (
     "number,headRefName,headRefOid,autoMergeRequest,isCrossRepository,mergeable,"
-    "labels,statusCheckRollup"
+    "labels,reviewDecision,statusCheckRollup"
+)
+# What a review decision that holds up the merge says about the pull request.
+REVIEWS = {
+    "CHANGES_REQUESTED": "changes were requested in a review",
+    "REVIEW_REQUIRED": "it waits for an approving review",
+}
+# How GitHub refuses the update of a branch that conflicts, and one whose head moved.
+CONFLICT_MESSAGE = "merge conflict"
+MOVED_MESSAGE = "expected head sha"
+# The conversations of a pull request; one page is plenty for those of a bot's line.
+THREADS_QUERY = (
+    "query {{ repository(owner: {owner}, name: {name}) {{ pullRequest(number: {number})"
+    " {{ reviewThreads(first: 100) {{ nodes {{ isResolved }} }} }} }} }}"
 )
 # The most pull requests that the bot looks at, as many as one page of GitHub's list.
 LIMIT = 100
@@ -116,6 +130,7 @@ class Pull:
     enabled_at: str
     mergeable: str
     labelled: bool
+    review: str = ""
     checks: Mapping[str, State] = field(default_factory=dict)
 
     @classmethod
@@ -130,6 +145,7 @@ class Pull:
             labelled=any(
                 label.get("name") == LABEL for label in data.get("labels") or []
             ),
+            review=str(data.get("reviewDecision") or ""),
             checks=latest_checks(data.get("statusCheckRollup") or []),
         )
 
@@ -186,14 +202,32 @@ def waiting(api: Api, repo: str, base: str) -> list[Pull]:
     return sorted(pulls, key=lambda pull: (pull.enabled_at, pull.number))
 
 
-def required_checks(api: Api, repo: str, base: str) -> frozenset[str]:
-    """The names of the checks that the rules of base require."""
+@dataclass(frozen=True)
+class Rules:
+    """What the rules of base require of a pull request before it merges."""
+
+    checks: frozenset[str]
+    threads: bool
+
+
+def rules_of(api: Api, repo: str, base: str) -> Rules:
+    """The names of the checks that the rules of base require, and whether they want
+    every conversation resolved."""
     rules = api.get(f"repos/{repo}/rules/branches/{quoted(base)}?per_page=100") or []
-    return frozenset(
-        str(check["context"])
-        for rule in rules
-        if rule.get("type") == "required_status_checks"
-        for check in (rule.get("parameters") or {}).get("required_status_checks", [])
+    return Rules(
+        checks=frozenset(
+            str(check["context"])
+            for rule in rules
+            if rule.get("type") == "required_status_checks"
+            for check in (rule.get("parameters") or {}).get(
+                "required_status_checks", []
+            )
+        ),
+        threads=any(
+            rule.get("type") == "pull_request"
+            and (rule.get("parameters") or {}).get("required_review_thread_resolution")
+            for rule in rules
+        ),
     )
 
 
@@ -213,6 +247,7 @@ class Line:
     repo: str
     base: str
     required: frozenset[str]
+    threads: bool = False
     notes: dict[int, list[str]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     behind: dict[int, int] = field(default_factory=dict)
@@ -236,6 +271,32 @@ class Line:
                 raise GitHubError(404, f"no comparison of {pull.head} with the base")
             self.behind[pull.number] = int(compared["behind_by"])
         return self.behind[pull.number]
+
+    def held(self, pull: Pull) -> str:
+        """What holds up its merge besides its checks, or nothing: a review that the
+        rules want, or a conversation to resolve."""
+        reason = REVIEWS.get(pull.review, "")
+        if not reason and self.threads and self.unresolved(pull):
+            reason = "it has a conversation to resolve"
+        return reason
+
+    def unresolved(self, pull: Pull) -> bool:
+        owner, _, name = self.repo.partition("/")
+        data = self.api.graphql(
+            THREADS_QUERY.format(
+                owner=json.dumps(owner), name=json.dumps(name), number=pull.number
+            )
+        )
+        found = (((data or {}).get("repository") or {}).get("pullRequest")) or {}
+        threads = (found.get("reviewThreads") or {}).get("nodes") or []
+        return any(not thread.get("isResolved") for thread in threads)
+
+    def wait(self, pull: Pull, reason: str) -> None:
+        self.note(
+            pull,
+            f"{reason}, so it can't merge yet: the bot leaves it as it is, and the "
+            "next one takes its place.",
+        )
 
     def conflict(self, pull: Pull) -> None:
         """A pull request that conflicts with base: the label and one comment, which a
@@ -285,7 +346,7 @@ class Line:
             if not pull.pending(self.required) or pull.failed(self.required):
                 continue
             try:
-                if self.commits_behind(pull) == 0:
+                if self.commits_behind(pull) == 0 and not self.held(pull):
                     return pull
             except GitHubError as error:
                 self.refused(pull, error)
@@ -344,13 +405,29 @@ class Line:
                         "conversation to resolve or a check that was cancelled.",
                     )
                     continue
+                reason = self.held(pull)
+                if reason:
+                    self.wait(pull, reason)
+                    continue
                 try:
                     self.update(pull)
-                except GitHubError:
-                    if pull.mergeable == "UNKNOWN" and self.conflicts_now(pull):
+                except GitHubError as error:
+                    message = str(error).lower()
+                    if CONFLICT_MESSAGE in message or (
+                        pull.mergeable == "UNKNOWN" and self.conflicts_now(pull)
+                    ):
                         self.conflict(pull)
                         continue
-                    raise
+                    if MOVED_MESSAGE not in message:
+                        raise
+                    # Someone pushed to it since the list: its checks run anyway.
+                    front = pull
+                    self.note(
+                        pull,
+                        "got a new commit since the list, so its checks run now: it "
+                        "merges next.",
+                    )
+                    continue
             except GitHubError as error:
                 self.refused(pull, error)
                 continue
@@ -390,7 +467,8 @@ def next_branch(api: Api, repo: str) -> Outcome:
     """One run of the branch bot: the labels of the conflicts, and the next pull
     request of the line brought up to date, unless one is in flight."""
     base = default_branch(api, repo)
-    line = Line(api, repo, base, required_checks(api, repo, base))
+    rules = rules_of(api, repo, base)
+    line = Line(api, repo, base, rules.checks, rules.threads)
     pulls = waiting(api, repo, base)
     line.move_on(line.sort_out(pulls))
     return Outcome(line.summary(pulls), line.warnings)

@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The jobs of a pull request
+    accDescr: Each job of a push waits for a runner of its own, and the account runs about 20 jobs at once. So the quick checks share their jobs: lint runs every linter, the title job checks the title and the entry in the changelog, codeql analyzes every language under the category of its alerts, and home-assistant runs HACS and hassfest. Each step runs also when one before it failed, and the PR coach explains each check of a job that failed.
+
+    push["A push to a pull request"]
+    lint["lint<br>workflows · licenses · Markdown<br>issue assistant · sign-off · prose"]
+    title["conventional title<br>title · entry in the changelog"]
+    codeql["codeql<br>every language, one after the other<br>each under /language:name"]
+    ha["home-assistant<br>HACS · hassfest"]
+    coach["PR coach<br>explains each check that failed"]
+
+    push --> lint
+    push --> title
+    push --> codeql
+    push -- "Home Assistant" --> ha
+    lint --> coach
+    title --> coach
+    codeql --> coach
+    ha --> coach
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class push person
+    class lint,title,codeql,ha bot
+    class coach done

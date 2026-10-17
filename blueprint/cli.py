@@ -166,28 +166,39 @@ def explain_command(arguments: argparse.Namespace, root: Path) -> int:
             "and every explanation says how it fixes itself or why it can't."
         )
         return 0
-    step = arguments.step
-    entry = catalog.step(arguments.name) if step else catalog.check(arguments.name)
+    # A check that runs several others, as lint runs every linter, explains each of
+    # them that failed, and itself only when none did.
+    if not arguments.parts:
+        explain(catalog, arguments.name, arguments.step)
+    for part in arguments.parts:
+        explain(catalog, part, arguments.step, within=arguments.name)
+    return 0
+
+
+def explain(catalog: Catalog, name: str, step: bool, within: str = "") -> None:
+    """What a check or a step found and how to fix it: in the log, and in the CI also
+    in the summary of the job and as its annotation; within names the check whose job
+    ran it, if another one."""
+    entry = catalog.step(name) if step else catalog.check(name)
     if entry is None:
-        text = unknown(arguments.name, step)
+        text = unknown(name, step)
         sys.stdout.write(text)
     else:
         repo = os.environ.get("GITHUB_REPOSITORY") or None
         entry = entry.within(repo)
-        sys.stdout.write(plain(entry, step))
+        sys.stdout.write(plain(entry, step, within))
         if os.environ.get("GITHUB_ACTIONS") == "true":
-            print(coach_annotation(entry, step))
+            print(coach_annotation(entry, step, within))
         url = link(
             entry.docs,
             repo,
             os.environ.get("GITHUB_SERVER_URL") or "https://github.com",
         )
-        text = summary(entry, step, url)
+        text = summary(entry, step, url, within)
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if target:
         with Path(target).open("a", encoding="utf-8") as file:
             file.write(text + "\n")
-    return 0
 
 
 def bot_health_command(
@@ -544,10 +555,16 @@ def main(
         help="the blueprint on GitHub as OWNER/NAME, a fork perhaps, whose release the "
         "pull request links",
     )
-    commands.add_parser(
+    next_branch_parser = commands.add_parser(
         "next-branch",
         help="bring the next pull request that waits for auto-merge up to date, one "
         "at a time, for the branch bot",
+    )
+    next_branch_parser.add_argument(
+        "--warnings-only",
+        action="store_true",
+        help="pass even when GitHub refused a request, with the warnings alone, as "
+        "in a run that shows as a check of a pull request",
     )
     coach_parser = commands.add_parser(
         "coach",
@@ -565,6 +582,14 @@ def main(
     )
     explain_parser.add_argument(
         "--step", action="store_true", help="the name is a step of scripts/check.sh"
+    )
+    explain_parser.add_argument(
+        "--parts",
+        nargs="*",
+        default=[],
+        metavar="PART",
+        help="the checks that the job of the check runs and that failed, such as "
+        "markdown in lint; the coach explains each of them instead of the check",
     )
     coach_report_parser = coach_actions.add_parser(
         "report",
@@ -831,7 +856,7 @@ def main(
             for warning in outcome.warnings:
                 print(warning, file=sys.stderr)
             print(outcome.summary, end="")
-            return 1 if outcome.warnings else 0
+            return 1 if outcome.warnings and not arguments.warnings_only else 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments)
         settings = Settings.load(root / arguments.config)

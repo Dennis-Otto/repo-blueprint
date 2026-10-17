@@ -39,7 +39,8 @@ rules:
       # annotations and writes issues, and checks out only the default branch.
       - bot-health.yml
       # The branch bot starts when auto-merge of a pull request is turned on or off and
-      # when a check of a pull request fails; it checks out only the default branch,
+      # when a check of a pull request fails, also one that runs on pull_request_target
+      # such as the title's, which may be a fork's; it checks out only the default branch,
       # whose blueprint.py reads the pull requests and their checks from the API and
       # merges the default branch into one of them through the API.
       - update-branches.yml

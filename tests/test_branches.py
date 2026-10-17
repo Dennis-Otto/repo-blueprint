@@ -75,6 +75,7 @@ def pull(
     labels: Sequence[str] = (),
     checks: list[dict[str, Any]] | None = None,
     cross: bool = False,
+    review: str | None = None,
 ) -> dict[str, Any]:
     """An open pull request as gh pr list shows it."""
     return {
@@ -87,6 +88,7 @@ def pull(
         "isCrossRepository": cross,
         "mergeable": mergeable,
         "labels": [{"name": name} for name in labels],
+        "reviewDecision": review,
         "statusCheckRollup": passed() if checks is None else checks,
     }
 
@@ -107,9 +109,16 @@ class FakeGitHub:
         self.removed: list[int] = []
         # A status that answers a request instead of the simulation.
         self.fail: dict[tuple[str, str], int] = {}
+        self.messages: dict[tuple[str, str], str] = {}
         self.listed: list[Sequence[str]] = []
         self.list_error = ""
         self.calls: list[tuple[str, str]] = []
+        # Whether the rules want every conversation resolved, and the conversations of
+        # each pull request: resolved or not.
+        self.thread_rule = False
+        self.threads: dict[int, list[bool]] = {}
+        self.queried: list[int] = []
+        self.graphql_error = ""
 
     def __call__(
         self, arguments: Sequence[str], body: str | None
@@ -119,11 +128,14 @@ class FakeGitHub:
             if self.list_error:
                 return subprocess.CompletedProcess(arguments, 1, "", self.list_error)
             return subprocess.CompletedProcess(arguments, 0, json.dumps(self.pulls), "")
+        if arguments[1] == "graphql":
+            return self.graphql(arguments)
         method, path = arguments[3], arguments[4]
         self.calls.append((method, path))
         payload = json.loads(body) if body else None
         code = self.fail.get((method, path), 0)
-        data: Any = {"message": "simulated failure"} if code else None
+        message = self.messages.get((method, path), "simulated failure")
+        data: Any = {"message": message} if code else None
         if not code:
             code, data = self.route(method, path, payload)
         text = "" if data is None else json.dumps(data)
@@ -134,13 +146,36 @@ class FakeGitHub:
             "",
         )
 
+    def graphql(self, arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        query = arguments[3]
+        found = re.search(
+            r'repository\(owner: "Dennis-Otto", name: "demo"\) \{ pullRequest\(number: (\d+)\)',
+            query,
+        )
+        assert found, query
+        assert "reviewThreads(first: 100) { nodes { isResolved } }" in query
+        number = int(found[1])
+        self.queried.append(number)
+        if self.graphql_error:
+            return subprocess.CompletedProcess(arguments, 1, "", self.graphql_error)
+        nodes = [{"isResolved": done} for done in self.threads.get(number, [])]
+        data = {
+            "data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}
+        }
+        return subprocess.CompletedProcess(arguments, 0, json.dumps(data), "")
+
     def route(self, method: str, path: str, body: Any) -> tuple[int, Any]:
         own = f"repos/{REPO}"
         if (method, path) == ("GET", own):
             return 200, {"default_branch": "main"}
         if (method, path) == ("GET", f"{own}/rules/branches/main?per_page=100"):
             return 200, [
-                {"type": "pull_request", "parameters": {}},
+                {
+                    "type": "pull_request",
+                    "parameters": {
+                        "required_review_thread_resolution": self.thread_rule
+                    },
+                },
                 {
                     "type": "required_status_checks",
                     "parameters": {
@@ -496,6 +531,134 @@ def test_a_conflict_that_the_list_didnt_know_yet_is_a_conflict() -> None:
     assert [number for number, _ in github.updated] == [2]
 
 
+@pytest.mark.parametrize(
+    ("review", "reason"),
+    [
+        ("CHANGES_REQUESTED", "changes were requested in a review"),
+        ("REVIEW_REQUIRED", "it waits for an approving review"),
+    ],
+)
+def test_a_pull_request_that_waits_for_a_review_is_not_brought_up_to_date(
+    review: str, reason: str
+) -> None:
+    # Its checks would pass and it still wouldn't merge, after every merge again.
+    github = FakeGitHub(pull(1, review=review), pull(2, enabled=LATER))
+    github.behind = {1: 2, 2: 1}
+
+    summary, warnings = bot(github)
+
+    assert warnings == []
+    assert [number for number, _ in github.updated] == [2]
+    assert notes(summary)[1] == (
+        f"{reason}, so it can't merge yet: the bot leaves it as it is, and the next "
+        "one takes its place."
+    )
+    assert github.queried == []
+
+
+def test_an_approved_pull_request_is_brought_up_to_date() -> None:
+    github = FakeGitHub(pull(1, review="APPROVED"))
+    github.behind = {1: 1}
+
+    bot(github)
+
+    assert [number for number, _ in github.updated] == [1]
+
+
+def test_a_conversation_to_resolve_holds_a_pull_request_back_where_the_rules_say_so() -> (
+    None
+):
+    github = FakeGitHub(pull(1), pull(2, enabled=LATER), pull(3, enabled=LATEST))
+    github.behind = {1: 1, 2: 1, 3: 1}
+    github.thread_rule = True
+    github.threads = {1: [True, False], 2: [True]}
+
+    summary, warnings = bot(github)
+
+    assert warnings == []
+    assert [number for number, _ in github.updated] == [2]
+    assert notes(summary)[1].startswith("it has a conversation to resolve, so it can't")
+    # None is asked about after the one that moves.
+    assert github.queried == [1, 2]
+
+
+def test_conversations_dont_count_where_the_rules_dont_want_them_resolved() -> None:
+    github = FakeGitHub(pull(1))
+    github.behind = {1: 1}
+    github.threads = {1: [False]}
+
+    bot(github)
+
+    assert [number for number, _ in github.updated] == [1]
+    assert github.queried == []
+
+
+def test_an_up_to_date_pull_request_with_a_conversation_to_resolve_is_not_in_flight() -> (
+    None
+):
+    # Its checks run, but it can't merge after them, and their end starts no run of
+    # the bot: the next one moves up instead of waiting behind it.
+    pending = [run("lint", None, status="IN_PROGRESS"), run("check (python)")]
+    github = FakeGitHub(pull(1, checks=pending), pull(2, enabled=LATER))
+    github.behind = {1: 0, 2: 1}
+    github.thread_rule = True
+    github.threads = {1: [False]}
+
+    summary, _ = bot(github)
+
+    assert [number for number, _ in github.updated] == [2]
+    assert notes(summary)[2].startswith("was 1 commit behind")
+    assert github.queried == [1, 2]
+
+
+def test_conversations_that_github_doesnt_list_are_a_warning() -> None:
+    github = FakeGitHub(pull(1), pull(2, enabled=LATER))
+    github.behind = {1: 1, 2: 1}
+    github.thread_rule = True
+    github.graphql_error = "HTTP 502: Bad Gateway"
+
+    summary, warnings = bot(github)
+
+    assert github.updated == []
+    assert len(warnings) == 2
+    assert "Bad Gateway" in notes(summary)[1]
+
+
+def test_a_conflict_that_the_update_reports_is_a_conflict() -> None:
+    # The list didn't know yet, and neither does GitHub, asked again; the answer to the
+    # update does.
+    github = FakeGitHub(pull(1, mergeable="UNKNOWN"), pull(2, enabled=LATER))
+    github.behind = {1: 1, 2: 1}
+    update = ("PUT", f"repos/{REPO}/pulls/1/update-branch")
+    github.fail[update] = 422
+    github.messages[update] = "merge conflict between base and head"
+    github.mergeable[1] = None
+
+    summary, warnings = bot(github)
+
+    assert warnings == []
+    assert github.added == [1]
+    assert "it has the label merge-conflict" in notes(summary)[1]
+    assert [number for number, _ in github.updated] == [2]
+
+
+def test_a_pull_request_that_got_a_commit_since_the_list_is_in_flight() -> None:
+    github = FakeGitHub(pull(1), pull(2, enabled=LATER))
+    github.behind = {1: 1, 2: 1}
+    update = ("PUT", f"repos/{REPO}/pulls/1/update-branch")
+    github.fail[update] = 422
+    github.messages[update] = "expected head sha didn't match current head ref."
+
+    summary, warnings = bot(github)
+
+    assert warnings == []
+    assert github.updated == []
+    assert notes(summary)[1] == (
+        "got a new commit since the list, so its checks run now: it merges next."
+    )
+    assert notes(summary)[2] == "waits in line."
+
+
 # --------------------------------------------------------------------------- errors
 
 
@@ -647,7 +810,7 @@ def test_a_pull_request_takes_what_gh_lists() -> None:
 
     found = Pull.of(data)
 
-    assert found == Pull(9, "feat/change-9", f"{9:040x}", "", "UNKNOWN", True, {})
+    assert found == Pull(9, "feat/change-9", f"{9:040x}", "", "UNKNOWN", True, "", {})
     required = frozenset(REQUIRED)
     assert found.pending(required)
     assert found.failed(required) == []
@@ -682,6 +845,14 @@ def test_the_command_writes_the_summary_and_the_warnings(
     assert cli.main(["--repo", REPO, "next-branch"], api=Api(github)) == 1
     out, err = capsys.readouterr()
     assert "GitHub refused a request" in out
+    assert err.startswith("::warning::The branch bot couldn't handle #1:")
+
+    # A run that shows as a check of a pull request passes with the warnings alone.
+    assert (
+        cli.main(["--repo", REPO, "next-branch", "--warnings-only"], api=Api(github))
+        == 0
+    )
+    _, err = capsys.readouterr()
     assert err.startswith("::warning::The branch bot couldn't handle #1:")
 
 

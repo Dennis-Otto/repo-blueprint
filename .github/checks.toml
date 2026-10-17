@@ -43,6 +43,19 @@ docs = "CONTRIBUTING.md#checks"
 autofix = """Its steps fix themselves: each step of `scripts/check.sh` has an
 autofix of its own."""
 
+[check.lint]
+title = "The linters"
+problem = """A step of the check failed before its linters ran, such as the checkout of
+the pull request. When a linter fails, the PR coach explains that linter instead:
+the workflows, the licenses, the Markdown, the issue assistant or the sign-off."""
+why = """The linters run in one job, which takes one runner instead of one each; they
+report only once the job got that far."""
+fix = """Run the check again; if it fails at the same step, the log of the check says
+why."""
+docs = "CONTRIBUTING.md#coding-standards"
+autofix = """A step that fails before the linters needs a look at its log; each linter
+fixes itself with the autofix of its own explanation."""
+
 [check.workflow-lint]
 title = "The workflows"
 problem = """A workflow in `.github/workflows/` breaks a rule of actionlint, such as an
@@ -183,27 +196,18 @@ docs = "CONTRIBUTING.md#workflow"
 autofix = """Not yet: a draft entry from the title of the pull request follows in
 Dennis-Otto/repo-blueprint#225; the words for users stay the author's."""
 
-[check."analyze (*)"]
+[check.codeql]
 title = "The CodeQL analysis"
-problem = """CodeQL couldn't analyze the code of one language. Its findings are a check
-of their own, CodeQL; this one fails when the analysis itself breaks."""
-why = """Without the analysis, no one sees the security problems that the change may
-bring."""
+problem = """CodeQL couldn't analyze the code, or couldn't upload what it found. Its
+findings are a check of their own, CodeQL; this one fails when the analysis itself
+breaks."""
+why = """The rules of `main` require that every language is analyzed, so that no security
+problem goes unseen."""
 fix = """Read the log of the check. A failure of the analysis is rarely caused by the
 change: run the check again, and if it fails again, open an issue with the log."""
 docs = "https://docs.github.com/en/code-security/code-scanning"
 autofix = """An analysis that breaks needs a look at its log; the change rarely causes
 it."""
-
-[check.codeql]
-title = "Every CodeQL analysis"
-problem = """The CodeQL analysis of at least one language failed; the check of that
-language, `analyze (…)`, says why."""
-why = """The rules of `main` require that every language is analyzed, so that no security
-problem goes unseen."""
-fix = """Fix the check `analyze (…)` that failed; this one passes with it."""
-docs = "https://docs.github.com/en/code-security/code-scanning"
-autofix = """It passes once every analysis `analyze (…)` passes."""
 
 [check.CodeQL]
 title = "Security alerts of CodeQL"
@@ -262,6 +266,17 @@ the tests of the action with `bash scripts/check.sh`, fix the action or the test
 `.github/workflows/action-test.yml`, and push."""
 docs = "CONTRIBUTING.md#checks"
 autofix = """A test of the action that fails needs a person, who knows what the action should do."""
+
+[check.home-assistant]
+title = "The validations of Home Assistant"
+problem = """A step of the check failed before HACS and hassfest ran. When one of them
+fails, the PR coach explains that one instead."""
+why = """HACS and hassfest run in one job, which takes one runner instead of two; they
+report only once the job got that far."""
+fix = """Run the check again; if it fails at the same step, the log of the check says
+why."""
+docs = "https://developers.home-assistant.io/docs/creating_integration_manifest"
+autofix = """A step that fails before the validations needs a look at its log."""
 
 [check.hacs]
 title = "The HACS validation"
