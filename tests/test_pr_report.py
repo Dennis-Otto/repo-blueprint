@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -399,7 +400,12 @@ def test_every_entry_stays_in_its_block(lines: list[str]) -> None:
         assert "`" not in text.split("\n\n", 2)[-1]
         return
     assert not re.search(rf"^{found[1]}", found[2], re.MULTILINE)
-    assert not re.search("[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029]", found[2])
+    # No control character but the line breaks between the lines.
+    assert not any(
+        (unicodedata.category(char) == "Cc" and char != "\n")
+        or char in "\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}"
+        for char in found[2]
+    )
 
 
 # ---------------------------------------------------------------- coverage
