@@ -36,5 +36,6 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0028](0028-bring-one-pull-request-at-a-time-up-to-date.md) | Bring one pull request at a time up to date, in the order of its auto-merge | accepted |
 | [0029](0029-a-dependency-dashboard-the-whole-monday-and-pins-with-their-checksum.md) | A dependency dashboard, the whole Monday, fix(deps) for what the users run, and pinned downloads that move with their checksum | accepted |
 | [0030](0030-one-report-on-each-pull-request.md) | One report on each pull request, which says what it makes | accepted |
+| [0031](0031-mutation-tests-in-parts-with-the-logic-first-and-an-issue-on-a-drop.md) | The mutation tests run in parts, list the survivors that change the logic first and open an issue when the score drops | accepted |
 | [0032](0032-the-taint-analysis-knows-nextcloud-and-proves-that-it-still-sees.md) | The taint analysis of a Nextcloud app knows Nextcloud, and proves in every run that it still sees | accepted |
 | [0033](0033-schedules-are-only-a-safety-net.md) | Bots start from events, and their schedules are only a safety net | accepted |

@@ -624,6 +624,9 @@ def test_the_blueprint_pins_one_release_of_the_issue_assistant() -> None:
         )
 
 
+# In the copy of the mutation tests, the script that the test copies is the code with
+# the mutants, which runs only where mutmut set it up.
+@pytest.mark.mutation_unsafe
 @needs_git
 def test_the_script_runs_as_the_workflow_runs_it(tmp_path: Path) -> None:
     root = blueprint(tmp_path / "blueprint")

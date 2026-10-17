@@ -355,6 +355,9 @@ def test_the_text_fix_leaves_a_link_alone(tmp_path: Path) -> None:
     assert (root / "link.txt").is_symlink()
 
 
+# In the copy of the mutation tests, the tool that the test copies into the repository
+# is the code with the mutants, whose format Ruff fixes as well.
+@pytest.mark.mutation_unsafe
 @needs_bash
 def test_a_pull_request_with_mistakes_passes_after_its_fixes(
     tmp_path: Path,

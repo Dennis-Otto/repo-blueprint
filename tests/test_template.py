@@ -49,6 +49,7 @@ from blueprint.bot_health import (
 from blueprint.changelog import Fragment, release_changelog
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
+from blueprint.mutation import default_paths
 from blueprint.pages import layouts, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import Settings
@@ -9564,7 +9565,15 @@ def test_the_code_of_a_project_meets_mutants_every_week(
     project = projects[kind]
     mutation = project / ".github/workflows/mutation.yml"
     tools = project / ".github/mutation-requirements.txt"
-    if kind in ("home-assistant", "python-package", "github-action"):
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    # The plan, the parts and the report of the run, in the tool of every repository.
+    assert (project / ".github/blueprint/mutation.py").is_file()
+    python = kind in ("home-assistant", "python-package", "github-action")
+    # How a contributor kills a survivor, or keeps mutmut away from a text.
+    assert ("`# pragma: no mutate`" in contributing) == python
+    assert ("`@pytest.mark.mutation_unsafe`" in contributing) == python
+    assert "\n\n\n" not in contributing
+    if python:
         assert mutation.is_file()
         assert "mutmut==" in tools.read_text(encoding="utf-8")
     elif kind == "nextcloud-app":
@@ -9575,10 +9584,12 @@ def test_the_code_of_a_project_meets_mutants_every_week(
 
 
 def mutation_step(name: str, kind: str) -> str:
-    """The script of a step of the Mutation workflow for one kind of code."""
+    """The script of a step of the Mutation workflow for one kind of code, or with
+    no kind of one that runs for every kind, as the plan and the report do."""
     workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    condition = rf"        if: .*== '{kind}'\n" if kind else ""
     step = re.search(
-        rf"      - name: {re.escape(name)}\n        if: .*== '{kind}'\n"
+        rf"      - name: {re.escape(name)}\n{condition}"
         r"(?:        (?!run: \|).*\n)*        run: \|\n((?:          .*\n|\n)+)",
         workflow,
     )
@@ -9686,7 +9697,32 @@ def test_mutmut_mutates_the_code_of_every_kind_of_project(
     assert {".github", "docs", "pyproject.toml", "tests"} <= set(copied)
     assert not {".git", "setup.cfg"} & set(copied)
     assert mutmut_list(config, "pytest_add_cli_args") == ["-m", "not mutation_unsafe"]
-    assert calls.read_text(encoding="utf-8").startswith("run --max-children ")
+    # One part runs every mutant.
+    assert re.fullmatch(r"run --max-children \d+\n", calls.read_text(encoding="utf-8"))
+    # The plan splits what the step mutates.
+    assert default_paths(project) == paths
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_part_runs_the_mutants_of_its_code(tmp_path: Path) -> None:
+    (tmp_path / "project").mkdir()
+    calls = tmp_path / "calls"
+
+    code, _ = run_mutation_step(
+        tmp_path,
+        "Run the mutants against the tests",
+        "python",
+        {"mutmut": 'printf "%s\\n" "$@" > "$CALLS"\n'},
+        CALLS=calls.as_posix(),
+        PATTERNS="demo.x_*\ndemo.xǁ*",
+    )
+
+    assert code == 0
+    # Each name a word of its own, as mutmut run takes them.
+    assert calls.read_text(encoding="utf-8").splitlines()[-2:] == [
+        "demo.x_*",
+        "demo.xǁ*",
+    ]
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -9718,60 +9754,259 @@ MUTANTS = """\
     demo.x_add__mutmut_2: survived
     demo.x_add__mutmut_3: no tests
 """
-# The output of mutmut, whose spinner redraws the line of each phase with \r.
-STOPPED = (
+# Stand-ins for the module of mutmut, which shows a survivor, and for its command,
+# which lists the results.
+SHOW = """\
+import sys
+
+print(f"# {sys.argv[2]}: survived")
+print("--- demo.py\\n+++ demo.py\\n@@ -1,2 +1,2 @@\\n def add(a, b):")
+print("-    return a + b\\n+    return a - b")
+"""
+MUTMUT = """\
+case "$1" in
+  results) printf '%s' "$RESULTS" ;;
+esac
+"""
+PYTHON = f'exec "{Path(sys.executable).as_posix()}" "$@"\n'
+# The output of mutmut, whose spinner redraws the line of each phase with \r, when a
+# test fails without any mutant.
+FAILING = (
     "⠋ Generating mutants\r⠙ Generating mutants\r⠇ Generating mutants\n"
-    "    done in 597ms (0 files mutated, 0 ignored, 0 unmodified)\n"
+    "    done in 597ms (2 files mutated, 0 ignored, 0 unmodified)\n"
     "⠋ Running stats\r⠹ Running stats\n"
-    "Stopping early, because we could not find any test case for any mutant.\n"
+    "FAILED tests/test_fixes.py::test_one - AssertionError: assert 1 == 2\n"
+    "failed to collect stats. runner returned 1\n"
 )
 
 
+def with_the_tool(project: Path) -> None:
+    """The project with blueprint.py in .github/, as a repository has it."""
+    (project / ".github").mkdir(parents=True)
+    shutil.copy(ROOT / "blueprint.py", project / ".github/blueprint.py")
+    shutil.copytree(
+        ROOT / "blueprint",
+        project / ".github/blueprint",
+        ignore=shutil.ignore_patterns("__pycache__", "*.meta"),
+    )
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_plan_splits_the_code_into_parts(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    with_the_tool(project)
+    for name, text in {
+        ".python-version": "3.12\n",
+        ".github/mutation-requirements.txt": "mutmut==3.8.0\n",
+        "demo.py": "def add(a, b):\n    return a + b\n",
+        "other.py": "def sub(a, b):\n    return a - b\n",
+    }.items():
+        (project / name).write_text(text, encoding="utf-8")
+    output = tmp_path / "output"
+
+    code, summary = run_mutation_step(
+        tmp_path,
+        "Split the code into parts of about the same number of mutants",
+        "",
+        {"python3": PYTHON},
+        GITHUB_OUTPUT=output.as_posix(),
+        PARTS="2",
+    )
+
+    assert code == 0
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "kind=python"
+    parts = json.loads(lines[1].removeprefix("parts="))
+    assert [part["patterns"] for part in parts] == [
+        "demo.x_*\ndemo.xǁ*",
+        "other.x_*\nother.xǁ*",
+    ]
+    assert summary == ""
+    (project / ".python-version").unlink()
+    code, summary = run_mutation_step(
+        tmp_path,
+        "Split the code into parts of about the same number of mutants",
+        "",
+        {"python3": PYTHON},
+        GITHUB_OUTPUT=output.as_posix(),
+    )
+    assert code == 0
+    assert summary == "No mutation tool for this kind of project yet.\n"
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("results", "status", "code", "expected"),
+    ("results", "output", "code", "expected"),
     [
+        (MUTANTS, "done\n", 0, ""),
+        # The tests that fail without any mutant, in the summary of the part.
         (
-            MUTANTS,
-            "0",
-            0,
-            "**50 %** of the mutants were noticed by a test: 1 killed, 1 survived, 1 other.\n",
-        ),
-        (MUTANTS, "124", 0, "The run stopped at its time limit"),
-        # A configuration that mutates nothing, in the words of mutmut, with the
-        # last state of each line.
-        (
-            "",
-            "1",
+            "    demo.x_add__mutmut_1: not checked\n",
+            FAILING,
             1,
-            "```text\n⠇ Generating mutants\n    done in 597ms (0 files mutated,"
-            " 0 ignored, 0 unmodified)\n⠹ Running stats\nStopping early,",
+            "**The tests fail without any mutant.** mutmut first runs the tests once",
         ),
-        # No error of mutmut, but nothing measured either.
-        ("", "0", 1, "No mutant ran. The end of the output of mutmut:\n"),
+        # No output at all, as when the installation failed.
+        ("", None, 1, "No mutant ran. The end of the output of mutmut:\n"),
     ],
 )
-def test_the_score_of_mutmut_or_why_it_has_none(
-    tmp_path: Path, results: str, status: str, code: int, expected: str
+def test_a_part_keeps_its_results_and_the_change_of_each_survivor(
+    tmp_path: Path, results: str, output: str | None, code: int, expected: str
 ) -> None:
-    (tmp_path / "project").mkdir()
+    project = tmp_path / "project"
+    with_the_tool(project)
     (tmp_path / "temp").mkdir()
-    (tmp_path / "temp/run.txt").write_text(STOPPED, encoding="utf-8", newline="\n")
+    # The module of mutmut, which the step runs on the Python that has it.
+    (tmp_path / "modules").mkdir()
+    (tmp_path / "modules/mutmut.py").write_text(SHOW, encoding="utf-8")
+    if output is not None:
+        (tmp_path / "temp/run.txt").write_text(output, encoding="utf-8", newline="\n")
 
     exit_code, summary = run_mutation_step(
         tmp_path,
-        "Report the score and the surviving mutants",
+        "Keep the results of this part and the change of each survivor",
         "python",
-        {"mutmut": 'printf "%s" "$RESULTS"\n'},
+        {"python3": PYTHON, "mutmut": MUTMUT},
         RESULTS=results,
-        status=status,
+        PYTHONPATH=(tmp_path / "modules").as_posix(),
+        PART="2",
+        PARTS="3",
+        PATTERNS="demo.x_*\ndemo.xǁ*",
     )
 
     assert exit_code == code
-    assert summary.startswith("### Mutation tests (mutmut)\n")
     assert expected in summary
     assert "⠋" not in summary
-    assert ("\n- demo.x_add__mutmut_2\n" in summary) == bool(results)
+    part = json.loads((tmp_path / "temp/part/part-2.json").read_text(encoding="utf-8"))
+    assert (part["part"], part["parts"]) == (2, 3)
+    if code == 0:
+        assert summary == ""
+        assert part["survivors"] == [
+            {
+                "name": "demo.x_add__mutmut_2",
+                "kind": "logic",
+                "diff": " def add(a, b):\n-    return a + b\n+    return a - b",
+            }
+        ]
+    elif output:
+        assert "- `tests/test_fixes.py::test_one`\n" in summary
+        assert "⠇ Generating mutants\n" in summary
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("measured", [True, False])
+def test_the_report_puts_the_parts_together(tmp_path: Path, measured: bool) -> None:
+    project = tmp_path / "project"
+    with_the_tool(project)
+    parts = tmp_path / "temp/parts"
+    parts.mkdir(parents=True)
+    results = {"demo.x_add__mutmut_1": "killed", "demo.x_add__mutmut_2": "survived"}
+    if measured:
+        for number, (name, state) in enumerate(results.items(), 1):
+            part = {
+                "part": number,
+                "parts": 2,
+                "status": 0,
+                "generated": 2,
+                "results": {name: state},
+                "survivors": [{"name": name, "kind": "text", "diff": "-'a'\n+'b'"}]
+                if state == "survived"
+                else [],
+            }
+            (parts / f"part-{number}.json").write_text(
+                json.dumps(part), encoding="utf-8"
+            )
+
+    code, summary = run_mutation_step(
+        tmp_path,
+        "Report the score and the surviving mutants",
+        "",
+        {"python3": PYTHON},
+        GITHUB_REPOSITORY="Someone/demo",
+        RUN_URL="https://github.com/Someone/demo/actions/runs/1",
+        ISSUE="false",
+    )
+
+    assert summary.startswith("### Mutation tests (mutmut)\n")
+    data = json.loads(
+        (tmp_path / "temp/mutation/mutation.json").read_text(encoding="utf-8")
+    )
+    if measured:
+        assert code == 0
+        assert "**50.0 %** of the mutants were noticed by a test" in summary
+        assert "in 2 parts" in summary
+        assert data["score"] == 50.0
+        assert data["run"] == "https://github.com/Someone/demo/actions/runs/1"
+        # What the dashboard reads.
+        results_text = (tmp_path / "temp/mutation/results.txt").read_text(
+            encoding="utf-8"
+        )
+        assert results_text == (
+            "    demo.x_add__mutmut_1: killed\n    demo.x_add__mutmut_2: survived\n"
+        )
+    else:
+        # A run that measures nothing fails.
+        assert code == 1
+        assert "No mutant ran." in summary
+        assert data["complete"] is False
+
+
+def test_the_parts_and_the_report_hand_on_their_results() -> None:
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    jobs = {
+        name: workflow[start:]
+        for name, start in (
+            (match[1], match.start())
+            for match in re.finditer(r"^  (\w+):\n", workflow, re.M)
+        )
+    }
+    plan, mutation, report = jobs["plan"], jobs["mutation"], jobs["report"]
+    plan = plan[: plan.index("\n  mutation:")]
+    mutation = mutation[: mutation.index("\n  report:")]
+    # The plan gives the matrix of the parts, one job each.
+    assert "      parts: ${{ steps.plan.outputs.parts }}\n" in plan
+    assert "PARTS: ${{ vars.MUTATION_PARTS }}" in plan
+    assert "        include: ${{ fromJSON(needs.plan.outputs.parts) }}\n" in mutation
+    assert "      fail-fast: false\n" in mutation
+    assert "          PATTERNS: ${{ matrix.patterns }}\n" in mutation
+    # Each part hands its results to the report, which puts them together also when a
+    # part failed, and keeps the artifact that the dashboard and the next run read.
+    assert "          name: mutation-part-${{ matrix.part }}\n" in mutation
+    assert "    needs: [plan, mutation]\n" in report
+    assert "    if: ${{ always() && needs.plan.outputs.kind == 'python' }}\n" in report
+    assert (
+        "          pattern: mutation-part-*\n          path: ${{ runner.temp }}/parts\n"
+        in report
+    )
+    assert "          merge-multiple: true\n" in report
+    assert '--name mutation --dir "$RUNNER_TEMP/previous"' in report
+    assert '--previous "$RUNNER_TEMP/previous/mutation.json"' in report
+    assert (
+        "          name: mutation\n          path: ${{ runner.temp }}/mutation/\n"
+        in report
+    )
+    # The weekly run compares with the one before; an artifact lives 90 days at most.
+    assert "          retention-days: 90\n" in report
+    # Only the report writes, and only the one issue of the default branch.
+    for job in (plan, mutation):
+        assert "    permissions:\n      contents: read\n" in job
+        assert "write" not in job
+    assert "      issues: write\n" in report
+    assert "      actions: read\n" in report
+    assert (
+        "ISSUE: ${{ github.event_name == 'schedule' || (github.event_name == "
+        "'workflow_dispatch' && github.ref_name == "
+        "github.event.repository.default_branch) }}"
+    ) in report
 
 
 # The end of the output of Infection.
