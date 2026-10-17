@@ -10,12 +10,15 @@ name: After the checks
 # issue, with the step, the test and the error that failed, so that it gets fixed
 # instead of failing pull requests at random. A job that fails again is a real
 # failure and stays red, and so does one that failed the same way for the commit
-# before: running it again would only keep a runner busy.
+# before: running it again would only keep a runner busy. A pull request names its
+# jobs and steps and writes its logs, so the issue shows them only as code, and the
+# branch of a fork not at all.
 #
 # The coverage bot: after the checks of a pull request, it compares the coverage of
 # its tests with that of main, file by file, and keeps one comment on the pull
-# request up to date. It reads the coverage reports that the checks keep as the
-# artifact "coverage".
+# request up to date, for its head. It reads the coverage reports that the checks
+# keep as the artifact "coverage", which a pull request from a fork writes as it
+# likes: the comment shows the name of each file only as code.
 #
 # The bot for cancelled checks: a newer run of a workflow cancels the one still running
 # for the same pull request. GitHub doesn't always create the runs in the order of the
@@ -201,6 +204,7 @@ jobs:
           NAME: ${{ github.event.workflow_run.name }}
           URL: ${{ github.event.workflow_run.html_url }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           # Lengths in characters, not bytes, so that a cut keeps every character whole.
@@ -262,9 +266,15 @@ jobs:
             echo "No job failed or ran out of time at first; nothing to report." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # A fork names its branches as it likes; the issue names only those of the
+          # repository.
+          where="a branch of a fork"
+          if [[ "$HEAD_REPO" == "$GH_REPO" ]]; then
+            where="$(cell "$BRANCH")"
+          fi
           title="Flaky tests"
           body="$(printf '**%s** failed at first and passed when it ran again, on %s at %s ([the run](%s)):\n\n%s\n%s\n%s' \
-            "$NAME" "$(cell "$BRANCH")" "${SHA:0:7}" "$URL" \
+            "$NAME" "$where" "${SHA:0:7}" "$URL" \
             "| Job | Step | Test | Error |" "| --- | --- | --- | --- |" "$rows")"
           number="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
             --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
@@ -441,6 +451,13 @@ jobs:
           number="${NUMBER:-$(gh pr list --state open --search "$SHA" --json number --jq '.[0].number // empty')}"
           if [[ -z "$number" ]]; then
             echo "No open pull request has the commit $SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A late run for a commit before the head would describe code that the pull
+          # request no longer has; the run for its head keeps the comment.
+          current="$(gh pr view "$number" --json headRefOid --jq .headRefOid)"
+          if [[ "$current" != "$SHA" ]]; then
+            echo "#$number moved on from ${SHA:0:7} to ${current:0:7}; the checks of its head keep the comment." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           marker="$(head -n 1 "$RUNNER_TEMP/comment.md")"

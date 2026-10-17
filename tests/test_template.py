@@ -5511,10 +5511,16 @@ EXITED = "Process completed with exit code 1."
 
 
 def run_a_bot_after_the_checks(
-    tmp_path: Path, job: str, step: str, answers: dict[str, object], **variables: str
+    tmp_path: Path,
+    job: str,
+    step: str,
+    answers: dict[str, object],
+    stubs: dict[str, str] | None = None,
+    **variables: str,
 ) -> tuple[list[str], str, dict[str, str]]:
-    """Runs a step of a bot after the checks, as GitHub does, with the fake gh; returns
-    the calls of gh, the summary of the step and what gh was given to write."""
+    """Runs a step of a bot after the checks, as GitHub does, with the fake gh and these
+    stubs of other commands; returns the calls of gh, the summary of the step and what
+    gh was given to write."""
     (tmp_path / "step.sh").write_text(
         script_of(after_the_checks_job(job), step), encoding="utf-8", newline="\n"
     )
@@ -5527,9 +5533,9 @@ def run_a_bot_after_the_checks(
             encoding="utf-8",
             newline="\n",
         )
-    gh = folders["bin"] / "gh"
-    gh.write_text(FAKE_GH, encoding="utf-8", newline="\n")
-    gh.chmod(0o755)
+    for name, text in {"gh": FAKE_GH, **(stubs or {})}.items():
+        (folders["bin"] / name).write_text(text, encoding="utf-8", newline="\n")
+        (folders["bin"] / name).chmod(0o755)
     calls = tmp_path / "calls"
     summary = tmp_path / "summary"
     calls.touch()
@@ -5541,6 +5547,7 @@ def run_a_bot_after_the_checks(
         "RUN": "5",
         "NAME": "CI (python)",
         "BRANCH": "feature",
+        "HEAD_REPO": "o/r",
         "SHA": "abc1234def",
         "RUNNER_TEMP": str(tmp_path),
         "GITHUB_STEP_SUMMARY": str(summary),
@@ -6126,6 +6133,28 @@ def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
     assert body.count("`") == 2 * 8
 
 
+@WITH_JQ
+def test_the_flaky_test_bot_names_no_branch_of_a_fork(tmp_path: Path) -> None:
+    # A fork names its branches as it likes, and the issue is the repository's.
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {**FIRST_ATTEMPT, "issue list": []},
+        URL="https://github.com/o/r/actions/runs/5",
+        BRANCH="`@team` [a](https://e.vil)",
+        HEAD_REPO="fork/r",
+    )
+
+    body = written["issue-create"]
+    assert (
+        "**CI (python)** failed at first and passed when it ran again, on a branch of"
+        " a fork at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):"
+    ) in body.splitlines()
+    assert "@team" not in body
+    assert "e.vil" not in body
+
+
 def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
     # The failed push of the tag of v0.10.0 held the release and its rollout for 35
     # minutes, until a person ran it again.
@@ -6295,6 +6324,45 @@ def test_the_check_variants_passes_when_every_variant_passed_or_none_ran(
     )
 
     assert (done.returncode == 0) == passes, done.stderr
+
+
+@pytest.mark.parametrize("targets", [1, 2, 5])
+@pytest.mark.parametrize("weekly", [True, False])
+def test_the_fuzzing_ends_within_its_timeout_however_many_targets(
+    tmp_path: Path, targets: int, weekly: bool
+) -> None:
+    # Every week the targets share one budget, so a new target doesn't push the job
+    # past its timeout; a pull request fuzzes each one for a minute.
+    workflow = (ROOT / ".github/workflows/fuzz.yml").read_text(encoding="utf-8")
+    timeout = re.search(r"timeout-minutes: (\d+)\n    steps:", workflow)
+    weekly_budget = re.search(r"'schedule' && '(\d+)'", workflow)
+    assert timeout, "the fuzzing has a timeout"
+    assert weekly_budget, "the weekly fuzzing has a budget"
+    weekly_seconds = int(weekly_budget[1])
+    # Five minutes are left for the setup and for the end of the last run.
+    assert weekly_seconds + 5 * 60 <= int(timeout[1]) * 60
+    repository = tmp_path / "repository"
+    (repository / "fuzz").mkdir(parents=True)
+    for number in range(targets):
+        (repository / f"fuzz/fuzz_{number}.py").write_text("", encoding="utf-8")
+    result, calls = run_workflow_step(
+        tmp_path,
+        script_of(workflow, "Fuzz every target"),
+        repository,
+        {"python": ""},
+        RUNNER_TEMP=(tmp_path / "temp").as_posix(),
+        WEEKLY_SECONDS=str(weekly_seconds) if weekly else "",
+    )
+    assert result.returncode == 0, result.stderr
+    budgets = [
+        int(found) for found in re.findall(r"-max_total_time=(\d+)", "\n".join(calls))
+    ]
+    assert len(budgets) == targets
+    if weekly:
+        assert sum(budgets) <= weekly_seconds
+        assert budgets == [weekly_seconds // targets] * targets
+    else:
+        assert budgets == [60] * targets
 
 
 def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
@@ -6716,6 +6784,82 @@ def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
             name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
             assert name, path
             assert name[1] in watched, name[1]
+
+
+# The coverage bot's tool, which writes its comment.
+COVERAGE_TOOL = """#!/usr/bin/env bash
+echo "python3 $*" >> "$CALLS"
+printf '%s\\n' '<!-- coverage-bot -->' '### Coverage'
+"""
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("number", "comments", "patched"),
+    [
+        # The first comment on the pull request.
+        ("7", [], False),
+        # A pull request from a fork, which the run doesn't name.
+        ("", [], False),
+        # The comment that the bot keeps up to date.
+        ("7", [{"id": 9, "body": "<!-- coverage-bot -->\nbefore"}], True),
+    ],
+)
+def test_the_coverage_bot_keeps_one_comment_on_the_head_of_a_pull_request(
+    tmp_path: Path, number: str, comments: list[object], patched: bool
+) -> None:
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "coverage",
+        "Keep one comment on the pull request up to date",
+        {
+            "pr list": [{"number": 7}],
+            "pr view": {"headRefOid": "abc1234def"},
+            "repos/o/r/issues/7/comments": comments,
+            "repos/o/r/issues/comments/9": "",
+            "pr comment": "",
+        },
+        {"python3": COVERAGE_TOOL},
+        NUMBER=number,
+    )
+
+    assert summary == "<!-- coverage-bot -->\n### Coverage\n"
+    assert any(call.startswith("python3 blueprint.py coverage ") for call in calls)
+    assert any(
+        call.startswith("pr list --state open --search abc1234def ") for call in calls
+    ) == (not number)
+    assert any(call.startswith("pr view 7 --json headRefOid ") for call in calls)
+    assert (
+        any(
+            call.startswith("api --method PATCH repos/o/r/issues/comments/9 ")
+            for call in calls
+        )
+        == patched
+    )
+    if not patched:
+        assert written["pr-comment"] == "<!-- coverage-bot -->\n### Coverage\n"
+
+
+@WITH_JQ
+def test_the_coverage_bot_leaves_the_comment_to_the_run_for_the_head(
+    tmp_path: Path,
+) -> None:
+    # A late run for the commit before the head, after the run for the head.
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "coverage",
+        "Keep one comment on the pull request up to date",
+        {"pr view": {"headRefOid": "fedcba98765"}},
+        {"python3": COVERAGE_TOOL},
+        NUMBER="7",
+    )
+
+    assert summary.endswith(
+        "#7 moved on from abc1234 to fedcba9; the checks of its head keep the"
+        " comment.\n"
+    )
+    assert not written
+    assert not any(call.startswith(("pr comment", "api ")) for call in calls)
 
 
 def test_the_coverage_report_of_the_blueprint_names_every_file_by_its_path() -> None:

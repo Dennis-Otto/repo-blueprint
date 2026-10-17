@@ -1,5 +1,10 @@
 """The comment of the coverage bot, from the Cobertura reports of a pull request
-and of main."""
+and of main.
+
+The report of a pull request is its own: one from a fork writes the names of its
+files and the hits of its lines as it likes. A name reaches the comment only as code
+in its cell, so that it adds no Markdown, link or mention to what the bot says, and
+hits that are no count count as a number or as 0."""
 
 from __future__ import annotations
 
@@ -7,7 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
+from blueprint.coach import code
+
 COVERAGE_MARKER = "<!-- coverage-bot -->"
+# The table shows the first files by name, each name in at most so many characters:
+# GitHub takes a comment of up to 65,536 characters.
+MOST_FILES = 100
+NAME_LENGTH = 200
 
 
 @dataclass(frozen=True)
@@ -33,7 +44,7 @@ class Coverage:
             if folder not in ("", "."):
                 name = f"{folder}/{name}"
             lines = element.findall("./lines/line")
-            covered = sum(1 for line in lines if int(line.get("hits", "0")) > 0)
+            covered = sum(1 for line in lines if runs(line.get("hits", "0")))
             have = files.get(name, (0, 0))
             files[name] = (have[0] + covered, have[1] + len(lines))
         return cls(files)
@@ -46,13 +57,28 @@ class Coverage:
         )
 
 
+def runs(hits: str) -> bool:
+    """Whether the tests run a line that many times: a count such as 1.5 counts as a
+    number, one that is no number as 0."""
+    try:
+        return float(hits) > 0
+    except ValueError:
+        return False
+
+
+def cell(name: str) -> str:
+    """The name of a file as code in a cell of the table, on one line: no pipe of it
+    ends the cell, which GitHub looks for inside code as well."""
+    return code(name, NAME_LENGTH).replace("|", "\\|") or "(unnamed file)"
+
+
 def percent(covered: int, lines: int) -> float:
     return 100.0 if lines == 0 else 100 * covered / lines
 
 
 def coverage_comment(head: Coverage, base: Coverage | None) -> str:
     """The comment of the coverage bot: the coverage of a pull request, compared with
-    that of main, and every file whose coverage differs."""
+    that of main, and each file whose coverage differs, the first MOST_FILES by name."""
     covered, lines = head.total
     now = percent(covered, lines)
     rows = [
@@ -75,10 +101,16 @@ def coverage_comment(head: Coverage, base: Coverage | None) -> str:
         old_text = "new" if old is None else f"{percent(*old):.2f} %"
         new_text = "removed" if new is None else f"{percent(*new):.2f} %"
         if old_text != new_text:
-            changed.append(f"| `{name}` | {old_text} | {new_text} |")
-    if changed:
-        rows += ["", "| File | main | This pull request |", "| --- | ---: | ---: |"]
-        rows += changed
-    else:
+            changed.append(f"| {cell(name)} | {old_text} | {new_text} |")
+    if not changed:
         rows += ["", "No file changes its coverage."]
+        return "\n".join([*rows, ""])
+    rows += ["", "| File | main | This pull request |", "| --- | ---: | ---: |"]
+    rows += changed[:MOST_FILES]
+    if len(changed) > MOST_FILES:
+        rows += [
+            "",
+            f"{len(changed) - MOST_FILES} more files change their coverage; the "
+            "artifact coverage of the checks has the whole report.",
+        ]
     return "\n".join([*rows, ""])
