@@ -86,7 +86,7 @@ def test_the_blueprint_explains_every_required_check_and_every_step() -> None:
     checks = required_checks(ROOT)
     steps = check_steps(ROOT)
 
-    assert "dco" in checks
+    assert "lint" in checks
     assert steps[0] == "Text files"
     assert "Website" in steps
     assert missing(explained, checks, steps) == []
@@ -440,6 +440,39 @@ def test_explain_writes_the_summary_and_the_annotation_in_the_ci(
     out = capsys.readouterr().out
     assert f"\n      git fetch https://github.com/{REPO}.git main\n" in out
     assert f"%0Agit fetch https://github.com/{REPO}.git main%0A" in out
+
+
+def test_explain_explains_each_check_that_failed_in_a_job_of_several(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(target))
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
+
+    # As the job lint passes the linters that failed.
+    arguments = ["coach", "explain", "lint", "--parts", "markdown", "dco"]
+    assert cli.main(arguments, root=ROOT) == 0
+
+    out = capsys.readouterr().out
+    # Each annotation names the check whose job ran it, by which the report finds it.
+    assert (
+        "\n::error title=PR coach%3A The Markdown of the documents (in lint)::" in out
+    )
+    assert "\n::error title=PR coach%3A The sign-off of every commit (in lint)::" in out
+    assert "PR coach: The linters" not in out
+    written = target.read_text(encoding="utf-8")
+    assert written.startswith("### PR coach: The Markdown of the documents (in lint)\n")
+    assert "\n### PR coach: The sign-off of every commit (in lint)\n" in written
+    assert written.count("### PR coach: ") == 2
+
+    # When none of them failed, but a step before them, the check explains itself.
+    assert cli.main(["coach", "explain", "lint", "--parts"], root=ROOT) == 0
+    out = capsys.readouterr().out
+    assert "\n::error title=PR coach%3A The linters::" in out
+    assert "(in lint)" not in out
 
 
 def test_explain_names_what_it_cannot_explain(
@@ -960,6 +993,77 @@ def test_the_report_suggests_a_title() -> None:
         "**A title that passes:**\n\n```text\nfeat: dark mode for the settings\n```"
         in part
     )
+
+
+def coach_annotation(title: str) -> dict[str, Any]:
+    """An annotation of the PR coach, as the API returns it."""
+    return {
+        "path": ".github",
+        "start_line": 1,
+        "annotation_level": "failure",
+        "title": title,
+        "message": "It broke.",
+    }
+
+
+def test_the_report_explains_each_linter_that_failed_in_lint() -> None:
+    github = FakeGitHub()
+    # The job of markdown is the one of every linter now.
+    github.runs[1]["name"] = "lint"
+    github.annotations["52000000002"] += [
+        coach_annotation("PR coach: The Markdown of the documents (in lint)"),
+        coach_annotation("PR coach: The license of every file (in lint)"),
+        # One that the job of another check wrote is no part of lint.
+        coach_annotation("PR coach: The workflows (in docs)"),
+    ]
+    github.runs[1]["output"]["annotations_count"] = 5
+
+    run_report(github)
+
+    part = sections(body_of(github))["lint"]
+    assert "**The Markdown of the documents** · <code>markdown</code>" in part
+    assert '```sh\nnpx markdownlint-cli2 --fix "**/*.md"\n```' in part
+    assert "**The license of every file** · <code>reuse</code>" in part
+    assert "<code>workflow-lint</code>" not in part
+    # Not the explanation of lint itself, which is for a step before the linters.
+    assert "before its linters ran" not in part
+    # What markdownlint found, but not the annotations of the coach once more.
+    assert "MD022/blanks-around-headings" in part
+    assert "It broke." not in part
+
+
+def test_the_report_suggests_a_title_only_when_the_title_failed() -> None:
+    github = FakeGitHub()
+    # The check of the title found only that the entry in the changelog is missing.
+    github.annotations["52000000004"] = [
+        coach_annotation("PR coach: The entry in the changelog (in conventional title)")
+    ]
+
+    run_report(github)
+
+    part = sections(body_of(github))["conventional title"]
+    assert "**The entry in the changelog** · <code>changelog</code>" in part
+    assert "Edit the title of the pull request" not in part
+    assert "A title that passes" not in part
+
+    # Both failed: the title, with a title that passes, and the entry.
+    github = FakeGitHub()
+    # The check of the title names only the parts of other checks.
+    github.annotations["52000000004"] = [
+        coach_annotation("PR coach: The title of the pull request"),
+        coach_annotation(
+            "PR coach: The entry in the changelog (in conventional title)"
+        ),
+    ]
+    github.runs[3]["output"]["annotations_count"] = 2
+
+    run_report(github)
+
+    part = sections(body_of(github))["conventional title"]
+    assert "**How to fix it:** Edit the title of the pull request" in part
+    assert "**A title that passes:**" in part
+    assert "**The entry in the changelog** · <code>changelog</code>" in part
+    assert part.index("A title that passes") < part.index("<code>changelog</code>")
 
 
 def test_the_report_names_a_check_without_an_explanation() -> None:

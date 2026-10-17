@@ -132,7 +132,7 @@ fi
 step "Changelog fragments"
 # Every fragment of changelog.d/ as the release takes it in, those that wait on main
 # for the next release too: rules that get stricter, in blueprint.py or in an update
-# of the blueprint, meet them here, before the release does. The check *changelog*
+# of the blueprint, meet them here, before the release does. The check of the title
 # checks only the fragments of a pull request, with the code of main. Each problem
 # names its fragment and the fix. The Python and blueprint.py of the step before.
 if [[ -n "$python" ]]; then

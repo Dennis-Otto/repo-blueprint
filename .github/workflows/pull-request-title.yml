@@ -30,8 +30,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      # The explanations of the PR coach, from the default branch.
+      # The fragments of the changelog of the pull request, and blueprint.py and the
+      # explanations of the PR coach of the default branch.
       contents: read
+      # The labels of the pull request, and its files.
       issues: write
       pull-requests: write
     steps:
@@ -42,6 +44,7 @@ jobs:
       # Never check out or run pull request code in this privileged workflow; the
       # title only reaches the script through an environment variable.
       - name: Check the title and set the label
+        id: title
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -83,44 +86,10 @@ jobs:
             if [[ "$want" == false && "$has" == true ]]; then gh pr edit "$NUMBER" --remove-label "$label"; fi
           done
           echo "Labels: ${wanted[*]}" >> "$GITHUB_STEP_SUMMARY"
-      # The PR coach needs blueprint.py and .github/checks.toml of the default branch;
-      # nothing of the pull request is checked out.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: failure()
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            .github
-            blueprint
-      # The PR coach: what failed, why it matters and how to fix it, in the summary
-      # of the check and as its annotation, from .github/checks.toml.
-      - name: Explain the failure
-        if: failure()
-        env:
-          CHECK: "conventional title"
-        run: |
-          script=.github/blueprint.py
-          [[ -f "$script" ]] || script=blueprint.py
-          python3 "$script" coach explain "$CHECK"
-
-  changelog:
-    name: changelog
-    if: ${{ !github.event.repository.fork }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      # The fragments of the pull request, and blueprint.py and the explanations of
-      # the PR coach of the default branch.
-      contents: read
-      pull-requests: read
-    steps:
-      - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
       # The files of the pull request come from the API.
       - name: Require an entry in the changelog for a change for users
         id: entry
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -235,14 +204,15 @@ jobs:
       # they read as text, and the PR coach explains a failure with its
       # .github/checks.toml; nothing of the pull request is checked out or run.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.entry.outputs.fragments == 'true' || failure()
+        if: ${{ !cancelled() && (steps.entry.outputs.fragments == 'true' || failure()) }}
         with:
           persist-credentials: false
           sparse-checkout: |
             .github
             blueprint
       - name: Check the fragments as the release takes them in
-        if: steps.entry.outputs.fragments == 'true'
+        id: fragments
+        if: ${{ !cancelled() && steps.entry.outputs.fragments == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -272,12 +242,33 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
       # The PR coach: what failed, why it matters and how to fix it, in the summary
-      # of the check and as its annotation, from .github/checks.toml.
+      # of the check and as its annotation, from .github/checks.toml: each check
+      # of the job that failed, or the job itself when none of them did.
       - name: Explain the failure
         if: failure()
         env:
-          CHECK: changelog
+          CHECK: "conventional title"
+          FAILED: |
+            ${{ steps.title.outcome == 'failure' && 'conventional title' || '' }}
+            ${{ (steps.entry.outcome == 'failure' || steps.fragments.outcome == 'failure') && 'changelog' || '' }}
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
-          python3 "$script" coach explain "$CHECK"
+          mapfile -t parts < <(grep . <<<"$FAILED" || true)
+          python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"
+
+  # The entry in the changelog is a step of the check of the title since this release.
+  # The rulesets of the repositories require the check changelog until the settings
+  # bot applies the required checks of this release; the next release removes it.
+  changelog:
+    name: changelog
+    if: ${{ !github.event.repository.fork }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Name the check that checks the changelog
+        run: echo "The check *conventional title* checks the entry in the changelog." >> "$GITHUB_STEP_SUMMARY"

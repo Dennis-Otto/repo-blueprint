@@ -307,11 +307,11 @@ def test_the_workflows_are_the_blueprints_own(
             )
         if name == "codeql.yml":
             source = re.sub(
-                r"        # The languages of this repository.*\n        language: \[.*\]\n",
+                r"          # The languages of this repository.*\n          languages: .*\n",
                 "",
                 source,
             )
-            text = re.sub(r"        language: \[.*\]\n", "", text)
+            text = re.sub(r"          languages: .*\n", "", text)
         if name == "after-checks.yml":
             # The workflows it watches; the bots after the checks test them.
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
@@ -2024,7 +2024,7 @@ def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
     # fetches with the whole history, is current.
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
-    for workflow, name in ((lint, "dco"), (lint, "prose"), (links, "links")):
+    for workflow, name in ((lint, "lint"), (lint, "dco"), (links, "links")):
         job = job_of(workflow, name)
         assert "base.sha" not in job, name
         assert "BASE_REF: ${{ github.event.pull_request.base.ref }}" in job, name
@@ -2222,7 +2222,7 @@ def test_the_prose_hints_install_their_tools_from_the_cache_of_npm(
 ) -> None:
     folder = ROOT if kind == "blueprint" else projects[kind]
     prose = job_of(
-        (folder / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "prose"
+        (folder / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "lint"
     )
     setup = step_of(prose, "      - uses: actions/setup-node@")
     hints = step_of(
@@ -2238,7 +2238,9 @@ def test_the_prose_hints_install_their_tools_from_the_cache_of_npm(
     assert install[1] == Path(lock[1]).parent.as_posix()
     # Node and the packages come only for changed documents, the runs that install
     # them, so that every run with npm's cache has one to save.
-    changed = "        if: steps.documents.outputs.changed == 'true'\n"
+    changed = (
+        "        if: ${{ !cancelled() && steps.documents.outputs.changed == 'true' }}\n"
+    )
     assert changed in setup
     assert changed in hints
     # The names that the step before found, which may hold spaces.
@@ -4944,6 +4946,44 @@ def explain_step(check: str, python: str = "python3") -> str:
     )
 
 
+PARTS_COMMENT = (
+    "      # The PR coach: what failed, why it matters and how to fix it, in the summary\n"
+    "      # of the check and as its annotation, from .github/checks.toml: each check\n"
+    "      # of the job that failed, or the job itself when none of them did.\n"
+)
+
+
+def explain_parts_step(check: str, failed: list[tuple[str, str]]) -> str:
+    """The last step of the job of a check that runs several others: the PR coach
+    explains each of them that failed, by its condition and its name."""
+    value = f'"{check}"' if " " in check else check
+    lines = "".join(
+        f"            ${{{{ {condition} && '{name}' || '' }}}}\n"
+        for condition, name in failed
+    )
+    return PARTS_COMMENT + (
+        "      - name: Explain the failure\n"
+        "        if: failure()\n"
+        "        env:\n"
+        f"          CHECK: {value}\n"
+        "          FAILED: |\n"
+        f"{lines}"
+        "        run: |\n"
+        "          script=.github/blueprint.py\n"
+        '          [[ -f "$script" ]] || script=blueprint.py\n'
+        '          mapfile -t parts < <(grep . <<<"$FAILED" || true)\n'
+        '          python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"\n'
+    )
+
+
+# The checks that the job of each of these checks runs, in the order of its steps.
+PARTS = {
+    "lint": ["workflow-lint", "reuse", "markdown", "issue-assistant", "dco"],
+    "conventional title": ["conventional title", "changelog"],
+    "home-assistant": ["hacs", "hassfest"],
+}
+
+
 # Only what the PR coach needs, and only after a failure, for a job that checks out
 # nothing else.
 COACH_CHECKOUT = re.compile(
@@ -4972,11 +5012,31 @@ def test_every_required_check_explains_its_failure(
             name = re.search(r"^    name: (.+)$", job, re.M)
             assert name
             jobs[name[1]] = job
+    explained = Catalog.load(root)
     for check in settings["branch"]["required_checks"]:
         job = jobs[check]
-        # The summary and the annotation of the check say how to fix it.
-        assert job.endswith(explain_step(check)), check
-        before = job[: job.index(EXPLAIN_COMMENT)]
+        # The summary and the annotation of the check say how to fix it, those of a
+        # check that runs several others for each of them that failed.
+        comment = PARTS_COMMENT if check in PARTS else EXPLAIN_COMMENT
+        if check in PARTS:
+            failed = re.findall(
+                r"^            \$\{\{ (.+) && '([^']+)' \|\| '' \}\}$", job, re.M
+            )
+            assert [name for _, name in failed] == PARTS[check], check
+            assert job.endswith(explain_parts_step(check, failed)), check
+            for condition, name in failed:
+                assert explained.check(name), name
+                # Each step runs also when one before it failed, so that the check
+                # reports all of them.
+                for step in re.findall(r"steps\.([\w-]+)\.outcome", condition):
+                    assert f"        id: {step}\n" in job, step
+                    if name != PARTS[check][0]:
+                        assert (
+                            f"        id: {step}\n        if: ${{{{ !cancelled()" in job
+                        )
+        else:
+            assert job.endswith(explain_step(check)), check
+        before = job[: job.index(comment)]
         checkouts = before.count("actions/checkout@")
         coach = COACH_CHECKOUT.findall(before)
         assert checkouts == 1, check
@@ -4987,9 +5047,6 @@ def test_every_required_check_explains_its_failure(
 
 
 def test_the_checks_of_a_matrix_explain_each_failure() -> None:
-    codeql = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
-    analyze = job_alone(codeql, "analyze")
-    assert analyze.endswith(explain_step("analyze (${{ matrix.language }})"))
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     variant = job_alone(variants, "variant")
     name = (
@@ -5006,6 +5063,128 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     assert job_alone(windows, "check").endswith(
         explain_step("check (Windows)", "python")
     )
+
+
+# The checks that a job of several checks replaces. Their own jobs stay for one
+# release, so that a pull request passes the rulesets of every repository until the
+# settings bot applies the required checks of this release; the next one removes them.
+REPLACED = {
+    "lint": ["workflow-lint", "reuse", "markdown", "issue-assistant", "dco"],
+    "conventional title": ["changelog"],
+    "home-assistant": ["hacs", "hassfest"],
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_job_of_several_checks_replaces_their_jobs_in_the_required_checks(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    required = settings["branch"]["required_checks"]
+    names = set()
+    for workflow in workflows(root).values():
+        names |= set(re.findall(r"^    name: (.+)$", workflow, re.M))
+    home_assistant = project == "home-assistant"
+    for check, replaced in REPLACED.items():
+        if check == "home-assistant" and not home_assistant:
+            assert check not in required
+            continue
+        assert check in required, check
+        assert not set(replaced) & set(required), check
+        # Until the next release, the old jobs report as well.
+        assert set(replaced) <= names, check
+    assert "prose" not in names
+
+
+def test_one_job_runs_every_linter_and_reports_each_one() -> None:
+    lint = job_alone(
+        (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "lint"
+    )
+    steps = re.split(r"\n(?=      - )", lint)
+    after = "${{ !cancelled() && steps.checkout.outcome == 'success'"
+    for name in (
+        "Lint the workflows",
+        "Check that every file names its license",
+        "Lint the Markdown of every document",
+        "Check the issue assistant's set-up",
+        "Check the sign-off of every commit",
+    ):
+        step = next(step for step in steps if f"- name: {name}\n" in step)
+        # Each linter runs also when one before it failed, but not without the files.
+        assert f"        if: {after}" in step, name
+    # REUSE runs its image, pinned to a digest, without the action, which builds an
+    # image of its own in every run.
+    assert "fsfe/reuse-action" not in lint
+    assert re.search(r"REUSE: fsfe/reuse:[\d.]+@sha256:[0-9a-f]{64}\n", lint)
+    assert "GIT_CONFIG_KEY_0=safe.directory" in lint
+    # The hints at the prose never fail the check.
+    for name in ("Find the changed documents", "Hint at the spelling"):
+        step = next(step for step in steps if f"- name: {name}" in step)
+        assert "        continue-on-error: true\n" in step, name
+    setup = next(step for step in steps if "actions/setup-node@" in step)
+    assert "        continue-on-error: true\n" in setup
+    # Markdownlint fixes the head of the pull request after every other linter, as
+    # the fixes of lint, and the PR coach explains last.
+    head = lint.index("- name: Check out the head of the pull request for the fixes")
+    assert lint.index("- name: Hint at the spelling") < head
+    assert "steps.markdown.outcome == 'failure'" in lint[head:]
+    assert "          name: fixes-lint\n" in lint
+    assert lint.index("          name: fixes-lint\n") < lint.index(PARTS_COMMENT)
+    # The sign-off and the changed documents need the history.
+    assert "          fetch-depth: 0\n" in lint
+
+
+def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
+    workflow = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
+        encoding="utf-8"
+    )
+    title = job_alone(workflow, "title")
+    assert (
+        "      - name: Require an entry in the changelog for a change for users\n"
+        in (title)
+    )
+    assert "        id: entry\n        if: ${{ !cancelled() }}\n" in title
+    assert "        id: fragments\n        if: ${{ !cancelled() &&" in title
+    # It reads the files of the pull request through the API and sets its labels.
+    assert "      pull-requests: write\n" in title
+    # The job changelog only reports for the rulesets that still require it: it
+    # checks nothing out and runs nothing of the pull request.
+    changelog = job_alone(workflow, "changelog")
+    assert "actions/checkout@" not in changelog
+    assert "GH_TOKEN" not in changelog
+    assert changelog.count("      - name: ") == 2
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_one_job_runs_codeql_for_every_language(
+    projects: dict[str, Path], kind: str
+) -> None:
+    codeql = (projects[kind] / ".github/workflows/codeql.yml").read_text(
+        encoding="utf-8"
+    )
+    languages = re.findall(r"^          languages: (.+)$", codeql, re.M)
+    expected = {
+        "python-package": "python, actions",
+        "home-assistant": "python, actions",
+        "node-package": "javascript-typescript, actions",
+        "github-action": "python, actions",
+    }
+    assert languages == [expected.get(kind, "actions")]
+    assert "matrix" not in codeql
+    assert re.findall(r"^  ([\w-]+):\n    name: (.+)$", codeql, re.M) == [
+        ("codeql", "codeql")
+    ]
+    # Each language keeps the category of its analysis, under which code scanning
+    # keeps its alerts, and the results go up once, after every analysis.
+    assert "          upload: never\n" in codeql
+    assert """'.runs[].automationDetails = {id: $id}'""" in codeql
+    assert '--arg id "/language:$language/"' in codeql
+    pins = set(re.findall(r"uses: github/codeql-action/\w+(@\w+)", codeql))
+    assert len(pins) == 1
+    assert codeql.index("upload-sarif@") > codeql.index("analyze@")
 
 
 def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() -> None:
@@ -5508,6 +5687,58 @@ fi
 TIMED_OUT = "The job has exceeded the maximum execution time of 30m0s"
 CANCELLED = "The operation was canceled."
 EXITED = "Process completed with exit code 1."
+
+
+@WITH_JQ
+def test_codeql_files_the_results_of_each_language_under_its_category(
+    tmp_path: Path,
+) -> None:
+    workflow = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    (tmp_path / "step.sh").write_text(
+        script_of(workflow, "File the results of each language under its own category"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    results = tmp_path / "codeql"
+    results.mkdir()
+    for language in ("python", "actions"):
+        (results / f"{language}.sarif").write_text(
+            json.dumps({"runs": [{"tool": {"driver": {"name": "CodeQL"}}}]}),
+            encoding="utf-8",
+        )
+    summary = tmp_path / "summary.md"
+    environment = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(summary),
+    }
+    assert BASH
+    done = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    for language in ("python", "actions"):
+        sarif = json.loads((results / f"{language}.sarif").read_text(encoding="utf-8"))
+        assert sarif["runs"][0]["automationDetails"] == {"id": f"/language:{language}/"}
+    assert "- python: `/language:python`" in summary.read_text(encoding="utf-8")
+
+    # Without results, the step fails rather than uploading nothing.
+    for found in results.iterdir():
+        found.unlink()
+    done = subprocess.run(
+        [BASH, "-e", str(tmp_path / "step.sh")],
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert done.returncode == 1
+    assert "::error::CodeQL wrote no results." in done.stdout
 
 
 def run_a_bot_after_the_checks(
@@ -6251,9 +6482,16 @@ def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> 
     # It changes the changelog and the version, which no kind of project renders and
     # no scanner reads, and the pull requests it releases ran every check already.
     flows = workflows(ROOT)
-    skipped = {"variants.yml": "variant", "lint.yml": "prose", **SCANNERS}
+    skipped = {"variants.yml": "variant", **SCANNERS}
     for name, job in skipped.items():
         assert RELEASE_PULL_REQUEST in condition_of(job_of(flows[name], job)), name
+    # The hints at the prose, steps of lint, which start with the changed documents.
+    documents = step_of(
+        job_of(flows["lint.yml"], "lint"), "      - name: Find the changed documents"
+    )
+    found = re.search(r"^        if: >-\n((?:          .+\n)+)", documents, re.M)
+    assert found
+    assert RELEASE_PULL_REQUEST in " ".join(found[1].split())
 
 
 def test_one_check_stands_for_every_variant() -> None:
@@ -7686,22 +7924,25 @@ def changelog_check() -> str:
     title = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
         encoding="utf-8"
     )
-    return job_of(title, "changelog")
+    # A step of the check of the title.
+    return job_alone(title, "title")
 
 
 def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None:
     job = changelog_check()
     permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
+    # Writes only the labels of the pull request, which the title sets.
     assert [
         line.strip() for line in permissions.splitlines()[1:] if "#" not in line
-    ] == ["contents: read", "pull-requests: read"]
+    ] == ["contents: read", "issues: write", "pull-requests: write"]
     # The default branch, sparse, without credentials, and only for fragments or for
     # the PR coach after a failure.
     checkout = job[job.index("      - uses: actions/checkout@") :]
     checkout = checkout[: checkout.index("      - name:")]
     assert (
-        "        if: steps.entry.outputs.fragments == 'true' || failure()\n" in checkout
-    )
+        "        if: ${{ !cancelled() && "
+        "(steps.entry.outputs.fragments == 'true' || failure()) }}\n"
+    ) in checkout
     assert "          persist-credentials: false\n" in checkout
     assert (
         "          sparse-checkout: |\n            .github\n            blueprint\n"
@@ -8208,7 +8449,8 @@ def test_every_repository_gets_the_folder_of_the_fragments(
         "`bash scripts/check.sh` checks every fragment as the release takes it in, "
         "those that wait on `main` for the next release too, with "
         "`python3 .github/blueprint.py fragments`.",
-        "The check *changelog* takes only a new fragment as the entry of a pull request",
+        "The check of the title, *conventional title*, takes only a new fragment as "
+        "the entry of a pull request",
     ):
         assert text in contributing, text
     template = (project / ".github/pull_request_template.md").read_text(
