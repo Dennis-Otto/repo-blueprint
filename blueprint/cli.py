@@ -32,6 +32,7 @@ from blueprint.coach import (
     PROJECT_CATALOG,
     Catalog,
     CatalogError,
+    Part,
     check_steps,
     link,
     missing,
@@ -69,9 +70,10 @@ from blueprint.fixes import (
     suggest,
 )
 from blueprint.fixes import keep as keep_fixes
-from blueprint.github import Api, GitHubError, current_repo
+from blueprint.github import Api, GitHubError, Json, current_repo
 from blueprint.notices import third_party_notices
 from blueprint.pages import Layout, annotation, command, fixed, layouts, pages
+from blueprint.pr_report import about as pr_parts
 from blueprint.settings import CONFIG, ConfigError, Settings, apply, check, describe
 from blueprint.update import SOURCE, Outdated, update_pull_request
 from blueprint.vex import openvex
@@ -138,6 +140,24 @@ def coverage_command(arguments: argparse.Namespace) -> int:
     )
     sys.stdout.write(coverage_comment(head, base))
     return 0
+
+
+def read_coverage(head: str, base: str) -> tuple[Coverage, Coverage | None] | None:
+    """The coverage reports of a pull request and of main for its report, none when
+    the tests kept none. A pull request from a fork writes its report as it likes, and
+    one that can't be read leaves the coverage out of the report."""
+    root = Path.cwd()
+    try:
+        found = Coverage.parse(Path(head).read_text(encoding="utf-8"), root)
+        base_file = Path(base)
+        before = (
+            Coverage.parse(base_file.read_text(encoding="utf-8"), root)
+            if base and base_file.is_file()
+            else None
+        )
+    except (OSError, ElementTree.ParseError, ValueError):
+        return None
+    return found, before
 
 
 def explain_command(arguments: argparse.Namespace, root: Path) -> int:
@@ -600,6 +620,12 @@ def main(
     coach_report_parser.add_argument(
         "--pull", default="", help="its number, when the run of the checks names it"
     )
+    coach_report_parser.add_argument(
+        "--coverage", default="", help="the coverage report of its tests, if any"
+    )
+    coach_report_parser.add_argument(
+        "--coverage-base", default="", help="the coverage report of main, if any"
+    )
     coach_actions.add_parser(
         "verify",
         help="whether every required check and every step of scripts/check.sh has "
@@ -834,7 +860,19 @@ def main(
         if arguments.command == "coach":
             number = int(arguments.pull) if arguments.pull else None
             catalog = Catalog.load(root)
-            sys.stdout.write(coach_report(api, repo, arguments.sha, number, catalog))
+            coverage = (
+                read_coverage(arguments.coverage, arguments.coverage_base)
+                if arguments.coverage
+                else None
+            )
+            client = api
+
+            def parts(pull: Json) -> list[Part]:
+                return pr_parts(client, repo, pull, root, coverage)
+
+            sys.stdout.write(
+                coach_report(api, repo, arguments.sha, number, catalog, about=parts)
+            )
             return 0
         if arguments.command == "update-commit":
             print(

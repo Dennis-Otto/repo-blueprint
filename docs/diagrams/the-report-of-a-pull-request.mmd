@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The report of a pull request
+    accDescr: A push to a pull request of a person runs the checks, which keep the coverage of the tests and the website that they built as artifacts. After the checks, the PR coach reads the check runs, the title and description, the files, the coverage reports of the pull request and of main and the artifact website from the API, with the release-please files and mkdocs.yml of main, and runs no code of the pull request. It keeps one comment: the checks that failed, the next version with the entry of the changelog, the coverage file by file, and the website with the pages that change. A pull request whose checks pass gets it only when it has something of this to say.
+
+    push(["A push to a pull request of a person"])
+    checks["The checks run and keep<br>the coverage and the website as artifacts"]
+    coach["The PR coach after the checks reads from the API<br>the check runs, the title and description, the files,<br>the coverage of the pull request and of main and the website,<br>and runs no code of the pull request"]
+    main[(".release-please-manifest.json<br>release-please-config.json<br>mkdocs.yml of main")]
+    comment["One comment on the pull request:<br>the checks that failed<br>📦 the next version and the entry of the changelog<br>the coverage, file by file<br>🌐 the website and the pages that change"]
+    quiet["No comment while the checks pass<br>and it has nothing of this to say"]
+
+    push --> checks --> coach --> comment
+    main -.-> coach
+    coach -. "nothing to say" .-> quiet
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class checks,coach,comment bot
+    class push person
+    class quiet done
