@@ -5722,7 +5722,7 @@ def test_codeql_files_the_results_of_each_language_under_its_category(
     )
 
     assert done.returncode == 0, done.stderr
-    # The extractor names map back to the configured names, which the matrix used.
+    # The extractor names map back to the configured names, the old categories.
     for extractor, language in (
         ("python", "python"),
         ("actions", "actions"),
@@ -5733,8 +5733,9 @@ def test_codeql_files_the_results_of_each_language_under_its_category(
         sarif = json.loads((results / f"{extractor}.sarif").read_text(encoding="utf-8"))
         assert sarif["runs"][0]["automationDetails"] == {"id": f"/language:{language}/"}
     assert "- python: `/language:python`" in summary.read_text(encoding="utf-8")
-    assert "- javascript-typescript: `/language:javascript-typescript`" in summary.read_text(
-        encoding="utf-8"
+    assert (
+        "- javascript-typescript: `/language:javascript-typescript`"
+        in summary.read_text(encoding="utf-8")
     )
 
     # Without results, the step fails rather than uploading nothing.
