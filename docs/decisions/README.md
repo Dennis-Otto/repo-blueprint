@@ -35,3 +35,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0027](0027-few-jobs-that-each-run-several-checks.md) | Few jobs that each run several checks, so that a pull request waits for fewer runners, in two releases | accepted |
 | [0028](0028-bring-one-pull-request-at-a-time-up-to-date.md) | Bring one pull request at a time up to date, in the order of its auto-merge | accepted |
 | [0029](0029-a-dependency-dashboard-the-whole-monday-and-pins-with-their-checksum.md) | A dependency dashboard, the whole Monday, fix(deps) for what the users run, and pinned downloads that move with their checksum | accepted |
+| [0030](0030-one-report-on-each-pull-request.md) | One report on each pull request, which says what it makes | accepted |

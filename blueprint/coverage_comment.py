@@ -79,19 +79,22 @@ def percent(covered: int, lines: int) -> float:
 def coverage_comment(head: Coverage, base: Coverage | None) -> str:
     """The comment of the coverage bot: the coverage of a pull request, compared with
     that of main, and each file whose coverage differs, the first MOST_FILES by name."""
+    rows, _ = coverage_table(head, base)
+    return "\n".join([COVERAGE_MARKER, "### Coverage", "", *rows, ""])
+
+
+def coverage_table(head: Coverage, base: Coverage | None) -> tuple[list[str], bool]:
+    """The coverage of a pull request against that of main, as the lines of Markdown
+    of its tables, and whether the coverage of a file changes."""
     covered, lines = head.total
     now = percent(covered, lines)
     rows = [
-        COVERAGE_MARKER,
-        "### Coverage",
-        "",
         "| | Lines | Covered |",
         "| --- | ---: | ---: |",
         f"| This pull request | {lines} | {now:.2f} % |",
     ]
     if base is None:
-        rows += ["", "main has no coverage report yet to compare with."]
-        return "\n".join([*rows, ""])
+        return [*rows, "", "main has no coverage report yet to compare with."], False
     before = percent(*base.total)
     rows.append(f"| main | {base.total[1]} | {before:.2f} % ({now - before:+.2f}) |")
     changed = []
@@ -103,8 +106,7 @@ def coverage_comment(head: Coverage, base: Coverage | None) -> str:
         if old_text != new_text:
             changed.append(f"| {cell(name)} | {old_text} | {new_text} |")
     if not changed:
-        rows += ["", "No file changes its coverage."]
-        return "\n".join([*rows, ""])
+        return [*rows, "", "No file changes its coverage."], False
     rows += ["", "| File | main | This pull request |", "| --- | ---: | ---: |"]
     rows += changed[:MOST_FILES]
     if len(changed) > MOST_FILES:
@@ -113,4 +115,4 @@ def coverage_comment(head: Coverage, base: Coverage | None) -> str:
             f"{len(changed) - MOST_FILES} more files change their coverage; the "
             "artifact coverage of the checks has the whole report.",
         ]
-    return "\n".join([*rows, ""])
+    return rows, True

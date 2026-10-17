@@ -14,12 +14,6 @@ name: After the checks
 # jobs and steps and writes its logs, so the issue shows them only as code, and the
 # branch of a fork not at all.
 #
-# The coverage bot: after the checks of a pull request, it compares the coverage of
-# its tests with that of main, file by file, and keeps one comment on the pull
-# request up to date, for its head. It reads the coverage reports that the checks
-# keep as the artifact "coverage", which a pull request from a fork writes as it
-# likes: the comment shows the name of each file only as code.
-#
 # The bot for cancelled checks: a newer run of a workflow cancels the one still running
 # for the same pull request. GitHub doesn't always create the runs in the order of the
 # commits, so a late run for an older commit can cancel the run for the head of the
@@ -40,12 +34,19 @@ name: After the checks
 # it, with the commands to run, from the explanations of .github/checks.toml and
 # .github/checks.project.toml. It works for a pull request from a fork as well, whose
 # own runs can't write to it. The comment follows every push and turns into a short
-# all-clear once every check passes; a pull request whose checks never failed gets
-# none. A check that was cancelled, as a job that ran out of time is, hasn't passed
-# either. It reads the check runs and their annotations from the API and shows their
-# text only as code, and waits up to three minutes for the checks of other apps, such
-# as the alerts of code scanning, which end after the last workflow. The scanners,
-# which run in the pull requests that change what they read, start it as well.
+# all-clear once every check passes. A check that was cancelled, as a job that ran out
+# of time is, hasn't passed either. It reads the check runs and their annotations from
+# the API and shows their text only as code, and waits up to three minutes for the
+# checks of other apps, such as the alerts of code scanning, which end after the last
+# workflow. The scanners, which run in the pull requests that change what they read,
+# start it as well. On a pull request of a person, the comment also says what the
+# pull request makes: the next version, from its title and the release-please files
+# of main, and the entry that it adds to the changelog; the coverage of its tests
+# against that of main, file by file, from the coverage reports that the checks keep
+# as the artifact "coverage", which a pull request from a fork writes as it likes;
+# and the website that the check docs built, with the pages that it changes. A pull
+# request whose checks never failed gets the comment only when it has something of
+# this to say, and one of a bot never.
 #
 # The fix bot: a check whose findings a command fixes, such as the format of the code,
 # the whitespace of a text file or the rules of markdownlint, runs the commands of
@@ -389,87 +390,6 @@ jobs:
           gh run rerun "$RUN"
           echo "A run for an older commit cancelled $NAME for the head of #$number; it runs again." >> "$GITHUB_STEP_SUMMARY"
 
-  coverage:
-    name: coverage comment
-    # The checks that keep a coverage report, when they ran.
-    if: >-
-      !github.event.repository.fork &&
-      github.event.workflow_run.event == 'pull_request' &&
-      contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion) &&
-      contains(fromJSON('["CI (python)", "CI (github-action)", "CI (home-assistant)", "CI (php)", "CI (node)"]'), github.event.workflow_run.name)
-    concurrency:
-      group: ${{ github.workflow }}-coverage-${{ github.event.workflow_run.head_sha }}
-      cancel-in-progress: true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      # The default branch, for blueprint.py; the pull request only gives its report.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Fetch the reports of the pull request and of main
-        id: reports
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          RUN: ${{ github.event.workflow_run.id }}
-          WORKFLOW: ${{ github.event.workflow_run.workflow_id }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/head" "$RUNNER_TEMP/base"
-          if ! gh run download "$RUN" --name coverage --dir "$RUNNER_TEMP/head"; then
-            echo "The checks kept no coverage report; nothing to compare." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          base="$(gh run list --workflow "$WORKFLOW" --branch main --event push --status success \
-            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [[ -n "$base" ]]; then
-            gh run download "$base" --name coverage --dir "$RUNNER_TEMP/base" || true
-          fi
-          echo "found=true" >> "$GITHUB_OUTPUT"
-      - name: Keep one comment on the pull request up to date
-        if: steps.reports.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-        run: |
-          script=.github/blueprint.py
-          [[ -f "$script" ]] || script=blueprint.py
-          python3 "$script" coverage "$RUNNER_TEMP/head/coverage.xml" "$RUNNER_TEMP/base/coverage.xml" \
-            > "$RUNNER_TEMP/comment.md"
-          cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
-          # A pull request from a fork isn't named in the run; its commit finds it.
-          number="${NUMBER:-$(gh pr list --state open --search "$SHA" --json number --jq '.[0].number // empty')}"
-          if [[ -z "$number" ]]; then
-            echo "No open pull request has the commit $SHA." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          # A late run for a commit before the head would describe code that the pull
-          # request no longer has; the run for its head keeps the comment.
-          current="$(gh pr view "$number" --json headRefOid --jq .headRefOid)"
-          if [[ "$current" != "$SHA" ]]; then
-            echo "#$number moved on from ${SHA:0:7} to ${current:0:7}; the checks of its head keep the comment." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          marker="$(head -n 1 "$RUNNER_TEMP/comment.md")"
-          comment="$(gh api "repos/$GH_REPO/issues/$number/comments" --paginate \
-            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)"
-          if [[ -n "$comment" ]]; then
-            gh api --method PATCH "repos/$GH_REPO/issues/comments/$comment" \
-              -F "body=@$RUNNER_TEMP/comment.md" --silent
-          else
-            gh pr comment "$number" --body-file "$RUNNER_TEMP/comment.md"
-          fi
-
   coach:
     name: PR coach
     # After every run of the checks of a pull request, also one from a fork, and one
@@ -486,6 +406,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: read # the coverage reports and the website that the checks kept
       checks: read
       contents: read
       pull-requests: write
@@ -494,14 +415,43 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
-      # The default branch, for blueprint.py and the explanations; nothing of the pull
-      # request is checked out or run, its checks only come from the API.
+      # The default branch, for blueprint.py, the explanations and the versions of
+      # release-please; nothing of the pull request is checked out or run, its checks
+      # only come from the API.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: |
             .github
             blueprint
+      # Every run of the coach reads them anew, as a newer run takes the place of one
+      # that waits: the run after the tests may never come. It runs for every run,
+      # also one a bot started: the bots push to pull requests of people too. The
+      # coach gives a pull request that a bot opened no coverage in its report.
+      - name: Fetch the coverage reports of the head and of main
+        id: coverage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # The newest run of the tests of the head that ended, and its workflow.
+          run="$(gh run list --commit "$SHA" --status completed --limit 100 \
+            --json databaseId,workflowDatabaseId,workflowName,conclusion \
+            --jq 'first(.[] | select((.workflowName | startswith("CI (")) and (.conclusion == "success" or .conclusion == "failure"))) | "\(.databaseId) \(.workflowDatabaseId)"')"
+          if [[ -z "$run" ]] || ! gh run download "${run% *}" --name coverage --dir "$RUNNER_TEMP/head"; then
+            echo "No run of the tests of ${SHA:0:7} kept a coverage report so far." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          base="$(gh run list --workflow "${run#* }" --branch main --event push --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [[ -n "$base" ]]; then
+            gh run download "$base" --name coverage --dir "$RUNNER_TEMP/base" || true
+          fi
+          {
+            echo "head=$RUNNER_TEMP/head/coverage.xml"
+            echo "base=$RUNNER_TEMP/base/coverage.xml"
+          } >> "$GITHUB_OUTPUT"
       - name: Keep the one report of the PR coach up to date
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -509,10 +459,13 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           # A pull request from a fork isn't named in the run; its commit finds it.
           NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          COVERAGE: ${{ steps.coverage.outputs.head }}
+          COVERAGE_BASE: ${{ steps.coverage.outputs.base }}
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
-          python3 "$script" --repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          python3 "$script" --repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER" \
+            --coverage "$COVERAGE" --coverage-base "$COVERAGE_BASE" >> "$GITHUB_STEP_SUMMARY"
 
   fixes:
     name: the fix bot

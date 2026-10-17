@@ -8,9 +8,11 @@ name: Docs
 # check passes, so that it can be required everywhere. Where another workflow
 # publishes GitHub Pages, as the Dashboard of the blueprint does with its dashboard,
 # a run on main only builds the website; in a fork, where the Dashboard doesn't run,
-# Docs publishes it. The tools are the hash-pinned ones of
-# stacks/docs/requirements-docs.txt, which the blueprint keeps current, and the files
-# that Material downloads for the website stay in a cache for a week.
+# Docs publishes it. A pull request keeps the website that it built as the artifact
+# website for a week, which the report of the PR coach links. The tools are the
+# hash-pinned ones of stacks/docs/requirements-docs.txt, which the blueprint keeps
+# current, and the files that Material downloads for the website stay in a cache for a
+# week.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -147,6 +149,17 @@ jobs:
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5
         run: mkdocs build --strict
+      # The website of a pull request, for a week: the report of the PR coach links
+      # it, so that a reviewer sees the pages as they will look after the merge.
+      - name: Keep the website of the pull request
+        if: steps.site.outputs.build == 'true' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        timeout-minutes: 5
+        with:
+          name: website
+          path: site
+          retention-days: 7
+          include-hidden-files: true
       # Only a push saves the cache: one of main, which every pull request reads, since
       # a cache of a pull request stays with its branch. It saves it once for each
       # key, so a run that restored its own key saves nothing.

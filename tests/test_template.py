@@ -47,6 +47,7 @@ from blueprint.changelog import Fragment, release_changelog
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
 from blueprint.pages import layouts, shown
+from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
@@ -5551,22 +5552,29 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     ) in job
     permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
     assert permissions.splitlines()[1:] == [
+        "      actions: read # the coverage reports and the website that the checks kept",
         "      checks: read",
         "      contents: read",
         "      pull-requests: write",
     ]
     # The default branch, which the run is of, and only blueprint.py with the
     # explanations; nothing of the pull request.
-    checkout = job[job.index("actions/checkout@") : job.index("      - name: Keep")]
+    checkout = job[job.index("actions/checkout@") : job.index("      - name: Fetch")]
     assert "ref:" not in checkout
     assert "persist-credentials: false" in checkout
     assert (
         "sparse-checkout: |\n            .github\n            blueprint\n" in checkout
     )
     # The values of the event reach the script as variables only.
-    script = job[job.index("        run: |\n") :]
-    assert "${{" not in script
+    fetch = script_of(job, "Fetch the coverage reports of the head and of main")
+    script = script_of(job, "Keep the one report of the PR coach up to date")
+    assert "${{" not in fetch + script
     assert '--repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER"' in script
+    # The coverage is fetched in every run, also one that a bot started: the bots push
+    # to pull requests of people too (update branches, the fix bot, the diagram bot).
+    step = job[job.index("      - name: Fetch the coverage") :]
+    assert "if:" not in step[: step.index("        run: |")]
+    assert "actor.type" not in job
     assert "SHA: ${{ github.event.workflow_run.head_sha }}" in job
     assert "NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}" in job
 
@@ -7133,6 +7141,30 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
     )
 
 
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_check_docs_keeps_the_website_of_a_pull_request(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The artifact that the report of the PR coach links, by the name it looks for.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    step = docs[docs.index("      - name: Keep the website of the pull request\n") :]
+    # Its lines up to the next comment or step.
+    lines = re.split(r"\n      (?! )", step)[0].splitlines()[1:]
+    assert lines == [
+        "        if: steps.site.outputs.build == 'true'"
+        " && github.event_name == 'pull_request'",
+        "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        " # v7.0.1",
+        "        timeout-minutes: 5",
+        "        with:",
+        f"          name: {WEBSITE_ARTIFACT}",
+        "          path: site",
+        f"          retention-days: {WEBSITE_DAYS}",
+        "          include-hidden-files: true",
+    ]
+
+
 def run_the_search_for_the_website(
     tmp_path: Path, root: Path, event: str, pages: str, fork: bool
 ) -> tuple[str, str]:
@@ -7373,96 +7405,128 @@ def test_every_project_records_its_decisions(
     assert (decisions / "0000-template.md").is_file()
 
 
-def test_the_coverage_bot_reads_every_report_of_the_checks() -> None:
-    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    bot = after[after.index("\n  coverage:\n") :]
-    listed = re.search(
-        r"contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)", bot
+def test_the_pr_coach_reads_every_coverage_report_of_the_checks() -> None:
+    # The coach takes the report of the newest run of the tests, a workflow CI (...).
+    step = script_of(
+        after_the_checks_job("coach"),
+        "Fetch the coverage reports of the head and of main",
     )
-    assert listed
-    watched = set(json.loads(listed[1]))
+    assert 'startswith("CI (")' in step
     for path in (ROOT / ".github/workflows").glob("ci-*.yml"):
         ci = path.read_text(encoding="utf-8")
         if "name: coverage\n" in ci:
             name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
             assert name, path
-            assert name[1] in watched, name[1]
+            assert name[1].startswith("CI ("), name[1]
+    # The job that kept a comment of its own is gone; the report holds the table.
+    assert "\n  coverage:\n" not in (
+        ROOT / ".github/workflows/after-checks.yml"
+    ).read_text(encoding="utf-8")
 
 
-# The coverage bot's tool, which writes its comment.
-COVERAGE_TOOL = """#!/usr/bin/env bash
-echo "python3 $*" >> "$CALLS"
-printf '%s\\n' '<!-- coverage-bot -->' '### Coverage'
-"""
+# The runs of the head: the tests, which kept a report, after a run that was cancelled.
+RUNS_OF_THE_HEAD = [
+    {
+        "databaseId": 8,
+        "workflowDatabaseId": 2,
+        "workflowName": "Docs",
+        "conclusion": "success",
+    },
+    {
+        "databaseId": 9,
+        "workflowDatabaseId": 3,
+        "workflowName": "CI (python)",
+        "conclusion": "cancelled",
+    },
+    {
+        "databaseId": 11,
+        "workflowDatabaseId": 3,
+        "workflowName": "CI (python)",
+        "conclusion": "failure",
+    },
+]
+
+
+@WITH_JQ
+def test_the_pr_coach_fetches_the_coverage_of_the_head_and_of_main(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "output"
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "coach",
+        "Fetch the coverage reports of the head and of main",
+        {"run list": RUNS_OF_THE_HEAD, "run download": ""},
+        GITHUB_OUTPUT=str(output),
+    )
+
+    assert calls[0].startswith("run list --commit abc1234def --status completed ")
+    assert calls[1] == f"run download 11 --name coverage --dir {tmp_path}/head"
+    # main: the newest run of the same workflow, as the fake answers with the runs.
+    assert calls[2].startswith("run list --workflow 3 --branch main --event push ")
+    assert calls[3] == f"run download 8 --name coverage --dir {tmp_path}/base"
+    assert output.read_text(encoding="utf-8") == (
+        f"head={tmp_path}/head/coverage.xml\nbase={tmp_path}/base/coverage.xml\n"
+    )
+    assert not summary
 
 
 @WITH_JQ
 @pytest.mark.parametrize(
-    ("number", "comments", "patched"),
+    "answers",
     [
-        # The first comment on the pull request.
-        ("7", [], False),
-        # A pull request from a fork, which the run doesn't name.
-        ("", [], False),
-        # The comment that the bot keeps up to date.
-        ("7", [{"id": 9, "body": "<!-- coverage-bot -->\nbefore"}], True),
+        # The tests haven't ended, or ended without a result.
+        {"run list": RUNS_OF_THE_HEAD[:2]},
+        # Their run kept no report.
+        {"run list": RUNS_OF_THE_HEAD, "run download.error": "no artifact"},
     ],
 )
-def test_the_coverage_bot_keeps_one_comment_on_the_head_of_a_pull_request(
-    tmp_path: Path, number: str, comments: list[object], patched: bool
+def test_the_pr_coach_reports_without_coverage_before_the_tests_kept_it(
+    tmp_path: Path, answers: dict[str, object]
 ) -> None:
-    calls, summary, written = run_a_bot_after_the_checks(
+    output = tmp_path / "output"
+    calls, summary, _ = run_a_bot_after_the_checks(
         tmp_path,
-        "coverage",
-        "Keep one comment on the pull request up to date",
-        {
-            "pr list": [{"number": 7}],
-            "pr view": {"headRefOid": "abc1234def"},
-            "repos/o/r/issues/7/comments": comments,
-            "repos/o/r/issues/comments/9": "",
-            "pr comment": "",
-        },
-        {"python3": COVERAGE_TOOL},
-        NUMBER=number,
+        "coach",
+        "Fetch the coverage reports of the head and of main",
+        answers,
+        GITHUB_OUTPUT=str(output),
     )
 
-    assert summary == "<!-- coverage-bot -->\n### Coverage\n"
-    assert any(call.startswith("python3 blueprint.py coverage ") for call in calls)
-    assert any(
-        call.startswith("pr list --state open --search abc1234def ") for call in calls
-    ) == (not number)
-    assert any(call.startswith("pr view 7 --json headRefOid ") for call in calls)
-    assert (
-        any(
-            call.startswith("api --method PATCH repos/o/r/issues/comments/9 ")
-            for call in calls
-        )
-        == patched
-    )
-    if not patched:
-        assert written["pr-comment"] == "<!-- coverage-bot -->\n### Coverage\n"
+    assert summary == "No run of the tests of abc1234 kept a coverage report so far.\n"
+    assert not output.exists()
+    assert not any("--branch main" in call for call in calls)
 
 
 @WITH_JQ
-def test_the_coverage_bot_leaves_the_comment_to_the_run_for_the_head(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("coverage", "expected"),
+    [
+        ("", "--coverage  --coverage-base "),
+        (
+            "/t/head/coverage.xml",
+            "--coverage /t/head/coverage.xml --coverage-base /t/b",
+        ),
+    ],
+)
+def test_the_pr_coach_hands_the_coverage_to_its_report(
+    tmp_path: Path, coverage: str, expected: str
 ) -> None:
-    # A late run for the commit before the head, after the run for the head.
-    calls, summary, written = run_a_bot_after_the_checks(
+    calls, summary, _ = run_a_bot_after_the_checks(
         tmp_path,
-        "coverage",
-        "Keep one comment on the pull request up to date",
-        {"pr view": {"headRefOid": "fedcba98765"}},
-        {"python3": COVERAGE_TOOL},
+        "coach",
+        "Keep the one report of the PR coach up to date",
+        {},
+        {"python3": '#!/usr/bin/env bash\necho "python3 $*" >> "$CALLS"\necho done\n'},
         NUMBER="7",
+        COVERAGE=coverage,
+        COVERAGE_BASE=coverage and "/t/b",
     )
 
-    assert summary.endswith(
-        "#7 moved on from abc1234 to fedcba9; the checks of its head keep the"
-        " comment.\n"
-    )
-    assert not written
-    assert not any(call.startswith(("pr comment", "api ")) for call in calls)
+    assert calls == [
+        "python3 blueprint.py --repo o/r coach report abc1234def --pull 7 " + expected
+    ]
+    assert summary == "done\n"
 
 
 def test_the_coverage_report_of_the_blueprint_names_every_file_by_its_path() -> None:

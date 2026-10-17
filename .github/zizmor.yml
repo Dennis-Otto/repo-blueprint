@@ -22,10 +22,13 @@ rules:
       - dependabot-automerge.yml
       # After the checks, the flaky-test bot only runs failed jobs again and writes an
       # issue, the bot for cancelled checks only runs cancelled runs again, the bot for
-      # failed releases only runs the failed jobs of a release again, the coverage bot
-      # reads the coverage reports and writes one comment, the PR coach reads the
-      # check runs from the API and writes one comment, with only the explanations of
-      # the default branch checked out, and the diagram bot checks out main alone,
+      # failed releases only runs the failed jobs of a release again, the PR coach
+      # reads the check runs, the files of the pull request and its list of artifacts
+      # from the API and, with actions: read, downloads the coverage reports of the
+      # head and of main, also those that a fork's run kept, which it parses only as
+      # data; it runs no code of the pull request, has only the explanations and
+      # blueprint.py of the default branch checked out, and writes one comment. The
+      # diagram bot checks out main alone,
       # whose blueprint.py takes only the sources, SVG pictures and pages of Markdown
       # of an artifact, and commits them onto the branch of a pull request of this
       # repository.

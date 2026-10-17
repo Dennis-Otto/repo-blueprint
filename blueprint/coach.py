@@ -36,6 +36,10 @@ STEP_SUFFIX = " (scripts/check.sh)"
 # The account of the token of the workflows, which writes the comment; a comment of
 # anyone else stays as it is, even with the marker.
 BOT = "github-actions[bot]"
+# The markers of the comments of retired bots whose place the report took, such as
+# that of the coverage bot: the coach deletes them on every pull request, also on one
+# that gets no report, as no job updates them any more.
+RETIRED = ("<!-- coverage-bot -->",)
 # The check of the title of a pull request; its section suggests a title that passes.
 TITLE_CHECK = "conventional title"
 # The first line of each commit of the fix bot, by which the report names its fixes.
@@ -69,6 +73,15 @@ ALIASES = {
     "deps": "build",
     "dependencies": "build",
 }
+# The types that stand for themselves without a colon, as in "fix the crash": a title
+# that starts with one of them names its type. Others, such as add or test, may be the
+# first word of a sentence.
+BARE = frozenset(
+    {"feat", "fix", "docs", "perf", "refactor", "ci", "chore", "feature", "bugfix"}
+)
+# Those of them that may also be a noun of the sentence, as in "Feature flags for the
+# API": with no colon, brackets, scope or "!", it names the type and stays in place.
+NOUNS = frozenset({"docs", "perf", "ci", "feature", "bugfix"})
 FAILED = frozenset({"failure", "timed_out", "startup_failure"})
 # A check that ended before it finished, such as a job that ran out of time, which
 # GitHub reports as cancelled, or one that waits for a person: it hasn't passed.
@@ -369,14 +382,17 @@ def suggest_title(title: str, branch: str) -> str:
     text = clean(title, 200)
     kind = scope = bang = ""
     match = re.match(
-        r"^\[?([A-Za-z]+)(?:\(([^)]*)\))?\]?(!)?\s*(?::|\]|-)\s*(.*)$", text
+        r"^\[?([A-Za-z]+)(?:\(([^)]*)\))?\]?(!)?(\s*(?::|\]|-)\s*|\s+)(.*)$", text
     )
-    if match and match[1].lower() in (*TYPES, *ALIASES):
-        word = match[1].lower()
+    word = match[1].lower() if match else ""
+    # A type with a colon, or one that is no word of a sentence without it.
+    typed = bool(match and match[4].strip()) and word in (*TYPES, *ALIASES)
+    if match and (typed or word in BARE):
         kind = ALIASES.get(word, word)
         scope = re.sub(r"[^a-z0-9._/-]+", "-", (match[2] or "").lower()).strip("-")
         bang = match[3] or ""
-        text = match[4]
+        if typed or scope or bang or text[:1] == "[" or word not in NOUNS:
+            text = match[5]
     if not kind:
         prefix = re.split(r"[/_-]", branch.lower(), maxsplit=1)[0]
         if prefix in (*TYPES, *ALIASES):
@@ -472,6 +488,18 @@ class Finding:
         if where and self.line:
             where += f":{self.line}"
         return " ".join(part for part in ("-", code(where, 160), code(text)) if part)
+
+
+@dataclass(frozen=True)
+class Part:
+    """A part of the report about the pull request itself, after the checks, such as
+    the release that it makes: its Markdown, whether it is worth a comment on a pull
+    request whose checks pass, and the marker of an older comment of a bot that it
+    takes the place of."""
+
+    text: str
+    news: bool = False
+    replaces: str = ""
 
 
 def paged(api: Api, path: str) -> Iterator[Json]:
@@ -668,9 +696,11 @@ def render(
     found: dict[int, list[Finding]],
     catalog: Catalog,
     fixed: Sequence[str] | None = None,
+    parts: Sequence[Part] = (),
 ) -> str:
     """The comment of the PR coach on a pull request; fixed holds the files of the
-    head when the fix bot made it."""
+    head when the fix bot made it, and parts what the report says of the pull request
+    itself, after the checks."""
     failed = [run for run in runs if run.failed]
     stopped = [run for run in runs if run.stopped]
     pending = sum(1 for run in runs if run.pending)
@@ -697,18 +727,19 @@ def render(
     if fixed is not None:
         lines += [fix_note(sha, fixed), ""]
     body = "\n".join([*lines, ""])
+    about = "".join(f"{part.text.rstrip()}\n\n" for part in parts)
     shown = 0
     for run in failed[:SECTIONS]:
         part = section(
             run, found.get(run.id, []), catalog, pull, repo, len(failed) <= 3
         )
-        if len(body) + len(part) > BODY_LENGTH:
+        if len(body) + len(part) + len(about) > BODY_LENGTH:
             break
         body += part + "\n"
         shown += 1
     if shown < len(failed):
         body += f"… and {len(failed) - shown} more; their logs say what they found.\n\n"
-    return body + footer(repo, sha)
+    return body + about + footer(repo, sha)
 
 
 def fixed_by_bot(api: Api, repo: str, sha: str) -> list[str] | None:
@@ -721,12 +752,23 @@ def fixed_by_bot(api: Api, repo: str, sha: str) -> list[str] | None:
     return [str(item.get("filename") or "") for item in commit.get("files") or []]
 
 
-def find_comment(api: Api, repo: str, number: int) -> Json | None:
-    for comment in paged(api, f"repos/{repo}/issues/{number}/comments"):
-        user = (comment.get("user") or {}).get("login")
-        if user == BOT and str(comment.get("body") or "").startswith(MARKER):
-            return comment
-    return None
+def bot_comments(api: Api, repo: str, number: int) -> list[Json]:
+    """The comments of the bot on a pull request; those of anyone else stay as they
+    are, even with a marker."""
+    return [
+        comment
+        for comment in paged(api, f"repos/{repo}/issues/{number}/comments")
+        if (comment.get("user") or {}).get("login") == BOT
+    ]
+
+
+def marked(comments: Iterable[Json], marker: str) -> list[Json]:
+    """The comments whose body starts with marker."""
+    return [
+        comment
+        for comment in comments
+        if str(comment.get("body") or "").startswith(marker)
+    ]
 
 
 def apps_only(runs: list[Run]) -> bool:
@@ -743,10 +785,13 @@ def report(
     number: int | None,
     catalog: Catalog,
     wait: Callable[[float], None] = time.sleep,
+    about: Callable[[Json], Sequence[Part]] | None = None,
 ) -> str:
     """Keeps the one comment of the PR coach on the pull request of sha up to date,
-    and says what it did, for the summary of the job. A pull request whose checks
-    never failed gets no comment."""
+    and says what it did, for the summary of the job. about gives the parts of the
+    report about the pull request of a person, such as the release that it makes; a
+    pull request of a bot gets none. A pull request whose checks never failed gets no
+    comment, unless one of its parts is news."""
     pull = find_pull(api, repo, sha, number)
     if pull is None:
         return f"{sha[:7]} is no longer the head of an open pull request; no report.\n"
@@ -758,26 +803,42 @@ def report(
             break
         wait(WAIT)
         runs = check_runs(api, repo, sha)
-    comment = find_comment(api, repo, number)
-    if comment is None and not any(run.failed for run in runs):
+    comments = bot_comments(api, repo, number)
+    comment = next(iter(marked(comments, MARKER)), None)
+    failed = [run for run in runs if run.failed]
+    person = (pull.get("user") or {}).get("type") != "Bot"
+    parts = list(about(pull)) if about is not None and person else []
+    if comment is None and not failed and not any(part.news for part in parts):
+        retire(api, repo, comments, parts)
         return f"No check of #{number} failed; it needs no report.\n"
     # What the checks found, only of those that the report can show: each check that
     # failed has one annotation at least, and the API takes only so many requests.
-    failed = [run for run in runs if run.failed]
     found = {run.id: findings(api, repo, run) for run in failed[:SECTIONS]}
     fixed = fixed_by_bot(api, repo, sha)
-    body = render(repo, sha, pull, runs, found, catalog, fixed)
+    body = render(repo, sha, pull, runs, found, catalog, fixed, parts)
     if comment is not None and comment.get("body") == body:
-        return f"The report of #{number} is up to date:\n\n{body}"
+        said = f"The report of #{number} is up to date:\n\n{body}"
     # A push while the coach read the checks: the report of the new head follows, and
     # this one neither overwrites it nor adds a second comment next to it.
-    if find_pull(api, repo, sha, number) is None:
+    elif find_pull(api, repo, sha, number) is None:
         return f"{sha[:7]} is no longer the head of #{number}; no report.\n"
-    if comment is None:
+    elif comment is None:
         api.post(f"repos/{repo}/issues/{number}/comments", {"body": body})
-        return f"The report of #{number}:\n\n{body}"
-    api.patch(f"repos/{repo}/issues/comments/{comment['id']}", {"body": body})
-    return f"The report of #{number}, updated:\n\n{body}"
+        said = f"The report of #{number}:\n\n{body}"
+    else:
+        api.patch(f"repos/{repo}/issues/comments/{comment['id']}", {"body": body})
+        said = f"The report of #{number}, updated:\n\n{body}"
+    retire(api, repo, comments, parts)
+    return said
+
+
+def retire(api: Api, repo: str, comments: list[Json], parts: Sequence[Part]) -> None:
+    """Deletes the comments of the bot whose place the report took: those of the
+    retired bots, and those that a part replaces, as the report says what they said."""
+    replaced = [part.replaces for part in parts if part.replaces]
+    for marker in dict.fromkeys([*RETIRED, *replaced]):
+        for old in marked(comments, marker):
+            api.delete(f"repos/{repo}/issues/comments/{old['id']}")
 
 
 # ---------------------------------------------------------------- what needs explaining

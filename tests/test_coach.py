@@ -28,6 +28,7 @@ from blueprint.coach import (
     Catalog,
     CatalogError,
     Entry,
+    Part,
     Run,
     annotation,
     check_steps,
@@ -772,6 +773,18 @@ def test_no_untrusted_text_leaves_its_code(text: str) -> None:
         ),
         ("README for the CLI", "contributor:main", "feat: README for the CLI"),
         ("Update: the CI", "ci/faster", "ci: update: the CI"),
+        # A type without its colon.
+        ("feat add a dark mode", "patch-1", "feat: add a dark mode"),
+        ("Fix the crash on save", "feat/save", "fix: the crash on save"),
+        ("Docs(README) update the badges.", "", "docs(readme): update the badges"),
+        ("Feature! drop Python 3.12", "", "feat!: drop Python 3.12"),
+        # A type that may be a noun of the sentence keeps its place without a colon.
+        ("Feature flags for the API", "", "feat: feature flags for the API"),
+        ("CI is flaky on Windows", "", "ci: CI is flaky on Windows"),
+        ("docs for the CLI", "patch-1", "docs: docs for the CLI"),
+        # A word that is no type keeps its place.
+        ("Add a dark mode", "feat/dark-mode", "feat: add a dark mode"),
+        ("Fixes the crash", "", "fix: fixes the crash"),
         ("", "docs_typo", "docs: describe the change"),
         ("...", "", "feat: describe the change"),
     ],
@@ -806,6 +819,9 @@ class FakeGitHub:
         self.runs: list[dict[str, Any]] = recorded["check_runs"]
         self.annotations: dict[str, list[dict[str, Any]]] = recorded["annotations"]
         self.comments: list[dict[str, Any]] = []
+        # The files of the pull request, and the artifacts of the repository.
+        self.files: list[dict[str, Any]] = []
+        self.artifacts: list[dict[str, Any]] = []
         # The head of the pull request, a commit of a person.
         self.commit: dict[str, Any] = {
             "commit": {"message": "Add a feature"},
@@ -852,6 +868,15 @@ class FakeGitHub:
             return 200, self.page(items, found[2], found[3])
         if found := re.fullmatch(rf"issues/42/comments\?{paged}", path):
             return 200, self.page(self.comments, *found.groups())
+        if found := re.fullmatch(rf"pulls/42/files\?{paged}", path):
+            return 200, self.page(self.files, *found.groups())
+        if path == "actions/artifacts?name=website&per_page=100":
+            return 200, {"artifacts": self.artifacts}
+        if method == "DELETE" and (
+            found := re.fullmatch(r"issues/comments/(\d+)", path)
+        ):
+            self.comments = [c for c in self.comments if c["id"] != int(found[1])]
+            return 204, None
         if method == "POST" and path == "issues/42/comments":
             comment = {"id": 900 + len(self.comments), "user": {"login": BOT}}
             self.comments.append(comment | body)
@@ -877,8 +902,14 @@ class FakeGitHub:
         self.meanwhile(self)
 
 
-def run_report(github: FakeGitHub, number: int | None = None) -> str:
-    return report(Api(runner=github), REPO, SHA, number, catalog(), wait=github.wait)
+def run_report(
+    github: FakeGitHub,
+    number: int | None = None,
+    about: Callable[[dict[str, Any]], Sequence[Part]] | None = None,
+) -> str:
+    return report(
+        Api(runner=github), REPO, SHA, number, catalog(), wait=github.wait, about=about
+    )
 
 
 def body_of(github: FakeGitHub) -> str:
@@ -1317,6 +1348,116 @@ def test_a_pull_request_whose_checks_never_failed_gets_no_comment() -> None:
     assert github.writes() == []
 
 
+def test_a_pull_request_that_is_news_gets_a_report_whose_checks_passed() -> None:
+    github = FakeGitHub()
+    github.finish()
+    asked: list[int] = []
+
+    def about(pull: dict[str, Any]) -> list[Part]:
+        asked.append(pull["number"])
+        return [
+            Part("#### Release\n\nThis pull request releases nothing by itself.\n"),
+            Part("#### Website\n\n🌐 A page changes.", news=True),
+        ]
+
+    said = run_report(github, 42, about)
+
+    assert said.startswith("The report of #42:\n\n")
+    assert asked == [42]
+    assert body_of(github).startswith(
+        f"{MARKER}\n### PR coach\n\n✅ **Every check passed.** Thank you!\n\n"
+        "#### Release\n\nThis pull request releases nothing by itself.\n\n"
+        "#### Website\n\n🌐 A page changes.\n\n<sub>For "
+    )
+
+
+def test_parts_that_are_no_news_need_no_report() -> None:
+    github = FakeGitHub()
+    github.finish()
+
+    said = run_report(github, 42, lambda pull: [Part("#### Coverage\n\nThe same.")])
+
+    assert said == "No check of #42 failed; it needs no report.\n"
+    assert github.writes() == []
+
+
+def test_the_parts_follow_the_checks_that_failed() -> None:
+    github = FakeGitHub()
+
+    run_report(github, 42, lambda pull: [Part("#### Release\n\n📦 A minor release.")])
+
+    body = body_of(github)
+    assert body.index("</details>") < body.index("#### Release") < body.index("<sub>")
+
+
+def test_a_pull_request_of_a_bot_gets_no_parts() -> None:
+    def about(pull: dict[str, Any]) -> list[Part]:
+        raise AssertionError("a pull request of a bot gets no parts")
+
+    github = FakeGitHub()
+    github.pulls[0]["user"] = {"login": "renovate[bot]", "type": "Bot"}
+    run_report(github, 42, about)
+    assert "#### " not in body_of(github)
+
+    github = FakeGitHub()
+    github.pulls[0]["user"] = {"login": "renovate[bot]", "type": "Bot"}
+    github.finish()
+    assert "needs no report" in run_report(github, 42, about)
+
+
+def test_the_report_takes_the_place_of_the_comment_of_the_coverage_bot() -> None:
+    github = FakeGitHub()
+    old = {"id": 700, "user": {"login": BOT}, "body": "<!-- coverage-bot -->\nold"}
+    mine = {"id": 701, "user": {"login": "someone"}, "body": "<!-- coverage-bot -->\n"}
+    github.comments = [old, mine]
+    parts = [Part("#### Coverage\n\n| table |", True, "<!-- coverage-bot -->")]
+
+    run_report(github, 42, lambda pull: parts)
+
+    assert github.writes() == [
+        ("POST", f"repos/{REPO}/issues/42/comments"),
+        ("DELETE", f"repos/{REPO}/issues/comments/700"),
+    ]
+    assert [comment["id"] for comment in github.comments] == [701, 902]
+    # The next run finds the report up to date and nothing more to delete.
+    assert "is up to date" in run_report(github, 42, lambda pull: parts)
+    assert len(github.writes()) == 2
+
+
+@pytest.mark.parametrize("author", ["someone", "renovate[bot]"])
+def test_the_comment_of_the_coverage_bot_goes_without_a_report(author: str) -> None:
+    # A green pull request with no news, of a person or of a bot: no report, yet the
+    # comment of the retired coverage bot, which no job updates any more, goes.
+    github = FakeGitHub()
+    github.pulls[0]["user"] = {
+        "login": author,
+        "type": "Bot" if author.endswith("[bot]") else "User",
+    }
+    old = {"id": 700, "user": {"login": BOT}, "body": "<!-- coverage-bot -->\nold"}
+    mine = {"id": 701, "user": {"login": "someone"}, "body": "<!-- coverage-bot -->\n"}
+    github.comments = [old, mine]
+    github.finish()
+
+    assert "needs no report" in run_report(github, 42, lambda pull: [])
+
+    assert github.writes() == [("DELETE", f"repos/{REPO}/issues/comments/700")]
+    assert [comment["id"] for comment in github.comments] == [701]
+
+
+def test_the_parts_keep_their_place_in_a_long_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(blueprint.coach, "BODY_LENGTH", 3000)
+    github = FakeGitHub()
+
+    run_report(github, 42, lambda pull: [Part("#### Release\n\n" + "x" * 2000)])
+
+    body = body_of(github)
+    assert len(body) < 3000 + 1000
+    assert "x" * 2000 in body
+    assert "… and 5 more; their logs say what they found." in body
+
+
 def test_a_report_only_for_the_head_of_an_open_pull_request() -> None:
     github = FakeGitHub()
     github.pulls[0]["head"]["sha"] = "0" * 40
@@ -1433,6 +1574,71 @@ def test_report_from_the_command_line(capsys: pytest.CaptureFixture[str]) -> Non
     assert capsys.readouterr().out.startswith("The report of #42:")
     assert cli.main([*command, "42"], api=api, root=ROOT) == 0
     assert "is up to date" in capsys.readouterr().out
+
+
+# A Cobertura report of one file with one line, which the tests run or not.
+COVERAGE = (
+    '<?xml version="1.0" ?><coverage><packages><package><classes>'
+    '<class filename="src/app.py"><lines><line number="1" hits="{hits}"/></lines>'
+    "</class></classes></package></packages></coverage>"
+)
+
+
+def test_report_from_the_command_line_with_its_parts(tmp_path: Path) -> None:
+    github = FakeGitHub()
+    github.finish()
+    github.pulls[0]["title"] = "feat: dark mode for the settings"
+    github.files = [
+        {"filename": "docs/guide.md", "status": "modified", "patch": "@@ -1 +1 @@"}
+    ]
+    head, base = tmp_path / "head.xml", tmp_path / "base.xml"
+    head.write_text(COVERAGE.format(hits=1), encoding="utf-8")
+    base.write_text(COVERAGE.format(hits=0), encoding="utf-8")
+    command = ["--repo", REPO, "coach", "report", SHA, "--pull", "42"]
+    command += ["--coverage", str(head), "--coverage-base", str(base)]
+
+    assert cli.main(command, api=Api(runner=github), root=ROOT) == 0
+
+    body = body_of(github)
+    assert (
+        "#### Release\n\n📦 Merging this pull request makes the next release **" in body
+    )
+    assert "| `src/app.py` | 0.00 % | 100.00 % |" in body
+    assert "#### Website\n\n🌐 The check *docs* has kept no build" in body
+    assert (
+        "- [`docs/guide.md`](https://dennis-otto.github.io/repo-blueprint/guide/)"
+        in body
+    )
+
+
+@pytest.mark.parametrize(
+    ("report_text", "base", "shown"),
+    [
+        # A report from a fork that is no XML: the report goes without coverage.
+        ("<coverage", "", None),
+        # main has no report yet.
+        (COVERAGE.format(hits=1), "missing.xml", "main has no coverage report yet"),
+    ],
+)
+def test_the_coverage_of_the_report_from_the_command_line(
+    tmp_path: Path, report_text: str, base: str, shown: str | None
+) -> None:
+    github = FakeGitHub()
+    head = tmp_path / "head.xml"
+    head.write_text(report_text, encoding="utf-8")
+    command = ["--repo", REPO, "coach", "report", SHA, "--pull", "42"]
+    command += [
+        "--coverage",
+        str(head),
+        "--coverage-base",
+        base and str(tmp_path / base),
+    ]
+
+    assert cli.main(command, api=Api(runner=github), root=ROOT) == 0
+
+    body = body_of(github)
+    assert ("#### Coverage" in body) == (shown is not None)
+    assert shown is None or shown in body
 
 
 @pytest.mark.parametrize(
