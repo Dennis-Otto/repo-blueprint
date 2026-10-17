@@ -733,9 +733,10 @@ def main(
     arguments = parser.parse_args(argv)
 
     if arguments.command == "coverage":
+        # A report that isn't there, isn't XML or isn't text of UTF-8.
         try:
             return coverage_command(arguments)
-        except (OSError, ElementTree.ParseError) as error:
+        except (OSError, ElementTree.ParseError, ValueError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command == "coach" and arguments.action != "report":
