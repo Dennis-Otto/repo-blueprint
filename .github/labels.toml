@@ -11,7 +11,7 @@
 #   decision   set by the maintainer only
 #   release    set by the bots: the pull request title check, the release bot, the
 #              branch bot and the bot-health bot; Dependabot sets dependencies too,
-#              Renovate no label
+#              Renovate dependencies on its Dependency dashboard issue
 #
 # ask = false keeps the assistant from asking reporters of that kind for information.
 
