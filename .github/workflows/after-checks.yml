@@ -425,11 +425,11 @@ jobs:
             .github
             blueprint
       # Every run of the coach reads them anew, as a newer run takes the place of one
-      # that waits: the run after the tests may never come. A pull request of a bot
-      # gets no coverage in its report.
+      # that waits: the run after the tests may never come. It runs for every run,
+      # also one a bot started: the bots push to pull requests of people too. The
+      # coach gives a pull request that a bot opened no coverage in its report.
       - name: Fetch the coverage reports of the head and of main
         id: coverage
-        if: github.event.workflow_run.actor.type != 'Bot'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

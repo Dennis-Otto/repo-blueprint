@@ -46,6 +46,7 @@ from blueprint.changelog import Fragment, release_changelog
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
 from blueprint.pages import layouts, shown
+from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import Settings
 
 ROOT = Path(__file__).parents[1]
@@ -5308,8 +5309,11 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     script = script_of(job, "Keep the one report of the PR coach up to date")
     assert "${{" not in fetch + script
     assert '--repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER"' in script
-    # A pull request of a bot gets no coverage in its report, and costs no requests.
-    assert "        if: github.event.workflow_run.actor.type != 'Bot'\n" in job
+    # The coverage is fetched in every run, also one that a bot started: the bots push
+    # to pull requests of people too (update branches, the fix bot, the diagram bot).
+    step = job[job.index("      - name: Fetch the coverage") :]
+    assert "if:" not in step[: step.index("        run: |")]
+    assert "actor.type" not in job
     assert "SHA: ${{ github.event.workflow_run.head_sha }}" in job
     assert "NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}" in job
 
@@ -6874,6 +6878,30 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
     assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
         result == "failure"
     )
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_check_docs_keeps_the_website_of_a_pull_request(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The artifact that the report of the PR coach links, by the name it looks for.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    step = docs[docs.index("      - name: Keep the website of the pull request\n") :]
+    # Its lines up to the next comment or step.
+    lines = re.split(r"\n      (?! )", step)[0].splitlines()[1:]
+    assert lines == [
+        "        if: steps.site.outputs.build == 'true'"
+        " && github.event_name == 'pull_request'",
+        "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        " # v7.0.1",
+        "        timeout-minutes: 5",
+        "        with:",
+        f"          name: {WEBSITE_ARTIFACT}",
+        "          path: site",
+        f"          retention-days: {WEBSITE_DAYS}",
+        "          include-hidden-files: true",
+    ]
 
 
 def run_the_search_for_the_website(

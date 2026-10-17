@@ -36,6 +36,10 @@ STEP_SUFFIX = " (scripts/check.sh)"
 # The account of the token of the workflows, which writes the comment; a comment of
 # anyone else stays as it is, even with the marker.
 BOT = "github-actions[bot]"
+# The markers of the comments of retired bots whose place the report took, such as
+# that of the coverage bot: the coach deletes them on every pull request, also on one
+# that gets no report, as no job updates them any more.
+RETIRED = ("<!-- coverage-bot -->",)
 # The check of the title of a pull request; its section suggests a title that passes.
 TITLE_CHECK = "conventional title"
 # The first line of each commit of the fix bot, by which the report names its fixes.
@@ -75,6 +79,9 @@ ALIASES = {
 BARE = frozenset(
     {"feat", "fix", "docs", "perf", "refactor", "ci", "chore", "feature", "bugfix"}
 )
+# Those of them that may also be a noun of the sentence, as in "Feature flags for the
+# API": with no colon, brackets, scope or "!", it names the type and stays in place.
+NOUNS = frozenset({"docs", "perf", "ci", "feature", "bugfix"})
 FAILED = frozenset({"failure", "timed_out", "startup_failure"})
 # A check that ended before it finished, such as a job that ran out of time, which
 # GitHub reports as cancelled, or one that waits for a person: it hasn't passed.
@@ -384,7 +391,8 @@ def suggest_title(title: str, branch: str) -> str:
         kind = ALIASES.get(word, word)
         scope = re.sub(r"[^a-z0-9._/-]+", "-", (match[2] or "").lower()).strip("-")
         bang = match[3] or ""
-        text = match[5]
+        if typed or scope or bang or text[:1] == "[" or word not in NOUNS:
+            text = match[5]
     if not kind:
         prefix = re.split(r"[/_-]", branch.lower(), maxsplit=1)[0]
         if prefix in (*TYPES, *ALIASES):
@@ -801,6 +809,7 @@ def report(
     person = (pull.get("user") or {}).get("type") != "Bot"
     parts = list(about(pull)) if about is not None and person else []
     if comment is None and not failed and not any(part.news for part in parts):
+        retire(api, repo, comments, parts)
         return f"No check of #{number} failed; it needs no report.\n"
     # What the checks found, only of those that the report can show: each check that
     # failed has one annotation at least, and the API takes only so many requests.
@@ -819,12 +828,17 @@ def report(
     else:
         api.patch(f"repos/{repo}/issues/comments/{comment['id']}", {"body": body})
         said = f"The report of #{number}, updated:\n\n{body}"
-    # The comments whose place a part of the report took, such as that of the
-    # coverage bot before it became a part: the report says what they said.
-    for part in parts:
-        for old in marked(comments, part.replaces) if part.replaces else []:
-            api.delete(f"repos/{repo}/issues/comments/{old['id']}")
+    retire(api, repo, comments, parts)
     return said
+
+
+def retire(api: Api, repo: str, comments: list[Json], parts: Sequence[Part]) -> None:
+    """Deletes the comments of the bot whose place the report took: those of the
+    retired bots, and those that a part replaces, as the report says what they said."""
+    replaced = [part.replaces for part in parts if part.replaces]
+    for marker in dict.fromkeys([*RETIRED, *replaced]):
+        for old in marked(comments, marker):
+            api.delete(f"repos/{repo}/issues/comments/{old['id']}")
 
 
 # ---------------------------------------------------------------- what needs explaining

@@ -52,6 +52,8 @@ PAGE_NAME = re.compile(
 WEBSITE = re.compile(r"(docs/.+|mkdocs\.yml|README(\.[a-z]{2})?\.md|CHANGELOG\.md)")
 FRAGMENT = re.compile(r"changelog\.d/[A-Za-z0-9][A-Za-z0-9._-]*\.md")
 WEBSITE_DAYS = 7
+# The artifact of the website that the check docs keeps of a pull request.
+WEBSITE_ARTIFACT = "website"
 
 Version = tuple[int, int, int]
 
@@ -350,7 +352,9 @@ class Website:
 
 def website_artifact(api: Api, repo: str, sha: str) -> str | None:
     """The link to the artifact website that the check docs kept for sha."""
-    data = api.get(f"repos/{repo}/actions/artifacts?name=website&per_page={PAGE}")
+    data = api.get(
+        f"repos/{repo}/actions/artifacts?name={WEBSITE_ARTIFACT}&per_page={PAGE}"
+    )
     for item in (data or {}).get("artifacts") or []:
         run = item.get("workflow_run") or {}
         if run.get("head_sha") == sha and not item.get("expired"):

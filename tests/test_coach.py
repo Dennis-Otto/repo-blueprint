@@ -778,6 +778,10 @@ def test_no_untrusted_text_leaves_its_code(text: str) -> None:
         ("Fix the crash on save", "feat/save", "fix: the crash on save"),
         ("Docs(README) update the badges.", "", "docs(readme): update the badges"),
         ("Feature! drop Python 3.12", "", "feat!: drop Python 3.12"),
+        # A type that may be a noun of the sentence keeps its place without a colon.
+        ("Feature flags for the API", "", "feat: feature flags for the API"),
+        ("CI is flaky on Windows", "", "ci: CI is flaky on Windows"),
+        ("docs for the CLI", "patch-1", "docs: docs for the CLI"),
         # A word that is no type keeps its place.
         ("Add a dark mode", "feat/dark-mode", "feat: add a dark mode"),
         ("Fixes the crash", "", "fix: fixes the crash"),
@@ -1418,6 +1422,26 @@ def test_the_report_takes_the_place_of_the_comment_of_the_coverage_bot() -> None
     # The next run finds the report up to date and nothing more to delete.
     assert "is up to date" in run_report(github, 42, lambda pull: parts)
     assert len(github.writes()) == 2
+
+
+@pytest.mark.parametrize("author", ["someone", "renovate[bot]"])
+def test_the_comment_of_the_coverage_bot_goes_without_a_report(author: str) -> None:
+    # A green pull request with no news, of a person or of a bot: no report, yet the
+    # comment of the retired coverage bot, which no job updates any more, goes.
+    github = FakeGitHub()
+    github.pulls[0]["user"] = {
+        "login": author,
+        "type": "Bot" if author.endswith("[bot]") else "User",
+    }
+    old = {"id": 700, "user": {"login": BOT}, "body": "<!-- coverage-bot -->\nold"}
+    mine = {"id": 701, "user": {"login": "someone"}, "body": "<!-- coverage-bot -->\n"}
+    github.comments = [old, mine]
+    github.finish()
+
+    assert "needs no report" in run_report(github, 42, lambda pull: [])
+
+    assert github.writes() == [("DELETE", f"repos/{REPO}/issues/comments/700")]
+    assert [comment["id"] for comment in github.comments] == [701]
 
 
 def test_the_parts_keep_their_place_in_a_long_report(
