@@ -32,6 +32,7 @@ from mypy import api as mypy_api
 from shared import copy_of, git_environment, once, run_folder
 from shell import BASH, in_bash
 
+import pins
 from blueprint.bot_health import (
     FAILED,
     LABEL,
@@ -3682,6 +3683,266 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
         if "lockFileMaintenance" in types and not about_a_dependency:
             automerge = rule.get("automerge", automerge)
     assert automerge is False
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_keeps_a_dependency_dashboard_and_the_whole_monday(
+    projects: dict[str, Path], kind: str
+) -> None:
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    # One issue lists the updates that wait, for their week, their window or the
+    # maintainer, and those that failed, with checkboxes to open or retry each: without
+    # it, a major update whose lock file couldn't be written closed itself unseen.
+    assert ":disableDependencyDashboard" not in shared["extends"] + own["extends"]
+    assert {
+        key: value
+        for key, value in shared.items()
+        if key.startswith("dependencyDashboard")
+    } == {
+        "dependencyDashboard": True,
+        "dependencyDashboardTitle": "Dependency dashboard",
+        "dependencyDashboardLabels": ["dependencies"],
+        "dependencyDashboardOSVVulnerabilitySummary": "all",
+    }
+    assert not any(key.startswith("dependencyDashboard") for key in own)
+    labels = tomllib.loads((root / ".github/labels.toml").read_text(encoding="utf-8"))
+    assert "dependencies" in {label["name"] for label in labels["label"]}
+    # GitHub starts the scheduled runs of the bot every two hours only roughly and
+    # skips some: in the week of 2026-10-05, one run fell into the window of 00:00 to
+    # 06:59 of Monday. The whole Monday has a dozen; fixes of vulnerabilities come at
+    # any time.
+    assert shared["schedule"] == ["* * * * 1"]
+    assert shared["lockFileMaintenance"]["schedule"] == ["* * * * 1"]
+    assert shared["vulnerabilityAlerts"]["schedule"] == ["at any time"]
+    assert "schedule" not in own
+
+
+# The rules of config:recommended that decide the type of Renovate's commits, from
+# :semanticPrefixFixDepsChoreOthers of Renovate 44: fix(deps) for the dependencies of
+# npm and the require of Composer only, chore(deps) for everything else.
+RECOMMENDED_COMMIT_TYPES = [
+    {"matchPackageNames": ["*"], "semanticCommitType": "chore"},
+    {"matchDepTypes": ["dependencies", "require"], "semanticCommitType": "fix"},
+]
+# An update of what the users of each kind of project run: its manager, its type of
+# dependency, and its file.
+WHAT_THE_USERS_RUN = {
+    "home-assistant": [
+        ("homeassistant-manifest", "", "custom_components/demo/manifest.json")
+    ],
+    "nextcloud-app": [("composer", "require", "composer.json")],
+    "github-action": [
+        ("github-actions", "action", "action.yml"),
+        ("pep621", "project.dependencies", "pyproject.toml"),
+    ],
+    "python-package": [("pep621", "project.dependencies", "pyproject.toml")],
+    "node-package": [("npm", "dependencies", "package.json")],
+    "container": [("dockerfile", "final", "Dockerfile")],
+    "generic": [],
+}
+# Updates of the tools of every kind, and of each kind's own.
+THE_TOOLS = [
+    ("github-actions", "action", ".github/workflows/ci.yml"),
+    ("custom.regex", "", ".github/workflows/docs.yml"),
+    ("custom.regex", "", "scripts/diagrams.sh"),
+    ("pip-compile", "", ".github/docs-requirements.txt"),
+    ("dockerfile", "final", ".devcontainer/Dockerfile"),
+    ("dockerfile", "final", ".github/social-preview/Dockerfile"),
+    ("npm", "devDependencies", ".github/prose/package.json"),
+    ("pre-commit", "repository", ".pre-commit-config.yaml"),
+]
+THE_TOOLS_OF_A_KIND = {
+    "home-assistant": [("pip-compile", "", "requirements-test.txt")],
+    "nextcloud-app": [("composer", "require-dev", "composer.json")],
+    "github-action": [("pip-compile", "", "requirements-dev.txt")],
+    "python-package": [
+        ("pip-compile", "", "requirements-dev.txt"),
+        ("pep621", "dependency-groups", "pyproject.toml"),
+    ],
+    "node-package": [("npm", "devDependencies", "package.json")],
+    "container": [],
+    "generic": [],
+}
+
+
+def commit_type(
+    rules: list[dict[str, Any]], manager: str, dep_type: str, file: str
+) -> str | None:
+    """The type of Renovate's commit of an update: the last rule that matches it."""
+    found = None
+    for rule in rules:
+        if "semanticCommitType" not in rule:
+            continue
+        conditions = {key for key in rule if key.startswith("match")}
+        # A rule on anything else needs a case here first.
+        assert conditions <= {
+            "matchPackageNames",
+            "matchManagers",
+            "matchDepTypes",
+            "matchFileNames",
+        }, rule
+        if (
+            rule.get("matchPackageNames", ["*"]) == ["*"]
+            and manager in rule.get("matchManagers", [manager])
+            and dep_type in rule.get("matchDepTypes", [dep_type])
+            and any(
+                fnmatch.fnmatchcase(file, name)
+                for name in rule.get("matchFileNames", [file])
+            )
+        ):
+            found = rule["semanticCommitType"]
+    return found
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_updates_of_what_the_users_run_lead_to_a_patch_release(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The title of the squashed commit decides the release: fix(deps) leads to a patch
+    # release, chore(deps) to none. config:recommended commits only the dependencies
+    # of npm and Composer as fix, so the requirements of a Home Assistant integration,
+    # the dependencies of a Python package, the actions of an action and the base
+    # images of a container never reached their users.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    assert shared["extends"][:2] == ["config:recommended", ":semanticCommits"]
+    rules = [
+        *RECOMMENDED_COMMIT_TYPES,
+        *shared["packageRules"],
+        *own.get("packageRules", []),
+    ]
+    if kind == "blueprint":
+        # What every repository gets from the blueprint is what its users run, apart
+        # from the tools of the blueprint's own tests.
+        for update in [
+            *THE_TOOLS,
+            ("pip-compile", "", "stacks/python/requirements-dev.txt"),
+            ("pep621", "dependency-groups", "pyproject.toml"),
+        ]:
+            assert commit_type(rules, *update) == "fix", update
+        assert commit_type(rules, "pip-compile", "", "requirements-dev.txt") == "chore"
+        return
+    for update in WHAT_THE_USERS_RUN[kind]:
+        assert commit_type(rules, *update) == "fix", update
+    for update in [*THE_TOOLS, *THE_TOOLS_OF_A_KIND[kind]]:
+        assert commit_type(rules, *update) == "chore", update
+
+
+# A version pinned in a workflow or a script: NAME_VERSION: 1.2.3, or version=1.2.3.
+PINNED_VERSION = re.compile(
+    r'^[ \t]*(?:[A-Z][A-Z0-9_]*_VERSION: |version=)"?v?\d', re.MULTILINE
+)
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_finds_every_version_that_a_workflow_or_script_pins(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # A version without its line "# renovate:" stays where it is for good, as gitsign
+    # and Infection did: their pins in YAML had none, and Renovate's pattern knew only
+    # YAML, not the shell of .github/sign-tag.sh.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    rules = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    patterns = [
+        re.compile(pattern.replace("(?<", "(?P<"))
+        for manager in rules["customManagers"]
+        if "datasourceTemplate" not in manager
+        for pattern in manager["matchStrings"]
+    ]
+    files = [
+        path
+        for folder in (".github/workflows/*.yml", ".github/*.sh", "scripts/*.sh")
+        for path in sorted(root.glob(folder))
+    ]
+    pinned = 0
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        found = {
+            match.end("currentValue"): match
+            for pattern in patterns
+            for match in pattern.finditer(text)
+        }
+        for line in PINNED_VERSION.finditer(text):
+            end = text.index("\n", line.start())
+            match = found.get(end) or found.get(end - 1)
+            assert match, f"{path.name}: {text[line.start() : end].strip()}"
+            assert match["datasource"] == "github-releases", path.name
+            # The version as the files use it, without the v of the tag.
+            assert re.fullmatch(r"\d+(\.\d+)+", match["currentValue"]), path.name
+            tag = match["extractVersion"]
+            assert tag in (None, "^v(?<version>.+)$"), path.name
+            pinned += 1
+    # gitsign in sign-tag.sh and verify-release.yml, krankerl and Nextcloud in the
+    # release of a Nextcloud app, which every kind has, krankerl in the checks of a
+    # Nextcloud app too, and Infection in the mutation tests.
+    assert pinned == {
+        "blueprint": 6,
+        "nextcloud-app": 6,
+        "home-assistant": 5,
+        "github-action": 5,
+        "python-package": 5,
+    }.get(kind, 4)
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_downloads_of_the_workflows_follow_the_blueprint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The workflows and .github/sign-tag.sh belong to the blueprint, which moves the
+    # tools they download together with their sha256; the next release brings both to
+    # every repository. A repository's own Renovate would move only the version, and
+    # the download would fail its checksum in the next release.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    shared = renovate_rules(
+        (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    downloads = set(pins.load_record(ROOT))
+    enabled, tasks = True, None
+    for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
+        if downloads & set(rule.get("matchDepNames", [])):
+            assert set(rule["matchDepNames"]) == downloads
+            assert rule["matchManagers"] == ["custom.regex"]
+            assert rule["matchFileNames"] == [
+                ".github/workflows/**",
+                ".github/sign-tag.sh",
+            ]
+            enabled = rule["enabled"]
+            tasks = rule.get("postUpgradeTasks", tasks)
+    assert enabled is (kind == "blueprint")
+    if kind != "blueprint":
+        assert tasks is None
+        assert not (root / "pins.py").exists()
+        assert not (root / pins.RECORD).exists()
+        return
+    # After Renovate moved a version, pins.py writes its sha256, and Renovate commits
+    # the files it changed; the bot allows that one command and no other.
+    assert tasks == {
+        "commands": ["python3 pins.py"],
+        "fileFilters": [pins.RECORD, ".github/sign-tag.sh", ".github/workflows/*.yml"],
+        "executionMode": "branch",
+    }
+    bot = renovate_rules(
+        (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    )
+    assert bot["allowedCommands"] == ["^python3 pins\\.py$"]
+    assert all(
+        re.search(allowed, command)
+        for command in tasks["commands"]
+        for allowed in bot["allowedCommands"]
+    )
+    assert "allowShellExecutorForPostUpgradeCommands" not in bot
+    for pin in pins.find_pins(ROOT):
+        assert any(fnmatch.fnmatchcase(pin.path, name) for name in tasks["fileFilters"])
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
