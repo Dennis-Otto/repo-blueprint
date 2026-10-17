@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Die Reihe des Branch-Bots
+    accDescr: Ein Merge in main, ein an- oder ausgeschaltetes Auto-Merge oder eine vorgeschriebene Prüfung eines Pull Requests, die scheitert, startet den Branch-Bot. Er nimmt die Pull Requests, die auf Auto-Merge warten, in der Reihenfolge, in der es angeschaltet wurde. Einer mit Konflikten zu main bekommt das Label merge-conflict und einen Kommentar. Solange die Prüfungen eines aktuellen laufen, warten die anderen in der Reihe. Sonst wartet einer, dessen vorgeschriebene Prüfung gescheitert ist, auf eine Korrektur, und der Bot bringt den ersten anderen, der zurückliegt, als Release-App auf den neuesten Stand. Seine Prüfungen laufen, und sobald sie grün sind, merged er, was den Bot für den nächsten erneut startet.
+
+    start["Ein Merge in main · Auto-Merge an oder aus<br>eine vorgeschriebene Prüfung scheitert<br>der Zeitplan"]
+    line["Die Pull Requests, die auf Auto-Merge warten,<br>in der Reihenfolge, in der es angeschaltet wurde"]
+    conflict["Jeder mit Konflikten zu main bekommt<br>das Label merge-conflict und einen Kommentar"]
+    flight["Solange einer, der aktuell ist, seine Prüfungen<br>laufen lässt, warten die anderen in der Reihe"]
+    failed["Sonst wartet einer, dessen vorgeschriebene<br>Prüfung gescheitert ist, auf eine Korrektur<br>und macht Platz"]
+    update["Der erste andere, der zurückliegt, kommt<br>als Release-App auf den neuesten Stand"]
+    merge["Seine Prüfungen sind grün, er merged<br>und startet den Bot erneut"]
+
+    start --> line
+    line --> conflict
+    conflict --> flight
+    flight --> failed
+    failed --> update
+    update --> merge
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class line,flight,update bot
+    class conflict,failed person
+    class merge done
