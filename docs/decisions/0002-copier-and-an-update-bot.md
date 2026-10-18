@@ -1,6 +1,6 @@
 # Generate the repositories with Copier and keep them current with a bot
 
-- Status: accepted
+- Status: accepted, amended by [0052](0052-roll-out-every-release-at-once.md), which brings every release right after it is verified
 - Date: 2026-10-07
 
 ## Context
