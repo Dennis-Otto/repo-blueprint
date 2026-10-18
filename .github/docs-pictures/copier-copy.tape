@@ -122,9 +122,12 @@ Type "ls -A paperless-sync"
 Sleep 300ms
 Enter
 Sleep 3s
-Type "ls paperless-sync/.github/workflows"
+# The command after the copy, which every copy brings: a dry run shows what it runs,
+# without the GitHub CLI and its sign-in, which the recording has neither of.
+Type "cd paperless-sync && python3 .github/blueprint.py create --dry-run"
 Sleep 300ms
 Enter
+Wait /^\$$/
 Sleep 1s
 # The last screen, which the website shows before its video plays. VHS writes it
 # with the next frame, so the recording goes on after it.

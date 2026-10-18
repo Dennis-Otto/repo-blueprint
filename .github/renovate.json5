@@ -19,6 +19,15 @@
       ],
       datasourceTemplate: "npm",
     },
+    {
+      // The Copier of the quick start in the READMEs, with uv and with pipx.
+      customType: "regex",
+      managerFilePatterns: ["/^README(\\.de)?\\.md$/"],
+      matchStrings: [
+        "(?<depName>copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+) copier copy",
+      ],
+      datasourceTemplate: "pypi",
+    },
   ],
   packageRules: [
     {
@@ -84,6 +93,13 @@
     },
     {
       matchFileNames: ["stacks/copier/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Copier",
+    },
+    {
+      // The quick start copies with the Copier that the blueprint bot updates with.
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["copier"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "Copier",
     },

@@ -15,6 +15,8 @@ from pathlib import Path
 from blueprint.github import Api, GitHubError, Json
 
 CONFIG = Path(".github/repository.toml")
+# The branch that every workflow runs on: their triggers name main.
+BRANCH = "main"
 # The GitHub Actions app, which reports the checks of the workflows.
 ACTIONS_APP = 15368
 
@@ -48,7 +50,28 @@ def check_repository(api: Api, repo: str, want: dict[str, Json]) -> list[Drift]:
             have = have or ""
         if have != value:
             drift.append(Drift(f"repository.{key}", value, have))
-    return drift
+    return drift + check_default_branch(repo, data.get("default_branch"))
+
+
+def check_default_branch(repo: str, have: str | None) -> list[Drift]:
+    """The workflows run on pushes to main and on pull requests to it, so with another
+    default branch, such as the master of a Git without init.defaultBranch, none of
+    them runs. Renaming it is a step for a person, which apply leaves alone: GitHub
+    moves the open pull requests and the rules to the new name, but every clone needs
+    the new name too."""
+    if have in (None, BRANCH):
+        return []
+    return [
+        Drift(
+            "default branch",
+            BRANCH,
+            have,
+            manual=f"the workflows expect {BRANCH}: rename {have} to {BRANCH} at "
+            f"https://github.com/{repo}/branches, then in each clone: "
+            f"git branch --move {have} {BRANCH} && git fetch origin && "
+            f"git branch --set-upstream-to origin/{BRANCH} {BRANCH}",
+        )
+    ]
 
 
 def apply_repository(api: Api, repo: str, drift: list[Drift]) -> None:
