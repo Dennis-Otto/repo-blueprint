@@ -16,7 +16,7 @@
 # With these tools, scripts/check.sh builds the website too, as the check docs does.
 INHERIT: .github/mkdocs-blueprint.yml
 site_name: "Repo Blueprint"
-site_description: "A Copier template for GitHub repositories, with tests, releases, security checks and bots built in, for seven kinds of projects."
+site_description: "Copier template for self-maintaining GitHub repos (Python, Home Assistant/HACS, Nextcloud apps, GitHub Actions, Node/TypeScript, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update."
 site_url: https://dennis-otto.github.io/repo-blueprint/
 repo_url: https://github.com/Dennis-Otto/repo-blueprint
 repo_name: Dennis-Otto/repo-blueprint
@@ -43,7 +43,7 @@ plugins:
       - locale: de
         name: Deutsch
         build: true
-        site_description: "Eine Copier-Vorlage für GitHub-Repositories, mit Tests, Releases, Sicherheitsprüfungen und Bots, für sieben Arten von Projekten."
+        site_description: "Copier-Vorlage für GitHub-Repositorys, die sich selbst pflegen (Python, Home Assistant/HACS, Nextcloud-Apps, GitHub Actions, Node/TypeScript, Container): CI, signierte Releases nach SLSA L3, Renovate, OpenSSF Scorecard, Einstellungen als Code und ein Bot, der jedes Update der Vorlage ausrollt."
         nav_translations:
           Home: Start
           Guide: Anleitung

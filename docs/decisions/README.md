@@ -7,7 +7,7 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | Record | Decision | Status |
 | --- | --- | --- |
 | [0001](0001-record-decisions.md) | Record the decisions that shape the project | accepted |
-| [0002](0002-copier-and-an-update-bot.md) | Generate the repositories with Copier and keep them current with a bot | accepted |
+| [0002](0002-copier-and-an-update-bot.md) | Generate the repositories with Copier and keep them current with a bot | accepted, amended by [0052](0052-roll-out-every-release-at-once.md) |
 | [0003](0003-curated-changelog.md) | Write the changelog in the pull requests, and let the release bot assemble it | accepted |
 | [0004](0004-settings-as-code.md) | Keep the settings of every repository as code, applied by a bot | accepted |
 | [0005](0005-renovate-instead-of-dependabot.md) | Keep the dependencies current with a self-hosted Renovate | accepted |
@@ -57,4 +57,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0049](0049-every-owner-brings-their-own-release-app.md) | Every owner brings their own release app, and only the blueprint's owner gets its defaults | accepted |
 | [0050](0050-a-new-copy-becomes-its-repository-with-one-command.md) | A new copy becomes its repository on GitHub with one command that it brings, `blueprint.py create`, always on `main` | accepted |
 | [0051](0051-every-owner-chooses-who-runs-renovate-and-whether-an-ai-reads-the-issues.md) | Every owner chooses who runs Renovate, and whether an AI reads the issues | accepted |
-| [0052](0052-answers-render-valid-files-and-every-repository-links-its-website.md) | The answers render valid files, and every new repository links its website and has the topics of its kind | accepted |
+| [0052](0052-roll-out-every-release-at-once.md) | Bring every release to every repository right after it is verified, and keep the weekly run as a safety net | accepted |
+| [0053](0053-answers-render-valid-files-and-every-repository-links-its-website.md) | The answers render valid files, and every new repository links its website and has the topics of its kind | accepted |
