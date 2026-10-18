@@ -7,7 +7,9 @@ import importlib.util
 import io
 import json
 import logging
+import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -50,6 +52,28 @@ def config(
             current_language=building or default,
         )
     return SimpleNamespace(site_dir=str(site), plugins=plugins)
+
+
+def mkdocs_config(root: Path = Path("demo"), **more: Any) -> SimpleNamespace:
+    """The parts of a configuration of MkDocs that on_config reads, for a website in
+    one language whose mkdocs.yml is in root, without an address or a repository,
+    with more: without a repository, nothing reads the folder."""
+    return SimpleNamespace(
+        **{
+            "config_file_path": str(root / "mkdocs.yml"),
+            "docs_dir": str(root / "docs"),
+            "plugins": {},
+            "extra_css": [],
+            "extra_javascript": [],
+            "nav": None,
+            "theme": {"language": "en"},
+            "extra": {},
+            "site_url": None,
+            "repo_url": None,
+            "edit_uri": None,
+            **more,
+        }
+    )
 
 
 def site(root: Path, *pages: str) -> None:
@@ -188,14 +212,7 @@ def requests_of(plugin: Any) -> Any:
 def downloading(monkeypatch: pytest.MonkeyPatch, network: Network) -> Any:
     """The requests of the privacy plugin, after the hook has set it up."""
     privacy = plugin(monkeypatch, "privacy", network)
-    hooks().on_config(
-        SimpleNamespace(
-            plugins={"material/privacy": privacy},
-            extra_css=[],
-            extra_javascript=[],
-            nav=None,
-        )
-    )
+    hooks().on_config(mkdocs_config(plugins={"material/privacy": privacy}))
     return requests_of(privacy)
 
 
@@ -256,15 +273,12 @@ def test_both_plugins_that_download_try_again_and_nothing_else_changes(
     names = ("privacy", "social", "search")
     privacy, social, search = (plugin(monkeypatch, n, Network()) for n in names)
     module = hooks()
-    config = SimpleNamespace(
+    config = mkdocs_config(
         plugins={
             "material/privacy": privacy,
             "material/social": social,
             "material/search": search,
         },
-        extra_css=[],
-        extra_javascript=[],
-        nav=None,
     )
 
     module.on_config(config)
@@ -360,11 +374,8 @@ class Script:
 def test_every_page_gets_the_stylesheet_and_the_script_before_the_project_s() -> None:
     module = hooks()
     project = Script("javascripts/extra.js")
-    config = SimpleNamespace(
-        plugins={},
-        extra_css=["stylesheets/extra.css"],
-        extra_javascript=[project],
-        nav=None,
+    config = mkdocs_config(
+        extra_css=["stylesheets/extra.css"], extra_javascript=[project]
     )
 
     module.on_config(config)
@@ -972,9 +983,7 @@ def test_the_switch_of_the_scheme_speaks_the_language_of_the_page() -> None:
 
     def build(language: str, theme: dict[str, Any]) -> None:
         module.on_config(
-            bilingual(
-                language, theme=theme, extra_css=[], extra_javascript=[], nav=None
-            )
+            mkdocs_config(theme=theme, plugins=bilingual(language).plugins)
         )
 
     build("de", {"palette": palette})
@@ -999,6 +1008,312 @@ def test_the_switch_of_the_scheme_speaks_the_language_of_the_page() -> None:
     single = {"palette": {"scheme": "slate"}}
     build("de", single)
     assert single == {"palette": {"scheme": "slate"}}
+
+
+# ------------------------------------------------- the header and the footer of a page
+
+
+def owner_website(root: Path, funding: str | None = None, **more: Any) -> Any:
+    """The configuration of the website of Owner/demo, whose mkdocs.yml is in root,
+    with .github/FUNDING.yml when funding is given."""
+    if funding is not None:
+        (root / ".github").mkdir(parents=True, exist_ok=True)
+        (root / ".github/FUNDING.yml").write_text(funding, encoding="utf-8")
+    settings: dict[str, Any] = {
+        "site_url": "https://owner.github.io/demo/",
+        "repo_url": "https://github.com/Owner/demo",
+        **more,
+    }
+    return mkdocs_config(root, **settings)
+
+
+def footer(config: Any) -> Any:
+    """The links in the footer that the hooks give the website of config."""
+    hooks().on_config(config)
+    return config.extra.get("social")
+
+
+PROFILE = {
+    "icon": "fontawesome/brands/github",
+    "link": "https://github.com/Owner",
+    "name": "Owner on GitHub",
+}
+PROJECTS = {
+    "icon": "material/view-grid-outline",
+    "link": "https://owner.github.io/",
+    "name": "All projects of Owner",
+}
+
+
+def sponsor(account: str = "Owner") -> dict[str, str]:
+    return {
+        "icon": "octicons/heart-16",
+        "link": f"https://github.com/sponsors/{account}",
+        "name": f"Sponsor {account}",
+    }
+
+
+def test_the_footer_leads_to_the_owner_their_projects_and_sponsors(
+    tmp_path: Path,
+) -> None:
+    funding = "# The sponsor button\ngithub: [Owner]\n"
+
+    assert footer(owner_website(tmp_path, funding)) == [PROFILE, PROJECTS, sponsor()]
+
+
+def test_the_website_of_the_owner_leads_to_no_website_of_itself(
+    tmp_path: Path,
+) -> None:
+    hub = owner_website(
+        tmp_path,
+        "github: Owner\n",
+        site_url="https://Owner.github.io",
+        repo_url="https://github.com/Owner",
+        edit_uri="https://github.com/Owner/owner.github.io/edit/main/docs/",
+    )
+    elsewhere = owner_website(tmp_path, site_url="https://docs.example.org/demo/")
+    without_address = owner_website(tmp_path, site_url=None)
+
+    assert footer(hub) == [PROFILE, sponsor()]
+    # A website on a domain of its own or without an address may not be under the
+    # website of the owner, so it leads to their profile only.
+    assert footer(elsewhere) == [PROFILE, sponsor()]
+    assert footer(without_address) == [PROFILE, sponsor()]
+
+
+@pytest.mark.parametrize(
+    ("funding", "links"),
+    [
+        (None, [PROFILE, PROJECTS]),
+        ("github: [Maintainer, Owner]\n", [PROFILE, PROJECTS, sponsor("Maintainer")]),
+        ("patreon: owner\n", [PROFILE, PROJECTS]),
+        ("github: []\n", [PROFILE, PROJECTS]),
+        ("github: [not an account]\n", [PROFILE, PROJECTS]),
+        ("github: [42]\n", [PROFILE, PROJECTS]),
+        ("- github\n", [PROFILE, PROJECTS]),
+        ("github: [Owner\n", [PROFILE, PROJECTS]),
+    ],
+    ids=[
+        "none",
+        "first",
+        "elsewhere",
+        "empty",
+        "no-account",
+        "number",
+        "list",
+        "broken",
+    ],
+)
+def test_the_sponsor_link_follows_the_sponsor_button(
+    tmp_path: Path, funding: str | None, links: list[dict[str, str]]
+) -> None:
+    assert footer(owner_website(tmp_path, funding)) == links
+
+
+@pytest.mark.parametrize(
+    "address",
+    [None, "https://gitlab.com/owner/demo", "https://github.com/", "ftp://github.com"],
+)
+def test_a_website_without_a_repository_on_github_has_no_links_of_its_own(
+    tmp_path: Path, address: str | None
+) -> None:
+    config = owner_website(tmp_path, "github: [Owner]\n", repo_url=address)
+
+    assert footer(config) is None
+    assert config.extra == {}
+
+
+@pytest.mark.parametrize("own", [[{"icon": "x", "link": "https://x.example"}], []])
+def test_links_of_the_project_take_the_place_of_the_owner_s(
+    tmp_path: Path, own: list[dict[str, str]]
+) -> None:
+    config = owner_website(tmp_path, "github: [Owner]\n", extra={"social": own})
+    before = [dict(link) for link in own]
+
+    assert footer(config) is own
+    assert own == before
+
+
+def test_the_footer_speaks_the_language_of_the_page(tmp_path: Path) -> None:
+    module = hooks()
+    config = owner_website(tmp_path, "github: [Owner]\n")
+
+    def build(language: str) -> list[str]:
+        config.plugins = bilingual(language).plugins
+        module.on_config(config)
+        return [link["name"] for link in config.extra["social"]]
+
+    # The i18n plugin builds every further language after the default one, with
+    # the configuration of the build before.
+    assert build("en") == ["Owner on GitHub", "All projects of Owner", "Sponsor Owner"]
+    assert build("de") == [
+        "Owner auf GitHub",
+        "Alle Projekte von Owner",
+        "Owner sponsern",
+    ]
+    assert build("en")[0] == "Owner on GitHub"
+    # A language without words of its own takes the English ones, and a website in
+    # one language that of its theme.
+    assert build("fr")[0] == "Owner on GitHub"
+    german = owner_website(tmp_path, theme={"language": "de"})
+    assert footer(german)[0]["name"] == "Owner auf GitHub"
+
+
+def repository_link(facts: str = "", *, component: bool = False) -> str:
+    """The link to the repository in the header and in the menu of a phone, as
+    Material writes it, with the attribute that its script looks for, or as the
+    hooks leave it, with the facts that they write."""
+    attribute = ' data-md-component="source"' if component else ""
+    return (
+        '<a href="https://github.com/Owner/demo" title="Go to repository" '
+        f'class="md-source"{attribute}>\n'
+        '  <div class="md-source__icon md-icon">\n'
+        '    <svg viewBox="0 0 496 512"><path d="M165.9 397.4"/></svg>\n'
+        "  </div>\n"
+        '  <div class="md-source__repository">\n'
+        f"    Owner/demo{facts}\n"
+        "  </div>\n"
+        "</a>"
+    )
+
+
+def chrome(link: str) -> str:
+    """A page with link in its header and in the menu of a phone."""
+    return (
+        "<html><head></head><body>"
+        f'<header class="md-header"><div class="md-header__source">{link}</div>'
+        "</header>"
+        f'<nav class="md-nav"><div class="md-nav__source">{link}</div></nav>'
+        "</body></html>"
+    )
+
+
+def facts(version: str) -> str:
+    return (
+        '<ul class="md-source__facts">'
+        f'<li class="md-source__fact md-source__fact--version">{version}</li></ul>'
+    )
+
+
+def test_the_header_shows_the_version_and_asks_github_for_nothing() -> None:
+    module = hooks()
+    written = chrome(repository_link(component=True))
+    one = SimpleNamespace(site_url=SITE, plugins={})
+
+    module.BUILT.version = "v1.2.3"
+    assert module.on_post_page(written, page_of("guide.html"), one) == chrome(
+        repository_link(facts("v1.2.3"))
+    )
+    # Without a release, the link names only the repository.
+    module.BUILT.version = ""
+    assert module.on_post_page(written, page_of("guide.html"), one) == chrome(
+        repository_link()
+    )
+    # The 404 page is a template of the theme, with the same header.
+    assert module.on_post_template(written, "404.html", one) == chrome(
+        repository_link()
+    )
+    assert module.on_post_template("<urlset/>", "sitemap.xml", one) == "<urlset/>"
+
+
+def test_the_version_is_written_as_text() -> None:
+    module = hooks()
+    module.BUILT.version = "v1.0.0<b>"
+    output = module.on_post_page(
+        chrome(repository_link(component=True)),
+        page_of("guide.html"),
+        SimpleNamespace(site_url=SITE, plugins={}),
+    )
+
+    assert facts("v1.0.0&lt;b&gt;") in output
+
+
+def tagged(root: Path, *tags: str) -> Path:
+    """A repository in root with a commit for each tag, tagged with it, in order."""
+    roles = ("AUTHOR", "COMMITTER")
+    environment = {
+        **os.environ,
+        **{f"GIT_{role}_NAME": "Test" for role in roles},
+        **{f"GIT_{role}_EMAIL": "test@example.com" for role in roles},
+    }
+
+    def git(*arguments: str) -> None:
+        # The repository of the test signs nothing, whatever the configuration of
+        # the machine asks for.
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "commit.gpgSign=false",
+                "-c",
+                "tag.gpgSign=false",
+                *arguments,
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            env=environment,
+        )
+
+    root.mkdir(parents=True, exist_ok=True)
+    git("init", "--quiet")
+    for tag in tags:
+        git("commit", "--quiet", "--allow-empty", "--message", f"Release {tag}")
+        git("tag", tag)
+    git("commit", "--quiet", "--allow-empty", "--message", "After the release")
+    return root
+
+
+@pytest.mark.parametrize(
+    ("tags", "version"),
+    [
+        (("v1.0.0", "v1.2.3", "v1.3.0-beta.1", "release-2"), "v1.2.3"),
+        (("v0.1.0-beta.1",), ""),
+        ((), ""),
+    ],
+    ids=["stable", "only-betas", "no-tags"],
+)
+def test_the_version_is_the_newest_stable_release_before_the_build(
+    tmp_path: Path, tags: tuple[str, ...], version: str
+) -> None:
+    module = hooks()
+    root = tagged(tmp_path / "demo", *tags)
+
+    module.on_config(owner_website(root))
+
+    assert module.BUILT.version == version
+
+
+def test_without_git_or_its_history_the_header_shows_no_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = hooks()
+    # No folder above the website is a repository either.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    (tmp_path / "plain").mkdir()
+    module.on_config(owner_website(tmp_path / "plain"))
+    assert module.BUILT.version == ""
+
+    tagged(tmp_path / "demo", "v1.2.3")
+    monkeypatch.setenv("PATH", str(tmp_path / "plain"))
+    module.on_config(owner_website(tmp_path / "demo"))
+    assert module.BUILT.version == ""
+    # A website without a repository has no link to one and no version, and one
+    # whose link leads to the profile of its owner none of the website's own.
+    monkeypatch.undo()
+    for address in (None, "https://github.com/Owner/"):
+        module.on_config(owner_website(tmp_path / "demo", repo_url=address))
+        assert module.BUILT.version == ""
+    module.on_config(owner_website(tmp_path / "demo"))
+    assert module.BUILT.version == "v1.2.3"
+
+
+def test_the_settings_of_every_website_promise_only_what_is_true() -> None:
+    settings = (ROOT / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+
+    assert "come\n  # from the API of GitHub" not in settings
+    assert "the API of GitHub" in settings
+    assert "extra.social" in settings
 
 
 def test_the_search_and_search_engines_leave_out_copies_and_templates() -> None:
@@ -1611,6 +1926,8 @@ def website(root: Path, *locales: str, **more: Any) -> Any:
             "site_name": 'Demo "Project"',
             "repo_url": "https://github.com/owner/demo/",
             "edit_uri": None,
+            "site_url": None,
+            "extra": {},
             "theme": {"language": "en"},
             "plugins": plugins,
             **more,

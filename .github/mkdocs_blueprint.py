@@ -15,6 +15,7 @@ import posixpath
 import re
 import shutil
 import struct
+import subprocess
 import sys
 import time
 import tomllib
@@ -172,8 +173,9 @@ class Retrying:
 
 def on_config(config: Any) -> None:
     """Let the plugins of Material try a download again before they give up, give
-    every page the stylesheet and the script of the blueprint, and put the page of
-    the automation into the menu.
+    every page the stylesheet and the script of the blueprint, the links to the
+    owner in the footer and the version of the latest release in the header, and
+    put the page of the automation into the menu.
 
     The plugins try every file once: the privacy plugin warns when a font of Google
     Fonts doesn't come within 5 seconds, which fails a strict build, and the social
@@ -198,6 +200,12 @@ def on_config(config: Any) -> None:
     found = languages(config)
     if found is not None:
         name_the_toggles(config.theme, found.current)
+    link_the_owner(config, found)
+    # The link to the repository shows its version; one to the profile of the
+    # owner, as on a personal website, shows none of the website's.
+    root = Path(config.config_file_path).parent
+    repository = urlparse(config.repo_url or "").path.strip("/").count("/") == 1
+    BUILT.version = newest_release(root) if repository else ""
     if (
         isinstance(config.nav, list)
         and automated(config) is not None
@@ -265,6 +273,172 @@ def name_the_toggles(theme: Any, language: str) -> None:
         if "name" in toggle:
             english = ENGLISH.get(toggle["name"], toggle["name"])
             toggle["name"] = TOGGLES.get(language, {}).get(english, english)
+
+
+# ------------------------------------------------- the header and the footer of a page
+
+# The links in the footer of every page, which lead to the owner of the repository:
+# their profile on GitHub, their own website with all of their projects, for a
+# website under it, such as https://owner.github.io/demo/ under
+# https://owner.github.io/, and GitHub Sponsors, when .github/FUNDING.yml names an
+# account there, as the sponsor button of the repository does. Their names, which
+# a screen reader reads and a pointer shows, in each language that has words here;
+# every other one takes the English ones.
+FUNDING = ".github/FUNDING.yml"
+ACCOUNT = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?")
+OWNER_LINKS = {
+    "en": {
+        "profile": "{owner} on GitHub",
+        "projects": "All projects of {owner}",
+        "sponsor": "Sponsor {account}",
+    },
+    "de": {
+        "profile": "{owner} auf GitHub",
+        "projects": "Alle Projekte von {owner}",
+        "sponsor": "{account} sponsern",
+    },
+}
+# The link to the repository in the header and in the menu of a phone. The script of
+# Material fills a link with this attribute with the numbers of the repository, its
+# latest release, stars and forks, which the browser of every reader asked the API
+# of GitHub for, once in each session: that failed on a website without a release,
+# and a network that many share hit the limit of the API. The hooks take the
+# attribute away and write the version of the latest release into the link, read
+# from git at the build.
+SOURCE_LINK = re.compile(
+    r'(?P<link><a\b[^>]*?\bclass="md-source")\s+data-md-component="source"'
+    r'(?P<name>[^>]*>.*?<div class="md-source__repository">.*?)(?=\s*</div>)',
+    re.S,
+)
+# The newest stable release before the commit of the build, such as v1.2.0 and not
+# v1.3.0-beta.1, by the tag that git describes it with.
+NEWEST_RELEASE = (
+    "git",
+    "describe",
+    "--tags",
+    "--abbrev=0",
+    "--match",
+    "v[0-9]*",
+    "--exclude",
+    "*-*",
+)
+
+
+def link_the_owner(config: Any, found: Languages | None) -> None:
+    """Give the footer of every page the links to the owner of the repository, in
+    the language of the build.
+
+    A list extra.social of mkdocs.yml, also an empty one, takes their place, since
+    INHERIT replaces every list. The i18n plugin builds every further language with
+    the configuration of the build before, so a list that the hooks gave it before
+    is theirs to name anew.
+    """
+    social = config.extra.get("social")
+    if social is not None and social != BUILT.social:
+        return
+    language = found.current if found else str(config.theme.get("language"))
+    BUILT.social = owner_links(config, OWNER_LINKS.get(language, OWNER_LINKS["en"]))
+    if BUILT.social:
+        config.extra["social"] = BUILT.social
+
+
+def owner_links(config: Any, names: dict[str, str]) -> list[dict[str, str]]:
+    """The links to the owner, with their names: none for a website whose
+    repository is not on GitHub."""
+    owner = owner_of(config)
+    if not owner:
+        return []
+    links = [
+        {
+            "icon": "fontawesome/brands/github",
+            "link": f"https://github.com/{owner}",
+            "name": names["profile"].format(owner=owner),
+        }
+    ]
+    hub = f"{owner.lower()}.github.io"
+    address = urlparse(config.site_url or "")
+    if address.netloc.lower() == hub and address.path.strip("/"):
+        links.append(
+            {
+                "icon": "material/view-grid-outline",
+                "link": f"https://{hub}/",
+                "name": names["projects"].format(owner=owner),
+            }
+        )
+    account = sponsored(Path(config.config_file_path).parent / FUNDING)
+    if account:
+        links.append(
+            {
+                "icon": "octicons/heart-16",
+                "link": f"https://github.com/sponsors/{account}",
+                "name": names["sponsor"].format(account=account),
+            }
+        )
+    return links
+
+
+def owner_of(config: Any) -> str:
+    """The owner of the website's repository on GitHub, from repo_url, also the
+    profile of the owner on a personal website, or from an absolute edit_uri; ""
+    for a repository elsewhere."""
+    for value in (config.repo_url, config.edit_uri):
+        address = urlparse(value or "")
+        owner = address.path.strip("/").partition("/")[0]
+        if (
+            address.scheme in ("http", "https")
+            and address.netloc == "github.com"
+            and owner
+        ):
+            return owner
+    return ""
+
+
+def sponsored(path: Path) -> str:
+    """The first account of GitHub Sponsors that the FUNDING.yml at path names, or
+    "" when it names none or can't be read."""
+    try:
+        funding = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return ""
+    accounts = funding.get("github") if isinstance(funding, dict) else None
+    if not isinstance(accounts, list):
+        accounts = [accounts]
+    first = accounts[0] if accounts else None
+    return first if isinstance(first, str) and ACCOUNT.fullmatch(first) else ""
+
+
+def newest_release(root: Path) -> str:
+    """The tag of the newest stable release in the repository at root, such as
+    v1.2.0, or "" without one, without the history or without git.
+
+    The Docs workflow checks the repository out with its whole history and tags.
+    """
+    try:
+        described = subprocess.run(
+            NEWEST_RELEASE,
+            cwd=root,
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError:
+        return ""
+    return described.stdout.strip() if described.returncode == 0 else ""
+
+
+def source_facts(output: str) -> str:
+    """The link to the repository in the header and in the menu of a phone, without
+    the attribute that has the script of Material ask GitHub for its numbers, and
+    with the version of the latest release, as that script would show it."""
+    facts = ""
+    if BUILT.version:
+        facts = (
+            '<ul class="md-source__facts">'
+            '<li class="md-source__fact md-source__fact--version">'
+            f"{html.escape(BUILT.version)}</li></ul>"
+        )
+    return SOURCE_LINK.sub(lambda match: match["link"] + match["name"] + facts, output)
 
 
 def on_files(files: Any, config: Any) -> Any:
@@ -335,8 +509,10 @@ class Built:
     """What the builds of every language found, for the steps after the last one:
     the paths of the pages that a further language shows untranslated, such as
     de/roadmap.html, and the addresses of the pages that no search engine lists;
-    and the pages that the hooks write, such as the page of the automation, with
-    the text of each by its path in docs/ and the files that they are made of.
+    the pages that the hooks write, such as the page of the automation, with
+    the text of each by its path in docs/ and the files that they are made of; the
+    links in the footer that the hooks gave the build before, None until they did;
+    and the version of the latest release, which the header shows.
 
     The i18n plugin builds every further language within the build of the default
     one, and MkDocs loads the hooks anew for each build of mkdocs serve.
@@ -347,6 +523,8 @@ class Built:
         self.unlisted: set[str] = set()
         self.pages: dict[str, str] = {}
         self.sources: list[Path] = []
+        self.social: list[dict[str, str]] | None = None
+        self.version = ""
 
 
 BUILT = Built()
@@ -784,7 +962,9 @@ def on_post_page(output: str, page: Any, config: Any) -> str:
     """Give the head of a page what search engines and the search need to know of
     its language: the full addresses of its versions in other languages, a page
     that a further language shows untranslated as a copy of the page of the default
-    language, which no search engine lists, and the search in its language.
+    language, which no search engine lists, and the search in its language; and
+    the link to the repository the version of the latest release, which the
+    browser of the reader no longer asks GitHub for.
 
     It runs after the hooks of a project, such as one that leads the home page to
     the root of the address, and after the privacy plugin.
@@ -796,7 +976,7 @@ def on_post_page(output: str, page: Any, config: Any) -> str:
             output = search_in_language(output, page, found)
     if unlisted(page, config):
         output = output.replace("</head>", f"{NOINDEX}</head>", 1)
-    return output
+    return source_facts(output)
 
 
 on_post_page.mkdocs_priority = -60  # type: ignore[attr-defined]
@@ -988,7 +1168,8 @@ def write_index(path: Path, data: dict[str, Any]) -> None:
 
 
 def on_post_template(output_content: str, template_name: str, config: Any) -> str:
-    """Keep the 404 page of the default language at the root.
+    """Keep the 404 page of the default language at the root, with the link to the
+    repository of every other page.
 
     The i18n plugin builds every further language into the same folder, and that
     build would write 404.html at the root again: in the further language, and with
@@ -996,7 +1177,9 @@ def on_post_template(output_content: str, template_name: str, config: Any) -> st
     """
     plugin = config.plugins.get("i18n")
     further = plugin is not None and not plugin.is_default_language_build
-    return "" if template_name == "404.html" and further else output_content
+    if template_name == "404.html" and further:
+        return ""
+    return source_facts(output_content)
 
 
 # ---------------------------------------------------------- the page of the automation
