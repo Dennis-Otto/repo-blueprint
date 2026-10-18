@@ -23,6 +23,8 @@ Option 3, in the hook of every website, `.github/mkdocs_blueprint.py`: the page 
 - **What doesn't run:** a workflow of which no job runs in the repository of the website, such as the checks of the kinds of projects in the blueprint itself, stays out.
 - **Languages:** the page speaks the language of the website, and a website in German gets a German page too, whose comments of the workflows are English and marked so.
 - **The menu:** the template lists it after the security design, and the hook puts it there in a menu that doesn't name it, so that every repository gets it with its next update.
+- **The address of the repository:** the links to the files take it from `repo_url` when that names owner and repository, and otherwise from an absolute `edit_uri`, as on a personal website whose `repo_url` is its owner's profile; without either the files show as plain names.
+- **The title:** *Automation* in the menu of every website. A project where the word means something else, such as the automations of Home Assistant in ha-autodarts, names the page in its own menu, for example `- Repository automation: automation.md`.
 - **The project decides:** a page `docs/automation.md` of the project takes its place, and `docs/automation.de.md` that of the German one; paperless-sync keeps its own.
 - **Every workflow says what it does:** CodeQL, the dependency review and the Scorecard got the comment at their top that they lacked.
 

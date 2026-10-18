@@ -9109,6 +9109,7 @@ def test_every_website_shows_the_automation_of_its_repository(
         docs_dir=str(project / "docs"),
         site_name="Demo Project",
         repo_url=address,
+        edit_uri=None,
         theme={"language": "en"},
         plugins={},
     )
@@ -9145,7 +9146,7 @@ def test_every_website_shows_the_automation_of_its_repository(
     blueprint = "https://github.com/Dennis-Otto/repo-blueprint"
     assert f"from the [Repo Blueprint]({blueprint})" in page
     nav = (project / "mkdocs.yml").read_text(encoding="utf-8").split("\nnav:\n")[1]
-    assert "\n  - Automation: automation.md\n" in nav
+    assert "\n  - automation.md\n" in nav
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])

@@ -1071,7 +1071,7 @@ WORDS: dict[str, dict[str, str]] = {
         "required-checks": "What a pull request needs",
         "required intro": (
             "A pull request merges into `main` once each of these checks passes, as "
-            "the settings in `.github/repository.toml` require:"
+            "the settings in {files} require:"
         ),
         "check of": "{check} of {workflow}",
         "at-a-glance": "At a glance",
@@ -1149,8 +1149,7 @@ WORDS: dict[str, dict[str, str]] = {
         "required-checks": "Was ein Pull Request braucht",
         "required intro": (
             "Ein Pull Request kommt nach `main`, sobald jede dieser Prüfungen "
-            "besteht, wie es die Einstellungen in `.github/repository.toml` "
-            "verlangen:"
+            "besteht, wie es die Einstellungen in {files} verlangen:"
         ),
         "check of": "{check} aus {workflow}",
         "at-a-glance": "Auf einen Blick",
@@ -1514,19 +1513,20 @@ def automation_pages(folder: Path, config: Any) -> dict[str, str]:
         required += data.get("branch", {}).get("required_checks", [])
     required = list(dict.fromkeys(required))
     BUILT.sources = [folder, *settings]
-    repository = urlparse(config.repo_url or "").path.strip("/")
-    flows = workflows(folder, repository)
+    address = repository_address(config)
+    flows = workflows(folder, urlparse(address).path.strip("/"))
+    names = [path.name for path in settings]
     found = languages(config)
     default = found.default if found else str(config.theme.get("language"))
     pages = {
         AUTOMATION: automation_page(
-            flows, required, config, default if default in WORDS else "en"
+            flows, required, names, config, default if default in WORDS else "en"
         )
     }
     for language in found.further if found else ():
         name = AUTOMATION.replace(".md", f".{language}.md")
         if language in WORDS and not (Path(config.docs_dir) / name).exists():
-            pages[name] = automation_page(flows, required, config, language)
+            pages[name] = automation_page(flows, required, names, config, language)
     return pages
 
 
@@ -1723,12 +1723,31 @@ def mermaid(source: str) -> str:
     return f"```mermaid\n{source}```"
 
 
+def repository_address(config: Any) -> str:
+    """The address of the website's repository, such as
+    https://github.com/owner/name, or "" when the website does not tell it.
+
+    repo_url is it when its path is owner/name; a website whose repo_url is the
+    profile of its owner, such as a personal one, tells it by an absolute edit_uri.
+    """
+    for value, exact in ((config.repo_url, True), (config.edit_uri, False)):
+        address = urlparse(value or "")
+        parts = [part for part in address.path.split("/") if part]
+        if address.netloc and (len(parts) == 2 or (not exact and len(parts) > 2)):
+            return f"{address.scheme}://{address.netloc}/{parts[0]}/{parts[1]}"
+    return ""
+
+
 def automation_page(
-    flows: list[Workflow], required: list[str], config: Any, language: str
+    flows: list[Workflow],
+    required: list[str],
+    settings: list[str],
+    config: Any,
+    language: str,
 ) -> str:
     """The page of the automation in language, as Markdown: what the workflows do,
-    what a pull request needs, a table of what starts each, and each workflow in its
-    group."""
+    what a pull request needs by the files of settings in .github/ that require it,
+    a table of what starts each, and each workflow in its group."""
     words = WORDS[language]
     overview, release = DIAGRAMS[language]
     count = len(flows)
@@ -1752,7 +1771,8 @@ def automation_page(
     ]
     if required:
         lines += [f"## {words['required-checks']} {{#required-checks}}", ""]
-        lines += [words["required intro"], ""]
+        files = listing([f"`.github/{name}`" for name in settings], words["and"])
+        lines += [words["required intro"].format(files=files), ""]
         for check in required:
             provider = providers.get(check)
             lines.append(
@@ -1777,7 +1797,7 @@ def automation_page(
         when = ", ".join(flow.when(language, anchors, brief=True))
         lines.append(f"| [{plain(flow.name)}](#{flow.anchor}) | {when} |")
     lines.append("")
-    repository = (config.repo_url or "").rstrip("/")
+    repository = repository_address(config)
     for group in GROUPS:
         if not groups[group]:
             continue

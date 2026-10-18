@@ -1610,6 +1610,7 @@ def website(root: Path, *locales: str, **more: Any) -> Any:
             "use_directory_urls": False,
             "site_name": 'Demo "Project"',
             "repo_url": "https://github.com/owner/demo/",
+            "edit_uri": None,
             "theme": {"language": "en"},
             "plugins": plugins,
             **more,
@@ -1800,6 +1801,54 @@ def test_the_blueprint_s_own_page_names_no_origin(tmp_path: Path) -> None:
         ".github/workflows/ci.yml)\n"
     ) in page
     assert "from the [Repo Blueprint]" not in page
+
+
+def test_a_profile_address_takes_the_repository_from_edit_uri(
+    tmp_path: Path,
+) -> None:
+    site = "https://github.com/Dennis-Otto/dennis-otto.github.io"
+    page = automation(
+        tmp_path,
+        repo_url="https://github.com/Dennis-Otto",
+        edit_uri=f"{site}/edit/main/docs/",
+    )["automation.md"]
+
+    assert (
+        f"- **Source:** [`.github/workflows/ci.yml`]({site}/blob/HEAD/"
+        ".github/workflows/ci.yml), from the [Repo Blueprint]"
+    ) in page
+    assert "https://github.com/Dennis-Otto/blob/" not in page
+
+
+@pytest.mark.parametrize(
+    ("repo_url", "edit_uri"),
+    [
+        ("https://github.com/Dennis-Otto", "edit/main/docs/"),
+        ("https://github.com/Dennis-Otto", None),
+        ("https://github.com/Dennis-Otto", "https://github.com/Dennis-Otto/"),
+        (None, None),
+    ],
+)
+def test_without_the_address_of_a_repository_sources_are_plain(
+    tmp_path: Path, repo_url: str | None, edit_uri: str | None
+) -> None:
+    page = automation(tmp_path, repo_url=repo_url, edit_uri=edit_uri)["automation.md"]
+
+    assert "- **Source:** `.github/workflows/ci.yml`" in page
+    assert "/blob/HEAD/" not in page
+
+
+def test_the_required_checks_name_each_file_of_settings(tmp_path: Path) -> None:
+    pages = automation(tmp_path, "en", "de")
+
+    assert (
+        "the settings in `.github/repository.toml` and "
+        "`.github/repository.project.toml` require:"
+    ) in pages["automation.md"]
+    assert (
+        "die Einstellungen in `.github/repository.toml` und "
+        "`.github/repository.project.toml` verlangen:"
+    ) in pages["automation.de.md"]
 
 
 @pytest.mark.parametrize(
@@ -2095,12 +2144,14 @@ def test_the_page_of_the_automation_draws_its_diagrams_live(tmp_path: Path) -> N
 
 
 def test_the_blueprint_and_every_repository_list_the_page_in_the_menu() -> None:
-    for path in ("mkdocs.yml", "template/mkdocs.yml.jinja"):
+    # The blueprint names it and translates the name; the template lists the page
+    # alone, so that each language shows the title of its page.
+    for path, entry in (
+        ("mkdocs.yml", "Automation: automation.md"),
+        ("template/mkdocs.yml.jinja", "automation.md"),
+    ):
         config = (ROOT / path).read_text(encoding="utf-8")
-        assert (
-            "\n  - Security design: security.md\n  - Automation: automation.md\n"
-            in (config)
-        ), path
+        assert f"\n  - Security design: security.md\n  - {entry}\n" in config, path
     assert "\n          Automation: Automatisierung\n" in (
         ROOT / "mkdocs.yml"
     ).read_text(encoding="utf-8")
