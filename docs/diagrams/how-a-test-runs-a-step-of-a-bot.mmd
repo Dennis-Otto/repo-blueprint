@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a test runs a step of a bot
+    accDescr: A test names a step of a workflow and plans the answers of gh. run_step reads the step from the parsed workflow, with the variables of the step, its job and its workflow, and runs its script in bash with the options of GitHub, in Git Bash on Windows. gh is the fake gh, which answers each call as planned, fails a call without an answer and writes every call down with what it read. The test checks the calls, the summary, the outputs and the exit code. A census finds every step that deletes, starts, merges, publishes or comments, and fails while one of them runs in no test.
+
+    test(["A test names a step of a workflow<br>and plans the answers of gh"])
+    step["run_step reads the step from the parsed workflow,<br>with the variables of the step, its job and its workflow"]
+    bash["bash runs its script with the options of GitHub,<br>in Git Bash on Windows"]
+    gh["The fake gh answers each call as planned,<br>fails a call without an answer<br>and writes every call down with what it read"]
+    checked["The test checks the calls, the summary,<br>the outputs and the exit code"]
+    census["A census finds every step that deletes, starts,<br>merges, publishes or comments"]
+
+    test --> step
+    step --> bash
+    bash --> gh
+    gh --> checked
+    census -. "fails while one of them<br>runs in no test" .-> test
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class step,bash,gh,census bot
+    class test person
+    class checked done
