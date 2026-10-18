@@ -30,9 +30,10 @@ AFTER = (
     ["python3", ".github/blueprint.py", "checklist"],
 )
 # The owner and the name of the repository, as Copier writes them into its answers:
-# the questions take letters, digits, hyphens and the dots of owner.github.io only,
-# so Copier never quotes them.
-ANSWER = re.compile(r"^(owner|project_slug): ([\w.-]+)$", re.MULTILINE)
+# the questions take letters, digits, hyphens and the dots of owner.github.io only.
+# Copier writes them with PyYAML, which quotes a value that YAML would read as a
+# number, a bool or null, such as the slug '2048' or an owner of digits only.
+ANSWER = re.compile(r"^(owner|project_slug): (['\"]?)([\w.-]+)\2$", re.MULTILINE)
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
 
 Runner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
@@ -61,11 +62,12 @@ def answered_repo(root: Path) -> str:
     """OWNER/NAME of the repository, from the answers that Copier wrote."""
     path = root / ANSWERS
     text = path.read_text(encoding="utf-8") if path.exists() else ""
-    answers = dict(ANSWER.findall(text))
+    answers = {key: value for key, _, value in ANSWER.findall(text)}
     if "owner" not in answers or "project_slug" not in answers:
         raise CreateError(
             f"{ANSWERS} names no owner and project_slug: run create in the folder "
-            "that copier copy wrote, or name the repository with --repo OWNER/NAME"
+            "that copier copy wrote, or name the repository: "
+            "python3 .github/blueprint.py --repo OWNER/NAME create"
         )
     return f"{answers['owner']}/{answers['project_slug']}"
 

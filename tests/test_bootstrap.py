@@ -216,6 +216,26 @@ def test_a_repository_without_its_owner_is_refused(root: Path) -> None:
         create(root, "A demo", repo="demo", run=Shell())
 
 
+@pytest.mark.parametrize("quote", ["'", '"'])
+def test_the_answers_that_yaml_quotes_are_read(root: Path, quote: str) -> None:
+    # PyYAML quotes an owner or a slug that YAML would read as a number.
+    (root / ".copier-answers.yml").write_text(
+        f"owner: {quote}1234{quote}\nproject_slug: {quote}2048{quote}\n",
+        encoding="utf-8",
+    )
+
+    assert bootstrap.answered_repo(root) == "1234/2048"
+
+
+def test_answers_with_quotes_that_do_not_match_are_not_read(root: Path) -> None:
+    (root / ".copier-answers.yml").write_text(
+        "owner: 'octo-org\"\nproject_slug: demo\n", encoding="utf-8"
+    )
+
+    with pytest.raises(CreateError, match="names no owner"):
+        bootstrap.answered_repo(root)
+
+
 def test_the_answers_of_a_windows_checkout_are_read(root: Path) -> None:
     (root / ".copier-answers.yml").write_bytes(ANSWERS.replace("\n", "\r\n").encode())
 

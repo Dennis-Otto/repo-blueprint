@@ -2161,6 +2161,24 @@ def test_create_with_dry_run_changes_nothing(
     assert "  python3 .github/blueprint.py settings apply\n" in out
 
 
+def test_create_without_the_answers_names_a_command_that_works(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (copy / ".copier-answers.yml").unlink()
+
+    assert run(github, copy, "create", "--dry-run") == 2
+
+    err = capsys.readouterr().err
+    named = err.split("python3 .github/blueprint.py ", 1)[1].split()
+    assert named == ["--repo", "OWNER/NAME", "create"]
+    named[1] = REPO
+    assert run(github, copy, *named, "--dry-run") == 0
+    assert capsys.readouterr().out.startswith(f"create would make {REPO} on GitHub")
+
+
 def test_create_refuses_a_folder_that_pushes_to_a_remote(
     github: FakeGitHub,
     copy: Path,
