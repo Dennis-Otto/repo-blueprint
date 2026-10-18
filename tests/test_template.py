@@ -3173,7 +3173,7 @@ def test_the_syntax_check_of_a_nextcloud_app_reads_the_files_at_once(
 ) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
     start = check.index('step "PHP syntax"')
-    syntax = check[start : check.index('step "Coding standard"', start)]
+    syntax = check[start : check.index('step "Oldest PHP"', start)]
     repository = tmp_path / "repository"
     (repository / "scripts").mkdir(parents=True)
     # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
@@ -3232,6 +3232,146 @@ def test_the_syntax_check_of_a_nextcloud_app_reads_the_files_at_once(
         assert result.stdout == "\n== PHP syntax\nEvery PHP file parses.\n"
 
 
+@pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("oldest", "installed", "failure", "expected"),
+    [
+        # An app whose tools still run on its oldest PHP, as one made before PHP 8.3.
+        ("8.3", False, None, "The tools run on PHP 8.3, the oldest PHP of the app.\n"),
+        # An appinfo/info.xml without a PHP: Nextcloud then takes each PHP that it runs on.
+        ("", False, None, "The tools run on PHP 8.3, the oldest PHP of the app.\n"),
+        (
+            "8.2",
+            True,
+            None,
+            "The code of the app parses on PHP 8.2, and the packages that it ships"
+            " install there.\n",
+        ),
+        ("8.2", True, "syntax", None),
+        ("8.2", True, "packages", None),
+        ("8.2", False, "missing", None),
+        (
+            "8.2",
+            False,
+            "elsewhere",
+            "PHP 8.2, the oldest PHP of appinfo/info.xml, is not installed here as"
+            " php8.2; the CI checks the code on it.\n",
+        ),
+    ],
+)
+def test_the_code_of_a_nextcloud_app_parses_and_installs_on_its_oldest_php(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    oldest: str,
+    installed: bool,
+    failure: str | None,
+    expected: str | None,
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Oldest PHP"')
+    step = check[start : check.index('step "Coding standard"', start)]
+    # Right after the syntax on the PHP of the tools.
+    assert check.index('step "PHP syntax"') < start
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    (repository / "scripts/oldest.sh").write_text(
+        check[: check.index('step "Text files"')] + step,
+        encoding="utf-8",
+        newline="\n",
+    )
+    # What the app ships, and the tests and the tools, which only the PHP of the tools
+    # runs.
+    shipped = [
+        "appinfo/routes.php",
+        "lib/AppInfo/Application.php",
+        "lib/Service/A Service.php",
+        "templates/main.php",
+        *(["lib/Broken.php"] if failure == "syntax" else []),
+    ]
+    for name in [*shipped, "tests/Unit/ApplicationTest.php", "vendor/autoload.php"]:
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_text("<?php\n", encoding="utf-8")
+    # The PHP of the tools answers the two questions of the step: the oldest PHP of
+    # appinfo/info.xml and its own version.
+    php = textwrap.dedent(
+        """\
+        case "$2" in
+          *simplexml_load_file*) printf '%s' "$OLDEST" ;;
+          *PHP_MAJOR_VERSION*) printf 8.3 ;;
+        esac
+        """
+    )
+    oldest_php = textwrap.dedent(
+        """\
+        if [[ "$1" == --syntax-check ]]; then
+          if [[ "$2" == *Broken.php ]]; then
+            printf '\nParse error: syntax error, unexpected identifier in %s on line 2\n' "$2"
+            echo "Errors parsing $2"
+            exit 255
+          fi
+          echo "No syntax errors detected in $2"
+        elif [[ -n "$NEEDS_NEWER" ]]; then
+          echo "php 8.2.34 acme/clock requires php (>=8.3) failed"
+          exit 2
+        else
+          echo "php 8.2.34 success"
+        fi
+        """
+    )
+    tools = {"php": php, "composer": "", "getconf": "echo 4\n"}
+    if installed:
+        tools["php8.2"] = oldest_php
+    # No PHP 8.2 of this computer stands in for the missing one.
+    path = os.pathsep.join(
+        folder
+        for folder in os.environ.get("PATH", "").split(os.pathsep)
+        if not (Path(folder) / "php8.2").exists()
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/oldest.sh\n",
+        repository,
+        tools,
+        ("CI",) if failure == "elsewhere" else (),
+        OLDEST=oldest,
+        NEEDS_NEWER="yes" if failure == "packages" else "",
+        PATH=path,
+        **({} if failure == "elsewhere" else {"CI": "true"}),
+    )
+
+    on_oldest = [call for call in calls if call.startswith("php8.2 ")]
+    if expected is not None:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.endswith(expected)
+    else:
+        assert result.returncode != 0
+        assert "The code of the app parses" not in result.stdout
+    if not installed:
+        assert not on_oldest
+    if failure == "missing":
+        assert result.stderr == (
+            "PHP 8.2, the oldest PHP of appinfo/info.xml, is missing: the CI needs it"
+            " as php8.2 beside PHP 8.3, the PHP of the tools.\n"
+        )
+    if failure == "syntax":
+        assert "Errors parsing lib/Broken.php\n" in result.stdout
+        assert not any("check-platform-reqs" in call for call in on_oldest)
+    if installed and failure != "syntax":
+        # Each file that the app ships, on as many processors as there are, and none of
+        # its tests or tools; then the packages that it ships, on the same PHP.
+        syntax = sorted(call for call in on_oldest if "--syntax-check" in call)
+        assert syntax == sorted(f"php8.2 --syntax-check {name}" for name in shipped)
+        assert "No syntax errors detected" not in result.stdout
+        # The Composer of the PATH, a PHAR that the oldest PHP runs.
+        assert re.fullmatch(
+            r"php8\.2 \S+/bin/composer check-platform-reqs --lock --no-dev",
+            on_oldest[-1],
+        )
+        assert ("acme/clock requires php (>=8.3) failed" in result.stdout) == (
+            failure == "packages"
+        )
+
+
 def test_the_ci_of_a_nextcloud_app_keeps_the_packages_of_composer() -> None:
     workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
     find = step_of(workflow, "      - name: Find the cache of Composer")
@@ -3253,6 +3393,111 @@ def test_the_ci_of_a_nextcloud_app_keeps_the_packages_of_composer() -> None:
         in restore
     )
     assert "          restore-keys: composer-${{ runner.os }}-\n" in restore
+
+
+# The two PHPs of the CI of a Nextcloud app, in the CI and in the Variants, which run
+# its checks with its own tools.
+PHP_WORKFLOWS = [
+    ("ci-php.yml", ""),
+    ("variants.yml", "matrix.kind == 'nextcloud-app' && "),
+]
+
+
+@pytest.mark.parametrize(("name", "condition"), PHP_WORKFLOWS)
+def test_the_tools_of_a_nextcloud_app_run_on_the_php_of_its_composer_json(
+    name: str, condition: str
+) -> None:
+    workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    find = step_of(
+        workflow,
+        "      - name: Find the PHP of the tools and the oldest PHP of the app",
+    )
+    oldest = step_of(workflow, "      - name: Set up the oldest PHP of the app")
+    tools = step_of(workflow, "      - name: Set up the PHP of the tools")
+    # The oldest PHP first and that of the tools last, which php runs then; both
+    # before Composer installs the tools.
+    assert workflow.index(find) < workflow.index(oldest) < workflow.index(tools)
+    assert workflow.index(tools) < workflow.index("composer install")
+    assert "        id: php\n" in find
+    assert (
+        f"        if: {condition}steps.php.outputs.oldest != steps.php.outputs.tools\n"
+        in oldest
+    )
+    assert "          php-version: ${{ steps.php.outputs.oldest }}\n" in oldest
+    assert "          coverage: none\n" in oldest
+    assert "          php-version: ${{ steps.php.outputs.tools }}\n" in tools
+    assert "          coverage: pcov\n" in tools
+    assert "          tools: composer:v2\n" in tools
+    # The same extensions on both, which the packages of the app may need.
+    extensions = "          extensions: dom, libxml, mbstring, xml\n"
+    assert extensions in oldest
+    assert extensions in tools
+    # No PHP of its own beside the two that the app names.
+    assert workflow.count("uses: shivammathur/setup-php@") == 2
+    assert 'php-version: "' not in workflow
+    # The same versions in the CI and in the Variants.
+    ci = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    assert script_of(
+        workflow, "Find the PHP of the tools and the oldest PHP of the app"
+    ) == (script_of(ci, "Find the PHP of the tools and the oldest PHP of the app"))
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("platform", "php", "expected"),
+    [
+        # A new app: its tools on PHP 8.3, its code from PHP 8.2 on.
+        ({"php": "8.3.16"}, '<php min-version="8.2"/>', "tools=8.3\noldest=8.2\n"),
+        # An app made before, whose tools still run on its oldest PHP.
+        ({"php": "8.2.27"}, '<php min-version="8.2"/>', "tools=8.2\noldest=8.2\n"),
+        # Without a platform, Composer locks the tools for the oldest PHP.
+        ({}, '<php min-version="8.2.0" max-version="8.5"/>', "tools=8.2\noldest=8.2\n"),
+        # Without a PHP in appinfo/info.xml, the app runs on that of its tools.
+        ({"php": "8.4.1"}, "", "tools=8.4\noldest=8.4\n"),
+        ({}, "", None),
+    ],
+)
+def test_the_ci_reads_the_php_of_the_tools_and_the_oldest_php_of_the_app(
+    tmp_path: Path, platform: dict[str, str], php: str, expected: str | None
+) -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    script = script_of(
+        workflow, "Find the PHP of the tools and the oldest PHP of the app"
+    )
+    app = tmp_path / "app"
+    (app / "appinfo").mkdir(parents=True)
+    config: dict[str, object] = {"sort-packages": True}
+    if platform:
+        config["platform"] = platform
+    manifest = {"require": {"php": "^8.2"}, "config": config}
+    (app / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (app / "appinfo/info.xml").write_text(
+        f"<info><id>demo</id><dependencies>{php}"
+        '<nextcloud min-version="33" max-version="35"/></dependencies></info>\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+    output.touch()
+
+    result, _ = run_workflow_step(
+        tmp_path,
+        script,
+        app,
+        # The Python of the tests, not one that the PATH of Windows names.
+        {"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        GITHUB_OUTPUT=output.as_posix(),
+    )
+
+    if expected is None:
+        assert result.returncode != 0
+        assert result.stderr == (
+            "Neither config.platform.php of composer.json nor appinfo/info.xml names a"
+            " PHP.\n"
+        )
+        assert output.read_text(encoding="utf-8") == ""
+    else:
+        assert result.returncode == 0, result.stderr
+        assert output.read_text(encoding="utf-8") == expected
 
 
 def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
@@ -5070,6 +5315,97 @@ def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
         "template/.github/renovate-blueprint.json5.jinja",
     ):
         assert expected in (ROOT / name).read_text(encoding="utf-8"), name
+
+
+# The oldest PHP that each major version of PHPUnit runs on, as its composer.json says.
+PHPUNIT_PHP = {10: (8, 1), 11: (8, 2), 12: (8, 3), 13: (8, 4)}
+
+
+def test_renovate_proposes_no_phpunit_that_the_php_of_the_tools_cannot_run() -> None:
+    composer = json.loads(
+        (ROOT / "stacks/php/composer.json").read_text(encoding="utf-8")
+    )
+    major, minor = map(int, composer["config"]["platform"]["php"].split(".")[:2])
+    newest = max(
+        version for version, php in PHPUNIT_PHP.items() if php <= (major, minor)
+    )
+    # A new app starts on the newest PHPUnit that runs on the PHP of its tools, while
+    # it still runs on PHP 8.2 itself.
+    assert composer["require"]["php"] == "^8.2"
+    assert composer["require-dev"]["phpunit/phpunit"].startswith(f"^{newest}.")
+    lock = json.loads((ROOT / "stacks/php/composer.lock").read_text(encoding="utf-8"))
+    phpunit = next(
+        package
+        for package in lock["packages-dev"]
+        if package["name"] == "phpunit/phpunit"
+    )
+    assert phpunit["version"].startswith(f"{newest}.")
+    assert phpunit["require"]["php"] == ">={}.{}".format(*PHPUNIT_PHP[newest])
+    # Renovate's filter by PHP let PHPUnit 13 through to the apps, whose checks then
+    # failed (Dennis-Otto/paperless-sync#80), so a rule holds back the next major
+    # version, and each major version comes on its own.
+    rule = (
+        '      matchDepNames: ["phpunit/phpunit"],\n'
+        f'      allowedVersions: "<{newest + 1}",\n'
+    )
+    for name in (
+        ".github/renovate.json5",
+        "template/.github/renovate-blueprint.json5.jinja",
+    ):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert rule in text, name
+        assert "      separateMultipleMajor: true,\n" in text, name
+
+
+def test_the_dev_container_of_a_nextcloud_app_runs_the_php_of_its_tools() -> None:
+    composer = json.loads(
+        (ROOT / "stacks/php/composer.json").read_text(encoding="utf-8")
+    )
+    php = ".".join(composer["config"]["platform"]["php"].split(".")[:2])
+    dockerfile = (ROOT / "stacks/php/devcontainer/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert f"\nFROM mcr.microsoft.com/devcontainers/php:{php}@sha256:" in dockerfile
+
+
+# The attributes of <phpunit> that the schemas of PHPUnit 10.5, 11.5, 12.5 and 13.4
+# all know, so that the phpunit.xml of the blueprint fits an app on each of them;
+# failOnPhpunitNotice, for one, came only with PHPUnit 12.
+PHPUNIT_ATTRIBUTES = {
+    "bootstrap",
+    "cacheDirectory",
+    "colors",
+    "failOnDeprecation",
+    "failOnNotice",
+    "failOnWarning",
+    "failOnRisky",
+    "failOnPhpunitDeprecation",
+    "beStrictAboutOutputDuringTests",
+    "executionOrder",
+    "resolveDependencies",
+}
+SCHEMA = "{http://www.w3.org/2001/XMLSchema-instance}noNamespaceSchemaLocation"
+
+
+def test_the_tests_of_a_nextcloud_app_run_in_a_new_random_order(
+    projects: dict[str, Path],
+) -> None:
+    project = projects["nextcloud-app"]
+    root = ElementTree.parse(project / "phpunit.xml").getroot()
+    # The schema of the PHPUnit that the app installs, whichever its major version.
+    assert root.get(SCHEMA) == "vendor/phpunit/phpunit/phpunit.xsd"
+    assert set(root.attrib) - {SCHEMA} <= PHPUNIT_ATTRIBUTES
+    # A new order each time, each test after those that it depends on.
+    assert root.get("executionOrder") == "depends,random"
+    assert root.get("resolveDependencies") == "true"
+    # A test that prints, or that uses what PHPUnit deprecates, fails.
+    assert root.get("beStrictAboutOutputDuringTests") == "true"
+    assert root.get("failOnRisky") == "true"
+    assert root.get("failOnPhpunitDeprecation") == "true"
+    # How to run an order again, which PHPUnit names as it starts.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`vendor/bin/phpunit --random-order-seed 1734`" in contributing
+    assert "The tests run in a new random order each time" in contributing
 
 
 def test_every_release_of_the_blueprint_rolls_out_one_repository_at_a_time(
@@ -10890,13 +11226,61 @@ def test_the_score_of_infection_or_why_it_has_none(
 
 
 def test_infection_gets_a_php_that_it_runs_on() -> None:
-    # Infection 0.35 needs PHP 8.3, newer than the oldest PHP of a Nextcloud app, on
-    # which its checks run.
+    # Infection 0.35 needs PHP 8.3, newer than the oldest PHP of a Nextcloud app and
+    # than the PHP of the tools of an app that hasn't moved them to PHP 8.3 yet.
     workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
     assert "INFECTION_VERSION: 0.35." in workflow
-    versions = re.findall(r'php-version: "(\d+)\.(\d+)"', workflow)
-    assert versions
-    assert all((int(major), int(minor)) >= (8, 3) for major, minor in versions)
+    find = step_of(workflow, "      - name: Find the PHP of the tools\n")
+    setup = step_of(workflow, "      - name: Set up the PHP of the tools\n")
+    assert workflow.index(find) < workflow.index(setup)
+    assert workflow.index(setup) < workflow.index("composer install")
+    assert "        id: php\n" in find
+    assert "          php-version: ${{ steps.php.outputs.version }}\n" in setup
+    # No PHP of its own beside that of the tools.
+    assert workflow.count("uses: shivammathur/setup-php@") == 1
+    assert 'php-version: "' not in workflow
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        # A new app: its tools on PHP 8.3.
+        ({"php": "8.3.16"}, "version=8.3\n"),
+        # An app that moved its tools to a newer PHP runs the mutants on it.
+        ({"php": "8.4.1"}, "version=8.4\n"),
+        ({"php": "9.0"}, "version=9.0\n"),
+        # An app whose tools are older still gets the PHP that Infection needs.
+        ({"php": "8.2.27"}, "version=8.3\n"),
+        ({}, "version=8.3\n"),
+    ],
+)
+def test_the_mutants_run_on_the_php_of_the_tools(
+    tmp_path: Path, platform: dict[str, str], expected: str
+) -> None:
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    script = script_of(workflow, "Find the PHP of the tools")
+    app = tmp_path / "app"
+    app.mkdir()
+    config: dict[str, object] = {"sort-packages": True}
+    if platform:
+        config["platform"] = platform
+    manifest = {"require": {"php": "^8.2"}, "config": config}
+    (app / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+    output = tmp_path / "output"
+    output.touch()
+
+    result, _ = run_workflow_step(
+        tmp_path,
+        script,
+        app,
+        # The Python of the tests, not one that the PATH of Windows names.
+        {"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        GITHUB_OUTPUT=output.as_posix(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.read_text(encoding="utf-8") == expected
 
 
 def test_a_pull_request_that_changes_how_the_mutants_run_tries_them() -> None:

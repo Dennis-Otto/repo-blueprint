@@ -75,12 +75,19 @@
       groupName: "the tools of the Nextcloud apps",
     },
     {
-      // As in the Nextcloud apps: only releases that run on their oldest PHP, the
-      // platform of stacks/php/composer.json, and the public API of Nextcloud
-      // within its major version.
+      // As in the Nextcloud apps: only releases that run on the PHP of their tools,
+      // the platform of stacks/php/composer.json, each major version on its own, and
+      // the public API of Nextcloud within its major version.
       matchFileNames: ["stacks/php/**"],
-      constraints: { php: "8.2.*" },
+      constraints: { php: "8.3.*" },
       constraintsFiltering: "strict",
+      separateMultipleMajor: true,
+    },
+    {
+      // The filter above lets PHPUnit 13 through, which needs PHP 8.4.
+      matchFileNames: ["stacks/php/**"],
+      matchDepNames: ["phpunit/phpunit"],
+      allowedVersions: "<13",
     },
     {
       matchFileNames: ["stacks/php/**"],

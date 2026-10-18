@@ -258,12 +258,25 @@
       enabled: false,
     },
     {
-      // Only releases that run on that PHP, the platform of composer.json: a tool
-      // that needs a newer one waits until the app raises it. A project with a
-      // newer PHP sets it in .github/renovate.json5.
+      // Only releases that run on the PHP of the tools, config.platform.php of
+      // composer.json: a tool that needs a newer one waits until the app raises it.
+      // A project with a newer PHP sets it in .github/renovate.json5. Each major
+      // version in a pull request of its own, so that one that needs a newer PHP
+      // holds back none that the app can take.
       matchManagers: ["composer"],
-      constraints: { php: "8.2.*" },
+      constraints: { php: "8.3.*" },
       constraintsFiltering: "strict",
+      separateMultipleMajor: true,
+    },
+    {
+      // The filter above let PHPUnit 13, which needs PHP 8.4, through to the apps
+      // (Dennis-Otto/paperless-sync#80), whose checks could never pass: PHPUnit 12
+      // is the newest that runs on PHP 8.3. A project whose tools run on PHP 8.4
+      // lifts this limit in .github/renovate.json5 with its own allowedVersions for
+      // phpunit/phpunit, beside its newer PHP.
+      matchManagers: ["composer"],
+      matchDepNames: ["phpunit/phpunit"],
+      allowedVersions: "<13",
     },
     {
       // The public API of Nextcloud follows the min-version of appinfo/info.xml.

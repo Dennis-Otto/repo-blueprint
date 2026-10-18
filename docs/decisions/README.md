@@ -40,3 +40,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0032](0032-the-taint-analysis-knows-nextcloud-and-proves-that-it-still-sees.md) | The taint analysis of a Nextcloud app knows Nextcloud, and proves in every run that it still sees | accepted |
 | [0033](0033-schedules-are-only-a-safety-net.md) | Bots start from events, and their schedules are only a safety net | accepted |
 | [0034](0034-the-sboms-of-a-release-describe-what-it-ships.md) | The SBOMs of a release describe what it ships, by its name and version | accepted |
+| [0035](0035-the-tools-of-a-nextcloud-app-run-on-a-newer-php-than-its-code.md) | The tools of a Nextcloud app run on a newer PHP than its code, which is checked on the oldest | accepted |

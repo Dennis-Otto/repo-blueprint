@@ -688,6 +688,25 @@ commands = ["php --syntax-check FILE"]
 docs = "CONTRIBUTING.md#coding-standards"
 autofix = """A file that doesn't parse needs a person, who knows what the code should do."""
 
+[step."Oldest PHP"]
+problem = """A file of `appinfo/`, `lib/` or `templates/` doesn't parse on the oldest PHP
+that `appinfo/info.xml` names, or a package that the app ships needs a newer PHP; the log
+names the file and its line, or the package. In the CI, that PHP may also be missing."""
+why = """Nextcloud runs the app on every PHP from that version on: a file that doesn't
+parse there, or a package that needs a newer PHP, breaks the app on such a server,
+although the tools, on the newer PHP of `config.platform.php` in `composer.json`, pass."""
+fix = """Write the line without the syntax of the newer PHP, hold the package back to a
+release that still supports the oldest PHP, or raise the `min-version` of the PHP in
+`appinfo/info.xml` and `require.php` in `composer.json` when the app drops that PHP.
+Check it with that PHP:"""
+commands = [
+    "php8.2 --syntax-check FILE",
+    "php8.2 \"$(command -v composer)\" check-platform-reqs --lock --no-dev",
+]
+docs = "CONTRIBUTING.md#coding-standards"
+autofix = """Only a person can choose between the oldest PHP and the code or the package
+that needs a newer one."""
+
 [step."Coding standard"]
 problem = """The PHP code doesn't follow the Nextcloud coding standard; the log shows the
 diff that php-cs-fixer would make."""

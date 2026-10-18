@@ -333,6 +333,32 @@ find "${folders[@]}" -name '*.php' -print0 |
   { grep -v '^No syntax errors detected in ' || true; }
 echo "Every PHP file parses."
 
+step "Oldest PHP"
+# The app runs on the oldest PHP of appinfo/info.xml and on every newer one, its tools on
+# the PHP of config.platform.php in composer.json, which may be newer: the code that the
+# app ships has to parse on the oldest PHP, and the packages that it ships have to
+# install there. The CI sets up that PHP beside the one of the tools, as php8.2 or the
+# like. This is PHP code, not a shell expression.
+# shellcheck disable=SC2016
+oldest="$(php -r '$php = simplexml_load_file("appinfo/info.xml")->dependencies->php;
+echo implode(".", array_slice(explode(".", (string) ($php["min-version"] ?? "")), 0, 2));')"
+tools="$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')"
+if [[ -z "$oldest" || "$oldest" == "$tools" ]]; then
+  echo "The tools run on PHP $tools, the oldest PHP of the app."
+elif command -v "php$oldest" >/dev/null 2>&1; then
+  mapfile -t shipped < <(find appinfo lib templates -maxdepth 0 -type d 2>/dev/null)
+  find "${shipped[@]}" -name '*.php' -print0 |
+    xargs -0 -n 1 -P "$(getconf _NPROCESSORS_ONLN)" "php$oldest" --syntax-check |
+    { grep -v '^No syntax errors detected in ' || true; }
+  "php$oldest" "$(command -v composer)" check-platform-reqs --lock --no-dev
+  echo "The code of the app parses on PHP $oldest, and the packages that it ships install there."
+elif [[ -n "${CI:-}" ]]; then
+  echo "PHP $oldest, the oldest PHP of appinfo/info.xml, is missing: the CI needs it as php$oldest beside PHP $tools, the PHP of the tools." >&2
+  exit 1
+else
+  echo "PHP $oldest, the oldest PHP of appinfo/info.xml, is not installed here as php$oldest; the CI checks the code on it."
+fi
+
 step "Coding standard"
 vendor/bin/php-cs-fixer fix --dry-run --diff
 

@@ -111,7 +111,7 @@ Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, 
 
     ---
 
-    php-cs-fixer, Psalm mit seiner Taint-Analyse und PHPUnit mit jeder Zeile abgedeckt; ein signiertes Paket für den App Store.
+    php-cs-fixer, Psalm mit seiner Taint-Analyse und PHPUnit in zufälliger Reihenfolge mit jeder Zeile abgedeckt, die Werkzeuge auf PHP 8.3 und der Code auch auf PHP 8.2; ein signiertes Paket für den App Store.
 
 - :simple-githubactions:{ .lg .middle } **GitHub Action**
 
