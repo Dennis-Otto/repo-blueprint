@@ -2487,6 +2487,44 @@ def remapper(project: Path) -> Callable[[str], str]:
     return remapped
 
 
+def lychee_excludes(project: Path) -> list[str]:
+    return tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))[
+        "exclude"
+    ]
+
+
+def test_the_link_check_leaves_out_the_website_that_a_new_repository_gets_later(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The README links the website on GitHub Pages, which the Docs workflow publishes
+    # only after a run on main: the first push would fail the link check without it.
+    own = "^" + re.escape("https://dennis-otto.github.io/demo-project/")
+    assert own in lychee_excludes(projects["generic"])
+    assert re.search(own, "https://dennis-otto.github.io/demo-project/guide/")
+    # The website of the owner, as the repository owner.github.io has it.
+    site = render(
+        tmp_path / "site",
+        project_name="dennis-otto.github.io",
+        project_slug="dennis-otto.github.io",
+        description="A demo.",
+        project_type="generic",
+    )
+    assert "^" + re.escape("https://dennis-otto.github.io/") in lychee_excludes(site)
+    # Another website, or none, the check still checks: it is there from the start.
+    for name, homepage in (("custom", "https://example.org/demo/"), ("none", "")):
+        project = render(
+            tmp_path / name,
+            project_name="Demo Project",
+            description="A demo.",
+            project_type="generic",
+            homepage=homepage,
+        )
+        # Everything else as the blueprint's own lychee.toml has it.
+        assert (project / "lychee.toml").read_text(encoding="utf-8") == (
+            ROOT / "lychee.toml"
+        ).read_text(encoding="utf-8")
+
+
 def test_the_link_check_checks_the_anchors_that_it_can_see(
     projects: dict[str, Path],
 ) -> None:
@@ -7358,6 +7396,22 @@ def test_answers_that_would_break_a_file_are_refused(
                 quiet=True,
             )
 
+
+
+def test_a_namespace_may_hold_underscores_as_those_of_nextcloud_do(
+    tmp_path: Path,
+) -> None:
+    # Such as OCA\Files_Sharing of Nextcloud itself: PHP takes them, and so does the
+    # App Store; an update must keep such an answer instead of falling back to the default.
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="nextcloud-app",
+        nextcloud_namespace="Files_Demo",
+    )
+    info = (project / "appinfo/info.xml").read_text(encoding="utf-8")
+    assert "<namespace>Files_Demo</namespace>" in info
 
 # A name and a description with what each kind of file quotes in its own way: the
 # quotes of JSON, TOML, Python and the Dockerfile, the markup of XML and HTML, the

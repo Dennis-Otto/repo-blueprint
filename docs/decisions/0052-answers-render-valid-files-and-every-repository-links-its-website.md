@@ -1,4 +1,4 @@
-# The answers render valid files, and every new repository links its website
+# The answers render valid files, and every new repository links its website and has the topics of its kind
 
 - Status: accepted
 - Date: 2026-10-18
@@ -22,11 +22,11 @@ The templates that take a file of the blueprint and replace a text in it, such a
 Option 2.
 
 - **The name and the description** may hold neither `"""`, `*/`, `]]>`, a backslash nor a line break: Copier says so at the question. The other files escape what they take: JSON and TOML by `to_json`, XML and HTML by `e`, the `Dockerfile` with `\$`, and the docstring of a Python package a quote at its end.
-- **The id of a Nextcloud app** follows the schema of the App Store, 2 to 32 characters, and its default is cut to 32; the namespace is a name of PHP in CamelCase. A Nextcloud app analyzes JavaScript with CodeQL by default, as the apps of its pages do.
+- **The id of a Nextcloud app** follows the schema of the App Store, 2 to 32 characters, and its default is cut to 32; the namespace is a name of PHP in CamelCase, which may hold underscores, as `Files_Sharing` of Nextcloud does. A Nextcloud app analyzes JavaScript with CodeQL by default, as the apps of its pages do.
 - **The homepage** is by default the website at the address that `mkdocs.yml` names, `https://OWNER.github.io/NAME/`, or the root for the website of an owner. The README shows a badge and a link to it, the About box gets it by `settings apply`, and the manifest of an integration and `appinfo/info.xml` of an app name it as their documentation and website; `info.xml` also names the discussions and the sponsor, in the order of its schema.
 - **The topics** have the defaults of each kind, such as `home-assistant, hacs, hacs-integration` for an integration; an integration can't do without them, and GitHub's rules for topics apply to all: at most 20, each of 50 characters at most, of lowercase letters, digits and hyphens. The checklist of an integration shows whether the description and the topics are on GitHub.
 - **A template that replaces a text of a file of the blueprint** does so with the macro `replaced` of `includes/replace.jinja`, which stops the render with the file and the text when the text is gone, so that a change of the blueprint's file fails the tests of the blueprint, never the repositories.
 
 ## Consequences
 
-A new repository renders files that parse whatever its name and description say, links its website from its first commit, and an integration passes the check *hacs* with the default answers. An existing repository keeps its answers, which pass the new questions: the Variants test them with the answers of each repository of the Rollout. A change of a comment or a step that a template looks for, in a file of the blueprint, needs the template changed with it, and the error of the render names both.
+A new repository renders files that parse whatever its name and description say, links its website from its first commit, and an integration passes the check *hacs* with the default answers. An existing repository keeps the answers that pass the new questions: the Variants test them with the answers of each repository of the Rollout. An answer that the new questions refuse, the update replaces with the default, as Copier does: an integration without topics gets the topics of its kind, a homepage that is no address the website on GitHub Pages, and an app id over 32 characters the cut default. A name or a description with `"""`, `*/`, `]]>` or a backslash has no default: such a repository answers it anew with `copier update --defaults --vcs-ref=:current: --data description=...` before the blueprint bot can update it. A change of a comment or a step that a template looks for, in a file of the blueprint, needs the template changed with it, and the error of the render names both.

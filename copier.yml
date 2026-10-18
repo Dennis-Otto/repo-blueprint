@@ -223,7 +223,7 @@ nextcloud_namespace:
   default: "{= project_name | regex_replace('[^A-Za-z0-9]+', ' ') | title | replace(' ', '') =}"
   when: "{= project_type == 'nextcloud-app' =}"
   validator: >-
-    [% if not (nextcloud_namespace | regex_search('^[A-Z][A-Za-z0-9]*$')) %]Use a name of PHP in CamelCase, such as PaperlessSync: a capital letter, then letters and digits.[% endif %]
+    [% if not (nextcloud_namespace | regex_search('^[A-Z][A-Za-z0-9_]*$')) %]Use a name of PHP in CamelCase, such as PaperlessSync or Files_Sharing: a capital letter, then letters, digits and underscores.[% endif %]
 
 languages:
   type: yaml
