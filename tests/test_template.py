@@ -8,6 +8,7 @@ import contextlib
 import datetime
 import fnmatch
 import hashlib
+import io
 import json
 import os
 import re
@@ -15,10 +16,12 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import textwrap
 import time
 import tomllib
 import warnings
+import zipfile
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -3344,6 +3347,49 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
+    # Each attestation only of the workflow that builds the release: the isolated
+    # build of build-release.yml, and the release workflow for the image that it
+    # pushes, so that one of another workflow of the repository fails.
+    for kind in KINDS:
+        verify = [
+            line
+            for line in security(kind).splitlines()
+            if line.startswith("gh attestation verify ")
+        ]
+        assert len(verify) == (0 if kind in ("generic", "github-action") else 1), kind
+        workflow = "release.yml" if kind == "container" else "build-release.yml"
+        for line in verify:
+            assert line.endswith(
+                " --repo Dennis-Otto/demo-project --signer-workflow"
+                f" Dennis-Otto/demo-project/.github/workflows/{workflow}"
+            ), line
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_release_tells_how_to_scan_what_it_ships(
+    projects: dict[str, Path], kind: str
+) -> None:
+    security = (projects[kind] / "SECURITY.md").read_text(encoding="utf-8")
+    verify = security[
+        security.index("## Verify a release") : security.index("## Assurance case")
+    ]
+    # The SBOMs and the OpenVEX document under the names that build-release.yml gives
+    # them, and the root of the SBOMs by the name of the repository.
+    assert (
+        "gh release download vX.Y.Z --repo Dennis-Otto/demo-project"
+        " --pattern 'demo-project.*.json'\n"
+        "grype sbom:demo-project.spdx.json --vex demo-project.openvex.json\n"
+    ) in verify
+    assert "under the name `demo-project` and the version of the release" in verify
+    package = kind in (
+        "home-assistant",
+        "nextcloud-app",
+        "python-package",
+        "node-package",
+    )
+    assert ("the package that you install" in verify) == package
+    assert ("the files of its tag, without those that only" in verify) != package
+    assert ("The image carries an SBOM" in verify) == (kind == "container")
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -4313,15 +4359,15 @@ def test_renovate_finds_every_version_that_a_workflow_or_script_pins(
             assert tag in (None, "^v(?<version>.+)$"), path.name
             pinned += 1
     # gitsign in sign-tag.sh and verify-release.yml, krankerl and Nextcloud in the
-    # release of a Nextcloud app, which every kind has, krankerl in the checks of a
-    # Nextcloud app too, and Infection in the mutation tests.
+    # release of a Nextcloud app and syft for its SBOMs, which every kind has, krankerl
+    # in the checks of a Nextcloud app too, and Infection in the mutation tests.
     assert pinned == {
-        "blueprint": 6,
-        "nextcloud-app": 6,
-        "home-assistant": 5,
-        "github-action": 5,
-        "python-package": 5,
-    }.get(kind, 4)
+        "blueprint": 7,
+        "nextcloud-app": 7,
+        "home-assistant": 6,
+        "github-action": 6,
+        "python-package": 6,
+    }.get(kind, 5)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -8823,6 +8869,321 @@ def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
         assert "steps.resume.outputs." in line, output
 
 
+# What each kind of release ships, which its SBOMs describe: the files of its package,
+# as an archive in the assets, and what lies beside it that the SBOMs leave out.
+PACKAGES: dict[str, dict[str, dict[str, str] | None]] = {
+    "hacs": {"demo.zip": {"manifest.json": "{}\n", "sensor.py": ""}},
+    "pypi": {
+        "demo-1.2.3-py3-none-any.whl": {
+            "demo/__init__.py": "",
+            "demo-1.2.3.dist-info/METADATA": "Name: demo\nVersion: 1.2.3\n",
+        },
+        # The sources, which build the same files as the wheel.
+        "demo-1.2.3.tar.gz": {"demo-1.2.3/PKG-INFO": ""},
+    },
+    "npm": {"demo-1.2.3.tgz": {"package/package.json": "{}\n"}},
+    "nextcloud-appstore": {
+        "demo.tar.gz": {"demo/appinfo/info.xml": "<info/>\n"},
+        "demo.tar.gz.sig": None,
+    },
+}
+SHIPPED = {
+    "hacs": ["manifest.json", "sensor.py"],
+    "pypi": ["demo-1.2.3.dist-info/METADATA", "demo/__init__.py"],
+    "npm": ["package/package.json"],
+    "nextcloud-appstore": ["demo/appinfo/info.xml"],
+}
+# The tree of the tag of a project that ships its sources, with what only checks,
+# tests and documents it, the tools of the blueprint among them.
+SOURCES = {
+    "action.yml": "runs: {}\n",
+    "demo.py": "",
+    "requirements.txt": "requests==2.32.5\n",
+    "requirements-dev.txt": "pytest==9.0.0\n",
+    "requirements-fuzz.txt": "atheris==2.3.0\n",
+    "requirements-test.in": "pytest\n",
+    ".devcontainer/devcontainer.json": "{}\n",
+    ".githooks/pre-push": "",
+    ".github/workflows/ci.yml": "on: push\n",
+    ".github/docs-requirements.txt": "mkdocs==1.6.1\n",
+    "changelog.d/x.md": "",
+    "docs/index.md": "",
+    "fuzz/fuzz_demo.py": "",
+    "scripts/check.sh": "",
+    "test/demo.test.ts": "",
+    "tests/test_demo.py": "",
+}
+
+
+def archive(path: Path, files: dict[str, str] | None) -> None:
+    """A zip, a wheel or a gzipped tar of the files, by the name of path; a file that
+    is no archive without them."""
+    if files is None:
+        path.write_bytes(b"a signature\n")
+    elif path.suffix in (".zip", ".whl"):
+        with zipfile.ZipFile(path, "w") as zipped:
+            for name, text in files.items():
+                zipped.writestr(name, text)
+    else:
+        with tarfile.open(path, "w:gz") as tarred:
+            for name, text in files.items():
+                data = text.encode()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tarred.addfile(info, io.BytesIO(data))
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("publish_to", [*PACKAGES, "github-action", "ghcr", "none", ""])
+def test_the_sboms_describe_what_a_release_ships(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publish_to: str
+) -> None:
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    # The checkout of the tag, with a file that the tag doesn't have.
+    checkout = tmp_path / "checkout"
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name, text in SOURCES.items():
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / name).write_text(text, encoding="utf-8", newline="\n")
+    for arguments in (
+        ["init", "--quiet"],
+        ["add", "--all"],
+        ["-c", "user.name=A", "-c", "user.email=a@example.com", "commit", "-qm", "v"],
+    ):
+        subprocess.run(["git", *arguments], cwd=checkout, check=True)
+    (checkout / "build").mkdir()
+    (checkout / "build/demo.tar.gz").write_bytes(b"not a release\n")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for name, files in PACKAGES.get(publish_to, {}).items():
+        archive(assets / name, files)
+
+    # The paths relative to the checkout, which the tar of Git for Windows takes, where
+    # it reads the C: of an absolute path as the name of a host.
+    result, _ = run_workflow_step(
+        tmp_path,
+        script_of(build, "Unpack what the release ships"),
+        checkout,
+        {"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        RUNNER_TEMP="../temp",
+        ASSETS="../assets",
+        PUBLISH_TO=publish_to,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    package = tmp_path / "temp/package"
+    # Only what its users install; an action, an image or a project without a package
+    # ships the sources of its tag, without the tools of its checks, its website and
+    # its workflows.
+    assert sorted(files_of(package)) == SHIPPED.get(
+        publish_to, ["action.yml", "demo.py", "requirements.txt"]
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_release_without_its_package_gets_no_sboms(tmp_path: Path) -> None:
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+
+    result, _ = run_workflow_step(
+        tmp_path,
+        script_of(build, "Unpack what the release ships"),
+        tmp_path,
+        {},
+        RUNNER_TEMP="temp",
+        ASSETS="assets",
+        PUBLISH_TO="pypi",
+    )
+
+    assert result.returncode == 1
+    assert "::error::The release has no package for its SBOMs to describe." in (
+        result.stdout
+    )
+
+
+# A stand-in for syft, in the archive of its release: it writes the root of each SBOM
+# as syft does, by the name and version that it is given or by those of $ROOT, and one
+# package, $PACKAGE, of the same version.
+FAKE_SYFT = """\
+#!/usr/bin/env bash
+echo "syft $*" >> "$CALLS"
+outputs=()
+while (($#)); do
+  case "$1" in
+    --source-name) name="$2"; shift ;;
+    --source-version) version="$2"; shift ;;
+    --output) outputs+=("$2"); shift ;;
+  esac
+  shift
+done
+read -r name version <<<"${ROOT:-$name $version}"
+root="SPDXRef-DocumentRoot-Directory-$name"
+for output in "${outputs[@]}"; do
+  case "$output" in
+    spdx-json=*)
+      printf '{"packages": [{"SPDXID": "SPDXRef-Package-x", "name": "%s", "versionInfo": "%s"},
+        {"SPDXID": "%s", "name": "%s", "versionInfo": "%s"}], "relationships": [{"spdxElementId":
+        "SPDXRef-DOCUMENT", "relatedSpdxElement": "%s", "relationshipType": "DESCRIBES"}]}\\n' \\
+        "${PACKAGE:-x}" "$version" "$root" "$name" "$version" "$root" > "${output#*=}" ;;
+    cyclonedx-json=*)
+      printf '{"metadata": {"component": {"type": "file", "name": "%s", "version": "%s"}}}\\n' \\
+        "$name" "$version" > "${output#*=}" ;;
+  esac
+done
+"""
+
+
+def describe_the_release(
+    tmp_path: Path, publish_to: str, **variables: str
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Runs the step that writes the SBOMs, with the stand-in for syft in the archive
+    of its release, which curl downloads and the step checks by its sha256."""
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    pin = dict(re.findall(r"(SBOM_SYFT_(?:VERSION|SHA256)): (\S+)", build))
+    release = tmp_path / "release.tar.gz"
+    with tarfile.open(release, "w:gz") as tarred:
+        data = FAKE_SYFT.encode()
+        info = tarfile.TarInfo("syft")
+        info.size = len(data)
+        info.mode = 0o755
+        tarred.addfile(info, io.BytesIO(data))
+    for folder in ("temp", "assets"):
+        (tmp_path / folder).mkdir()
+    return run_workflow_step(
+        tmp_path,
+        script_of(build, "Describe it in the SBOMs, as SPDX and as CycloneDX"),
+        tmp_path,
+        {
+            "curl": textwrap.dedent(
+                """\
+                while (($# > 0)); do
+                  if [[ "$1" == --output ]]; then cp release.tar.gz "$2"; fi
+                  shift
+                done
+                """
+            )
+        },
+        **{
+            "RUNNER_TEMP": "temp",
+            "ASSETS": "assets",
+            "PUBLISH_TO": publish_to,
+            "NAME": "demo",
+            "VERSION": "1.2.3",
+            "SUPPLIER": "Someone",
+            "SBOM_SYFT_VERSION": pin["SBOM_SYFT_VERSION"],
+            "SBOM_SYFT_SHA256": hashlib.sha256(release.read_bytes()).hexdigest(),
+            **variables,
+        },
+    )
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("publish_to", "catalogers"),
+    [
+        ("hacs", "image"),
+        ("pypi", "image"),
+        ("npm", "image"),
+        ("nextcloud-appstore", "image"),
+        ("github-action", "directory"),
+        ("ghcr", "directory"),
+        ("none", "directory"),
+    ],
+)
+def test_the_sboms_name_the_release_by_its_version(
+    tmp_path: Path, publish_to: str, catalogers: str
+) -> None:
+    result, calls = describe_the_release(tmp_path, publish_to)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    (download,) = [call for call in calls if call.startswith("curl ")]
+    assert "/anchore/syft/releases/download/v" in download
+    # A package lists what it installs, as an image does; sources what they declare.
+    (scan,) = [call for call in calls if call.startswith("syft ")]
+    assert scan == (
+        f"syft scan dir:temp/package --quiet --override-default-catalogers {catalogers}"
+        " --source-name demo --source-version 1.2.3 --source-supplier Someone"
+        " --output spdx-json=assets/demo.spdx.json"
+        " --output cyclonedx-json=assets/demo.cdx.json"
+    )
+    for name in ("demo.spdx.json", "demo.cdx.json"):
+        assert (tmp_path / "assets" / name).is_file(), name
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("root", "package"),
+    [
+        # The folder of the repository, as the SBOMs of the releases before named it.
+        (". 1.2.3", "x"),
+        ("demo 1.2.2", "x"),
+        # A package of the name and version of the release that isn't the root.
+        ("other 1.2.3", "demo"),
+    ],
+)
+def test_the_build_stops_at_an_sbom_that_does_not_name_the_release(
+    tmp_path: Path, root: str, package: str
+) -> None:
+    result, _ = describe_the_release(tmp_path, "pypi", ROOT=root, PACKAGE=package)
+
+    assert result.returncode == 1
+    assert "::error::The SBOMs don't name the release demo 1.2.3 at their root" in (
+        result.stdout
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_build_stops_at_a_syft_that_is_not_its_release(tmp_path: Path) -> None:
+    result, calls = describe_the_release(tmp_path, "pypi", SBOM_SYFT_SHA256="0" * 64)
+
+    assert result.returncode != 0
+    assert not [call for call in calls if call.startswith("syft ")]
+
+
+def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
+    workflows = ROOT / ".github/workflows"
+    build = (workflows / "build-release.yml").read_text(encoding="utf-8")
+    verify = (workflows / "verify-release.yml").read_text(encoding="utf-8")
+    describe = "Describe it in the SBOMs, as SPDX and as CycloneDX"
+    write = script_of(build, describe)
+    check = script_of(verify, "Verify the release as its users can")
+
+    def filters(script: str) -> list[str]:
+        return re.findall(r"^(?:spdx|cyclonedx)='.*?'$", script, re.DOTALL | re.M)
+
+    # The build checks the SBOMs as the verification does, before the release is
+    # immutable, so the tests of the build cover both.
+    assert len(filters(write)) == 2
+    assert filters(write) == filters(check)
+    assert "for sbom in *.spdx.json *.cdx.json; do" in check
+    assert 'name="${GH_REPO#*/}"' in check
+    assert check.index('version="${TAG#v}"') < check.index("for sbom in")
+    assert check.index('version="${TAG#v}"') < check.index('case "$PUBLISH_TO" in')
+    # The name of the repository and the version of the release, in the build too.
+    step = step_of(build, f"      - name: {describe}")
+    assert "          NAME: ${{ github.event.repository.name }}\n" in step
+    assert "          VERSION: ${{ inputs.version }}\n" in step
+    # syft comes from its release, checked by its sha256, into the job that may write
+    # the release; no action downloads its installer there.
+    assert "anchore/sbom-action" not in build
+    assert "sha256sum --check --strict" in write
+    # After the package is built and before the assets are attested.
+    order = [
+        "      - name: Build and sign the Nextcloud app\n",
+        "      - name: Unpack what the release ships\n",
+        f"      - name: {describe}\n",
+        "      - name: Write the advisories that don't affect the release\n",
+        "      - name: Attest the provenance of every asset\n",
+    ]
+    assert [build.index(name) for name in order] == sorted(
+        build.index(name) for name in order
+    )
+    # The advisories that don't affect the release name it as its SBOMs do.
+    vex = script_of(build, "Write the advisories that don't affect the release")
+    assert '--version "$VERSION"' in vex
+
+
 # Fragments of the changelog: the check of a pull request and the release bot.
 FEATURE_FRAGMENT = "### Features\n\n- **Dark mode:** the settings follow the system.\n"
 FIX_FRAGMENT = "### Bug fixes\n\n- **Token:** stays secret.\n"
@@ -9550,7 +9911,7 @@ def test_a_release_of_a_scheduled_run_is_verified_in_full() -> None:
     weekly = "github.event_name == 'schedule' && inputs.tag == ''"
     assert f"          WEEKLY: ${{{{ {weekly} }}}}\n" in verify
     assert "GITHUB_EVENT_NAME" not in verify
-    assert verify.count('[[ "$WEEKLY" == true ]]') == 4
+    assert verify.count('[[ "$WEEKLY" == true ]]') == 5
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = release[release.index("\n  verify:") :]
     assert "uses: ./.github/workflows/verify-release.yml" in job

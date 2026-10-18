@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Was die SBOMs eines Releases beschreiben
+    accDescr: Der Build entpackt, was das Release ausliefert, in einen eigenen Ordner: das Zip von HACS, das Wheel, das npm-Paket oder die signierte Nextcloud-App, und für eine Action, ein Image oder ein Projekt ohne Paket die Dateien seines Tags ohne die, die das Projekt nur prüfen, testen und dokumentieren. syft, geprüft an seinem sha256, listet die Komponenten, die ein Paket installiert oder die die Quellen deklarieren, unter dem Namen des Repositorys und der Version des Releases, als SPDX und als CycloneDX. Der Build und die Release-Prüfung prüfen, dass beide das Release nennen, und ein Scanner eines Nutzers wendet das OpenVEX-Dokument des Releases auf die SPDX-SBOM an.
+
+    package(["Das Paket des Releases<br>Zip · Wheel · npm · Nextcloud-App"])
+    sources(["Die Dateien seines Tags<br>ohne Prüfungen, Tests und Doku"])
+    unpack["Der Build entpackt es<br>in einen eigenen Ordner"]
+    syft["syft, geprüft an seinem sha256,<br>listet, was es installiert oder deklariert"]
+    sboms["repo.spdx.json · repo.cdx.json<br>Wurzel: repo @ Version"]
+    checks{"Beide nennen<br>das Release"}
+    scan["grype sbom:repo.spdx.json<br>--vex repo.openvex.json"]
+
+    package --> unpack
+    sources --> unpack
+    unpack --> syft --> sboms --> checks
+    checks -- "Build und Prüfung" --> scan
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class package,sources you
+    class unpack,syft,checks bot
+    class sboms,scan done

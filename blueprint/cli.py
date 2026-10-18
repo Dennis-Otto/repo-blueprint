@@ -90,7 +90,9 @@ def changelog_command(arguments: argparse.Namespace) -> int:
     if arguments.command == "vex":
         accepted = Path(arguments.file)
         text = accepted.read_text(encoding="utf-8") if accepted.is_file() else ""
-        document = openvex(arguments.repo, arguments.tag, arguments.timestamp, text)
+        document = openvex(
+            arguments.repo, arguments.tag, arguments.timestamp, text, arguments.version
+        )
         if document is not None:
             sys.stdout.write(document)
         return 0
@@ -545,6 +547,11 @@ def main(
     vex_parser.add_argument("tag", help="the tag of the release")
     vex_parser.add_argument("timestamp", help="when the release is made, RFC 3339")
     vex_parser.add_argument("--file", default="osv-scanner.toml")
+    vex_parser.add_argument(
+        "--version",
+        help="the version of the release, which its SBOMs name; the tag without its v "
+        "by default",
+    )
     notices_parser = commands.add_parser(
         "notices", help="the third-party components and their licenses, for releases"
     )

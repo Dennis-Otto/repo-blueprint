@@ -45,7 +45,38 @@ def test_every_accepted_advisory_does_not_affect_the_release() -> None:
     ]
     for statement in statements:
         assert statement["status"] == "not_affected"
-        assert statement["products"] == [{"@id": "pkg:github/Dennis-Otto/demo@v1.3.0"}]
+        assert statement["products"] == [
+            {
+                "@id": "pkg:github/Dennis-Otto/demo@v1.3.0",
+                "identifiers": {"purl": "pkg:generic/demo@1.3.0"},
+            }
+        ]
+
+
+@pytest.mark.parametrize(
+    ("repo", "tag", "version", "purl"),
+    [
+        # The version of the release, which its SBOMs name, without the v of its tag.
+        ("Dennis-Otto/demo", "v1.3.0", None, "pkg:generic/demo@1.3.0"),
+        ("Dennis-Otto/demo", "v2.0.0-beta.1", None, "pkg:generic/demo@2.0.0-beta.1"),
+        # The version that the build gives, whatever the tag says.
+        ("Dennis-Otto/demo", "demo-v1.3.0", "1.3.0", "pkg:generic/demo@1.3.0"),
+        # Scanners name the release in lowercase.
+        ("Dennis-Otto/Demo.App", "v1.0.0", None, "pkg:generic/demo.app@1.0.0"),
+        ("o/r", "v1.0.0+build.7", None, "pkg:generic/r@1.0.0%2Bbuild.7"),
+    ],
+)
+def test_the_release_is_the_product_that_scanners_name_from_its_sbom(
+    repo: str, tag: str, version: str | None, purl: str
+) -> None:
+    # Grype names the root of an SBOM pkg:generic/<name>@<version>, as syft wrote it
+    # in build-release.yml, and applies a statement only to the product of that name.
+    text = openvex(repo, tag, "2026-10-08T03:00:00Z", ACCEPTED, version)
+    assert text is not None
+    for statement in json.loads(text)["statements"]:
+        (product,) = statement["products"]
+        assert product["@id"] == f"pkg:github/{repo}@{tag}"
+        assert product["identifiers"] == {"purl": purl}
 
 
 def test_the_reason_becomes_the_statement_of_its_impact() -> None:
@@ -73,6 +104,12 @@ def test_the_command_line_writes_the_document(
 
     assert cli.main([*arguments, "--file", str(accepted)]) == 0
     assert json.loads(capsys.readouterr().out) == document()
+    # The version of the build, which its SBOMs name.
+    assert cli.main([*arguments, "--file", str(accepted), "--version", "1.3.0-rc"]) == 0
+    (statement, _) = json.loads(capsys.readouterr().out)["statements"]
+    assert statement["products"][0]["identifiers"] == {
+        "purl": "pkg:generic/demo@1.3.0-rc"
+    }
 
     # Without the file, nothing is written.
     assert cli.main([*arguments, "--file", str(tmp_path / "missing.toml")]) == 0
