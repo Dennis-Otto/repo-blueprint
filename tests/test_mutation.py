@@ -548,8 +548,20 @@ def test_a_part_without_mutants_is_empty() -> None:
 
 def test_the_last_words_and_the_failing_tests_of_mutmut() -> None:
     assert last_words("a\rb\nc\n") == ["b", "c"]
-    assert failing_tests("FAILED tests/x.py::t[1-2] - boom\nERROR x\n") == [
-        "tests/x.py::t[1-2]"
+    # Parameters with spaces, a " - " and brackets of their own, as pytest prints
+    # them; the message after the id may hold brackets too.
+    workflow = "steps:\\n      - uses: a@b # v1\\n-False"
+    assert failing_tests(
+        "FAILED tests/x.py::t[1-2] - boom - again [3]\nERROR x\n"
+        f"FAILED tests/x.py::t[{workflow}] - assert [1] == []\n"
+        "ERROR tests/y.py - ImportError\nFAILED tests/x.py::t[[a] b]\n"
+        "FAILED tests/x.py::t[unclosed - boom\n"
+    ) == [
+        "tests/x.py::t[1-2]",
+        f"tests/x.py::t[{workflow}]",
+        "tests/y.py",
+        "tests/x.py::t[[a] b]",
+        "tests/x.py::t[unclosed - boom",
     ]
 
 

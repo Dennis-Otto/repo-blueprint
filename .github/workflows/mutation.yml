@@ -181,6 +181,8 @@ jobs:
         run: |
           mutmut results --all true > "$RUNNER_TEMP/results.txt" 2>/dev/null || true
           mkdir -p "$RUNNER_TEMP/part"
+          # The whole output of mutmut, without its spinner, for a look at a failure.
+          sed 's/.*\r//' "$RUNNER_TEMP/run.txt" > "$RUNNER_TEMP/part/run-$PART.txt" 2>/dev/null || true
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
           # Why no mutant ran, such as the tests that fail without any, fails the step.

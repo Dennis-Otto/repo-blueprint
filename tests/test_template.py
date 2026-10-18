@@ -9897,6 +9897,10 @@ def test_a_part_keeps_its_results_and_the_change_of_each_survivor(
     elif output:
         assert "- `tests/test_fixes.py::test_one`\n" in summary
         assert "⠇ Generating mutants\n" in summary
+        # The artifact of the part keeps the whole output, without the spinner.
+        kept = (tmp_path / "temp/part/run-2.txt").read_text(encoding="utf-8")
+        assert kept.startswith("⠇ Generating mutants\n")
+        assert kept.endswith("failed to collect stats. runner returned 1\n")
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the

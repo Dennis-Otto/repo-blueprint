@@ -471,7 +471,8 @@ def function_of(name: str) -> str:
 
 # A line of mutmut results, such as "    a.x_f__mutmut_1: survived".
 RESULT = re.compile(r"^\s*(\S+__mutmut_\S+): (.+?)\s*$")
-FAILING = re.compile(r"^(?:FAILED|ERROR) (\S+?)(?: - .*)?$")
+# A line of the short summary of pytest, "FAILED <test> - <message>".
+FAILING = ("FAILED ", "ERROR ")
 NOTHING_MATCHES = "Filtered for specific mutants, but nothing matches"
 
 Shower = Callable[[str], str]
@@ -484,12 +485,27 @@ def last_words(output: str) -> list[str]:
     return [line.rsplit("\r", 1)[-1] for line in lines]
 
 
+def id_of_test(text: str) -> str:
+    """The id of a test at the start of text, up to the first space outside of its
+    parameters, which may hold spaces and brackets, as `test[a - b]`."""
+    depth = 0
+    for index, char in enumerate(text):
+        if char == "[":
+            depth += 1
+        elif char == "]" and depth:
+            depth -= 1
+        elif char == " " and not depth:
+            return text[:index]
+    return text
+
+
 def failing_tests(output: str) -> list[str]:
     """The tests that pytest reports as failed or in error, once each."""
     found: list[str] = []
     for line in last_words(output):
-        match = FAILING.match(line.strip())
-        test = match[1] if match else ""
+        line = line.strip()
+        prefix = next((start for start in FAILING if line.startswith(start)), "")
+        test = id_of_test(line.removeprefix(prefix)) if prefix else ""
         if ("::" in test or test.endswith(".py")) and test not in found:
             found.append(test)
     return found
