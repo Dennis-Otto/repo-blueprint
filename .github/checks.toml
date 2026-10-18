@@ -214,7 +214,9 @@ title = "Security alerts of CodeQL"
 problem = """CodeQL found a security problem in the code that the pull request changes,
 such as untrusted input that reaches a command, a query or a page unescaped."""
 why = """A vulnerability that merges reaches every user with the next release; here it
-is a line to change."""
+is a line to change. The rules of `main` stop the merge while the pull request adds a
+security alert of high or critical severity, or an error; an alert that `main` has
+already doesn't."""
 fix = """Open the alert from the details of the check: it shows where the data comes
 from, where it goes and how to fix it. Fix the code and push. If the alert is wrong,
 a maintainer dismisses it with the reason."""

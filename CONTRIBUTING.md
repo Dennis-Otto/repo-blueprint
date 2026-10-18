@@ -27,6 +27,7 @@ A new check runs only where it can change a result, as [decision 0009](docs/deci
 
 - **Python** follows [PEP 8](https://peps.python.org/pep-0008/) in the format of [Ruff](https://docs.astral.sh/ruff/), which matches Black, with the rules of Ruff that `pyproject.toml` selects. The code has type hints, which mypy checks in its strict mode.
 - **Shell scripts** pass [ShellCheck](https://www.shellcheck.net/), which the CI never skips, **workflows** pass actionlint and zizmor's audit of their security, and **Markdown** follows the rules of markdownlint in `.markdownlint.jsonc`.
+- **A new action or reusable workflow** needs its pattern `owner/repo@*` in `[actions.selected]` of `.github/repository.toml` and `template/.github/repository.toml.jinja`, also for what it runs in turn: GitHub starts only the listed ones, and `python3 blueprint.py settings check` names each one that the list lacks. Its jobs start once a maintainer has run `python3 blueprint.py settings apply`.
 - **Every text file** has LF line endings, no trailing whitespace, a line break at its end and no conflict markers that a merge left; `.editorconfig` sets up most editors for it.
 
 `scripts/check.sh` and the Lint workflow check these standards on every pull request, which merges only when they pass. An exception to a rule is rare and is marked at its place in the code, with its reason in a comment.
