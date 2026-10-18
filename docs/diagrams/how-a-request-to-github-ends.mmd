@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a request to GitHub ends
+    accDescr: A bot asks GitHub through the GitHub CLI, and a list is read with all its pages. An answer without an error is the answer, and so is a 404 where the bot asked what is there. After a gateway that timed out or a rate limit, the request waits as long as GitHub asks, 5 seconds or a minute, and tries once more, unless the wait would be longer than 90 seconds. Any other error, also a 404 to a change, fails the request, and settings apply names the part and the permission that the release app may lack.
+
+    ask(["A bot asks GitHub, with every page of a list"])
+    answer["The answer: no error,<br>or 404 where the bot asked what is there"]
+    wait["A gateway that timed out, or a rate limit:<br>wait 5 seconds or a minute, as GitHub asks,<br>and try once more"]
+    refused["Any other error, also a 404 to a change:<br>the request fails, and settings apply names<br>the part and the permission that the app may lack"]
+
+    ask --> answer
+    ask --> wait
+    wait --> answer
+    ask --> refused
+    wait -. "fails again, or would<br>wait more than 90 seconds" .-> refused
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class ask,wait bot
+    class refused person
+    class answer done

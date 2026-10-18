@@ -318,7 +318,7 @@ Die anderen Arten legen diese Orte in eigenen Dateien fest, etwa in `pyproject.t
 - **Variablen und Environments:** `PUBLISH_TO`, die Release-App (`RELEASE_AUTOMATION_CLIENT_ID` und `RELEASE_AUTOMATION_APP_ID`) und Environments, die nur `main` nutzen darf, mit den Secrets, die sie brauchen.
 - **Pages:** GitHub Pages veröffentlicht die Website, die der Docs-Workflow baut.
 
-`blueprint.py` braucht Python 3.12 und die GitHub CLI, angemeldet als Administrator, sonst nichts. Es liest und zeigt nie den Wert eines Secrets. Jedes Repository hat eine Kopie in `.github/blueprint.py` und `.github/blueprint/`, und der Settings-Bot (`settings.yml`) vergleicht seine Einstellungen jede Woche und nach jeder Änderung mit den Einstellungen als Code, damit kein Repository abdriftet.
+`blueprint.py` braucht Python 3.12 und die GitHub CLI, angemeldet als Administrator, sonst nichts. Es liest und zeigt nie den Wert eines Secrets. Jedes Repository hat eine Kopie in `.github/blueprint.py` und `.github/blueprint/`, und der Settings-Bot (`settings.yml`) vergleicht seine Einstellungen jede Woche, nach jeder Änderung und nach jedem Update seines eigenen Codes mit den Einstellungen als Code, damit kein Repository abdriftet. Eine Änderung, die GitHub ablehnt, lässt den Lauf fehlschlagen, der den Teil und die Berechtigung der Release-App nennt, die sie braucht; nach einem Gateway, das nicht rechtzeitig antwortete, oder einem Rate-Limit versucht eine Anfrage es noch einmal, nach der Wartezeit, die GitHub verlangt (Entscheidung 0036 der [Entscheidungen](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
 
 ## Updates
 

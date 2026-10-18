@@ -8,6 +8,8 @@ from collections.abc import Iterator
 import pytest
 from shared import GIT_REPOSITORY_VARIABLES
 
+import blueprint.github
+
 
 @pytest.fixture(scope="session", autouse=True)
 def no_repository_of_the_run() -> Iterator[None]:
@@ -35,3 +37,12 @@ def bytecode_apart(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         del os.environ["PYTHONPYCACHEPREFIX"]
     else:
         os.environ["PYTHONPYCACHEPREFIX"] = before
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """A request to GitHub that tries again waits first, as long as this list says;
+    no test waits."""
+    seconds: list[float] = []
+    monkeypatch.setattr(blueprint.github, "sleep", seconds.append)
+    return seconds

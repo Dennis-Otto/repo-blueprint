@@ -324,7 +324,7 @@ The other kinds set these places in files of their own, such as `pyproject.toml`
 - **Variables and environments:** `PUBLISH_TO`, the release app (`RELEASE_AUTOMATION_CLIENT_ID` and `RELEASE_AUTOMATION_APP_ID`), and environments that only `main` may use, with the secrets they need.
 - **Pages:** GitHub Pages publishes the website that the Docs workflow builds.
 
-`blueprint.py` needs Python 3.12 and the GitHub CLI signed in as an administrator, and nothing else. It never reads or prints the value of a secret. Every repository has a copy in `.github/blueprint.py` and `.github/blueprint/`, and the settings bot (`settings.yml`) compares its settings with the settings as code every week and after every change of them, so that no repository drifts.
+`blueprint.py` needs Python 3.12 and the GitHub CLI signed in as an administrator, and nothing else. It never reads or prints the value of a secret. Every repository has a copy in `.github/blueprint.py` and `.github/blueprint/`, and the settings bot (`settings.yml`) compares its settings with the settings as code every week, after every change of them and after every update of its own code, so that no repository drifts. A change that GitHub refuses fails the run, which names the part and the permission of the release app that it needs; after a gateway that timed out or a rate limit, a request tries once more, after the wait that GitHub asks for (decision 0036 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
 
 ## Updates
 

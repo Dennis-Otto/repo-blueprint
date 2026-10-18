@@ -305,9 +305,7 @@ def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[st
 
 
 def rulesets(api: Api, repo: str) -> dict[str, Json]:
-    return {
-        item["name"]: item["id"] for item in api.get(f"repos/{repo}/rulesets") or []
-    }
+    return {item["name"]: item["id"] for item in api.get_all(f"repos/{repo}/rulesets")}
 
 
 def check_rulesets(api: Api, repo: str, wanted: list[dict[str, Json]]) -> list[Drift]:
@@ -396,21 +394,15 @@ def check_environments(
             drift.append(Drift(f"environment {name}", "main only", "missing"))
         else:
             policy = environment.get("deployment_branch_policy")
-            branches = (
-                api.get(f"repos/{repo}/environments/{name}/deployment-branch-policies")
-                or {}
-            )
             names = sorted(
                 f"{item.get('type', 'branch')}:{item['name']}"
-                for item in branches.get("branch_policies", [])
+                for item in branch_policies(api, repo, name)
             )
             if policy != MAIN_ONLY or names != ["branch:main"]:
                 drift.append(Drift(f"environment {name}", "main only", names or policy))
         present = {
             item["name"]
-            for item in (
-                api.get(f"repos/{repo}/environments/{name}/secrets") or {}
-            ).get("secrets", [])
+            for item in api.get_all(f"repos/{repo}/environments/{name}/secrets")
         }
         for secret in config.get("secrets", []):
             if secret not in present:
@@ -423,24 +415,28 @@ def check_environments(
     return drift
 
 
+def branch_policies(api: Api, repo: str, environment: str) -> list[Json]:
+    """The branches and tags from which an environment may be used."""
+    return api.get_all(
+        f"repos/{repo}/environments/{environment}/deployment-branch-policies"
+    )
+
+
 def apply_environments(api: Api, repo: str, drift: list[Drift]) -> None:
     for item in drift:
         name = item.setting.removeprefix("environment ")
         api.put(
             f"repos/{repo}/environments/{name}", {"deployment_branch_policy": MAIN_ONLY}
         )
-        policies = (
-            api.get(f"repos/{repo}/environments/{name}/deployment-branch-policies")
-            or {}
-        )
-        for policy in policies.get("branch_policies", []):
+        policies = branch_policies(api, repo, name)
+        for policy in policies:
             if (policy.get("type", "branch"), policy["name"]) != ("branch", "main"):
                 api.delete(
                     f"repos/{repo}/environments/{name}/deployment-branch-policies/{policy['id']}"
                 )
         if not any(
             (policy.get("type", "branch"), policy["name"]) == ("branch", "main")
-            for policy in policies.get("branch_policies", [])
+            for policy in policies
         ):
             api.post(
                 f"repos/{repo}/environments/{name}/deployment-branch-policies",
@@ -502,38 +498,43 @@ def apply_pages(api: Api, repo: str, want: dict[str, Json], drift: list[Drift]) 
 # --------------------------------------------------------------------------- labels
 
 
+def labels(api: Api, repo: str) -> dict[str, Json]:
+    """The labels of the repository, by their names in lower case: GitHub ignores the
+    case of a name, so Bug is the label bug in another case."""
+    return {
+        item["name"].casefold(): item for item in api.get_all(f"repos/{repo}/labels")
+    }
+
+
 def check_labels(api: Api, repo: str, want: dict[str, dict[str, str]]) -> list[Drift]:
-    """Every label of .github/labels.toml, with its color and description.
+    """Every label of .github/labels.toml, with its name, color and description.
 
     The Labels workflow keeps them current later; a new repository needs them before
     its first pull request, whose title check sets one.
     """
-    have = {
-        item["name"]: item
-        for item in api.get(f"repos/{repo}/labels?per_page=100") or []
-    }
+    have = labels(api, repo)
     drift = []
     for name, label in want.items():
-        current = have.get(name)
+        current = have.get(name.casefold())
         wanted = f"#{label['color'].lower()} {label['description']}"
         if current is None:
             drift.append(Drift(f"label {name}", wanted, None))
-        elif (
-            f"#{current['color'].lower()} {current.get('description') or ''}" != wanted
-        ):
+            continue
+        found = f"#{current['color'].lower()} {current.get('description') or ''}"
+        if current["name"] != name:
+            # The name in another case: renamed, which the drift shows.
             drift.append(
-                Drift(
-                    f"label {name}",
-                    wanted,
-                    f"#{current['color']} {current.get('description') or ''}",
-                )
+                Drift(f"label {name}", f"{name} {wanted}", f"{current['name']} {found}")
             )
+        elif found != wanted:
+            drift.append(Drift(f"label {name}", wanted, found))
     return drift
 
 
 def apply_labels(
     api: Api, repo: str, want: dict[str, dict[str, str]], drift: list[Drift]
 ) -> None:
+    have = labels(api, repo)
     for item in drift:
         name = item.setting.removeprefix("label ")
         body = {
@@ -541,10 +542,19 @@ def apply_labels(
             "color": want[name]["color"].lower(),
             "description": want[name]["description"],
         }
-        if item.have is None:
-            api.post(f"repos/{repo}/labels", body)
-        else:
-            api.patch(f"repos/{repo}/labels/{urllib.parse.quote(name, safe='')}", body)
+        current = have.get(name.casefold())
+        if current is None:
+            try:
+                api.post(f"repos/{repo}/labels", body)
+                continue
+            except GitHubError as error:
+                # Created a moment ago, such as by the Labels workflow when a push
+                # starts both: then it is updated like any other.
+                if "already_exists" not in error.codes:
+                    raise
+            current = {"name": name}
+        path = urllib.parse.quote(current["name"], safe="")
+        api.patch(f"repos/{repo}/labels/{path}", body)
 
 
 def load_labels(path: Path) -> dict[str, dict[str, str]]:
@@ -676,14 +686,22 @@ def apply(api: Api, repo: str, settings: Settings, drift: list[Drift]) -> list[s
         try:
             step()
         except GitHubError as error:
-            hint = ""
-            if error.status == 403:
-                hint = (
-                    f"; the token may lack the permission {PERMISSIONS[name]}"
-                    " (read and write)"
-                )
-            refused.append(f"the {name} could not be applied: {error}{hint}")
+            refused.append(
+                f"the {name} could not be applied: {error}{hint(name, error)}"
+            )
     return refused
+
+
+def hint(part: str, error: GitHubError) -> str:
+    """What a refusal of GitHub likely means. GitHub answers 403, and for some changes
+    404, to a token without the permission."""
+    if error.rate_limited:
+        return "; that is the rate limit of GitHub; the next run tries again"
+    if error.status in (403, 404):
+        return (
+            f"; the token may lack the permission {PERMISSIONS[part]} (read and write)"
+        )
+    return ""
 
 
 def describe(drift: list[Drift]) -> str:

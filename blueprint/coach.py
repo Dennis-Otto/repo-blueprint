@@ -838,7 +838,8 @@ def retire(api: Api, repo: str, comments: list[Json], parts: Sequence[Part]) -> 
     replaced = [part.replaces for part in parts if part.replaces]
     for marker in dict.fromkeys([*RETIRED, *replaced]):
         for old in marked(comments, marker):
-            api.delete(f"repos/{repo}/issues/comments/{old['id']}")
+            # Someone may have deleted it a moment ago.
+            api.delete(f"repos/{repo}/issues/comments/{old['id']}", missing_ok=True)
 
 
 # ---------------------------------------------------------------- what needs explaining

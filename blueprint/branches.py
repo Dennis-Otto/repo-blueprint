@@ -330,8 +330,10 @@ class Line:
                     self.conflict(pull)
                     continue
                 if pull.labelled and pull.mergeable == "MERGEABLE":
+                    # Someone may have taken it off a moment ago.
                     self.api.delete(
-                        f"repos/{self.repo}/issues/{pull.number}/labels/{LABEL}"
+                        f"repos/{self.repo}/issues/{pull.number}/labels/{LABEL}",
+                        missing_ok=True,
                     )
             except GitHubError as error:
                 self.refused(pull, error)
@@ -359,6 +361,7 @@ class Line:
             "PUT",
             f"repos/{self.repo}/pulls/{pull.number}/update-branch",
             {"expected_head_sha": pull.head},
+            missing_ok=True,
         )
         if response.status == 404:
             raise GitHubError(404, f"no pull request #{pull.number} to update")

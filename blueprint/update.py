@@ -138,7 +138,7 @@ class Update:
 
 
 def post(api: Api, path: str, body: Json) -> dict[str, Json]:
-    response = api.request("POST", path, body)
+    response = api.request("POST", path, body, missing_ok=True)
     if response.status == 404 or not isinstance(response.data, dict):
         raise GitHubError(response.status, f"no answer to POST {path}")
     return response.data
@@ -488,7 +488,8 @@ def settle(
         return
     if LABEL in labels:
         label = urllib.parse.quote(LABEL, safe="")
-        api.delete(f"repos/{repo}/issues/{number}/labels/{label}")
+        # Someone may have taken it off a moment ago.
+        api.delete(f"repos/{repo}/issues/{number}/labels/{label}", missing_ok=True)
     if automerge and not merging and (pull is None or LABEL in labels):
         gh(api, "pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
 
