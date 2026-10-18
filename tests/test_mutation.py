@@ -436,6 +436,22 @@ def change(old: str, new: str, before: str = "", after: str = "") -> str:
             change('        help="the x",', "", '    add(\n        "--x",', "    )"),
             VALUE,
         ),
+        # The last argument of a call on lines of their own, whose comma the match
+        # of the tokens takes from the line before, as mutmut showed it in a run.
+        (
+            change(
+                '        "https://example.com/new",\n    ),',
+                "        ),",
+                '    Step(\n        "A title",\n        "projects/" in readme,',
+                "    Step(",
+            ),
+            VALUE,
+        ),
+        (change("    run(a, b, a)", "    run(a, b)"), VALUE),
+        (change("    run(b, b)", "    run(b)"), VALUE),
+        (change("    f(a, a, b, c)", "    f(a, b, c)"), VALUE),
+        # Not a value: a part of an expression left out.
+        (change("    return -x", "    return x"), LOGIC),
         # The logic: an operator, a removed not, a condition, a number.
         (change("    return a + b", "    return a - b"), LOGIC),
         (change("    if not ready:", "    if ready:"), LOGIC),

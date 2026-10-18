@@ -69,7 +69,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.kind != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 350 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 40 || 350 }}
     permissions:
       contents: read
     strategy:
@@ -83,9 +83,10 @@ jobs:
       INFECTION_VERSION: 0.35.6
       INFECTION_SHA256: 3fd4216875260b8e47c48ec1a92473f500d88bd36d8ffec21cc0d24e18d7f0ea
       # The time of mutmut, which keeps the mutants it reached: a pull request tries
-      # them for a quarter of an hour. Infection, which reports at its end only, takes
-      # the time of the job.
-      MUTMUT_LIMIT: ${{ github.event_name == 'pull_request' && '15m' || '320m' }}
+      # them for 25 minutes, of which the copy of the code and the first run of the
+      # tests take about 13 in each part of the blueprint. Infection, which reports at
+      # its end only, takes the time of the job.
+      MUTMUT_LIMIT: ${{ github.event_name == 'pull_request' && '25m' || '320m' }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1

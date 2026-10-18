@@ -416,13 +416,14 @@ def kind_of_change(
         return VALUE
     if [text for _, text in removed] == ["None"] and added and added[0][0] == "string":
         return VALUE
-    if (
-        removed
-        and not added
-        and before in OPENING
-        and (after in CLOSING or removed[-1][1] == ",")
-    ):
-        return VALUE
+    # An argument left out of a call: "a," after "(" or ",", "a" between them and
+    # ")" or ",", or ",a" before ")".
+    if removed and not added:
+        first, last = removed[0][1], removed[-1][1]
+        if (before in OPENING and (after in CLOSING or last == ",")) or (
+            first == "," and after == ")"
+        ):
+            return VALUE
     return LOGIC
 
 
@@ -439,19 +440,37 @@ def classify(diff: str) -> str:
             old += tokens(line[1:])
         if line.startswith(("+", " ")):
             new += tokens(line[1:])
+    texts = [text for _, text in old]
     matcher = difflib.SequenceMatcher(
-        None, [text for _, text in old], [text for _, text in new], autojunk=False
+        None, texts, [text for _, text in new], autojunk=False
     )
-    kinds = {
-        kind_of_change(
-            old[i1:i2],
-            new[j1:j2],
-            old[i1 - 1][1] if i1 else "",
-            old[i2][1] if i2 < len(old) else "",
-        )
-        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
-        if tag != "equal"
-    }
+    kinds = set()
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        # A deletion between equal tokens can sit one place further, as "a," for
+        # ",a" of "f(x, a)": the kind of the change is that of any of its places.
+        spans = [(i1, i2)]
+        if tag == "delete":
+            start, end = i1, i2
+            while start and texts[start - 1] == texts[end - 1]:
+                start, end = start - 1, end - 1
+                spans.append((start, end))
+            start, end = i1, i2
+            while end < len(texts) and texts[start] == texts[end]:
+                start, end = start + 1, end + 1
+                spans.append((start, end))
+        found = {
+            kind_of_change(
+                old[start:end],
+                new[j1:j2],
+                texts[start - 1] if start else "",
+                texts[end] if end < len(texts) else "",
+            )
+            for start, end in spans
+        }
+        # The mildest kind of its places, since all of them are the same change.
+        kinds.add(next(kind for kind in reversed(KINDS) if kind in found))
     return next((kind for kind in KINDS if kind in kinds), LOGIC)
 
 

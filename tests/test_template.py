@@ -10171,14 +10171,16 @@ def test_a_pull_request_that_changes_how_the_mutants_run_tries_them() -> None:
         "stacks/mutation/requirements.txt",
     ):
         assert f"      - {path}\n" in events, path
-    # mutmut for a quarter of an hour, every week for hours; it keeps the mutants it
-    # reached. Infection reports at its end only.
+    # mutmut for 25 minutes in each part, every week for hours; it keeps the mutants
+    # it reached. Each part first copies the code and runs every test, which took
+    # 13 minutes of the 15 that a part of the blueprint had. Infection reports at its
+    # end only.
     limit = re.search(r"\n      MUTMUT_LIMIT: \$\{\{ (.+) \}\}\n", workflow)
     assert limit
-    assert limit[1] == "github.event_name == 'pull_request' && '15m' || '320m'"
+    assert limit[1] == "github.event_name == 'pull_request' && '25m' || '320m'"
     assert workflow.count('timeout "$MUTMUT_LIMIT" mutmut run ') == 1
     assert (
-        "timeout-minutes: ${{ github.event_name == 'pull_request' && 30 || 350 }}"
+        "timeout-minutes: ${{ github.event_name == 'pull_request' && 40 || 350 }}"
         in workflow
     )
 
