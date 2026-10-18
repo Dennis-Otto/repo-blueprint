@@ -1,8 +1,11 @@
 // The rules of Renovate from the blueprint, which .github/renovate.json5 extends.
 // Renovate keeps the actions, the dependencies, the images and the pins of the
-// workflows current; the Renovate workflow of the blueprint runs it for every
+[% if renovate_runner == 'self' %]// workflows current; the Renovate workflow of this repository runs it, as the
+// release app. An update waits a
+[% elif renovate_runner == 'mend' %]// workflows current; the Mend Renovate app runs it. An update waits a
+[% else %]// workflows current; the Renovate workflow of the blueprint runs it for every
 // repository with a .github/renovate.json5, as the release app. An update waits a
-// week after its release; one that fixes a vulnerability comes at once, and so does
+[% endif %]// week after its release; one that fixes a vulnerability comes at once, and so does
 // the new commit of a branch that an action follows. Routine updates merge on their
 // own once every check passes; the weekly refresh of the lock files and a major
 // update wait for the maintainer. Updates of what the users run are committed as
@@ -145,7 +148,14 @@
       matchManagers: ["github-actions"],
       matchDepNames: ["Dennis-Otto/issue-assistant"],
       enabled: false,
-    },
+    },[% if renovate_runner == 'self' %]
+    {
+      // The Renovate of the Renovate workflow, pinned by digest, follows the line
+      // "# renovate:" above it rather than the action's own reading of the input.
+      matchManagers: ["github-actions"],
+      matchDepNames: ["ghcr.io/renovatebot/renovate"],
+      enabled: false,
+    },[% endif %]
     {
       // The versions of Python, Node and PHP that the workflows set up, and the
       // runners, follow the blueprint.

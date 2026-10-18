@@ -151,7 +151,7 @@ A repository without a build checks its text files and shell scripts and makes r
 
 --8<-- "README.md:quick-start"
 
-The guide describes how [your own account](guide.md#your-own-account) gets its release app and keeps its answers, what each repository needs [once](guide.md#once-per-repository), and how [an existing repository](guide.md#an-existing-repository) takes the blueprint.
+The guide describes how [your own account](guide.md#your-own-account) gets its release app and keeps its answers, and the page [Your own account](own-account.md) walks through a repository of your own step by step, with Renovate in the repository or as the Mend app and the issue assistant with or without AI; the guide also says what each repository needs [once](guide.md#once-per-repository), and how [an existing repository](guide.md#an-existing-repository) takes the blueprint.
 
 ## Learn more
 

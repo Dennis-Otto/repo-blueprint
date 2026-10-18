@@ -77,8 +77,10 @@ jobs:
         # Each file of tests/answers/, with the project_type of its answers.
         include:
           # The new generic repository of an owner other than the blueprint's, without
-          # a release app yet: it gets nothing of the blueprint owner's app or person.
-          - { kind: generic, start: new, owner: octo-org }
+          # a release app yet: it gets nothing of the blueprint owner's app or person,
+          # but a Renovate workflow of its own; and without the AI of the issue
+          # assistant, whose check then asks no file to name an engine.
+          - { kind: generic, start: new, owner: octo-org, ai: "false" }
           - { kind: generic, start: adopted, answers: dennis-otto.github.io }
           - { kind: home-assistant, start: adopted, answers: ha-autodarts }
           - { kind: github-action, start: adopted, answers: issue-assistant }
@@ -90,6 +92,8 @@ jobs:
       # The owner of the blueprint, as in every repository of the Rollout, unless the
       # leg names another.
       OWNER: ${{ matrix.owner || 'Dennis-Otto' }}
+      # The AI of the issue assistant, unless the leg switches it off.
+      AI: ${{ matrix.ai || 'true' }}
       # Inside the workspace, where actions such as setup-node look for their files.
       PROJECT: variant
     steps:
@@ -134,6 +138,7 @@ jobs:
             --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts." \
             --data project_type="$KIND" \
             --data owner="$OWNER" \
+            --data issue_assistant_ai="$AI" \
             . "$PROJECT"
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all

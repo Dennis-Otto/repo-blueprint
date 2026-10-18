@@ -25,8 +25,10 @@ unmapped_options = ["Other"]
 
 [transparency]
 # Files that tell reporters which AI reads their issue; the check command makes sure
-# they name the engine.
-files = ["SUPPORT.md"]
+# they name the engine.[% if issue_assistant_ai %]
+files = ["SUPPORT.md"][% else %] None: the repository variable ISSUE_ASSISTANT_AI
+# switches the AI off, and SUPPORT.md says that no AI reads the issues.
+files = [][% endif %]
 
 [releases]
 # A merged pull request that fixes an issue labels it fixed-in-next-release; the

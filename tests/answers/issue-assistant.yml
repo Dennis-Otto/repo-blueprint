@@ -9,6 +9,7 @@ description: 'A GitHub Action that looks after issues: a first analysis by an AI
   only reads, labels, duplicates and reminders, all checked before posting.'
 discussions: true
 homepage: https://dennis-otto.github.io/issue-assistant/
+issue_assistant_ai: true
 languages:
 - python
 license: MIT
@@ -20,6 +21,7 @@ python_package: issue_assistant
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
 release_app_id: '4739928'
+renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true

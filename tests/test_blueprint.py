@@ -24,6 +24,7 @@ from blueprint.checklist import (
     best_practices,
     checklist,
     release_app_name,
+    renovate,
     reuse_compliant,
 )
 from blueprint.github import Api, GitHubError
@@ -284,6 +285,9 @@ class FakeGitHub:
         }
         # Off, as in a new repository.
         self.pages: dict[str, Any] | None = None
+        # The open issues and pull requests, and the numbers of the bot users of apps.
+        self.issues: list[dict[str, Any]] = []
+        self.bots: dict[str, int] = {}
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
             "spare": {"color": "ffffff", "description": "Not in the configuration"},
@@ -343,6 +347,11 @@ class FakeGitHub:
             return self.content(*content.groups())
         if path == f"users/{REPO.split('/')[0]}":
             return 200, {"login": REPO.split("/")[0], "type": self.account}
+        if bot := re.fullmatch(r"users/([\w-]+)%5Bbot%5D", path):
+            number = self.bots.get(bot[1])
+            if number is None:
+                return 404, {"message": "Not Found"}
+            return 200, {"login": f"{bot[1]}[bot]", "id": number, "type": "Bot"}
         return self.route(
             method, path.split("?")[0].removeprefix(f"repos/{REPO}"), payload
         )
@@ -393,12 +402,16 @@ class FakeGitHub:
             (r"/environments/([\w-]+)/secrets", self.secrets),
             (r"/community/profile", self.community_profile),
             (r"/pages", self.pages_site),
+            (r"/issues", self.issue_list),
         ):
             match = re.fullmatch(pattern, path)
             if match:
                 result: tuple[int, Any] = handler(method, body, *match.groups())
                 return result
         raise AssertionError(f"unexpected request {method} {path}")
+
+    def issue_list(self, method: str, body: Any) -> tuple[int, Any]:
+        return 200, self.issues
 
     def community_profile(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.community
@@ -2052,6 +2065,7 @@ def test_the_checklist_of_a_finished_repository(
     run(github, root, "settings", "apply")
     set_secrets(github)
     github.og_image = True
+    github.issues = [DASHBOARD]
     (root / "README.md").write_text(
         "[![Best](https://www.bestpractices.dev/projects/1/badge)]\n"
         "[![Baseline](https://www.bestpractices.dev/projects/1/baseline)]\n",
@@ -2066,6 +2080,7 @@ def test_the_checklist_of_a_finished_repository(
     assert "✔ Settings as code applied" in out
     assert "✔ Secrets of the environments set" in out
     assert "✔ Community profile complete (100 %)" in out
+    assert "✔ Renovate runs: its issue 'Dependency dashboard' is open" in out
     assert "Sponsorships" not in out
     assert "✔ Registered with the REUSE API" in out
     assert "✔ OpenSSF Best Practices badge in the README" in out
@@ -2162,7 +2177,7 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 10
+        assert len(texts) == 11
     else:
         assert any(text in step for step in texts)
 
@@ -2301,6 +2316,126 @@ def test_the_checklist_of_a_named_release_app_links_its_installation(
     )
     # Its owner is no question once it is named.
     assert ("GET", "users/Dennis-Otto") not in github.calls
+
+
+# The issue that Renovate keeps open once it runs.
+DASHBOARD = {"number": 7, "title": "Dependency dashboard", "labels": [{"name": "x"}]}
+HUB = [
+    "The Renovate workflow of the blueprint runs it every two hours for each"
+    " repository of its owner on which the release app is installed; its next run"
+    " after the installation opens the dashboard."
+]
+
+
+def test_the_checklist_knows_that_renovate_runs_by_its_dashboard(
+    github: FakeGitHub, root: Path
+) -> None:
+    settings = Settings.load(root / ".github/repository.toml")
+    # A pull request of Renovate is no dashboard, whatever its title.
+    github.issues = [
+        {"number": 8, "title": "Dependency dashboard", "pull_request": {"url": "x"}},
+        {"number": 9, "title": "fix(deps): update the actions"},
+    ]
+
+    waiting = renovate(Api(github), REPO, settings, root)
+    github.issues.append(DASHBOARD)
+    running = renovate(Api(github), REPO, settings, root)
+
+    assert waiting.text == "Renovate runs: its issue 'Dependency dashboard' is open"
+    assert waiting.done is False
+    assert running.done is True
+    assert (
+        "GET",
+        f"repos/{REPO}/issues?labels=dependencies&state=open&per_page=100",
+    ) in github.calls
+
+
+@pytest.mark.parametrize(
+    ("answers", "how"),
+    [
+        # The blueprint itself, which has no answers, runs the hub.
+        (None, HUB),
+        ("_commit: v0.13.0\nrenovate_runner: hub\n", HUB),
+        (
+            "renovate_runner: self\n",
+            [
+                "The Renovate workflow of this repository runs it every two hours as"
+                " the release app, once the app is installed; start its first run:",
+                f"https://github.com/{REPO}/actions/workflows/renovate.yml",
+            ],
+        ),
+        ("renovate_runner: someone\n", HUB),
+    ],
+    ids=["no answers", "hub", "self", "unknown"],
+)
+def test_the_checklist_says_how_renovate_comes_to_run(
+    github: FakeGitHub, root: Path, answers: str | None, how: list[str]
+) -> None:
+    if answers is not None:
+        (root / ".copier-answers.yml").write_text(answers, encoding="utf-8")
+    settings = Settings.load(root / ".github/repository.toml")
+
+    step = renovate(Api(github), REPO, settings, root)
+
+    assert step.done is False
+    assert step.how.splitlines() == how
+
+
+MEND = [
+    "Install the Mend Renovate app on this repository; it reads"
+    " .github/renovate.json5 and opens the dashboard on its first run:",
+    "https://github.com/apps/renovate/installations/new",
+    "The branch bot and the fix bot commit to its branches as the release app; so"
+    " that Renovate goes on rebasing them, add to .github/renovate.json5:",
+]
+
+
+@pytest.mark.parametrize(
+    ("app", "bots", "rest"),
+    [
+        (
+            "demo-release-automation",
+            {"demo-release-automation": 1234},
+            [
+                'gitIgnoredAuthors: ["1234+demo-release-automation[bot]'
+                '@users.noreply.github.com"]'
+            ],
+        ),
+        # An app that GitHub doesn't know, and no app yet.
+        ("demo-release-automation", {}, None),
+        ("", {}, None),
+    ],
+    ids=["app", "unknown app", "no app"],
+)
+def test_the_checklist_links_the_mend_app_and_the_author_it_takes_for_its_own(
+    github: FakeGitHub,
+    root: Path,
+    app: str,
+    bots: dict[str, int],
+    rest: list[str] | None,
+) -> None:
+    (root / ".copier-answers.yml").write_text(
+        "renovate_runner: mend\n", encoding="utf-8"
+    )
+    path = root / ".github/repository.toml"
+    path.write_text(
+        CONFIG.replace("[variables]\n", f'[variables]\nRELEASE_APP = "{app}"\n'),
+        encoding="utf-8",
+    )
+    github.bots = bots
+
+    step = renovate(Api(github), REPO, Settings.load(path), root)
+
+    assert step.how.splitlines() == MEND + (
+        rest
+        or [
+            'gitIgnoredAuthors: ["ID+NAME[bot]@users.noreply.github.com"]',
+            "with the name of the release app for NAME, and for ID the number of its"
+            " bot user: gh api users/NAME%5Bbot%5D --jq .id",
+        ]
+    )
+    asked = [path for method, path in github.calls if path.startswith("users/")]
+    assert asked == ([f"users/{app}%5Bbot%5D"] if app else [])
 
 
 def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:

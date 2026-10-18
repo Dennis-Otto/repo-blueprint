@@ -151,7 +151,7 @@ Ein Repository ohne Build prüft seine Textdateien und Shell-Skripte und macht n
 
 --8<-- "README.de.md:quick-start"
 
-Die Anleitung beschreibt, wie [dein eigenes Konto](guide.md#dein-eigenes-konto) zu seiner Release-App kommt und seine Antworten behält, was jedes Repository [einmal](guide.md#einmal-pro-repository) braucht und wie [ein bestehendes Repository](guide.md#ein-bestehendes-repository) den Blueprint übernimmt.
+Die Anleitung beschreibt, wie [dein eigenes Konto](guide.md#dein-eigenes-konto) zu seiner Release-App kommt und seine Antworten behält, und die Seite [Dein eigenes Konto](own-account.md) führt Schritt für Schritt durch ein eigenes Repository, mit Renovate im Repository oder als Mend-App und dem Issue-Assistenten mit oder ohne KI; die Anleitung sagt auch, was jedes Repository [einmal](guide.md#einmal-pro-repository) braucht und wie [ein bestehendes Repository](guide.md#ein-bestehendes-repository) den Blueprint übernimmt.
 
 ## Mehr erfahren
 

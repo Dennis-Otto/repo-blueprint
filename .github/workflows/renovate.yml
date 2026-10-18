@@ -1,15 +1,16 @@
 name: Renovate
 
-# The dependency bot of every repository of the blueprint. On its schedule, which
-# GitHub runs as it can, a few times a day and often hours late, and on demand, it
-# runs Renovate for each repository of the owner that has a
-# .github/renovate.json5, as the release app: it opens the updates of the actions,
-# the dependencies, the images and the pins, and the checks of each repository
-# decide whether they merge. The rules of the updates are in the
+# The dependency bot. On its schedule, which GitHub runs as it can, a few times a day
+# and often hours late, and on demand, it runs Renovate as the release app of the
+# owner: in the blueprint for each repository of its owner that has a
+# .github/renovate.json5, and in a repository that runs Renovate itself, the answer
+# renovate_runner "self" of the blueprint, for that repository alone. It opens the
+# updates of the actions, the dependencies, the images and the pins, and the checks
+# of each repository decide whether they merge. The rules of the updates are in the
 # .github/renovate.json5 of each repository; .github/renovate-global.json5 holds
-# those of the bot itself. It runs in the blueprint only. A pull request that
-# changes the rules or a lock file shows whether Renovate accepts the rules and still
-# reads every file of the dependencies.
+# those of the bot itself. A pull request that changes the rules or a lock file
+# shows whether Renovate accepts the rules and still reads every file of the
+# dependencies.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -125,7 +126,9 @@ jobs:
 
   renovate:
     name: renovate
-    if: github.repository == 'Dennis-Otto/repo-blueprint' && github.event_name != 'pull_request'
+    # In the blueprint, for the repositories of its owner; a repository that runs
+    # Renovate itself gets the job without the name of the blueprint.
+    if: github.event_name != 'pull_request' && github.repository == 'Dennis-Otto/repo-blueprint'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     # One run of the bot at a time; the next one waits for it.
@@ -148,14 +151,38 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Create a token of the release app for the repositories of the owner
+      # Renovate runs as the release app of the owner, whose token may change the
+      # workflows and starts the checks of its pull requests. Without it, the run says
+      # what to set up rather than fail at the token.
+      - name: Check that the release app is set up
+        env:
+          CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
+          elif [[ "$KEY_SET" != true ]]; then
+            missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
+          else
+            exit 0
+          fi
+          echo "::error::This repository $missing, which Renovate runs as; no dependency was updated."
+          {
+            echo "### Renovate needs the release app of the owner"
+            echo
+            echo "This repository $missing. Renovate runs as the release app of the owner, a GitHub App whose token may change the workflows that an update touches and starts the checks of its pull requests, which the token of a job can't. No dependency was updated."
+            echo
+            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. The next run updates the dependencies."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+      - name: Create a token of the release app
         id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
-          # Every repository of the installation, on purpose: the app is installed on
-          # exactly the repositories that Renovate keeps current.
+          # In the blueprint, every repository of the installation, on purpose: the
+          # app is installed on exactly the repositories that Renovate keeps current.
           owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
           # Only what updates need, and no administration: the package managers
           # that write the lock files can't change a setting with it.
@@ -166,6 +193,20 @@ jobs:
           permission-statuses: write
           permission-checks: read
           permission-vulnerability-alerts: read
+      # Renovate commits and comments as the bot user of the app, and knows its own
+      # commits by their author, whose number GitHub gave the bot user.
+      - name: Name the bot user of the release app
+        id: bot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          user="${SLUG}[bot]"
+          id=$(gh api "users/$SLUG%5Bbot%5D" --jq .id)
+          {
+            echo "username=$user"
+            echo "git-author=$user <$id+$user@users.noreply.github.com>"
+          } >> "$GITHUB_OUTPUT"
       - name: Run Renovate
         uses: renovatebot/github-action@230ce922b08968d0a4f6f70f295601daff09ef1d # v46.3.7
         with:
@@ -175,6 +216,12 @@ jobs:
           renovate-version: 44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435
         env:
           LOG_LEVEL: info
+          RENOVATE_USERNAME: ${{ steps.bot.outputs.username }}
+          RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.git-author }}
+          # In the blueprint, every repository of the owner on which the app is
+          # installed and that has a .github/renovate.json5.
+          RENOVATE_AUTODISCOVER: "true"
+          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*
           # The warnings and errors once more, in JSON, for the next step; the action
           # shares /tmp with the container of Renovate.
           RENOVATE_LOG_FILE: /tmp/renovate/problems.json
@@ -189,5 +236,11 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -o pipefail
-          python3 blueprint.py --repo "$GITHUB_REPOSITORY" bot-health renovate /tmp/renovate/problems.json --run "$RUN_URL" |
+          # Repositories have the copy that the blueprint keeps current; the blueprint
+          # has the original.
+          script=.github/blueprint.py
+          if [[ ! -f "$script" ]]; then
+            script=blueprint.py
+          fi
+          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate /tmp/renovate/problems.json --run "$RUN_URL" |
             tee -a "$GITHUB_STEP_SUMMARY"

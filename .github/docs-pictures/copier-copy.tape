@@ -107,6 +107,16 @@ Enter
 Wait /4739928$/
 Sleep 500ms
 Enter
+# Who runs Renovate, a choice whose default, the Renovate workflow of the blueprint
+# for its owner, is selected, and the AI of the issue assistant, yes. The choice
+# shows no line to wait for, so the key waits for a moment.
+Sleep 1s
+Enter
+Wait /\(Y.n\)$/
+Sleep 500ms
+Enter
+# Whether to start with sample code, yes, once the answer of the AI shows.
+Sleep 700ms
 Wait /\(Y.n\)$/
 Sleep 500ms
 Enter

@@ -12,6 +12,7 @@ description: 'Autodarts for Home Assistant: local realtime board control, X01, C
 discussions: true
 ha_domain: autodarts
 homepage: https://dennis-otto.github.io/ha-autodarts/
+issue_assistant_ai: true
 languages:
 - python
 - javascript-typescript
@@ -24,6 +25,7 @@ python_package: autodarts
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
 release_app_id: '4739928'
+renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true
