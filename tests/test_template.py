@@ -9572,6 +9572,11 @@ def test_the_code_of_a_project_meets_mutants_every_week(
     # How a contributor kills a survivor, or keeps mutmut away from a text.
     assert ("`# pragma: no mutate`" in contributing) == python
     assert ("`@pytest.mark.mutation_unsafe`" in contributing) == python
+    # A block pragma on a line of its own reaches to the end of its block.
+    assert (
+        "`# pragma: no mutate start` … `# pragma: no mutate end`" in contributing
+    ) == (python)
+    assert ("up to the end of the block it stands in" in contributing) == python
     assert "\n\n\n" not in contributing
     if python:
         assert mutation.is_file()
@@ -9976,8 +9981,10 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
         )
     }
     plan, mutation, report = jobs["plan"], jobs["mutation"], jobs["report"]
+    issue = jobs["issue"]
     plan = plan[: plan.index("\n  mutation:")]
     mutation = mutation[: mutation.index("\n  report:")]
+    report = report[: report.index("\n  # The one issue")]
     # The plan gives the matrix of the parts, one job each.
     assert "      parts: ${{ steps.plan.outputs.parts }}\n" in plan
     assert "PARTS: ${{ vars.MUTATION_PARTS }}" in plan
@@ -10004,17 +10011,28 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
     )
     # The weekly run compares with the one before; an artifact lives 90 days at most.
     assert "          retention-days: 90\n" in report
-    # Only the report writes, and only the one issue of the default branch.
-    for job in (plan, mutation):
-        assert "    permissions:\n      contents: read\n" in job
+    # Only the job of the issue writes, the one issue of the default branch, and never
+    # on a pull request, whose code the report runs.
+    for job in (plan, mutation, report):
+        assert "      contents: read\n" in job
         assert "write" not in job
-    assert "      issues: write\n" in report
     assert "      actions: read\n" in report
+    assert "    name: mutation plan\n" in plan
+    assert "    name: mutation report\n" in report
+    assert "    name: mutation issue\n" in issue
+    assert "    needs: report\n" in issue
     assert (
-        "ISSUE: ${{ github.event_name == 'schedule' || (github.event_name == "
-        "'workflow_dispatch' && github.ref_name == "
-        "github.event.repository.default_branch) }}"
-    ) in report
+        "    if: ${{ needs.report.result == 'success' && (github.event_name == "
+        "'schedule' || (github.event_name == 'workflow_dispatch' && github.ref_name "
+        "== github.event.repository.default_branch)) }}\n"
+    ) in issue
+    assert "    permissions:\n      contents: read\n      issues: write\n" in issue
+    assert (
+        "          name: mutation\n          path: ${{ runner.temp }}/mutation\n"
+        in (issue)
+    )
+    assert 'mutation issue "$RUNNER_TEMP/mutation"' in issue
+    assert workflow.count("issues: write") == 1
 
 
 # The end of the output of Infection.

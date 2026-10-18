@@ -3,6 +3,7 @@ kinds of survivors, the report of the run and the issue of a score that dropped.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -26,6 +27,7 @@ from blueprint.mutation import (
     Module,
     Report,
     Unit,
+    baseline_of,
     classify,
     collect,
     comparison,
@@ -226,7 +228,7 @@ def test_the_estimate_counts_what_mutmut_changes() -> None:
         "xǁRunǁstatic": 1,
         # The function with a decorator, cached and skipped, runs as the module
         # loads and keeps its code; so does the code outside of a function.
-        "x_every": 40,
+        "x_every": 43,
     }
 
 
@@ -320,10 +322,10 @@ def test_the_parts_have_about_the_same_number_of_mutants(
     parts = split(found, None)
 
     # 20 mutants make two parts, of 10 at most each: big splits into its functions,
-    # which have more mutants than a part has, and its function without one stays
-    # out of the plan.
+    # which have more mutants than a part has. Its function that the estimate puts
+    # at none comes last, into the smallest part: mutmut may still find mutants there.
     assert [[unit.name for unit in part] for part in parts] == [
-        ["big.x_a", "tiny"],
+        ["big.x_a", "tiny", "big.x_c"],
         ["big.x_b", "small"],
     ]
     assert [[unit.name for unit in part] for part in split(found, 1)] == [
@@ -364,6 +366,31 @@ def test_the_plan_of_each_kind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
             {"part": 2, "parts": 2, "patterns": "b.x_*\nb.xǁ*", "mutants": 2},
         ],
     )
+
+
+def test_every_function_of_a_large_module_is_in_a_part(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mutation, "PART_MUTANTS", 4)
+    python = files(
+        tmp_path,
+        {
+            ".python-version": "3.12\n",
+            ".github/mutation-requirements.txt": "",
+            "a.py": "def f(x):\n    return x + 1 + 2 + 3\n\n"
+            "def g(x):\n    return x - 1 - 2 - 3\n\n"
+            "def h(x):\n    return x\n",
+        },
+    )
+
+    _, parts = plan(python, None)
+
+    # h has no mutant that the estimate sees; mutmut may find one all the same, which
+    # then belongs to a part.
+    patterns = [pattern for part in parts for pattern in part["patterns"].split()]
+    assert sorted(patterns) == ["a.x_f*", "a.x_g*", "a.x_h*"]
+    for name in ("a.x_f__mutmut_1", "a.x_g__mutmut_1", "a.x_h__mutmut_1"):
+        assert any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
 
 
 def test_the_plan_is_written_for_the_workflow(
@@ -425,6 +452,39 @@ def change(old: str, new: str, before: str = "", after: str = "") -> str:
         # A text that a comparison reads decides a branch.
         (change('    if kind == "php":', '    if kind == "XXphpXX":'), LOGIC),
         (change('    if "a" in kind:', '    if "XXaXX" in kind:'), LOGIC),
+        # So does a key, the name of an attribute and a text after in, as mutmut
+        # changed them in a run.
+        (change('    x = now["score"]', '    x = now["XXscoreXX"]'), LOGIC),
+        (change('    x = {"score": 1}', '    x = {"SCORE": 1}'), LOGIC),
+        (change('    x = data.get("base")', '    x = data.get("XXbaseXX")'), LOGIC),
+        (change('    x = os.getenv("CI", "a")', '    x = os.getenv("CI", "A")'), TEXT),
+        (change('    x = getattr(a, "name")', '    x = getattr(a, "NAME")'), LOGIC),
+        (
+            change(
+                '    x = getattr(f(a), "b", "c")', '    x = getattr(f(a), "b", "C")'
+            ),
+            TEXT,
+        ),
+        (
+            change(
+                '    if state in ("killed", "survived"):',
+                '    if state in ("killed", "XXsurvivedXX"):',
+            ),
+            LOGIC,
+        ),
+        (change('    x = [f(a), "b"]', '    x = [f(a), "B"]'), TEXT),
+        (change('    x = g({"a": "Done"})', '    x = g({"a": "DONE"})'), TEXT),
+        # The code in the braces of an f-string is code; its texts are texts.
+        (change('    x = f"{a + 1}!"', '    x = f"{a - 1}!"'), LOGIC),
+        (change("    x = f\"{f(a, 'b')}\"", '    x = f"{f(a, )}"'), VALUE),
+        (change("    x = rf'{a[\"k\"]}'", "    x = rf'{a[\"XXkXX\"]}'"), LOGIC),
+        (change('    x = f"{{a}}{b:>3}"', '    x = f"{{a}}{b:>4}"'), LOGIC),
+        (change('    x = f"{ {1: a}[1] }"', '    x = f"{ {1: a}[2] }"'), LOGIC),
+        (change('    x = f"{a", "b"', '    x = f"{a", "B"'), TEXT),
+        (change('    x = "a"', '    x = "b"'), TEXT),
+        (change('    ("a")', '    ("XXaXX")'), TEXT),
+        # An index, not a text, and a bracket closed before the text.
+        (change('    x = a[1], "b"', '    x = a[1], "B"'), TEXT),
         # A value that becomes None, or None that becomes a text.
         (change("    run(a, b)", "    run(None, b)"), VALUE),
         (change("    x = compute()", "    x = None"), VALUE),
@@ -1150,41 +1210,41 @@ def test_mutmut_shows_a_survivor_on_the_python_that_has_it(
     )
 
 
+def report_of(
+    folder: Path, parts: Sequence[dict[str, Any]], previous: Path | None
+) -> tuple[int, dict[str, Any]]:
+    """mutation report of these parts, with mutation.json of the run before."""
+    found = folder / "parts"
+    for part in parts:
+        files(found, {f"part-{part['part']}.json": json.dumps(part)})
+    out = folder / "mutation"
+    arguments = ["mutation", "report", str(found), "--out", str(out), "--run", RUN]
+    if previous is not None:
+        arguments += ["--previous", str(previous)]
+    code = cli.main(arguments)
+    return code, json.loads((out / "mutation.json").read_text(encoding="utf-8"))
+
+
 def test_the_report_from_the_command_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    parts = tmp_path / "parts"
-    for part in two_parts():
-        files(parts, {f"part-{part['part']}.json": json.dumps(part)})
     previous = files(tmp_path, {"previous.json": json.dumps(comparable(90.0, 99.0))})
     github = FakeGitHub()
-    out = tmp_path / "mutation"
+    out = tmp_path / "run/mutation"
 
-    code = cli.main(
-        [
-            "--repo",
-            REPO,
-            "mutation",
-            "report",
-            str(parts),
-            "--out",
-            str(out),
-            "--previous",
-            str(previous / "previous.json"),
-            "--run",
-            RUN,
-            "--issue",
-        ],
-        Api(github),
-    )
+    code, data = report_of(tmp_path / "run", two_parts(), previous / "previous.json")
 
     assert code == 0
     text = capsys.readouterr().out
     assert text.startswith("### Mutation tests (mutmut)\n\n**33.3 %**")
-    assert text.endswith("\nThe score dropped: opened #1.\n")
-    data = json.loads((out / "mutation.json").read_text(encoding="utf-8"))
     assert data["score"] == 33.3
     assert data["run"] == RUN
+    # A complete run is a baseline itself; it keeps what it compared with for the job
+    # of the issue.
+    assert "baseline" not in data
+    assert json.loads((out / "previous.json").read_text(encoding="utf-8")) == (
+        comparable(90.0, 99.0)
+    )
     assert "a.x_f__mutmut_2: survived" in (out / "results.txt").read_text(
         encoding="utf-8"
     )
@@ -1192,14 +1252,58 @@ def test_the_report_from_the_command_line(
         (out / "survivors.md").read_text(encoding="utf-8").startswith("# The surviving")
     )
 
-    # The summary shows also when GitHub refuses the issue, and the run fails.
+    # The report writes nothing to GitHub: a job of its own keeps the issue.
+    assert github.issues == {}
+    issue = ["--repo", REPO, "mutation", "issue", str(out)]
+    assert cli.main(issue, Api(github)) == 0
+    assert capsys.readouterr().out == "The score dropped: opened #1.\n"
     github.down = True
-    arguments = ["--repo", REPO, "mutation", "report", str(parts), "--out", str(out)]
-    code = cli.main([*arguments, "--issue"], Api(github))
-    captured = capsys.readouterr()
-    assert code == 2
-    assert captured.out.startswith("### Mutation tests (mutmut)\n")
-    assert "GitHub answered 502: Bad Gateway" in captured.err
+    assert cli.main(issue, Api(github)) == 2
+    assert "GitHub answered 502: Bad Gateway" in capsys.readouterr().err
+
+
+def test_the_issue_needs_the_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["--repo", REPO, "mutation", "issue", str(tmp_path)]) == 1
+    assert "No mutation.json in" in capsys.readouterr().out
+
+
+def test_a_drop_past_an_incomplete_run_still_shows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = files(tmp_path, {"first.json": json.dumps(comparable(90.0, 99.0))})
+
+    # The second run lacks a part: it compares with no other and keeps the first.
+    code, second = report_of(tmp_path / "second", two_parts()[:1], first / "first.json")
+    assert code == 1
+    assert second["complete"] is False
+    assert second["baseline"] == comparable(90.0, 99.0)
+
+    # The third compares with the first, through the second, and the issue opens.
+    code, third = report_of(
+        tmp_path / "third",
+        two_parts(),
+        tmp_path / "second/mutation/mutation.json",
+    )
+    assert code == 0
+    assert third["complete"] is True
+    assert "baseline" not in third
+    assert f"Since [the run of 2026-10-17]({BEFORE})" in capsys.readouterr().out
+    github = FakeGitHub()
+    folder = str(tmp_path / "third/mutation")
+    assert cli.main(["--repo", REPO, "mutation", "issue", folder], Api(github)) == 0
+    assert capsys.readouterr().out == "The score dropped: opened #1.\n"
+
+
+def test_the_baseline_of_a_run() -> None:
+    assert baseline_of(None) is None
+    assert baseline_of({"complete": False}) is None
+    assert baseline_of({"complete": False, "baseline": "x"}) is None
+    assert baseline_of({"complete": False, "baseline": {"complete": False}}) is None
+    assert baseline_of(comparable(1.0, 2.0)) == comparable(1.0, 2.0)
+    kept = {"complete": False, "baseline": comparable(1.0, 2.0)}
+    assert baseline_of(kept) == comparable(1.0, 2.0)
 
 
 def test_a_report_without_results_fails(

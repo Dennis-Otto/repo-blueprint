@@ -166,7 +166,8 @@ def functions(
                 yield f"{prefix}{member.name}", member
 
 
-# mutmut changes no type, no decorator and nothing of an f-string.
+# mutmut changes no type, no decorator and no text of an f-string, only the code in
+# its braces.
 SKIPPED = frozenset({"annotation", "returns", "decorator_list", "type_params"})
 SWAPPED = frozenset(
     {"lower", "upper", "lstrip", "rstrip", "find", "rfind", "ljust", "rjust", "index"}
@@ -180,6 +181,13 @@ def parts_of(function: ast.AST) -> Iterable[ast.AST]:
         node = stack.pop()
         yield node
         if isinstance(node, ast.JoinedStr):
+            stack += [
+                child
+                for value in node.values
+                if isinstance(value, ast.FormattedValue)
+                for child in (value.value, value.format_spec)
+                if child is not None
+            ]
             continue
         for field, value in ast.iter_fields(node):
             if field not in SKIPPED:
@@ -191,7 +199,7 @@ def mutants_of(node: ast.AST, lines: Sequence[bytes]) -> int:
     """The mutants that mutmut 3 makes of one node, about."""
     if isinstance(node, ast.Constant):
         value = node.value
-        if isinstance(value, str):
+        if isinstance(value, str | bytes):
             # The offset counts the bytes of the line in UTF-8.
             start = lines[node.lineno - 1][node.col_offset :].lstrip(b"rbuRBU")
             if start.startswith((b'"""', b"'''")):
@@ -199,9 +207,14 @@ def mutants_of(node: ast.AST, lines: Sequence[bytes]) -> int:
             return 1 + (value != value.lower()) + (value != value.upper())
         return int(isinstance(value, bool | int | float | complex))
     if isinstance(node, ast.Call):
-        arguments = len(node.args) + len(node.keywords)
+        values = [*node.args, *(keyword.value for keyword in node.keywords)]
+        # An argument that is None already doesn't become None.
+        nones = sum(
+            isinstance(value, ast.Constant) and value.value is None for value in values
+        )
+        arguments = len(values)
         swapped = isinstance(node.func, ast.Attribute) and node.func.attr in SWAPPED
-        return arguments + (arguments if arguments > 1 else 0) + swapped
+        return arguments - nones + (arguments if arguments > 1 else 0) + swapped
     if isinstance(node, ast.AugAssign | ast.IfExp):
         return 2
     if isinstance(node, ast.BoolOp):
@@ -321,13 +334,17 @@ def modules(root: Path) -> list[Module]:
                 merged[function] = merged.get(function, 0) + count
             have = Module(have.name, merged, have.lines)
         found[have.name] = have
-    return [module for module in found.values() if module.mutants]
+    # A module whose functions the estimate puts at none may still have mutants, as of
+    # code that the estimate misses: only one without a function has none.
+    return [module for module in found.values() if module.functions or module.lines]
 
 
 def split(found: Sequence[Module], parts: int | None) -> list[list[Unit]]:
     """The code in parts of about the same number of mutants, each of which runs in
     one job: so many parts, or as many as the estimate asks for. A module larger than
-    a part splits into its functions."""
+    a part splits into its functions. Every unit is in a part, also one that the
+    estimate puts at no mutant, so that every mutant belongs to a part: such units
+    come last, into the smallest parts."""
     total = sum(module.mutants for module in found)
     if parts is None:
         parts = math.ceil(total / PART_MUTANTS)
@@ -337,15 +354,15 @@ def split(found: Sequence[Module], parts: int | None) -> list[list[Unit]]:
         unit
         for module in found
         for unit in (module.split() if module.mutants > share else [module.whole()])
-        if unit.mutants
     ]
-    buckets: list[list[Unit]] = [[] for _ in range(min(parts, len(units)))]
+    counted = sum(1 for unit in units if unit.mutants)
+    buckets: list[list[Unit]] = [[] for _ in range(min(parts, max(counted, 1)))]
     sizes = [0] * len(buckets)
     for unit in sorted(units, key=lambda unit: (-unit.mutants, unit.name)):
         smallest = sizes.index(min(sizes))
         buckets[smallest].append(unit)
         sizes[smallest] += unit.mutants
-    return buckets or [[]]
+    return buckets
 
 
 def plan(root: Path, parts: int | None) -> tuple[str, list[dict[str, Any]]]:
@@ -381,34 +398,111 @@ TOKEN = re.compile(
 )
 # A text compared with another decides a branch, as in `if kind == "php"`.
 COMPARING = frozenset({"==", "!=", "in", "not", "is"})
+# So does a text that the code looks up: the key of `data.get("score")`, of
+# `os.getenv("CI")`, or the name of `getattr(item, "name")`.
+KEY_FIRST = frozenset({"get", "pop", "setdefault", "getenv"})
+KEY_SECOND = frozenset({"getattr", "hasattr", "setattr", "delattr"})
 OPENING = frozenset({"(", ","})
 CLOSING = frozenset({")", ","})
+BRACKETS = {")": "(", "]": "[", "}": "{"}
 
 
 def tokens(line: str) -> list[tuple[str, str]]:
     """The tokens of a line of Python, without comments: enough of a lexer for the
-    lines of a change, which may begin or end within a statement."""
+    lines of a change, which may begin or end within a statement. The code in the
+    braces of an f-string is code, as mutmut changes it."""
     found = []
     for match in TOKEN.finditer(line):
         kind = str(match.lastgroup)
-        if kind != "comment":
-            found.append((kind, match[0]))
+        text = match[0]
+        if kind == "string" and "f" in text[: text.index(text[-1])].lower():
+            found += formatted(text)
+        elif kind != "comment":
+            found.append((kind, text))
     return found
+
+
+def formatted(text: str) -> list[tuple[str, str]]:
+    """The tokens of an f-string: its texts, which mutmut leaves alone, and the
+    tokens of the code in its braces."""
+    quote = text[-1]
+    prefix, _, body = text.partition(quote)
+    body = body.removesuffix(quote)
+    found: list[tuple[str, str]] = []
+    literal = prefix + quote
+    depth = start = index = 0
+    while index < len(body):
+        char = body[index]
+        if not depth and body[index : index + 2] in ("{{", "}}"):
+            literal += body[index : index + 2]
+            index += 1
+        elif not depth and char == "{":
+            found.append(("string", literal))
+            literal = ""
+            depth, start = 1, index + 1
+        elif not depth:
+            literal += char
+        elif char in "{}":
+            depth += 1 if char == "{" else -1
+            if not depth:
+                found += tokens(body[start:index])
+        index += 1
+    if depth:
+        found += tokens(body[start:])
+    found.append(("string", literal + quote))
+    return found
+
+
+def enclosing(before: Sequence[str]) -> tuple[int, int]:
+    """The place of the bracket that is still open before a span of a change, -1 for
+    none, and how many commas lie between it and the span."""
+    depth = commas = 0
+    for index in range(len(before) - 1, -1, -1):
+        text = before[index]
+        if text in BRACKETS:
+            depth += 1
+        elif text in BRACKETS.values():
+            if not depth:
+                return index, commas
+            depth -= 1
+        elif text == "," and not depth:
+            commas += 1
+    return -1, commas
+
+
+def decides(before: Sequence[str], after: Sequence[str]) -> bool:
+    """Whether a text at this place decides what the code does: one that it compares,
+    a key, as of `now["score"]`, `{"score": …}` or `.get("score")`, the name of
+    getattr, or one of the texts after in, as in `state in ("killed", "survived")`."""
+    previous = before[-1] if before else ""
+    following = after[0] if after else ""
+    if previous in COMPARING or following in COMPARING or following == ":":
+        return True
+    if previous == "[" and following == "]":
+        return True
+    index, commas = enclosing(before)
+    if index < 0:
+        return False
+    name = before[index - 1] if index else ""
+    if before[index] == "(" and (
+        (name in KEY_FIRST and not commas) or (name in KEY_SECOND and commas == 1)
+    ):
+        return True
+    return name == "in"
 
 
 def kind_of_change(
     removed: Sequence[tuple[str, str]],
     added: Sequence[tuple[str, str]],
-    before: str,
-    after: str,
+    before: Sequence[str],
+    after: Sequence[str],
 ) -> str:
     """The kind of one span of a change, with the tokens before and after it."""
     if (
         removed
         and added
         and all(kind == "string" for kind, _ in [*removed, *added])
-        and before not in COMPARING
-        and after not in COMPARING
+        and not decides(before, after)
     ):
         return TEXT
     texts = [text for _, text in added]
@@ -419,9 +513,11 @@ def kind_of_change(
     # An argument left out of a call: "a," after "(" or ",", "a" between them and
     # ")" or ",", or ",a" before ")".
     if removed and not added:
+        previous = before[-1] if before else ""
+        following = after[0] if after else ""
         first, last = removed[0][1], removed[-1][1]
-        if (before in OPENING and (after in CLOSING or last == ",")) or (
-            first == "," and after == ")"
+        if (previous in OPENING and (following in CLOSING or last == ",")) or (
+            first == "," and following == ")"
         ):
             return VALUE
     return LOGIC
@@ -464,8 +560,8 @@ def classify(diff: str) -> str:
             kind_of_change(
                 old[start:end],
                 new[j1:j2],
-                texts[start - 1] if start else "",
-                texts[end] if end < len(texts) else "",
+                texts[:start],
+                texts[end:],
             )
             for start, end in spans
         }
@@ -762,6 +858,16 @@ def comparable(data: Mapping[str, Any] | None) -> bool:
         and isinstance(data.get("score"), int | float)
         and isinstance(data.get("logic_score"), int | float)
     )
+
+
+def baseline_of(data: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """What a run compares with: the run before, or, when that was incomplete, the
+    last complete run, which an incomplete run keeps as its baseline."""
+    if comparable(data):
+        assert data is not None
+        return dict(data)
+    kept = data.get("baseline") if data else None
+    return dict(kept) if isinstance(kept, dict) and comparable(kept) else None
 
 
 def run_link(data: Mapping[str, Any], words: str) -> str:

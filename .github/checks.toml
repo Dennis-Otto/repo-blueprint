@@ -427,6 +427,59 @@ it."""
 docs = "CONTRIBUTING.md#tests"
 autofix = """It passes once every `variant (…)` and `update (…)` passes."""
 
+[check."mutation plan"]
+title = "The plan of the mutation tests"
+problem = """The plan that splits the code into parts of about the same number of
+mutants failed before any mutant ran; the log names the error, such as a
+configuration of mutmut in `pyproject.toml` or `setup.cfg` that it can't read, or a
+repository variable `MUTATION_PARTS` that is neither a number nor `auto`."""
+why = """Without the plan no part runs, and the weekly score of the mutation tests,
+which shows the lines that the tests run but don't check, is missing."""
+fix = """Fix the configuration of mutmut, or set the repository variable
+`MUTATION_PARTS` to a number of parts or to `auto`."""
+docs = "CONTRIBUTING.md#tests"
+autofix = """A configuration of mutmut or a variable of the repository is the decision
+of a person."""
+
+[check."mutation */*"]
+title = "A part of the mutation tests"
+problem = """One part of the mutation tests measured nothing: no mutant ran, mostly
+because a test fails in mutmut's copy of the repository without any mutant, which
+the summary of the check names, or the part ran out of its time."""
+why = """A part that measures nothing leaves its code out of the score, so a drop of the
+score there goes unnoticed."""
+fix = """A test that reads the code as text, or keeps a cache of functools between the
+tests, can't pass in mutmut's copy: mark it with `@pytest.mark.mutation_unsafe`, or
+clear the cache in a fixture. A part that runs out of its time needs more parts: set
+the repository variable `MUTATION_PARTS` to a larger number."""
+docs = "CONTRIBUTING.md#tests"
+autofix = """Whether a test reads the code as text, or how many parts a project needs,
+is the decision of a person."""
+
+[check."mutation report"]
+title = "The report of the mutation tests"
+problem = """The report of the mutation tests found no results to put together: no
+mutant ran, or a part sent no results, which the summary of the check names."""
+why = """A run that measures nothing has no score to compare with the run before, so a
+drop of the score would go unnoticed."""
+fix = """Fix the part of the mutation tests that failed first: its explanation says how.
+A low score fails nothing; the summary lists the survivors that change the logic
+first, each a line for a test to check."""
+docs = "CONTRIBUTING.md#tests"
+autofix = """It passes once every part of the run measures its mutants."""
+
+[check."mutation issue"]
+title = "The issue of a dropped mutation score"
+problem = """The job that opens, keeps or closes the one issue of a mutation score of the
+default branch that dropped couldn't do so, mostly because GitHub refused the
+request; the log shows its answer."""
+why = """A drop of the score that opens no issue goes unnoticed until someone reads the
+summary of the weekly run."""
+fix = """Run the workflow Mutation again; a hiccup of GitHub usually passes."""
+docs = "CONTRIBUTING.md#tests"
+autofix = """Whether GitHub accepts a request is up to GitHub; the log shows its
+answer."""
+
 [check."adopt the latest release"]
 title = "The sync of the issue assistant"
 problem = """The sync bot refused the latest release of the issue assistant, or its

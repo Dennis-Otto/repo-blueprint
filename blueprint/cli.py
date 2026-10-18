@@ -301,23 +301,37 @@ def mutation_command(
         if silent:
             print(mutation.no_mutant_ran(part))
         return 1 if silent else 0
+    if arguments.action == "issue":
+        folder = Path(arguments.folder)
+        now = mutation.read_previous(folder / "mutation.json")
+        if now is None:
+            print(f"No mutation.json in {folder}: the issue stays as it is.")
+            return 1
+        previous = mutation.read_previous(folder / "previous.json")
+        api = api or Api()
+        repo = arguments.repo or current_repo(api)
+        print(mutation.keep_issue(api, repo, now, previous))
+        return 0
     report = mutation.Report.of(mutation.read_parts(Path(arguments.parts_folder)))
-    previous = mutation.read_previous(arguments.previous)
+    previous = mutation.baseline_of(mutation.read_previous(arguments.previous))
     now = report.data(arguments.run, datetime.now(UTC))
+    # An incomplete run keeps the last complete one, so that the next run compares
+    # with that, and a drop past an incomplete run still shows.
+    if not now["complete"] and previous is not None:
+        now["baseline"] = previous
     out = Path(arguments.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "mutation.json").write_text(
         json.dumps(now, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
     )
+    # What the run compared with, for the job that keeps the issue of a drop.
+    if previous is not None:
+        (out / "previous.json").write_text(
+            json.dumps(previous, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        )
     (out / "results.txt").write_text(report.results_text(), encoding="utf-8")
     (out / "survivors.md").write_text(mutation.survivors_text(report), encoding="utf-8")
-    # The summary first, so that it shows also when GitHub refuses the issue.
     sys.stdout.write(mutation.summary(report, now, previous))
-    sys.stdout.flush()
-    if arguments.issue:
-        api = api or Api()
-        repo = arguments.repo or current_repo(api)
-        print("\n" + mutation.keep_issue(api, repo, now, previous))
     return 0 if report.measured and not report.silent and not report.missing else 1
 
 
@@ -908,10 +922,13 @@ def main(
         "--previous", type=Path, help="mutation.json of the run before"
     )
     mutation_report_parser.add_argument("--run", default="", help="the link of the run")
-    mutation_report_parser.add_argument(
-        "--issue",
-        action="store_true",
-        help="open, keep or close the one issue of a dropped score",
+    mutation_issue_parser = mutation_actions.add_parser(
+        "issue",
+        help="open, keep or close the one issue of a dropped score, from the report",
+    )
+    mutation_issue_parser.add_argument(
+        "folder",
+        help="the folder of the report, with mutation.json and previous.json",
     )
     pages_parser = commands.add_parser(
         "pages",
