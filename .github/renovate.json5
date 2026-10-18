@@ -123,7 +123,7 @@
       // the platform of stacks/php/composer.json, each major version on its own, and
       // the public API of Nextcloud within its major version.
       matchFileNames: ["stacks/php/**"],
-      constraints: { php: "8.3.*" },
+      constraints: { php: "8.5.*" },
       constraintsFiltering: "strict",
       separateMultipleMajor: true,
     },
