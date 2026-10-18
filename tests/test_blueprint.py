@@ -18,7 +18,12 @@ import pytest
 
 import blueprint.checklist
 from blueprint import cli
-from blueprint.checklist import best_practices, checklist, reuse_compliant
+from blueprint.checklist import (
+    RELEASE_APP_PERMISSIONS,
+    best_practices,
+    checklist,
+    reuse_compliant,
+)
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
     MAIN_ONLY,
@@ -45,6 +50,8 @@ from blueprint.settings import (
 )
 
 REPO = "Dennis-Otto/demo"
+# The blueprint itself, whose workflows and README the tests read.
+ROOT = Path(__file__).parents[1]
 CONFIG = """
 [repository]
 description = "A demo"
@@ -266,6 +273,8 @@ class FakeGitHub:
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
         self.environments: dict[str, dict[str, Any]] = {}
         self.og_image = False
+        # The kind of account of the owner: "User" or "Organization".
+        self.account = "User"
         self.community: dict[str, Any] = {
             "health_percentage": 100,
             "description": "A demo",
@@ -330,6 +339,8 @@ class FakeGitHub:
         )
         if content and content[1] != REPO:
             return self.content(*content.groups())
+        if path == f"users/{REPO.split('/')[0]}":
+            return 200, {"login": REPO.split("/")[0], "type": self.account}
         return self.route(
             method, path.split("?")[0].removeprefix(f"repos/{REPO}"), payload
         )
@@ -2149,9 +2160,135 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 9
+        assert len(texts) == 10
     else:
         assert any(text in step for step in texts)
+
+
+def without_release_app(root: Path) -> Settings:
+    path = root / ".github/repository.toml"
+    path.write_text(
+        CONFIG.replace('RELEASE_AUTOMATION_CLIENT_ID = "Iv23client"\n', "").replace(
+            '["RELEASE_AUTOMATION_PRIVATE_KEY"]', "[]"
+        ),
+        encoding="utf-8",
+    )
+    return Settings.load(path)
+
+
+@pytest.mark.parametrize(
+    ("account", "page"),
+    [
+        ("User", "https://github.com/settings/apps/new"),
+        (
+            "Organization",
+            "https://github.com/organizations/Dennis-Otto/settings/apps/new",
+        ),
+    ],
+)
+def test_the_checklist_registers_a_release_app_of_the_owner(
+    github: FakeGitHub, root: Path, account: str, page: str
+) -> None:
+    github.account = account
+    settings = without_release_app(root)
+    assert "RELEASE_AUTOMATION_CLIENT_ID" not in settings.variables
+
+    steps = checklist(Api(github), REPO, settings, root, reuse=lambda repo: False)
+
+    # The app comes first: the settings and the secrets that follow name it.
+    registered = steps[0]
+    assert (
+        registered.text == "Release app registered and named in .github/repository.toml"
+    )
+    assert registered.done is False
+    lines = registered.how.splitlines()
+    link = urllib.parse.urlsplit(lines[1])
+    assert f"{link.scheme}://{link.netloc}{link.path}" == page
+    query = dict(urllib.parse.parse_qsl(link.query, strict_parsing=True))
+    # The name is the owner's, never that of the blueprint owner's app on its own.
+    assert query.pop("name") == "dennis-otto-release-automation"
+    assert query.pop("url") == "https://github.com/Dennis-Otto"
+    assert "Repo Blueprint" in query.pop("description")
+    # Only for the account of the owner, which has the private key, and no webhook.
+    assert query.pop("public") == "false"
+    assert query.pop("webhook_active") == "false"
+    assert query == {
+        "actions": "write",
+        "administration": "write",
+        "checks": "write",
+        "statuses": "write",
+        "contents": "write",
+        "issues": "write",
+        "pages": "write",
+        "pull_requests": "write",
+        "workflows": "write",
+        "vulnerability_alerts": "read",
+        "environments": "read",
+        "secrets": "read",
+    }
+    assert lines[2] == (
+        "It needs read and write access to Actions, Administration, Checks, Commit"
+        " statuses, Contents, Issues, Pages, Pull requests, Variables and Workflows,"
+        " and read access to Dependabot alerts, Environments and Secrets; set"
+        " Variables by hand, which the link can't fill in."
+    )
+    assert lines[-1] == (
+        "copier update --defaults --vcs-ref=:current: --data release_app=NAME"
+        " --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID"
+    )
+    installed = next(
+        step for step in steps if step.text.endswith("installed on the repository")
+    )
+    assert installed.how == (
+        "Install App on the settings page of the app, for this repository"
+    )
+    assert ("GET", "users/Dennis-Otto") in github.calls
+
+
+def test_the_checklist_of_a_named_release_app_links_its_installation(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = root / ".github/repository.toml"
+    path.write_text(
+        CONFIG.replace(
+            "[variables]\n", '[variables]\nRELEASE_APP = "demo-release-automation"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(github, root, "checklist") == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines.index(
+        "  ✔ Release app demo-release-automation named in .github/repository.toml"
+    ) < lines.index("  ✘ Settings as code applied")
+    installed = lines.index("  · Release app installed on the repository")
+    assert lines[installed + 1] == (
+        "      https://github.com/apps/demo-release-automation/installations/new"
+    )
+    # Its owner is no question once it is named.
+    assert ("GET", "users/Dennis-Otto") not in github.calls
+
+
+def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:
+    granted = {key: access for _, key, access in RELEASE_APP_PERMISSIONS if key}
+    rank = {"read": 1, "write": 2}
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        for name, access in re.findall(r"permission-([a-z-]+): (read|write)", text):
+            key = name.replace("-", "_")
+            # Every app may read the metadata.
+            if key == "metadata":
+                continue
+            assert key in granted, (path.name, key)
+            assert rank[granted[key]] >= rank[access], (path.name, key)
+    # The README names the same permissions.
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    paragraph = next(
+        line for line in readme.splitlines() if "**The release app**" in line
+    )
+    for name, _, _ in RELEASE_APP_PERMISSIONS:
+        assert f"*{name}*" in paragraph, name
 
 
 def opener(body: bytes | Exception) -> Callable[[str], Any]:

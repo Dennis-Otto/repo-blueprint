@@ -39,6 +39,18 @@ def bytecode_apart(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         os.environ["PYTHONPYCACHEPREFIX"] = before
 
 
+@pytest.fixture(scope="session", autouse=True)
+def no_settings_of_copier(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Copier renders with a settings file of the run, without defaults: those of the
+    machine, such as an owner and a release app that a maintainer set for all of their
+    repositories, would answer the questions that the tests leave to the defaults."""
+    settings = tmp_path_factory.mktemp("copier") / "settings.yml"
+    settings.write_text("defaults: {}\n", encoding="utf-8")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("COPIER_SETTINGS_PATH", str(settings))
+        yield
+
+
 @pytest.fixture(autouse=True)
 def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """A request to GitHub that tries again waits first, as long as this list says;

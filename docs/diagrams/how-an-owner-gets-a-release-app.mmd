@@ -1,0 +1,27 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How an owner gets a release app
+    accDescr: You copy the blueprint with the question of the release app left empty. The checklist links the registration of the app on your account or organization, with its name and permissions filled in. You create the app and its private key, and name it with copier update and the name, Client ID and App ID of its settings page. After the commit, settings apply sets the variables and the ruleset of the release tags, and the checklist asks for the private key and the installation on the repository. Then the bots run as your app; until then the blueprint bot and the release bot say in their summary what is missing.
+
+    copy(["copier copy<br>release app left empty"])
+    link["`**checklist**<br>a link registers the app<br>name and permissions filled in`"]
+    app(["You create the app<br>and its private key"])
+    named["`**copier update --data release_app=…**<br>name, Client ID, App ID`"]
+    apply["`**settings apply**<br>variables and the ruleset<br>of the release tags`"]
+    key(["The private key in the<br>environment release,<br>the app installed"])
+    bots["The bots run<br>as your app"]
+    waiting["Until then: the summary<br>of each bot says<br>what is missing"]
+
+    copy --> link --> app --> named --> apply --> key --> bots
+    copy -.-> waiting
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class link,named,apply,waiting bot
+    class copy,app,key person
+    class bots done

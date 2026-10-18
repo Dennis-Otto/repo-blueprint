@@ -76,6 +76,9 @@ jobs:
         start: [new, update]
         # Each file of tests/answers/, with the project_type of its answers.
         include:
+          # The new generic repository of an owner other than the blueprint's, without
+          # a release app yet: it gets nothing of the blueprint owner's app or person.
+          - { kind: generic, start: new, owner: octo-org }
           - { kind: generic, start: adopted, answers: dennis-otto.github.io }
           - { kind: home-assistant, start: adopted, answers: ha-autodarts }
           - { kind: github-action, start: adopted, answers: issue-assistant }
@@ -84,6 +87,9 @@ jobs:
     env:
       KIND: ${{ matrix.kind }}
       ANSWERS: ${{ matrix.answers }}
+      # The owner of the blueprint, as in every repository of the Rollout, unless the
+      # leg names another.
+      OWNER: ${{ matrix.owner || 'Dennis-Otto' }}
       # Inside the workspace, where actions such as setup-node look for their files.
       PROJECT: variant
     steps:
@@ -127,6 +133,7 @@ jobs:
             --data project_name="Demo Project" \
             --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts." \
             --data project_type="$KIND" \
+            --data owner="$OWNER" \
             . "$PROJECT"
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all
@@ -148,6 +155,7 @@ jobs:
               --data project_name="Demo Project"
               --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts."
               --data project_type="$KIND"
+              --data owner="$OWNER"
             )
           fi
           # The latest release before this commit; HEAD^ of a release is the one before.
