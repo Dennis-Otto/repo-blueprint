@@ -310,6 +310,8 @@ SOURCE_LINK = re.compile(
     r'(?P<name>[^>]*>.*?<div class="md-source__repository">.*?)(?=\s*</div>)',
     re.S,
 )
+# A stable version as release-please writes it, such as 1.2.0 and not 1.3.0-beta.1.
+STABLE = re.compile(r"\d+\.\d+\.\d+")
 # The newest stable release before the commit of the build, such as v1.2.0 and not
 # v1.3.0-beta.1, by the tag that git describes it with.
 NEWEST_RELEASE = (
@@ -396,9 +398,15 @@ def owner_of(config: Any) -> str:
 def sponsored(path: Path) -> str:
     """The first account of GitHub Sponsors that the FUNDING.yml at path names, or
     "" when it names none or can't be read."""
+    # One except for each, as a tuple of them would read differently to Ruff for
+    # Python 3.14, which a Home Assistant project targets, than for Python 3.12.
     try:
-        funding = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    try:
+        funding = yaml.safe_load(text)
+    except yaml.YAMLError:
         return ""
     accounts = funding.get("github") if isinstance(funding, dict) else None
     if not isinstance(accounts, list):
@@ -407,12 +415,37 @@ def sponsored(path: Path) -> str:
     return first if isinstance(first, str) and ACCOUNT.fullmatch(first) else ""
 
 
+def released(root: Path) -> str:
+    """The tag of the stable version that release-please wrote to the manifest at
+    root, such as v1.2.0, or "" for none, the first 0.0.0 or one it can't read.
+
+    The commit of a release already has its version there, while the workflow
+    of the release only signs and pushes its tag a while after the build starts.
+    """
+    try:
+        manifest = json.loads(
+            (root / ".release-please-manifest.json").read_text(encoding="utf-8")
+        )
+    except OSError:
+        return ""
+    except ValueError:
+        return ""
+    version = manifest.get(".") if isinstance(manifest, dict) else None
+    if isinstance(version, str) and STABLE.fullmatch(version) and version != "0.0.0":
+        return f"v{version}"
+    return ""
+
+
 def newest_release(root: Path) -> str:
     """The tag of the newest stable release in the repository at root, such as
-    v1.2.0, or "" without one, without the history or without git.
+    v1.2.0, or "" without one, without the history or without git: the version
+    of release-please's manifest, else the newest stable tag.
 
     The Docs workflow checks the repository out with its whole history and tags.
     """
+    manifested = released(root)
+    if manifested:
+        return manifested
     try:
         described = subprocess.run(
             NEWEST_RELEASE,

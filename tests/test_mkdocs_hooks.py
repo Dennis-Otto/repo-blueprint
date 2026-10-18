@@ -1284,6 +1284,32 @@ def test_the_version_is_the_newest_stable_release_before_the_build(
     assert module.BUILT.version == version
 
 
+@pytest.mark.parametrize(
+    ("manifest", "version"),
+    [
+        ('{".": "1.3.0"}', "v1.3.0"),
+        ('{".": "0.0.0"}', "v1.2.3"),
+        ('{".": "1.3.0-beta.1"}', "v1.2.3"),
+        ('{".": 1}', "v1.2.3"),
+        ('["1.3.0"]', "v1.2.3"),
+        ("{", "v1.2.3"),
+    ],
+    ids=["released", "first", "beta", "number", "list", "broken"],
+)
+def test_the_commit_of_a_release_shows_its_version_before_its_tag_exists(
+    tmp_path: Path, manifest: str, version: str
+) -> None:
+    # The Docs workflow builds the commit of a release while the release workflow
+    # still signs its tag: the manifest of release-please already names it.
+    module = hooks()
+    root = tagged(tmp_path / "demo", "v1.2.3")
+    (root / ".release-please-manifest.json").write_text(manifest, encoding="utf-8")
+
+    module.on_config(owner_website(root))
+
+    assert module.BUILT.version == version
+
+
 def test_without_git_or_its_history_the_header_shows_no_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
