@@ -1238,7 +1238,7 @@ def test_an_action_that_the_list_lacks_keeps_the_list_as_it_is(
     assert (
         '.github/workflows/ci.yml runs it: add "Rogue/Action@*" to patterns_allowed of'
         " [actions.selected] in .github/repository.project.toml; until then the list"
-        " of the allowed actions on GitHub stays as it is"
+        " of the allowed actions on GitHub only grows"
     ) in out
     # Every action may still run, and the other settings of the actions are applied.
     assert github.permissions == {
@@ -1257,6 +1257,40 @@ def test_an_action_that_the_list_lacks_keeps_the_list_as_it_is(
     assert run(github, root, "settings", "apply") == 1
     assert github.permissions["allowed_actions"] == "selected"
     assert "rogue/action@*" in github.selected["patterns_allowed"]
+
+
+def test_an_action_that_the_list_lacks_still_lets_the_active_list_grow(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root, WORKFLOW + "      - uses: Rogue/Action@89ab\n")
+    github.selected = {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": ["Old/Action@*", "actions/checkout@*"],
+    }
+
+    assert run(github, root, "settings", "apply") == 1
+
+    assert "lacks Rogue/Action@*" in capsys.readouterr().out
+    # The configured patterns come in addition, and none that GitHub had goes away.
+    assert github.selected == {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": [
+            "Old/Action@*",
+            "actions/checkout@*",
+            "step-security/harden-runner@*",
+            "vendor/composite@*",
+        ],
+    }
+    assert github.permissions["allowed_actions"] == "selected"
+
+    # Nothing new to add: no write.
+    github.calls.clear()
+    assert run(github, root, "settings", "apply") == 1
+    assert ("PUT", f"repos/{REPO}/actions/permissions/selected-actions") not in (
+        github.calls
+    )
 
 
 def test_an_action_that_an_action_runs_in_turn_needs_its_pattern(

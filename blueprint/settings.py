@@ -285,7 +285,7 @@ def check_selected_actions(
     api: Api, repo: str, selected: dict[str, Json], active: bool, named: dict[str, str]
 ) -> list[Drift]:
     """The list of the actions that may run, and every action that a workflow runs
-    but the list lacks: while one does, the list stays as it is on GitHub, because it
+    but the list lacks: while one does, the list on GitHub never narrows, because that
     would stop that workflow."""
     # GitHub keeps a list only while the repository allows the selected actions.
     path = f"repos/{repo}/actions/permissions/selected-actions"
@@ -313,7 +313,7 @@ def check_selected_actions(
             manual=(
                 f"{where} runs it: add {json.dumps(pattern)} to patterns_allowed of"
                 " [actions.selected] in .github/repository.project.toml; until then"
-                " the list of the allowed actions on GitHub stays as it is"
+                " the list of the allowed actions on GitHub only grows"
             ),
         )
         for pattern, where in lacking.items()
@@ -326,13 +326,33 @@ def check_selected_actions(
             "unreadable",
             manual=(
                 f"GitHub refused the file of {reference}: {answer}; what it runs in"
-                " turn is unknown, so the list of the allowed actions on GitHub stays"
-                " as it is until the next run reads it"
+                " turn is unknown, so the list of the allowed actions on GitHub only"
+                " grows until the next run reads it"
             ),
         )
         for reference, answer in sorted(refused.items())
     ]
     return drift
+
+
+def widen_selected_actions(api: Api, repo: str, selected: dict[str, Json]) -> None:
+    """While a workflow runs an action that the list lacks, a list that GitHub already
+    uses only grows by the configured patterns: that never stops a workflow, and the
+    actions of a newer release of the blueprint can still start."""
+    permissions = api.get(f"repos/{repo}/actions/permissions") or {}
+    if permissions.get("allowed_actions") != "selected":
+        return
+    path = f"repos/{repo}/actions/permissions/selected-actions"
+    current = dict(api.get(path) or {})
+    have = [str(pattern) for pattern in current.get("patterns_allowed") or []]
+    known = {pattern.casefold() for pattern in have}
+    added = [
+        str(pattern)
+        for pattern in selected.get("patterns_allowed") or []
+        if str(pattern).casefold() not in known
+    ]
+    if added:
+        api.put(path, {**current, "patterns_allowed": have + added})
 
 
 def apply_actions(
@@ -369,8 +389,13 @@ def apply_actions(
             },
         )
     # The list comes after the switch to the selected actions, which it needs.
-    if not lacking and any(key.startswith("selected.") for key in keys):
-        api.put(f"repos/{repo}/actions/permissions/selected-actions", want["selected"])
+    if any(key.startswith("selected.") for key in keys):
+        if lacking:
+            widen_selected_actions(api, repo, want["selected"])
+        else:
+            api.put(
+                f"repos/{repo}/actions/permissions/selected-actions", want["selected"]
+            )
     if "fork_pr_approval" in keys:
         api.put(
             f"repos/{repo}/actions/permissions/fork-pr-contributor-approval",

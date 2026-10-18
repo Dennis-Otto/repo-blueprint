@@ -46,7 +46,7 @@ allowed_actions = "selected"
 
 # The actions and reusable workflows that the workflows name, and those that these run
 # in turn. `blueprint.py settings check` names each one that a workflow runs and this
-# list lacks, and the settings bot leaves the list on GitHub as it is until it's added;
+# list lacks, and the settings bot only adds to the list on GitHub until it's added;
 # add those of this project alone in .github/repository.project.toml.
 [actions.selected]
 github_owned_allowed = true

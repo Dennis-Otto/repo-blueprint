@@ -992,6 +992,15 @@ def test_the_settings_bot_runs_when_its_code_changes(
         ".github/workflows/settings.yml",
     ):
         assert runs_for(rendered, [path]), path
+    # A workflow or an action that runs a new action, also in turn: the check of the
+    # allowed actions comes with its merge.
+    for path in (
+        ".github/workflows/ci.yml",
+        ".github/actions/setup/action.yml",
+        "action.yml",
+    ):
+        assert runs_for(rendered, [path]), path
+        assert runs_for(own, [path]), path
     assert runs_for(own, ["blueprint.py"])
     # In the blueprint, a change of another bot starts no run.
     assert not runs_for(own, ["blueprint/coach.py"])
