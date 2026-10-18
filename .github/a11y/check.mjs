@@ -3,6 +3,9 @@
 // the dark scheme, and runs axe-core on each with the rules of WCAG 2.2 at the levels
 // A and AA. A violation whose impact is serious or critical fails it, with the page,
 // the rule, the elements and a link that explains the fix; the lesser ones it counts.
+// Each page loads once and switches to the dark scheme in place, as Material follows
+// the reader's system, and a page of a further language without a translation, whose
+// text is that of the page in the default language, is checked through that page.
 // The pages come from the folder alone: a request to the address of the website is
 // answered from there, and one to another server is refused and named, so the check
 // reads nothing from the network. After a build, on your machine:
@@ -65,6 +68,37 @@ async function pagesOf(site) {
     .map((name) => name.split(path.sep).join("/"))
     .filter((name) => name.endsWith(".html") && !/^(assets|search)\//.test(name))
     .sort();
+}
+
+/** The text of the article of a page, without the date of its last change. */
+async function textOf(site, page) {
+  const html = await readFile(path.join(site, page), "utf-8");
+  const article = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/)?.[1] ?? html;
+  return article
+    .replace(/<aside class="md-source-file">[\s\S]*?<\/aside>/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The pages to check, and those left out: a page in the folder of a further
+ * language, such as de/roadmap.html, whose text is that of the page of the default
+ * language, roadmap.html, because it has no translation yet. The other pages of that
+ * language check its header and menu. */
+async function chosen(site, pages) {
+  const all = new Set(pages);
+  const checked = [];
+  const same = [];
+  for (const page of pages) {
+    const further = page.match(/^[a-z]{2}(?:-[A-Za-z]{2,})?\/(.+)$/);
+    if (further && all.has(further[1]) &&
+      (await textOf(site, page)) === (await textOf(site, further[1]))) {
+      same.push(page);
+    } else {
+      checked.push(page);
+    }
+  }
+  return { checked, same };
 }
 
 /** The address of the website, from the canonical link of its home page. */
@@ -136,41 +170,62 @@ async function serve(context, site, address, foreign) {
   });
 }
 
-/** The violations of one page in one scheme. */
-async function check(context, address, page, scheme) {
+/** Waits until the page shows a scheme, as Material sets it with its script. */
+async function showing(tab, scheme, timeout) {
+  try {
+    await tab.waitForFunction(
+      (wanted) => {
+        const body = document.body;
+        return !body?.hasAttribute("data-md-color-scheme") ||
+          body.getAttribute("data-md-color-scheme") === wanted;
+      },
+      SCHEMES[scheme],
+      { timeout },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The violations of a page in one scheme, as it shows now. */
+async function violations(tab, page, scheme) {
+  // The fonts, and the frames after which the script of Material has measured the
+  // page, such as a block of code that scrolls and takes the focus.
+  await tab.evaluate(async () => {
+    await document.fonts.ready;
+    for (let frame = 0; frame < 3; frame++) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  });
+  const results = await new AxeBuilder({ page: tab }).withTags(TAGS).analyze();
+  return results.violations.map((violation) => ({
+    page,
+    scheme,
+    rule: violation.id,
+    impact: violation.impact ?? "minor",
+    help: violation.help,
+    link: violation.helpUrl,
+    elements: violation.nodes.map((node) => node.target.join(" ")),
+  }));
+}
+
+/** The violations of one page in both schemes: in the light one, then in the dark
+ * one, to which the reader's system switches while the page stays open, as Material
+ * follows it; a page that doesn't follow loads again. */
+async function check(context, address, page) {
   const tab = await context.newPage();
   try {
+    await tab.emulateMedia({ colorScheme: "light" });
     await tab.goto(new URL(page, address).href, { waitUntil: "load", timeout: 60_000 });
-    // Material sets the scheme of the reader with its script; another page has none.
-    await tab
-      .waitForFunction(
-        (wanted) => {
-          const body = document.body;
-          return !body?.hasAttribute("data-md-color-scheme") ||
-            body.getAttribute("data-md-color-scheme") === wanted;
-        },
-        SCHEMES[scheme],
-        { timeout: 5_000 },
-      )
-      .catch(() => {});
-    // The fonts, and the frames after which the script of Material has measured the
-    // page, such as a block of code that scrolls and takes the focus.
-    await tab.evaluate(async () => {
-      await document.fonts.ready;
-      for (let frame = 0; frame < 3; frame++) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
-    });
-    const results = await new AxeBuilder({ page: tab }).withTags(TAGS).analyze();
-    return results.violations.map((violation) => ({
-      page,
-      scheme,
-      rule: violation.id,
-      impact: violation.impact ?? "minor",
-      help: violation.help,
-      link: violation.helpUrl,
-      elements: violation.nodes.map((node) => node.target.join(" ")),
-    }));
+    await showing(tab, "light", 5_000);
+    const found = await violations(tab, page, "light");
+    await tab.emulateMedia({ colorScheme: "dark" });
+    if (!(await showing(tab, "dark", 1_000))) {
+      await tab.reload({ waitUntil: "load", timeout: 60_000 });
+      await showing(tab, "dark", 5_000);
+    }
+    return [...found, ...(await violations(tab, page, "dark"))];
   } finally {
     await tab.close();
   }
@@ -216,15 +271,15 @@ function described(group) {
 }
 
 /** What failed, why it matters and how to fix it, for the summary of the job. */
-function summary(failing, lesser, pages, foreign) {
+function summary(failing, lesser, scope, foreign) {
   const lines = ["## Accessibility of the website", ""];
   if (failing.length === 0) {
     lines.push(
-      `axe-core found no serious or critical violation of WCAG 2.2 A or AA on ${pages} page(s), in the light and the dark scheme.`,
+      `axe-core found no serious or critical violation of WCAG 2.2 A or AA on ${scope}.`,
     );
   } else {
     lines.push(
-      `axe-core found ${failing.length} serious or critical violation(s) of WCAG 2.2 A or AA on the pages below.`,
+      `axe-core found ${failing.length} serious or critical violation(s) of WCAG 2.2 A or AA on ${scope}; the table below names each one.`,
       "",
       "**Why it matters:** a reader who uses a screen reader, the keyboard alone or a larger contrast can't use what these rules find: text too faint to read, a link told apart by its color alone, a control without a name.",
       "",
@@ -255,7 +310,7 @@ async function main(argv) {
     console.error("Usage: node .github/a11y/check.mjs SITE: SITE is the folder of a built website, with its index.html.");
     return 2;
   }
-  const pages = await pagesOf(site);
+  const { checked: pages, same } = await chosen(site, await pagesOf(site));
   const address = await addressOf(site);
   const foreign = new Set();
   const executablePath = process.env.CHROME || undefined;
@@ -269,19 +324,16 @@ async function main(argv) {
   }
   let findings;
   try {
-    const contexts = {};
-    for (const scheme of Object.keys(SCHEMES)) {
-      contexts[scheme] = await browser.newContext({ colorScheme: scheme, viewport: { width: 1280, height: 900 } });
-      await serve(contexts[scheme], site, address, foreign);
-    }
-    const tasks = pages.flatMap((page) =>
-      Object.keys(SCHEMES).map((scheme) => () => check(contexts[scheme], address, page, scheme)),
-    );
-    findings = await pool(tasks);
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await serve(context, site, address, foreign);
+    findings = await pool(pages.map((page) => () => check(context, address, page)));
   } finally {
     await browser.close();
   }
   const groups = grouped(findings);
+  const scope = `${pages.length} page(s) in the light and the dark scheme` + (same.length > 0
+    ? `, which stand in for ${same.length} more of another language without a translation`
+    : "");
   const failing = groups.filter((group) => FAILING.has(group.impact));
   const lesser = groups.filter((group) => !FAILING.has(group.impact));
   const actions = process.env.GITHUB_ACTIONS === "true";
@@ -297,14 +349,14 @@ async function main(argv) {
       console.log(`${group.impact} ${group.rule} on ${group.page}: ${message}`);
     }
   }
-  const text = summary(failing, lesser, pages.length, foreign);
+  const text = summary(failing, lesser, scope, foreign);
   if (process.env.GITHUB_STEP_SUMMARY) {
     await appendFile(process.env.GITHUB_STEP_SUMMARY, text);
   }
   console.log(
     failing.length === 0
-      ? `No serious or critical violation of WCAG 2.2 A or AA on ${pages.length} page(s), in both schemes; ${lesser.length} lesser one(s).`
-      : `${failing.length} serious or critical violation(s) of WCAG 2.2 A or AA on ${pages.length} page(s).`,
+      ? `No serious or critical violation of WCAG 2.2 A or AA on ${scope}; ${lesser.length} lesser one(s).`
+      : `${failing.length} serious or critical violation(s) of WCAG 2.2 A or AA on ${scope}.`,
   );
   if (foreign.size > 0) {
     console.log(`The pages asked other servers, which the check refused: ${[...foreign].sort().join(", ")}.`);
