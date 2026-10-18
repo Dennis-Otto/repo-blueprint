@@ -269,11 +269,35 @@ step "Coding standard"
 vendor/bin/php-cs-fixer fix --dry-run --diff
 
 step "Psalm"
-vendor/bin/psalm --threads=1 --no-cache
+# The canary of the taint analysis runs on another processor meanwhile; its step reads
+# what it found, never the report of a run before.
+mkdir -p build
+rm -f build/psalm-canary.json
+vendor/bin/psalm --config=.github/psalm/canary.xml --taint-analysis --threads=1 --no-cache \
+  --no-progress --monochrome --report=build/psalm-canary.json >build/psalm-canary.log 2>&1 &
+canary=$!
+if ! vendor/bin/psalm --threads=1 --no-cache; then
+  # A check that stops here leaves no canary running behind it.
+  kill "$canary" 2>/dev/null || true
+  exit 1
+fi
+
+step "Psalm taint canary"
+# The controller of .github/psalm/canary/ lets the input of a request reach each kind of
+# sink: the analysis has to find every path that it expects, and no other, or it has
+# gone blind and would pass the code of every app in silence.
+wait "$canary" || true
+if ! php .github/psalm/check-canary.php build/psalm-canary.json; then
+  cat build/psalm-canary.log
+  exit 1
+fi
 
 step "Psalm taint analysis"
-# Untrusted input that reaches HTML, SQL, a shell, a file or a header unescaped.
-vendor/bin/psalm --taint-analysis --threads=1 --no-cache
+# Untrusted input that reaches HTML, SQL, a shell, a file, a request to another server
+# or a header unescaped: the parameters of a request to a controller, the term of a
+# search and the answers of other servers, as .github/psalm/NextcloudTaintPlugin.php
+# teaches Psalm. The CI shows each path in code scanning too, from the SARIF report.
+vendor/bin/psalm --taint-analysis --threads=1 --no-cache --report=build/psalm-taint.sarif
 
 step "Tests, with every line covered"
 # pcov measures the coverage in the CI, Xdebug in the dev container.

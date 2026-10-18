@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the taint analysis of a Nextcloud app sees untrusted input
+    accDescr: The plugin of the blueprint tells Psalm what Nextcloud hides from it. The parameters of a request to a controller, the term of a search and the answers of other servers are untrusted input, next to IRequest. The paths of files, the addresses of requests to other servers and of redirections are sinks, next to the queries that nextcloud/ocp marks itself. Input that reaches a sink unescaped fails check (php), with its path in the log and in code scanning; a function of the app that makes it safe says so. A canary with a path to each kind of sink proves in every run that the analysis still finds them.
+
+    plugin["The plugin of the blueprint<br>.github/psalm/NextcloudTaintPlugin.php"]
+    sources["Untrusted input<br>parameters of a controller · IRequest<br>the term of a search · answers of other servers"]
+    sinks["Sinks<br>paths of files · requests to other servers<br>redirections · SQL · HTML · shell"]
+    app["The code of the app<br>lib/"]
+    escape["A function that makes the input safe<br>@psalm-taint-escape, with the reason"]
+    fail["check (php) fails<br>the path in the log and in code scanning"]
+    pass["The input is safe<br>where it arrives"]
+    canary["The canary<br>a path to each kind of sink:<br>each one found, or the check fails"]
+
+    plugin --> sources & sinks
+    sources --> app
+    app -->|unescaped| sinks --> fail
+    app --> escape --> pass
+    canary -->|proves it in every run| plugin
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class plugin,sources,sinks,canary bot
+    class app,escape you
+    class pass done

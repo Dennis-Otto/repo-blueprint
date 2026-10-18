@@ -221,6 +221,31 @@ a maintainer dismisses it with the reason."""
 docs = "https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/about-code-scanning-alerts"
 autofix = """A security problem needs a person, who knows where the data may go."""
 
+[check."taint report (php)"]
+title = "The upload of the taint analysis"
+problem = """The paths that the taint analysis of `check (php)` found couldn't reach
+code scanning; the log of the check says why. The analysis itself ran in
+`check (php)`, which shows its findings in its log."""
+why = """Code scanning shows each path at the lines of the pull request and keeps the
+alerts of `main` in the Security tab."""
+fix = """Run the check again; if it fails again, open an issue with the log."""
+docs = "https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github"
+autofix = """An upload that fails needs a look at its log; the change rarely causes
+it."""
+
+[check.Psalm]
+title = "Security alerts of Psalm"
+problem = """The taint analysis of Psalm found untrusted input that reaches a sink in
+the code that the pull request changes, such as a path of a file, a query or a
+request to another server, unescaped."""
+why = """A vulnerability that merges reaches every user with the next release; here it
+is a line to change."""
+fix = """Open the alert from the details of the check: it shows each line of the path,
+from the input to the sink. Validate or escape the input on that path, then push; the
+step *Psalm taint analysis* of `check (php)` says how."""
+docs = "https://psalm.dev/docs/security_analysis/"
+autofix = """A security problem needs a person, who knows where the data may go."""
+
 [check.dependency-review]
 title = "The review of the dependencies"
 problem = """The pull request adds or updates a dependency with a known vulnerability, or
@@ -611,20 +636,49 @@ autofix = ["vendor/bin/php-cs-fixer fix"]
 
 [step.Psalm]
 problem = """Psalm, at its strictest level, finds a type that doesn't fit, a call that
-can fail or code that can't run; the log names each line with its issue."""
+can fail or code that can't run; the log names each line with its issue. Psalm may
+also have stopped because `nextcloud/ocp` no longer has a method that
+`.github/psalm/NextcloudTaintPlugin.php` names; the log names that method then."""
 why = """Psalm catches bugs that the tests miss, before they reach a Nextcloud server."""
-fix = """Fix each line that Psalm names; its documentation explains every issue:"""
+fix = """Fix each line that Psalm names; its documentation explains every issue. A method
+that the plugin names and `nextcloud/ocp` lost is the blueprint's to adapt: report
+it there, and keep the update of `nextcloud/ocp` until a release of the blueprint
+does. Psalm runs alone with:"""
 commands = ["vendor/bin/psalm --no-cache"]
 docs = "https://psalm.dev/docs/running_psalm/issues/"
 autofix = """Only a person knows which type is right."""
 
+[step."Psalm taint canary"]
+problem = """The taint analysis no longer finds every path of the canary in
+`.github/psalm/canary/`, a controller that lets the input of a request reach each kind
+of sink, or finds one that the canary doesn't expect; the log names each line. Psalm
+may also have stopped, when `nextcloud/ocp` no longer has a method that
+`.github/psalm/NextcloudTaintPlugin.php` names as a source or a sink."""
+why = """An analysis that has gone blind passes every app in silence, as if its code
+were safe; the canary makes that fail instead."""
+fix = """An update of Psalm or of `nextcloud/ocp` usually causes it: the files in
+`.github/psalm/` belong to the blueprint, so report the log to it, and keep the
+update until a release of the blueprint adapts them. The canary runs alone with:"""
+commands = [
+  "vendor/bin/psalm --config=.github/psalm/canary.xml --taint-analysis --no-cache --report=build/psalm-canary.json",
+  "php .github/psalm/check-canary.php build/psalm-canary.json",
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/issues"
+autofix = """An analysis that misses a path needs a person, who finds out what changed
+in Psalm or in Nextcloud."""
+
 [step."Psalm taint analysis"]
-problem = """Untrusted input, such as a parameter of a request, reaches HTML, SQL, a
-shell, a file or a header without escaping; the log shows its path."""
-why = """That path is a vulnerability, such as cross-site scripting or an injection of
-SQL, that attackers look for."""
-fix = """Escape or validate the input on the path that the log shows, before it reaches
-its sink, then run the analysis again:"""
+problem = """Untrusted input reaches HTML, SQL, a shell, a file, a request to another
+server or a header without escaping: a parameter of a request to a controller, the
+term of a search or the answer of another server. The log shows its path, from the
+input to the line where it arrives."""
+why = """That path is a vulnerability, such as cross-site scripting, an injection of
+SQL, a path that climbs out of its folder or a request that the server makes for an
+attacker, which attackers look for."""
+fix = """Validate or escape the input on the path that the log shows, before it reaches
+its sink, then run the analysis again. A function that makes the input safe for a sink,
+such as one that refuses a path with `..`, says so in its docblock, with
+`@psalm-taint-escape file` for example, and a comment on why it is safe:"""
 commands = ["vendor/bin/psalm --taint-analysis --no-cache"]
 docs = "https://psalm.dev/docs/security_analysis/"
 autofix = """Where untrusted input may go, and how to escape it, is the decision of
