@@ -276,6 +276,33 @@ def test_only_pages_that_mkdocs_built_count(tmp_path: Path) -> None:
     assert site.further == ("de",)
 
 
+def test_no_page_has_the_browser_of_its_reader_ask_github(tmp_path: Path) -> None:
+    files = two_languages()
+    link = (
+        '<a href="https://github.com/owner/demo" title="Go to repository" '
+        'class="md-source" data-md-component="source">owner/demo</a>'
+    )
+    files["guide.html"] = page(
+        "en",
+        canonical=BASE + "guide.html",
+        alternates=versions("guide.html"),
+        body=link + link,
+    )
+    files["404.html"] = page("en", body=link)
+    # A page of HTML of the project, which MkDocs only copied, is the project's.
+    files["copied.html"] = link
+    asks = (
+        "has the browser of every reader ask the API of GitHub for the numbers of "
+        'the repository: data-md-component="source" on its link to the repository, '
+        "which the hooks of the website take away"
+    )
+
+    assert messages(built(tmp_path, files)) == [
+        f"404.html: {asks}",
+        f"guide.html: {asks}",
+    ]
+
+
 def test_a_website_without_a_home_page_fails(tmp_path: Path) -> None:
     site = check(tmp_path / "nothing")
 
@@ -322,6 +349,7 @@ def test_a_page_says_what_it_is() -> None:
     assert found.canonical == ["a.html"]
     assert found.alternates == [("en", "a.html")]
     assert found.parts == {"fr"}
+    assert not found.asks_github
 
 
 def test_an_annotation_names_the_file_on_one_line() -> None:

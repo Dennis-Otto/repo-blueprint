@@ -56,11 +56,11 @@ theme:
 plugins:
   search: {}
   # Fonts, scripts and pictures from other servers are downloaded when the website
-  # is built and served with it, so that reading a page asks no other server for
-  # them. Only the numbers of the repository in the header, such as its stars, come
-  # from the API of GitHub, which the reader's browser asks once in each session;
-  # the badges of a README, which would show their state at the time of the build,
-  # stay on GitHub.
+  # is built and served with it, so that reading a page asks no other server. The
+  # link to the repository in the header shows the version of the latest release,
+  # which the hooks read from git at the build, so the reader's browser no longer
+  # asks the API of GitHub for the numbers of the repository; the badges of a
+  # README, which would show their state at the time of the build, stay on GitHub.
   privacy: {}
   # A preview card of every page, which shows where a link to it is shared. The cards
   # are drawn with the Cairo library, which Windows doesn't have, so only the CI
@@ -146,5 +146,10 @@ validation:
   unrecognized_links: warn
   anchors: warn
 
+# The footer of every page leads to the owner of the repository: the hooks give it
+# the links to their profile on GitHub, to their website with all of their projects,
+# for a website under it, and to GitHub Sponsors, when .github/FUNDING.yml names an
+# account. A list extra.social in mkdocs.yml takes the place of these, since INHERIT
+# replaces lists, and an empty one, [], shows none.
 extra:
   generator: false

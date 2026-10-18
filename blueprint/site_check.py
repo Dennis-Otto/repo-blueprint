@@ -4,7 +4,9 @@ The hooks of .github/mkdocs_blueprint.py change what the plugins of MkDocs write
 they copy the sitemap into every folder of pages, which the language switch of
 Material asks for, keep the 404 page of the default language at the root, give each
 page the full addresses of its versions in other languages, and show a page that a
-further language lacks in the default language, which no search engine lists. Their
+further language lacks in the default language, which no search engine lists, and
+take the attribute from the link to the repository with which the script of Material
+would ask the API of GitHub for its numbers in the browser of every reader. Their
 tests fake the plugins; check() reads what the real ones built, so that a new version
 of Material or of mkdocs-static-i18n that breaks a hook fails the check docs, before
 the website is published. It also reads what the deploy job needs to know: the
@@ -34,7 +36,8 @@ LOCATION = re.compile(r"<loc>\s*([^<]*?)\s*</loc>")
 class Page(HTMLParser):
     """What a page of HTML says of itself: its language, the generator that built it,
     its canonical address, its versions in other languages, whether search engines
-    may list it, and the languages of its parts."""
+    may list it, the languages of its parts, and whether the script of Material asks
+    the API of GitHub for the numbers of the repository."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -44,6 +47,7 @@ class Page(HTMLParser):
         self.canonical: list[str] = []
         self.alternates: list[tuple[str, str]] = []
         self.parts: set[str] = set()
+        self.asks_github = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         found = {name: value or "" for name, value in attrs}
@@ -62,6 +66,8 @@ class Page(HTMLParser):
                 self.alternates.append((found["hreflang"], found.get("href", "")))
         elif "lang" in found:
             self.parts.add(found["lang"])
+        if found.get("data-md-component") == "source":
+            self.asks_github = True
 
     @property
     def built(self) -> bool:
@@ -126,6 +132,7 @@ def check(site: Path) -> Site:
     findings = [
         *canonicals(pages, required=bool(home.canonical)),
         *languages(pages, default, further),
+        *private(pages),
     ]
     if further:
         findings += sitemaps(site, pages, base)
@@ -221,6 +228,21 @@ def languages(
                     )
                 )
     return findings
+
+
+def private(pages: dict[str, Page]) -> list[Finding]:
+    """No page that MkDocs built has the browser of its reader ask another server:
+    the link to the repository shows the version that the hooks read at the build."""
+    return [
+        Finding(
+            name,
+            "has the browser of every reader ask the API of GitHub for the numbers of "
+            'the repository: data-md-component="source" on its link to the '
+            "repository, which the hooks of the website take away",
+        )
+        for name, page in pages.items()
+        if page.built and page.asks_github
+    ]
 
 
 def absolute(href: str) -> bool:
