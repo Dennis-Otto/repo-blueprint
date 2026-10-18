@@ -10,7 +10,8 @@
 [%- elif stack == 'node' %]
 # The tools come from:  npm ci
 [%- elif stack == 'container' %]
-# It needs Docker; hadolint and shellcheck run when they are installed.
+# It needs Docker. hadolint and shellcheck run when they are installed; the CI fails
+# without shellcheck and runs hadolint in a step of its own.
 [%- endif %]
 #
 # The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
@@ -39,8 +40,10 @@ coach() {
 }
 trap coach EXIT
 
+# The files of git, tracked or new, each once: during a merge, git lists a file with
+# a conflict once for each side otherwise.
 files() {
-  git ls-files -z --cached --others --exclude-standard "$@"
+  git ls-files -z --cached --others --exclude-standard --deduplicate "$@"
 }
 
 step "Text files"
@@ -76,28 +79,79 @@ problem() {
     echo "::error file=$name,line=$line,title=Text files::$2"
   fi
 }
+# The files of git other than the licenses, and of those the text files: the ones
+# with a character other than a line break and without the NUL of a binary file, as
+# grep -I sees them, so neither deleted, empty nor binary ones.
+names=()
 while IFS= read -r -d '' file; do
   case "$file" in
-    LICENSE | LICENSES/*) continue ;;
+    LICENSE | LICENSES/*) ;;
+    *) names+=("$file") ;;
   esac
-  # Leave out deleted, empty and binary files.
-  if [[ ! -s "$file" ]] || ! grep -Iq . "$file"; then
-    continue
-  fi
+done < <(files)
+text=()
+if ((${#names[@]} > 0)); then
+  mapfile -d '' text < <(printf '%s\0' "${names[@]}" | xargs -0 grep -IlsZ . --)
+fi
+# The text files that a command lists, each with a NUL at its end, as the keys of the
+# array named first: one command for all the files, or a few for a long list, rather
+# than a few for each file, which took half a minute on Windows.
+listed_by() {
+  local -n found="$1"
+  local file
+  shift
+  while IFS= read -r -d '' file; do
+    found["$file"]=1
+  done < <(printf '%s\0' "${text[@]}" | xargs -0 "$@" --)
+}
+declare -A crlf=() blanks=() unended=() markers=()
+# A line that git writes around a conflict that a merge leaves to a person: alone,
+# with the CR of a CRLF line ending, or before a blank and the name of a side.
+marker=$'^(<{7}|>{7})( |\r|$)'
+if ((${#text[@]} > 0)); then
   # -U reads the bytes as they are: the grep of Git for Windows drops the CR at the
   # end of a line otherwise, and found no CRLF line endings there.
-  if grep -qU $'\r' "$file"; then
+  listed_by crlf grep -lZU $'\r'
+  listed_by blanks grep -lZUE '[[:blank:]]$'
+  listed_by markers grep -lZUE "$marker"
+  # The files whose last byte is no line break. Perl, which comes with Git for
+  # Windows, macOS and Linux, reads the last byte of every file; tail, without it,
+  # that of one file at a time.
+  if command -v perl >/dev/null 2>&1; then
+    # shellcheck disable=SC2016 # The variables are those of the program of Perl.
+    listed_by unended perl -e 'for my $name (@ARGV) {
+      my $last = "\n";
+      open(my $file, "<:raw", $name) or next;
+      seek($file, -1, 2) and read($file, $last, 1);
+      print "$name\0" if $last ne "\n";
+    }'
+  else
+    for file in "${text[@]}"; do
+      if [[ -n "$(tail -c 1 "$file")" ]]; then
+        unended["$file"]=1
+      fi
+    done
+  fi
+fi
+for file in "${text[@]}"; do
+  if [[ -n "${crlf[$file]:-}" ]]; then
     problem "$file" "has CRLF line endings" $'\r'
   fi
-  if grep -qUE '[[:blank:]]$' "$file"; then
+  if [[ -n "${blanks[$file]:-}" ]]; then
     problem "$file" "has trailing whitespace" '[[:blank:]]$'
   fi
-  if [[ -n "$(tail -c 1 "$file")" ]]; then
+  if [[ -n "${unended[$file]:-}" ]]; then
     problem "$file" "lacks the line break at its end"
   fi
-done < <(files)
+  if [[ -n "${markers[$file]:-}" ]]; then
+    problem "$file" "has conflict markers" "$marker"
+  fi
+done
 if ((problems > 0)); then
   echo "Fix the $problems problem(s) above; .editorconfig sets up most editors for it."
+  if ((${#markers[@]} > 0)); then
+    echo "A conflict needs a person: keep the lines that belong, and delete the markers."
+  fi
   exit 1
 fi
 echo "Every text file is clean."
@@ -186,7 +240,14 @@ echo "Every hook in .githooks/ is executable."
 
 step "Shell scripts"
 mapfile -d '' scripts < <(files '*.sh')
+# ShellCheck, which the CI never skips: a runner without it fails here, as one whose
+# image no longer has it. The runners of Linux have it; pip installs it from the
+# package shellcheck-py.
 if ! command -v shellcheck >/dev/null 2>&1; then
+  if [[ -n "${CI:-}" ]]; then
+    echo "Checking the shell scripts needs ShellCheck, which this runner lacks."
+    exit 1
+  fi
   echo "shellcheck is not installed here; the CI runs it."
 elif ((${#scripts[@]} > 0)); then
   shellcheck "${scripts[@]}"

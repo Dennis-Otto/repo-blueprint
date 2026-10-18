@@ -499,14 +499,20 @@ by its verification, never by a command of the pull request."""
 # ---------------------------------------------------------------- the steps of scripts/check.sh
 
 [step."Text files"]
-problem = """A text file has CRLF line endings, a line with trailing whitespace or no
-line break at its end; the log names each file."""
+problem = """A text file has CRLF line endings, a line with trailing whitespace, no
+line break at its end, or the conflict markers of a merge, lines of `<<<<<<<` or
+`>>>>>>>`, alone or followed by a space; the log names each file."""
 why = """Line endings and stray whitespace that differ from file to file make every diff
 noisy and break shell scripts. `.editorconfig` and `.gitattributes` keep them the same
-everywhere."""
-fix = """Let your editor follow `.editorconfig`, which most do by themselves, and let
-the command fix every text file (in the blueprint itself, the tool is `blueprint.py`
-without `.github/`):"""
+everywhere. A conflict marker is a conflict that nobody resolved, such as one that an
+update of the blueprint leaves in a file that no other check reads, and it breaks the
+file or ships both versions of its lines."""
+fix = """A conflict needs a person: keep the lines that belong and delete the lines of
+the markers, `<<<<<<<`, `=======` and `>>>>>>>`; a file that needs such a line on
+purpose, such as a test of a merge, builds it, as with `"<" * 7`. For the rest, let
+your editor follow `.editorconfig`, which most do by themselves, and let the command
+fix every text file (in the blueprint itself, the tool is `blueprint.py` without
+`.github/`):"""
 commands = ["python3 .github/blueprint.py fix text"]
 docs = "CONTRIBUTING.md#coding-standards"
 autofix = ["{blueprint} fix text"]
@@ -586,12 +592,17 @@ can make a hook executable."""
 [step."Shell scripts"]
 problem = """ShellCheck flags a shell script, for a bug, such as a variable without
 quotes, or for a construct that breaks on another shell; the log names each line with
-its rule, such as SC2086."""
+its rule, such as SC2086. Or the runner of the CI lacks ShellCheck, which the CI never
+skips."""
 why = """Shell scripts fail quietly and differently on each system; ShellCheck finds the
-mistakes before they run."""
+mistakes before they run. A CI that skipped it would pass a script that nobody
+checked."""
 fix = """Fix each line that ShellCheck names; its wiki explains every rule. A line that
 needs the construct on purpose gets `# shellcheck disable=SC…` above it, with the
-reason. ShellCheck checks every script of the repository with:"""
+reason. A runner without ShellCheck installs it before the checks, such as with
+`sudo apt-get install shellcheck` or the hash-pinned `shellcheck-py` of the Python
+tools; the runners of Linux of GitHub have it. ShellCheck checks every script of the
+repository with:"""
 commands = ["shellcheck $(git ls-files '*.sh')"]
 docs = "https://www.shellcheck.net/wiki/"
 autofix = """A finding of ShellCheck needs a person, who knows what the script should do."""

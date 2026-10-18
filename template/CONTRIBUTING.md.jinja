@@ -26,8 +26,8 @@ Every Saturday the mutation tests change the code in thousands of small ways and
 - **PHP** follows the [Nextcloud coding standard](https://github.com/nextcloud/coding-standard), which builds on PSR-1 and PSR-2 and indents with tabs, as php-cs-fixer checks it, and passes Psalm at its strictest level, 1.[% elif stack == 'node' %]
 - **TypeScript** compiles in the strict mode of the compiler, with the further checks that `tsconfig.json` turns on.[% elif stack == 'container' %]
 - **The Dockerfile** follows the rules of [hadolint](https://github.com/hadolint/hadolint).[% endif %]
-- **Shell scripts** pass [ShellCheck](https://www.shellcheck.net/), **workflows** pass actionlint and zizmor's audit of their security, and **Markdown** follows the rules of markdownlint in `.markdownlint.jsonc`.
-- **Every text file** has LF line endings, no trailing whitespace and a line break at its end; `.editorconfig` sets up most editors for it.
+- **Shell scripts** pass [ShellCheck](https://www.shellcheck.net/), which the CI never skips, **workflows** pass actionlint and zizmor's audit of their security, and **Markdown** follows the rules of markdownlint in `.markdownlint.jsonc`.
+- **Every text file** has LF line endings, no trailing whitespace, a line break at its end and no conflict markers that a merge left; `.editorconfig` sets up most editors for it.
 
 `scripts/check.sh` and the Lint workflow check these standards on every pull request, which merges only when they pass. An exception to a rule is rare and is marked at its place in the code, with its reason in a comment.
 
