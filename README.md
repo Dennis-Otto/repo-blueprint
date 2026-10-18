@@ -284,26 +284,56 @@ Every kind starts with a small working example and its tests: replace it with th
 
 <!-- --8<-- [start:quick-start] -->
 
-Copier 9.4 or later, Git, GitHub CLI 2.48 or later and a checkout of the blueprint (for `blueprint.py`):
+Copier 9.8 or later, Git, GitHub CLI 2.48 or later and a checkout of the blueprint (for `blueprint.py`):
 
 ```sh
 copier copy gh:Dennis-Otto/repo-blueprint my-project
 cd my-project
 git init && git add --all && git commit --signoff --message "chore: start from the blueprint"
-gh repo create Dennis-Otto/my-project --public --source . --push
+gh repo create your-account/my-project --public --source . --push
 python3 ../repo-blueprint/blueprint.py settings apply
 python3 ../repo-blueprint/blueprint.py checklist
 ```
 
-Copier asks for the name, a one-sentence description, the kind of project, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later) and a few details of the kind. `settings apply` sets everything the API can set; `checklist` shows what is left for a person, such as the secrets, and which steps are done.
+Copier asks for the name, a one-sentence description, the kind of project, the GitHub account or organization that owns it, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later), a few details of the kind and the release app of the owner, which may stay empty until the checklist has registered it. `settings apply` sets everything the API can set; `checklist` shows what is left for a person, such as the secrets, and which steps are done.
 
-![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description and the kind of project, Python package, takes the defaults for the rest, writes the files and names the next steps; the new repository has its community files, its checks and its workflows](docs/images/copier-copy.gif)
+![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description, the kind of project, Python package, and the owner Dennis-Otto, takes the defaults for the rest, including the release app, writes the files and names the next steps; the new repository has its community files, its checks and its workflows](docs/images/copier-copy.gif)
 
 <!-- --8<-- [end:quick-start] -->
 
+### Your own account
+
+The blueprint works for every account and organization on GitHub, and a repository made from it names nothing of the blueprint's owner but the links to the blueprint. Each owner brings two things of their own:
+
+- **A release app,** once for all of their repositories. The bots act as a GitHub App of the owner: its token starts the checks of the release and update pull requests, may change workflows and creates the release tags, which the token of a job can't. Only the owner of an app has its private key, so the blueprint can't lend its own. Copy the blueprint with the question of the release app left empty, and `checklist` starts with a link that registers the app on your account or organization, with its name and permissions filled in and without a webhook; set *Variables* by hand, which the link can't fill in. Create the app, generate a private key on its settings page, and name the app in the answers of the blueprint, with the name in its address and the Client ID and App ID of that page:
+
+  ```sh
+  copier update --defaults --vcs-ref=:current: --data release_app=NAME --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID
+  ```
+
+  Commit the update: `.github/repository.toml` names the app, only it may create release tags, and `settings apply` and `checklist` then ask for its private key and its installation on the repository. Until then the blueprint bot and the release bot say in their summary what is missing, rather than fail at a token.
+- **Your defaults,** so that every new repository asks only what is new. Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) takes the answers that stay the same, on Windows in `%LOCALAPPDATA%\copier\settings.yml` and on macOS in `~/Library/Application Support/copier/settings.yml`:
+
+  ```yaml
+  # ~/.config/copier/settings.yml, or the file that COPIER_SETTINGS_PATH names
+  defaults:
+    owner: octo-org
+    author: Octo Org
+    release_app: octo-org-release-automation
+    release_app_client_id: Iv23liExample
+    release_app_id: "123456"
+  ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-an-owner-gets-a-release-app.dark.svg">
+  <img src="docs/images/diagrams/how-an-owner-gets-a-release-app.svg" alt="How an owner gets a release app: You copy the blueprint with the question of the release app left empty. The checklist links the registration of the app on your account or organization, with its name and permissions filled in. You create the app and its private key, and name it with copier update and the name, Client ID and App ID of its settings page. After the commit, settings apply sets the variables and the ruleset of the release tags, and the checklist asks for the private key and the installation on the repository. Then the bots run as your app; until then the blueprint bot and the release bot say in their summary what is missing.">
+</picture>
+
+Renovate still runs from the blueprint's own repository, for the repositories of its owner only.
+
 ### Once per repository
 
-- **The release app** opens the release and update pull requests, so that their checks run. Install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Actions*, *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests*, *Variables* and *Workflows* (read and write), and *Dependabot alerts*, *Environments* and *Secrets* (read): with them the settings bot applies the settings as code, Renovate updates the dependencies, and the rollout of the blueprint starts the blueprint bot of every repository after a release. Renovate gets a token without *Administration*. The release workflow creates every release tag with the app, and the ruleset *Release tag creation* lets nobody else create one; the variables `RELEASE_AUTOMATION_CLIENT_ID` and `RELEASE_AUTOMATION_APP_ID` in `.github/repository.toml` name the app, and a project with an app of its own sets both in `.github/repository.project.toml`.
+- **The release app** of the owner opens the release and update pull requests, so that their checks run. Register it once for the account, as [your own account](#your-own-account) shows, install it on the repository, and set its private key as the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. The app needs the permissions *Actions*, *Administration*, *Checks*, *Commit statuses*, *Contents*, *Issues*, *Pages*, *Pull requests*, *Variables* and *Workflows* (read and write), and *Dependabot alerts*, *Environments* and *Secrets* (read): with them the settings bot applies the settings as code, Renovate updates the dependencies, and the rollout of the blueprint starts the blueprint bot of every repository after a release. Renovate gets a token without *Administration*. The release workflow creates every release tag with the app, and the ruleset *Release tag creation* lets nobody else create one; the variables `RELEASE_APP`, `RELEASE_AUTOMATION_CLIENT_ID` and `RELEASE_AUTOMATION_APP_ID` in `.github/repository.toml` name the app, from the answers `release_app`, `release_app_client_id` and `release_app_id`, and a project with another app than its answers name sets them in `.github/repository.project.toml`.
 - **The issue assistant** needs `CLAUDE_CODE_OAUTH_TOKEN` in the environment `issue-assistant`.
 - **Delivery:** trusted publishing on PyPI or npm, the app certificate of a Nextcloud app, or the HACS submission, as the checklist says.
 - **OpenSSF Best Practices:** add the project on [bestpractices.dev](https://www.bestpractices.dev/en/projects/new) with the URL of the repository. It proposes the answers of `.bestpractices.json`, about 90 to 100 of the badge and of the OSPS Baseline that the blueprint guarantees for the kind of project, each with the file that shows it; *Save (and continue) 🤖* takes them in on each level, also after an update of the file. Answer the rest, what only your software and your people can say, and add both badges to the README, as the checklist shows.
@@ -342,7 +372,7 @@ The other kinds set these places in files of their own, such as `pyproject.toml`
 - **Security:** immutable releases, private vulnerability reporting, Dependabot alerts with the security updates of Renovate, secret scanning with push protection and with the generic patterns of private keys, connection strings and passwords.
 - **Actions:** read-only tokens by default, no approvals by workflows, actions pinned to commit hashes, only the actions of GitHub and those of the list in `[actions.selected]`, approval for the workflows of every outside contributor. `settings check` follows every action that a workflow runs, also inside a composite action or a reusable workflow, and names each one that the list lacks; until it is listed, `settings apply` only adds to the list on GitHub, so no workflow stops.
 - **Rulesets:** *Protect main* (pull requests only, squashed, linear history, every required check, no new alert of CodeQL of high or critical severity, no deletion or force push), *Release tags* (`v*.*.*` never moves) and *Release tag creation* (only the release app, whose App ID `RELEASE_AUTOMATION_APP_ID` names, creates a `v*.*.*` tag, which the release workflow signs).
-- **Variables and environments:** `PUBLISH_TO`, the release app (`RELEASE_AUTOMATION_CLIENT_ID` and `RELEASE_AUTOMATION_APP_ID`), and environments that only `main` may use, with the secrets they need.
+- **Variables and environments:** `PUBLISH_TO`, the release app (`RELEASE_APP`, `RELEASE_AUTOMATION_CLIENT_ID` and `RELEASE_AUTOMATION_APP_ID`), and environments that only `main` may use, with the secrets they need.
 - **Pages:** GitHub Pages publishes the website that the Docs workflow builds.
 
 `blueprint.py` needs Python 3.12 and GitHub CLI 2.48 or later, signed in as an administrator, and nothing else. It never reads or prints the value of a secret. Every repository has a copy in `.github/blueprint.py` and `.github/blueprint/`, and the settings bot (`settings.yml`) compares its settings with the settings as code every week, after every change of them and after every update of its own code, so that no repository drifts. A change that GitHub refuses fails the run, which names the part and the permission of the release app that it needs; after a gateway that timed out or a rate limit, a request tries once more, after the wait that GitHub asks for (decision 0036 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).

@@ -21,6 +21,9 @@ project_name: Autodarts
 project_slug: ha-autodarts
 project_type: home-assistant
 python_package: autodarts
+release_app: dennis-otto-release-automation
+release_app_client_id: Iv23liP9PIEHOV74AiIA
+release_app_id: '4739928'
 sample_code: false
 sponsor: Dennis-Otto
 successor: true

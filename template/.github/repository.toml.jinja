@@ -108,10 +108,18 @@ code_scanning_tools = [
 
 [variables]
 PUBLISH_TO = "{= publish_to =}"
-# The GitHub App that opens the release pull requests, so that their checks run.
-RELEASE_AUTOMATION_CLIENT_ID = "Iv23liP9PIEHOV74AiIA"
+[%- if release_app %]
+# The GitHub App that opens the release pull requests, so that their checks run, by
+# the name in its address: https://github.com/apps/{= release_app =}
+RELEASE_APP = "{= release_app =}"
+RELEASE_AUTOMATION_CLIENT_ID = "{= release_app_client_id =}"
 # Its App ID: only this app may create release tags, which the release workflow signs.
-RELEASE_AUTOMATION_APP_ID = "4739928"
+RELEASE_AUTOMATION_APP_ID = "{= release_app_id =}"
+[%- else %]
+# No release app yet, which opens the release pull requests, signs the release tags
+# and runs the bots: `python3 .github/blueprint.py checklist` shows how to register
+# one, and `copier update` with its answers names it here.
+[%- endif %]
 
 # GitHub Pages, which publishes the website that the Docs workflow builds from
 # mkdocs.yml and docs/.
@@ -120,7 +128,7 @@ build_type = "workflow"
 
 # Environments and the secrets they need; only main may use them.
 [environments.release]
-secrets = ["RELEASE_AUTOMATION_PRIVATE_KEY"[% if publish_to == 'nextcloud-appstore' %], "APP_PRIVATE_KEY", "APPSTORE_TOKEN"[% endif %]]
+secrets = [{= ((["RELEASE_AUTOMATION_PRIVATE_KEY"] if release_app else []) + (["APP_PRIVATE_KEY", "APPSTORE_TOKEN"] if publish_to == 'nextcloud-appstore' else [])) | map('to_json') | join(', ') =}]
 
 [environments.issue-assistant]
 secrets = ["CLAUDE_CODE_OAUTH_TOKEN"]

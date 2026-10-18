@@ -17,6 +17,9 @@ project_name: Issue assistant
 project_slug: issue-assistant
 project_type: github-action
 python_package: issue_assistant
+release_app: dennis-otto-release-automation
+release_app_client_id: Iv23liP9PIEHOV74AiIA
+release_app_id: '4739928'
 sample_code: false
 sponsor: Dennis-Otto
 successor: true

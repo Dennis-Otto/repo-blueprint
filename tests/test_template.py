@@ -105,7 +105,13 @@ class Template:
     folder = ROOT
 
 
+# The owner of the projects of the tests, unless a test names another: the owner of the
+# blueprint, as in every repository of the Rollout. The question has no default.
+OWNER = "Dennis-Otto"
+
+
 def render(destination: Path, *, overwrite: bool = False, **data: str | bool) -> Path:
+    data = {"owner": OWNER, **data}
     with warnings.catch_warnings(), contextlib.ExitStack() as stack:
         # Uncommitted changes of a repository render too, with a warning.
         warnings.simplefilter("ignore")
@@ -6742,12 +6748,268 @@ def test_answers_without_a_version_fail_but_refuse_nothing(tmp_path: Path) -> No
     assert not any(call.startswith("sign-tag.sh") for call in calls)
 
 
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("client", "key", "missing"),
+    [
+        (
+            "",
+            "false",
+            "names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID",
+        ),
+        (
+            "Iv23liOcto",
+            "false",
+            "has no private key of its release app in the secret"
+            " RELEASE_AUTOMATION_PRIVATE_KEY of the environment release",
+        ),
+    ],
+    ids=["no app", "no key"],
+)
+def test_the_blueprint_bot_says_what_its_release_app_lacks(
+    tmp_path: Path, client: str, key: str, missing: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        "Check that the release app is set up",
+        env={"CLIENT_ID": client, "KEY_SET": key},
+    )
+
+    assert done.returncode == 1
+    assert done.stdout.splitlines() == [
+        f"::error::This repository {missing}, which the blueprint bot needs to push an"
+        " update and open its pull request; nothing has changed."
+    ]
+    assert done.summary.startswith(
+        "### The blueprint bot needs the release app of the owner\n\n"
+        f"This repository {missing}. "
+    )
+    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
+    assert done.calls == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_blueprint_bot_goes_on_with_its_release_app(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        "Check that the release app is set up",
+        env={"CLIENT_ID": "Iv23liOcto", "KEY_SET": "true"},
+    )
+
+    assert done.returncode == 0
+    assert done.stdout == ""
+    assert done.summary == ""
+    # Before the token of the app, which would fail without it.
+    names = [
+        found.get("name")
+        for found in workflow_steps.job("blueprint-update.yml", "update")["steps"]
+    ]
+    assert names.index("Check that the release app is set up") + 1 == names.index(
+        "Create a token of the release app"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_release_bot_explains_a_missing_release_app(tmp_path: Path) -> None:
+    found = workflow_steps.step(
+        "release.yml", "release-please", "Explain a missing release app"
+    )
+    assert found["if"] == "vars.RELEASE_AUTOMATION_CLIENT_ID == ''"
+    done = workflow_steps.run_step(
+        tmp_path, "release.yml", "release-please", "Explain a missing release app"
+    )
+
+    # A warning: release-please still keeps its pull request.
+    assert done.returncode == 0
+    assert done.stdout.startswith(
+        "::warning::This repository names no release app in the variable"
+        " RELEASE_AUTOMATION_CLIENT_ID"
+    )
+    assert done.summary.startswith("### No release app\n\n")
+    assert "`python3 .github/blueprint.py checklist` shows how" in done.summary
+    assert done.calls == []
+
+
+# Anything that names the blueprint owner as a person or an account, or the release app
+# of the blueprint owner, but a reference to one of its repositories, such as the
+# blueprint itself or its issue assistant.
+BLUEPRINT_OWNER = re.compile(
+    r"(?i)dennis[ -]otto(?!/[\w.-])|Iv23liP9PIEHOV74AiIA|\b4739928\b"
+)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
+    tmp_path: Path, kind: str
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type=kind,
+        owner="octo-org",
+    )
+
+    found = [
+        f"{path.relative_to(project).as_posix()}: {match[0]}"
+        for path in text_files(project)
+        for match in BLUEPRINT_OWNER.finditer(path.read_text(encoding="utf-8"))
+    ]
+    assert found == []
+    # Their own name, in the license and the governance.
+    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    assert answers["author"] == "octo-org"
+    assert answers["sponsor"] == "octo-org"
+    assert "maintained by octo-org" in (project / "GOVERNANCE.md").read_text("utf-8")
+    # No release app yet: no variable names one, no ruleset lets one create the release
+    # tags, and the environment release waits for no private key of one.
+    assert answers["release_app"] == ""
+    assert "release_app_client_id" not in answers
+    assert "release_app_id" not in answers
+    settings = Settings.load(project / ".github/repository.toml")
+    assert not {
+        "RELEASE_APP",
+        "RELEASE_AUTOMATION_CLIENT_ID",
+        "RELEASE_AUTOMATION_APP_ID",
+    } & set(settings.variables)
+    assert "Release tag creation" not in {
+        ruleset["name"] for ruleset in settings.rulesets
+    }
+    assert (
+        "RELEASE_AUTOMATION_PRIVATE_KEY"
+        not in (settings.environments["release"]["secrets"])
+    )
+    toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "`python3 .github/blueprint.py checklist` shows how to register" in toml
+
+
+def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="nextcloud-app",
+        owner="octo-org",
+        author="Octo Org",
+        release_app="octo-org-release-automation",
+        release_app_client_id="Iv23liOcto",
+        release_app_id="12345",
+    )
+
+    settings = Settings.load(project / ".github/repository.toml")
+    assert settings.variables == {
+        "PUBLISH_TO": "nextcloud-appstore",
+        "RELEASE_APP": "octo-org-release-automation",
+        "RELEASE_AUTOMATION_CLIENT_ID": "Iv23liOcto",
+        "RELEASE_AUTOMATION_APP_ID": "12345",
+    }
+    creation = next(
+        ruleset
+        for ruleset in settings.rulesets
+        if ruleset["name"] == "Release tag creation"
+    )
+    assert creation["bypass_actors"] == [
+        {"actor_id": 12345, "actor_type": "Integration", "bypass_mode": "always"}
+    ]
+    assert settings.environments["release"]["secrets"] == [
+        "RELEASE_AUTOMATION_PRIVATE_KEY",
+        "APP_PRIVATE_KEY",
+        "APPSTORE_TOKEN",
+    ]
+    toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "https://github.com/apps/octo-org-release-automation" in toml
+    assert "maintained by Octo Org" in (project / "GOVERNANCE.md").read_text("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({}, 'Question "owner" is required'),
+        ({"owner": "octo org"}, "Name the GitHub account or organization"),
+        (
+            {"owner": "octo-org", "release_app": "Octo App"},
+            "Name the app as its address does",
+        ),
+        (
+            {
+                "owner": "octo-org",
+                "release_app": "octo-app",
+                "release_app_client_id": "12345",
+                "release_app_id": "12345",
+            },
+            "Copy the Client ID from the settings page of the app",
+        ),
+        (
+            {
+                "owner": "octo-org",
+                "release_app": "octo-app",
+                "release_app_client_id": "Iv23liOcto",
+                "release_app_id": "Iv23liOcto",
+            },
+            "Copy the App ID, a number",
+        ),
+    ],
+    ids=["no owner", "owner", "app", "client id", "app id"],
+)
+def test_the_questions_of_the_owner_refuse_what_github_would_not_take(
+    tmp_path: Path, data: dict[str, str], message: str
+) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValueError, match=re.escape(message)):
+            run_copy(
+                str(Template.folder),
+                tmp_path / "project",
+                data={
+                    "project_name": "Demo Project",
+                    "description": "A demo.",
+                    "project_type": "generic",
+                    **data,
+                },
+                defaults=True,
+                vcs_ref="HEAD",
+                quiet=True,
+            )
+
+
+def test_the_owner_of_the_blueprint_keeps_the_answers_of_its_repositories(
+    projects: Mapping[str, Path],
+) -> None:
+    # copier update --defaults gives each repository of the Rollout the release app
+    # that it has, from the defaults of the blueprint owner, so the update changes none
+    # of its settings.
+    answers = yaml.safe_load(
+        (projects["generic"] / ".copier-answers.yml").read_text(encoding="utf-8")
+    )
+    keys = ("author", "release_app", "release_app_client_id", "release_app_id")
+    for name, theirs in ANSWERS.items():
+        assert {key: theirs[key] for key in keys} == {
+            key: answers[key] for key in keys
+        }, name
+    # The defaults are those of the blueprint's own repository.
+    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    own = copier["blueprint_owner"]["default"]
+    settings = Settings.load(ROOT / ".github/repository.toml")
+    assert own == {
+        "account": OWNER,
+        "author": "Dennis Otto",
+        "release_app": settings.variables["RELEASE_APP"],
+        "release_app_client_id": settings.variables["RELEASE_AUTOMATION_CLIENT_ID"],
+        "release_app_id": settings.variables["RELEASE_AUTOMATION_APP_ID"],
+    }
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_only_the_release_app_creates_the_release_tags_of_a_project(
     projects: dict[str, Path], kind: str
 ) -> None:
     settings = Settings.load(projects[kind] / ".github/repository.toml")
-    # The App ID next to the Client ID of the same app.
+    # The App ID next to the Client ID of the same app, and the name in its address.
+    assert settings.variables["RELEASE_APP"] == "dennis-otto-release-automation"
     assert settings.variables["RELEASE_AUTOMATION_CLIENT_ID"] == "Iv23liP9PIEHOV74AiIA"
     assert settings.variables["RELEASE_AUTOMATION_APP_ID"] == "4739928"
     creation = next(

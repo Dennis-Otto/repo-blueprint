@@ -3,7 +3,7 @@
 # repository itself, where they run and Renovate keeps them current.
 # https://github.com/Dennis-Otto/repo-blueprint
 
-_min_copier_version: "9.4"
+_min_copier_version: "9.8"
 _subdirectory: template
 _templates_suffix: .jinja
 _answers_file: .copier-answers.yml
@@ -91,6 +91,12 @@ _message_after_copy: |
     1. Create the repository and push:  gh repo create {= owner =}/{= project_slug =} --public --source . --push
     2. Apply the settings as code:      python3 <blueprint>/blueprint.py settings apply
     3. Follow the checklist:            python3 <blueprint>/blueprint.py checklist
+  [%- if not release_app %]
+
+  The checklist starts with the release app of {= owner =}, which opens the release and
+  update pull requests and runs the bots: it registers one with a link that fills in
+  its permissions, and copier update names it in .github/repository.toml.
+  [%- endif %]
 
 project_name:
   type: str
@@ -121,15 +127,32 @@ project_type:
     Container image (GHCR): container
     Repository without a build (docs, configuration, scripts): generic
 
+# The owner of this blueprint, whose own repositories keep its name and its release
+# app as their defaults; every other owner names their own. A fork of the blueprint
+# names its owner here. Never asked and not stored.
+blueprint_owner:
+  type: yaml
+  when: false
+  default:
+    account: Dennis-Otto
+    author: Dennis Otto
+    release_app: dennis-otto-release-automation
+    release_app_client_id: Iv23liP9PIEHOV74AiIA
+    release_app_id: "4739928"
+
+# No default: each owner names their account, or sets it once for all of their
+# repositories in the defaults of Copier's settings file.
 owner:
   type: str
-  help: The GitHub account or organization of the repository
-  default: Dennis-Otto
+  help: The GitHub account or organization of the repository, such as octo-org
+  validator: >-
+    [% if not (owner | regex_search('^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$')) %]Name the GitHub account or organization of the repository, such as octo-org.[% endif %]
 
 author:
   type: str
   help: The maintainer, named in the license and the governance
-  default: Dennis Otto
+  default: "[% if owner == blueprint_owner.account %]{= blueprint_owner.author =}[% else %]{= owner =}[% endif %]"
+  validator: "[% if not author.strip() %]Name the maintainer.[% endif %]"
 
 copyright:
   type: str
@@ -220,6 +243,35 @@ sponsor:
   default: "{= owner =}"
   validator: >-
     [% if sponsor and not (sponsor | regex_search('^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$')) %]Name a GitHub account, or leave it empty.[% endif %]
+
+# The GitHub App of the release and update pull requests, whose token starts their
+# checks, signs the release tags and runs the bots. Empty for none yet: the checklist
+# then shows how to register one, and copier update with these answers names it.
+release_app:
+  type: str
+  help: >-
+    The GitHub App of the owner that opens the release and update pull requests, by the
+    name in its address (github.com/apps/NAME); empty to register one after the copy,
+    as the checklist shows
+  default: "[% if owner == blueprint_owner.account %]{= blueprint_owner.release_app =}[% endif %]"
+  validator: >-
+    [% if release_app and not (release_app | regex_search('^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$')) %]Name the app as its address does, github.com/apps/NAME, with lowercase letters, digits and hyphens, or leave it empty.[% endif %]
+
+release_app_client_id:
+  type: str
+  help: The Client ID of the release app, on its settings page, such as Iv23li…
+  default: "[% if release_app == blueprint_owner.release_app %]{= blueprint_owner.release_app_client_id =}[% endif %]"
+  when: "{= release_app != '' =}"
+  validator: >-
+    [% if not (release_app_client_id | regex_search('^[A-Za-z0-9.]+$')) or release_app_client_id | regex_search('^[0-9]+$') %]Copy the Client ID from the settings page of the app, such as Iv23li…; the App ID is the number next to it.[% endif %]
+
+release_app_id:
+  type: str
+  help: The App ID of the release app, the number on its settings page
+  default: "[% if release_app == blueprint_owner.release_app %]{= blueprint_owner.release_app_id =}[% endif %]"
+  when: "{= release_app != '' =}"
+  validator: >-
+    [% if not (release_app_id | regex_search('^[0-9]+$')) %]Copy the App ID, a number, from the settings page of the app.[% endif %]
 
 sample_code:
   type: bool

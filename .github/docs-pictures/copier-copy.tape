@@ -37,8 +37,8 @@ Type "copier copy gh:Dennis-Otto/repo-blueprint paperless-sync"
 Sleep 500ms
 Enter
 
-# The answers: the name, the description and the kind of project, and the defaults
-# for the rest. Each key waits for its question. Wait+Screen reads only the first
+# The answers: the name, the description, the kind of project and the owner, and the
+# defaults for the rest, including the release app. Each key waits for its question. Wait+Screen reads only the first
 # screen of output, so the last questions wait for the line of the cursor instead,
 # or for a moment where that line stays empty.
 Wait+Screen@60s /The name of the project/
@@ -62,6 +62,8 @@ Sleep 600ms
 Enter
 Wait+Screen /GitHub account or organization/
 Sleep 500ms
+Type "Dennis-Otto"
+Sleep 300ms
 Enter
 Wait+Screen /The maintainer/
 Sleep 500ms
@@ -92,6 +94,17 @@ Enter
 Sleep 700ms
 Enter
 Wait /Dennis-Otto$/
+Sleep 500ms
+Enter
+# The release app of the owner, its Client ID and its App ID, which the owner of the
+# blueprint gets as defaults.
+Wait /dennis-otto-release-automation$/
+Sleep 500ms
+Enter
+Wait /Iv23liP9PIEHOV74AiIA$/
+Sleep 500ms
+Enter
+Wait /4739928$/
 Sleep 500ms
 Enter
 Wait /\(Y.n\)$/

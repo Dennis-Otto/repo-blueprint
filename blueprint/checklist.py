@@ -10,11 +10,30 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from blueprint.github import Api
 from blueprint.settings import Settings, check
 
-RELEASE_APP = "dennis-otto-release-automation"
+# The permissions of the release app, as its settings page names them and as the link
+# that registers it does, with the access that the bots need: the settings bot,
+# Renovate, the release bot, the blueprint bot and the others. GitHub's link has no
+# name for Variables, so the checklist names it.
+RELEASE_APP_PERMISSIONS = (
+    ("Actions", "actions", "write"),
+    ("Administration", "administration", "write"),
+    ("Checks", "checks", "write"),
+    ("Commit statuses", "statuses", "write"),
+    ("Contents", "contents", "write"),
+    ("Issues", "issues", "write"),
+    ("Pages", "pages", "write"),
+    ("Pull requests", "pull_requests", "write"),
+    ("Variables", "", "write"),
+    ("Workflows", "workflows", "write"),
+    ("Dependabot alerts", "vulnerability_alerts", "read"),
+    ("Environments", "environments", "read"),
+    ("Secrets", "secrets", "read"),
+)
 REUSE_API = "https://api.reuse.software/status/github.com/"
 BEST_PRACTICES = "https://www.bestpractices.dev"
 # A badge of OpenSSF Best Practices in a README: of the metal series, "badge", or of
@@ -75,6 +94,85 @@ def best_practices(readme: str) -> list[Step]:
     return steps
 
 
+APP_NAME_LIMIT = 34
+"""GitHub allows at most 34 characters in the name of an app."""
+
+
+def release_app_name(owner: str) -> str:
+    """The suggested name of the owner's release app, within GitHub's limit: the
+    owner and "-release-automation", or "-release" and as much of the owner as
+    fits when the owner's name is long."""
+    name = f"{owner.lower()}-release-automation"
+    if len(name) <= APP_NAME_LIMIT:
+        return name
+    suffix = "-release"
+    return owner.lower()[: APP_NAME_LIMIT - len(suffix)].rstrip("-") + suffix
+
+
+def release_app_registration(owner: str, organization: bool) -> str:
+    """The address that registers the release app of the owner: on the account itself,
+    with its name, its permissions and no webhook filled in."""
+    page = (
+        f"https://github.com/organizations/{owner}/settings/apps/new"
+        if organization
+        else "https://github.com/settings/apps/new"
+    )
+    query = {
+        "name": release_app_name(owner),
+        "description": "Opens the release and update pull requests of the repositories"
+        " made from Repo Blueprint, so that their checks run, and runs their bots.",
+        "url": f"https://github.com/{owner}",
+        "public": "false",
+        "webhook_active": "false",
+        **{key: access for _, key, access in RELEASE_APP_PERMISSIONS if key},
+    }
+    return f"{page}?{urlencode(query)}"
+
+
+def release_app(api: Api, repo: str, settings: Settings) -> tuple[Step, Step]:
+    """The release app: registered by the owner and named in the settings, then
+    installed on the repository. Every owner registers their own, since only the
+    owner of an app has its private key."""
+    owner = repo.split("/", 1)[0]
+    name = str(settings.variables.get("RELEASE_APP", "")).strip()
+    client = str(settings.variables.get("RELEASE_AUTOMATION_CLIENT_ID", "")).strip()
+    installed = Step(
+        "Release app installed on the repository",
+        None,
+        f"https://github.com/apps/{name}/installations/new"
+        if name
+        else "Install App on the settings page of the app, for this repository",
+    )
+    if client:
+        named = f"Release app {name or client} named in .github/repository.toml"
+        return Step(named, True), installed
+    account = api.get(f"users/{owner}")
+    organization = isinstance(account, dict) and account.get("type") == "Organization"
+    how = [
+        "Register it, with its name and permissions filled in and without a webhook:",
+        release_app_registration(owner, organization),
+        f"It needs read and write access to {listed('write')}, and read access to"
+        f" {listed('read')}; set Variables by hand, which the link can't fill in.",
+        "Create the app and generate a private key on its settings page. Then name it"
+        " in the answers of the blueprint, with the name in its address and the Client"
+        " ID and App ID of that page, and commit the update:",
+        "copier update --defaults --vcs-ref=:current: --data release_app=NAME"
+        " --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID",
+    ]
+    registered = Step(
+        "Release app registered and named in .github/repository.toml",
+        False,
+        "\n".join(how),
+    )
+    return registered, installed
+
+
+def listed(access: str) -> str:
+    """The permissions of the release app with that access, as a sentence lists them."""
+    names = [name for name, _, need in RELEASE_APP_PERMISSIONS if need == access]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def checklist(
     api: Api,
     repo: str,
@@ -97,7 +195,10 @@ def checklist(
     secrets_missing = [item for item in drift if item.setting.startswith("secret ")]
     community = [item for item in drift if item.setting == "community profile"]
     target = settings.variables.get("PUBLISH_TO", "none")
+    # The app first: the settings and the secrets that follow name it.
+    registered, installed = release_app(api, repo, settings)
     steps = [
+        registered,
         Step(
             "Settings as code applied",
             all(item.manual for item in drift),
@@ -113,11 +214,7 @@ def checklist(
             not community,
             "\n".join(item.manual for item in community),
         ),
-        Step(
-            "Release app installed on the repository",
-            None,
-            f"https://github.com/apps/{RELEASE_APP}/installations/new",
-        ),
+        installed,
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
             "(the issue assistant closes them with the release)",

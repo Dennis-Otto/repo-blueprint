@@ -63,6 +63,20 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      # Without the release app of the owner, release-please still keeps its pull
+      # request, but as the token of the job, which starts none of its checks, and no
+      # run can sign a release tag: the run says what to set up.
+      - name: Explain a missing release app
+        if: vars.RELEASE_AUTOMATION_CLIENT_ID == ''
+        run: |
+          echo "::warning::This repository names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID, so the release pull request starts no checks and no release can be published; python3 .github/blueprint.py checklist shows how to set one up."
+          {
+            echo "### No release app"
+            echo
+            echo "This repository names no release app in the variable \`RELEASE_AUTOMATION_CLIENT_ID\`. Release-please keeps the release pull request with the token of the job, which starts none of its checks, and only the release app may create and sign a release tag, so no release can be published."
+            echo
+            echo "\`python3 .github/blueprint.py checklist\` shows how to register the app of the owner, with a link that fills in its permissions, and how to name it in \`.github/repository.toml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Create a token of the release app
         id: app
         if: vars.RELEASE_AUTOMATION_CLIENT_ID != ''
