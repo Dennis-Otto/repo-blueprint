@@ -70,7 +70,8 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 | An output smuggles in another output | Every output is written with a random delimiter |
 | A secret reaches the log | Secrets are never printed, and GitHub masks them |[% elif project_type == 'python-package' or stack == 'node' %]
 | Invalid input leads to wrong results | Every public function rejects it with an error |
-| Input runs as code | The package evaluates no input |[% elif stack == 'container' %]
+| Input runs as code | The package evaluates no input |[% if stack == 'node' %]
+| A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% endif %][% elif stack == 'container' %]
 | A flaw of the program takes over the host | The image runs as an unprivileged user, with only what the user maps into it |
 | A base image is replaced | The base image is pinned by its digest |[% else %]
 | A script changes more than it should | Scripts check their arguments and stay in the folder they are given |

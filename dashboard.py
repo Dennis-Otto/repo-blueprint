@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from blueprint.coverage_comment import Coverage, percent
 from blueprint.github import Api, GitHubError
 
 BLUEPRINT = "Dennis-Otto/repo-blueprint"
@@ -289,7 +290,7 @@ TREND = ("coverage", "mutation", "releases", "answer_hours", "ci_minutes")
 # The seconds that the download of an artifact may take.
 DOWNLOAD_TIMEOUT = 120
 # What a report that can't be read raises: gh failing to download it, a zip or an XML
-# file that is none, a rate that is no number.
+# file that is none, a rate that is no number, an LCOV report that isn't UTF-8.
 UNREADABLE = (
     subprocess.SubprocessError,
     zipfile.BadZipFile,
@@ -379,10 +380,15 @@ def report(
 
 
 def coverage(files: dict[str, bytes]) -> float | None:
+    """The line coverage of the report of Cobertura, coverage.xml, or of the LCOV
+    report of the test runner of Node, lcov.info, which a Node package keeps."""
     for name, data in files.items():
         if name.endswith(".xml"):
             rate = ElementTree.fromstring(data).get("line-rate")
             return None if rate is None else 100 * float(rate)
+        if name.endswith(".info"):
+            covered, lines = Coverage.parse_lcov(data.decode("utf-8")).total
+            return percent(covered, lines) if lines else None
     return None
 
 

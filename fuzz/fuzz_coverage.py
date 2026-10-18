@@ -1,9 +1,10 @@
 """Coverage-guided fuzzing of the coverage bot of blueprint/coverage_comment.py, with Atheris.
 
-The coverage.xml of a pull request is its own, also from a fork. Whatever it holds,
-reading it either gives a report or raises ParseError, and the comment of the bot
-keeps every name of a file as code in its cell: no row of its tables gets another
-cell or a line break, and the comment fits into one comment of GitHub.
+The coverage.xml or lcov.info of a pull request is its own, also from a fork.
+Whatever it holds, reading it either gives a report or raises ParseError, and the
+comment of the bot keeps every name of a file as code in its cell: no row of its
+tables gets another cell or a line break, and the comment fits into one comment of
+GitHub.
 
     pip install --require-hashes -r stacks/fuzz/requirements.txt
     python fuzz/fuzz_coverage.py -max_total_time=60
@@ -56,6 +57,35 @@ def report(provider: atheris.FuzzedDataProvider) -> str:
     )
 
 
+def lcov_report(provider: atheris.FuzzedDataProvider) -> str:
+    """An LCOV report, as the test runner of Node writes it: any text, or records
+    with any names and hits."""
+    if provider.ConsumeBool():
+        return provider.ConsumeUnicodeNoSurrogates(4000)
+    files = (
+        provider.ConsumeIntInRange(0, 8)
+        if provider.ConsumeBool()
+        else provider.ConsumeIntInRange(MOST_FILES, 2 * MOST_FILES)
+    )
+    records = []
+    for _ in range(files):
+        # A name on one line, as a line break would start the next entry.
+        name = provider.ConsumeUnicodeNoSurrogates(300).splitlines() or [""]
+        lines = "".join(
+            f"DA:1,{provider.ConsumeUnicodeNoSurrogates(8)}\n"
+            for _ in range(provider.ConsumeIntInRange(0, 3))
+        )
+        records.append(f"SF:{name[0]}\n{lines}end_of_record\n")
+    return "".join(records)
+
+
+def parsed(provider: atheris.FuzzedDataProvider) -> Coverage:
+    """A report of either kind, as the coach reads it."""
+    if provider.ConsumeBool():
+        return Coverage.parse_lcov(lcov_report(provider), Path("/work"))
+    return Coverage.parse(report(provider), Path("/work"))
+
+
 def check(comment: str) -> None:
     if len(comment) >= 65536:
         raise AssertionError(f"a comment of {len(comment)} characters")
@@ -79,8 +109,8 @@ def check(comment: str) -> None:
 def test_one_input(data: bytes) -> None:
     provider = atheris.FuzzedDataProvider(data)
     try:
-        head = Coverage.parse(report(provider), Path("/work"))
-        base = Coverage.parse(report(provider), Path("/work"))
+        head = parsed(provider)
+        base = parsed(provider)
     except ParseError:
         return
     check(coverage_comment(head, base))

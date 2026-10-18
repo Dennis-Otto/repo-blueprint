@@ -1317,6 +1317,123 @@ def test_every_project_has_a_dev_container(
         assert f"-r {requirements[kind]}" in setup
         assert (project / requirements[kind]).exists()
         assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]
+    biome = "biomejs.biome" in config["customizations"]["vscode"]["extensions"]
+    assert biome == (kind == "node-package")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_npm_never_runs_the_install_scripts_of_the_packages(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The scripts that a package runs as it installs are how a package that was taken
+    # over reaches a machine: the CI, the dev container and every command that the
+    # documentation gives install without them.
+    project = projects[kind]
+    for path in text_files(project):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line in re.findall(r"^.*\bnpm ci\b.*$", text, re.MULTILINE):
+            assert "--ignore-scripts" in line, f"{path.relative_to(project)}: {line}"
+    if kind == "node-package":
+        setup = (project / ".devcontainer/setup.sh").read_text(encoding="utf-8")
+        assert "\nnpm ci --ignore-scripts\n" in setup
+        for name in ("CONTRIBUTING.md", "AGENTS.md"):
+            text = (project / name).read_text(encoding="utf-8")
+            assert "npm ci --ignore-scripts\nbash scripts/check.sh\n" in text, name
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_node_package_lints_and_formats_its_code_with_biome(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    node = kind == "node-package"
+
+    assert (project / "biome.jsonc").is_file() == node
+    assert ('\nstep "Lint and format"\n' in check) == node
+    if not node:
+        return
+    # Before the types and the tests, as Ruff in a Python project; a warning fails.
+    assert check.index('\nstep "Lint and format"\n') < check.index('\nstep "Types"\n')
+    assert "\n  npx --no -- biome ci --error-on-warnings .\n" in check
+    manifest = json.loads((project / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((project / "package-lock.json").read_text(encoding="utf-8"))
+    assert "@biomejs/biome" in manifest["devDependencies"]
+    # Locked with its hash, as every package of the lock.
+    biome = lock["packages"]["node_modules/@biomejs/biome"]
+    assert biome["integrity"].startswith("sha512-")
+    # The settings: the files of the blueprint in .github/ keep its format, and the
+    # indentation comes from .editorconfig, which has it for JSONC too.
+    settings = (project / "biome.jsonc").read_text(encoding="utf-8")
+    config = json.loads(re.sub(r"^//.*\n", "", settings, flags=re.MULTILINE))
+    assert config["files"]["includes"] == ["**", "!.github"]
+    assert config["formatter"]["useEditorconfig"] is True
+    assert config["linter"]["rules"]["preset"] == "recommended"
+    assert config["vcs"]["useIgnoreFile"] is True
+    editorconfig = configparser.ConfigParser()
+    editorconfig.read_string(
+        "[top]\n" + (project / ".editorconfig").read_text(encoding="utf-8")
+    )
+    assert editorconfig["*.{json,jsonc,toml,yml,yaml,ts,js,mjs}"]["indent_size"] == "2"
+    # The coverage of the tests as the LCOV report that the CI keeps, which git and
+    # the package leave out.
+    assert "--test-reporter-destination=lcov.info" in manifest["scripts"]["test"]
+    assert (
+        "--test-reporter=spec --test-reporter-destination=stdout"
+        in (manifest["scripts"]["test"])
+    )
+    ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
+    assert "/lcov.info" in ignored
+    assert manifest["files"] == ["dist"]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("listed", [True, False])
+def test_the_lint_of_a_node_package_waits_for_biome_in_its_package_json(
+    projects: dict[str, Path], tmp_path: Path, listed: bool
+) -> None:
+    # package.json belongs to the project: one from before the blueprint brought Biome
+    # lacks it, and the step says how to add it instead of failing the update.
+    check = (projects["node-package"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Lint and format"')
+    script = (
+        check[: check.index('step "Text files"')]
+        + check[start : check.index('step "Types"', start)]
+    )
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    manifest = json.loads(
+        (projects["node-package"] / "package.json").read_text(encoding="utf-8")
+    )
+    if not listed:
+        del manifest["devDependencies"]["@biomejs/biome"]
+    (repository / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    (stubs / "npx").write_text(
+        f"#!/usr/bin/env bash\necho \"$*\" >> '{calls.as_posix()}'\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "npx").chmod(0o755)
+
+    result = run_the_steps(
+        repository, script, path=f"{stubs}{os.pathsep}{os.environ['PATH']}", ci=True
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    if listed:
+        assert result.stdout == "\n== Lint and format\n"
+        assert calls.read_text(encoding="utf-8") == (
+            "--no -- biome ci --error-on-warnings .\n"
+        )
+    else:
+        assert result.stdout == (
+            "\n== Lint and format\npackage.json lacks @biomejs/biome, which lints and "
+            "formats the code; add it: npm install --save-dev @biomejs/biome\n"
+        )
+        assert not calls.exists()
 
 
 def renders_a_script(path: Path) -> bool:
@@ -3910,7 +4027,11 @@ AGENT_COMMANDS = {
         "coverage run -m pytest && coverage report",
         "`pytest -n auto --cov` runs them on every core",
     ],
-    "node-package": ["npm ci", "`npm test`"],
+    "node-package": [
+        "npm ci --ignore-scripts",
+        "`npm test`",
+        "`npx biome check --write .`",
+    ],
     "container": ["docker run --rm demo-project:check --self-test"],
     "generic": ["no build and no tests of its own"],
 }
@@ -6937,7 +7058,7 @@ FIXED_STEPS = {
     "github-action": ["Ruff"],
     "home-assistant": ["Ruff"],
     "php": ["Coding standard"],
-    "node": [],
+    "node": ["Lint and format"],
     "container": [],
     "generic": [],
 }
@@ -8707,12 +8828,32 @@ def test_the_pr_coach_reads_every_coverage_report_of_the_checks() -> None:
         "Fetch the coverage reports of the head and of main",
     )
     assert 'startswith("CI (")' in step
+    keep = set()
     for path in (ROOT / ".github/workflows").glob("ci-*.yml"):
         ci = path.read_text(encoding="utf-8")
         if "name: coverage\n" in ci:
             name = re.search(r"^name: (.+)$", ci, re.MULTILINE)
             assert name, path
             assert name[1].startswith("CI ("), name[1]
+            keep.add(path.name)
+    # Every kind of project with tests, the Node packages with the LCOV report of
+    # their test runner, which the coach reads by its name.
+    assert keep == {
+        "ci-python.yml",
+        "ci-github-action.yml",
+        "ci-home-assistant.yml",
+        "ci-php.yml",
+        "ci-node.yml",
+    }
+    node = step_of(
+        (ROOT / ".github/workflows/ci-node.yml").read_text(encoding="utf-8"),
+        "      - name: Keep the coverage report",
+    )
+    assert "if: always() && hashFiles('lcov.info') != ''" in node
+    assert "path: lcov.info\n" in node
+    assert "--test-reporter-destination=lcov.info" in (
+        ROOT / "template/[% if stack == 'node' %]package.json[% endif %].jinja"
+    ).read_text(encoding="utf-8")
     # The job that kept a comment of its own is gone; the report holds the table.
     assert "\n  coverage:\n" not in (
         ROOT / ".github/workflows/after-checks.yml"
@@ -8743,10 +8884,16 @@ RUNS_OF_THE_HEAD = [
 
 
 @WITH_JQ
+# The report of Cobertura, and that of the test runner of Node, which the coach
+# reads as LCOV by its name.
+@pytest.mark.parametrize("report", ["coverage.xml", "lcov.info"])
 def test_the_pr_coach_fetches_the_coverage_of_the_head_and_of_main(
-    tmp_path: Path,
+    tmp_path: Path, report: str
 ) -> None:
     output = tmp_path / "output"
+    # What the download of the head gives, which the fake gh doesn't write.
+    (tmp_path / "head").mkdir()
+    (tmp_path / "head" / report).touch()
     calls, summary, _ = run_a_bot_after_the_checks(
         tmp_path,
         "coach",
@@ -8761,7 +8908,7 @@ def test_the_pr_coach_fetches_the_coverage_of_the_head_and_of_main(
     assert calls[2].startswith("run list --workflow 3 --branch main --event push ")
     assert calls[3] == f"run download 8 --name coverage --dir {tmp_path}/base"
     assert output.read_text(encoding="utf-8") == (
-        f"head={tmp_path}/head/coverage.xml\nbase={tmp_path}/base/coverage.xml\n"
+        f"head={tmp_path}/head/{report}\nbase={tmp_path}/base/{report}\n"
     )
     assert not summary
 

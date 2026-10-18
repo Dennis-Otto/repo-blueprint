@@ -272,7 +272,7 @@ Every bot starts from an event, such as a merge into `main`, a pull request or t
 | Nextcloud app | PHP 8.2 and newer, the tools on PHP 8.3, Composer | php-cs-fixer, Psalm with its taint analysis, the code and its packages on PHP 8.2, PHPUnit in random order with every line covered | signed package to the App Store |
 | GitHub Action | Python 3.12 of the runner, composite action | Ruff, mypy, tests, a run of the action | release tags and a moving major tag |
 | Python package | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
-| Node package | Node 24, TypeScript | tsc, node:test with full coverage, pack | npm with provenance |
+| Node package | Node 24, TypeScript | Biome for the lint and the format, tsc, node:test with full coverage and its report in the PR coach, pack; npm installs without the scripts of the packages | npm with provenance |
 | Container image | Alpine by digest | Hadolint, build, self-test | GHCR, multi-arch, with SBOM and provenance |
 | Repository without a build | | text files, shell scripts | releases only |
 
@@ -322,7 +322,7 @@ The configuration of the checks belongs to the blueprint and looks for the code 
 | Kind | Code | Tests | From the blueprint |
 | --- | --- | --- | --- |
 | Nextcloud app | `lib/` | PHPUnit tests in `tests/Unit/` | `psalm.xml` and `phpunit.xml`, with the `tests/bootstrap.php` and `tests/stubs/` that they load |
-| Node package | `src/`, built into `dist/` | `test/`, typechecked by `tsconfig.json`; the `npm test` of a new project runs `test/**/*.test.ts` | `tsconfig.json` and `tsconfig.build.json`, which need `typescript` and `@types/node` in the `package.json` of the project |
+| Node package | `src/`, built into `dist/` | `test/`, typechecked by `tsconfig.json`; the `npm test` of a new project runs `test/**/*.test.ts` | `tsconfig.json` and `tsconfig.build.json`, which need `typescript` and `@types/node` in the `package.json` of the project, and `biome.jsonc`, whose step *Lint and format* runs once `@biomejs/biome` is there too |
 
 The other kinds set these places in files of their own, such as `pyproject.toml`. What lies in `tests/` belongs to the project: the copy and every update add only the files that are missing there, so an app with its own bootstrap keeps it.
 

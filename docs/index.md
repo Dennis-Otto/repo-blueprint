@@ -135,7 +135,7 @@ The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR c
 
     ---
 
-    TypeScript, tsc and node:test with full coverage; npm with provenance.
+    TypeScript, Biome, tsc and node:test with full coverage; npm with provenance.
 
 - :material-docker:{ .lg .middle } **Container image**
 

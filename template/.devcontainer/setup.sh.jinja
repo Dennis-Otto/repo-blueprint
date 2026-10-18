@@ -11,7 +11,9 @@ python -m venv .venv
 [%- elif stack == 'php' %]
 composer install
 [%- elif stack == 'node' %]
-npm ci
+# Without the install scripts of the packages, as in the CI: a package can't run
+# code of its own as it installs.
+npm ci --ignore-scripts
 [%- endif %]
 [%- if stack in ['home-assistant', 'php'] %]
 # The frontend, if the project has one.

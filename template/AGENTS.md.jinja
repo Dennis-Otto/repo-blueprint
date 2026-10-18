@@ -14,7 +14,7 @@ These are the rules for coding agents, such as Claude Code, Codex, GitHub Copilo
 . .venv/bin/activate && bash scripts/check.sh[% elif stack == 'home-assistant' %]python3 -m venv .venv
 .venv/bin/pip install --require-hashes -r requirements-test.txt
 . .venv/bin/activate && bash scripts/check.sh[% elif stack == 'php' %]composer install
-bash scripts/check.sh[% elif stack == 'node' %]npm ci
+bash scripts/check.sh[% elif stack == 'node' %]npm ci --ignore-scripts
 bash scripts/check.sh[% else %]bash scripts/check.sh[% endif %]
 ```
 
@@ -37,6 +37,7 @@ On Windows, run them in Git Bash. While you work, the quicker steps of the check
 On Windows, run them in Git Bash. While you work, the quicker steps of the checks:
 
 - `npm test`: the tests, with every line, branch and function covered.
+- `npx biome check --write .`: the format of the code, and the fixes that Biome can make for its rules.
 - `npm run typecheck`: the types, in the strict mode of the compiler.
 - `npm run build`: the package.
 [%- elif stack == 'container' -%]

@@ -135,7 +135,7 @@ Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, 
 
     ---
 
-    TypeScript, tsc und node:test mit voller Abdeckung; npm mit Provenance.
+    TypeScript, Biome, tsc und node:test mit voller Abdeckung; npm mit Provenance.
 
 - :material-docker:{ .lg .middle } **Container-Image**
 

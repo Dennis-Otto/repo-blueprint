@@ -448,9 +448,15 @@ jobs:
           if [[ -n "$base" ]]; then
             gh run download "$base" --name coverage --dir "$RUNNER_TEMP/base" || true
           fi
+          # The report of Cobertura, coverage.xml, or that of the test runner of
+          # Node, lcov.info, which the coach reads as LCOV by its name.
+          report=coverage.xml
+          if [[ -f "$RUNNER_TEMP/head/lcov.info" ]]; then
+            report=lcov.info
+          fi
           {
-            echo "head=$RUNNER_TEMP/head/coverage.xml"
-            echo "base=$RUNNER_TEMP/base/coverage.xml"
+            echo "head=$RUNNER_TEMP/head/$report"
+            echo "base=$RUNNER_TEMP/base/$report"
           } >> "$GITHUB_OUTPUT"
       - name: Keep the one report of the PR coach up to date
         env:
