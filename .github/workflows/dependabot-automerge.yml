@@ -52,8 +52,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # A token that can't be made, say the app isn't installed here or its key was
+      # rotated, doesn't stop the merge: the job's token still turns auto-merge on.
       - name: Create a token of the release app
         id: app
+        continue-on-error: true
         if: >-
           vars.RELEASE_AUTOMATION_CLIENT_ID != '' &&
           (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
@@ -65,6 +68,12 @@ jobs:
           # Only what turning on auto-merge and the squash merge need.
           permission-contents: write
           permission-pull-requests: write
+      - name: Explain a token of the release app that failed
+        if: steps.app.outcome == 'failure'
+        run: |
+          message="The release app gave no token, so the job's token turns auto-merge on, and the merge starts no workflow; check the app's installation and the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release."
+          echo "::warning title=Release app token failed::$message"
+          echo "$message" >> "$GITHUB_STEP_SUMMARY"
       - name: Enable automatic squash merge for patch and minor updates
         if: >-
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||

@@ -3680,7 +3680,7 @@ def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
     # It runs every schedule as it can, often hours late, so no comment promises one.
     root = ROOT if project == "blueprint" else projects[project]
     promise = re.compile(
-        r"\b(?:hourly|half-hourly|every (?:hour|half hour|two hours|\d+ minutes))\b",
+        r"\b(?:hourly|half-hourly|every (?:hour|half hour|two hours|morning|\d+ minutes))\b",
         re.IGNORECASE,
     )
     for name, text in workflows(root).items():
@@ -3688,7 +3688,13 @@ def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
             cron = Cron.parse(line)
             assert cron, (name, line)
             assert 0 not in cron.minutes, (name, line)
-        for comment in re.findall(r"#.*", text):
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            # Templates of the issue assistant, whose comments only it can reword: the
+            # "runs every hour" of issue-lifecycle.yml is a follow-up there.
+            continue
+        # A promise may wrap onto the next line of a comment, so whole blocks count.
+        for block in re.findall(r"(?:^[ \t]*#.*\n?)+", text, re.MULTILINE):
+            comment = re.sub(r"\s*\n[ \t]*#\s*", " ", block)
             assert not promise.search(comment), (name, comment)
 
 
@@ -3709,9 +3715,17 @@ def test_dependabot_merges_as_the_release_app(
     job = job_of(text, "auto-merge")
     assert "    environment:\n      name: release\n      deployment: false\n" in job
     assert "actions/checkout" not in text
-    assert text.count("run: ") == 1
+    assert text.count("run: ") == 2
     app = job.split("      - name: Create a token of the release app\n", 1)[1]
     app = app.split("\n      - name: ", 1)[0]
+    # A token that fails still lets the job's token turn auto-merge on, and says so.
+    assert "        continue-on-error: true\n" in app
+    parts = job.split("      - name: Explain a token of the release app that failed\n")
+    assert len(parts) == 2
+    explain = parts[1].split("\n      - name: ", 1)[0]
+    assert "        if: steps.app.outcome == 'failure'\n" in explain
+    assert "::warning title=Release app token failed::" in explain
+    assert '>> "$GITHUB_STEP_SUMMARY"' in explain
     assert "vars.RELEASE_AUTOMATION_CLIENT_ID != ''" in app
     assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in app
     assert "private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}" in app
