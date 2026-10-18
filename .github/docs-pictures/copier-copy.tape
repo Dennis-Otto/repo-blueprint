@@ -37,8 +37,8 @@ Type "copier copy gh:Dennis-Otto/repo-blueprint paperless-sync"
 Sleep 500ms
 Enter
 
-# The answers: the name, the description and the kind of project, and the defaults
-# for the rest. Each key waits for its question. Wait+Screen reads only the first
+# The answers: the name, the description, the kind of project and the owner, and the
+# defaults for the rest, including the release app. Each key waits for its question. Wait+Screen reads only the first
 # screen of output, so the last questions wait for the line of the cursor instead,
 # or for a moment where that line stays empty.
 Wait+Screen@60s /The name of the project/

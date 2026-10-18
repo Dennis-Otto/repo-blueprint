@@ -284,7 +284,7 @@ Every kind starts with a small working example and its tests: replace it with th
 
 <!-- --8<-- [start:quick-start] -->
 
-Copier 9.4 or later, Git, GitHub CLI 2.48 or later and a checkout of the blueprint (for `blueprint.py`):
+Copier 9.8 or later, Git, GitHub CLI 2.48 or later and a checkout of the blueprint (for `blueprint.py`):
 
 ```sh
 copier copy gh:Dennis-Otto/repo-blueprint my-project
@@ -297,7 +297,7 @@ python3 ../repo-blueprint/blueprint.py checklist
 
 Copier asks for the name, a one-sentence description, the kind of project, the GitHub account or organization that owns it, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later), a few details of the kind and the release app of the owner, which may stay empty until the checklist has registered it. `settings apply` sets everything the API can set; `checklist` shows what is left for a person, such as the secrets, and which steps are done.
 
-![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description and the kind of project, Python package, takes the defaults for the rest, writes the files and names the next steps; the new repository has its community files, its checks and its workflows](docs/images/copier-copy.gif)
+![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description, the kind of project, Python package, and the owner Dennis-Otto, takes the defaults for the rest, including the release app, writes the files and names the next steps; the new repository has its community files, its checks and its workflows](docs/images/copier-copy.gif)
 
 <!-- --8<-- [end:quick-start] -->
 

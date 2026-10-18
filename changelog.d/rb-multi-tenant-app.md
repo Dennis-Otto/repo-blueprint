@@ -5,3 +5,4 @@
 ### Changes
 
 - **The question of the owner has no default any more:** `copier copy --defaults` needs `--data owner=…`, or the owner in the defaults of Copier's settings file. An existing repository keeps the answers it has; its next update adds the answers of the release app: the app of the blueprint's owner for a repository of that owner, which keeps its settings, and none for another owner, whose checklist then registers one.
+- **The template needs Copier 9.8 or later:** the `copier update --vcs-ref=:current:` that names the release app uses a reference Copier knows only since 9.8, so the template no longer accepts 9.4 to 9.7, where that step failed with a Git error.

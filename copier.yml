@@ -3,7 +3,7 @@
 # repository itself, where they run and Renovate keeps them current.
 # https://github.com/Dennis-Otto/repo-blueprint
 
-_min_copier_version: "9.4"
+_min_copier_version: "9.8"
 _subdirectory: template
 _templates_suffix: .jinja
 _answers_file: .copier-answers.yml

@@ -94,6 +94,21 @@ def best_practices(readme: str) -> list[Step]:
     return steps
 
 
+APP_NAME_LIMIT = 34
+"""GitHub allows at most 34 characters in the name of an app."""
+
+
+def release_app_name(owner: str) -> str:
+    """The suggested name of the owner's release app, within GitHub's limit: the
+    owner and "-release-automation", or "-release" and as much of the owner as
+    fits when the owner's name is long."""
+    name = f"{owner.lower()}-release-automation"
+    if len(name) <= APP_NAME_LIMIT:
+        return name
+    suffix = "-release"
+    return owner.lower()[: APP_NAME_LIMIT - len(suffix)].rstrip("-") + suffix
+
+
 def release_app_registration(owner: str, organization: bool) -> str:
     """The address that registers the release app of the owner: on the account itself,
     with its name, its permissions and no webhook filled in."""
@@ -103,7 +118,7 @@ def release_app_registration(owner: str, organization: bool) -> str:
         else "https://github.com/settings/apps/new"
     )
     query = {
-        "name": f"{owner.lower()}-release-automation",
+        "name": release_app_name(owner),
         "description": "Opens the release and update pull requests of the repositories"
         " made from Repo Blueprint, so that their checks run, and runs their bots.",
         "url": f"https://github.com/{owner}",

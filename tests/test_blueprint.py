@@ -19,9 +19,11 @@ import pytest
 import blueprint.checklist
 from blueprint import cli
 from blueprint.checklist import (
+    APP_NAME_LIMIT,
     RELEASE_APP_PERMISSIONS,
     best_practices,
     checklist,
+    release_app_name,
     reuse_compliant,
 )
 from blueprint.github import Api, GitHubError
@@ -2243,6 +2245,37 @@ def test_the_checklist_registers_a_release_app_of_the_owner(
         "Install App on the settings page of the app, for this repository"
     )
     assert ("GET", "users/Dennis-Otto") in github.calls
+
+
+@pytest.mark.parametrize(
+    ("owner", "name"),
+    [
+        ("Dennis-Otto", "dennis-otto-release-automation"),
+        # 15 characters still fit with the long suffix: 34 in all.
+        ("abcdefghijklmno", "abcdefghijklmno-release-automation"),
+        ("my-company-engineering", "my-company-engineering-release"),
+        # The longest name GitHub allows, cut so that no hyphen ends it.
+        ("a" * 25 + "-" + "b" * 13, "a" * 25 + "-release"),
+    ],
+)
+def test_the_suggested_release_app_name_fits_the_limit_of_github(
+    owner: str, name: str
+) -> None:
+    assert release_app_name(owner) == name
+    assert len(name) <= APP_NAME_LIMIT
+
+
+def test_the_template_asks_for_the_copier_that_knows_the_current_ref() -> None:
+    # `--vcs-ref=:current:`, which the checklist and the READMEs name, came with 9.8.
+    command = "--vcs-ref=:current:"
+    assert command in (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
+    copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
+    minimum = re.search(r'^_min_copier_version: "(\d+)\.(\d+)"$', copier, re.M)
+    assert minimum is not None
+    assert (int(minimum[1]), int(minimum[2])) >= (9, 8)
+    version = f"{minimum[1]}.{minimum[2]}"
+    assert f"Copier {version} or later" in (ROOT / "README.md").read_text("utf-8")
+    assert f"Copier ab {version}" in (ROOT / "README.de.md").read_text("utf-8")
 
 
 def test_the_checklist_of_a_named_release_app_links_its_installation(

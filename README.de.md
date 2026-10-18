@@ -278,7 +278,7 @@ Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das du
 
 <!-- --8<-- [start:quick-start] -->
 
-Copier ab 9.4, Git, die GitHub CLI ab 2.48 und ein Checkout des Blueprints (für `blueprint.py`):
+Copier ab 9.8, Git, die GitHub CLI ab 2.48 und ein Checkout des Blueprints (für `blueprint.py`):
 
 ```sh
 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
@@ -291,7 +291,7 @@ python3 ../repo-blueprint/blueprint.py checklist
 
 Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, dem GitHub-Konto oder der Organisation, der es gehört, der Lizenz (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later oder AGPL-3.0-or-later), ein paar Details der Art und der Release-App des Eigentümers, die leer bleiben darf, bis die Checkliste sie registriert hat. `settings apply` setzt alles, was die API setzen kann; `checklist` zeigt, was noch eine Person erledigen muss, etwa die Secrets, und welche Schritte schon erledigt sind.
 
-![copier copy im Terminal: Copier klont den Blueprint und fragt nach dem Namen Paperless Sync, dem Repository, einer Beschreibung und der Art des Projekts, Python-Paket, übernimmt für den Rest die Vorgaben, schreibt die Dateien und nennt die nächsten Schritte; das neue Repository hat seine Community-Dateien, seine Prüfungen und seine Workflows](docs/images/copier-copy.gif)
+![copier copy im Terminal: Copier klont den Blueprint und fragt nach dem Namen Paperless Sync, dem Repository, einer Beschreibung, der Art des Projekts, Python-Paket, und dem Eigentümer Dennis-Otto, übernimmt für den Rest die Vorgaben, auch die Release-App, schreibt die Dateien und nennt die nächsten Schritte; das neue Repository hat seine Community-Dateien, seine Prüfungen und seine Workflows](docs/images/copier-copy.gif)
 
 <!-- --8<-- [end:quick-start] -->
 
