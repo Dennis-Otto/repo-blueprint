@@ -266,7 +266,7 @@ Jeder Bot startet von einem Ereignis, etwa einem Merge in `main`, einem Pull Req
 | Nextcloud-App | PHP 8.2 und neuer, die Werkzeuge auf PHP 8.3, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, der Code und seine Pakete auf PHP 8.2, PHPUnit in zufälliger Reihenfolge mit jeder Zeile abgedeckt | signiertes Paket in den App Store |
 | GitHub Action | Python 3.12 des Runners, Composite Action | Ruff, mypy, Tests, ein Lauf der Action | Release-Tags und ein mitwandernder Major-Tag |
 | Python-Paket | Python 3.12, Hatchling | Ruff, mypy, Tests, Build | PyPI, Trusted Publishing |
-| Node-Paket | Node 24, TypeScript | tsc, node:test mit voller Abdeckung, Pack | npm mit Provenance |
+| Node-Paket | Node 24, TypeScript | Biome für Lint und Format, tsc, node:test mit voller Abdeckung und ihrem Bericht im PR-Coach, Pack; npm installiert ohne die Skripte der Pakete | npm mit Provenance |
 | Container-Image | Alpine per Digest | Hadolint, Build, Selbsttest | GHCR, Multi-Arch, mit SBOM und Provenance |
 | Repository ohne Build | | Textdateien, Shell-Skripte | nur Releases |
 
@@ -316,7 +316,7 @@ Die Konfiguration der Prüfungen gehört dem Blueprint und sucht den Code dort, 
 | Art | Code | Tests | Vom Blueprint |
 | --- | --- | --- | --- |
 | Nextcloud-App | `lib/` | PHPUnit-Tests in `tests/Unit/` | `psalm.xml` und `phpunit.xml`, mit den `tests/bootstrap.php` und `tests/stubs/`, die sie laden |
-| Node-Paket | `src/`, gebaut nach `dist/` | `test/`, von `tsconfig.json` typgeprüft; das `npm test` eines neuen Projekts führt `test/**/*.test.ts` aus | `tsconfig.json` und `tsconfig.build.json`, die `typescript` und `@types/node` in der `package.json` des Projekts brauchen |
+| Node-Paket | `src/`, gebaut nach `dist/` | `test/`, von `tsconfig.json` typgeprüft; das `npm test` eines neuen Projekts führt `test/**/*.test.ts` aus | `tsconfig.json` und `tsconfig.build.json`, die `typescript` und `@types/node` in der `package.json` des Projekts brauchen, und `biome.jsonc`, dessen Schritt *Lint and format* läuft, sobald dort auch `@biomejs/biome` steht |
 
 Die anderen Arten legen diese Orte in eigenen Dateien fest, etwa in `pyproject.toml`. Was in `tests/` liegt, gehört dem Projekt: Die Kopie und jedes Update ergänzen dort nur die Dateien, die fehlen, und eine App mit eigenem Bootstrap behält ihn.
 

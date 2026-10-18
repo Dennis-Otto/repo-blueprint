@@ -1,4 +1,4 @@
-"""Tests of the coverage bot: a Cobertura report compared with that of main."""
+"""Tests of the coverage bot: a Cobertura or an LCOV report compared with that of main."""
 
 from __future__ import annotations
 
@@ -83,6 +83,88 @@ def test_the_root_several_sources_or_another_place_keep_the_names(
 
     assert Coverage.parse(text, tmp_path).files == {"a.py": (1, 1)}
     assert Coverage.parse(text).files == {"a.py": (1, 1)}
+
+
+def lcov(**files: tuple[int, int]) -> str:
+    """An LCOV report, as the test runner of Node writes it, with the given covered
+    and total lines per file."""
+    records = []
+    for name, (covered, lines) in files.items():
+        hits = "".join(
+            f"DA:{number},{1 if number <= covered else 0}\n"
+            for number in range(1, lines + 1)
+        )
+        records.append(
+            f"TN:\nSF:{name}.ts\nFN:1,f\nFNDA:1,f\n{hits}LH:{covered}\nLF:{lines}\n"
+            "end_of_record\n"
+        )
+    return "".join(records)
+
+
+def test_an_lcov_report_counts_the_lines_of_each_file() -> None:
+    coverage = Coverage.parse_lcov(lcov(**{"src/a": (3, 4), "src/b": (0, 0)}))
+
+    assert coverage.files == {"src/a.ts": (3, 4), "src/b.ts": (0, 0)}
+    assert coverage.total == (3, 4)
+
+
+def test_the_records_of_one_file_in_lcov_add_up() -> None:
+    # Hits as a number of any kind, a checksum after them, as some tools write, and
+    # a line without its hits.
+    text = (
+        "SF:a.ts\nDA:1,1\nDA:2,0\nend_of_record\n"
+        "SF:a.ts\nDA:3,2.5,abc\nDA:4\nDA:5,x\nend_of_record\n"
+    )
+
+    assert Coverage.parse_lcov(text).files == {"a.ts": (2, 5)}
+
+
+def test_lines_of_lcov_outside_a_record_count_for_an_unnamed_file() -> None:
+    text = "DA:1,1\nSF:a.ts\nDA:1,0\nend_of_record\nDA:2,0\n  \nno lcov\n"
+
+    assert Coverage.parse_lcov(text).files == {"": (1, 2), "a.ts": (0, 1)}
+
+
+def test_an_absolute_name_in_lcov_under_the_root_starts_at_the_root(
+    tmp_path: Path,
+) -> None:
+    # c8 and Istanbul name each file by its absolute path; the test runner of Node by
+    # its path from where the tests ran, which stays as it is, as one elsewhere does.
+    elsewhere = (tmp_path.parent / "elsewhere/c.ts").as_posix()
+    text = (
+        f"SF:{(tmp_path / 'src/a.ts').as_posix()}\nDA:1,1\nend_of_record\n"
+        "SF:src/b.ts\nDA:1,0\nend_of_record\n"
+        f"SF:{elsewhere}\nDA:1,1\nend_of_record\n"
+    )
+
+    assert Coverage.parse_lcov(text, tmp_path).files == {
+        "src/a.ts": (1, 1),
+        "src/b.ts": (0, 1),
+        elsewhere: (1, 1),
+    }
+    assert set(Coverage.parse_lcov(text).files) == {
+        (tmp_path / "src/a.ts").as_posix(),
+        "src/b.ts",
+        elsewhere,
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("coverage.xml", report(a=(1, 2))),
+        ("lcov.info", lcov(a=(1, 2))),
+        ("coverage.lcov.info", lcov(a=(1, 2))),
+        ("report", report(a=(1, 2))),
+    ],
+)
+def test_the_name_of_the_file_picks_the_format_of_its_report(
+    tmp_path: Path, name: str, content: str
+) -> None:
+    path = tmp_path / name
+    path.write_text(content, encoding="utf-8")
+
+    assert Coverage.read(path).total == (1, 2)
 
 
 def test_the_comment_shows_the_change_of_every_file() -> None:
@@ -289,12 +371,35 @@ def test_the_command_line_names_the_paths_from_where_it_runs(
     }
 
 
-# A report that is no XML, and one that is no text of UTF-8.
-@pytest.mark.parametrize("content", [b"<coverage>", b"<coverage>\xff</coverage>"])
-def test_the_command_line_names_a_broken_report(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: bytes
+def test_the_command_line_compares_the_lcov_reports_of_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    broken = tmp_path / "broken.xml"
+    # As the PR coach downloads them: each as lcov.info, in a folder of its own.
+    for folder, covered in (("head", 1), ("base", 2)):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "lcov.info").write_text(
+            lcov(**{f"{tmp_path.as_posix()}/src/a": (covered, 2)}), encoding="utf-8"
+        )
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["coverage", "head/lcov.info", "base/lcov.info"]) == 0
+    assert "| `src/a.ts` | 100.00 % | 50.00 % |" in capsys.readouterr().out
+
+
+# A report that is no XML, one that is no text of UTF-8, and an LCOV report that is
+# no text of UTF-8.
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [
+        ("broken.xml", b"<coverage>"),
+        ("broken.xml", b"<coverage>\xff</coverage>"),
+        ("lcov.info", b"SF:\xff\n"),
+    ],
+)
+def test_the_command_line_names_a_broken_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, content: bytes
+) -> None:
+    broken = tmp_path / name
     broken.write_bytes(content)
 
     assert cli.main(["coverage", str(broken)]) == 2

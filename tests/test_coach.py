@@ -256,7 +256,13 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         for command in entry.autofix:
             assert "python3" not in command, (entry.key, command)
     fixed = [key for key, entry in explained.steps.items() if entry.autofix]
-    assert fixed == ["Text files", "Pages in one column", "Ruff", "Coding standard"]
+    assert fixed == [
+        "Text files",
+        "Pages in one column",
+        "Ruff",
+        "Coding standard",
+        "Lint and format",
+    ]
     markdown = explained.check("markdown")
     assert markdown
     assert markdown.autofix == ('npx markdownlint-cli2 --fix "**/*.md"',)
@@ -1639,6 +1645,28 @@ def test_the_coverage_of_the_report_from_the_command_line(
     body = body_of(github)
     assert ("#### Coverage" in body) == (shown is not None)
     assert shown is None or shown in body
+
+
+def test_the_report_compares_the_lcov_reports_of_node(tmp_path: Path) -> None:
+    # The CI of a Node package keeps lcov.info, which the coach reads as LCOV, by
+    # its name; one that isn't UTF-8 leaves the coverage out of the report.
+    github = FakeGitHub()
+    for folder, hits in (("head", 1), ("base", 0)):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "lcov.info").write_text(
+            f"SF:src/index.ts\nDA:1,{hits}\nend_of_record\n", encoding="utf-8"
+        )
+    command = ["--repo", REPO, "coach", "report", SHA, "--pull", "42"]
+    command += ["--coverage", str(tmp_path / "head/lcov.info")]
+    command += ["--coverage-base", str(tmp_path / "base/lcov.info")]
+
+    assert cli.main(command, api=Api(runner=github), root=ROOT) == 0
+    assert "| `src/index.ts` | 0.00 % | 100.00 % |" in body_of(github)
+
+    (tmp_path / "head/lcov.info").write_bytes(b"SF:\xff\n")
+    github = FakeGitHub()
+    assert cli.main(command, api=Api(runner=github), root=ROOT) == 0
+    assert "#### Coverage" not in body_of(github)
 
 
 @pytest.mark.parametrize(

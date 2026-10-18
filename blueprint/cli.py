@@ -134,13 +134,9 @@ def fragments_command(arguments: argparse.Namespace) -> int:
 def coverage_command(arguments: argparse.Namespace) -> int:
     # The coverage bot runs in the checkout at the path where the checks ran.
     root = Path.cwd()
-    head = Coverage.parse(Path(arguments.head).read_text(encoding="utf-8"), root)
+    head = Coverage.read(Path(arguments.head), root)
     base_file = Path(arguments.base)
-    base = (
-        Coverage.parse(base_file.read_text(encoding="utf-8"), root)
-        if base_file.is_file()
-        else None
-    )
+    base = Coverage.read(base_file, root) if base_file.is_file() else None
     sys.stdout.write(coverage_comment(head, base))
     return 0
 
@@ -151,12 +147,10 @@ def read_coverage(head: str, base: str) -> tuple[Coverage, Coverage | None] | No
     one that can't be read leaves the coverage out of the report."""
     root = Path.cwd()
     try:
-        found = Coverage.parse(Path(head).read_text(encoding="utf-8"), root)
+        found = Coverage.read(Path(head), root)
         base_file = Path(base)
         before = (
-            Coverage.parse(base_file.read_text(encoding="utf-8"), root)
-            if base and base_file.is_file()
-            else None
+            Coverage.read(base_file, root) if base and base_file.is_file() else None
         )
     except (OSError, ElementTree.ParseError, ValueError):
         return None
@@ -680,7 +674,8 @@ def main(
     )
     coverage_parser = commands.add_parser(
         "coverage",
-        help="the comment of the coverage bot: a Cobertura report against that of main",
+        help="the comment of the coverage bot: a Cobertura or LCOV report against that "
+        "of main",
     )
     coverage_parser.add_argument("head", help="the report of the pull request")
     coverage_parser.add_argument(

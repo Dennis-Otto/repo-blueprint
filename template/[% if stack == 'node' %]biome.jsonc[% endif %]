@@ -1,0 +1,36 @@
+// The lint and the format of the code, which Biome checks in the step "Lint and
+// format" of scripts/check.sh with `npx --no -- biome ci --error-on-warnings .`;
+// `npx --no -- biome check --write .` fixes what it can. Biome checks the code and the JSON of the package that git
+// doesn't ignore, in the indentation of .editorconfig, with its recommended rules
+// and sorted imports. It leaves out .github/, the tools and the settings of the
+// bots, which keep the format of the blueprint.
+//
+// The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!.github"]
+  },
+  "formatter": {
+    "useEditorconfig": true
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

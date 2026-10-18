@@ -21,7 +21,8 @@
         "ms-python.python",
         "charliermarsh.ruff",
         "ms-python.mypy-type-checker"[% elif stack == 'php' %],
-        "bmewburn.vscode-intelephense-client"[% elif stack == 'container' %],
+        "bmewburn.vscode-intelephense-client"[% elif stack == 'node' %],
+        "biomejs.biome"[% elif stack == 'container' %],
         "ms-azuretools.vscode-docker"[% endif %]
       ]
     }

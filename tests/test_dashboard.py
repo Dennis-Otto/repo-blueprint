@@ -697,6 +697,15 @@ def test_the_score_of_the_mutants(
 def test_a_coverage_report_without_a_rate() -> None:
     assert dashboard.coverage({"coverage.xml": b"<coverage/>"}) is None
     assert dashboard.coverage({"notes.txt": b"no report"}) is None
+    assert dashboard.coverage({"lcov.info": b"SF:a.ts\nend_of_record\n"}) is None
+
+
+def test_the_coverage_of_a_node_package_comes_from_its_lcov_report() -> None:
+    lcov = b"SF:src/a.ts\nDA:1,1\nDA:2,0\nend_of_record\nSF:src/b.ts\nDA:1,3\n"
+
+    assert dashboard.coverage({"lcov.info": lcov}) == pytest.approx(200 / 3)
+    with pytest.raises(dashboard.UNREADABLE):
+        dashboard.coverage({"lcov.info": b"SF:\xff\n"})
 
 
 def published(url: str, timeout: float) -> io.BytesIO:

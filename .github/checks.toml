@@ -831,6 +831,20 @@ commands = ["npm run typecheck"]
 docs = "CONTRIBUTING.md#coding-standards"
 autofix = """Only a person knows which type is right."""
 
+[step."Lint and format"]
+problem = """The code isn't in the format of Biome, or breaks one of the rules of Biome,
+also one that only warns, such as an unused variable or imports that aren't sorted;
+the log shows the diff or names each line with its rule."""
+why = """One format and one set of rules keep the code readable for everyone and catch
+bugs, such as a variable that is never used or a comparison that is always true,
+before they run."""
+fix = """Let Biome format the code and make the fixes that are safe, then fix the rest
+by hand; `biome.jsonc` holds the settings, and `npx --no -- biome explain RULE`
+explains a rule:"""
+commands = ["npx --no -- biome check --write ."]
+docs = "CONTRIBUTING.md#coding-standards"
+autofix = ["npx --no -- biome check --write ."]
+
 [step."Tests, with every line, branch and function covered"]
 problem = """A test fails, or a line, a branch or a function of the code runs in no test;
 the coverage report names what it misses."""

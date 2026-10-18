@@ -1,5 +1,6 @@
-"""The comment of the coverage bot, from the Cobertura reports of a pull request
-and of main.
+"""The comment of the coverage bot, from the coverage reports of a pull request and
+of main: a Cobertura report, coverage.xml, of coverage.py and PHPUnit, or an LCOV
+report, lcov.info, of the test runner of Node.
 
 The report of a pull request is its own: one from a fork writes the names of its
 files and the hits of its lines as it likes. A name reaches the comment only as code
@@ -23,7 +24,7 @@ NAME_LENGTH = 200
 
 @dataclass(frozen=True)
 class Coverage:
-    """The lines of each file that the tests run, from a Cobertura report."""
+    """The lines of each file that the tests run, from a Cobertura or an LCOV report."""
 
     files: dict[str, tuple[int, int]]
 
@@ -48,6 +49,39 @@ class Coverage:
             have = files.get(name, (0, 0))
             files[name] = (have[0] + covered, have[1] + len(lines))
         return cls(files)
+
+    @classmethod
+    def parse_lcov(cls, report: str, root: Path | None = None) -> Coverage:
+        """An LCOV report, as the test runner of Node writes it: SF: names a file,
+        relative to where the tests ran or as an absolute path, each DA: one of its
+        lines with its hits, and end_of_record ends the file. An absolute name under
+        root starts at root; any other name stays as it is."""
+        files: dict[str, tuple[int, int]] = {}
+        name = ""
+        for line in report.splitlines():
+            key, _, value = line.strip().partition(":")
+            if key == "SF":
+                name = value
+                if root is not None and Path(name).is_relative_to(root):
+                    name = Path(name).relative_to(root).as_posix()
+                files.setdefault(name, (0, 0))
+            elif key == "DA":
+                # DA:<line>,<hits>, and a checksum after them for some tools.
+                hits = value.split(",")[1] if "," in value else "0"
+                covered, lines = files.get(name, (0, 0))
+                files[name] = (covered + (1 if runs(hits) else 0), lines + 1)
+            elif key == "end_of_record":
+                name = ""
+        return cls(files)
+
+    @classmethod
+    def read(cls, path: Path, root: Path | None = None) -> Coverage:
+        """The report in a file, by its name: LCOV in a file that ends in .info, such
+        as lcov.info, and Cobertura in any other, such as coverage.xml."""
+        text = path.read_text(encoding="utf-8")
+        if path.suffix == ".info":
+            return cls.parse_lcov(text, root)
+        return cls.parse(text, root)
 
     @property
     def total(self) -> tuple[int, int]:

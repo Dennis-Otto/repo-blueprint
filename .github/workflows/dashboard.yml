@@ -19,6 +19,8 @@ on:
     paths:
       - dashboard.py
       - blueprint/github.py
+      - blueprint/coverage_comment.py
+      - blueprint/coach.py
       - .github/workflows/dashboard.yml
       - mkdocs.yml
       - .github/mkdocs-blueprint.yml
