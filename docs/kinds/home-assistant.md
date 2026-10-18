@@ -42,6 +42,7 @@ Merging the release pull request publishes a release with the zip of the integra
 
 This kind adds these steps:
 
+- Give the repository the description and the topics that HACS lists and its check needs: the answer `topics` names them in `.github/repository.toml`, and `settings apply` sets them.
 - Submit the repository to the default repositories of HACS: <https://github.com/hacs/default>.
 
 ## A real repository
