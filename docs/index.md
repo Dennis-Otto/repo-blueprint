@@ -1,4 +1,6 @@
 ---
+# The title of the page and of the preview card of a link to it, which said Home.
+title: Repositories that look after themselves
 hide:
   - navigation
   - toc

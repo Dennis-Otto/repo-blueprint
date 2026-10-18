@@ -1,4 +1,6 @@
 ---
+# The title of the page and of the preview card of a link to it, which said Home.
+title: Repositories, die sich selbst pflegen
 hide:
   - navigation
   - toc

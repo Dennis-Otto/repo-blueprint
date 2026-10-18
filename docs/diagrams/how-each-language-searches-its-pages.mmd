@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How each language searches its pages
+    accDescr: You write guide.md and guide.de.md, and roadmap.md without a German version. MkDocs builds the English and the German website with the hook of the blueprint. The German roadmap is a copy of the English page, with its text marked as English, the English page as its canonical address and noindex, and stays out of the search and the sitemap. After the build, the hook writes beside the index of every language one index for each: the English pages, and the German pages with the English ones that have no German version, at their address in de/. A German page asks for the German index and an English one for the English index.
+
+    you(["You"])
+    pages["`**docs/**<br>guide.md · guide.de.md<br>roadmap.md`"]
+    build["MkDocs with the hook<br>of the blueprint<br>English, then German"]
+    copy["`**de/roadmap.html**<br>a copy: lang en · canonical<br>to roadmap.html · noindex`"]
+    index["`**search/search_index.json**<br>every language`"]
+    english(["`**search_index.en.json**<br>guide · roadmap`"])
+    german(["`**search_index.de.json**<br>de/guide · de/roadmap`"])
+    reader(["A reader of a German page"])
+
+    you -- "writes" --> pages --> build
+    build --> copy
+    build --> index
+    copy -. "not in the search" .-> index
+    index --> english
+    index --> german
+    reader -- "searches" --> german
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class build,copy,index bot
+    class you,pages,reader person
+    class english,german done
