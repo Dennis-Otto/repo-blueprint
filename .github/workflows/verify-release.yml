@@ -47,7 +47,7 @@ jobs:
           PUBLISH_TO: ${{ vars.PUBLISH_TO }}
           # The weekly run of the latest release accepts what older releases lack. A run
           # that the release workflow calls has the event of that run, which may be its
-          # hourly schedule, but always a tag, and checks in full.
+          # daily schedule, but always a tag, and checks in full.
           WEEKLY: ${{ github.event_name == 'schedule' && inputs.tag == '' }}
           # The gitsign of .github/sign-tag.sh.
           # renovate: datasource=github-releases depName=sigstore/gitsign extractVersion=^v(?<version>.+)$

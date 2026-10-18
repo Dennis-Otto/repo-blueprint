@@ -35,6 +35,7 @@ from shell import BASH, in_bash
 
 import pins
 from blueprint.bot_health import (
+    CRON,
     FAILED,
     LABEL,
     LABEL_COLOR,
@@ -42,6 +43,7 @@ from blueprint.bot_health import (
     OWN_ISSUE,
     RENOVATE_LABEL,
     TYPE,
+    Cron,
     after_pull_requests,
 )
 from blueprint.changelog import Fragment, release_changelog
@@ -3639,6 +3641,106 @@ def test_renovate_keeps_every_project_current(
     assert re.findall(r"package-ecosystem: (\S+)", dependabot) == ["devcontainers"]
     settings = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "dependabot_security_updates = false" in settings
+
+
+def scheduled_runs_a_week(root: Path) -> dict[str, int]:
+    """The runs that the schedules of each workflow of a repository start in a week."""
+    week = [
+        datetime.date(2026, 10, 12) + datetime.timedelta(days=day) for day in range(7)
+    ]
+    runs: dict[str, int] = {}
+    for name, text in workflows(root).items():
+        for line in CRON.findall(text):
+            cron = Cron.parse(line)
+            assert cron, (name, line)
+            times = len(cron.hours) * len(cron.minutes)
+            runs[name] = runs.get(name, 0) + times * sum(map(cron.runs_on, week))
+    return runs
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_schedules_of_a_project_start_a_dozen_runs_a_day_at_most(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Every bot starts from an event, and a schedule is only a safety net, which
+    # GitHub runs hours late and often not at all. In a private repository each run is
+    # a minute at least of the 2,000 a month of GitHub Free; the hourly release bot and
+    # the half-hourly branch bot alone came to 72 runs a day.
+    runs = scheduled_runs_a_week(projects[kind])
+    assert sum(runs.values()) <= 12 * 7, runs
+    assert runs["release.yml"] == 7
+    assert runs["update-branches.yml"] == 4 * 7
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
+    projects: dict[str, Path], project: str
+) -> None:
+    # GitHub has the most schedules to start on the full hour, and drops runs then.
+    # It runs every schedule as it can, often hours late, so no comment promises one.
+    root = ROOT if project == "blueprint" else projects[project]
+    promise = re.compile(
+        r"\b(?:hourly|half-hourly|every (?:hour|half hour|two hours|\d+ minutes))\b",
+        re.IGNORECASE,
+    )
+    for name, text in workflows(root).items():
+        for line in CRON.findall(text):
+            cron = Cron.parse(line)
+            assert cron, (name, line)
+            assert 0 not in cron.minutes, (name, line)
+        for comment in re.findall(r"#.*", text):
+            assert not promise.search(comment), (name, comment)
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_dependabot_merges_as_the_release_app(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A merge that auto-merge does with the token of a workflow starts no workflow, so
+    # the release bot and the branch bot waited for their schedules; the merge of the
+    # release app starts them at once, as Renovate's does.
+    root = ROOT if project == "blueprint" else projects[project]
+    text = (root / ".github/workflows/dependabot-automerge.yml").read_text(
+        encoding="utf-8"
+    )
+    # pull_request_target runs on main, the only branch that may use the environment
+    # with the private key of the app, and the job checks out nothing.
+    assert set(triggers(text)) == {"pull_request_target"}
+    job = job_of(text, "auto-merge")
+    assert "    environment:\n      name: release\n      deployment: false\n" in job
+    assert "actions/checkout" not in text
+    assert text.count("run: ") == 1
+    app = job.split("      - name: Create a token of the release app\n", 1)[1]
+    app = app.split("\n      - name: ", 1)[0]
+    assert "vars.RELEASE_AUTOMATION_CLIENT_ID != ''" in app
+    assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in app
+    assert "private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}" in app
+    assert re.findall(r"permission-([\w-]+): (\w+)", app) == [
+        ("contents", "write"),
+        ("pull-requests", "write"),
+    ]
+    merge = job.split("      - name: Enable automatic squash merge", 1)[1]
+    # Without the app, the job's own token still turns auto-merge on.
+    assert "GH_TOKEN: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}" in merge
+    assert (
+        'run: gh pr merge --auto --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"'
+        in merge
+    )
+    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
+    assert "      - dependabot-automerge.yml\n" in dangerous
+
+
+def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> None:
+    # main takes only a pull request that is up to date with it, so a release pull
+    # request that only the schedule rebuilt couldn't merge for hours, and its notes
+    # would miss what merged since (decision 0033).
+    text = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert triggers(text)["push"] == ["    branches: [main]"]
+    assert triggers(text)["schedule"] == ['    - cron: "25 5 * * *"']
+    rebuild = text.split("      - name: Have the release pull request rebuilt", 1)[1]
+    assert rebuild.split("\n", 2)[1] == "        if: steps.app.outputs.token != ''"
+    assert "skip-github-pull-request" not in text
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -9420,9 +9522,9 @@ def test_the_build_checks_the_tag_before_it_builds() -> None:
     assert manifest in release
 
 
-def test_a_release_of_an_hourly_run_is_verified_in_full() -> None:
+def test_a_release_of_a_scheduled_run_is_verified_in_full() -> None:
     # Called by the release workflow, verify-release.yml has the event of its run,
-    # which may be the hourly schedule; only its own weekly run is lenient.
+    # which may be its daily schedule; only its own weekly run is lenient.
     verify = (ROOT / ".github/workflows/verify-release.yml").read_text(encoding="utf-8")
     weekly = "github.event_name == 'schedule' && inputs.tag == ''"
     assert f"          WEEKLY: ${{{{ {weekly} }}}}\n" in verify

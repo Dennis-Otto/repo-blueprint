@@ -1,0 +1,25 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What starts the bots
+    accDescr: Renovate, the updates of Dependabot, the release bot and the branch bot merge as the release app, and a person as themselves, since a merge with the token of a workflow would start no workflow. So every merge into main is a push, which starts the release bot and the branch bot at once; they keep the release pull request current and bring the next pull request up to date. Only an event that GitHub lost waits for the schedules, a few runs a day, which GitHub runs as it can, often hours late, and every night the bot-health bot starts a workflow whose schedule GitHub missed.
+
+    merge["Renovate, Dependabot's updates, the release bot and<br>the branch bot merge as the release app, a person as themselves"]
+    push["The push to main starts the release bot<br>and the branch bot at once"]
+    done["The release pull request is current,<br>the next pull request comes up to date"]
+    lost["Only an event that GitHub lost waits for the schedules,<br>a few runs a day, often hours late"]
+    health["Every night, the bot-health bot starts<br>a workflow whose schedule GitHub missed"]
+
+    merge --> push
+    push --> done
+    done -.-> lost
+    lost -.-> health
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge,push,lost,health bot
+    class done done

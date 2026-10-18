@@ -34,11 +34,11 @@ on:
     # Then those of the other required checks and of the scanners, the same in every repository.
     workflows: [CI (python), Variants, Windows, Issue assistant sync, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security]
     types: [completed]
-  # Merges that auto-merge does with the token of a workflow, such as those of
-  # Dependabot's updates, start no workflow; so the bot looks every half hour too.
-  # GitHub runs schedules as it can, often hours late, so this is only a safety net.
+  # The schedule is only a safety net, for an event that GitHub lost and a pull
+  # request whose fix passed its checks: every merge into main is a push of the
+  # release app or of a person, and GitHub runs schedules as it can, often hours late.
   schedule:
-    - cron: "10,40 * * * *"
+    - cron: "10 */6 * * *"
   workflow_dispatch:
 
 permissions: {}

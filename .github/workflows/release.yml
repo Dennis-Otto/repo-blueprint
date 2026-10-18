@@ -20,10 +20,12 @@ name: Release
 on:
   push:
     branches: [main]
-  # Merges that auto-merge does with the token of a workflow, such as those of
-  # Dependabot's updates, start no workflow; so the release bot looks every hour too.
+  # Every merge into main is a push of the release app or of a person, which starts
+  # the release bot at once. The schedule is only a safety net, for a push that GitHub
+  # lost and a tag that a failed run left to sign: GitHub runs schedules as it can,
+  # often hours late, and the bot-health bot starts a run that it missed.
   schedule:
-    - cron: "25 * * * *"
+    - cron: "25 5 * * *"
   workflow_dispatch:
 
 permissions: {}

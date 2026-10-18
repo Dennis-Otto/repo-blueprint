@@ -32,7 +32,7 @@ jobs:
     name: plan the rollout
     # A successful run of the Release workflow that can have made a release, or a
     # start by hand. Of the runs for a push, only the one for the merge of a release
-    # pull request makes a release, so the others start no runner. A run on the hourly
+    # pull request makes a release, so the others start no runner. A run on the daily
     # schedule makes one when the run of the merge failed before it, and one started by
     # hand when it takes up a draft. A release that the run of a later merge made,
     # because the run of its own merge was lost, waits for a start by hand or for the
