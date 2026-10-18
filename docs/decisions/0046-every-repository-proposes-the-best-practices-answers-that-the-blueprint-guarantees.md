@@ -27,7 +27,7 @@ Option 3:
 
 ## Consequences
 
-- A new repository proposes 90 to 100 answers, and a maintainer answers the rest; the Baseline of a repository no longer starts at 0 %.
+- A new repository proposes about 90 to 100 answers, and a maintainer answers the rest; the Baseline of a repository no longer starts at 0 %.
 - An update of the blueprint brings each new answer, and a changed one, to every repository: *Save (and continue) 🤖* on a level takes it in.
 - A repository can't add its own answers to the file, which the next update would overwrite; it gives them on bestpractices.dev.
 - When bestpractices.dev renames or adds criteria, `tests/data/bestpractices-criteria.json` is taken anew from its source, and the tests show which answers no longer fit.

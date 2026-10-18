@@ -4604,6 +4604,9 @@ PROJECT_SPECIFIC = {
     "osps_sa_02_01",
     "osps_sa_03_01",
     "osps_qa_07_01",
+    # The check of the website only reports for now, and the user interface of an app
+    # or of the cards of an integration is the project's own.
+    "accessibility_best_practices",
 }
 # Every answer of a repository: none of them can do without these.
 GUARANTEED = {
@@ -4734,7 +4737,9 @@ def test_the_answers_of_openssf_best_practices_follow_those_of_copier(
     criteria = proposed_criteria(project, "Dennis-Otto/demo-project")
     answers = best_practices(project)
 
-    assert {"access_continuity", "bus_factor"} <= criteria
+    # The project on PyPI doesn't pass with the repository to the successor.
+    assert "bus_factor" in criteria
+    assert "access_continuity" not in criteria
     # Without the fuzz targets of the samples, nothing says that fuzzing finds anything.
     assert "dynamic_analysis" not in criteria
     # A site of its own, which the blueprint can't vouch for.
@@ -4742,6 +4747,44 @@ def test_the_answers_of_openssf_best_practices_follow_those_of_copier(
     assert "Discussions" not in answers["discussion_justification"]
     assert "discussions" not in answers["osps_gv_02_01_justification"]
     assert "from PyPI" in answers["delivery_mitm_justification"]
+
+
+def test_a_successor_alone_cannot_release_in_a_store(tmp_path: Path) -> None:
+    # GOVERNANCE.md says that the entry of the App Store doesn't pass with the
+    # repository, so the successor can't release there within a week on their own.
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="nextcloud-app",
+        successor=True,
+    )
+    criteria = proposed_criteria(project, "Dennis-Otto/demo-project")
+
+    assert "bus_factor" in criteria
+    assert "access_continuity" not in criteria
+    answers = best_practices(project)
+    assert (
+        "Psalm's taint analysis"
+        in answers["static_analysis_common_vulnerabilities_justification"]
+    )
+
+
+@pytest.mark.parametrize(
+    "answers",
+    sorted((ROOT / "tests/answers").glob("*.yml")),
+    ids=lambda path: path.stem,
+)
+def test_the_downstream_repositories_propose_their_answers(
+    tmp_path: Path, answers: Path
+) -> None:
+    # The answers of the real repositories, which the Rollout brings the file to:
+    # every file and heading that their .bestpractices.json names is there.
+    data = yaml.safe_load(answers.read_text(encoding="utf-8"))
+    project = render(tmp_path, **data)
+    criteria = proposed_criteria(project, f"{data['owner']}/{data['project_slug']}")
+
+    assert criteria >= GUARANTEED
 
 
 def test_the_blueprint_proposes_its_own_answers_of_openssf_best_practices() -> None:
