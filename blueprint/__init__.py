@@ -4,6 +4,7 @@ and the changelog of its releases.
     python3 blueprint.py settings check     compare .github/repository.toml with GitHub
     python3 blueprint.py settings apply     make GitHub match .github/repository.toml
     python3 blueprint.py checklist          the steps outside the API, and which are done
+    python3 blueprint.py create [--private] the repository on GitHub of a new copy, set up
     python3 blueprint.py changelog ...      the changelog of a release (the release bot)
     python3 blueprint.py fragments          check the fragments of the changelog in changelog.d/
     python3 blueprint.py notices ...        the licenses of the third-party components

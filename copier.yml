@@ -85,12 +85,27 @@ _skip_if_exists:
   - /test
   - "/*.py"
 
-_message_after_copy: |
-  {= project_name =} is ready. Next:
+# What Copier says before its questions, when no answer is known yet, and after it
+# wrote the files. The README says the same in its quick start, for a new copy:
+# blueprint.py create comes with every copy, so no checkout of the blueprint is needed.
+_message_before_copy: |
+  Repo Blueprint asks for the name, the kind and the owner of the project and writes
+  its files. Copying runs no code of the blueprint, so Copier needs no --trust. The
+  repository on GitHub follows with one command, which needs Git, Python 3.12 or
+  later and GitHub CLI 2.48 or later, signed in as an administrator of the owner
+  (gh auth login).
 
-    1. Create the repository and push:  gh repo create {= owner =}/{= project_slug =} --public --source . --push
-    2. Apply the settings as code:      python3 <blueprint>/blueprint.py settings apply
-    3. Follow the checklist:            python3 <blueprint>/blueprint.py checklist
+_message_after_copy: |
+  {= project_name =} is ready. Make it the repository {= owner =}/{= project_slug =} on GitHub:
+  [% set folder = _copier_conf.dst_path | string %][% if folder != '.' %]
+    cd {= ('"' ~ folder ~ '"') if ' ' in folder else folder =}[% endif %]
+    python3 .github/blueprint.py create
+
+  create commits the files on the branch main, with a sign-off, creates the public
+  repository with gh repo create and pushes, applies the settings as code and shows
+  the checklist, which names what only a person can do, such as the secrets. Add
+  --private for a private repository, or --dry-run to see the commands first. On
+  Windows, py -3 runs Python.
   [%- if not release_app %]
 
   The checklist starts with the release app of {= owner =}, which opens the release and

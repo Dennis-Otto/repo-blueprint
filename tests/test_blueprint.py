@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+import blueprint.bootstrap
 import blueprint.checklist
 from blueprint import cli
 from blueprint.checklist import (
@@ -239,6 +240,7 @@ class FakeGitHub:
             "description": None,
             "homepage": None,
             "topics": ["old"],
+            "default_branch": "main",
             "has_wiki": True,
             "allow_update_branch": False,
             "security_and_analysis": {
@@ -713,6 +715,44 @@ def test_a_refused_part_without_a_permission_hint(
     err = capsys.readouterr().err
     assert "the pages could not be applied: GitHub answered 422" in err
     assert "permission" not in err
+
+
+def test_check_reports_a_default_branch_that_the_workflows_never_run_on(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["default_branch"] = "master"
+
+    assert run(github, root, "settings", "check") == 1
+
+    out = capsys.readouterr().out
+    assert 'default branch: GitHub has "master", the configuration wants "main"' in out
+    assert (
+        "the workflows expect main: rename master to main at "
+        f"https://github.com/{REPO}/branches, then in each clone: "
+        "git branch --move master main" in out
+    )
+
+
+def test_apply_leaves_the_renaming_of_the_default_branch_to_a_person(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["default_branch"] = "master"
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    # Only the branch is left, which a person renames.
+    assert run(github, root, "settings", "apply") == 1
+
+    assert github.repo["default_branch"] == "master"
+    out = capsys.readouterr().out.splitlines()
+    assert out[1:] == [
+        '  default branch: GitHub has "master", the configuration wants "main"',
+        "      the workflows expect main: rename master to main at "
+        f"https://github.com/{REPO}/branches, then in each clone: "
+        "git branch --move master main && git fetch origin && "
+        "git branch --set-upstream-to origin/main main",
+    ]
 
 
 def test_apply_without_drift_changes_nothing(github: FakeGitHub, root: Path) -> None:
@@ -2014,6 +2054,145 @@ def test_a_missing_configuration(
 ) -> None:
     assert run(github, tmp_path, "--repo", REPO, "settings", "check") == 2
     assert "repository.toml" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- create
+
+
+class Shell:
+    """git and gh for blueprint.py create, which succeed: each call is written down
+    with the requests that GitHub had answered before it."""
+
+    def __init__(
+        self, github: FakeGitHub, answers: dict[str, str] | None = None
+    ) -> None:
+        self.github = github
+        self.answers = answers or {}
+        self.calls: list[tuple[str, int]] = []
+
+    def __call__(
+        self, arguments: Sequence[str], folder: Path
+    ) -> subprocess.CompletedProcess[str]:
+        command = " ".join(arguments)
+        self.calls.append((command, len(self.github.calls)))
+        return subprocess.CompletedProcess(
+            list(arguments), 0, self.answers.get(command, ""), ""
+        )
+
+
+@pytest.fixture
+def shell(github: FakeGitHub, monkeypatch: pytest.MonkeyPatch) -> Shell:
+    simulated = Shell(github)
+    monkeypatch.setattr(blueprint.bootstrap, "run_command", simulated)
+    return simulated
+
+
+@pytest.fixture
+def copy(root: Path) -> Path:
+    """A new copy of the blueprint, with the answers that Copier wrote."""
+    owner, name = REPO.split("/")
+    (root / ".copier-answers.yml").write_text(
+        f"_commit: v1.0.0\nowner: {owner}\nproject_slug: {name}\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_create_makes_the_repository_then_applies_the_settings_and_shows_the_checklist(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # What only a person sets, such as the secrets, the checklist names.
+    assert run(github, copy, "create") == 0
+
+    assert shell.calls == [
+        ("git init --initial-branch=main", 0),
+        ("git add --all", 0),
+        ("git commit --signoff --message chore: start from the blueprint", 0),
+        (
+            f"gh repo create {REPO} --public --description A demo --source . "
+            "--remote origin --push",
+            0,
+        ),
+    ]
+    # The settings once the repository exists, from .github/repository.toml.
+    assert ("PATCH", f"repos/{REPO}") in github.calls
+    assert github.repo["description"] == "A demo"
+    assert github.pages is not None
+    out = capsys.readouterr().out
+    assert out.index(f"Created https://github.com/{REPO}") < out.index(
+        f"The settings of {REPO} differ"
+    )
+    assert out.index("secret RELEASE_AUTOMATION_PRIVATE_KEY of release") < out.index(
+        f"The set-up of {REPO}:"
+    )
+    assert "✔ Settings as code applied" in out
+
+
+def test_create_fails_when_github_refuses_a_part_of_the_settings(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github.fail[("POST", f"repos/{REPO}/pages")] = 422
+
+    assert run(github, copy, "create", "--private") == 2
+
+    assert shell.calls[-1][0].startswith(f"gh repo create {REPO} --private")
+    assert "the pages could not be applied" in capsys.readouterr().err
+    # The checklist all the same, with the rest.
+    assert any(path.endswith("/community/profile") for _, path in github.calls)
+
+
+def test_create_with_dry_run_changes_nothing(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert run(github, copy, "create", "--dry-run") == 0
+
+    assert shell.calls == []
+    assert github.calls == []
+    out = capsys.readouterr().out
+    assert out.startswith(f"create would make {REPO} on GitHub, public, with:")
+    assert "  python3 .github/blueprint.py settings apply\n" in out
+
+
+def test_create_refuses_a_folder_that_pushes_to_a_remote(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (copy / ".git").mkdir()
+    shell.answers["git remote"] = "origin\n"
+
+    assert run(github, copy, "--repo", "octo-org/demo", "create") == 2
+
+    assert shell.calls == [("git remote", 0)]
+    assert github.calls == []
+    assert capsys.readouterr().err.startswith(
+        "blueprint.py: this folder pushes to origin already"
+    )
+
+
+def test_create_checks_the_settings_before_anything_is_made(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (copy / ".github/repository.toml").write_text(
+        '[variables]\nRELEASE_AUTOMATION_APP_ID = "x"\n', encoding="utf-8"
+    )
+
+    assert run(github, copy, "create") == 2
+
+    assert shell.calls == []
+    assert "RELEASE_AUTOMATION_APP_ID" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------- checklist

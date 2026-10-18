@@ -55,3 +55,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0047](0047-every-repository-proposes-the-best-practices-answers-that-the-blueprint-guarantees.md) | Every repository proposes the answers of OpenSSF Best Practices that the blueprint guarantees | accepted |
 | [0048](0048-the-dashboard-publishes-its-data-at-addresses-that-stay.md) | The dashboard publishes its data as JSON and a feed of the releases, at addresses that stay | accepted |
 | [0049](0049-every-owner-brings-their-own-release-app.md) | Every owner brings their own release app, and only the blueprint's owner gets its defaults | accepted |
+| [0050](0050-a-new-copy-becomes-its-repository-with-one-command.md) | A new copy becomes its repository on GitHub with one command that it brings, `blueprint.py create`, always on `main` | accepted |

@@ -7003,6 +7003,80 @@ def test_the_owner_of_the_blueprint_keeps_the_answers_of_its_repositories(
     }
 
 
+@pytest.mark.parametrize(
+    ("folder", "owner", "cd"),
+    [
+        ("my-project", "octo-org", "  cd my-project\n"),
+        ("my project", "octo-org", '  cd "my project"\n'),
+        (".", OWNER, ""),
+    ],
+    ids=["folder", "folder with a space", "here"],
+)
+def test_copier_names_what_the_copy_needs_and_the_one_command_after_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    folder: str,
+    owner: str,
+    cd: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        # What a person sees, without the files: Copier writes none.
+        run_copy(
+            str(Template.folder),
+            folder,
+            data={
+                "project_name": "Demo Project",
+                "description": "A demo.",
+                "project_type": "generic",
+                "owner": owner,
+            },
+            defaults=True,
+            vcs_ref="HEAD",
+            pretend=True,
+        )
+    said = capsys.readouterr().err
+
+    before, _, after = said.partition("Copying from template version")
+    # Before the questions: what the command after the copy needs, and no --trust.
+    assert "Copying runs no code of the blueprint, so Copier needs no --trust" in before
+    assert "Python 3.12 or\nlater and GitHub CLI 2.48 or later" in before
+    # After the files: the one command, which every copy brings, and no checkout of
+    # the blueprint, whose path Copier can't know.
+    assert (
+        f"Demo Project is ready. Make it the repository {owner}/demo-project on GitHub:\n"
+        f"\n{cd}  python3 .github/blueprint.py create\n\ncreate commits" in after
+    )
+    assert "blueprint.py" in TOOL
+    assert "<blueprint>" not in after
+    assert "gh repo create --" not in after
+    # Only an owner without a release app is told that the checklist registers one.
+    assert ("The checklist starts with the release app of" in after) is (owner != OWNER)
+
+
+def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
+    renovate = (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    assert '"/^README(\\\\.de)?\\\\.md$/"' in renovate
+    # The pattern of the manager, as JSON reads its string, in the syntax of Python.
+    written = re.search(r'\n {8}("\(\?<depName>copier\)[^\n]+"),\n', renovate)
+    assert written is not None
+    pattern = json.loads(written[1]).replace("(?<", "(?P<")
+    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    least = tuple(int(part) for part in copier["_min_copier_version"].split("."))
+    for readme in ("README.md", "README.de.md"):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        found = [match.groupdict() for match in re.finditer(pattern, text)]
+        # The command of uv and that of pipx, with one release that the template takes.
+        assert len(found) == 2, readme
+        assert {item["depName"] for item in found} == {"copier"}
+        (version,) = {item["currentValue"] for item in found}
+        assert tuple(int(part) for part in version.split(".")) >= least
+        assert f"uvx --from copier=={version} copier copy gh:" in text
+        assert f"pipx run --spec copier=={version} copier copy gh:" in text
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_only_the_release_app_creates_the_release_tags_of_a_project(
     projects: dict[str, Path], kind: str
