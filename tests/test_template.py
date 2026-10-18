@@ -8874,8 +8874,14 @@ def test_the_check_docs_checks_the_website_that_it_built(
     # Each check of the built website runs once the build passed, also when the
     # check before it failed, so that one run names everything to fix.
     built = "!cancelled() && steps.build.outcome == 'success'"
-    for step in (promises, address, lychee):
+    node = step_of(job, "      - name: Set up the accessibility check")
+    a11y_tests = step_of(job, "      - name: Test the accessibility check")
+    a11y = step_of(job, "      - name: Check the accessibility of the website")
+    for step in (promises, address, lychee, accessible, node, a11y):
         assert setting_of(step, "if") == f"${{{{ {built} }}}}", step
+    assert setting_of(a11y_tests, "if") == (
+        f"${{{{ {built} && hashFiles('.github/a11y/check.test.mjs') != '' }}}}"
+    )
     assert setting_of(project, "if") == (
         f"${{{{ {built} && hashFiles('scripts/check-site.sh') != '' }}}}"
     )
@@ -9301,7 +9307,7 @@ def test_every_website_is_checked_for_its_accessibility(
     docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     step = docs[docs.index("      - name: Check the accessibility of the website\n") :]
     assert re.split(r"\n      (?! )", step)[0].splitlines()[1:] == [
-        "        if: steps.site.outputs.build == 'true'",
+        "        if: ${{ !cancelled() && steps.build.outcome == 'success' }}",
         "        continue-on-error: true",
         "        timeout-minutes: 5",
         "        env:",
