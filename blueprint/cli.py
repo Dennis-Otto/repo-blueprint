@@ -1195,7 +1195,7 @@ def main(
             return 1 if outcome.warnings and not arguments.warnings_only else 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments)
-        settings = Settings.load(root / arguments.config)
+        settings = Settings.load(root / arguments.config, root)
         if arguments.command == "checklist":
             print(f"The set-up of {repo}:")
             steps = checklist(api, repo, settings, root)

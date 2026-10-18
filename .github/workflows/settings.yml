@@ -16,7 +16,12 @@ on:
     paths:
       - .github/repository.toml
       - .github/repository.project.toml
-      - .github/workflows/settings.yml
+      # Every workflow and action: one that runs a new action, also in turn, gets the
+      # check of the allowed actions with its merge, not a week later.
+      - .github/workflows/**
+      - .github/actions/**
+      - action.yml
+      - action.yaml
       # Its code, so that an update of the blueprint that changes how a setting is
       # applied takes effect with its merge: in a repository the copy of the blueprint,
       # in the blueprint the modules that settings apply runs.

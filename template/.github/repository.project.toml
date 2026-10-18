@@ -7,6 +7,19 @@
 # [branch]
 # required_checks = ["e2e"]
 
+# The tools of code scanning whose new alerts stop a merge: an entry of a tool replaces
+# that of .github/repository.toml, such as CodeQL that stops alerts of medium severity
+# too. Only a tool that analyzes every pull request belongs here:
+# [branch]
+# code_scanning_tools = [
+#   { tool = "CodeQL", alerts_threshold = "errors", security_alerts_threshold = "medium_or_higher" },
+# ]
+
+# Actions that only the workflows of this project run, such as those of its end-to-end
+# tests; `blueprint.py settings check` names each one that the list lacks:
+# [actions.selected]
+# patterns_allowed = ["owner/action@*"]
+
 # An environment of this project and the secrets it needs:
 # [environments.deploy]
 # secrets = ["DEPLOY_TOKEN"]
