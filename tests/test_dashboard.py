@@ -43,7 +43,7 @@ def listed(*found: dict[str, Any]) -> dict[str, Any]:
 def last_runs(repo: str, workflow: str) -> str:
     return (
         f"repos/Dennis-Otto/{repo}/actions/workflows/{workflow}/runs"
-        "?branch=main&per_page=10&exclude_pull_requests=true"
+        f"?branch=main&per_page={dashboard.LAST_RUNS}&exclude_pull_requests=true"
     )
 
 
@@ -121,7 +121,8 @@ ROUTES: dict[str, tuple[int, Any]] = {
         200,
         listed(
             run("completed", "success", event="pull_request"),
-            run("completed", "skipped"),
+            # A busy hour of pull requests skips more than ten runs in a row.
+            *[run("completed", "skipped")] * 12,
             run("completed", "failure", html_url="https://findings"),
         ),
     ),
@@ -139,7 +140,7 @@ ROUTES: dict[str, tuple[int, Any]] = {
     ),
     "repos/Dennis-Otto/demo/commits/v1.2.2": (200, {"sha": "abc123"}),
     "repos/Dennis-Otto/demo/commits/v0.1.0": (200, {"sha": "fff000"}),
-    "repos/Dennis-Otto/demo/actions/workflows/release.yml/runs?head_sha=abc123&per_page=1": (
+    "repos/Dennis-Otto/demo/actions/workflows/release.yml/runs?head_sha=abc123&event=push&per_page=1": (
         200,
         listed({"id": 50}),
     ),
@@ -233,6 +234,24 @@ def test_the_verification_is_the_newer_of_its_own_run_and_that_of_the_release() 
     # it, the verification's own runs are all there is.
     for tag in ("", "v0.0.1", "v0.1.0"):
         assert dashboard.verification(api, "Dennis-Otto/demo", tag, older) == older
+
+
+def test_the_verification_comes_from_the_push_that_made_the_release() -> None:
+    # A scheduled run of Release on the same commit is newer and skips its
+    # verification; the push run that merged the release pull request holds it.
+    routes = dict(ROUTES)
+    routes[
+        "repos/Dennis-Otto/demo/actions/workflows/release.yml/runs?head_sha=abc123&per_page=1"
+    ] = (200, listed({"id": 60, "event": "schedule"}))
+    routes["repos/Dennis-Otto/demo/actions/runs/60/jobs?per_page=100"] = (
+        200,
+        {"jobs": [{"name": "verify", "status": "completed", "conclusion": "skipped"}]},
+    )
+    older = dashboard.Run("failure", "https://weekly", "2026-10-01T05:17:00Z")
+
+    assert dashboard.verification(
+        simulated(routes), "Dennis-Otto/demo", "v1.2.2", older
+    ) == dashboard.Run("success", "https://verify", "2026-10-07T12:05:00Z")
 
 
 def test_a_release_run_without_a_verification() -> None:

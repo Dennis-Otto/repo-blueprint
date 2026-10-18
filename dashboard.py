@@ -66,6 +66,10 @@ SYMBOLS = {
 }
 # The runs of main that the state of a workflow looks through for one that ran.
 RECENT = 10
+# The runs of main that the last run of a workflow looks through: a busy hour of pull
+# requests leaves more than ten skipped runs of Findings in a row, and it is still
+# one request.
+LAST_RUNS = 50
 # The conclusions of a run or a job that passed.
 PASSED = ("success", "neutral")
 # The branch of the pull request of the blueprint bot.
@@ -154,7 +158,7 @@ def last_run(api: Api, repo: str, workflow: str) -> Run:
     too."""
     runs = api.get(
         f"repos/{repo}/actions/workflows/{workflow}/runs"
-        f"?branch=main&per_page={RECENT}&exclude_pull_requests=true"
+        f"?branch=main&per_page={LAST_RUNS}&exclude_pull_requests=true"
     )
     for run in (runs or {}).get("workflow_runs") or []:
         skipped = run.get("conclusion") == "skipped"
@@ -169,13 +173,15 @@ def verification(api: Api, repo: str, tag: str, standalone: Run) -> Run:
     latest release every week, and the verification of the release tag in the run of
     the Release workflow that made it, which calls it as a reusable workflow: GitHub
     lists that run under the Release workflow alone, as its job "verify / verify the
-    release"."""
+    release". Only the push that merged the release pull request made the release:
+    the scheduled runs of Release on that commit skip the verification."""
     quoted = urllib.parse.quote(tag, safe="")
     commit = api.get(f"repos/{repo}/commits/{quoted}") if tag else None
     sha = (commit or {}).get("sha", "")
     runs = (
         api.get(
-            f"repos/{repo}/actions/workflows/release.yml/runs?head_sha={sha}&per_page=1"
+            f"repos/{repo}/actions/workflows/release.yml/runs"
+            f"?head_sha={sha}&event=push&per_page=1"
         )
         if sha
         else None
