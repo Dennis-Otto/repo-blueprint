@@ -9621,6 +9621,8 @@ def run_mutation_step(
         "GITHUB_ENV": (tmp_path / "env").as_posix(),
         "GITHUB_STEP_SUMMARY": summary.as_posix(),
         "MUTMUT_LIMIT": "1m",
+        # Not those of the part that runs the mutation tests of the blueprint.
+        "PATTERNS": "",
         **variables,
     }
     # As GitHub runs a step: bash -e.
@@ -9986,7 +9988,9 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
     # part failed, and keeps the artifact that the dashboard and the next run read.
     assert "          name: mutation-part-${{ matrix.part }}\n" in mutation
     assert "    needs: [plan, mutation]\n" in report
-    assert "    if: ${{ always() && needs.plan.outputs.kind == 'python' }}\n" in report
+    assert (
+        "    if: ${{ !cancelled() && needs.plan.outputs.kind == 'python' }}\n" in report
+    )
     assert (
         "          pattern: mutation-part-*\n          path: ${{ runner.temp }}/parts\n"
         in report

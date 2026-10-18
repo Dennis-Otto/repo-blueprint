@@ -292,7 +292,7 @@ jobs:
   report:
     name: report
     needs: [plan, mutation]
-    if: ${{ always() && needs.plan.outputs.kind == 'python' }}
+    if: ${{ !cancelled() && needs.plan.outputs.kind == 'python' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
