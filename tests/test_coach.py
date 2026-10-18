@@ -683,7 +683,7 @@ def test_the_lint_of_the_workflows_shows_each_error_at_its_line() -> None:
         assert not regexp.match(source)
     # The job registers it before actionlint runs.
     assert lint.index("::add-matcher::$RUNNER_TEMP/actionlint.json") < lint.index(
-        "uses: docker://rhysd/actionlint"
+        '"$ACTIONLINT"'
     )
 
 
