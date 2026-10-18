@@ -1472,6 +1472,356 @@ def test_the_checks_fail_while_git_would_skip_a_hook(
         ), passed.stderr
 
 
+def text_step(check: str) -> str:
+    """The step Text files, with the function before it that lists the files of git."""
+    start = check.index("# The files of git, tracked or new, each once")
+    return check[start : check.index('step "Diagrams"', start)]
+
+
+def shell_step(check: str) -> str:
+    start = check.index('step "Shell scripts"')
+    return check[start : check.index("\nfi\n", start) + 4]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_its_text_files_and_scripts_as_the_blueprint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    assert text_step(check) == text_step(own)
+    assert shell_step(check) == shell_step(own)
+    assert "--deduplicate" in text_step(check)
+
+
+def path_without(folder: Path, *commands: str) -> str:
+    """A PATH without these commands, for a step that must do without them: on Linux
+    and macOS a folder with a link to every other command of the PATH, and on Windows,
+    which makes no links without privileges, the folders of bash and git alone, where
+    the test runs only when they lack the commands."""
+    if os.name == "nt":
+        git = shutil.which("git")
+        assert BASH
+        assert git
+        folders = os.pathsep.join([str(Path(BASH).parent), str(Path(git).parent)])
+        if any(shutil.which(command, path=folders) for command in commands):
+            pytest.skip(f"the folders of bash and git have {', '.join(commands)}")
+        return folders
+    folder.mkdir()
+    for entry in os.environ["PATH"].split(os.pathsep):
+        if not Path(entry).is_dir():
+            continue
+        for program in Path(entry).iterdir():
+            link = folder / program.name
+            if (
+                program.name not in commands
+                and not link.is_symlink()
+                and program.is_file()
+                and os.access(program, os.X_OK)
+            ):
+                link.symlink_to(program)
+    return str(folder)
+
+
+def run_the_steps(
+    repository: Path, script: str, *, path: str | None = None, ci: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """The set-up of scripts/check.sh and steps after it, as script, in the repository:
+    from a file that git leaves out, without the variables of a run of the CI or with
+    those of GitHub Actions, and with this PATH."""
+    (repository / "scripts").mkdir(exist_ok=True)
+    (repository / "scripts/steps.sh").write_text(script, encoding="utf-8", newline="\n")
+    (repository / ".git/info").mkdir(exist_ok=True)
+    (repository / ".git/info/exclude").write_text(
+        "/scripts/steps.sh\n", encoding="utf-8"
+    )
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name != "CI" and not name.startswith("GITHUB_")
+    }
+    if ci:
+        environment |= {"CI": "true", "GITHUB_ACTIONS": "true"}
+    if path is not None:
+        environment["PATH"] = path
+    assert BASH
+    return subprocess.run(
+        [BASH, "scripts/steps.sh"],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def a_repository_with_problems(repository: Path) -> Path:
+    """A repository with a text file for each problem, one with all of them, a merge
+    that leaves a conflict, and the files that the step leaves alone: binary, empty,
+    deleted and ignored ones and the licenses."""
+
+    def git(*arguments: str) -> None:
+        subprocess.run(
+            ["git", "-c", "core.autocrlf=false", *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=arguments[0] != "merge",
+        )
+
+    repository.mkdir()
+    git("init", "--quiet", "--initial-branch=main")
+    files = {
+        "crlf.md": b"one\r\ntwo\r\n",
+        "spaces.txt": b"one\ntwo \n",
+        "tab.py": b"x = 1\t\n",
+        "end.txt": b"one\ntwo",
+        "all.txt": b"<<<<<<< HEAD\r\nx \r\nend ",
+        "conflict.py": b"a = 1\n<<<<<<< HEAD\nb = 2\n=======\nb = 3\n>>>>>>> side\n",
+        # A marker alone, before the CR of its line ending, on every system.
+        "bare.txt": b"x\r\n>>>>>>>\r\n",
+        # A heading of Markdown, and lines that only look like markers.
+        "no conflict.md": b"Title\n=======\n\n<<<<<<<< eight\n> >>>>>>> quoted\nx <<<<<<<\n",
+        "binary.bin": b"\0one \r\n<<<<<<< HEAD\nend",
+        "LICENSE": b"license \n",
+        "LICENSES/MIT.txt": b"text \r\nend",
+        "empty.txt": b"",
+        "lines.txt": b"\n\n",
+        "clean.txt": b"clean\n",
+        "gone.txt": b"gone \n",
+        "merged.txt": b"start\n",
+        ".gitignore": b"ignored.txt\n",
+    }
+    for name, content in files.items():
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        (repository / name).write_bytes(content)
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "start")
+    git("switch", "--quiet", "--create", "side")
+    (repository / "merged.txt").write_bytes(b"side\n")
+    git("commit", "--quiet", "--all", "-m", "side")
+    git("switch", "--quiet", "main")
+    (repository / "merged.txt").write_bytes(b"main\n")
+    git("commit", "--quiet", "--all", "-m", "main")
+    git("merge", "side")
+    (repository / "gone.txt").unlink()
+    (repository / "new.txt").write_bytes(b"new \n")
+    (repository / "ignored.txt").write_bytes(b"ignored \n")
+    return repository
+
+
+@pytest.fixture
+def isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Git without the configuration of this machine, and with a name for commits."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Tester")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "tester@example.com")
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_find_every_problem_of_a_text_file(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    script = check[: check.index('step "Diagrams"')]
+    repository = a_repository_with_problems(tmp_path / "repository")
+
+    local = run_the_steps(repository, script)
+    ci = run_the_steps(repository, script, ci=True)
+
+    assert local.returncode == 1, local.stderr
+    assert local.stderr == ""
+    lines = local.stdout.splitlines()
+    assert lines[:2] == ["", "== Text files"]
+    # Each problem once, those of the file of the merge too, which git lists for each
+    # side of its conflict.
+    assert sorted(lines[2:-2]) == [
+        "all.txt: has CRLF line endings",
+        "all.txt: has conflict markers",
+        "all.txt: has trailing whitespace",
+        "all.txt: lacks the line break at its end",
+        "bare.txt: has CRLF line endings",
+        "bare.txt: has conflict markers",
+        "conflict.py: has conflict markers",
+        "crlf.md: has CRLF line endings",
+        "end.txt: lacks the line break at its end",
+        "merged.txt: has conflict markers",
+        "new.txt: has trailing whitespace",
+        "spaces.txt: has trailing whitespace",
+        "tab.py: has trailing whitespace",
+    ]
+    # The problems of a file together, in the order of the checks.
+    first = lines.index("all.txt: has CRLF line endings")
+    assert lines[first : first + 4] == [
+        "all.txt: has CRLF line endings",
+        "all.txt: has trailing whitespace",
+        "all.txt: lacks the line break at its end",
+        "all.txt: has conflict markers",
+    ]
+    assert lines[-2:] == [
+        "Fix the 13 problem(s) above; .editorconfig sets up most editors for it.",
+        "A conflict needs a person: keep the lines that belong, and delete the markers.",
+    ]
+    # In the CI, each problem is an annotation at its line as well.
+    assert ci.returncode == 1
+    annotations = [line for line in ci.stdout.splitlines() if line.startswith("::")]
+    assert len(annotations) == 13
+    for annotation in [
+        "::error file=conflict.py,line=2,title=Text files::has conflict markers",
+        "::error file=bare.txt,line=2,title=Text files::has conflict markers",
+        "::error file=merged.txt,line=1,title=Text files::has conflict markers",
+        "::error file=all.txt,line=1,title=Text files::has conflict markers",
+        "::error file=all.txt,line=3,title=Text files::lacks the line break at its end",
+        "::error file=tab.py,line=1,title=Text files::has trailing whitespace",
+    ]:
+        assert annotation in annotations
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_find_the_same_problems_without_perl(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    script = check[: check.index('step "Diagrams"')]
+    repository = a_repository_with_problems(tmp_path / "repository")
+    without = path_without(tmp_path / "bin", "perl")
+
+    with_perl = run_the_steps(repository, script)
+    with_tail = run_the_steps(repository, script, path=without)
+
+    assert "lacks the line break at its end" in with_perl.stdout
+    assert (with_tail.returncode, with_tail.stdout) == (1, with_perl.stdout)
+
+
+def stub_in_front(folder: Path, name: str, script: str) -> str:
+    """A PATH with a bash script as the command name in front of the PATH of the
+    tests: the script runs the real command after it drops its own folder."""
+    folder.mkdir()
+    (folder / name).write_text(
+        f'#!/usr/bin/env bash\n{script}\nPATH="${{PATH#*:}}"\nexec {name} "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (folder / name).chmod(0o755)
+    return f"{folder}{os.pathsep}{os.environ['PATH']}"
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_find_the_same_problems_with_the_grep_of_macos(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The grep of macOS reads -Z as gzip, and ends no name with a NUL for it: the
+    # step asks for the NUL with --null, which every grep knows.
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    script = check[: check.index('step "Diagrams"')]
+    repository = a_repository_with_problems(tmp_path / "repository")
+    bsd = stub_in_front(
+        tmp_path / "bsd",
+        "grep",
+        'for word in "$@"; do\n'
+        '  if [[ "$word" == -[!-]*Z* ]]; then echo "-Z is gzip here" >&2; exit 2; fi\n'
+        "done",
+    )
+
+    gnu = run_the_steps(repository, script)
+    macos = run_the_steps(repository, script, path=bsd)
+
+    assert "has conflict markers" in gnu.stdout
+    assert (macos.returncode, macos.stdout, macos.stderr) == (1, gnu.stdout, "")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_stop_on_a_git_older_than_2_31(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "spaces.txt").write_bytes(b"spaces \n")
+    old = stub_in_front(
+        tmp_path / "old",
+        "git",
+        'for word in "$@"; do\n'
+        '  if [[ "$word" == --deduplicate ]]; then exit 129; fi\n'
+        "done",
+    )
+
+    result = run_the_steps(
+        repository, check[: check.index('step "Diagrams"')], path=old
+    )
+
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "\n== Text files\n",
+        "scripts/check.sh needs Git 2.31 or newer.\n",
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("files", [{}, {"binary.bin": b"\0text \n"}])
+def test_the_checks_pass_without_text_files(
+    projects: dict[str, Path], tmp_path: Path, files: dict[str, bytes]
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    for name, content in files.items():
+        (repository / name).write_bytes(content)
+
+    result = run_the_steps(repository, check[: check.index('step "Diagrams"')])
+
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        "\n== Text files\nEvery text file is clean.\n",
+        "",
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_ci_never_skips_shellcheck(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    script = check[: check.index('step "Text files"')] + shell_step(check)
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "tool.sh").write_text("echo tool\n", encoding="utf-8", newline="\n")
+    without = path_without(tmp_path / "bin", "shellcheck")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    (stubs / "shellcheck").write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >> '{calls.as_posix()}'\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "shellcheck").chmod(0o755)
+
+    local = run_the_steps(repository, script, path=without)
+    ci = run_the_steps(repository, script, path=without, ci=True)
+    checked = run_the_steps(repository, script, path=f"{stubs}{os.pathsep}{without}")
+
+    assert (local.returncode, local.stdout) == (
+        0,
+        "\n== Shell scripts\nshellcheck is not installed here; the CI runs it.\n",
+    )
+    assert (ci.returncode, ci.stdout) == (
+        1,
+        "\n== Shell scripts\n"
+        "Checking the shell scripts needs ShellCheck, which this runner lacks.\n",
+    )
+    assert (checked.returncode, checked.stdout) == (
+        0,
+        "\n== Shell scripts\nshellcheck found nothing in 1 script(s).\n",
+    )
+    assert calls.read_text(encoding="utf-8") == "tool.sh\n"
+
+
 def pages_step(check: str) -> str:
     start = check.index('step "Pages in one column"')
     return check[start : check.index('step "Changelog fragments"', start)]
