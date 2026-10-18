@@ -7397,7 +7397,6 @@ def test_answers_that_would_break_a_file_are_refused(
             )
 
 
-
 def test_a_namespace_may_hold_underscores_as_those_of_nextcloud_do(
     tmp_path: Path,
 ) -> None:
@@ -7412,6 +7411,7 @@ def test_a_namespace_may_hold_underscores_as_those_of_nextcloud_do(
     )
     info = (project / "appinfo/info.xml").read_text(encoding="utf-8")
     assert "<namespace>Files_Demo</namespace>" in info
+
 
 # A name and a description with what each kind of file quotes in its own way: the
 # quotes of JSON, TOML, Python and the Dockerfile, the markup of XML and HTML, the
