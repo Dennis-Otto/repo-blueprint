@@ -481,6 +481,36 @@ def test_keep_takes_a_video_whose_bytes_changed(tmp_path: Path) -> None:
     assert (tmp_path / "kept/files/docs/images/a.mp4").read_bytes() == video + b"new"
 
 
+def test_keep_takes_a_video_beside_a_gif_only_with_the_gif(tmp_path: Path) -> None:
+    # The script records again: the GIF of a.mp4 kept its pixels, that of b.mp4 not.
+    video = b"\0\0\0\x20ftypisom\0\0\x02\0"
+    root = repository(
+        tmp_path / "repository",
+        {
+            "docs/images/a.gif": gif([(1, 2, 3)], [100]),
+            "docs/images/a.mp4": video + b"old",
+            "docs/images/b.gif": gif([(1, 2, 3)], [100]),
+            "docs/images/b.mp4": video + b"old",
+        },
+    )
+    write(
+        root,
+        {
+            "docs/images/a.gif": gif([(1, 2, 3), (1, 2, 3)], [50, 50]),
+            "docs/images/a.mp4": video + b"new",
+            "docs/images/b.gif": gif([(0, 0, 0)], [100]),
+            "docs/images/b.mp4": video + b"new",
+        },
+    )
+    kept = keep(root, tmp_path / "kept")
+    assert [picture.path for picture in kept.pictures] == [
+        "docs/images/b.gif",
+        "docs/images/b.mp4",
+    ]
+    assert (root / "docs/images/a.mp4").read_bytes() == video + b"old"
+    assert (root / "docs/images/b.mp4").read_bytes() == video + b"new"
+
+
 def test_keep_fails_on_a_picture_that_is_no_picture(tmp_path: Path) -> None:
     root = repository(tmp_path / "repository", {"README.md": b"# Demo\n"})
     write(root, {"docs/images/a.png": b"<html>an error page</html>"})

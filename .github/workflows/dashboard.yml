@@ -96,21 +96,21 @@ jobs:
         run: |
           python3 dashboard.py --owner "$OWNER" --out site/dashboard/index.html \
             --history https://dennis-otto.github.io/repo-blueprint/dashboard/history.json
-      # The accessibility of the website with the dashboard, as the check docs checks
-      # the website: it reports in the summary and as annotations, and the website is
-      # published all the same, since the check docs keeps its pages accessible.
+      # The accessibility of the dashboard, as the check docs checks the pages of the
+      # website, which it keeps accessible: it reports in the summary and as
+      # annotations, and the website is published all the same.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         timeout-minutes: 5
         with:
           node-version: 24
-      - name: Check the accessibility of the website and the dashboard
+      - name: Check the accessibility of the dashboard
         continue-on-error: true
         timeout-minutes: 5
         env:
           REPORT_ONLY: "true"
         run: |
           npm ci --prefix .github/a11y --ignore-scripts --no-audit --no-fund
-          node .github/a11y/check.mjs site
+          node .github/a11y/check.mjs site dashboard/index.html
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site

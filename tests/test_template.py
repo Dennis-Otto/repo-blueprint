@@ -8966,19 +8966,29 @@ def test_every_website_is_checked_for_its_accessibility(
         "        timeout-minutes: 5",
         "        env:",
         '          REPORT_ONLY: "true"',
-        "        run: |",
-        "          npm ci --prefix .github/a11y --ignore-scripts --no-audit --no-fund",
-        "          node .github/a11y/check.mjs site",
+        "        run: node .github/a11y/check.mjs site",
     ]
     assert docs.index("        run: mkdocs build --strict\n") < docs.index(step)
+    tools_step = (
+        "        run: npm ci --prefix .github/a11y --ignore-scripts --no-audit"
+        " --no-fund\n"
+    )
+    assert docs.index("        run: mkdocs build --strict\n") < docs.index(tools_step)
+    # The tests of the check run where the blueprint keeps them, before the check.
+    tests = "        run: node --test .github/a11y/check.test.mjs\n"
+    assert docs.index(tools_step) < docs.index(tests) < docs.index(step)
+    assert "hashFiles('.github/a11y/check.test.mjs') != ''" in docs
+    assert (root / ".github/a11y/check.test.mjs").is_file() == (kind == "blueprint")
     setup = docs[: docs.index(step)].rsplit("      - uses: ", 1)[1]
     assert setup.startswith("actions/setup-node@")
     assert "          node-version: 24\n" in setup
     if kind == "blueprint":
         # The website with the dashboard, which the Dashboard workflow publishes.
         dashboard = (root / ".github/workflows/dashboard.yml").read_text("utf-8")
+        # The pages of the documentation are the check docs', the dashboard alone
+        # is new.
         assert dashboard.index("python3 dashboard.py") < dashboard.index(
-            "\n          node .github/a11y/check.mjs site\n"
+            "\n          node .github/a11y/check.mjs site dashboard/index.html\n"
         )
         for path in (".github/a11y/**", ".github/mkdocs-blueprint.css"):
             assert f"\n      - {path}\n" in dashboard, path

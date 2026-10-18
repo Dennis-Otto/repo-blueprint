@@ -16,7 +16,7 @@ import struct
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 log = logging.getLogger("mkdocs.hooks.blueprint")
 
@@ -179,13 +179,17 @@ def on_page_content(html_text: str, page: Any, config: Any, files: Any) -> str:
     It runs before the plugin glightbox, which then wraps each picture that is left
     in a link that opens it enlarged, among the pictures of the reader's scheme.
     """
-    found = {file.dest_uri: file for file in files}
-    folder = posixpath.dirname(page.file.dest_uri)
     docs = Path(config.docs_dir)
+    where = Where(
+        posixpath.dirname(page.file.dest_uri),
+        posixpath.dirname(page.file.src_uri),
+        docs.name,
+        {file.dest_uri: file for file in files},
+    )
     html_text = live_diagrams(html_text, docs / "diagrams")
-    html_text = PICTURE.sub(lambda m: themed(m, folder, docs.name, found), html_text)
-    html_text = IMAGE.sub(lambda m: video(m[0], folder, found), html_text)
-    return lazy(html_text, folder, found)
+    html_text = PICTURE.sub(lambda m: themed(m, where), html_text)
+    html_text = IMAGE.sub(lambda m: video(m[0], where), html_text)
+    return lazy(html_text, where)
 
 
 # Before the plugin glightbox.
@@ -248,16 +252,52 @@ def relative(target: str, folder: str) -> str:
     return posixpath.relpath(target, folder or ".")
 
 
-def themed(match: re.Match[str], folder: str, docs: str, found: dict[str, Any]) -> str:
+class Where(NamedTuple):
+    """Where a page is: its folder on the website and that of its source, the name
+    of the folder of the sources, and the files of the website by their paths."""
+
+    folder: str
+    source: str
+    docs: str
+    found: dict[str, Any]
+
+    def find(self, src: str) -> str | None:
+        """The path on the website of the file that src names, when the website has
+        that file.
+
+        MkDocs leads the path of a picture of Markdown from the page on the website,
+        but leaves that of HTML as the source names it: from the folder of its
+        source, which for guide.de.md in de/ is not the folder of the page, or from
+        the root of the repository, as a README names docs/images/NAME.png.
+        """
+        for folder in (self.folder, self.source):
+            target = local(src, folder, self.found)
+            if target is not None:
+                return target
+        if src.startswith(f"{self.docs}/"):
+            return local(src.removeprefix(f"{self.docs}/"), "", self.found)
+        return None
+
+    def address(self, src: str) -> str:
+        """src as the page on the website reaches its file, with its ending such as
+        #only-dark; src as it is when the website lacks that file."""
+        target = self.find(src)
+        if target is None or local(src, self.folder, self.found) is not None:
+            return src
+        ending = re.search(r"[?#].*", src)
+        return relative(target, self.folder) + (ending[0] if ending else "")
+
+
+def themed(match: re.Match[str], where: Where) -> str:
     """Show a <picture> with a picture for each scheme as two pictures.
 
     GitHub picks the picture of <source media="(prefers-color-scheme: dark)"> by the
     scheme of the reader's system, but the reader of the website can switch it, which
     a <picture> doesn't follow. The website shows each picture with #only-light or
     #only-dark, which Material shows in that scheme alone, and the other one never
-    loads. A path from the root of the repository, as a README names
-    docs/images/NAME.png, leads to the same picture on the website. Any other
-    <picture> stays as it is.
+    loads. A path from the source of the page, or from the root of the repository
+    as a README names docs/images/NAME.png, leads to the same picture on the
+    website. Any other <picture> stays as it is.
     """
     image = IMAGE.search(match["inside"])
     if image is None:
@@ -275,11 +315,7 @@ def themed(match: re.Match[str], folder: str, docs: str, found: dict[str, Any]) 
         return match[0]
     pictures = []
     for scheme, ending in zip(("light", "dark"), SCHEMES, strict=True):
-        src = str(chosen[scheme])
-        if local(src, folder, found) is None and src.startswith(f"{docs}/"):
-            target = local(src.removeprefix(f"{docs}/"), "", found)
-            if target is not None:
-                src = relative(target, folder)
+        src = where.address(str(chosen[scheme]).split("#")[0])
         pictures.append(element("img", {**attrs, "src": src.split("#")[0] + ending}))
     return "".join(pictures)
 
@@ -310,7 +346,7 @@ def size(path: str) -> tuple[int, int] | None:
     return None
 
 
-def video(tag: str, folder: str, found: dict[str, Any]) -> str:
+def video(tag: str, where: Where) -> str:
     """Show a GIF with a video beside it, NAME.mp4, as that video.
 
     GitHub shows the GIF, the website the video, which is a third of its size and
@@ -320,7 +356,8 @@ def video(tag: str, folder: str, found: dict[str, Any]) -> str:
     names it.
     """
     attrs = attributes(tag)
-    target = local(attrs.get("src") or "", folder, found)
+    target = where.find(attrs.get("src") or "")
+    folder, found = where.folder, where.found
     if target is None or not target.lower().endswith(".gif"):
         return tag
     stem = target[: -len(".gif")]
@@ -345,7 +382,7 @@ def video(tag: str, folder: str, found: dict[str, Any]) -> str:
     return f"{element('video', shown)}</video>"
 
 
-def lazy(html_text: str, folder: str, found: dict[str, Any]) -> str:
+def lazy(html_text: str, where: Where) -> str:
     """Load the pictures of a page as the reader comes to them.
 
     The first picture loads first, as the largest part of the page that a reader
@@ -363,9 +400,11 @@ def lazy(html_text: str, folder: str, found: dict[str, Any]) -> str:
         if "loading" in attrs:
             return match[0]
         src = attrs.get("src") or ""
-        target = local(src, folder, found)
+        target = where.find(src)
+        if target is not None:
+            attrs["src"] = src = where.address(src)
         if target is not None and "width" not in attrs and "height" not in attrs:
-            dimensions = size(found[target].abs_src_path)
+            dimensions = size(where.found[target].abs_src_path)
             if dimensions is not None:
                 attrs["width"], attrs["height"] = map(str, dimensions)
         if was_first and not src.endswith(SCHEMES):

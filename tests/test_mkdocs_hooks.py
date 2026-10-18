@@ -525,16 +525,21 @@ def webp(width: int, height: int, **options: Any) -> bytes:
 
 
 def pictures(
-    tmp_path: Path, html: str, media: dict[str, bytes], page: str = "guide.html"
+    tmp_path: Path,
+    html: str,
+    media: dict[str, bytes],
+    page: str = "guide.html",
+    source: str = "",
 ) -> str:
-    """The content of a page after the hook, with the files of the website."""
+    """The content of a page after the hook, with the files of the website; the
+    page comes from source, from the same path as Markdown when it is empty."""
     docs = tmp_path / "docs"
     files = []
     for name, data in media.items():
         (docs / name).parent.mkdir(parents=True, exist_ok=True)
         (docs / name).write_bytes(data)
         files.append(File(name, str(docs), str(tmp_path / "site"), False))
-    files.append(File(page.replace(".html", ".md"), str(docs), "site", False))
+    files.append(File(source or page.replace(".html", ".md"), str(docs), "site", False))
     files[-1].dest_uri = page
     result: str = hooks().on_page_content(
         html,
@@ -609,6 +614,34 @@ def test_a_picture_for_each_scheme_follows_the_switch_of_the_website(
         ' width="4" height="2" loading="lazy" decoding="async">'
         '<img src="../images/settings.dark.png#only-dark" alt="The settings"'
         ' width="4" height="2" loading="lazy" decoding="async"></p>'
+    )
+
+
+def test_a_translated_page_leads_its_html_pictures_from_its_source(
+    tmp_path: Path,
+) -> None:
+    media = {
+        "images/a.png": png(),
+        "images/a.dark.png": png(),
+        "images/b.png": png(),
+        "images/c.gif": gif(),
+        "images/c.mp4": b"",
+    }
+    # MkDocs leaves the paths of HTML as guide.de.md names them, from docs/.
+    html = (
+        f"{themed_picture('images/a.png', 'images/a.dark.png', alt='A')}"
+        '<img src="images/b.png?v=2#top" alt="B"><img src="images/c.gif" alt="C">'
+    )
+
+    assert pictures(tmp_path, html, media, "de/guide.html", "guide.de.md") == (
+        '<img src="../images/a.png#only-light" alt="A" width="4" height="2"'
+        ' loading="lazy" decoding="async">'
+        '<img src="../images/a.dark.png#only-dark" alt="A" width="4" height="2"'
+        ' loading="lazy" decoding="async">'
+        '<img src="../images/b.png?v=2#top" alt="B" width="4" height="2"'
+        ' loading="lazy" decoding="async">'
+        '<video class="blueprint-video" src="../images/c.mp4" width="6" height="3"'
+        ' controls muted loop playsinline preload="none" aria-label="C"></video>'
     )
 
 

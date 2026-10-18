@@ -3,15 +3,21 @@
 // the dark scheme, and runs axe-core on each with the rules of WCAG 2.2 at the levels
 // A and AA. A violation whose impact is serious or critical fails it, with the page,
 // the rule, the elements and a link that explains the fix; the lesser ones it counts.
-// Each page loads once and switches to the dark scheme in place, as Material follows
-// the reader's system, and a page of a further language without a translation, whose
-// text is that of the page in the default language, is checked through that page.
-// The pages come from the folder alone: a request to the address of the website is
-// answered from there, and one to another server is refused and named, so the check
-// reads nothing from the network. After a build, on your machine:
+// Each scheme has a browser of its own, whose system shows that scheme, and each page
+// loads in it as a new reader's would, without a scheme that an earlier page saved;
+// a website whose palette doesn't follow the system switches with its toggle, and a
+// page that shows neither way the scheme of its toggle is a violation as well. A page
+// of a further language without a translation, whose text is that of the page in the
+// default language, is checked through that page. The pages come from the folder
+// alone: a request to the address of the website is answered from there, and one to
+// another server is refused and named, so the check reads nothing from the network.
+// After a build, on your machine:
 //
 //   npm ci --prefix .github/a11y --ignore-scripts
 //   node .github/a11y/check.mjs site
+//
+// Pages after the folder, such as dashboard/index.html, check those pages alone.
+// node --test .github/a11y/check.test.mjs tests the check itself.
 //
 // It drives the Google Chrome that GitHub's runners have; CHROME names another
 // Chrome or Chromium, by the path of its program. REPORT_ONLY=true annotates the
@@ -33,6 +39,13 @@ import { chromium } from "playwright-core";
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 // The impacts that fail the check.
 const FAILING = new Set(["critical", "serious"]);
+// The finding of a page that doesn't show a scheme that its toggle offers.
+const UNSHOWN = {
+  rule: "color-scheme",
+  impact: "serious",
+  link: "https://squidfunk.github.io/mkdocs-material/setup/changing-the-colors/#automatic-light-dark-mode",
+  elements: ["body"],
+};
 // The schemes of the reader's system, and the one of Material that each should show.
 const SCHEMES = { light: "default", dark: "slate" };
 // Pages that are checked at the same time: one for each core, from two to eight.
@@ -116,7 +129,7 @@ async function addressOf(site) {
 }
 
 /** The Markdown file of a page, for the annotation, when docs/ has one. */
-function sourceOf(page, root = ".") {
+export function sourceOf(page, root = ".") {
   const name = page.replace(/\.html$/, "");
   const candidates = [`${name}.md`, `${name}/index.md`, `${name}/README.md`];
   const language = name.match(/^([a-z]{2})\/(.+)$/);
@@ -133,7 +146,7 @@ function sourceOf(page, root = ".") {
 }
 
 /** A value for a command of GitHub Actions, such as ::error. */
-function escaped(text, property = false) {
+export function escaped(text, property = false) {
   let value = String(text).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   if (property) {
     value = value.replaceAll(":", "%3A").replaceAll(",", "%2C");
@@ -170,7 +183,8 @@ async function serve(context, site, address, foreign) {
   });
 }
 
-/** Waits until the page shows a scheme, as Material sets it with its script. */
+/** Waits until the page shows a scheme, as Material sets it with its script; a page
+ * without the schemes of Material, such as the dashboard, shows each one. */
 async function showing(tab, scheme, timeout) {
   try {
     await tab.waitForFunction(
@@ -210,25 +224,62 @@ async function violations(tab, page, scheme) {
   }));
 }
 
-/** The violations of one page in both schemes: in the light one, then in the dark
- * one, to which the reader's system switches while the page stays open, as Material
- * follows it; a page that doesn't follow loads again. */
-async function check(context, address, page) {
-  const tab = await context.newPage();
-  try {
-    await tab.emulateMedia({ colorScheme: "light" });
-    await tab.goto(new URL(page, address).href, { waitUntil: "load", timeout: 60_000 });
-    await showing(tab, "light", 5_000);
-    const found = await violations(tab, page, "light");
-    await tab.emulateMedia({ colorScheme: "dark" });
-    if (!(await showing(tab, "dark", 1_000))) {
-      await tab.reload({ waitUntil: "load", timeout: 60_000 });
-      await showing(tab, "dark", 5_000);
-    }
-    return [...found, ...(await violations(tab, page, "dark"))];
-  } finally {
-    await tab.close();
+/** Whether the page shows a scheme: as the system shows it, which a palette with
+ * the media of that scheme follows, or else after the toggle of the website switched
+ * to it. Null for a page whose toggle doesn't offer it, such as a website with one
+ * scheme alone. */
+async function shows(tab, scheme) {
+  if (await showing(tab, scheme, 3_000)) {
+    return true;
   }
+  const offered = await tab.evaluate((wanted) => {
+    const option = document.querySelector(`input[name="__palette"][data-md-color-scheme="${wanted}"]`);
+    option?.click();
+    return option !== null;
+  }, SCHEMES[scheme]);
+  return offered ? showing(tab, scheme, 3_000) : null;
+}
+
+/** The violations of one page in each scheme that the website offers, each in the
+ * browser of that scheme. */
+async function check(contexts, address, page) {
+  const found = [];
+  for (const [scheme, context] of Object.entries(contexts)) {
+    const tab = await context.newPage();
+    try {
+      await tab.goto(new URL(page, address).href, { waitUntil: "load", timeout: 60_000 });
+      const shown = await shows(tab, scheme);
+      if (shown) {
+        found.push(...(await violations(tab, page, scheme)));
+      } else if (shown === false) {
+        const help = `The page doesn't show the ${scheme} scheme that its toggle offers, neither as the system shows it nor after the toggle, so it can't be checked in it`;
+        found.push({ ...UNSHOWN, page, scheme, help });
+      }
+    } finally {
+      await tab.close();
+    }
+  }
+  return found;
+}
+
+/** A browser for each scheme, whose system shows that scheme and whose pages read
+ * the website from the folder; each page loads without what an earlier one saved,
+ * such as the scheme that Material keeps. */
+async function contextsOf(browser, site, address, foreign) {
+  const contexts = {};
+  for (const scheme of Object.keys(SCHEMES)) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: scheme });
+    await context.addInitScript(() => {
+      try {
+        localStorage.clear();
+      } catch {
+        // A frame without storage keeps nothing.
+      }
+    });
+    await serve(context, site, address, foreign);
+    contexts[scheme] = context;
+  }
+  return contexts;
 }
 
 /** Runs each task with at most PARALLEL at a time. */
@@ -304,32 +355,57 @@ function summary(failing, lesser, scope, foreign) {
   return `${lines.join("\n")}\n`;
 }
 
-async function main(argv) {
-  const [site] = argv;
-  if (!site || !existsSync(path.join(site, "index.html"))) {
-    console.error("Usage: node .github/a11y/check.mjs SITE: SITE is the folder of a built website, with its index.html.");
-    return 2;
-  }
-  const { checked: pages, same } = await chosen(site, await pagesOf(site));
+/** Starts the Chrome of the runner, or the one that CHROME names. */
+export function launch() {
+  const executablePath = process.env.CHROME || undefined;
+  return chromium.launch(executablePath ? { executablePath } : { channel: "chrome" });
+}
+
+/** The findings of the pages of the website in the folder site, or of the pages
+ * named alone when there are any: the pages checked, those left out for the page of
+ * their default language, the findings and the other servers that the pages asked. */
+export async function checkSite(browser, site, named = []) {
+  const all = await pagesOf(site);
+  const { checked, same } = named.length > 0
+    ? { checked: all.filter((page) => named.includes(page)), same: [] }
+    : await chosen(site, all);
   const address = await addressOf(site);
   const foreign = new Set();
-  const executablePath = process.env.CHROME || undefined;
+  const contexts = await contextsOf(browser, site, address, foreign);
+  try {
+    const findings = await pool(checked.map((page) => () => check(contexts, address, page)));
+    return { pages: checked, same, findings, foreign };
+  } finally {
+    await Promise.all(Object.values(contexts).map((context) => context.close()));
+  }
+}
+
+async function main(argv) {
+  const [site, ...named] = argv;
+  if (!site || !existsSync(path.join(site, "index.html"))) {
+    console.error("Usage: node .github/a11y/check.mjs SITE [PAGE...]: SITE is the folder of a built website, with its index.html; each PAGE, such as dashboard/index.html, checks that page alone.");
+    return 2;
+  }
+  const missing = named.filter((page) => !existsSync(path.join(site, page)));
+  if (missing.length > 0) {
+    console.error(`The website has no page ${missing.join(", ")}.`);
+    return 2;
+  }
   let browser;
   try {
-    browser = await chromium.launch(executablePath ? { executablePath } : { channel: "chrome" });
+    browser = await launch();
   } catch (error) {
     console.error(`Chrome doesn't start: ${error.message.split("\n")[0]}`);
     console.error("Install Google Chrome, or name another Chrome or Chromium with CHROME=/path/to/chrome.");
     return 2;
   }
-  let findings;
+  let result;
   try {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    await serve(context, site, address, foreign);
-    findings = await pool(pages.map((page) => () => check(context, address, page)));
+    result = await checkSite(browser, site, named);
   } finally {
     await browser.close();
   }
+  const { pages, same, findings, foreign } = result;
   const groups = grouped(findings);
   const scope = `${pages.length} page(s) in the light and the dark scheme` + (same.length > 0
     ? `, which stand in for ${same.length} more of another language without a translation`
