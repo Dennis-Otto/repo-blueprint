@@ -113,10 +113,14 @@ _message_after_copy: |
   its permissions, and copier update names it in .github/repository.toml.
   [%- endif %]
 
+# The name and the description stand as they are in a docstring of Python, a comment
+# of TypeScript and the CDATA of appinfo/info.xml, which """, */ and ]]> would end,
+# and a backslash would start an escape there; the other files escape them.
 project_name:
   type: str
   help: The name of the project, such as "Paperless Sync"
-  validator: "[% if not project_name.strip() %]Name the project.[% endif %]"
+  validator: >-
+    [% if not project_name.strip() %]Name the project.[% elif project_name | regex_search('"""|[*]/|]]>|[\\\\\r\n]') %]Write the name without """, */, ]]>, backslashes and line breaks, which would end or break the code that names it.[% endif %]
 
 project_slug:
   type: str
@@ -128,7 +132,8 @@ project_slug:
 description:
   type: str
   help: One sentence that says what the project does
-  validator: "[% if not description.strip() %]Describe the project in one sentence.[% endif %]"
+  validator: >-
+    [% if not description.strip() %]Describe the project in one sentence.[% elif description | regex_search('"""|[*]/|]]>|[\\\\\r\n]') %]Write the description without """, */, ]]>, backslashes and line breaks, which would end or break the code that quotes it.[% endif %]
 
 project_type:
   type: str
@@ -202,19 +207,23 @@ ha_domain:
   validator: >-
     [% if not (ha_domain | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
 
+# The App Store takes an id of 32 characters at most, from a lowercase letter to a
+# letter or a digit, as the schema of appinfo/info.xml says.
 nextcloud_app_id:
   type: str
-  help: The id of the Nextcloud app
-  default: "{= project_slug | replace('-', '_') =}"
+  help: The id of the Nextcloud app, 32 characters at most
+  default: "{= (project_slug | replace('-', '_'))[:32] | trim('_') =}"
   when: "{= project_type == 'nextcloud-app' =}"
   validator: >-
-    [% if not (nextcloud_app_id | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
+    [% if not (nextcloud_app_id | regex_search('^[a-z][a-z0-9_]*[a-z0-9]$')) or nextcloud_app_id | length > 32 %]Use 2 to 32 lowercase letters, digits and underscores, from a letter to a letter or a digit, as the App Store takes them.[% endif %]
 
 nextcloud_namespace:
   type: str
   help: The PHP namespace of the app, under OCA
-  default: "{= project_name | title | regex_replace('[^A-Za-z0-9]', '') =}"
+  default: "{= project_name | regex_replace('[^A-Za-z0-9]+', ' ') | title | replace(' ', '') =}"
   when: "{= project_type == 'nextcloud-app' =}"
+  validator: >-
+    [% if not (nextcloud_namespace | regex_search('^[A-Z][A-Za-z0-9_]*$')) %]Use a name of PHP in CamelCase, such as PaperlessSync or Files_Sharing: a capital letter, then letters, digits and underscores.[% endif %]
 
 languages:
   type: yaml
@@ -229,7 +238,7 @@ languages:
     Rust: rust
   default: >-
     [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
-    [%- elif project_type == 'node-package' -%][javascript-typescript]
+    [%- elif project_type in ['node-package', 'nextcloud-app'] -%][javascript-typescript]
     [%- else -%][][%- endif -%]
 
 discussions:
@@ -242,15 +251,34 @@ successor:
   help: The owner has designated a successor through GitHub's account successor setting, who can take over the repository
   default: false
 
+# The website that the Docs workflow publishes on GitHub Pages, at the address that
+# mkdocs.yml names: the README, the About box of the repository, the issue forms and
+# the manifest of an integration or an app link it.
 homepage:
   type: str
-  help: The homepage, if not the repository
-  default: ""
+  help: The website of the project; by default the one that the Docs workflow publishes on GitHub Pages, empty for none
+  default: "https://{= owner | lower =}.github.io/[% if project_slug != (owner | lower) ~ '.github.io' %]{= project_slug =}/[% endif %]"
+  validator: >-
+    [% if homepage and not (homepage | regex_search('^https?://[A-Za-z0-9._~:/?#@!$&*+,;=%-]+$')) %]Name the address of the website, such as https://octo-org.github.io/demo/, or leave it empty.[% endif %]
 
+# The topics of the repository on GitHub, with those of each kind by default: HACS
+# lists an integration only with topics, and its check asks for them.
 topics:
   type: str
-  help: Topics of the repository, separated by commas
-  default: ""
+  help: The topics of the repository, separated by commas; up to 20, each of lowercase letters, digits and hyphens
+  default: >-
+    [%- if project_type == 'home-assistant' -%]home-assistant, hacs, hacs-integration, home-assistant-integration, home-assistant-custom-component, homeassistant
+    [%- elif project_type == 'nextcloud-app' -%]nextcloud, nextcloud-app
+    [%- elif project_type == 'github-action' -%]github-actions, github-action
+    [%- elif project_type == 'python-package' -%]python, pypi
+    [%- elif project_type == 'node-package' -%]typescript, nodejs, npm
+    [%- elif project_type == 'container' -%]docker, container, ghcr
+    [%- endif -%]
+  validator: >-
+    [%- set names = topics.split(',') | map('trim') | select | list -%]
+    [%- if names and not (names | join(',') | regex_search('^([a-z0-9][a-z0-9-]{0,49}(,|$)){1,20}$')) -%]Separate up to 20 topics by commas, each of 50 characters at most, with lowercase letters, digits and hyphens, such as home-assistant.
+    [%- elif project_type == 'home-assistant' and not names -%]HACS lists an integration only with topics, and its check asks for them: name at least one, such as home-assistant.
+    [%- endif -%]
 
 sponsor:
   type: str
@@ -382,8 +410,3 @@ release_type:
     [%- if project_type == 'python-package' -%]python
     [%- elif stack == 'node' -%]node
     [%- else -%]simple[%- endif -%]
-
-copyright_year:
-  type: str
-  when: false
-  default: "{= '%Y' | strftime =}"

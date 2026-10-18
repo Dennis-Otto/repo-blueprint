@@ -1,1 +1,2 @@
-[% filter replace('stacks/docs/requirements-docs.txt', '.github/docs-requirements.txt') %][% include ".github/workflows/docs.yml" %][% endfilter -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+{= replaced(".github/workflows/docs.yml", [["stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"]]) -=}

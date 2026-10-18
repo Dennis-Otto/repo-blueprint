@@ -3,7 +3,7 @@
   "name": {= project_name | to_json(ensure_ascii=False) =},
   "codeowners": ["@{= owner =}"],
   "config_flow": true,
-  "documentation": "https://github.com/{= owner =}/{= project_slug =}",
+  "documentation": {= (homepage or 'https://github.com/' ~ owner ~ '/' ~ project_slug) | to_json =},
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/{= owner =}/{= project_slug =}/issues",

@@ -1,10 +1,9 @@
 [#- The Renovate workflow of the blueprint, for this repository alone: the job runs
     without the name of the blueprint, with a token of the release app for this
     repository, and for this repository in place of every one of the owner. -#]
+[%- from "includes/replace.jinja" import replaced with context -%]
 [%- set guard = " && github.repository == 'Dennis-Otto/repo-blueprint'\n" -%]
 [%- set installation = "          # In the blueprint, every repository of the installation, on purpose: the\n          # app is installed on exactly the repositories that Renovate keeps current.\n          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]\n" -%]
 [%- set everyone = "          # In the blueprint, every repository of the owner on which the app is\n          # installed and that has a .github/renovate.json5.\n          RENOVATE_AUTODISCOVER: \"true\"\n          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*\n" -%]
 [%- set alone = "          # This repository alone, by its name, also after a rename.\n          RENOVATE_REPOSITORIES: ${{ github.repository }}\n" -%]
-[%- filter replace(guard, "\n") | replace(installation, "") | replace(everyone, alone) -%]
-[%- include ".github/workflows/renovate.yml" -%]
-[%- endfilter -%]
+{= replaced(".github/workflows/renovate.yml", [[guard, "\n"], [installation, ""], [everyone, alone]]) -=}

@@ -38,6 +38,9 @@ import workflow_steps
 import yaml
 from copier import _main as copier_main
 from copier import run_copy
+from jinja2 import ChoiceLoader, FileSystemLoader
+from jinja2.exceptions import FilterArgumentError
+from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
 from shared import copy_of, git_environment, once, run_folder
 from shell import BASH, in_bash
@@ -75,6 +78,18 @@ KINDS = [
     "container",
     "generic",
 ]
+# The languages that CodeQL analyzes in each kind of project by default, besides the
+# workflows: a Nextcloud app has its PHP, which CodeQL doesn't know, and the
+# JavaScript of its pages.
+CODEQL = {
+    "home-assistant": "python, actions",
+    "nextcloud-app": "javascript-typescript, actions",
+    "github-action": "python, actions",
+    "python-package": "python, actions",
+    "node-package": "javascript-typescript, actions",
+    "container": "actions",
+    "generic": "actions",
+}
 # The delimiters of the template; no rendered file may hold them.
 LEFTOVER = re.compile(r"\{=|=\}|\[%|%\]")
 GUARD = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n"
@@ -329,12 +344,14 @@ def test_the_workflows_are_the_blueprints_own(
                 "stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"
             )
         if name == "codeql.yml":
-            source = re.sub(
-                r"          # The languages of this repository.*\n          languages: .*\n",
-                "",
-                source,
+            # The languages of the kind of project, in place of the blueprint's own and
+            # the comment that the template looks for.
+            marker = (
+                "          # The languages of this repository; the blueprint sets them"
+                " for each kind of project.\n          languages: python, actions\n"
             )
-            text = re.sub(r"          languages: .*\n", "", text)
+            assert source.count(marker) == 1
+            source = source.replace(marker, f"          languages: {CODEQL[kind]}\n")
         if name in ("after-checks.yml", "update-branches.yml"):
             # The workflows they watch; the bots after the checks and the branch bot
             # test them.
@@ -2470,6 +2487,43 @@ def remapper(project: Path) -> Callable[[str], str]:
     return remapped
 
 
+def lychee_excludes(project: Path) -> list[str]:
+    config = tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))
+    return [str(rule) for rule in config["exclude"]]
+
+
+def test_the_link_check_leaves_out_the_website_that_a_new_repository_gets_later(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The README links the website on GitHub Pages, which the Docs workflow publishes
+    # only after a run on main: the first push would fail the link check without it.
+    own = "^" + re.escape("https://dennis-otto.github.io/demo-project/")
+    assert own in lychee_excludes(projects["generic"])
+    assert re.search(own, "https://dennis-otto.github.io/demo-project/guide/")
+    # The website of the owner, as the repository owner.github.io has it.
+    site = render(
+        tmp_path / "site",
+        project_name="dennis-otto.github.io",
+        project_slug="dennis-otto.github.io",
+        description="A demo.",
+        project_type="generic",
+    )
+    assert "^" + re.escape("https://dennis-otto.github.io/") in lychee_excludes(site)
+    # Another website, or none, the check still checks: it is there from the start.
+    for name, homepage in (("custom", "https://example.org/demo/"), ("none", "")):
+        project = render(
+            tmp_path / name,
+            project_name="Demo Project",
+            description="A demo.",
+            project_type="generic",
+            homepage=homepage,
+        )
+        # Everything else as the blueprint's own lychee.toml has it.
+        assert (project / "lychee.toml").read_text(encoding="utf-8") == (
+            ROOT / "lychee.toml"
+        ).read_text(encoding="utf-8")
+
+
 def test_the_link_check_checks_the_anchors_that_it_can_see(
     projects: dict[str, Path],
 ) -> None:
@@ -4520,6 +4574,10 @@ def test_the_website_of_the_owner_lives_at_the_root(tmp_path: Path) -> None:
     config = (project / "mkdocs.yml").read_text(encoding="utf-8")
 
     assert "\nsite_url: https://dennis-otto.github.io/\n" in config
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert settings["repository"]["homepage"] == "https://dennis-otto.github.io/"
     assert (
         "\nrepo_url: https://github.com/Dennis-Otto/dennis-otto.github.io\n" in config
     )
@@ -7290,6 +7348,369 @@ def test_the_questions_of_the_owner_refuse_what_github_would_not_take(
             )
 
 
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({"description": 'Ends """ the docstring.'}, "Write the description without"),
+        ({"description": "Ends */ the comment."}, "Write the description without"),
+        ({"description": "Ends ]]> the CDATA."}, "Write the description without"),
+        ({"description": "Starts \\N an escape."}, "Write the description without"),
+        ({"project_name": "Demo */ Project"}, "Write the name without"),
+        ({"project_name": "Demo \\ Project"}, "Write the name without"),
+        (
+            {"project_type": "nextcloud-app", "nextcloud_app_id": "a" * 33},
+            "Use 2 to 32 lowercase letters",
+        ),
+        (
+            {"project_type": "nextcloud-app", "nextcloud_app_id": "_demo"},
+            "Use 2 to 32 lowercase letters",
+        ),
+        (
+            {"project_type": "nextcloud-app", "nextcloud_app_id": "demo_"},
+            "Use 2 to 32 lowercase letters",
+        ),
+        (
+            {"project_type": "nextcloud-app", "nextcloud_namespace": "2Demo"},
+            "Use a name of PHP in CamelCase",
+        ),
+        ({"topics": "demo, Home-Assistant"}, "Separate up to 20 topics"),
+        (
+            {"topics": ", ".join(f"topic-{n}" for n in range(21))},
+            "Separate up to 20 topics",
+        ),
+        ({"topics": "a" * 51}, "Separate up to 20 topics"),
+        (
+            {"project_type": "home-assistant", "topics": " , "},
+            "HACS lists an integration only with topics",
+        ),
+        ({"homepage": "javascript:alert(1)"}, "Name the address of the website"),
+        ({"homepage": "https://octo-org.github.io/a b/"}, "Name the address"),
+    ],
+    ids=[
+        "docstring",
+        "comment",
+        "cdata",
+        "backslash",
+        "name comment",
+        "name backslash",
+        "app id too long",
+        "app id start",
+        "app id end",
+        "namespace",
+        "topic case",
+        "21 topics",
+        "long topic",
+        "integration without topics",
+        "homepage scheme",
+        "homepage space",
+    ],
+)
+def test_answers_that_would_break_a_file_are_refused(
+    tmp_path: Path, data: dict[str, str], message: str
+) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(ValueError, match=re.escape(message)):
+            run_copy(
+                str(Template.folder),
+                tmp_path / "project",
+                data={
+                    "owner": "octo-org",
+                    "project_name": "Demo Project",
+                    "description": "A demo.",
+                    "project_type": "generic",
+                    **data,
+                },
+                defaults=True,
+                vcs_ref="HEAD",
+                quiet=True,
+            )
+
+
+def test_a_namespace_may_hold_underscores_as_those_of_nextcloud_do(
+    tmp_path: Path,
+) -> None:
+    # Such as OCA\Files_Sharing of Nextcloud itself: PHP takes them, and so does the
+    # App Store; an update must keep such an answer instead of falling back to the default.
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="nextcloud-app",
+        nextcloud_namespace="Files_Demo",
+    )
+    info = (project / "appinfo/info.xml").read_text(encoding="utf-8")
+    assert "<namespace>Files_Demo</namespace>" in info
+
+
+# A name and a description with what each kind of file quotes in its own way: the
+# quotes of JSON, TOML, Python and the Dockerfile, the markup of XML and HTML, the
+# variables of Docker and the shell, and a quote at the end of a docstring.
+HOSTILE_NAME = 'Demo "Quoted" & <Tagged> $USER Project of Paperless Documents'
+HOSTILE_DESCRIPTION = (
+    "Reads $HOME & <tags> with 'single quotes', `backticks`, {braces} and an"
+    ' ending "quote"'
+)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "home-assistant",
+        "nextcloud-app",
+        "github-action",
+        "python-package",
+        "node-package",
+        "container",
+    ],
+)
+def test_names_with_quotes_and_markup_render_files_that_parse(
+    tmp_path: Path, kind: str
+) -> None:
+    project = render(
+        tmp_path,
+        project_name=HOSTILE_NAME,
+        description=HOSTILE_DESCRIPTION,
+        project_type=kind,
+    )
+
+    for path in text_files(project):
+        text = path.read_text(encoding="utf-8")
+        name = path.relative_to(project).as_posix()
+        if path.suffix == ".py":
+            ast.parse(text, name)
+        elif path.suffix == ".xml":
+            ElementTree.fromstring(text.encode())
+        elif path.suffix == ".toml":
+            tomllib.loads(text)
+        elif path.suffix in (".yml", ".yaml"):
+            # Its syntax, with the tags of MkDocs, such as !!python/name, as they are.
+            list(yaml.compose_all(text, yaml.SafeLoader))
+        elif path.name in ("package.json", "manifest.json", "composer.json"):
+            json.loads(text)
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert settings["repository"]["description"] == HOSTILE_DESCRIPTION
+    if kind == "python-package":
+        module = project / "src/demo_quoted_tagged_user_project_of_paperless_documents"
+        docstring = ast.get_docstring(
+            ast.parse((module / "__init__.py").read_text(encoding="utf-8"))
+        )
+        assert docstring == f"{HOSTILE_NAME}: {HOSTILE_DESCRIPTION}"
+    if kind == "node-package":
+        source = (project / "src/index.ts").read_text(encoding="utf-8")
+        # The comment ends where the template ends it.
+        assert source.index("*/") > source.index("The starting point of the package")
+    if kind == "container":
+        dockerfile = (project / "Dockerfile").read_text(encoding="utf-8")
+        labels = dockerfile[dockerfile.index("LABEL org.opencontainers.image.title") :]
+        labels = labels[: labels.index("\n\n")]
+        # Docker takes each $ as it is, and no quote ends a value early.
+        assert (
+            "image.title=\"Demo 'Quoted' & <Tagged> \\$USER Project of Paperless"
+            ' Documents" \\\n'
+        ) in labels
+        assert (
+            "image.description=\"Reads \\$HOME & <tags> with 'single quotes',"
+            " `backticks`, {braces} and an ending 'quote'\" \\\n"
+        ) in labels
+        assert not re.search(r"(?<!\\)\$", labels)
+    if kind == "nextcloud-app":
+        info = ElementTree.parse(project / "appinfo/info.xml").getroot()
+        assert info.findtext("name") == HOSTILE_NAME
+        assert info.findtext("summary") == HOSTILE_DESCRIPTION
+        assert (info.findtext("description") or "").strip() == HOSTILE_DESCRIPTION
+        # The id of a long name, cut to the 32 characters that the App Store takes.
+        assert info.findtext("id") == "demo_quoted_tagged_user_project"
+        assert (
+            info.findtext("namespace")
+            == "DemoQuotedTaggedUserProjectOfPaperlessDocuments"
+        )
+        composer = json.loads((project / "composer.json").read_text(encoding="utf-8"))
+        assert composer["description"] == HOSTILE_DESCRIPTION
+    if kind == "home-assistant":
+        manifest = json.loads(
+            (
+                project
+                / "custom_components/demo_quoted_tagged_user_project_of_paperless_documents"
+                / "manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert manifest["name"] == HOSTILE_NAME
+
+
+# The topics of each kind of project, unless the answers name others; HACS lists an
+# integration only with topics.
+TOPICS = {
+    "home-assistant": [
+        "home-assistant",
+        "hacs",
+        "hacs-integration",
+        "home-assistant-integration",
+        "home-assistant-custom-component",
+        "homeassistant",
+    ],
+    "nextcloud-app": ["nextcloud", "nextcloud-app"],
+    "github-action": ["github-actions", "github-action"],
+    "python-package": ["python", "pypi"],
+    "node-package": ["typescript", "nodejs", "npm"],
+    "container": ["docker", "container", "ghcr"],
+    "generic": [],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_new_repository_links_its_website_and_has_the_topics_of_its_kind(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    website = "https://dennis-otto.github.io/demo-project/"
+
+    # The website that the Docs workflow publishes, which mkdocs.yml names.
+    config = (project / "mkdocs.yml").read_text(encoding="utf-8")
+    assert f"\nsite_url: {website}\n" in config
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert settings["repository"]["homepage"] == website
+    assert settings["repository"]["topics"] == TOPICS[kind]
+    readme = (project / "README.md").read_text(encoding="utf-8")
+    assert (
+        "[![Documentation](https://img.shields.io/badge/docs-website-526cfe"
+        f"?logo=materialformkdocs&logoColor=white)]({website})\n"
+    ) in readme
+    assert f"\nThe documentation is on the [website]({website}).\n" in readme
+    issues = (project / ".github/ISSUE_TEMPLATE/config.yml").read_text(encoding="utf-8")
+    assert f"    url: {website}\n" in issues
+    if kind == "home-assistant":
+        # HACS checks the description and the topics of the repository.
+        assert settings["repository"]["description"]
+        assert "hacs" in settings["repository"]["topics"]
+        manifest = json.loads(
+            (project / "custom_components/demo_project/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert manifest["documentation"] == website
+    if kind == "nextcloud-app":
+        info = ElementTree.parse(project / "appinfo/info.xml").getroot()
+        # In the order of the schema of the App Store.
+        assert [child.tag for child in info] == [
+            "id",
+            "name",
+            "summary",
+            "description",
+            "version",
+            "licence",
+            "author",
+            "namespace",
+            "documentation",
+            "category",
+            "website",
+            "discussion",
+            "bugs",
+            "repository",
+            "donation",
+            "dependencies",
+        ]
+        assert info.findtext("documentation/user") == website
+        assert info.findtext("website") == website
+        assert info.findtext("discussion") == (
+            "https://github.com/Dennis-Otto/demo-project/discussions"
+        )
+        donation = info.find("donation")
+        assert donation is not None
+        assert donation.attrib == {"type": "other", "title": "GitHub Sponsors"}
+        assert donation.text == "https://github.com/sponsors/Dennis-Otto"
+
+
+@pytest.mark.parametrize("homepage", ["", "http://demo.example/"])
+def test_an_app_without_a_website_discussions_and_a_sponsor_links_its_repository(
+    tmp_path: Path, homepage: str
+) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="An app on its own.",
+        project_type="nextcloud-app",
+        homepage=homepage,
+        discussions=False,
+        sponsor="",
+    )
+
+    # The App Store takes addresses of https only.
+    info = ElementTree.parse(project / "appinfo/info.xml").getroot()
+    repository = "https://github.com/Dennis-Otto/demo-project"
+    assert info.findtext("documentation/user") == f"{repository}#readme"
+    assert info.findtext("website") == repository
+    assert info.find("discussion") is None
+    assert info.find("donation") is None
+    readme = (project / "README.md").read_text(encoding="utf-8")
+    assert ("Documentation" in readme) == bool(homepage)
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert settings["repository"]["homepage"] == homepage
+
+
+def test_a_template_stops_when_the_text_that_it_replaces_is_gone(
+    tmp_path: Path,
+) -> None:
+    # The template of codeql.yml as Copier renders it, in the sandbox of Jinja with the
+    # delimiters and the filters of the blueprint, with the blueprint's files, but its
+    # workflow from tmp_path.
+    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    workflow = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+
+    def rendered(workflow: str) -> str:
+        (tmp_path / ".github/workflows/codeql.yml").write_text(
+            workflow, encoding="utf-8", newline="\n"
+        )
+        environment = SandboxedEnvironment(
+            loader=ChoiceLoader([FileSystemLoader(tmp_path), FileSystemLoader(ROOT)]),
+            extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"],
+            **questions["_envops"],
+        )
+        template = environment.get_template(
+            "template/.github/workflows/codeql.yml.jinja"
+        )
+        return template.render(codeql_languages="[go, actions]")
+
+    assert rendered(workflow) == workflow.replace(
+        "          # The languages of this repository; the blueprint sets them for each"
+        " kind of project.\n          languages: python, actions\n",
+        "          languages: go, actions\n",
+    )
+    # A reworded comment of the blueprint's workflow: the template would have left the
+    # blueprint's languages in every repository.
+    reworded = workflow.replace(
+        "# The languages of this repository;", "# The languages of the repository;"
+    )
+    assert reworded != workflow
+    message = (
+        ".github/workflows/codeql.yml no longer holds the text that its template"
+        " replaces"
+    )
+    with pytest.raises(FilterArgumentError, match=re.escape(message)):
+        rendered(reworded)
+
+
+def test_every_template_checks_the_texts_that_it_replaces_in_a_file_of_the_blueprint() -> (
+    None
+):
+    for path in (ROOT / "template").rglob("*.jinja"):
+        text = path.read_text(encoding="utf-8")
+        # A filter of an include replaced nothing when the text was gone.
+        assert not re.search(r"\[%-?\s*filter\s+replace\(", text), path
+        if "replaced(" in text:
+            assert (
+                '[%- from "includes/replace.jinja" import replaced with context -%]\n'
+                in text
+            ), path
+
+
 def test_the_owner_of_the_blueprint_keeps_the_answers_of_its_repositories(
     projects: Mapping[str, Path],
 ) -> None:
@@ -8001,13 +8422,7 @@ def test_one_job_runs_codeql_for_every_language(
         encoding="utf-8"
     )
     languages = re.findall(r"^          languages: (.+)$", codeql, re.M)
-    expected = {
-        "python-package": "python, actions",
-        "home-assistant": "python, actions",
-        "node-package": "javascript-typescript, actions",
-        "github-action": "python, actions",
-    }
-    assert languages == [expected.get(kind, "actions")]
+    assert languages == [CODEQL[kind]]
     assert "matrix" not in codeql
     assert re.findall(r"^  ([\w-]+):\n    name: (.+)$", codeql, re.M) == [
         ("codeql", "codeql")
@@ -11120,7 +11535,9 @@ def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
 
 
 # A file of the blueprint that a file of the template takes in.
-INCLUDE = re.compile(r"""\[%-?\s*include\s+["']([^"']+)["']""")
+# A file of the blueprint that a template includes, as it is or with the texts that
+# the macro replaced of includes/replace.jinja replaces.
+INCLUDE = re.compile(r"""(?:\[%-?\s*include\s+|replaced\()["']([^"']+)["']""")
 
 
 def test_the_downstream_workflow_updates_each_repository_read_only() -> None:

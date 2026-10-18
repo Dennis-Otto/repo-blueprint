@@ -1,1 +1,8 @@
-[% include "lychee.toml" -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+[%- set shields = "  '^https://img\.shields\.io/',\n" -%]
+[%- if homepage and homepage.startswith('https://' ~ (owner | lower) ~ '.github.io/') -%]
+[%- set own = shields ~ "  # The website of this repository, which the Docs workflow publishes only after a run\n  # on main, so the first push and the pull requests before it can't reach it yet: the\n  # check docs checks every page of it.\n  '^" ~ (homepage | regex_escape) ~ "',\n" -%]
+[%- else -%]
+[%- set own = shields -%]
+[%- endif -%]
+{= replaced("lychee.toml", [[shields, own]]) -=}

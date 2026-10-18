@@ -1,1 +1,3 @@
-[% set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" %][% filter replace(guard, "") %][% include ".github/workflows/register-app.yml" %][% endfilter -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+[%- set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" -%]
+{= replaced(".github/workflows/register-app.yml", [[guard, ""]]) -=}

@@ -7,7 +7,8 @@ name: Variants
 #
 # The same again for a repository of each kind that starts from the latest release
 # and that the blueprint bot brings to this commit with `copier update`: the update
-# must give every file of the blueprint as a new repository has it, without a
+# must give every file of the blueprint as a new repository with the same answers
+# has it (the update keeps the answers, also where a new default came), without a
 # conflict and without --trust, and the files of the project, which it keeps, must
 # still pass the checks of this commit.
 #
@@ -178,8 +179,20 @@ jobs:
           git -C "$PROJECT" add --all
           echo "The ${ANSWERS:-$KIND} from $latest, updated to ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
 
-          # A new repository from this commit, whose files the update must give.
-          copier copy --defaults --vcs-ref "$commit" "${data[@]}" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/new"
+          # A new repository from this commit with the answers that the update kept, whose
+          # files the update must give. With the answers, not with the new defaults: an
+          # update keeps an answer of the repository when a later release changes its default.
+          python3 - "$PROJECT/.copier-answers.yml" "$RUNNER_TEMP/kept.yml" <<'PYTHON'
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          answers = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          kept = {key: value for key, value in answers.items() if not key.startswith("_")}
+          Path(sys.argv[2]).write_text(yaml.safe_dump(kept, allow_unicode=True), encoding="utf-8")
+          PYTHON
+          copier copy --defaults --vcs-ref "$commit" --data-file "$RUNNER_TEMP/kept.yml"             "$GITHUB_WORKSPACE" "$RUNNER_TEMP/new"
           python3 - "$PROJECT" "$RUNNER_TEMP/new" <<'PYTHON'
           import difflib
           import os

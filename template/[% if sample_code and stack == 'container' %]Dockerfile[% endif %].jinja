@@ -7,8 +7,10 @@
 # x-release-please-start-version
 LABEL org.opencontainers.image.version="0.0.0"
 # x-release-please-end
-LABEL org.opencontainers.image.title="{= project_name | replace('"', "'") =}" \
-      org.opencontainers.image.description="{= description | replace('"', "'") =}" \
+[#- Docker expands a variable such as $HOME in a value in quotes, unless a backslash
+    escapes its $. #]
+LABEL org.opencontainers.image.title="{= project_name | replace('"', "'") | replace('$', '\\$') =}" \
+      org.opencontainers.image.description="{= description | replace('"', "'") | replace('$', '\\$') =}" \
       org.opencontainers.image.source="https://github.com/{= owner =}/{= project_slug =}" \
       org.opencontainers.image.licenses="{= license =}"
 

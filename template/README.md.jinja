@@ -8,11 +8,18 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/{= repo =}/badge)](https://scorecard.dev/viewer/?uri=github.com/{= repo =})
 [![REUSE](https://api.reuse.software/badge/github.com/{= repo =})](https://api.reuse.software/info/github.com/{= repo =})
 [![License: {= license =}](https://img.shields.io/badge/license-{= license | replace('-', '--') =}-blue)]({= base =}LICENSE)
+[%- if homepage %]
+[![Documentation](https://img.shields.io/badge/docs-website-526cfe?logo=materialformkdocs&logoColor=white)]({= homepage =})
+[%- endif %]
 [%- if sponsor %]
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/{= sponsor =})
 [%- endif %]
 
 {= description =}
+[%- if homepage %]
+
+The documentation is on the [website]({= homepage =}).
+[%- endif %]
 [%- if sponsor %]
 
 <sub>💛 If {= project_name =} is useful to you, you can [support its development](https://github.com/sponsors/{= sponsor =}).</sub>

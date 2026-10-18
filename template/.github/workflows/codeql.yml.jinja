@@ -1,1 +1,3 @@
-[% set languages = "          # The languages of this repository; the blueprint sets them for each kind of project.\n          languages: python, actions\n" %][% filter replace(languages, "          languages: " ~ codeql_languages[1:-1] ~ "\n") %][% include ".github/workflows/codeql.yml" %][% endfilter -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+[%- set languages = "          # The languages of this repository; the blueprint sets them for each kind of project.\n          languages: python, actions\n" -%]
+{= replaced(".github/workflows/codeql.yml", [[languages, "          languages: " ~ codeql_languages[1:-1] ~ "\n"]]) -=}

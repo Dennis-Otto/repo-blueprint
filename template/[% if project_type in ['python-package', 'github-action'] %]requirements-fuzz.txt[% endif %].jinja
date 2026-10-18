@@ -1,1 +1,2 @@
-[% filter replace('--output-file=requirements.txt', '--output-file=requirements-fuzz.txt') | replace('--strip-extras requirements.in', '--strip-extras requirements-fuzz.in') %][% include "stacks/fuzz/requirements.txt" %][% endfilter -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+{= replaced("stacks/fuzz/requirements.txt", [["--output-file=requirements.txt", "--output-file=requirements-fuzz.txt"], ["--strip-extras requirements.in", "--strip-extras requirements-fuzz.in"]]) -=}
