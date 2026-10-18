@@ -1,5 +1,11 @@
 name: CodeQL
 
+# The code analysis of GitHub. CodeQL reads the code of every language of this
+# repository and its workflows with the queries of security-extended, for every pull
+# request, every push to main and every week, and sends what it finds to code
+# scanning, where a new alert of a pull request stops its merge.
+# https://github.com/Dennis-Otto/repo-blueprint
+
 on:
   push:
     branches: [main]

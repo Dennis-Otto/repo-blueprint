@@ -50,4 +50,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0042](0042-each-language-of-a-website-searches-and-describes-itself.md) | Each language of a website searches and describes itself | accepted |
 | [0043](0043-a-node-package-lints-with-biome-and-installs-without-scripts.md) | A Node package lints and formats with Biome, reports its coverage as LCOV and installs without the scripts of its packages | accepted |
 | [0044](0044-the-built-website-is-checked-and-every-deployment-is-signed.md) | The built website is checked, and every deployment is signed and asked for its pages | accepted |
-| [0045](0045-every-repository-proposes-the-best-practices-answers-that-the-blueprint-guarantees.md) | Every repository proposes the answers of OpenSSF Best Practices that the blueprint guarantees | accepted |
+| [0045](0045-every-website-shows-its-automation-written-from-its-workflows.md) | Every website shows its automation, written from its workflows at every build | accepted |
+| [0046](0046-every-repository-proposes-the-best-practices-answers-that-the-blueprint-guarantees.md) | Every repository proposes the answers of OpenSSF Best Practices that the blueprint guarantees | accepted |

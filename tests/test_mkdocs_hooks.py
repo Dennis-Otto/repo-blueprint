@@ -190,7 +190,10 @@ def downloading(monkeypatch: pytest.MonkeyPatch, network: Network) -> Any:
     privacy = plugin(monkeypatch, "privacy", network)
     hooks().on_config(
         SimpleNamespace(
-            plugins={"material/privacy": privacy}, extra_css=[], extra_javascript=[]
+            plugins={"material/privacy": privacy},
+            extra_css=[],
+            extra_javascript=[],
+            nav=None,
         )
     )
     return requests_of(privacy)
@@ -261,6 +264,7 @@ def test_both_plugins_that_download_try_again_and_nothing_else_changes(
         },
         extra_css=[],
         extra_javascript=[],
+        nav=None,
     )
 
     module.on_config(config)
@@ -357,7 +361,10 @@ def test_every_page_gets_the_stylesheet_and_the_script_before_the_project_s() ->
     module = hooks()
     project = Script("javascripts/extra.js")
     config = SimpleNamespace(
-        plugins={}, extra_css=["stylesheets/extra.css"], extra_javascript=[project]
+        plugins={},
+        extra_css=["stylesheets/extra.css"],
+        extra_javascript=[project],
+        nav=None,
     )
 
     module.on_config(config)
@@ -399,6 +406,7 @@ def theme(tmp_path: Path, script: str) -> File:
 
 def build(tmp_path: Path, *files: File) -> list[File]:
     config = SimpleNamespace(
+        config_file_path=str(tmp_path / "mkdocs.yml"),
         docs_dir=str(tmp_path / "docs"),
         site_dir=str(tmp_path / "site"),
         use_directory_urls=False,
@@ -964,7 +972,9 @@ def test_the_switch_of_the_scheme_speaks_the_language_of_the_page() -> None:
 
     def build(language: str, theme: dict[str, Any]) -> None:
         module.on_config(
-            bilingual(language, theme=theme, extra_css=[], extra_javascript=[])
+            bilingual(
+                language, theme=theme, extra_css=[], extra_javascript=[], nav=None
+            )
         )
 
     build("de", {"palette": palette})
@@ -1447,3 +1457,718 @@ def test_the_i18n_plugin_keeps_every_entry_of_the_search() -> None:
     # out of the index and left their sections under .../undefined.
     assert "\n  i18n:\n    enabled: false\n    docs_structure: suffix\n" in settings
     assert "\n    reconfigure_search: false\n" in settings
+
+
+# ---------------------------------------------------------- the page of the automation
+
+BLUEPRINT = "https://github.com/Dennis-Otto/repo-blueprint"
+WORKFLOWS = {
+    "ci.yml": f"""name: CI
+
+# The checks of every change, as scripts/check.sh runs them.
+# {BLUEPRINT}
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: check (python)
+    runs-on: ubuntu-24.04
+""",
+    "release.yml": """# SPDX-FileCopyrightText: 2026 Dennis Otto
+# SPDX-License-Identifier: MIT
+
+name: Release
+
+# The release bot: `release-please` keeps a pull request for the next release,
+# as the docs say (https://example.org/docs).
+#
+# ```mermaid at the start of a line, <b>bold</b> & co
+# stay text.
+
+on:
+  push:
+    branches: [main]
+    paths: ["src/**"]
+  schedule:
+    - cron: "25 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  release-please:
+    name: release pull request
+    environment:
+      name: release
+      deployment: false
+    steps:
+      - env:
+          KEY: ${{ secrets.RELEASE_APP_KEY }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  pypi:
+    name: deliver to PyPI
+    needs: release-please
+    environment: pypi
+""",
+    "after-checks.yml": """name: After the checks
+
+# The bots that act on the end of a run.
+
+on:
+  workflow_run:
+    workflows: [CI, Release, Gone]
+    types: [completed]
+
+jobs:
+  rerun:
+    runs-on: ubuntu-24.04
+""",
+    "rollout.yml": """name: Rollout
+
+# Only in the blueprint.
+
+on: workflow_dispatch
+
+jobs:
+  plan:
+    if: github.repository != 'Owner/Demo'
+  rollout:
+    needs: [plan]
+  report:
+    needs: rollout
+""",
+    "nightly.yaml": """name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * 1-5"
+    - cron: "0 3 * * 1-5"
+
+jobs:
+  sweep:
+    if: ${{ github.repository != 'Someone/Else' }}
+""",
+    "greet.yml": """on: [issues, issue_comment, discussion]
+jobs:
+  hello:
+    runs-on: ubuntu-24.04
+""",
+    "security.yml": """name: Security
+on:
+  pull_request_target:
+  pull_request:
+    paths-ignore: ["docs/**"]
+jobs: {}
+""",
+    "broken.yml": "name: [unclosed\n",
+}
+
+
+def repository(root: Path, *, settings: bool = True) -> Path:
+    """A repository with the workflows of WORKFLOWS and the required checks of its
+    settings as code, both files of them."""
+    folder = root / ".github/workflows"
+    folder.mkdir(parents=True)
+    for name, text in WORKFLOWS.items():
+        (folder / name).write_text(text, encoding="utf-8")
+    (root / "docs").mkdir()
+    if settings:
+        (root / ".github/repository.toml").write_text(
+            '[branch]\nrequired_checks = ["check (python)", "conventional title"]\n',
+            encoding="utf-8",
+        )
+        (root / ".github/repository.project.toml").write_text(
+            '[branch]\nrequired_checks = ["release pull request", "check (python)"]\n',
+            encoding="utf-8",
+        )
+    return folder
+
+
+def website(root: Path, *locales: str, **more: Any) -> Any:
+    """The parts of the configuration of the website of the repository at root that
+    the page of the automation reads, in the languages locales, the first the
+    default one, or in one language."""
+    plugins: dict[str, Any] = {}
+    if locales:
+        plugins["i18n"] = SimpleNamespace(
+            config=SimpleNamespace(
+                languages=[
+                    SimpleNamespace(locale=locale, default=not index, build=True)
+                    for index, locale in enumerate(locales)
+                ]
+            ),
+            current_language=locales[0],
+        )
+    return SimpleNamespace(
+        **{
+            "config_file_path": str(root / "mkdocs.yml"),
+            "docs_dir": str(root / "docs"),
+            "site_dir": str(root / "site"),
+            "use_directory_urls": False,
+            "site_name": 'Demo "Project"',
+            "repo_url": "https://github.com/owner/demo/",
+            "edit_uri": None,
+            "theme": {"language": "en"},
+            "plugins": plugins,
+            **more,
+        }
+    )
+
+
+def automation(tmp_path: Path, *locales: str, **more: Any) -> dict[str, str]:
+    """The pages of the automation that the hooks write for the repository of
+    WORKFLOWS, by their paths in docs/."""
+    folder = repository(tmp_path)
+    pages: dict[str, str] = hooks().automation_pages(
+        folder, website(tmp_path, *locales, **more)
+    )
+    return pages
+
+
+def test_the_automation_page_shows_every_workflow_with_its_comment(
+    tmp_path: Path,
+) -> None:
+    page = automation(tmp_path)["automation.md"]
+
+    assert page.startswith(
+        "---\n"
+        'description: "How Demo \\"Project\\" looks after itself: its 7 workflows'
+        " of GitHub Actions, what starts each one, which checks a pull request needs"
+        ' and which workflows hold secrets."\n'
+        "---\n\n# Automation\n\nHow this repository looks after itself: its 7"
+        " workflows of GitHub Actions"
+    )
+    # Every workflow that runs here, in its group and by the name of its file; the
+    # rollout runs elsewhere alone, and its other jobs wait for that one.
+    headings = re.findall(r"^#{2,3} .*$", page, re.M)
+    assert headings == [
+        "## What a pull request needs {#required-checks}",
+        "## At a glance {#at-a-glance}",
+        "## Checks {#checks}",
+        "### CI {#ci}",
+        "## Releases {#releases}",
+        "### Release {#release}",
+        "## Bots {#bots}",
+        "### After the checks {#after-checks}",
+        "### broken {#broken}",
+        "### greet {#greet}",
+        "## Security {#security}",
+        "### Security {#security-workflow}",
+        "## Maintenance {#maintenance}",
+        "### Nightly {#nightly}",
+    ]
+    # The comment at the top, without the lines of the license; code and addresses
+    # as such, and nothing of it as Markdown or HTML.
+    assert (
+        "<p>The release bot: <code>release-please</code> keeps a pull request for the"
+        " next release, as the docs say"
+        ' (<a href="https://example.org/docs">https://example.org/docs</a>).</p>\n\n'
+        "<p>```mermaid at the start of a line, &lt;b&gt;bold&lt;/b&gt; &amp; co stay"
+        " text.</p>\n"
+    ) in page
+    assert "SPDX" not in page
+    # The address of the blueprint names where a workflow comes from.
+    assert "<p>The checks of every change, as scripts/check.sh runs them.</p>\n" in page
+    assert (
+        "- **Source:** [`.github/workflows/ci.yml`]"
+        "(https://github.com/owner/demo/blob/HEAD/.github/workflows/ci.yml),"
+        f" from the [Repo Blueprint]({BLUEPRINT})\n"
+    ) in page
+    assert (
+        "- **Source:** [`.github/workflows/release.yml`]"
+        "(https://github.com/owner/demo/blob/HEAD/.github/workflows/release.yml)\n"
+    ) in page
+    assert "Rollout" not in page
+
+
+def test_the_automation_page_says_what_starts_each_workflow(tmp_path: Path) -> None:
+    page = automation(tmp_path)["automation.md"]
+
+    assert (
+        "- **When:** every push to <code>main</code> that changes certain files,"
+        " every day at 05:25 UTC, by hand\n"
+    ) in page
+    assert (
+        "- **When:** after a run of [CI](#ci), [Release](#release) or Gone\n"
+    ) in page
+    # Two schedules alike are one.
+    assert (
+        "- **When:** every Monday, Tuesday, Wednesday, Thursday and Friday at"
+        " 03:00 UTC\n"
+    ) in page
+    assert "- **When:** new and changed issues, comments, the event" in page
+    assert "<code>discussion</code>\n" in page
+    # A pull request with the workflow of main is a pull request as well.
+    assert "- **When:** every pull request, every pull request that changes" in page
+    # The table at a glance counts the workflows after whose run one runs.
+    assert "| [After the checks](#after-checks) | after 3 workflows |\n" in page
+    assert (
+        "| [CI](#ci) | every push to <code>main</code>, every pull request, by hand |\n"
+    ) in page
+    assert "| [broken](#broken) |  |\n" in page
+
+
+def test_the_automation_page_names_the_checks_that_main_requires(
+    tmp_path: Path,
+) -> None:
+    page = automation(tmp_path)["automation.md"]
+
+    # Of both files of the settings, each check once.
+    assert (
+        "\n- <code>check (python)</code> of [CI](#ci)\n"
+        "- <code>conventional title</code>\n"
+        "- <code>release pull request</code> of [Release](#release)\n\n"
+    ) in page
+    assert "- **Required checks:** <code>check (python)</code>\n" in page
+    assert "- **Required checks:** <code>release pull request</code>\n" in page
+    assert "- **Environments:** <code>pypi</code>, <code>release</code>\n" in page
+    assert "- **Secrets:** <code>RELEASE_APP_KEY</code>\n" in page
+    assert "GITHUB_TOKEN" not in page
+
+
+def test_the_automation_page_without_settings_or_an_address(tmp_path: Path) -> None:
+    folder = repository(tmp_path, settings=False)
+    module = hooks()
+
+    page = module.automation_pages(folder, website(tmp_path, repo_url=None))[
+        "automation.md"
+    ]
+
+    assert "{#required-checks}" not in page
+    assert "Required checks" not in page
+    assert "- **Source:** `.github/workflows/release.yml`\n" in page
+    assert module.BUILT.sources == [folder]
+
+
+def test_the_automation_page_speaks_the_languages_of_the_website(
+    tmp_path: Path,
+) -> None:
+    pages = automation(tmp_path, "en", "de", "fr")
+
+    # German has words of its own; French shows the English page.
+    assert sorted(pages) == ["automation.de.md", "automation.md"]
+    german = pages["automation.de.md"]
+    assert "\n# Automatisierung\n" in german
+    assert "## Was ein Pull Request braucht {#required-checks}" in german
+    assert "- <code>check (python)</code> aus [CI](#ci)\n" in german
+    assert (
+        "- **Wann:** jeder Push auf <code>main</code>, der bestimmte Dateien ändert,"
+        " jeden Tag um 05:25 UTC, von Hand\n"
+    ) in german
+    assert "aus dem [Repo Blueprint]" in german
+    # The comments of the workflows are English, and say so to a screen reader.
+    assert '<p lang="en">The release bot: ' in german
+    assert "## Prüfungen {#checks}" in german
+
+
+def test_a_page_of_the_project_takes_the_place_of_a_language(tmp_path: Path) -> None:
+    folder = repository(tmp_path)
+    (tmp_path / "docs/automation.de.md").write_text("# Eigene\n", encoding="utf-8")
+
+    pages = hooks().automation_pages(folder, website(tmp_path, "en", "de"))
+
+    assert sorted(pages) == ["automation.md"]
+
+
+@pytest.mark.parametrize(
+    ("language", "title"), [("de", "Automatisierung"), ("fr", "Automation")]
+)
+def test_the_page_of_a_website_in_one_language_speaks_it(
+    tmp_path: Path, language: str, title: str
+) -> None:
+    pages = automation(tmp_path, theme={"language": language})
+
+    assert list(pages) == ["automation.md"]
+    assert f"\n# {title}\n" in pages["automation.md"]
+
+
+def test_a_german_website_writes_the_default_page_in_german(tmp_path: Path) -> None:
+    pages = automation(tmp_path, "de", "en")
+
+    assert list(pages) == ["automation.md", "automation.en.md"]
+    assert "\n# Automatisierung\n" in pages["automation.md"]
+    assert "\n# Automation\n" in pages["automation.en.md"]
+
+
+def test_the_blueprint_s_own_page_names_no_origin(tmp_path: Path) -> None:
+    page = automation(tmp_path, repo_url=BLUEPRINT)["automation.md"]
+
+    assert (
+        f"- **Source:** [`.github/workflows/ci.yml`]({BLUEPRINT}/blob/HEAD/"
+        ".github/workflows/ci.yml)\n"
+    ) in page
+    assert "from the [Repo Blueprint]" not in page
+
+
+def test_a_profile_address_takes_the_repository_from_edit_uri(
+    tmp_path: Path,
+) -> None:
+    site = "https://github.com/Dennis-Otto/dennis-otto.github.io"
+    page = automation(
+        tmp_path,
+        repo_url="https://github.com/Dennis-Otto",
+        edit_uri=f"{site}/edit/main/docs/",
+    )["automation.md"]
+
+    assert (
+        f"- **Source:** [`.github/workflows/ci.yml`]({site}/blob/HEAD/"
+        ".github/workflows/ci.yml), from the [Repo Blueprint]"
+    ) in page
+    assert "https://github.com/Dennis-Otto/blob/" not in page
+
+
+@pytest.mark.parametrize(
+    ("repo_url", "edit_uri"),
+    [
+        ("https://github.com/Dennis-Otto", "edit/main/docs/"),
+        ("https://github.com/Dennis-Otto", None),
+        ("https://github.com/Dennis-Otto", "https://github.com/Dennis-Otto/"),
+        (None, None),
+    ],
+)
+def test_without_the_address_of_a_repository_sources_are_plain(
+    tmp_path: Path, repo_url: str | None, edit_uri: str | None
+) -> None:
+    page = automation(tmp_path, repo_url=repo_url, edit_uri=edit_uri)["automation.md"]
+
+    assert "- **Source:** `.github/workflows/ci.yml`" in page
+    assert "/blob/HEAD/" not in page
+
+
+def test_the_required_checks_name_each_file_of_settings(tmp_path: Path) -> None:
+    pages = automation(tmp_path, "en", "de")
+
+    assert (
+        "the settings in `.github/repository.toml` and "
+        "`.github/repository.project.toml` require:"
+    ) in pages["automation.md"]
+    assert (
+        "die Einstellungen in `.github/repository.toml` und "
+        "`.github/repository.project.toml` verlangen:"
+    ) in pages["automation.de.md"]
+
+
+@pytest.mark.parametrize(
+    ("expression", "english", "german"),
+    [
+        ("25 * * * *", "every hour at :25", "jede Stunde um :25"),
+        ("5 */2 * * *", "every 2 hours at :05", "alle 2 Stunden um :05"),
+        ("40 4 * * *", "every day at 04:40 UTC", "jeden Tag um 04:40 UTC"),
+        ("40 4 * * 2", "every Tuesday at 04:40 UTC", "jeden Dienstag um 04:40 UTC"),
+        (
+            "0 6 * * 0,7",
+            "every Sunday and Sunday at 06:00 UTC",
+            "jeden Sonntag und Sonntag um 06:00 UTC",
+        ),
+        (
+            "0 6 * * 1,3-4",
+            "every Monday, Wednesday and Thursday at 06:00 UTC",
+            "jeden Montag, Mittwoch und Donnerstag um 06:00 UTC",
+        ),
+        (
+            "15 1 1 * *",
+            "on day 1 of every month at 01:15 UTC",
+            "am 1. jedes Monats um 01:15 UTC",
+        ),
+        # What says more, or otherwise, stays as it is.
+        (
+            "0 6 * * MON",
+            "on the schedule <code>0 6 * * MON</code>",
+            "nach dem Zeitplan <code>0 6 * * MON</code>",
+        ),
+        ("0 6 * * 5-1", "on the schedule <code>0 6 * * 5-1</code>", ""),
+        ("0 6 * * 1-2-3", "on the schedule <code>0 6 * * 1-2-3</code>", ""),
+        ("0 6 * * 8", "on the schedule <code>0 6 * * 8</code>", ""),
+        ("0 6 1 * 1", "on the schedule <code>0 6 1 * 1</code>", ""),
+        ("0 6 * 1 *", "on the schedule <code>0 6 * 1 *</code>", ""),
+        ("0 6,18 * * *", "on the schedule <code>0 6,18 * * *</code>", ""),
+        ("0 */2 1 * *", "on the schedule <code>0 */2 1 * *</code>", ""),
+        ("*/5 * * * *", "on the schedule <code>*/5 * * * *</code>", ""),
+        ("@daily", "on the schedule <code>@daily</code>", ""),
+    ],
+)
+def test_a_schedule_reads_as_words(expression: str, english: str, german: str) -> None:
+    module = hooks()
+
+    assert module.cron(expression, "en") == english
+    if german:
+        assert module.cron(expression, "de") == german
+
+
+@pytest.mark.parametrize(
+    ("file", "events", "group"),
+    [
+        ("ci-python.yml", {}, "checks"),
+        ("pull-request-title.yml", {}, "checks"),
+        ("e2e.yml", {}, "checks"),
+        ("build-release.yml", {}, "releases"),
+        ("verify-release.yml", {}, "releases"),
+        ("dependency-review.yml", {}, "security"),
+        ("dependabot-automerge.yml", {}, "bots"),
+        ("blueprint-update.yml", {}, "bots"),
+        ("docs-pictures.yml", {}, "bots"),
+        ("area-labels.yml", {}, "bots"),
+        ("labels.yml", {}, "maintenance"),
+        ("bot-health.yml", {}, "maintenance"),
+        # A workflow of a project, by what starts it.
+        ("translate.yml", {"pull_request": None}, "checks"),
+        ("nightly.yml", {"schedule": []}, "maintenance"),
+        ("greet.yml", {"issues": None}, "bots"),
+    ],
+)
+def test_each_workflow_has_its_group(
+    file: str, events: dict[str, Any], group: str
+) -> None:
+    workflow = hooks().Workflow(file, "A workflow", (), events, (), (), ())
+
+    assert workflow.group == group
+
+
+def test_a_workflow_without_a_name_of_letters_has_an_anchor_still() -> None:
+    workflow = hooks().Workflow("---.yml", "Dashes", (), {}, (), (), ())
+
+    assert workflow.anchor == "-workflow"
+
+
+def test_the_events_of_a_workflow_read_as_words() -> None:
+    module = hooks()
+    events = {
+        "push": {"tags": ["v*"]},
+        "schedule": "not a list",
+        "workflow_run": {"types": ["completed"]},
+        "workflow_call": None,
+        "merge_group": None,
+        "release": {"types": ["published"]},
+    }
+
+    workflow = module.Workflow("x.yml", "X", (), events, (), (), ())
+
+    assert workflow.when("en", {}) == [
+        "every new tag",
+        "the event <code>workflow_run</code>",
+        "when another workflow calls it",
+        "the merge queue",
+        "a release",
+    ]
+    assert module.Workflow("x.yml", "X", (), {"push": None}, (), (), ()).when(
+        "de", {}
+    ) == ["jeder Push"]
+    after = module.Workflow(
+        "x.yml", "X", (), {"workflow_run": {"workflows": ["CI"]}}, (), (), ()
+    )
+    assert after.when("en", {}, brief=True) == ["after a run of CI"]
+
+
+def test_the_menu_gets_the_page_after_the_security_design(tmp_path: Path) -> None:
+    repository(tmp_path)
+    module = hooks()
+
+    def menu(nav: Any) -> Any:
+        config = website(tmp_path, nav=nav, extra_css=[], extra_javascript=[])
+        module.on_config(config)
+        return config.nav
+
+    assert menu([{"Home": "index.md"}, {"Security design": "security.md"}, "x.md"]) == [
+        {"Home": "index.md"},
+        {"Security design": "security.md"},
+        "automation.md",
+        "x.md",
+    ]
+    assert menu(
+        [
+            {"Home": "index.md"},
+            {"Guide": [{"Overview": "guide.md"}, "faq.md"]},
+            {"Project": ["roadmap.md", "security.md", "changelog.md"]},
+        ]
+    ) == [
+        {"Home": "index.md"},
+        {"Guide": [{"Overview": "guide.md"}, "faq.md"]},
+        {"Project": ["roadmap.md", "security.md", "automation.md", "changelog.md"]},
+    ]
+    # Without a security design, at the end; a menu that names it keeps it where it
+    # is, and a website without a menu lists every page.
+    assert menu(["index.md"]) == ["index.md", "automation.md"]
+    assert menu([{"Bots": [{"Automation": "automation.md"}]}, "security.md"]) == [
+        {"Bots": [{"Automation": "automation.md"}]},
+        "security.md",
+    ]
+    assert menu(None) is None
+
+
+def test_a_page_of_the_project_or_no_workflows_leave_the_menu_alone(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    nav = ["index.md", "security.md"]
+    config = website(tmp_path, nav=nav, extra_css=[], extra_javascript=[])
+    (tmp_path / "docs").mkdir()
+
+    module.on_config(config)
+    assert nav == ["index.md", "security.md"]
+
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    (tmp_path / ".github/workflows/ci.yml").write_text("name: CI\n", encoding="utf-8")
+    (tmp_path / "docs/automation.md").write_text("# Ours\n", encoding="utf-8")
+    module.on_config(config)
+    assert nav == ["index.md", "security.md"]
+
+
+class Generated(File):
+    """A file of MkDocs, which takes its text in place of the file in docs/, and the
+    page that MkDocs makes of it."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.generated_by: str | None = None
+        self.page: Any = SimpleNamespace(edit_url="edit/main/docs/" + self.src_uri)
+
+    @property
+    def content_string(self) -> str:
+        raise AssertionError("read only by MkDocs")
+
+    @content_string.setter
+    def content_string(self, text: str) -> None:
+        self.text = text
+        self.abs_src_path = None
+
+
+def test_the_website_gets_the_page_of_the_automation_in_each_language(
+    tmp_path: Path,
+) -> None:
+    repository(tmp_path)
+    module = hooks()
+    config = website(tmp_path, "en", "de")
+    stylesheet = Generated("extra.css", str(tmp_path / "docs"), config.site_dir, False)
+
+    files = module.on_files([stylesheet], config)
+
+    # Files of docs/ that the folder lacks, which the i18n plugin takes as pages.
+    pages = [file for file in files if file.src_uri.startswith("automation")]
+    assert [file.src_uri for file in pages] == ["automation.md", "automation.de.md"]
+    assert pages[0].abs_src_path == str(tmp_path / "docs/automation.md")
+    # After the i18n plugin, each gets its text, no pencil and no date of its own.
+    pages[1].page = None
+    assert module.on_nav("the menu", config, files) == "the menu"
+    assert pages[0].text == module.BUILT.pages["automation.md"]
+    assert "\n# Automatisierung\n" in pages[1].text
+    assert pages[0].abs_src_path is None
+    assert pages[0].generated_by == module.__name__
+    assert pages[0].page.edit_url is None
+    assert stylesheet.page.edit_url == "edit/main/docs/extra.css"
+    assert stylesheet.generated_by is None
+
+
+def test_a_website_without_workflows_gets_no_page_of_them(tmp_path: Path) -> None:
+    module = hooks()
+    module.BUILT.pages = {"automation.md": "# Stale"}
+    (tmp_path / "docs").mkdir()
+    config = website(tmp_path)
+    index = Generated("index.md", config.docs_dir, config.site_dir, False)
+
+    files = module.on_files([index], config)
+
+    assert [file.dest_uri for file in files] == [
+        "index.md",
+        "assets/stylesheets/blueprint.css",
+        "assets/javascripts/blueprint.js",
+    ]
+    assert module.BUILT.pages == {}
+
+
+def test_the_page_of_the_automation_is_dated_by_its_workflows(
+    tmp_path: Path,
+) -> None:
+    folder = repository(tmp_path)
+    module = hooks()
+    plugin = Dates(
+        {"workflows": 300, "repository.toml": 400, "repository.project.toml": 200}
+    )
+    settings = website(tmp_path, "en", "de", mdx_configs={})
+    settings.plugins["git-revision-date-localized"] = plugin
+    module.BUILT.pages = module.automation_pages(folder, settings)
+    page = page_of("automation.html")
+    page.file.abs_src_path = None
+    page.meta["git_revision_date_localized"] = "the date of the build"
+
+    module.redate("# Automation", page, settings)
+
+    assert plugin.rendered == [
+        ("en", "git_revision_date_localized", "hash of repository.toml", 400)
+    ]
+
+
+def test_a_page_of_another_plugin_keeps_the_date_of_the_build(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    plugin = Dates({})
+    settings = bilingual(
+        "de", config_file_path=str(tmp_path / "mkdocs.yml"), mdx_configs={}
+    )
+    settings.plugins["git-revision-date-localized"] = plugin
+    # A page that another plugin writes, which German shows untranslated.
+    page = page_of("de/generated.html")
+    page.file.abs_src_path = None
+    page.meta["git_revision_date_localized"] = "the date of the build"
+
+    module.redate("# Generated", page, settings)
+
+    assert plugin.rendered == []
+
+
+@pytest.mark.parametrize(("language", "suffix"), [("en", ""), ("de", ".de")])
+def test_the_automation_page_draws_the_diagrams_of_the_readme(
+    language: str, suffix: str
+) -> None:
+    overview, release = hooks().DIAGRAMS[language]
+    sources = ROOT / "docs/diagrams"
+
+    assert overview == (
+        sources / f"how-a-repository-looks-after-itself{suffix}.mmd"
+    ).read_text(encoding="utf-8")
+    assert release == (sources / f"from-a-change-to-a-release{suffix}.mmd").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_the_page_of_the_automation_draws_its_diagrams_live(tmp_path: Path) -> None:
+    page = automation(tmp_path)["automation.md"]
+    overview, release = hooks().DIAGRAMS["en"]
+
+    assert f"\n```mermaid\n{overview}```\n" in page
+    assert "## Releases {#releases}\n\nThey make a signed release" in page
+    assert f"\n```mermaid\n{release}```\n\n### Release {{#release}}\n" in page
+
+
+def test_the_blueprint_and_every_repository_list_the_page_in_the_menu() -> None:
+    # The blueprint names it and translates the name; the template lists the page
+    # alone, so that each language shows the title of its page.
+    for path, entry in (
+        ("mkdocs.yml", "Automation: automation.md"),
+        ("template/mkdocs.yml.jinja", "automation.md"),
+    ):
+        config = (ROOT / path).read_text(encoding="utf-8")
+        assert f"\n  - Security design: security.md\n  - {entry}\n" in config, path
+    assert "\n          Automation: Automatisierung\n" in (
+        ROOT / "mkdocs.yml"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_group_without_workflows_has_no_heading(tmp_path: Path) -> None:
+    folder = tmp_path / ".github/workflows"
+    folder.mkdir(parents=True)
+    (tmp_path / "docs").mkdir()
+    # A file of comments alone, which is no workflow yet.
+    (folder / "draft.yml").write_text("# A draft,\n# of a bot.\n", encoding="utf-8")
+
+    page = hooks().automation_pages(folder, website(tmp_path))["automation.md"]
+
+    assert re.findall(r"^#{2,3} .*$", page, re.M) == [
+        "## At a glance {#at-a-glance}",
+        "## Bots {#bots}",
+        "### draft {#draft}",
+    ]
+    assert "\n<p>A draft, of a bot.</p>\n" in page

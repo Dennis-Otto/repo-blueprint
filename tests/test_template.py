@@ -9,6 +9,7 @@ import contextlib
 import datetime
 import fnmatch
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -25,6 +26,7 @@ import warnings
 import zipfile
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, NamedTuple
 from unittest import mock
 from xml.etree import ElementTree
@@ -32,6 +34,7 @@ from xml.etree import ElementTree
 import pathspec
 import pytest
 import workflow_steps
+import yaml
 from copier import _main as copier_main
 from copier import run_copy
 from mypy import api as mypy_api
@@ -9469,6 +9472,64 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         for target in re.findall(r"\]\(([^)\s#]+)", text):
             if "://" not in target:
                 assert (page.parent / target).resolve().is_relative_to(pages), target
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_shows_the_automation_of_its_repository(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    spec = importlib.util.spec_from_file_location(
+        f"hooks_of_{kind.replace('-', '_')}", project / ".github/mkdocs_blueprint.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    address = "https://github.com/Dennis-Otto/demo-project"
+    config = SimpleNamespace(
+        config_file_path=str(project / "mkdocs.yml"),
+        docs_dir=str(project / "docs"),
+        site_name="Demo Project",
+        repo_url=address,
+        edit_uri=None,
+        theme={"language": "en"},
+        plugins={},
+    )
+
+    folder = hooks.automated(config)
+    assert folder == project / ".github/workflows"
+    page = hooks.automation_pages(folder, config)["automation.md"]
+
+    # Every workflow, with the comment at its top, where it comes from and what
+    # starts it: a repository runs each one of them.
+    files = sorted(folder.glob("*.yml"))
+    assert f"its {len(files)} workflows of GitHub Actions" in page
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text)
+        anchor = re.sub(r"[^a-z0-9]+", "-", path.stem.lower())
+        assert f"[{data['name']}](#{anchor}) | " in page, path.name
+        first = re.search(r"^# (.+)$", text, re.M)
+        assert first is not None, path.name
+        assert first[1].split("`")[0].replace("&", "&amp;") in page, path.name
+        source = f"{address}/blob/HEAD/.github/workflows/{path.name}"
+        assert f"- **Source:** [`.github/workflows/{path.name}`]({source})" in page
+    assert (
+        "- **When:** every push to <code>main</code>, every day at 05:25 UTC, by hand"
+        in page
+    )
+    # Every check that main requires, with the workflow that makes it.
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    for check in settings["branch"]["required_checks"]:
+        assert f"\n- <code>{check}</code> of [" in page, check
+    assert "- **Environments:** <code>release</code>" in page
+    blueprint = "https://github.com/Dennis-Otto/repo-blueprint"
+    assert f"from the [Repo Blueprint]({blueprint})" in page
+    nav = (project / "mkdocs.yml").read_text(encoding="utf-8").split("\nnav:\n")[1]
+    assert "\n  - automation.md\n" in nav
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])

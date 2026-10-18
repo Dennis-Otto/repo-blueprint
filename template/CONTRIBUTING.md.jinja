@@ -105,6 +105,8 @@ npm ci --prefix .github/a11y --ignore-scripts
 node .github/a11y/check.mjs site
 ```
 
+One page the website writes by itself: *Automation*, which the hooks of the blueprint make from `.github/workflows/` at every build, in English and, on a website in German, in German too. It shows every workflow with the comment at its top and what starts it, each schedule in words, the checks that `main` requires and the environments and secrets that each one uses, so a new workflow says there what it does once its comment does. A page `docs/automation.md` of your own takes its place.
+
 ## Pages in one column
 
 The READMEs, this guide and the pages of `docs/` have one column, so that they read well in the GitHub app and on a phone, which keep columns side by side and squeeze them until the text is a few words wide and the pictures tiny:
