@@ -792,6 +792,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         homepage="https://dennis-otto.github.io/repo-blueprint/",
     )
     for name in (
+        ".bestpractices.json",
         ".editorconfig",
         ".gitattributes",
         ".gitignore",
@@ -4588,6 +4589,245 @@ def test_a_designated_successor_continues_the_project(tmp_path: Path) -> None:
     assert "don't pass with the repository" in governance
     assert "A successor is planned" not in governance
     assert "bus factor of the project is 1" not in governance
+
+
+# The criteria of OpenSSF Best Practices, of its levels passing, silver and gold and
+# of the OSPS Baseline, as bestpractices.dev knows them; the file names their source.
+BEST_PRACTICES: dict[str, dict[str, Any]] = json.loads(
+    (ROOT / "tests/data/bestpractices-criteria.json").read_text(encoding="utf-8")
+)["criteria"]
+# What only a project knows, of its software or of its people, and no file of the
+# blueprint can promise: .bestpractices.json leaves it out, so that bestpractices.dev
+# keeps the answers that a maintainer gives there. So do the criteria of crypto_.
+PROJECT_SPECIFIC = {
+    "description_good",
+    "interact",
+    "documentation_basics",
+    "documentation_interface",
+    "maintained",
+    "report_responses",
+    "enhancement_responses",
+    "release_notes_vulns",
+    "vulnerability_report_response",
+    "build",
+    "know_secure_design",
+    "know_common_errors",
+    "test_most",
+    "tests_are_added",
+    "warnings_strict",
+    "vulnerabilities_fixed_60_days",
+    "vulnerabilities_critical_fixed",
+    "dynamic_analysis_unsafe",
+    "dynamic_analysis_enable_assertions",
+    "documentation_roadmap",
+    "documentation_architecture",
+    "documentation_security",
+    "documentation_quick_start",
+    "documentation_achievements",
+    "internationalization",
+    "regression_tests_added50",
+    "test_statement_coverage80",
+    "implement_secure_design",
+    "input_validation",
+    "hardening",
+    "assurance_case",
+    # Multi-factor authentication, the user guides, the design, the interfaces, the
+    # security assessment and a second person's review.
+    "osps_ac_01_01",
+    "osps_do_01_01",
+    "osps_sa_01_01",
+    "osps_sa_02_01",
+    "osps_sa_03_01",
+    "osps_qa_07_01",
+    # The check of the website only reports for now, and the user interface of an app
+    # or of the cards of an integration is the project's own.
+    "accessibility_best_practices",
+}
+# Every answer of a repository: none of them can do without these.
+GUARANTEED = {
+    "contribution",
+    "license_location",
+    "vulnerability_report_private",
+    "static_analysis",
+    "dco",
+    "governance",
+    "signed_releases",
+    "version_tags_signed",
+    "osps_ac_03_01",
+    "osps_ac_03_02",
+    "osps_ac_04_02",
+    "osps_br_01_03",
+    "osps_br_07_01",
+    "osps_gv_01_01",
+    "osps_le_01_01",
+    "osps_le_03_01",
+    "osps_qa_03_01",
+    "osps_vm_02_01",
+    "osps_vm_04_02",
+    "osps_vm_06_02",
+}
+
+
+def best_practices(project: Path) -> dict[str, str]:
+    """The answers of .bestpractices.json, which may name each field only once."""
+
+    def once_each(pairs: list[tuple[str, str]]) -> dict[str, str]:
+        names = [name for name, _ in pairs]
+        assert len(names) == len(set(names)), names
+        return dict(pairs)
+
+    answers: dict[str, str] = json.loads(
+        (project / ".bestpractices.json").read_text(encoding="utf-8"),
+        object_pairs_hook=once_each,
+    )
+    return answers
+
+
+def anchors(markdown: str) -> set[str]:
+    """The anchors of the headings of a Markdown file, as GitHub makes them."""
+    return {
+        re.sub(r"[^\w\- ]", "", title.strip().lower()).replace(" ", "-")
+        for title in re.findall(r"^#{1,6} (.+)$", markdown, re.MULTILINE)
+    }
+
+
+def proposed_criteria(project: Path, repository: str) -> set[str]:
+    """The criteria that the .bestpractices.json of a project answers, once each of
+    them is an answer that bestpractices.dev takes and every file that it names, with
+    its heading, is there."""
+    answers = best_practices(project)
+    criteria = {name.rsplit("_", 1)[0] for name in answers}
+    assert set(answers) == {
+        f"{criterion}_{field}"
+        for criterion in criteria
+        for field in ("status", "justification")
+    }
+    assert criteria <= set(BEST_PRACTICES), criteria - set(BEST_PRACTICES)
+    assert not criteria & PROJECT_SPECIFIC
+    assert not [criterion for criterion in criteria if criterion.startswith("crypto_")]
+    files = f"https://github.com/{repository}/blob/main/"
+    for criterion in criteria:
+        justification = answers[f"{criterion}_justification"]
+        assert answers[f"{criterion}_status"] == "Met", criterion
+        links = re.findall(r"https://\S+", justification)
+        if BEST_PRACTICES[criterion]["met_url_required"]:
+            assert links, criterion
+        for link in links:
+            assert link.startswith(f"https://github.com/{repository}"), (
+                criterion,
+                link,
+            )
+            if not link.startswith(files):
+                continue
+            path, _, anchor = link.removeprefix(files).partition("#")
+            assert (project / path).is_file(), (criterion, path)
+            if anchor:
+                markdown = (project / path).read_text(encoding="utf-8")
+                assert anchor in anchors(markdown), (criterion, link)
+    return criteria
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_proposes_its_answers_of_openssf_best_practices(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    criteria = proposed_criteria(project, "Dennis-Otto/demo-project")
+
+    assert criteria >= GUARANTEED
+    # The test suite of scripts/check.sh, and the manifests of the dependencies.
+    tested = kind not in ("generic", "container")
+    for criterion in ("test", "automated_integration_testing", "osps_qa_06_01"):
+        assert (criterion in criteria) == tested, criterion
+    for criterion in ("external_dependencies", "osps_qa_02_01"):
+        assert (criterion in criteria) == tested, criterion
+    assert ("dynamic_analysis" in criteria) == (
+        kind in ("python-package", "github-action")
+    )
+    # The sites are on GitHub, and only a designated successor continues a project.
+    assert {"sites_https", "osps_br_03_01"} <= criteria
+    assert not {"access_continuity", "bus_factor"} & criteria
+    answers = best_practices(project)
+    assert "GitHub Discussions" in answers["discussion_justification"]
+    # What osps_ac_04_01 says: every workflow starts with read-only permissions or none.
+    for name, workflow in workflows(project).items():
+        top = re.search(r"^permissions:(.*(?:\n  .*)*)", workflow, re.MULTILINE)
+        assert top, name
+        assert re.fullmatch(r" (?:\{\}|read-all)|(?:\n  [\w-]+: read)+", top[1]), name
+
+
+def test_the_answers_of_openssf_best_practices_follow_those_of_copier(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="python-package",
+        sample_code=False,
+        successor=True,
+        discussions=False,
+        homepage="http://demo.example",
+    )
+    criteria = proposed_criteria(project, "Dennis-Otto/demo-project")
+    answers = best_practices(project)
+
+    # The project on PyPI doesn't pass with the repository to the successor.
+    assert "bus_factor" in criteria
+    assert "access_continuity" not in criteria
+    # Without the fuzz targets of the samples, nothing says that fuzzing finds anything.
+    assert "dynamic_analysis" not in criteria
+    # A site of its own, which the blueprint can't vouch for.
+    assert not {"sites_https", "sites_password_security", "osps_br_03_01"} & criteria
+    assert "Discussions" not in answers["discussion_justification"]
+    assert "discussions" not in answers["osps_gv_02_01_justification"]
+    assert "from PyPI" in answers["delivery_mitm_justification"]
+
+
+def test_a_successor_alone_cannot_release_in_a_store(tmp_path: Path) -> None:
+    # GOVERNANCE.md says that the entry of the App Store doesn't pass with the
+    # repository, so the successor can't release there within a week on their own.
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="nextcloud-app",
+        successor=True,
+    )
+    criteria = proposed_criteria(project, "Dennis-Otto/demo-project")
+
+    assert "bus_factor" in criteria
+    assert "access_continuity" not in criteria
+    answers = best_practices(project)
+    assert (
+        "Psalm's taint analysis"
+        in answers["static_analysis_common_vulnerabilities_justification"]
+    )
+
+
+@pytest.mark.parametrize(
+    "answers",
+    sorted((ROOT / "tests/answers").glob("*.yml")),
+    ids=lambda path: path.stem,
+)
+def test_the_downstream_repositories_propose_their_answers(
+    tmp_path: Path, answers: Path
+) -> None:
+    # The answers of the real repositories, which the Rollout brings the file to:
+    # every file and heading that their .bestpractices.json names is there.
+    data = yaml.safe_load(answers.read_text(encoding="utf-8"))
+    project = render(tmp_path, **data)
+    criteria = proposed_criteria(project, f"{data['owner']}/{data['project_slug']}")
+
+    assert criteria >= GUARANTEED
+
+
+def test_the_blueprint_proposes_its_own_answers_of_openssf_best_practices() -> None:
+    # Its own .bestpractices.json is that of the GitHub Action it is rendered as, which
+    # test_the_blueprint_follows_its_own_template keeps equal; its files are its own.
+    criteria = proposed_criteria(ROOT, "Dennis-Otto/repo-blueprint")
+
+    assert criteria >= GUARANTEED | {"sites_https", "access_continuity", "test"}
 
 
 @pytest.mark.parametrize("kind", KINDS)

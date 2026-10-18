@@ -599,9 +599,10 @@ FEED = 30
 SUMMARY = 500
 ATOM = "http://www.w3.org/2005/Atom"
 # What XML 1.0 has no place for: every control character but the tab and the line
-# breaks, which the notes of a release could hold and which would make the whole feed
-# unreadable.
-CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+# breaks, the lone surrogates that a JSON escape could carry and U+FFFE and U+FFFF,
+# which the notes of a release could hold and which would make the whole feed
+# unreadable or its file impossible to write.
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff￾￿]")
 
 
 def stamp(moment: datetime) -> str:

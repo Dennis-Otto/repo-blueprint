@@ -52,4 +52,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0044](0044-the-built-website-is-checked-and-every-deployment-is-signed.md) | The built website is checked, and every deployment is signed and asked for its pages | accepted |
 | [0045](0045-every-website-shows-its-automation-written-from-its-workflows.md) | Every website shows its automation, written from its workflows at every build | accepted |
 | [0046](0046-a-website-leads-to-its-owner-and-asks-github-for-nothing.md) | A website leads to its owner and asks GitHub for nothing: the links of the footer and the version of the latest release come from the build | accepted |
+| [0047](0047-every-repository-proposes-the-best-practices-answers-that-the-blueprint-guarantees.md) | Every repository proposes the answers of OpenSSF Best Practices that the blueprint guarantees | accepted |
 | [0048](0048-the-dashboard-publishes-its-data-at-addresses-that-stay.md) | The dashboard publishes its data as JSON and a feed of the releases, at addresses that stay | accepted |

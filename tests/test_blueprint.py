@@ -18,7 +18,7 @@ import pytest
 
 import blueprint.checklist
 from blueprint import cli
-from blueprint.checklist import checklist, reuse_compliant
+from blueprint.checklist import best_practices, checklist, reuse_compliant
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
     MAIN_ONLY,
@@ -2023,6 +2023,10 @@ def test_the_checklist_of_a_new_repository(
     assert "· Settings → General → Features: Sponsorships on" in out
     assert "✘ Social preview uploaded" in out
     assert "✘ OpenSSF Best Practices badge" in out
+    assert "✘ OpenSSF Baseline badge" in out
+    # Without a project, the form of a new one, which reads .bestpractices.json.
+    assert out.count("https://www.bestpractices.dev/en/projects/new") == 2
+    assert "press 'Save (and continue) 🤖'" in out
     assert "Trusted publisher on PyPI" in out
 
 
@@ -2036,7 +2040,9 @@ def test_the_checklist_of_a_finished_repository(
     set_secrets(github)
     github.og_image = True
     (root / "README.md").write_text(
-        "[![Best](https://www.bestpractices.dev/projects/1/badge)]\n", encoding="utf-8"
+        "[![Best](https://www.bestpractices.dev/projects/1/badge)]\n"
+        "[![Baseline](https://www.bestpractices.dev/projects/1/baseline)]\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
     capsys.readouterr()
@@ -2049,6 +2055,47 @@ def test_the_checklist_of_a_finished_repository(
     assert "✔ Community profile complete (100 %)" in out
     assert "Sponsorships" not in out
     assert "✔ Registered with the REUSE API" in out
+    assert "✔ OpenSSF Best Practices badge in the README" in out
+    assert "✔ OpenSSF Baseline badge in the README" in out
+
+
+@pytest.mark.parametrize(
+    ("readme", "done", "edit", "badge"),
+    [
+        (
+            "[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15284/badge)]",
+            "Best Practices",
+            "https://www.bestpractices.dev/en/projects/15284/baseline-1/edit",
+            "[![OpenSSF Baseline](https://www.bestpractices.dev/projects/15284/baseline)]"
+            "(https://www.bestpractices.dev/projects/15284)",
+        ),
+        (
+            '<img src="https://www.bestpractices.dev/projects/7/baseline">',
+            "Baseline",
+            "https://www.bestpractices.dev/en/projects/7/passing/edit",
+            "[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/7/badge)]"
+            "(https://www.bestpractices.dev/projects/7)",
+        ),
+    ],
+    ids=["metal", "baseline"],
+)
+def test_one_badge_of_openssf_best_practices_leads_to_the_other(
+    readme: str, done: str, edit: str, badge: str
+) -> None:
+    steps = best_practices(f"# Demo\n\n{readme}\n")
+
+    assert [step.done for step in steps] == [
+        done == "Best Practices",
+        done == "Baseline",
+    ]
+    # The project has its number: the form of the other series, and its badge.
+    missing = next(step for step in steps if not step.done)
+    assert missing.how.splitlines() == [
+        edit,
+        "On each level, press 'Save (and continue) 🤖' to take in the answers that"
+        " .bestpractices.json proposes, and answer the rest.",
+        f"Then add its badge to the README: {badge}",
+    ]
 
 
 def test_the_checklist_tells_secrets_and_the_community_profile_apart(
@@ -2102,7 +2149,7 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 8
+        assert len(texts) == 9
     else:
         assert any(text in step for step in texts)
 

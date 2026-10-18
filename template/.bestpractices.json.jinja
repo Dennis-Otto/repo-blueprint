@@ -1,0 +1,252 @@
+[#- The answers of the OpenSSF Best Practices badge (https://www.bestpractices.dev)
+    that the blueprint guarantees for every repository made from it: the criteria of
+    the levels passing and silver and of the OSPS Baseline that its files, workflows
+    and settings as code meet, each with the file that shows it. bestpractices.dev
+    reads the file and proposes these answers, also after a change of the file once
+    a maintainer presses "Save (and continue)" with the robot. What depends on the
+    software or on the people of a project is left out: bestpractices.dev keeps the
+    answers that a maintainer gives there for it. -#]
+[%- set repository = 'https://github.com/' ~ owner ~ '/' ~ project_slug -%]
+[%- set files = repository ~ '/blob/main/' -%]
+[#- The test runner of the kinds whose scripts/check.sh runs a test suite. -#]
+[%- set tests = {'python': 'pytest', 'home-assistant': 'pytest', 'php': 'PHPUnit', 'node': 'npm test'}.get(stack, '') -%]
+[%- set linters = {'python': ', Ruff, mypy', 'home-assistant': ', Ruff, mypy', 'php': ', php-cs-fixer, Psalm', 'node': ', Biome, the TypeScript compiler', }.get(stack, '') -%]
+[#- The manifest of the direct dependencies, and what lists and pins them. -#]
+[%- set dependencies = {
+  'python': ('requirements-dev.in', 'pyproject.toml and requirements-dev.in list the direct dependencies, and requirements-dev.txt pins each with its hashes'),
+  'home-assistant': ('requirements-test.in', 'pyproject.toml and requirements-test.in list the direct dependencies, and requirements-test.txt pins each with its hashes'),
+  'php': ('composer.json', 'composer.json lists the direct dependencies, and composer.lock pins each'),
+  'node': ('package.json', 'package.json lists the direct dependencies, and package-lock.json pins each with its hash'),
+}.get(stack) -%]
+[%- set registry = {'pypi': ' and from PyPI', 'npm': ' and from npm', 'ghcr': ' and from the GitHub Container Registry', 'nextcloud-appstore': ' and from the Nextcloud App Store'}.get(publish_to, '') -%]
+[#- Every site of the project is on GitHub: the repository and, on GitHub Pages, the website. -#]
+[%- set on_github = not homepage or homepage.startswith('https://' ~ (owner | lower) ~ '.github.io/') -%]
+[%- set channels = 'GitHub Issues and pull requests' ~ (', and GitHub Discussions' if discussions else '') -%]
+{
+  "contribution_status": "Met",
+  "contribution_justification": "CONTRIBUTING.md explains how to contribute: an issue first for anything larger, a branch and a pull request with a Conventional Commit title, which merges once every required check passes: {= files =}CONTRIBUTING.md#workflow",
+  "contribution_requirements_status": "Met",
+  "contribution_requirements_justification": "CONTRIBUTING.md states what an acceptable contribution needs: tests, the passing checks of scripts/check.sh, the coding standards and a sign-off on every commit: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "floss_license_status": "Met",
+  "floss_license_justification": "The {= license =} license, which the Open Source Initiative approves: {= files =}LICENSE",
+  "floss_license_osi_status": "Met",
+  "floss_license_osi_justification": "The {= license =} license is approved by the Open Source Initiative (OSI): {= files =}LICENSE",
+  "license_location_status": "Met",
+  "license_location_justification": "{= files =}LICENSE",
+[%- if on_github %]
+  "sites_https_status": "Met",
+  "sites_https_justification": "The repository, its issues and its releases are on GitHub, and the website on GitHub Pages, all served only over HTTPS: {= repository =}",
+[%- endif %]
+  "discussion_status": "Met",
+  "discussion_justification": "{= channels =}: searchable, with a URL for every topic and comment, open to everyone with a GitHub account and usable in any browser: {= repository =}/issues",
+  "english_status": "Met",
+  "english_justification": "The guides for contributors, the security policy, the governance and the forms of the issues are in English, and reports in English are welcome: {= files =}CONTRIBUTING.md",
+  "repo_public_status": "Met",
+  "repo_public_justification": "A public Git repository on GitHub: {= repository =}",
+  "repo_track_status": "Met",
+  "repo_track_justification": "Git records every change, who made it and when; every change reaches main through a pull request: {= repository =}/commits/main",
+  "repo_interim_status": "Met",
+  "repo_interim_justification": "The changes between releases are on main and in the pull requests: {= repository =}/commits/main",
+  "repo_distributed_status": "Met",
+  "repo_distributed_justification": "Git, a distributed version control system, on GitHub.",
+  "version_unique_status": "Met",
+  "version_unique_justification": "release-please gives every release a version of its own, from the titles of the merged pull requests, and a tag of the same name: {= repository =}/releases",
+  "version_semver_status": "Met",
+  "version_semver_justification": "Semantic Versioning: the Conventional Commit titles of the pull requests decide the version, fix a patch, feat a minor and a breaking change a major version: {= files =}CONTRIBUTING.md#workflow",
+  "version_tags_status": "Met",
+  "version_tags_justification": "Every release has a tag vX.Y.Z, which the release workflow signs and a ruleset keeps from moving or being deleted: {= repository =}/tags",
+  "release_notes_status": "Met",
+  "release_notes_justification": "Every release has its notes in CHANGELOG.md and in its GitHub release, written in the words of a user from the entries that its pull requests bring: {= files =}CHANGELOG.md",
+  "report_process_status": "Met",
+  "report_process_justification": "SUPPORT.md says where to report a bug, ask a question or propose a feature, and the issues have forms for bugs and feature requests: {= files =}SUPPORT.md",
+  "report_tracker_status": "Met",
+  "report_tracker_justification": "GitHub Issues, with forms for bugs and feature requests: {= repository =}/issues",
+  "report_archive_status": "Met",
+  "report_archive_justification": "GitHub Issues keeps every report and its answers public and searchable: {= repository =}/issues",
+  "vulnerability_report_process_status": "Met",
+  "vulnerability_report_process_justification": "SECURITY.md says how to report a vulnerability and what happens next: {= files =}SECURITY.md",
+  "vulnerability_report_private_status": "Met",
+  "vulnerability_report_private_justification": "The private vulnerability reporting of GitHub, which the settings as code turn on and SECURITY.md names: {= repository =}/security/advisories/new",
+[%- if tests %]
+  "test_status": "Met",
+  "test_justification": "An automated test suite, which scripts/check.sh runs with {= tests =} and its coverage, on a computer and in the CI: {= files =}scripts/check.sh",
+  "test_invocation_status": "Met",
+  "test_invocation_justification": "bash scripts/check.sh runs the tests with every other check, the same on a computer and in the CI: {= files =}CONTRIBUTING.md#checks",
+  "test_continuous_integration_status": "Met",
+  "test_continuous_integration_justification": "The CI runs scripts/check.sh with the tests on every pull request and after every change of main, as a required check: {= files =}scripts/check.sh",
+[%- endif %]
+  "test_policy_status": "Met",
+  "test_policy_justification": "CONTRIBUTING.md has the policy: changes need tests, and the checks of scripts/check.sh pass: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "tests_documented_added_status": "Met",
+  "tests_documented_added_justification": "CONTRIBUTING.md requires tests with every change, and the checklist of the pull request template asks for tests that cover it: {= files =}.github/pull_request_template.md",
+  "warnings_status": "Met",
+  "warnings_justification": "scripts/check.sh runs ShellCheck{= linters =}, [% if stack == 'container' %]the CI hadolint, [% endif %]the Lint workflow actionlint, markdownlint and REUSE, and zizmor audits the workflows: {= files =}scripts/check.sh",
+  "warnings_fixed_status": "Met",
+  "warnings_fixed_justification": "A warning of ShellCheck{= linters =}[% if stack == 'container' %], hadolint[% endif %], actionlint, markdownlint or REUSE fails a required check, scripts/check.sh in the CI or the Lint workflow, so a pull request merges only once it is fixed; the findings of zizmor go to code scanning, where the Findings workflow fails until each is fixed or accepted with its reason: {= files =}CONTRIBUTING.md#coding-standards",
+  "delivery_mitm_status": "Met",
+  "delivery_mitm_justification": "Releases are delivered over HTTPS, from GitHub{= registry =}, with an attestation of GitHub and the build provenance signed with Sigstore, which gh release verify checks: {= files =}SECURITY.md#verify-a-release",
+  "delivery_unsigned_status": "Met",
+  "delivery_unsigned_justification": "No hash is retrieved over HTTP: the attestations and the signed provenance come from GitHub and Sigstore over HTTPS.",
+  "no_leaked_credentials_status": "Met",
+  "no_leaked_credentials_justification": "GitHub's secret scanning with push protection stops a known kind of secret before it lands, and Gitleaks scans every pull request and, every week, the whole history: {= files =}.github/workflows/secret-scan.yml",
+  "static_analysis_status": "Met",
+  "static_analysis_justification": "CodeQL analyzes [% if languages %]the code and [% endif %]the workflows on every pull request, after every change of main and every week[% if stack == 'php' %], and Psalm with its taint analysis the PHP, which CodeQL doesn't know[% endif %]; ShellCheck checks the shell scripts: {= files =}.github/workflows/codeql.yml",
+  "static_analysis_common_vulnerabilities_status": "Met",
+  "static_analysis_common_vulnerabilities_justification": "CodeQL runs its security-extended queries, which look for the weaknesses of the CWE Top 25[% if stack == 'php' %], Psalm's taint analysis follows untrusted input to HTML, SQL, shells and files,[% endif %] and zizmor audits the workflows for their security: {= files =}.github/workflows/codeql.yml",
+  "static_analysis_fixed_status": "Met",
+  "static_analysis_fixed_justification": "A new alert of CodeQL of high or critical severity stops the merge of the pull request that adds it, and the Findings workflow fails while a finding is open that isn't accepted with its reason: {= files =}SECURITY.md#findings-of-code-scanning",
+  "static_analysis_often_status": "Met",
+  "static_analysis_often_justification": "CodeQL runs on every pull request, after every change of main and every week: {= files =}.github/workflows/codeql.yml",
+[%- if sample_code and project_type in ['python-package', 'github-action'] %]
+  "dynamic_analysis_status": "Met",
+  "dynamic_analysis_justification": "Coverage-guided fuzzing with Atheris runs on every pull request that changes the code and every week, and a finding fails it: {= files =}.github/workflows/fuzz.yml",
+[%- endif %]
+  "dco_status": "Met",
+  "dco_justification": "Every commit carries a Developer Certificate of Origin sign-off: the check DCO of the Lint workflow fails without one, and the settings as code require it for commits made on github.com: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "governance_status": "Met",
+  "governance_justification": "GOVERNANCE.md describes how decisions are made, who has which access and who has the final responsibility: {= files =}GOVERNANCE.md",
+  "code_of_conduct_status": "Met",
+  "code_of_conduct_justification": "A code of conduct in the spirit of the Contributor Covenant 2.1, in the standard location, with private reporting: {= files =}CODE_OF_CONDUCT.md",
+  "roles_responsibilities_status": "Met",
+  "roles_responsibilities_justification": "GOVERNANCE.md defines the roles maintainer, contributor, reporter and bots with their responsibilities: {= files =}GOVERNANCE.md#roles-and-responsibilities",
+[%- if successor %]
+[#- A store entry doesn't pass with the repository (GOVERNANCE.md#continuity), so a
+    successor alone can't release there within a week. -#]
+[%- if publish_to not in ['nextcloud-appstore', 'pypi', 'npm'] %]
+  "access_continuity_status": "Met",
+  "access_continuity_justification": "The owner has designated a successor through GitHub's account successor setting, who can take the repository over, and everything that builds, tests, releases and protects the project is in the repository: {= files =}GOVERNANCE.md#continuity",
+[%- endif %]
+  "bus_factor_status": "Met",
+  "bus_factor_justification": "The bus factor is 2: the maintainer and the successor designated through GitHub's account successor setting: {= files =}GOVERNANCE.md#continuity",
+[%- endif %]
+  "documentation_current_status": "Met",
+  "documentation_current_justification": "The documentation changes in the pull request that changes what it describes, as the checklist of the pull request template asks, and the website is built and checked on every change: {= files =}.github/pull_request_template.md",
+[%- if on_github %]
+  "sites_password_security_status": "Met",
+  "sites_password_security_justification": "The sites of the project are on GitHub and GitHub Pages; the project stores no passwords.",
+[%- endif %]
+  "vulnerability_response_process_status": "Met",
+  "vulnerability_response_process_justification": "SECURITY.md documents the process: private reporting, an acknowledgement within 7 days, a first assessment within 14 days, a fix within 90 days at the latest and the disclosure in an advisory: {= files =}SECURITY.md#what-happens-next",
+  "coding_standards_status": "Met",
+  "coding_standards_justification": "CONTRIBUTING.md names the coding standards that contributions follow: {= files =}CONTRIBUTING.md#coding-standards",
+  "coding_standards_enforced_status": "Met",
+  "coding_standards_enforced_justification": "scripts/check.sh and the Lint workflow check the coding standards on every pull request, which merges only when they pass: {= files =}scripts/check.sh",
+  "installation_development_quick_status": "Met",
+  "installation_development_quick_justification": "CONTRIBUTING.md shows how to run every check with bash scripts/check.sh, and the dev container in .devcontainer/ has every tool set up, for VS Code and GitHub Codespaces: {= files =}CONTRIBUTING.md#checks",
+[%- if dependencies %]
+  "external_dependencies_status": "Met",
+  "external_dependencies_justification": "{= dependencies[1] =}: {= files =}{= dependencies[0] =}",
+[%- endif %]
+  "dependency_monitoring_status": "Met",
+  "dependency_monitoring_justification": "Renovate updates the dependencies, an update that fixes a vulnerability at once, and OSV-Scanner checks every lock file in the pull requests that change one, after every change of main and every week: {= files =}.github/workflows/osv-scanner.yml",
+  "updateable_reused_components_status": "Met",
+  "updateable_reused_components_justification": "Every dependency comes from its package manager, pinned in a lock file, every action by its commit hash and every image by its digest, and Renovate updates them: {= files =}GOVERNANCE.md#automation",
+[%- if tests %]
+  "automated_integration_testing_status": "Met",
+  "automated_integration_testing_justification": "The CI runs scripts/check.sh with the whole test suite on every pull request and after every change of main, and reports its success or failure as a required check: {= files =}scripts/check.sh",
+[%- endif %]
+  "test_policy_mandated_status": "Met",
+  "test_policy_mandated_justification": "CONTRIBUTING.md has the written policy: changes need tests in the automated test suite, and the checks of scripts/check.sh pass: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "signed_releases_status": "Met",
+  "signed_releases_justification": "Every release is immutable, GitHub signs an attestation that ties its tag to its commit and to every file, and the release workflow signs the build provenance of every file with Sigstore, without a long-lived key; SECURITY.md shows how to verify both: {= files =}SECURITY.md#verify-a-release",
+  "version_tags_signed_status": "Met",
+  "version_tags_signed_justification": "The release workflow signs every release tag without a key with gitsign, and builds no release on a tag that it didn't sign: {= files =}SECURITY.md#how-the-project-keeps-itself-secure",
+  "osps_ac_03_01_status": "Met",
+  "osps_ac_03_01_justification": "The ruleset of main, which the settings bot applies, lets a change reach main only through a pull request, with no exception, not even for administrators: {= files =}SECURITY.md#trust-boundaries",
+  "osps_ac_03_02_status": "Met",
+  "osps_ac_03_02_justification": "The ruleset of main, which the settings bot applies, keeps everybody from deleting main or force-pushing it, with no exception: {= files =}SECURITY.md#trust-boundaries",
+  "osps_br_01_01_status": "Met",
+  "osps_br_01_01_justification": "No workflow writes an untrusted value, such as the title of a pull request or the text of an issue, into a script: each one reaches it as an environment variable, and zizmor's audit of template injection checks every workflow: {= files =}.github/workflows/zizmor.yml",
+  "osps_br_01_03_status": "Met",
+  "osps_br_01_03_justification": "The workflows of a pull request run with a read-only token and without secrets, every secret is in an environment that only main may use, and the workflows of outside contributors wait for the maintainer's approval: {= files =}SECURITY.md#trust-boundaries",
+[%- if on_github %]
+  "osps_br_03_01_status": "Met",
+  "osps_br_03_01_justification": "The channels of the project, the repository with its issues[% if discussions %], discussions[% endif %] and releases on GitHub and the website on GitHub Pages, are served only over HTTPS: {= repository =}",
+[%- endif %]
+  "osps_br_03_02_status": "Met",
+  "osps_br_03_02_justification": "Releases are distributed over HTTPS, from GitHub{= registry =}, with an attestation of GitHub and the build provenance signed with Sigstore, which gh release verify checks: {= files =}SECURITY.md#verify-a-release",
+  "osps_br_07_01_status": "Met",
+  "osps_br_07_01_justification": "GitHub's secret scanning with push protection, which the settings as code turn on, stops a known kind of secret before it lands, and Gitleaks scans every pull request and, every week, the whole history: {= files =}.github/workflows/secret-scan.yml",
+  "osps_do_02_01_status": "Met",
+  "osps_do_02_01_justification": "SUPPORT.md and the form for bugs say how to report a defect: {= files =}SUPPORT.md",
+  "osps_gv_02_01_status": "Met",
+  "osps_gv_02_01_justification": "{= channels =}, open to everyone, for proposed changes and for problems of use: {= repository =}/issues",
+  "osps_gv_03_01_status": "Met",
+  "osps_gv_03_01_justification": "CONTRIBUTING.md explains the contribution process: {= files =}CONTRIBUTING.md#workflow",
+  "osps_le_02_01_status": "Met",
+  "osps_le_02_01_justification": "The source code is under the {= license =} license, which the Open Source Initiative approves: {= files =}LICENSE",
+  "osps_le_02_02_status": "Met",
+  "osps_le_02_02_justification": "The released assets are under the {= license =} license of the source code, which the Open Source Initiative approves: {= files =}LICENSE",
+  "osps_le_03_01_status": "Met",
+  "osps_le_03_01_justification": "The license is in the file LICENSE of the repository, and REUSE.toml gives the license of every file: {= files =}LICENSE",
+  "osps_le_03_02_status": "Met",
+  "osps_le_03_02_justification": "Every release contains the file LICENSE: the source code of its tag, which GitHub attaches to the release, holds it: {= files =}LICENSE",
+  "osps_qa_01_01_status": "Met",
+  "osps_qa_01_01_justification": "The repository is public at a static URL: {= repository =}",
+  "osps_qa_01_02_status": "Met",
+  "osps_qa_01_02_justification": "Git records every change, who made it and when, and the history of main is public: {= repository =}/commits/main",
+[%- if dependencies %]
+  "osps_qa_02_01_status": "Met",
+  "osps_qa_02_01_justification": "{= dependencies[1] =}: {= files =}{= dependencies[0] =}",
+[%- endif %]
+  "osps_vm_02_01_status": "Met",
+  "osps_vm_02_01_justification": "SECURITY.md names the security contact, the private vulnerability reporting of GitHub, which reaches the maintainers that GOVERNANCE.md lists: {= files =}SECURITY.md#reporting-a-vulnerability",
+  "osps_ac_04_01_status": "Met",
+  "osps_ac_04_01_justification": "The token of a workflow may only read by default, a setting of the settings as code, and every workflow sets read-only or no permissions at its top: {= files =}.github/repository.toml",
+  "osps_br_02_01_status": "Met",
+  "osps_br_02_01_justification": "release-please gives every release a version of its own and a tag of the same name: {= repository =}/releases",
+  "osps_br_04_01_status": "Met",
+  "osps_br_04_01_justification": "Every release has its notes in CHANGELOG.md and in its GitHub release, with every change for users and every security fix: {= files =}CHANGELOG.md",
+  "osps_br_05_01_status": "Met",
+  "osps_br_05_01_justification": "Every dependency is installed with the standard tools of its ecosystem from a lock file, pinned by version and hash, every action by its commit hash and every image by its digest: {= files =}SECURITY.md#trust-boundaries",
+  "osps_br_06_01_status": "Met",
+  "osps_br_06_01_justification": "GitHub signs an attestation of every release with the SHA-256 digest of each of its files, and the release workflow signs the build provenance of every file with Sigstore: {= files =}SECURITY.md#verify-a-release",
+  "osps_gv_01_01_status": "Met",
+  "osps_gv_01_01_justification": "GOVERNANCE.md lists the people with access to the repository, the releases and the security advisories: {= files =}GOVERNANCE.md#maintainers-and-access",
+  "osps_gv_01_02_status": "Met",
+  "osps_gv_01_02_justification": "GOVERNANCE.md describes the roles maintainer, contributor, reporter and bots with their responsibilities: {= files =}GOVERNANCE.md#roles-and-responsibilities",
+  "osps_gv_03_02_status": "Met",
+  "osps_gv_03_02_justification": "CONTRIBUTING.md states what an acceptable contribution needs: tests, the passing checks, the coding standards and a sign-off on every commit: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "osps_le_01_01_status": "Met",
+  "osps_le_01_01_justification": "Every commit carries a Developer Certificate of Origin sign-off, with which its author asserts the right to contribute it: the check DCO fails without one, and the settings as code require it for commits made on github.com: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "osps_qa_03_01_status": "Met",
+  "osps_qa_03_01_justification": "The ruleset of main lets a pull request merge only once every required check of the settings as code has passed on the latest main, with no exception: {= files =}.github/repository.toml",
+[%- if tests %]
+  "osps_qa_06_01_status": "Met",
+  "osps_qa_06_01_justification": "A required check runs scripts/check.sh with the test suite on every pull request before it can merge: {= files =}scripts/check.sh",
+[%- endif %]
+  "osps_vm_01_01_status": "Met",
+  "osps_vm_01_01_justification": "SECURITY.md has the policy of coordinated disclosure with its times: an acknowledgement within 7 days, a first assessment within 14 days, a fix within 90 days at the latest, and the disclosure with the fixed release: {= files =}SECURITY.md#what-happens-next",
+  "osps_vm_03_01_status": "Met",
+  "osps_vm_03_01_justification": "The private vulnerability reporting of GitHub, which SECURITY.md names: {= repository =}/security/advisories/new",
+  "osps_vm_04_01_status": "Met",
+  "osps_vm_04_01_justification": "A fixed vulnerability is published in a GitHub security advisory and in the release notes, as SECURITY.md says: {= files =}SECURITY.md#what-happens-next",
+  "osps_ac_04_02_status": "Met",
+  "osps_ac_04_02_justification": "Every workflow starts with read-only or no permissions, and each job gets only those that it needs; zizmor audits the permissions of every workflow: {= files =}.github/workflows/zizmor.yml",
+  "osps_br_01_04_status": "Met",
+  "osps_br_01_04_justification": "The inputs of a workflow, also those of collaborators, reach its scripts only as environment variables, never in the text of a script, which zizmor's audit of template injection checks: {= files =}.github/workflows/zizmor.yml",
+  "osps_br_02_02_status": "Met",
+  "osps_br_02_02_justification": "Every file of a release is attached to the immutable release of its tag, which the attestation of GitHub ties to it, and its SBOMs carry the version of the release: {= files =}SECURITY.md#verify-a-release",
+  "osps_do_03_01_status": "Met",
+  "osps_do_03_01_justification": "SECURITY.md shows how to verify the integrity and the authenticity of a release with gh release verify: {= files =}SECURITY.md#verify-a-release",
+  "osps_do_03_02_status": "Met",
+  "osps_do_03_02_justification": "The certificate of Sigstore names the release workflow of the repository as the author of a release, and SECURITY.md shows how to check it: {= files =}SECURITY.md#verify-a-release",
+  "osps_do_04_01_status": "Met",
+  "osps_do_04_01_justification": "SECURITY.md: security fixes are provided for the latest release: {= files =}SECURITY.md#supported-versions",
+  "osps_do_05_01_status": "Met",
+  "osps_do_05_01_justification": "SECURITY.md: only the latest release gets security fixes, so a release gets none once the next one is published: {= files =}SECURITY.md#supported-versions",
+  "osps_qa_02_02_status": "Met",
+  "osps_qa_02_02_justification": "Every release carries SBOMs of what it ships, as SPDX and as CycloneDX: {= files =}SECURITY.md#verify-a-release",
+[%- if tests %]
+  "osps_qa_06_02_status": "Met",
+  "osps_qa_06_02_justification": "CONTRIBUTING.md says how to run the tests, with bash scripts/check.sh and before every push with the hook, and the CI runs them on every pull request: {= files =}CONTRIBUTING.md#checks",
+[%- endif %]
+  "osps_qa_06_03_status": "Met",
+  "osps_qa_06_03_justification": "CONTRIBUTING.md has the policy: changes need tests, and the checks of scripts/check.sh pass: {= files =}CONTRIBUTING.md#requirements-for-changes",
+  "osps_vm_04_02_status": "Met",
+  "osps_vm_04_02_justification": "When the project accepts an advisory in osv-scanner.toml, with its reason, the release carries an OpenVEX document that tells scanners that the advisory doesn't affect it: {= files =}SECURITY.md#verify-a-release",
+  "osps_vm_06_01_status": "Met",
+  "osps_vm_06_01_justification": "SECURITY.md sets the threshold: a new alert of CodeQL of high or critical severity, or a new error, stops the merge, and the Findings workflow fails while a finding is open that isn't accepted with its reason: {= files =}SECURITY.md#findings-of-code-scanning",
+  "osps_vm_06_02_status": "Met",
+  "osps_vm_06_02_justification": "CodeQL analyzes every pull request as a required check, and the ruleset of main stops the merge of one that adds an alert of high or critical severity; a finding is accepted only with its reason in .github/findings.toml: {= files =}.github/findings.toml"
+}

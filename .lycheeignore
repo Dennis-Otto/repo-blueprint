@@ -1,2 +1,6 @@
 # Links that the link check of this repository skips, one regular expression per
 # line, each with its reason above it. The rules of every repository are in lychee.toml.
+
+# The data of the dashboard, which only the Dashboard workflow publishes after the merge
+# that adds it; its deploy job asks for each file after every deployment.
+^https://dennis-otto\.github\.io/repo-blueprint/dashboard/(repos\.json|releases\.atom)$

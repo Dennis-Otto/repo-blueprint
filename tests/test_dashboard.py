@@ -1130,8 +1130,9 @@ def test_the_feed_escapes_every_text() -> None:
         'v1 <b>&"</b>',
         'https://github.com/x?a=1&b="2"',
         "2026-10-07T12:00:00Z",
-        # A control character that XML 1.0 has no place for.
-        '<script>alert("&")</script>\x01\r\nnext line',
+        # Characters that XML 1.0 has no place for: a control character, a lone
+        # surrogate and a noncharacter.
+        '<script>alert("&")</script>\x01\ud800￿\r\nnext line',
     )
 
     text = dashboard.feed([hostile], "Dennis-Otto", "https://site/", NOW)

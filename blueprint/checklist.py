@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -15,6 +16,12 @@ from blueprint.settings import Settings, check
 
 RELEASE_APP = "dennis-otto-release-automation"
 REUSE_API = "https://api.reuse.software/status/github.com/"
+BEST_PRACTICES = "https://www.bestpractices.dev"
+# A badge of OpenSSF Best Practices in a README: of the metal series, "badge", or of
+# the OSPS Baseline, "baseline", with the number of the project.
+BADGE = re.compile(r"bestpractices\.dev/projects/(\d+)/(badge|baseline)")
+# The button of each form of bestpractices.dev that reads .bestpractices.json anew.
+SAVE = "Save (and continue) 🤖"
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,38 @@ def reuse_compliant(
             return bool(json.load(response).get("status") == "compliant")
     except (urllib.error.URLError, ValueError, OSError):
         return False
+
+
+def best_practices(readme: str) -> list[Step]:
+    """The badges of OpenSSF Best Practices and of the OSPS Baseline in the README.
+    The form of each level proposes the answers of .bestpractices.json, and a project
+    that shows one badge has its number for the other."""
+    badges = {series: number for number, series in BADGE.findall(readme)}
+    number = badges.get("badge") or badges.get("baseline")
+    take = (
+        f"On each level, press '{SAVE}' to take in the answers that"
+        " .bestpractices.json proposes, and answer the rest."
+    )
+    steps: list[Step] = []
+    for series, name, level in (
+        ("badge", "Best Practices", "passing"),
+        ("baseline", "Baseline", "baseline-1"),
+    ):
+        if number:
+            how = (
+                f"{BEST_PRACTICES}/en/projects/{number}/{level}/edit\n{take}\n"
+                f"Then add its badge to the README: [![OpenSSF {name}]"
+                f"({BEST_PRACTICES}/projects/{number}/{series})]"
+                f"({BEST_PRACTICES}/projects/{number})"
+            )
+        else:
+            how = (
+                "Add the project with the URL of the repository: "
+                f"{BEST_PRACTICES}/en/projects/new\n{take}\n"
+                "Then add its badges to the README, as the project page shows them."
+            )
+        steps.append(Step(f"OpenSSF {name} badge in the README", series in badges, how))
+    return steps
 
 
 def checklist(
@@ -100,11 +139,7 @@ def checklist(
             bool(data["repository"]["usesCustomOpenGraphImage"]),
             f"https://github.com/{repo}/settings",
         ),
-        Step(
-            "OpenSSF Best Practices badge in the README",
-            "bestpractices.dev/projects/" in readme,
-            "https://www.bestpractices.dev/en/projects/new",
-        ),
+        *best_practices(readme),
         Step(
             "Registered with the REUSE API, for its badge",
             (reuse or reuse_compliant)(repo),
