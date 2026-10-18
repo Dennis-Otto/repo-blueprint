@@ -2691,6 +2691,8 @@ def test_a_failed_check_of_the_types_leaves_no_canary_running(
     psalm = repository / "vendor/bin/psalm"
     psalm.parent.mkdir(parents=True)
     # The canary takes its time and says when it is stopped; the types have an error.
+    # The types wait until the canary listens for its stop, or a busy runner kills the
+    # canary before it could say so.
     psalm.write_text(
         textwrap.dedent(
             """\
@@ -2699,10 +2701,15 @@ def test_a_failed_check_of_the_types_leaves_no_canary_running(
             if [[ "$1" == --config=* ]]; then
               trap 'kill "$!"; echo "canary stopped" >> "$CALLS"; exit 143' TERM
               sleep 30 &
+              touch "$CALLS.listens"
               wait
               echo "canary finished" >> "$CALLS"
               exit 0
             fi
+            for _ in $(seq 100); do
+              [[ -e "$CALLS.listens" ]] && break
+              sleep 0.1
+            done
             echo "ERROR: a type"
             exit 2
             """
