@@ -24,7 +24,7 @@ import time
 import tomllib
 import warnings
 import zipfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NamedTuple
@@ -868,7 +868,19 @@ def as_an_action(security: str) -> str:
         security,
         flags=re.DOTALL,
     )
-    assert (supported, verified) == (1, 1)
+    # The Dashboard workflow publishes the website of the blueprint, with the
+    # dashboard, where the Docs workflow publishes that of every other repository.
+    security, website = re.subn(
+        r"(## Verify the website\n.*?)(?=\n## )",
+        lambda section: (
+            section[1]
+            .replace("The Dashboard workflow", "The Docs workflow")
+            .replace("/.github/workflows/dashboard.yml", "/.github/workflows/docs.yml")
+        ),
+        security,
+        flags=re.DOTALL,
+    )
+    assert (supported, verified, website) == (1, 1, 1)
     return security
 
 
@@ -2431,19 +2443,78 @@ def test_the_dev_container_makes_the_hook_executable_where_git_ignores_modes(
     assert git("status", "--porcelain") == ""
 
 
+def remapper(project: Path) -> Callable[[str], str]:
+    """The remaps of lychee.toml, as lychee applies them: the first rule whose regular
+    expression matches a link changes it."""
+    config = tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))
+    rules = []
+    for rule in config["remap"]:
+        pattern, replacement = rule.split()
+        # Lychee writes a group of the regular expression as $1, Python as \g<1>.
+        rules.append((re.compile(pattern), re.sub(r"\$(\d)", r"\\g<\1>", replacement)))
+
+    def remapped(url: str) -> str:
+        for pattern, replacement in rules:
+            if pattern.search(url):
+                return pattern.sub(replacement, url)
+        return url
+
+    return remapped
+
+
+def test_the_link_check_checks_the_anchors_that_it_can_see(
+    projects: dict[str, Path],
+) -> None:
+    config = tomllib.loads(
+        (projects["generic"] / "lychee.toml").read_text(encoding="utf-8")
+    )
+    # Every anchor of a link, also in the README of another repository.
+    assert config["include_fragments"] == "anchor-only"
+    remapped = remapper(projects["generic"])
+    # GitHub draws #readme with a script; the check asks for the repository.
+    assert remapped("https://github.com/owner/repo#readme") == (
+        "https://github.com/owner/repo"
+    )
+    assert remapped("https://github.com/owner/repo/#readme") == (
+        "https://github.com/owner/repo"
+    )
+    for url in (
+        "https://github.com/owner/repo#start-a-repository",
+        "https://github.com/owner/repo/tree/main#readme",
+        "https://example.org/page#readme",
+    ):
+        assert remapped(url) == url
+    # The anchors of the Markdown files of the repository, which --8<-- may put
+    # together from others, are the build's to check; the file is still checked.
+    assert remapped("file:///repo/docs/guide.md#kinds-of-projects") == (
+        "file:///repo/docs/guide.md"
+    )
+    assert remapped("file:///repo/docs/page.html#part") == (
+        "file:///repo/docs/page.html#part"
+    )
+    # A page of HTML of the repository is one of the built website, such as
+    # cards.html of docs/cards.md, which the check docs checks there.
+    excluded = [re.compile(pattern) for pattern in config["exclude"]]
+    for url in (
+        "file:///repo/docs/cards.html",
+        "file:///repo/docs/cards.html#play",
+        "file:///repo/docs/index.html?x=1",
+    ):
+        assert any(pattern.search(url) for pattern in excluded), url
+    for url in (
+        "file:///repo/docs/images/demo.png",
+        "file:///repo/docs/cards.md",
+        "https://example.org/page.html",
+    ):
+        assert not any(pattern.search(url) for pattern in excluded), url
+
+
 def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
     projects: dict[str, Path],
 ) -> None:
     # github.com answers the page of a file with 503 at times; raw.githubusercontent.com
     # has the same file, and answers 404 for a missing one as well.
-    config = (projects["generic"] / "lychee.toml").read_text(encoding="utf-8")
-    [rule] = tomllib.loads(config)["remap"]
-    pattern, replacement = rule.split()
-    # Lychee writes a group of the regular expression as $1, Python as \g<1>.
-    replacement = re.sub(r"\$(\d)", r"\\g<\1>", replacement)
-
-    def remapped(url: str) -> str:
-        return re.sub(pattern, replacement, url)
+    remapped = remapper(projects["generic"])
 
     raw = "https://raw.githubusercontent.com/owner/repo"
     blob = "https://github.com/owner/repo/blob"
@@ -2584,7 +2655,7 @@ def choose_the_documents_to_check(
     return outputs, summary.read_text(encoding="utf-8")
 
 
-EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
+EVERY_DOCUMENT = {"files": "'./**/*.md' './docs/**/*.html'", "every": "true"}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -2602,6 +2673,12 @@ EVERY_DOCUMENT = {"files": "'./**/*.md'", "every": "true"}
             {"README.md": "changed\n", "docs/new.md": "new\n", "src/app.py": "\n"},
             "pull_request",
             {"files": "'./README.md' './docs/new.md' "},
+        ),
+        # A page of HTML of the website, such as one that leads to another address.
+        (
+            {"docs/dashboard/index.html": "<p>x</p>\n", "src/page.html": "\n"},
+            "pull_request",
+            {"files": "'./docs/dashboard/index.html' "},
         ),
         # The changelog alone is no document to check, and neither is code.
         ({"CHANGELOG.md": "changed\n", "src/app.py": "\n"}, "pull_request", {}),
@@ -3010,6 +3087,15 @@ def test_every_download_tries_again_after_a_passing_error(
                 # An upload retries only where its API takes a second one without
                 # harm, as the release in the App Store does.
                 if "--request POST" in command:
+                    continue
+                # A request for a status that is an error, such as the 404 of an
+                # address that leads nowhere, tries again only after an error of the
+                # server or of the network, which --retry alone does.
+                if "--write-out '%{http_code}'" in command:
+                    for option in DOWNLOAD:
+                        assert (option in command) is (
+                            option not in ("--fail", "--retry-all-errors")
+                        ), f"{path.name}: curl {command}"
                     continue
                 downloads += 1
                 for option in DOWNLOAD:
@@ -4219,7 +4305,8 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
         verify = [
             line
             for line in security(kind).splitlines()
-            if line.startswith("gh attestation verify ")
+            # Not that of the website, which the Docs workflow signs.
+            if line.startswith("gh attestation verify ") and "artifact.tar" not in line
         ]
         assert len(verify) == (0 if kind in ("generic", "github-action") else 1), kind
         workflow = "release.yml" if kind == "container" else "build-release.yml"
@@ -8590,8 +8677,8 @@ def test_the_check_docs_keeps_the_website_of_a_pull_request(
     # Its lines up to the next comment or step.
     lines = re.split(r"\n      (?! )", step)[0].splitlines()[1:]
     assert lines == [
-        "        if: steps.site.outputs.build == 'true'"
-        " && github.event_name == 'pull_request'",
+        "        if: ${{ !cancelled() && steps.build.outcome == 'success'"
+        " && github.event_name == 'pull_request' }}",
         "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         " # v7.0.1",
         "        timeout-minutes: 5",
@@ -8766,6 +8853,105 @@ def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_wee
     base = (folder / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
     assert "cache_dir" not in base
     assert "/.cache/" in (folder / ".gitignore").read_text(encoding="utf-8").split("\n")
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_check_docs_checks_the_website_that_it_built(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    links = (folder / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    job = job_of(docs, "docs")
+    build = step_of(job, "      - name: Build the website")
+    assert setting_of(build, "id") == "build"
+    promises = step_of(job, "      - name: Check what the hooks of the website promise")
+    address = step_of(job, "      - name: Lay out the address of the website")
+    lychee = step_of(job, "      - name: Check the links and anchors of the website")
+    project = step_of(job, "      - name: Check the website as this project does")
+    accessible = step_of(job, "      - uses: actions/setup-node@")
+    publish = step_of(job, "      - name: Hand the website to GitHub Pages")
+    order = [job.index(step) for step in (build, promises, address, lychee, project)]
+    assert order == sorted(order)
+    assert order[-1] < job.index(accessible) < job.index(publish)
+    # Each check of the built website runs once the build passed, also when the
+    # check before it failed, so that one run names everything to fix.
+    built = "!cancelled() && steps.build.outcome == 'success'"
+    node = step_of(job, "      - name: Set up the accessibility check")
+    a11y_tests = step_of(job, "      - name: Test the accessibility check")
+    a11y = step_of(job, "      - name: Check the accessibility of the website")
+    for step in (promises, address, lychee, accessible, node, a11y):
+        assert setting_of(step, "if") == f"${{{{ {built} }}}}", step
+    assert setting_of(a11y_tests, "if") == (
+        f"${{{{ {built} && hashFiles('.github/a11y/check.test.mjs') != '' }}}}"
+    )
+    assert setting_of(project, "if") == (
+        f"${{{{ {built} && hashFiles('scripts/check-site.sh') != '' }}}}"
+    )
+    # What the hooks promise, with the languages for the job that publishes.
+    assert setting_of(promises, "id") == "promises"
+    assert 'python3 "$script" site-check site --output "$GITHUB_OUTPUT"' in promises
+    assert "      languages: ${{ steps.promises.outputs.languages }}\n" in job
+    assert "          ROOT: ${{ steps.promises.outputs.root }}\n" in address
+    assert "          ADDRESS: ${{ runner.temp }}/address\n" in address
+    # lychee of the Links workflow, without the network and away from its rules.
+    pinned = re.search(r"uses: lycheeverse/lychee-action@\S+ # v\S+", links)
+    assert pinned
+    assert f"        {pinned[0]}\n" in lychee
+    assert "          workingDirectory: site\n" in lychee
+    assert (
+        "          args: --offline --include-fragments --root-dir"
+        " ${{ runner.temp }}/address --no-progress '**/*.html'\n"
+    ) in lychee
+    assert "fail:" not in lychee
+    # The checks of the project alone, in a file that the blueprint never writes.
+    assert "        run: bash scripts/check-site.sh site\n" in project
+    assert not (folder / "scripts/check-site.sh").exists()
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
+    projects: dict[str, Path], kind: str
+) -> None:
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    for name, before in (("docs", "docs"), ("dashboard", "build")):
+        path = folder / f".github/workflows/{name}.yml"
+        if not path.exists():
+            assert kind != "blueprint"
+            continue
+        deploy = job_of(path.read_text(encoding="utf-8"), "deploy")
+        assert (
+            "    permissions:\n"
+            "      attestations: write # keeps the signed provenance of the website\n"
+            "      id-token: write # proves to GitHub Pages and to Sigstore which"
+            " workflow publishes\n"
+            "      pages: write # publishes the website\n"
+        ) in deploy
+        published = deploy.index("uses: actions/deploy-pages@")
+        taken = step_of(deploy, "      - name: Take the website that GitHub Pages")
+        attested = step_of(deploy, "      - name: Attest the provenance of the website")
+        asked = step_of(deploy, "      - name: Ask the published website for its pages")
+        assert published < deploy.index(taken) < deploy.index(attested)
+        assert deploy.index(attested) < deploy.index(asked)
+        assert "uses: actions/download-artifact@" in taken
+        assert "          name: github-pages\n" in taken
+        assert "uses: actions/attest-build-provenance@" in attested
+        assert "          subject-path: ${{ runner.temp }}/pages/artifact.tar\n" in (
+            attested
+        )
+        assert (
+            f"          LANGUAGES: ${{{{ needs.{before}.outputs.languages }}}}\n"
+        ) in asked
+    security = (folder / "SECURITY.md").read_text(encoding="utf-8")
+    signer = "dashboard.yml" if kind == "blueprint" else "docs.yml"
+    repository = "Dennis-Otto/" + (
+        "repo-blueprint" if kind == "blueprint" else "demo-project"
+    )
+    assert "\n## Verify the website\n" in security
+    assert (
+        f"gh attestation verify artifact.tar --repo {repository} --signer-workflow"
+        f" {repository}/.github/workflows/{signer}\n"
+    ) in security
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -9182,7 +9368,7 @@ def test_every_website_is_checked_for_its_accessibility(
     docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     step = docs[docs.index("      - name: Check the accessibility of the website\n") :]
     assert re.split(r"\n      (?! )", step)[0].splitlines()[1:] == [
-        "        if: steps.site.outputs.build == 'true'",
+        "        if: ${{ !cancelled() && steps.build.outcome == 'success' }}",
         "        continue-on-error: true",
         "        timeout-minutes: 5",
         "        env:",
@@ -10062,6 +10248,10 @@ if [[ "$4" == "$TMPDIR"/* && -d "$4" ]]; then
   echo "a new folder" >> "$CALLS"
 fi
 echo "<h1>Demo</h1>" > "$4/index.html"
+if [[ -n "${BROKEN:-}" ]]; then
+  echo '<html lang="en"><link rel="canonical" href="https://x.org/">' > "$4/index.html"
+  echo '<html lang="en"><meta name="generator" content="mkdocs-1.6.1">' > "$4/guide.html"
+fi
 echo "INFO    -  Building documentation to directory: $4"
 if [[ -n "${FAIL:-}" ]]; then
   echo "WARNING -  Doc file 'index.md' contains a link 'nowhere.md', but the target is not found."
@@ -10077,6 +10267,8 @@ def run_the_website_step(
     mkdocs: str,
     pages: tuple[str, ...] = ("mkdocs.yml", "docs/index.md"),
     fail: bool = False,
+    tool: bool = False,
+    broken: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """The step Website of scripts/check.sh, in a repository with these pages and a
     fake MkDocs at this place: in .venv-docs, in an activated environment (VIRTUAL_ENV
@@ -10085,7 +10277,14 @@ def run_the_website_step(
     repository = tmp_path / "repository"
     (repository / "scripts").mkdir(parents=True)
     # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
-    script = check[: check.index('step "Text files"')] + website_step(check)
+    script = check[: check.index('step "Text files"')]
+    if tool:
+        # The Python and blueprint.py that the step Pages in one column found.
+        script += (
+            f"python={shlex.quote(Path(sys.executable).as_posix())}\n"
+            f"tool={shlex.quote((ROOT / 'blueprint.py').as_posix())}\n"
+        )
+    script += website_step(check)
     (repository / "scripts/website.sh").write_text(
         script, encoding="utf-8", newline="\n"
     )
@@ -10125,6 +10324,8 @@ def run_the_website_step(
     )
     if fail:
         environment["FAIL"] = "1"
+    if broken:
+        environment["BROKEN"] = "1"
     assert BASH
     result = subprocess.run(
         [BASH, "scripts/website.sh"],
@@ -10163,6 +10364,30 @@ def test_the_website_step_builds_the_website_strictly(
     assert recorded[:4] == ["true", "build", "--strict", "--site-dir"]
     assert recorded[5:] == ["a new folder"]
     # The website goes again: nothing is left in the temporary folder.
+    assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("broken", [False, True])
+def test_the_website_step_checks_what_the_hooks_promise(
+    projects: dict[str, Path], tmp_path: Path, broken: bool
+) -> None:
+    # As the check docs checks it after the build, with blueprint.py site-check.
+    result, _, temporary = run_the_website_step(
+        projects, tmp_path, ".venv-docs/bin/mkdocs", tool=True, broken=broken
+    )
+
+    assert "The website builds strictly." in result.stdout
+    if broken:
+        assert result.returncode == 1
+        assert "/guide.html: no canonical address\n" in result.stdout
+        assert (
+            "The website breaks what its hooks promise; the lines above name each"
+            " file.\n"
+        ) in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "keeps what its hooks promise (one language).\n" in result.stdout
     assert list(temporary.iterdir()) == []
 
 

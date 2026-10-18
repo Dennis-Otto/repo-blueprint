@@ -49,4 +49,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0041](0041-every-website-is-accessible-and-quick-and-a-check-proves-it.md) | Every website is accessible and quick on a phone, and a check proves it | accepted |
 | [0042](0042-each-language-of-a-website-searches-and-describes-itself.md) | Each language of a website searches and describes itself | accepted |
 | [0043](0043-a-node-package-lints-with-biome-and-installs-without-scripts.md) | A Node package lints and formats with Biome, reports its coverage as LCOV and installs without the scripts of its packages | accepted |
-| [0044](0044-every-website-shows-its-automation-written-from-its-workflows.md) | Every website shows its automation, written from its workflows at every build | accepted |
+| [0044](0044-the-built-website-is-checked-and-every-deployment-is-signed.md) | The built website is checked, and every deployment is signed and asked for its pages | accepted |
+| [0045](0045-every-website-shows-its-automation-written-from-its-workflows.md) | Every website shows its automation, written from its workflows at every build | accepted |
