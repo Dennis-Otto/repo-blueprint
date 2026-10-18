@@ -37,6 +37,7 @@ from mypy import api as mypy_api
 from shared import copy_of, git_environment, once, run_folder
 from shell import BASH, in_bash
 
+import downstream
 import pins
 from blueprint.bot_health import (
     CRON,
@@ -1226,7 +1227,9 @@ def test_hadolint_runs_in_its_image_and_shows_its_findings_as_annotations(
     # there.
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     lint = step_of(variants, "      - name: Lint the Dockerfile")
-    assert "        if: matrix.kind == 'container'\n" in lint
+    assert (
+        "        if: matrix.start != 'adopted' && matrix.kind == 'container'\n" in lint
+    )
     command = step[step.index("docker run ") :].rstrip()
     assert lint.rstrip().endswith(command.replace('"$PWD:', '"$PWD/$PROJECT:'))
     assert HADOLINT.findall(variants) == [image[0]]
@@ -6411,6 +6414,7 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
             "Windows",
             "Release",
             "Issue assistant sync",
+            "Downstream",
         }
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
@@ -6689,7 +6693,8 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     variant = job_alone(variants, "variant")
     name = (
-        "${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})"
+        "${{ matrix.start == 'new' && 'variant' || matrix.start }}"
+        " (${{ matrix.answers || matrix.kind }})"
     )
     assert f"    name: {name}\n" in variant
     assert variant.endswith(explain_step(name))
@@ -9561,6 +9566,152 @@ def test_each_leg_of_the_variants_does_only_what_it_alone_can_show() -> None:
     assert "          cache-suffix: ${{ matrix.kind }}\n" in setup
     # No action that builds an image of its own when the job starts.
     assert "uses: hadolint/" not in job
+
+
+# The answers of each repository that takes the blueprint, by the name of the
+# repository; the Rollout brings it every release.
+ANSWERS = {
+    path.stem: downstream.read(path)
+    for path in sorted((ROOT / "tests/answers").glob("*.yml"))
+}
+
+
+def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
+    rollout = (ROOT / ".github/workflows/rollout.yml").read_text(encoding="utf-8")
+    order = re.search(r"^          ORDER: (.+)$", rollout, re.M)
+    assert order
+    assert sorted(order[1].split()) == list(ANSWERS)
+    for name, answers in ANSWERS.items():
+        assert answers["owner"] == "Dennis-Otto", name
+        assert answers["project_slug"] == name
+        # Never Copier's own, which name the version of the repository and the source.
+        assert not {"_commit", "_src_path"} & set(answers), name
+    # A leg of the Variants for each, with the kind of project of its answers.
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    legs = re.findall(
+        r"^          - \{ kind: ([\w-]+), start: adopted, answers: ([\w.-]+) \}$",
+        variants,
+        re.M,
+    )
+    assert legs == [
+        (answers["project_type"], name) for name, answers in ANSWERS.items()
+    ]
+
+
+@pytest.mark.parametrize("name", list(ANSWERS))
+def test_the_answers_of_each_repository_render_every_file(
+    tmp_path: Path, name: str
+) -> None:
+    project = render(tmp_path / name, **ANSWERS[name])
+    for path in text_files(project):
+        text = path.read_text(encoding="utf-8")
+        assert not LEFTOVER.search(text), path
+        assert text == "" or text.endswith("\n"), path
+        assert not LEFTOVER.search(str(path.relative_to(project))), path
+    # Each answer of the repository is one that the blueprint asks, and the
+    # repository answers each question: a new question gets its answer here too.
+    stored = downstream.read(project / ".copier-answers.yml")
+    assert {k: v for k, v in stored.items() if not k.startswith("_")} == ANSWERS[name]
+    # A repository that takes the blueprint brings its own code and tests.
+    assert not stored["sample_code"]
+    assert not (project / "docs/index.md").exists()
+
+
+def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    job = job_of(variants, "variant")
+    steps = ["      - " + step for step in job.split("\n      - ")[1:]]
+    # The update with the answers of the repository, from the latest release.
+    update = step_of(
+        job,
+        "      - name: Render the project from the latest release and update it to this commit",
+    )
+    assert setting_of(update, "if") == "matrix.start != 'new'"
+    assert (
+        '            data=(--data-file "$GITHUB_WORKSPACE/tests/answers/$ANSWERS.yml")\n'
+        in update
+    )
+    assert "      ANSWERS: ${{ matrix.answers }}\n" in job
+    # Its website, with the home page that the repository brings.
+    website = step_of(job, "      - name: Build the website of the project")
+    assert setting_of(website, "if") is None
+    assert "> docs/index.md\n" in website
+    # No tool of its own code, which it alone has.
+    own = [
+        step
+        for step in steps
+        if step.split("\n")[0]
+        in (
+            "      - name: Install the hash-pinned tools of the project",
+            "      - name: Find the PHP of the tools and the oldest PHP of the app",
+            "      - name: Set up the PHP of the tools",
+            "      - name: Install the locked tools of the app",
+            "      - name: Install the locked packages",
+            "      - name: Lint the Dockerfile",
+            "      - name: Run the checks of the project",
+            "      - name: Validate the integration with hassfest",
+        )
+        or "uses: actions/setup-node@" in step.split("\n")[0]
+        or "python-version-file: ${{ env.PROJECT }}" in step
+    ]
+    assert len(own) == 10
+    for step in own:
+        assert (setting_of(step, "if") or "").startswith("matrix.start != 'adopted'"), (
+            step
+        )
+    # The lint of its workflows and of its Markdown, as in every leg.
+    for name in ("Lint the workflows", "Lint the Markdown"):
+        assert (
+            setting_of(step_of(job, f"      - name: {name} of the project"), "if")
+            is None
+        )
+
+
+# A file of the blueprint that a file of the template takes in.
+INCLUDE = re.compile(r"""\[%-?\s*include\s+["']([^"']+)["']""")
+
+
+def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
+    workflow = (ROOT / ".github/workflows/downstream.yml").read_text(encoding="utf-8")
+    events = triggers(workflow)
+    assert set(events) == {"pull_request", "schedule", "workflow_dispatch"}
+    # In the pull requests that change what a repository gets from the blueprint.
+    paths = paths_of(workflow, "pull_request")
+    for pattern in (
+        "copier.yml",
+        "template/**",
+        "includes/**",
+        "stacks/**",
+        "blueprint/**",
+        "blueprint.py",
+        ".github/**",
+        "downstream.py",
+        "tests/answers/**",
+    ):
+        assert pattern in paths, pattern
+    # Every file that the template includes from the blueprint.
+    included: set[str] = set()
+    for file in (ROOT / "template").rglob("*"):
+        if file.is_file():
+            text = file.read_text(encoding="utf-8", errors="replace")
+            included |= set(INCLUDE.findall(text))
+    assert included
+    for name in included:
+        assert any(fnmatch.fnmatch(name, pattern) for pattern in paths), name
+    assert "  contents: read\n" in workflow
+    assert "write" not in workflow
+    job = job_alone(workflow, "downstream")
+    assert "          fetch-depth: 0\n          persist-credentials: false\n" in job
+    run = script_of(job, "Update every repository that takes the blueprint")
+    assert 'arguments=(--head "$(git rev-parse HEAD)")\n' in run
+    assert 'arguments+=(--base "$(git rev-parse HEAD^1)")\n' in run
+    assert 'python3 downstream.py "${arguments[@]}"\n' in run
+    assert job.endswith(explain_step("downstream"))
+    # No required check: a conflict can be the right change.
+    settings = tomllib.loads(
+        (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert "downstream" not in settings["branch"]["required_checks"]
 
 
 def website_step(check: str) -> str:

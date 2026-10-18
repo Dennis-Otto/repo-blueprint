@@ -11,6 +11,13 @@ name: Variants
 # conflict and without --trust, and the files of the project, which it keeps, must
 # still pass the checks of this commit.
 #
+# And the same update with the answers of each repository that takes the blueprint,
+# from tests/answers/ (adopted): without the sample code, with their licenses, their
+# languages and their discussions. Such a repository brings its own code and tests,
+# so these legs check what the blueprint gives it alone: the update, the website and
+# the lint of the workflows and of the Markdown. The Downstream workflow updates the
+# repositories themselves.
+#
 # Not after a merge: main takes a pull request only when it is up to date, so a merge
 # gives main the tree that the pull request ran here. Nor in the release pull request,
 # which changes only the changelog and the version, files that no project gets. The
@@ -49,8 +56,9 @@ concurrency:
 
 jobs:
   variant:
-    # A new repository (variant) and one updated from the latest release (update).
-    name: ${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})
+    # A new repository (variant), one updated from the latest release (update), and
+    # one updated with the answers of a repository that takes the blueprint (adopted).
+    name: ${{ matrix.start == 'new' && 'variant' || matrix.start }} (${{ matrix.answers || matrix.kind }})
     # Not in the release pull request: the branch of the release bot in this repository.
     if: >-
       !startsWith(github.head_ref, 'release-please--') ||
@@ -66,8 +74,16 @@ jobs:
       matrix:
         kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, container, generic]
         start: [new, update]
+        # Each file of tests/answers/, with the project_type of its answers.
+        include:
+          - { kind: generic, start: adopted, answers: dennis-otto.github.io }
+          - { kind: home-assistant, start: adopted, answers: ha-autodarts }
+          - { kind: github-action, start: adopted, answers: issue-assistant }
+          - { kind: nextcloud-app, start: adopted, answers: paperless-sync }
+          - { kind: nextcloud-app, start: adopted, answers: paperless-unified-search }
     env:
       KIND: ${{ matrix.kind }}
+      ANSWERS: ${{ matrix.answers }}
       # Inside the workspace, where actions such as setup-node look for their files.
       PROJECT: variant
     steps:
@@ -115,7 +131,7 @@ jobs:
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all
       - name: Render the project from the latest release and update it to this commit
-        if: matrix.start == 'update'
+        if: matrix.start != 'new'
         timeout-minutes: 5
         # As the blueprint bot runs Copier: without the maintenance that Git starts in
         # the background after a commit, which Copier's update would collide with.
@@ -124,11 +140,16 @@ jobs:
           GIT_CONFIG_KEY_0: maintenance.auto
           GIT_CONFIG_VALUE_0: "false"
         run: |
-          data=(
-            --data project_name="Demo Project"
-            --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts."
-            --data project_type="$KIND"
-          )
+          if [[ -n "$ANSWERS" ]]; then
+            # The answers of the repository, as its .copier-answers.yml has them.
+            data=(--data-file "$GITHUB_WORKSPACE/tests/answers/$ANSWERS.yml")
+          else
+            data=(
+              --data project_name="Demo Project"
+              --data "description=A $KIND of the blueprint's tests, with \"quotes\" and Ümlauts."
+              --data project_type="$KIND"
+            )
+          fi
           # The latest release before this commit; HEAD^ of a release is the one before.
           latest="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD^)"
           # The commit, not HEAD: Copier would take the rendered project, which isn't
@@ -142,7 +163,7 @@ jobs:
           # As the blueprint bot does it, without --trust: updating runs no code of the blueprint.
           (cd "$PROJECT" && copier update --defaults --conflict inline --vcs-ref "$commit")
           git -C "$PROJECT" add --all
-          echo "The $KIND from $latest, updated to ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
+          echo "The ${ANSWERS:-$KIND} from $latest, updated to ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
 
           # A new repository from this commit, whose files the update must give.
           copier copy --defaults --vcs-ref "$commit" "${data[@]}" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/new"
@@ -211,18 +232,23 @@ jobs:
         env:
           NO_MKDOCS_2_WARNING: "true"
         run: |
+          # A repository that takes the blueprint without its sample code brings its
+          # own home page, without which the Docs workflow builds no website.
+          if [[ ! -f docs/index.md && ! -f docs/README.md ]]; then
+            printf '# %s\n\nThe home page of the repository.\n' "$ANSWERS" > docs/index.md
+          fi
           uv venv --no-project --python "$(command -v python)" "$RUNNER_TEMP/docs"
           uv pip install --python "$RUNNER_TEMP/docs/bin/python" --require-hashes -r .github/docs-requirements.txt
           "$RUNNER_TEMP/docs/bin/mkdocs" build --strict --site-dir "$RUNNER_TEMP/site"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
+        if: matrix.start != 'adopted' && contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
         timeout-minutes: 5
         with:
           python-version-file: ${{ env.PROJECT }}/.python-version
       # Into the Python of the project, which is first on the PATH from here on.
       - name: Install the hash-pinned tools of the project
-        if: contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
+        if: matrix.start != 'adopted' && contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
         working-directory: ${{ env.PROJECT }}
         timeout-minutes: 5
         run: |
@@ -236,7 +262,7 @@ jobs:
       # oldest PHP of its appinfo/info.xml.
       - name: Find the PHP of the tools and the oldest PHP of the app
         id: php
-        if: matrix.kind == 'nextcloud-app'
+        if: matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'
         working-directory: ${{ env.PROJECT }}
         run: |
           python3 - >> "$GITHUB_OUTPUT" <<'EOF'
@@ -268,7 +294,7 @@ jobs:
           extensions: dom, libxml, mbstring, xml
           coverage: none
       - name: Set up the PHP of the tools
-        if: matrix.kind == 'nextcloud-app'
+        if: matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         timeout-minutes: 5
         with:
@@ -277,7 +303,7 @@ jobs:
           coverage: pcov
           tools: composer:v2
       - name: Install the locked tools of the app
-        if: matrix.kind == 'nextcloud-app'
+        if: matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'
         working-directory: ${{ env.PROJECT }}
         timeout-minutes: 5
         run: |
@@ -285,12 +311,12 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: matrix.kind == 'node-package'
+        if: matrix.start != 'adopted' && matrix.kind == 'node-package'
         timeout-minutes: 5
         with:
           node-version-file: ${{ env.PROJECT }}/.nvmrc
       - name: Install the locked packages
-        if: matrix.kind == 'node-package'
+        if: matrix.start != 'adopted' && matrix.kind == 'node-package'
         working-directory: ${{ env.PROJECT }}
         timeout-minutes: 5
         run: npm ci --ignore-scripts
@@ -298,14 +324,16 @@ jobs:
       # Hadolint as the CI of a container runs it, in its image, which only this
       # step pulls.
       - name: Lint the Dockerfile
-        if: matrix.kind == 'container'
+        if: matrix.start != 'adopted' && matrix.kind == 'container'
         timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/repo:ro" --workdir /repo \
             ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
             hadolint --no-color Dockerfile
 
+      # Not in a repository that takes the blueprint: its checks need its own code.
       - name: Run the checks of the project
+        if: matrix.start != 'adopted'
         working-directory: ${{ env.PROJECT }}
         run: bash scripts/check.sh
       - name: Lint the workflows of the project
@@ -323,7 +351,8 @@ jobs:
       # The Renovate of the Renovate workflow, which reads the rules of every project.
       # In a new repository only: an update gives every file of the blueprint as a new
       # repository has it, which its own step compares, and keeps renovate.json5 of
-      # the project.
+      # the project. The rules depend on the kind of project alone, not on the other
+      # answers of a repository that takes the blueprint.
       - name: Validate the rules of Renovate of the project
         if: matrix.start == 'new'
         timeout-minutes: 5
@@ -332,7 +361,7 @@ jobs:
             ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435 \
             renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5
       - name: Validate the integration with hassfest
-        if: matrix.kind == 'home-assistant'
+        if: matrix.start != 'adopted' && matrix.kind == 'home-assistant'
         timeout-minutes: 5
         # Home Assistant's current image on purpose, as in the CI of the integrations:
         # it validates against the rules that apply today.
@@ -342,7 +371,7 @@ jobs:
       - name: Explain the failure
         if: failure()
         env:
-          CHECK: "${{ matrix.start == 'update' && 'update' || 'variant' }} (${{ matrix.kind }})"
+          CHECK: "${{ matrix.start == 'new' && 'variant' || matrix.start }} (${{ matrix.answers || matrix.kind }})"
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py

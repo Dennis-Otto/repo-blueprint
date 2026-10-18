@@ -1,0 +1,22 @@
+# The answers of https://github.com/Dennis-Otto/dennis-otto.github.io,
+# as its .copier-answers.yml has them, without _commit and _src_path. The Variants
+# workflow makes a repository with them and updates one from the latest release,
+# and the Downstream workflow warns when they differ from those of the repository:
+# change them with the repository.
+author: Dennis Otto
+copyright: 2026 Dennis Otto
+description: 'The projects of Dennis Otto in one place: Home Assistant, Nextcloud
+  and Paperless, GitHub automation and the blueprint they all share.'
+discussions: false
+homepage: https://dennis-otto.github.io/
+languages: []
+license: MIT
+owner: Dennis-Otto
+project_name: Dennis Otto
+project_slug: dennis-otto.github.io
+project_type: generic
+sample_code: false
+sponsor: Dennis-Otto
+successor: true
+test_workflows: ''
+topics: documentation, github-pages, home-assistant, nextcloud, paperless-ngx, portfolio
