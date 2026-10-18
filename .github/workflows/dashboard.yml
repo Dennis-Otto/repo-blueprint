@@ -4,7 +4,9 @@ name: Dashboard
 # from mkdocs.yml and docs/ as in every repository, and under dashboard/ the
 # dashboard of the owner's public repositories: the release of the blueprint each one
 # is on, its releases, its open pull requests, the last runs of its main workflows and
-# its OpenSSF Scorecard (dashboard.py). On a schedule, which GitHub keeps as it can,
+# its OpenSSF Scorecard (dashboard.py), and beside it the same data as repos.json, the
+# health of each day as history.json and the releases of every repository as the
+# Atom feed releases.atom, at addresses that stay. On a schedule, which GitHub keeps as it can,
 # and after every change of either, of the changelog that a page includes and of the
 # code that reads GitHub. A history of the published dashboard that can't be read
 # fails the build, so that the website keeps its trends until the next run instead of
@@ -197,4 +199,32 @@ jobs:
             echo "::error title=The published website::$missing answers with the status $status, not 404: GitHub Pages must answer an address that leads nowhere with its 404 page."
             failed=1
           fi
+          exit "$failed"
+      # The dashboard and its data, at the addresses that stay, which the owner's
+      # website and feed readers read: each file answers, with what it holds.
+      - name: Ask the published dashboard for its data
+        timeout-minutes: 5
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          dashboard="${PAGE_URL%/}/dashboard"
+          found="$RUNNER_TEMP/dashboard"
+          failed=0
+          for file in index.html history.json repos.json releases.atom; do
+            case "$file" in
+              index.html) holds='<title>' ;;
+              history.json) holds='"date"' ;;
+              repos.json) holds='"repos"' ;;
+              *) holds='<feed' ;;
+            esac
+            address="$dashboard/$file"
+            if curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 10 \
+              --connect-timeout 10 --max-time 30 --output "$found" "$address" &&
+              grep -qF "$holds" "$found"; then
+              echo "- $address answers with its data." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=The published dashboard::$address answers without its data: the owner's website and every feed reader read it at this address."
+              failed=1
+            fi
+          done
           exit "$failed"

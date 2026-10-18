@@ -10,11 +10,14 @@ import subprocess
 import urllib.error
 import zipfile
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 import pytest
+from shell import BASH
+from workflow_steps import run_step
 
 import dashboard
 from blueprint.github import Api
@@ -60,7 +63,12 @@ ROUTES: dict[str, tuple[int, Any]] = {
     "users/Dennis-Otto/repos?type=owner&per_page=100": (
         200,
         [
-            {"full_name": "Dennis-Otto/demo"},
+            {
+                "full_name": "Dennis-Otto/demo",
+                "description": "A demo <of> the blueprint",
+                "homepage": "https://dennis-otto.github.io/demo/",
+                "stargazers_count": 12,
+            },
             {"full_name": "Dennis-Otto/old", "archived": True},
             {"full_name": "Dennis-Otto/fork", "fork": True},
             {"full_name": "Dennis-Otto/secret", "private": True},
@@ -104,6 +112,7 @@ ROUTES: dict[str, tuple[int, Any]] = {
             "codeql.yml",
             "release.yml",
             "verify-release.yml",
+            "docs.yml",
             "findings.yml",
             "links.yml",
             "mutation.yml",
@@ -114,6 +123,10 @@ ROUTES: dict[str, tuple[int, Any]] = {
     last_runs("demo", "codeql.yml"): (200, listed(run("completed", "failure"))),
     last_runs("demo", "release.yml"): (200, listed(run("in_progress"))),
     last_runs("demo", "links.yml"): (200, listed()),
+    last_runs("demo", "docs.yml"): (
+        200,
+        listed(run("completed", "success", html_url="https://docs")),
+    ),
     # A run of Findings that the CodeQL of a pull request started is skipped on main,
     # and a pull request from the main of a fork runs on a branch of that name too:
     # neither says how main does.
@@ -214,6 +227,7 @@ def test_a_repository_on_the_blueprint() -> None:
     assert row.runs["CodeQL"].state == "failure"
     assert row.runs["Release"].state == "running"
     assert row.runs["Links"].state == "none"
+    assert row.runs["Website"] == dashboard.Run("success", "https://docs")
     assert row.runs["Findings"] == dashboard.Run("failure", "https://findings")
     assert row.runs["Mutation"] == dashboard.Run("failure", "https://mutation")
     # The Settings workflow is gone, and Renovate runs in the blueprint alone.
@@ -367,12 +381,20 @@ def test_an_update_with_an_unusual_title() -> None:
 
 
 def test_the_repositories_are_the_public_ones_of_the_owner() -> None:
-    assert dashboard.repositories(simulated(ROUTES), "Dennis-Otto") == [
+    api = simulated(ROUTES)
+    found = dashboard.listing(api, "Dennis-Otto")
+
+    assert dashboard.repositories(api, "Dennis-Otto") == [
         "Dennis-Otto/behind",
         "Dennis-Otto/demo",
         "Dennis-Otto/plain",
         "Dennis-Otto/repo-blueprint",
     ]
+    # What GitHub lists about each one stays for the data of the dashboard.
+    assert [repo["full_name"] for repo in found] == dashboard.repositories(
+        api, "Dennis-Otto"
+    )
+    assert found[1]["stargazers_count"] == 12
 
 
 def test_the_page_shows_each_state(tmp_path: Path) -> None:
@@ -401,6 +423,16 @@ def test_the_page_shows_each_state(tmp_path: Path) -> None:
     assert 'title="Links: no run"' in page
     assert 'title="Settings: not set up"' in page
     assert 'title="Verification: passed"><a href="https://verify">✔</a>' in page
+    assert 'title="Website: passed"><a href="https://docs">✔</a>' in page
+    assert "<th>Verification</th><th>Website</th>" in page
+    # A feed reader and a script find the data of the page from its head.
+    assert (
+        '<link rel="alternate" type="application/atom+xml" '
+        'title="The releases of every repository" href="releases.atom">'
+    ) in page
+    assert '<link rel="alternate" type="application/json"' in page
+    for name in ("repos.json", "history.json", "releases.atom"):
+        assert f'<a href="{name}">{name}</a>' in page
     assert ">7.6</a>" in page
     assert "<th>Mutation</th><th>Renovate</th>" in page
     assert "<th>First answer by a person</th>" in page
@@ -905,3 +937,288 @@ def test_a_run_without_the_artifact() -> None:
     )
 
     assert files == {}
+
+
+# --------------------------------------------------------------------------- data
+
+ATOM = "{http://www.w3.org/2005/Atom}"
+
+RELEASES: dict[str, tuple[int, Any]] = {
+    # The older release first: the feed puts the newest first itself.
+    "repos/Dennis-Otto/demo/releases?per_page=100": (
+        200,
+        [
+            {
+                "tag_name": "v1.2.1",
+                "html_url": "https://github.com/Dennis-Otto/demo/releases/tag/v1.2.1",
+                "published_at": "2026-09-01T08:00:00Z",
+                "body": "",
+            },
+            {
+                "tag_name": "v1.2.2",
+                "html_url": "https://github.com/Dennis-Otto/demo/releases/tag/v1.2.2",
+                "published_at": "2026-10-07T12:00:00Z",
+                "body": "### Bug fixes\r\n\r\n* a fix",
+            },
+            {
+                "tag_name": "v1.3.0-beta.1",
+                "html_url": "https://github.com/Dennis-Otto/demo/releases/tag/v1.3.0-beta.1",
+                "published_at": "2026-10-07T13:00:00Z",
+                "prerelease": True,
+            },
+            {"tag_name": "v1.3.0", "draft": True, "published_at": None},
+        ],
+    ),
+    # A release without its address on GitHub gets the address of its tag.
+    "repos/Dennis-Otto/repo-blueprint/releases?per_page=100": (
+        200,
+        [{"tag_name": "v0.3.0", "published_at": "2026-10-05T10:00:00Z", "body": "N"}],
+    ),
+}
+
+
+def test_the_stable_releases_of_a_repository() -> None:
+    api = simulated(RELEASES)
+
+    found = dashboard.stable_releases(api, "Dennis-Otto/demo")
+    (blueprint,) = dashboard.stable_releases(api, "Dennis-Otto/repo-blueprint")
+
+    assert [release.tag for release in found] == ["v1.2.2", "v1.2.1"]
+    assert found[0].notes == "### Bug fixes\r\n\r\n* a fix"
+    assert blueprint.url == (
+        "https://github.com/Dennis-Otto/repo-blueprint/releases/tag/v0.3.0"
+    )
+    # A repository without a release adds none.
+    assert dashboard.stable_releases(api, "Dennis-Otto/behind") == []
+
+
+def test_the_dashboard_publishes_its_data_and_its_feed(tmp_path: Path) -> None:
+    out = tmp_path / "site" / "index.html"
+
+    code = dashboard.main(
+        ["--owner", "Dennis-Otto", "--out", str(out)],
+        api=simulated({**ROUTES, **HEALTH, **RELEASES}),
+        opener=opener,
+        now=NOW,
+        download=downloader,
+    )
+
+    assert code == 0
+    found = json.loads((out.parent / "repos.json").read_text(encoding="utf-8"))
+    assert {key: value for key, value in found.items() if key != "repos"} == {
+        "schema": 1,
+        "generated": "2026-10-08T06:05:00Z",
+        "owner": "Dennis-Otto",
+        "blueprint": "v0.3.0",
+    }
+    assert [repo["name"] for repo in found["repos"]] == [
+        "behind",
+        "demo",
+        "plain",
+        "repo-blueprint",
+    ]
+    # Every repository has every field, also where nothing is known.
+    fields = {field.name for field in dataclasses.fields(dashboard.Row)}
+    assert all(
+        set(repo) == {"name", "url", "release_url", *fields} for repo in found["repos"]
+    )
+    behind, demo, _, _ = found["repos"]
+    assert demo["repo"] == "Dennis-Otto/demo"
+    assert demo["url"] == "https://github.com/Dennis-Otto/demo"
+    assert (demo["description"], demo["homepage"], demo["stars"]) == (
+        "A demo <of> the blueprint",
+        "https://dennis-otto.github.io/demo/",
+        12,
+    )
+    assert (demo["release"], demo["released"], demo["release_url"]) == (
+        "v1.2.2",
+        "2026-10-07",
+        "https://github.com/Dennis-Otto/demo/releases/tag/v1.2.2",
+    )
+    assert demo["runs"]["Website"] == {
+        "state": "success",
+        "url": "https://docs",
+        "started": None,
+    }
+    assert demo["scorecard"] == 7.6
+    assert (demo["health"]["coverage"], demo["health"]["releases"]) == (50.0, 2)
+    # null where nothing is known, never an empty text.
+    assert [behind[key] for key in ("description", "homepage", "release")] == [
+        None,
+        None,
+        None,
+    ]
+    assert [behind[key] for key in ("release_url", "update", "scorecard")] == [
+        None,
+        None,
+        None,
+    ]
+    assert behind["stars"] == 0
+    assert behind["runs"]["CI"] == {"state": "absent", "url": None, "started": None}
+    assert behind["health"]["coverage"] is None
+
+    feed = ElementTree.fromstring((out.parent / "releases.atom").read_bytes())
+    entries = feed.findall(f"{ATOM}entry")
+    # The newest first, from every repository, without prereleases and drafts.
+    assert [entry.findtext(f"{ATOM}title") for entry in entries] == [
+        "demo v1.2.2",
+        "repo-blueprint v0.3.0",
+        "demo v1.2.1",
+    ]
+    assert entries[0].findtext(f"{ATOM}summary") == "### Bug fixes\n\n* a fix"
+    # Notes that are empty leave the summary out.
+    assert entries[2].find(f"{ATOM}summary") is None
+    link = feed.find(f"{ATOM}link[@rel='self']")
+    assert link is not None
+    assert link.get("href") == dashboard.PUBLISHED + "releases.atom"
+
+
+def release(number: int) -> dashboard.Release:
+    tag = f"v1.0.{number}"
+    return dashboard.Release(
+        "Dennis-Otto/demo",
+        tag,
+        f"https://github.com/Dennis-Otto/demo/releases/tag/{tag}",
+        dashboard.stamp(NOW - timedelta(hours=number)),
+    )
+
+
+def test_the_feed_holds_the_newest_releases_first() -> None:
+    releases = [release(number) for number in (*range(20, 40), *range(20))]
+
+    text = dashboard.feed(releases, "Dennis-Otto", "https://site/dashboard/", NOW)
+
+    feed = ElementTree.fromstring(text)
+    assert text.startswith('<?xml version="1.0" encoding="utf-8"?>\n<feed xmlns=')
+    entries = feed.findall(f"{ATOM}entry")
+    assert [entry.findtext(f"{ATOM}title") for entry in entries] == [
+        f"demo v1.0.{number}" for number in range(dashboard.FEED)
+    ]
+    # What a feed reader needs of the feed and of every entry.
+    address = "https://site/dashboard/releases.atom"
+    assert feed.findtext(f"{ATOM}id") == address
+    assert feed.findtext(f"{ATOM}title") == (
+        "The releases of the repositories of Dennis-Otto"
+    )
+    assert feed.findtext(f"{ATOM}updated") == "2026-10-08T06:05:00Z"
+    assert feed.findtext(f"{ATOM}author/{ATOM}name") == "Dennis-Otto"
+    links = {item.get("rel"): item.get("href") for item in feed.findall(f"{ATOM}link")}
+    assert links == {"self": address, "alternate": "https://site/dashboard/"}
+    first = entries[0]
+    assert first.findtext(f"{ATOM}id") == (
+        "https://github.com/Dennis-Otto/demo/releases/tag/v1.0.0"
+    )
+    assert first.findtext(f"{ATOM}updated") == "2026-10-08T06:05:00Z"
+    assert first.findtext(f"{ATOM}published") == "2026-10-08T06:05:00Z"
+    category = first.find(f"{ATOM}category")
+    assert category is not None
+    assert category.get("term") == "demo"
+
+
+def test_a_feed_without_releases() -> None:
+    feed = ElementTree.fromstring(
+        dashboard.feed([], "Dennis-Otto", "https://site/", NOW)
+    )
+
+    assert feed.findall(f"{ATOM}entry") == []
+    assert feed.findtext(f"{ATOM}updated") == "2026-10-08T06:05:00Z"
+
+
+def test_the_feed_escapes_every_text() -> None:
+    hostile = dashboard.Release(
+        "Dennis-Otto/demo",
+        'v1 <b>&"</b>',
+        'https://github.com/x?a=1&b="2"',
+        "2026-10-07T12:00:00Z",
+        # Characters that XML 1.0 has no place for: a control character, a lone
+        # surrogate and a noncharacter.
+        '<script>alert("&")</script>\x01\ud800￿\r\nnext line',
+    )
+
+    text = dashboard.feed([hostile], "Dennis-Otto", "https://site/", NOW)
+
+    assert "<script>" not in text
+    assert "<b>" not in text
+    assert "&lt;script&gt;" in text
+    assert "&amp;b=&quot;2&quot;" in text
+    (entry,) = ElementTree.fromstring(text).findall(f"{ATOM}entry")
+    assert entry.findtext(f"{ATOM}title") == 'demo v1 <b>&"</b>'
+    link = entry.find(f"{ATOM}link")
+    assert link is not None
+    assert link.get("href") == 'https://github.com/x?a=1&b="2"'
+    assert entry.findtext(f"{ATOM}summary") == (
+        '<script>alert("&")</script>\nnext line'
+    )
+
+
+def test_the_summary_of_a_release_ends_at_a_word() -> None:
+    assert dashboard.summary("  short notes \n") == "short notes"
+    cut = dashboard.summary("word " * 200)
+    assert cut.endswith(" word…")
+    assert len(cut) <= dashboard.SUMMARY + 1
+    assert dashboard.summary("x" * 600) == "x" * dashboard.SUMMARY + "…"
+
+
+# The published dashboard, as the job that publishes it asks for it: a fake curl
+# answers each address with what its file holds, but the one that ends with BROKEN,
+# and the feed with FEED, if set.
+CURL = r"""url="${@: -1}"
+printf '%s\n' "curl $url" >> "$STUB_CALLS"
+if [[ -n "${BROKEN:-}" && "$url" == *"$BROKEN" ]]; then
+  echo "curl: (22) The requested URL returned error: 404" >&2
+  exit 22
+fi
+while [[ "$1" != --output ]]; do
+  shift
+done
+case "$url" in
+  *.html) printf '<title>Repository dashboard</title>\n' > "$2" ;;
+  *history.json) printf '[{"date": "2026-10-08"}]\n' > "$2" ;;
+  *repos.json) printf '{"repos": []}\n' > "$2" ;;
+  *) printf '%s\n' "${FEED:-<feed xmlns=\"http://www.w3.org/2005/Atom\"/>}" > "$2" ;;
+esac
+"""
+PUBLISHED_DASHBOARD = "https://owner.github.io/repo-blueprint/dashboard"
+DASHBOARD_FILES = ("index.html", "history.json", "repos.json", "releases.atom")
+
+
+@pytest.mark.skipif(BASH is None, reason="the steps run in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("broken", "feed", "failed"),
+    [
+        ("", "", ""),
+        ("/repos.json", "", "repos.json"),
+        # A page of GitHub Pages in place of the feed is no feed.
+        ("", "<html><title>404</title></html>", "releases.atom"),
+    ],
+)
+def test_the_job_that_publishes_asks_for_the_data_of_the_dashboard(
+    tmp_path: Path, broken: str, feed: str, failed: str
+) -> None:
+    result = run_step(
+        tmp_path,
+        "dashboard.yml",
+        "deploy",
+        "Ask the published dashboard for its data",
+        env={
+            "PAGE_URL": "https://owner.github.io/repo-blueprint/",
+            "BROKEN": broken,
+            "FEED": feed,
+        },
+        stubs={"curl": CURL},
+    )
+
+    assert result.stubbed == [
+        f"curl {PUBLISHED_DASHBOARD}/{name}" for name in DASHBOARD_FILES
+    ]
+    assert result.returncode == (1 if failed else 0), result.stdout + result.stderr
+    if failed:
+        assert (
+            f"::error title=The published dashboard::{PUBLISHED_DASHBOARD}/{failed}"
+            " answers without its data"
+        ) in result.stdout
+    else:
+        assert result.summary == "".join(
+            f"- {PUBLISHED_DASHBOARD}/{name} answers with its data.\n"
+            for name in DASHBOARD_FILES
+        )

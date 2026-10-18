@@ -201,8 +201,8 @@ Die Anleitung beschreibt, was jedes Repository [einmal](guide.md#einmal-pro-repo
 
     ---
 
-    Jedes öffentliche Repository des Besitzers auf einen Blick: das Release des Blueprints, auf dem es steht, seine Releases, Pull Requests, Workflow-Läufe, Scorecard und Gesundheit.
+    Jedes öffentliche Repository des Besitzers auf einen Blick: das Release des Blueprints, auf dem es steht, seine Releases, Pull Requests, Workflow-Läufe, Website, Scorecard und Gesundheit, mit denselben Daten als JSON und einem Feed jedes Releases.
 
-    [:octicons-arrow-right-24: Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/)
+    [:octicons-arrow-right-24: Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) · [JSON](https://dennis-otto.github.io/repo-blueprint/dashboard/repos.json) · [Feed](https://dennis-otto.github.io/repo-blueprint/dashboard/releases.atom)
 
 </div>
