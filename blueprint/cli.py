@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 
 import blueprint
 from blueprint import mutation, screenshots
+from blueprint.bootstrap import CreateError, create
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
 from blueprint.changelog import (
@@ -623,6 +624,58 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
     return 1
 
 
+def settings_command(
+    api: Api, repo: str, settings: Settings, action: str, path: Path
+) -> int:
+    """settings check or apply: 0 when GitHub matches the settings, 1 when it differs,
+    2 when GitHub refused a part of them."""
+    drift = check(api, repo, settings)
+    refused: list[str] = []
+    if action == "apply" and drift:
+        refused = apply(api, repo, settings, drift)
+        drift = check(api, repo, settings)
+    for reason in refused:
+        print(f"blueprint.py: {reason}", file=sys.stderr)
+    # The path as the documentation writes it, with slashes on Windows too.
+    config = path.as_posix()
+    if not drift:
+        print(f"The settings of {repo} match {config}.")
+        return 0
+    print(f"The settings of {repo} differ from {config}:")
+    print(describe(drift))
+    if action == "check":
+        print("python3 blueprint.py settings apply sets what the API can set.")
+    return 2 if refused else 1
+
+
+def checklist_command(api: Api, repo: str, settings: Settings, root: Path) -> int:
+    print(f"The set-up of {repo}:")
+    steps = checklist(api, repo, settings, root)
+    print(describe_steps(steps))
+    return 0 if all(step.done is not False for step in steps) else 1
+
+
+def create_command(api: Api, arguments: argparse.Namespace, root: Path) -> int:
+    """blueprint.py create: the repository on GitHub of a new copy, then its settings
+    and its checklist. The settings load first, so that a configuration that can't be
+    right stops it before anything is made. What only a person can do, such as the
+    secrets, the checklist names, so only a part of the settings that GitHub refused
+    fails it."""
+    settings = Settings.load(root / arguments.config, root)
+    repo = create(
+        root,
+        str(settings.repository.get("description", "")),
+        repo=arguments.repo,
+        private=arguments.private,
+        dry_run=arguments.dry_run,
+    )
+    if repo is None:
+        return 0
+    applied = settings_command(api, repo, settings, "apply", arguments.config)
+    checklist_command(api, repo, settings, root)
+    return 2 if applied == 2 else 0
+
+
 def utf8_output() -> None:
     """Windows consoles default to a code page without the marks of the checklist, and
     to CRLF, which a file of the repository written from the output must not get."""
@@ -655,6 +708,17 @@ def main(
     settings_parser.add_argument("action", choices=["check", "apply"])
     commands.add_parser(
         "checklist", help="the steps outside the API, and which are done"
+    )
+    create_parser = commands.add_parser(
+        "create",
+        help="the repository on GitHub of a new copy: git init, the first commit, "
+        "gh repo create, the settings and the checklist",
+    )
+    create_parser.add_argument(
+        "--private", action="store_true", help="a private repository; public by default"
+    )
+    create_parser.add_argument(
+        "--dry-run", action="store_true", help="print the commands and run none"
     )
     changelog_parser = commands.add_parser(
         "changelog",
@@ -1201,6 +1265,8 @@ def main(
             return 2
     api = api or Api()
     try:
+        if arguments.command == "create":
+            return create_command(api, arguments, root)
         repo = arguments.repo or current_repo(api)
         if arguments.command == "coach":
             number = int(arguments.pull) if arguments.pull else None
@@ -1244,27 +1310,8 @@ def main(
             return fix_bot_command(api, repo, arguments)
         settings = Settings.load(root / arguments.config, root)
         if arguments.command == "checklist":
-            print(f"The set-up of {repo}:")
-            steps = checklist(api, repo, settings, root)
-            print(describe_steps(steps))
-            return 0 if all(step.done is not False for step in steps) else 1
-        drift = check(api, repo, settings)
-        refused: list[str] = []
-        if arguments.action == "apply" and drift:
-            refused = apply(api, repo, settings, drift)
-            drift = check(api, repo, settings)
-        for reason in refused:
-            print(f"blueprint.py: {reason}", file=sys.stderr)
-        # The path as the documentation writes it, with slashes on Windows too.
-        config = arguments.config.as_posix()
-        if not drift:
-            print(f"The settings of {repo} match {config}.")
-            return 0
-        print(f"The settings of {repo} differ from {config}:")
-        print(describe(drift))
-        if arguments.action == "check":
-            print("python3 blueprint.py settings apply sets what the API can set.")
-        return 2 if refused else 1
+            return checklist_command(api, repo, settings, root)
+        return settings_command(api, repo, settings, arguments.action, arguments.config)
     except (
         GitHubError,
         OSError,
@@ -1272,6 +1319,7 @@ def main(
         ConfigError,
         Outdated,
         CatalogError,
+        CreateError,
     ) as error:
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2

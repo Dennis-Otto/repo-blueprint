@@ -1,0 +1,25 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein neues Repository beginnt
+    accDescr: copier copy schreibt die Dateien des Projekts und führt keinen Code des Blueprints aus. python3 .github/blueprint.py create, das jede Kopie mitbringt, macht den ersten Commit auf dem Branch main mit Sign-off, legt das Repository mit gh repo create an und pusht dorthin, wendet die Einstellungen als Code an und zeigt die Checkliste. Du erledigst die Schritte, die nur eine Person erledigen kann, etwa die Release-App und die Secrets, und dann laufen die Prüfungen und die Bots.
+
+    copy(["`**copier copy**<br>die Dateien des Projekts,<br>kein Code des Blueprints läuft`"])
+    commit["`**blueprint.py create**<br>git init auf main,<br>der erste Commit, mit Sign-off`"]
+    repo["`**gh repo create**<br>das Repository, gepusht`"]
+    settings["`**settings apply**<br>Rulesets, Sicherheit,<br>Umgebungen, Labels`"]
+    checklist["`**checklist**<br>was eine Person noch erledigt`"]
+    you(["Du: die Release-App<br>und die Secrets"])
+    bots["Die Prüfungen und<br>die Bots laufen"]
+
+    copy --> commit --> repo --> settings --> checklist --> you --> bots
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class commit,repo,settings,checklist bot
+    class copy,you person
+    class bots done

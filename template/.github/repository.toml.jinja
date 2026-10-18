@@ -122,12 +122,11 @@ RELEASE_AUTOMATION_APP_ID = "{= release_app_id =}"
 # and runs the bots: `python3 .github/blueprint.py checklist` shows how to register
 # one, and `copier update` with its answers names it here.
 [%- endif %]
-[%- if not issue_assistant_ai %]
-# The issue assistant labels the issues and answers its commands without an AI
-# engine, which analyzes no issue and needs no secret; the answer issue_assistant_ai
-# of the blueprint turns it on.
-ISSUE_ASSISTANT_AI = "off"
-[%- endif %]
+# Whether the issue assistant analyzes each new issue with its AI engine, by the
+# answer issue_assistant_ai of the blueprint. "off" labels the issues and answers
+# the commands without an engine, which needs no secret; the settings bot sets the
+# variable either way, so a later answer turns the AI on or off again.
+ISSUE_ASSISTANT_AI = "{= 'on' if issue_assistant_ai else 'off' =}"
 
 # GitHub Pages, which publishes the website that the Docs workflow builds from
 # mkdocs.yml and docs/.

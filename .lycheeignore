@@ -4,3 +4,7 @@
 # The data of the dashboard, which only the Dashboard workflow publishes after the merge
 # that adds it; its deploy job asks for each file after every deployment.
 ^https://dennis-otto\.github\.io/repo-blueprint/dashboard/(repos\.json|releases\.atom)$
+
+# The page for owners of their own, which only the Docs workflow publishes after the
+# merge that adds it; #314 removes this entry once the website has it.
+^https://dennis-otto\.github\.io/repo-blueprint/(de/)?own-account/$

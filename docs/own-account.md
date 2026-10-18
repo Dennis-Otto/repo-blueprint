@@ -21,7 +21,7 @@ copier copy gh:Dennis-Otto/repo-blueprint my-project
 
 Copier asks for your account or organization, `owner`, and takes it as the maintainer. Leave the question of the release app empty, and answer two more:
 
-- **`renovate_runner`**, who runs Renovate: `self`, a workflow in the repository, the default for every owner but the blueprint's; or `mend`, the Mend Renovate app.
+- **`renovate_runner`**, who runs Renovate: `self`, a workflow in the repository, the default for every owner but the blueprint's; or `mend`, the Mend Renovate app. The repositories of the blueprint's owner keep the blueprint's workflow, `hub`, which already runs for each of them.
 - **`issue_assistant_ai`**, whether an AI engine, Claude, analyzes each new issue; *no* switches it off.
 
 Keep the answers that stay the same for every repository in Copier's settings file, as [the guide shows](guide.md#your-own-account):
