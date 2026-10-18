@@ -8902,6 +8902,8 @@ SOURCES = {
     "requirements-dev.txt": "pytest==9.0.0\n",
     "requirements-fuzz.txt": "atheris==2.3.0\n",
     "requirements-test.in": "pytest\n",
+    "requirements-images.txt": "playwright==1.55.0\n",
+    "stacks/docs/requirements-docs.txt": "mkdocs==1.6.1\n",
     ".devcontainer/devcontainer.json": "{}\n",
     ".githooks/pre-push": "",
     ".github/workflows/ci.yml": "on: push\n",
@@ -9179,9 +9181,15 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     assert [build.index(name) for name in order] == sorted(
         build.index(name) for name in order
     )
-    # The advisories that don't affect the release name it as its SBOMs do.
+    # The advisories that don't affect the release name it as its SBOMs do, by the
+    # default of the CLI: the tag without its v, as release.yml tags it. No --version,
+    # which the blueprint.py of an older tag rejects when its draft is finished by hand.
     vex = script_of(build, "Write the advisories that don't affect the release")
-    assert '--version "$VERSION"' in vex
+    assert ' vex "$GITHUB_REPOSITORY" "$TAG" ' in vex
+    assert "--version" not in vex
+    assert 'tag="v$version"' in (ROOT / ".github/workflows/release.yml").read_text(
+        encoding="utf-8"
+    )
 
 
 # Fragments of the changelog: the check of a pull request and the release bot.

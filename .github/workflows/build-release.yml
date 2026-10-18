@@ -189,10 +189,12 @@ jobs:
               ;;
             *)
               # An action, an image or a project without a package ships its sources:
-              # the tree of the tag, without what only checks, tests and documents it.
+              # the tree of the tag, without what only checks, tests and documents it:
+              # its run time pins live in requirements.txt, every requirements-*.* is a
+              # lock file of its tools, and stacks/ holds the tool pins of the blueprint.
               git archive --format=tar HEAD | tar --extract --directory "$package"
               (cd "$package" && rm -rf .devcontainer .githooks .github changelog.d docs fuzz \
-                scripts test tests requirements-dev.* requirements-fuzz.* requirements-test.*)
+                scripts stacks test tests requirements-*.*)
               ;;
           esac
           if [[ -z "$(ls -A "$package")" ]]; then
@@ -250,12 +252,14 @@ jobs:
       - name: Write the advisories that don't affect the release
         env:
           NAME: ${{ github.event.repository.name }}
-          VERSION: ${{ inputs.version }}
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
+          # The version is the tag without its v, as release.yml tags it; no option for
+          # it, which the blueprint.py of an older tag rejects when its draft is finished
+          # by hand.
           python3 "$script" vex "$GITHUB_REPOSITORY" "$TAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --version "$VERSION" > "$RUNNER_TEMP/vex.json"
+            > "$RUNNER_TEMP/vex.json"
           if [[ -s "$RUNNER_TEMP/vex.json" ]]; then
             mv "$RUNNER_TEMP/vex.json" "$ASSETS/$NAME.openvex.json"
           fi
