@@ -47,4 +47,5 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0039](0039-try-every-change-on-the-repositories-that-take-the-blueprint.md) | Try every change of the template on the answers and the files of the repositories that take the blueprint, before its release | accepted |
 | [0040](0040-every-step-of-a-bot-that-changes-github-runs-in-a-test.md) | Every step of a bot that changes something on GitHub runs in a test | accepted |
 | [0041](0041-every-website-is-accessible-and-quick-and-a-check-proves-it.md) | Every website is accessible and quick on a phone, and a check proves it | accepted |
+| [0042](0042-each-language-of-a-website-searches-and-describes-itself.md) | Each language of a website searches and describes itself | accepted |
 | [0043](0043-a-node-package-lints-with-biome-and-installs-without-scripts.md) | A Node package lints and formats with Biome, reports its coverage as LCOV and installs without the scripts of its packages | accepted |
