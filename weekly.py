@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import statistics
 import sys
 import urllib.parse
 from collections.abc import Sequence
@@ -26,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from blueprint.github import Api, GitHubError
-from dashboard import WORKFLOWS, repositories
+from dashboard import ci_workflow, median_minutes, repositories, workflow_files
 
 # The titles of updates of dependencies, as Renovate and Dependabot write them.
 UPDATE = re.compile(r"^(?:fix|chore|build)\(deps(?:-dev)?\): ")
@@ -46,10 +45,16 @@ class Week:
     ci_minutes: float | None = None
 
 
+def count(api: Api, query: str) -> int:
+    """How many issues and pull requests the search finds: its total, not the items
+    of a page, which are 100 at most."""
+    found = api.get(f"search/issues?q={urllib.parse.quote(query)}&per_page=1") or {}
+    return int(found.get("total_count", 0))
+
+
 def search(api: Api, query: str) -> list[dict[str, str]]:
-    found = api.get(f"search/issues?q={urllib.parse.quote(query)}&per_page=100") or {}
-    items: list[dict[str, str]] = found.get("items", [])
-    return items
+    """The issues and pull requests that the search finds, from all its pages."""
+    return api.get_all(f"search/issues?q={urllib.parse.quote(query)}&per_page=100")
 
 
 def when(text: str) -> datetime:
@@ -57,32 +62,37 @@ def when(text: str) -> datetime:
 
 
 def collect(api: Api, repo: str, since: datetime) -> Week:
+    """The week of repo from since to now. Every search starts at the moment since,
+    not at the start of its day, so that one report counts no hour of the last."""
     week = Week(repo)
-    day = since.strftime("%Y-%m-%d")
+    stamp = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for release in api.get(f"repos/{repo}/releases?per_page=30") or []:
         published = release.get("published_at")
         if published and when(published) >= since:
             week.releases.append((release["tag_name"], release["html_url"]))
-    merged = search(api, f"repo:{repo} is:pr is:merged merged:>={day}")
-    week.merged = len(merged)
-    week.updates = sum(1 for pull in merged if UPDATE.match(pull["title"]))
-    week.opened = len(search(api, f"repo:{repo} is:issue created:>={day}"))
-    week.closed = len(search(api, f"repo:{repo} is:issue closed:>={day}"))
-    created = urllib.parse.quote(f">={day}")
+    merged = f"repo:{repo} is:pr is:merged merged:>={stamp}"
+    week.merged = count(api, merged)
+    week.updates = sum(1 for pull in search(api, merged) if UPDATE.match(pull["title"]))
+    week.opened = count(api, f"repo:{repo} is:issue created:>={stamp}")
+    week.closed = count(api, f"repo:{repo} is:issue closed:>={stamp}")
+    created = urllib.parse.quote(f">={stamp}")
     failed = api.get(
         f"repos/{repo}/actions/runs?branch=main&status=failure&created={created}&per_page=1"
     )
     week.failed = (failed or {}).get("total_count", 0)
-    runs = api.get(
-        f"repos/{repo}/actions/workflows/{WORKFLOWS['CI']}/runs"
-        f"?branch=main&status=success&created={created}&per_page=100"
+    ci = ci_workflow(workflow_files(api, repo))
+    runs = api.get_all(
+        f"repos/{repo}/actions/workflows/{ci}/runs?branch=main&status=success"
+        f"&created={created}&exclude_pull_requests=true&per_page=100"
     )
-    minutes = [
-        (when(run["updated_at"]) - when(run["run_started_at"])).total_seconds() / 60
-        for run in (runs or {}).get("workflow_runs", [])
-        if run.get("run_started_at") and run.get("updated_at")
-    ]
-    week.ci_minutes = statistics.median(minutes) if minutes else None
+    # A pull request from the main of a fork runs on a branch of that name too.
+    week.ci_minutes = median_minutes(
+        [
+            run
+            for run in runs
+            if not str(run.get("event", "")).startswith("pull_request")
+        ]
+    )
     return week
 
 

@@ -3,11 +3,12 @@
 
     python3 dashboard.py --owner Dennis-Otto --out site/index.html
 
-For every public repository that is no fork and not archived, it shows the release of the blueprint it is
-on, its latest release and the pull request of the next one, its open pull requests
-and those that conflict, the last run of its main workflows on main, and its OpenSSF
-Scorecard. It shows nothing that isn't public anyway: no finding of code scanning and
-no alert of Dependabot. The Dashboard workflow publishes it on GitHub Pages.
+For every public repository that is no fork and not archived, it shows the release of
+the blueprint it is on and the pull request that updates it, its latest release and the
+pull request of the next one, its open pull requests and those that conflict, the last
+run of its main workflows on main, and its OpenSSF Scorecard. It shows nothing that
+isn't public anyway: no finding of code scanning and no alert of Dependabot. The
+Dashboard workflow publishes it on GitHub Pages.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -16,6 +17,7 @@ from __future__ import annotations
 import argparse
 import base64
 import html
+import http.client
 import io
 import json
 import re
@@ -23,6 +25,7 @@ import statistics
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable, Sequence
@@ -38,30 +41,63 @@ BLUEPRINT = "Dennis-Otto/repo-blueprint"
 SCORECARD_API = "https://api.scorecard.dev/projects/github.com/"
 # What a cell without a value shows.
 DASH = "\u2013"
-# The workflows whose last run on main the dashboard shows, by file.
+# The file of the CI: ci.yml in a repository made from the blueprint, and in the
+# blueprint, which has a CI for each stack, that of its own code, in Python.
+CI_FILES = ("ci.yml", "ci-python.yml")
+# The workflows whose last run on main the dashboard shows, by file; that of the CI is
+# the first of CI_FILES that a repository has.
 WORKFLOWS = {
-    "CI": "ci.yml",
+    "CI": CI_FILES[0],
     "CodeQL": "codeql.yml",
     "Release": "release.yml",
     "Verification": "verify-release.yml",
     "Settings": "settings.yml",
     "Findings": "findings.yml",
     "Links": "links.yml",
+    "Mutation": "mutation.yml",
+    "Renovate": "renovate.yml",
 }
 SYMBOLS = {
     "success": ("✔", "ok", "passed"),
     "failure": ("✘", "bad", "failed"),
     "running": ("●", "wait", "running"),
     "none": (DASH, "none", "no run"),
+    "absent": (DASH, "none", "not set up"),
 }
+# The runs of main that the state of a workflow looks through for one that ran.
+RECENT = 10
+# The runs of main that the last run of a workflow looks through: a busy hour of pull
+# requests leaves more than ten skipped runs of Findings in a row, and it is still
+# one request.
+LAST_RUNS = 50
+# The conclusions of a run or a job that passed.
+PASSED = ("success", "neutral")
+# The branch of the pull request of the blueprint bot.
+UPDATE_BRANCH = "blueprint/update"
+# The seconds that a request to a website may take, such as one to the Scorecard.
+TIMEOUT = 30
 
-Opener = Callable[[str], Any]
+Opener = Callable[..., Any]
 
 
 @dataclass
 class Run:
+    """The state of the last run of a workflow or a job, and when it started."""
+
     state: str
     url: str = ""
+    started: str = ""
+
+
+@dataclass
+class Update:
+    """The open pull request of the blueprint bot: the release it updates to and the
+    state of its checks."""
+
+    target: str
+    number: int
+    url: str
+    state: str
 
 
 @dataclass
@@ -71,12 +107,14 @@ class Row:
     repo: str
     kind: str = ""
     blueprint: str = ""
+    update: Update | None = None
     release: str = ""
     released: str = ""
     next_release: str = ""
     next_url: str = ""
     pulls: int = 0
     conflicts: int = 0
+    ci: str = CI_FILES[0]
     runs: dict[str, Run] = field(default_factory=dict)
     scorecard: float | None = None
     health: Health = field(default_factory=lambda: Health())
@@ -91,26 +129,108 @@ def answers(api: Api, repo: str) -> dict[str, str]:
     return dict(re.findall(r"^(_commit|project_type): *(\S+)", text, re.MULTILINE))
 
 
+def workflow_files(api: Api, repo: str) -> set[str]:
+    """The files of the workflows that repo has, by name, without deleted ones."""
+    return {
+        str(item.get("path", "")).rsplit("/", 1)[-1]
+        for item in api.get_all(f"repos/{repo}/actions/workflows")
+        if item.get("state") != "deleted"
+    }
+
+
+def ci_workflow(files: set[str]) -> str:
+    """The file of the CI among the files of the workflows of a repository."""
+    return next((name for name in CI_FILES if name in files), CI_FILES[0])
+
+
+def state_of(item: dict[str, Any]) -> str:
+    """The state of a run or a job: running until it completed, then passed or
+    failed."""
+    if item.get("status") != "completed":
+        return "running"
+    return "success" if item.get("conclusion") in PASSED else "failure"
+
+
 def last_run(api: Api, repo: str, workflow: str) -> Run:
+    """The last run of workflow for main. A run that GitHub skipped says nothing about
+    main, such as one of Findings that the CodeQL of a pull request started, and
+    neither does a pull request from the main of a fork, whose branch has that name
+    too."""
     runs = api.get(
         f"repos/{repo}/actions/workflows/{workflow}/runs"
-        "?branch=main&per_page=1&exclude_pull_requests=true"
+        f"?branch=main&per_page={LAST_RUNS}&exclude_pull_requests=true"
     )
-    found = (runs or {}).get("workflow_runs") or []
-    if not found:
-        return Run("none")
-    run = found[0]
-    if run.get("status") != "completed":
-        return Run("running", run.get("html_url", ""))
-    good = run.get("conclusion") in ("success", "skipped", "neutral")
-    return Run("success" if good else "failure", run.get("html_url", ""))
+    for run in (runs or {}).get("workflow_runs") or []:
+        skipped = run.get("conclusion") == "skipped"
+        if skipped or str(run.get("event", "")).startswith("pull_request"):
+            continue
+        return Run(state_of(run), run.get("html_url", ""), run.get("created_at") or "")
+    return Run("none")
+
+
+def verification(api: Api, repo: str, tag: str, standalone: Run) -> Run:
+    """The newer of the last run of the release verification itself, which checks the
+    latest release every week, and the verification of the release tag in the run of
+    the Release workflow that made it, which calls it as a reusable workflow: GitHub
+    lists that run under the Release workflow alone, as its job "verify / verify the
+    release". Only the push that merged the release pull request made the release:
+    the scheduled runs of Release on that commit skip the verification."""
+    quoted = urllib.parse.quote(tag, safe="")
+    commit = api.get(f"repos/{repo}/commits/{quoted}") if tag else None
+    sha = (commit or {}).get("sha", "")
+    runs = (
+        api.get(
+            f"repos/{repo}/actions/workflows/release.yml/runs"
+            f"?head_sha={sha}&event=push&per_page=1"
+        )
+        if sha
+        else None
+    )
+    for run in (runs or {}).get("workflow_runs") or []:
+        jobs = api.get(f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100")
+        for job in (jobs or {}).get("jobs") or []:
+            named = str(job.get("name", "")).startswith("verify / ")
+            if named and job.get("conclusion") != "skipped":
+                verified = Run(
+                    state_of(job), job.get("html_url", ""), job.get("started_at") or ""
+                )
+                return max(standalone, verified, key=lambda found: found.started)
+    return standalone
+
+
+def checks(api: Api, repo: str, sha: str) -> str:
+    """The state of the checks of a commit: failed when one failed, passed when every
+    one passed or was skipped, running otherwise."""
+    found = api.get_all(f"repos/{repo}/commits/{sha}/check-runs") if sha else []
+    good = (*PASSED, "skipped")
+    if any(
+        item.get("status") == "completed" and item.get("conclusion") not in good
+        for item in found
+    ):
+        return "failure"
+    if found and all(item.get("status") == "completed" for item in found):
+        return "success"
+    return "running"
+
+
+def update(api: Api, repo: str, pull: dict[str, Any]) -> Update:
+    """The pull request of the blueprint bot, such as "chore: update to the blueprint
+    v0.10.1": the release it updates to and the state of its checks."""
+    found = re.search(r"(v\d+\.\d+\.\d+\S*)\s*$", str(pull.get("title", "")))
+    sha = str((pull.get("head") or {}).get("sha", ""))
+    return Update(
+        found[1] if found else "",
+        int(pull.get("number", 0)),
+        str(pull.get("html_url", "")),
+        checks(api, repo, sha),
+    )
 
 
 def scorecard(repo: str, opener: Opener) -> float | None:
     try:
-        with opener(SCORECARD_API + repo) as response:
+        with opener(SCORECARD_API + repo, timeout=TIMEOUT) as response:
             score = json.load(response).get("score")
-    except (urllib.error.URLError, ValueError, OSError):
+    except (OSError, ValueError, http.client.HTTPException):
         return None
     return float(score) if isinstance(score, int | float) else None
 
@@ -124,7 +244,7 @@ def collect(api: Api, repo: str, opener: Opener) -> Row:
     if isinstance(latest, dict):
         row.release = latest.get("tag_name", "")
         row.released = (latest.get("published_at") or "")[:10]
-    for pull in api.get(f"repos/{repo}/pulls?state=open&per_page=100") or []:
+    for pull in api.get_all(f"repos/{repo}/pulls?state=open&per_page=100"):
         labels = {label["name"] for label in pull.get("labels", [])}
         if "autorelease: pending" in labels:
             row.next_release = pull["title"].removeprefix("chore: release ")
@@ -132,14 +252,24 @@ def collect(api: Api, repo: str, opener: Opener) -> Row:
             continue
         row.pulls += 1
         row.conflicts += "merge-conflict" in labels
-    row.runs = {name: last_run(api, repo, file) for name, file in WORKFLOWS.items()}
+        if (pull.get("head") or {}).get("ref") == UPDATE_BRANCH:
+            row.update = update(api, repo, pull)
+    files = workflow_files(api, repo)
+    row.ci = ci_workflow(files)
+    row.runs = {
+        name: last_run(api, repo, file) if file in files else Run("absent")
+        for name, file in {**WORKFLOWS, "CI": row.ci}.items()
+    }
+    row.runs["Verification"] = verification(
+        api, repo, row.release, row.runs["Verification"]
+    )
     row.scorecard = scorecard(repo, opener)
     return row
 
 
 def repositories(api: Api, owner: str) -> list[str]:
     """The public repositories of the owner, without archived ones and forks."""
-    found = api.get(f"users/{owner}/repos?type=owner&per_page=100") or []
+    found = api.get_all(f"users/{owner}/repos?type=owner&per_page=100")
     return sorted(
         repo["full_name"]
         for repo in found
@@ -156,14 +286,28 @@ ISSUES = 30
 # The entries of the history: one a day.
 HISTORY = 120
 TREND = ("coverage", "mutation", "releases", "answer_hours", "ci_minutes")
+# The seconds that the download of an artifact may take.
+DOWNLOAD_TIMEOUT = 120
+# What a report that can't be read raises: gh failing to download it, a zip or an XML
+# file that is none, a rate that is no number.
+UNREADABLE = (
+    subprocess.SubprocessError,
+    zipfile.BadZipFile,
+    ElementTree.ParseError,
+    ValueError,
+)
 
 Downloader = Callable[[str], bytes]
+
+
+class HistoryError(Exception):
+    """The history of the published dashboard can't be read."""
 
 
 def gh_download(path: str) -> bytes:
     """The bytes at path of GitHub's API, such as the zip of an artifact."""
     return subprocess.run(  # pragma: no cover - the tests simulate gh
-        ["gh", "api", path], capture_output=True, check=True
+        ["gh", "api", path], capture_output=True, check=True, timeout=DOWNLOAD_TIMEOUT
     ).stdout
 
 
@@ -188,7 +332,7 @@ def main_runs(api: Api, repo: str, workflow: str) -> list[dict[str, Any]]:
     changes, even to the workflow."""
     runs = api.get(
         f"repos/{repo}/actions/workflows/{workflow}/runs"
-        "?branch=main&status=success&per_page=10&exclude_pull_requests=true"
+        f"?branch=main&status=success&per_page={RECENT}&exclude_pull_requests=true"
     )
     return [
         run
@@ -211,6 +355,27 @@ def artifact(
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 return {entry: archive.read(entry) for entry in archive.namelist()}
     return {}
+
+
+def report(
+    read: Callable[[dict[str, bytes]], float | None],
+    api: Api,
+    download: Downloader,
+    repo: str,
+    workflow: str,
+    name: str,
+) -> float | None:
+    """The value that read finds in the artifact name of the last successful run of
+    workflow, or None, with a warning, when it can't be read: a broken report leaves
+    out its own value, not the page."""
+    try:
+        return read(artifact(api, download, repo, workflow, name))
+    except UNREADABLE as error:
+        print(
+            f"dashboard.py: the {name} report of {repo} is unreadable: {error}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def coverage(files: dict[str, bytes]) -> float | None:
@@ -240,12 +405,23 @@ def mutation(files: dict[str, bytes]) -> float | None:
     return None
 
 
+def bot(user: dict[str, Any]) -> bool:
+    """Whether a user of GitHub is a bot, such as the issue assistant or an app."""
+    return user.get("type") == "Bot" or str(user.get("login", "")).endswith("[bot]")
+
+
 def answer_hours(api: Api, repo: str, since: datetime) -> float | None:
-    """The median hours from a new issue to its first answer by someone else."""
+    """The median hours from a new issue to its first answer by a person other than
+    its reporter. The answer of a bot, such as the issue assistant, comes within
+    minutes and tells nothing about the maintainers, and an issue that a bot opened,
+    such as the report of a failed run, waits for no answer."""
     stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
     issues = api.get(f"repos/{repo}/issues?state=all&since={stamp}&per_page=100") or []
+    asked = [
+        item for item in issues if "pull_request" not in item and not bot(item["user"])
+    ]
     hours = []
-    for issue in [item for item in issues if "pull_request" not in item][:ISSUES]:
+    for issue in asked[:ISSUES]:
         if when(issue["created_at"]) < since:
             continue
         reporter = issue["user"]["login"]
@@ -253,28 +429,32 @@ def answer_hours(api: Api, repo: str, since: datetime) -> float | None:
             api.get(f"repos/{repo}/issues/{issue['number']}/comments?per_page=30") or []
         )
         for comment in comments:
-            if comment["user"]["login"] != reporter:
+            if comment["user"]["login"] != reporter and not bot(comment["user"]):
                 answered = when(comment["created_at"]) - when(issue["created_at"])
                 hours.append(answered.total_seconds() / 3600)
                 break
     return statistics.median(hours) if hours else None
 
 
-def ci_minutes(api: Api, repo: str) -> float | None:
+def median_minutes(runs: list[dict[str, Any]]) -> float | None:
+    """The median minutes from the start of each run to its end."""
     minutes = [
         (when(run["updated_at"]) - when(run["run_started_at"])).total_seconds() / 60
-        for run in main_runs(api, repo, WORKFLOWS["CI"])
+        for run in runs
         if run.get("run_started_at") and run.get("updated_at")
     ]
     return statistics.median(minutes) if minutes else None
 
 
-def health(api: Api, download: Downloader, repo: str, now: datetime) -> Health:
+def health(
+    api: Api, download: Downloader, repo: str, now: datetime, ci: str = CI_FILES[0]
+) -> Health:
+    """The health of repo, whose CI is the workflow ci."""
     since = now - WINDOW
     releases = api.get(f"repos/{repo}/releases?per_page=100") or []
     return Health(
-        coverage=coverage(artifact(api, download, repo, WORKFLOWS["CI"], "coverage")),
-        mutation=mutation(artifact(api, download, repo, "mutation.yml", "mutation")),
+        coverage=report(coverage, api, download, repo, ci, "coverage"),
+        mutation=report(mutation, api, download, repo, "mutation.yml", "mutation"),
         releases=sum(
             1
             for release in releases
@@ -283,24 +463,34 @@ def health(api: Api, download: Downloader, repo: str, now: datetime) -> Health:
             and when(release["published_at"]) >= since
         ),
         answer_hours=answer_hours(api, repo, since),
-        ci_minutes=ci_minutes(api, repo),
+        ci_minutes=median_minutes(main_runs(api, repo, ci)),
     )
 
 
 def load_history(url: str, opener: Opener) -> list[dict[str, Any]]:
-    """The history that the published dashboard holds, or none."""
+    """The history that the published dashboard holds: none when nothing is published
+    there yet. Any other failure raises HistoryError: the page would otherwise publish
+    a history of today alone, and the trends of up to HISTORY days would be gone."""
     if not url:
         return []
     try:
-        with opener(url) as response:
+        with opener(url, timeout=TIMEOUT) as response:
             found = json.load(response)
-    except (urllib.error.URLError, ValueError, OSError):
-        return []
-    return (
-        [entry for entry in found if isinstance(entry, dict)]
-        if isinstance(found, list)
-        else []
-    )
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return []
+        raise HistoryError(f"the history at {url} can't be read: {error}") from error
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        raise HistoryError(f"the history at {url} can't be read: {error}") from error
+    if not isinstance(found, list):
+        raise HistoryError(f"the history at {url} holds no list of days")
+    return [
+        entry
+        for entry in found
+        if isinstance(entry, dict)
+        and isinstance(entry.get("date"), str)
+        and isinstance(entry.get("repos", {}), dict)
+    ]
 
 
 def add_to_history(
@@ -317,7 +507,8 @@ def add_to_history(
 
 
 def week_before(history: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
-    """The values of the entry of a week ago, or of the oldest one after it."""
+    """The values of the newest entry from a week ago or before, or none when the
+    history is younger than a week."""
     target = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     older = [item for item in history if str(item.get("date", "")) <= target]
     return dict((older[-1] if older else {}).get("repos") or {})
@@ -367,6 +558,8 @@ BETTER = {
     "answer_hours": -1,
     "ci_minutes": -1,
 }
+# The workflow whose runs a value of the health comes from.
+SOURCES = {"coverage": "CI", "mutation": "Mutation", "ci_minutes": "CI"}
 
 
 def shown(key: str, value: float | None) -> str:
@@ -377,14 +570,19 @@ def shown(key: str, value: float | None) -> str:
     if key == "releases":
         return f"{value:.0f}"
     if key == "ci_minutes":
-        return f"{value:.0f} min"
+        return "< 1 min" if value < 1 else f"{value:.0f} min"
     if value < 1:
         return "< 1 h"
     return f"{value:.0f} h" if value < 48 else f"{value / 24:.0f} d"
 
 
-def health_cell(key: str, value: float | None, before: dict[str, Any]) -> str:
-    """The value with an arrow when it moved since a week ago, green when better."""
+def health_cell(
+    key: str, value: float | None, before: dict[str, Any], run: Run | None = None
+) -> str:
+    """The value with an arrow when it moved since a week ago, green when better. No
+    value, where the last run of its workflow failed, shows that run."""
+    if value is None and run is not None and run.state == "failure":
+        return cell("✘ failed", run.url, "bad", f"{SOURCES[key]}: the last run failed")
     old = before.get(key)
     text = shown(key, value)
     if value is None or not isinstance(old, int | float) or value == old:
@@ -404,7 +602,7 @@ def health_table(rows: list[Row], previous: dict[str, Any]) -> str:
         "Coverage",
         "Mutants caught",
         "Releases in 90 days",
-        "First answer to an issue",
+        "First answer by a person",
         "CI on main",
     ]
     lines = []
@@ -412,19 +610,43 @@ def health_table(rows: list[Row], previous: dict[str, Any]) -> str:
         before = previous.get(row.repo, {})
         values = asdict(row.health)
         cells = [cell(row.repo.split("/", 1)[1], f"https://github.com/{row.repo}")]
-        cells += [health_cell(key, values[key], before) for key in TREND]
+        cells += [
+            health_cell(key, values[key], before, row.runs.get(SOURCES.get(key, "")))
+            for key in TREND
+        ]
         lines.append("<tr>" + "".join(cells) + "</tr>")
     header = "".join(f"<th>{html.escape(head)}</th>" for head in heads)
     return (
         "<h2>Health</h2>\n"
         "<p>The line coverage and the share of mutants that the tests catch, from the "
-        "reports of the last runs on main; the stable releases and the median time to "
-        "the first answer to a new issue over 90 days; the median time of the CI on "
-        "main. An arrow shows a change since a week ago.</p>\n"
+        "reports of the last successful runs on main, or ✘ where none has one and the "
+        "last run failed; the stable releases and the median time to the first answer "
+        "by a person, not a bot, to a new issue over 90 days; the median time of the "
+        "CI on main. An arrow shows a change since a week ago.</p>\n"
         f'<div class="table"><table>\n<thead><tr>{header}</tr></thead>\n<tbody>\n'
         + "\n".join(lines)
         + "\n</tbody>\n</table></div>\n"
     )
+
+
+def blueprint_cell(row: Row, latest: str) -> str:
+    """The release of the blueprint that row is on, and the update to a newer one: a
+    pull request of the blueprint bot in the colour of its checks."""
+    if row.repo == BLUEPRINT:
+        return cell("the blueprint", css="ok")
+    if not row.blueprint:
+        return cell("not on it", css="wait")
+    if row.blueprint == latest:
+        return cell(f"✔ {row.blueprint}", css="ok")
+    if row.update:
+        _, css, words = SYMBOLS[row.update.state]
+        return cell(
+            f"{row.blueprint} → {row.update.target or latest} · #{row.update.number}",
+            row.update.url,
+            css,
+            f"the update of the blueprint: checks {words}",
+        )
+    return cell(f"{row.blueprint} → {latest}", css="wait")
 
 
 def render(
@@ -450,15 +672,8 @@ def render(
         cells = [
             cell(row.repo.split("/", 1)[1], github),
             cell(row.kind or DASH, css="muted"),
+            blueprint_cell(row, latest),
         ]
-        if row.repo == BLUEPRINT:
-            cells.append(cell("the blueprint", css="ok"))
-        elif not row.blueprint:
-            cells.append(cell("not on it", css="wait"))
-        elif row.blueprint == latest:
-            cells.append(cell(f"✔ {row.blueprint}", css="ok"))
-        else:
-            cells.append(cell(f"{row.blueprint} → {latest}", css="wait"))
         if row.release:
             release_url = f"{github}/releases/tag/{row.release}"
             cells.append(cell(f"{row.release} · {row.released}", release_url))
@@ -526,6 +741,8 @@ def main(
     api = api or Api()
     now = now or datetime.now(UTC)
     try:
+        # First: a history that can't be read stops the page before its requests.
+        history = load_history(arguments.history, opener)
         latest = (api.get(f"repos/{BLUEPRINT}/releases/latest") or {}).get(
             "tag_name", ""
         )
@@ -533,11 +750,10 @@ def main(
             collect(api, repo, opener) for repo in repositories(api, arguments.owner)
         ]
         for row in rows:
-            row.health = health(api, download, row.repo, now)
-    except GitHubError as error:
+            row.health = health(api, download, row.repo, now, row.ci)
+    except (GitHubError, HistoryError) as error:
         print(f"dashboard.py: {error}", file=sys.stderr)
         return 2
-    history = load_history(arguments.history, opener)
     previous = week_before(history, now)
     arguments.out.parent.mkdir(parents=True, exist_ok=True)
     arguments.out.write_text(

@@ -26,9 +26,33 @@ def content(text: str) -> dict[str, str]:
     return {"content": base64.b64encode(text.encode()).decode()}
 
 
-def runs(status: str, conclusion: str | None = None) -> dict[str, Any]:
-    run = {"status": status, "conclusion": conclusion, "html_url": "https://run"}
-    return {"workflow_runs": [run]}
+def run(status: str, conclusion: str | None = None, **more: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "conclusion": conclusion,
+        "html_url": "https://run",
+        "event": "push",
+        **more,
+    }
+
+
+def listed(*found: dict[str, Any]) -> dict[str, Any]:
+    return {"total_count": len(found), "workflow_runs": list(found)}
+
+
+def last_runs(repo: str, workflow: str) -> str:
+    return (
+        f"repos/Dennis-Otto/{repo}/actions/workflows/{workflow}/runs"
+        f"?branch=main&per_page={dashboard.LAST_RUNS}&exclude_pull_requests=true"
+    )
+
+
+def workflows(*files: str, deleted: Sequence[str] = ()) -> dict[str, Any]:
+    found = [{"path": f".github/workflows/{name}", "state": "active"} for name in files]
+    found += [
+        {"path": f".github/workflows/{name}", "state": "deleted"} for name in deleted
+    ]
+    return {"total_count": len(found), "workflows": found}
 
 
 ROUTES: dict[str, tuple[int, Any]] = {
@@ -73,20 +97,81 @@ ROUTES: dict[str, tuple[int, Any]] = {
             },
         ],
     ),
-    "repos/Dennis-Otto/demo/actions/workflows/ci.yml/runs"
-    "?branch=main&per_page=1&exclude_pull_requests=true": (
+    "repos/Dennis-Otto/demo/actions/workflows?per_page=100": (
         200,
-        runs("completed", "success"),
+        workflows(
+            "ci.yml",
+            "codeql.yml",
+            "release.yml",
+            "verify-release.yml",
+            "findings.yml",
+            "links.yml",
+            "mutation.yml",
+            deleted=["settings.yml"],
+        ),
     ),
-    "repos/Dennis-Otto/demo/actions/workflows/codeql.yml/runs"
-    "?branch=main&per_page=1&exclude_pull_requests=true": (
+    last_runs("demo", "ci.yml"): (200, listed(run("completed", "success"))),
+    last_runs("demo", "codeql.yml"): (200, listed(run("completed", "failure"))),
+    last_runs("demo", "release.yml"): (200, listed(run("in_progress"))),
+    last_runs("demo", "links.yml"): (200, listed()),
+    # A run of Findings that the CodeQL of a pull request started is skipped on main,
+    # and a pull request from the main of a fork runs on a branch of that name too:
+    # neither says how main does.
+    last_runs("demo", "findings.yml"): (
         200,
-        runs("completed", "failure"),
+        listed(
+            run("completed", "success", event="pull_request"),
+            # A busy hour of pull requests skips more than ten runs in a row.
+            *[run("completed", "skipped")] * 12,
+            run("completed", "failure", html_url="https://findings"),
+        ),
     ),
-    "repos/Dennis-Otto/demo/actions/workflows/release.yml/runs"
-    "?branch=main&per_page=1&exclude_pull_requests=true": (200, runs("in_progress")),
-    "repos/Dennis-Otto/demo/actions/workflows/links.yml/runs"
-    "?branch=main&per_page=1&exclude_pull_requests=true": (200, {"workflow_runs": []}),
+    last_runs("demo", "mutation.yml"): (
+        200,
+        listed(run("completed", "failure", html_url="https://mutation")),
+    ),
+    # The weekly verification failed before the release that the Release workflow
+    # verified since.
+    last_runs("demo", "verify-release.yml"): (
+        200,
+        listed(
+            run("completed", "failure", created_at="2026-10-01T05:17:00Z"),
+        ),
+    ),
+    "repos/Dennis-Otto/demo/commits/v1.2.2": (200, {"sha": "abc123"}),
+    "repos/Dennis-Otto/demo/commits/v0.1.0": (200, {"sha": "fff000"}),
+    "repos/Dennis-Otto/demo/actions/workflows/release.yml/runs?head_sha=abc123&event=push&per_page=1": (
+        200,
+        listed({"id": 50}),
+    ),
+    "repos/Dennis-Otto/demo/actions/runs/50/jobs?per_page=100": (
+        200,
+        {
+            "jobs": [
+                {"name": "release pull request", "status": "completed"},
+                {
+                    "name": "verify / verify the release",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "started_at": "2026-10-07T12:05:00Z",
+                    "html_url": "https://verify",
+                },
+            ]
+        },
+    ),
+    # The blueprint runs a CI for each stack; its own is that of Python.
+    "repos/Dennis-Otto/repo-blueprint/actions/workflows?per_page=100": (
+        200,
+        workflows("ci-node.yml", "ci-python.yml", "renovate.yml"),
+    ),
+    last_runs("repo-blueprint", "ci-python.yml"): (
+        200,
+        listed(run("completed", "success", html_url="https://ci-python")),
+    ),
+    last_runs("repo-blueprint", "renovate.yml"): (
+        200,
+        listed(run("completed", "failure", html_url="https://renovate")),
+    ),
 }
 
 
@@ -94,6 +179,13 @@ def simulated(routes: dict[str, tuple[int, Any]]) -> Api:
     def runner(
         arguments: Sequence[str], body: str | None
     ) -> subprocess.CompletedProcess[str]:
+        if "--paginate" in arguments:
+            # gh api --paginate --slurp: every page in one list; here one page.
+            status, data = routes.get(arguments[-1], (404, {"message": "Not Found"}))
+            if status >= 400:
+                error = f"gh: {data['message']} (HTTP {status})"
+                return subprocess.CompletedProcess(arguments, 1, "", error)
+            return subprocess.CompletedProcess(arguments, 0, json.dumps([data]), "")
         status, data = routes.get(arguments[4], (404, {"message": "Not Found"}))
         answer = f"HTTP/2.0 {status} X\n\n{json.dumps(data)}"
         return subprocess.CompletedProcess(arguments, 0, answer, "")
@@ -101,7 +193,9 @@ def simulated(routes: dict[str, tuple[int, Any]]) -> Api:
     return Api(runner)
 
 
-def opener(url: str) -> io.BytesIO:
+def opener(url: str, timeout: float) -> io.BytesIO:
+    # No request may wait forever on a server that doesn't answer.
+    assert timeout == dashboard.TIMEOUT
     if url.endswith("/demo"):
         return io.BytesIO(json.dumps({"score": 7.6}).encode())
     if url.endswith("/behind"):
@@ -112,16 +206,82 @@ def opener(url: str) -> io.BytesIO:
 def test_a_repository_on_the_blueprint() -> None:
     row = dashboard.collect(simulated(ROUTES), "Dennis-Otto/demo", opener)
 
-    assert (row.kind, row.blueprint) == ("github-action", "v0.3.0")
+    assert (row.kind, row.blueprint, row.ci) == ("github-action", "v0.3.0", "ci.yml")
     assert (row.release, row.released) == ("v1.2.2", "2026-10-07")
     assert (row.next_release, row.next_url) == ("1.3.0", "https://pull/5")
-    assert (row.pulls, row.conflicts) == (2, 1)
-    assert row.runs["CI"] == dashboard.Run("success", "https://run")
+    assert (row.pulls, row.conflicts, row.update) == (2, 1, None)
+    assert row.runs["CI"].state == "success"
     assert row.runs["CodeQL"].state == "failure"
     assert row.runs["Release"].state == "running"
     assert row.runs["Links"].state == "none"
-    assert row.runs["Settings"].state == "none"
+    assert row.runs["Findings"] == dashboard.Run("failure", "https://findings")
+    assert row.runs["Mutation"] == dashboard.Run("failure", "https://mutation")
+    # The Settings workflow is gone, and Renovate runs in the blueprint alone.
+    assert row.runs["Settings"].state == "absent"
+    assert row.runs["Renovate"].state == "absent"
     assert row.scorecard == 7.6
+
+
+def test_the_verification_is_the_newer_of_its_own_run_and_that_of_the_release() -> None:
+    api = simulated(ROUTES)
+    older = dashboard.Run("failure", "https://weekly", "2026-10-01T05:17:00Z")
+    newer = dashboard.Run("failure", "https://weekly", "2026-10-08T05:17:00Z")
+    verified = dashboard.Run("success", "https://verify", "2026-10-07T12:05:00Z")
+
+    assert dashboard.verification(api, "Dennis-Otto/demo", "v1.2.2", older) == verified
+    assert dashboard.verification(api, "Dennis-Otto/demo", "v1.2.2", newer) == newer
+    # Without a release, a commit of its tag or a run of the Release workflow for
+    # it, the verification's own runs are all there is.
+    for tag in ("", "v0.0.1", "v0.1.0"):
+        assert dashboard.verification(api, "Dennis-Otto/demo", tag, older) == older
+
+
+def test_the_verification_comes_from_the_push_that_made_the_release() -> None:
+    # A scheduled run of Release on the same commit is newer and skips its
+    # verification; the push run that merged the release pull request holds it.
+    routes = dict(ROUTES)
+    routes[
+        "repos/Dennis-Otto/demo/actions/workflows/release.yml/runs?head_sha=abc123&per_page=1"
+    ] = (200, listed({"id": 60, "event": "schedule"}))
+    routes["repos/Dennis-Otto/demo/actions/runs/60/jobs?per_page=100"] = (
+        200,
+        {"jobs": [{"name": "verify", "status": "completed", "conclusion": "skipped"}]},
+    )
+    older = dashboard.Run("failure", "https://weekly", "2026-10-01T05:17:00Z")
+
+    assert dashboard.verification(
+        simulated(routes), "Dennis-Otto/demo", "v1.2.2", older
+    ) == dashboard.Run("success", "https://verify", "2026-10-07T12:05:00Z")
+
+
+def test_a_release_run_without_a_verification() -> None:
+    routes = dict(ROUTES)
+    routes["repos/Dennis-Otto/demo/actions/runs/50/jobs?per_page=100"] = (
+        200,
+        {"jobs": [{"name": "verify", "status": "completed", "conclusion": "skipped"}]},
+    )
+    none = dashboard.Run("none")
+
+    assert (
+        dashboard.verification(simulated(routes), "Dennis-Otto/demo", "v1.2.2", none)
+        == none
+    )
+
+
+def test_the_verification_of_a_repository_on_the_page() -> None:
+    row = dashboard.collect(simulated(ROUTES), "Dennis-Otto/demo", opener)
+
+    assert row.runs["Verification"] == dashboard.Run(
+        "success", "https://verify", "2026-10-07T12:05:00Z"
+    )
+
+
+def test_the_blueprint_finds_its_own_ci() -> None:
+    row = dashboard.collect(simulated(ROUTES), "Dennis-Otto/repo-blueprint", opener)
+
+    assert row.ci == "ci-python.yml"
+    assert row.runs["CI"] == dashboard.Run("success", "https://ci-python")
+    assert row.runs["Renovate"] == dashboard.Run("failure", "https://renovate")
 
 
 def test_repositories_without_the_blueprint_or_a_release() -> None:
@@ -135,6 +295,75 @@ def test_repositories_without_the_blueprint_or_a_release() -> None:
     assert (behind.kind, behind.blueprint) == ("nextcloud-app", "v0.2.0")
     assert (behind.release, behind.next_release, behind.pulls) == ("", "", 0)
     assert behind.scorecard is None
+    # A repository without workflows has the CI of the blueprint's projects, in name.
+    assert behind.ci == "ci.yml"
+    assert {item.state for item in behind.runs.values()} == {"absent"}
+
+
+def update_pull(sha: str = "def456") -> dict[str, Any]:
+    return {
+        "number": 226,
+        "title": "chore: update to the blueprint v0.10.1",
+        "html_url": "https://pull/226",
+        "labels": [],
+        "head": {"ref": "blueprint/update", "sha": sha},
+    }
+
+
+@pytest.mark.parametrize(
+    ("checks", "state"),
+    [
+        ([], "running"),
+        (
+            [
+                {"status": "in_progress"},
+                {"status": "completed", "conclusion": "success"},
+            ],
+            "running",
+        ),
+        (
+            [
+                {"status": "completed", "conclusion": "success"},
+                {"status": "completed", "conclusion": "skipped"},
+                {"status": "completed", "conclusion": "neutral"},
+            ],
+            "success",
+        ),
+        (
+            [
+                {"status": "in_progress"},
+                {"status": "completed", "conclusion": "failure"},
+            ],
+            "failure",
+        ),
+    ],
+)
+def test_an_update_of_the_blueprint_in_flight(
+    checks: list[dict[str, str]], state: str
+) -> None:
+    routes = dict(ROUTES)
+    routes["repos/Dennis-Otto/behind/pulls?state=open&per_page=100"] = (
+        200,
+        [update_pull()],
+    )
+    routes["repos/Dennis-Otto/behind/commits/def456/check-runs?per_page=100"] = (
+        200,
+        {"total_count": len(checks), "check_runs": checks},
+    )
+
+    row = dashboard.collect(simulated(routes), "Dennis-Otto/behind", opener)
+
+    assert row.pulls == 1
+    assert row.update == dashboard.Update("v0.10.1", 226, "https://pull/226", state)
+
+
+def test_an_update_with_an_unusual_title() -> None:
+    pull = update_pull(sha="")
+    pull["title"] = "chore: update the blueprint"
+
+    assert dashboard.update(simulated({}), "Dennis-Otto/behind", pull) == (
+        dashboard.Update("", 226, "https://pull/226", "running")
+    )
 
 
 def test_the_repositories_are_the_public_ones_of_the_owner() -> None:
@@ -170,9 +399,40 @@ def test_the_page_shows_each_state(tmp_path: Path) -> None:
     assert 'title="CodeQL: failed"' in page
     assert 'title="Release: running"' in page
     assert 'title="Links: no run"' in page
+    assert 'title="Settings: not set up"' in page
+    assert 'title="Verification: passed"><a href="https://verify">✔</a>' in page
     assert ">7.6</a>" in page
+    assert "<th>Mutation</th><th>Renovate</th>" in page
+    assert "<th>First answer by a person</th>" in page
     # The head and a row for each repository, in the table of the state and of health.
     assert page.count("<tr>") == 10
+
+
+def test_the_page_shows_an_update_in_flight() -> None:
+    rows = [
+        dashboard.Row(
+            "Dennis-Otto/behind",
+            blueprint="v0.9.1",
+            update=dashboard.Update("v0.10.1", 226, "https://pull/226", state),
+        )
+        for state in ("success", "failure", "running")
+    ]
+    rows.append(
+        dashboard.Row(
+            "Dennis-Otto/odd",
+            blueprint="v0.9.1",
+            update=dashboard.Update("", 227, "https://pull/227", "running"),
+        )
+    )
+
+    page = dashboard.render(rows, "Dennis-Otto", "v0.10.2", NOW)
+
+    for css, words in (("ok", "passed"), ("bad", "failed"), ("wait", "running")):
+        assert (
+            f'<td class="{css}" title="the update of the blueprint: checks {words}">'
+            '<a href="https://pull/226">v0.9.1 → v0.10.1 · #226</a></td>'
+        ) in page
+    assert ">v0.9.1 → v0.10.2 · #227</a>" in page
 
 
 def test_a_failure_of_github_stops_the_page(
@@ -281,28 +541,51 @@ HEALTH: dict[str, tuple[int, Any]] = {
             {
                 "number": 8,
                 "created_at": "2026-10-01T00:00:00Z",
-                "user": {"login": "reporter"},
+                "user": {"login": "reporter", "type": "User"},
             },
             {
                 "number": 7,
                 "created_at": "2026-10-02T00:00:00Z",
-                "user": {"login": "reporter"},
+                "user": {"login": "reporter", "type": "User"},
             },
             {
                 "number": 6,
                 "created_at": "2026-05-01T00:00:00Z",
-                "user": {"login": "reporter"},
+                "user": {"login": "reporter", "type": "User"},
+            },
+            # An issue that a bot opened, such as a report of a failed bot, waits for
+            # no person.
+            {
+                "number": 5,
+                "created_at": "2026-10-03T00:00:00Z",
+                "user": {"login": "release-app[bot]", "type": "Bot"},
             },
         ],
     ),
+    # The issue assistant answers within minutes; the first answer of a person counts.
     "repos/Dennis-Otto/demo/issues/8/comments?per_page=30": (
         200,
         [
             {"user": {"login": "reporter"}, "created_at": "2026-10-01T01:00:00Z"},
-            {"user": {"login": "maintainer"}, "created_at": "2026-10-01T04:00:00Z"},
+            {
+                "user": {"login": "issue-assistant", "type": "Bot"},
+                "created_at": "2026-10-01T01:05:00Z",
+            },
+            {
+                "user": {"login": "github-actions[bot]"},
+                "created_at": "2026-10-01T01:06:00Z",
+            },
+            {
+                "user": {"login": "maintainer", "type": "User"},
+                "created_at": "2026-10-01T04:00:00Z",
+            },
         ],
     ),
     "repos/Dennis-Otto/demo/issues/7/comments?per_page=30": (200, []),
+    "repos/Dennis-Otto/demo/issues/5/comments?per_page=30": (
+        200,
+        [{"user": {"login": "maintainer"}, "created_at": "2026-10-03T00:30:00Z"}],
+    ),
 }
 
 
@@ -321,10 +604,62 @@ def test_the_health_of_a_repository() -> None:
     )
 
 
+def test_the_health_of_a_repository_with_its_own_ci() -> None:
+    routes = {
+        successful("ci-python.yml") if key == successful("ci.yml") else key: value
+        for key, value in HEALTH.items()
+    }
+
+    health = dashboard.health(
+        simulated(routes), downloader, "Dennis-Otto/demo", NOW, "ci-python.yml"
+    )
+
+    assert (health.coverage, health.ci_minutes) == (50.0, 4.0)
+
+
 def test_a_repository_without_reports_has_no_health_values() -> None:
     health = dashboard.health(simulated({}), downloader, "Dennis-Otto/demo", NOW)
 
     assert health == dashboard.Health()
+
+
+def broken_zip(path: str) -> bytes:
+    if path.endswith("/3/zip"):
+        return b"no zip"
+    return downloader(path)
+
+
+def broken_xml(path: str) -> bytes:
+    if path.endswith("/3/zip"):
+        return zipped({"coverage.xml": "<coverage"})
+    return downloader(path)
+
+
+def broken_rate(path: str) -> bytes:
+    if path.endswith("/3/zip"):
+        return zipped({"coverage.xml": '<coverage line-rate="many"/>'})
+    return downloader(path)
+
+
+def gh_fails(path: str) -> bytes:
+    if path.endswith("/3/zip"):
+        raise subprocess.CalledProcessError(1, ["gh", "api", path])
+    return downloader(path)
+
+
+@pytest.mark.parametrize("download", [broken_zip, broken_xml, broken_rate, gh_fails])
+def test_a_broken_report_leaves_out_its_value_alone(
+    download: dashboard.Downloader, capsys: pytest.CaptureFixture[str]
+) -> None:
+    health = dashboard.health(simulated(HEALTH), download, "Dennis-Otto/demo", NOW)
+
+    assert health == dashboard.Health(
+        coverage=None, mutation=75.0, releases=1, answer_hours=4.0, ci_minutes=4.0
+    )
+    assert (
+        "the coverage report of Dennis-Otto/demo is unreadable"
+        in capsys.readouterr().err
+    )
 
 
 @pytest.mark.parametrize(
@@ -364,20 +699,82 @@ def test_a_coverage_report_without_a_rate() -> None:
     assert dashboard.coverage({"notes.txt": b"no report"}) is None
 
 
-def test_the_history_comes_from_the_published_dashboard() -> None:
-    def published(url: str) -> io.BytesIO:
-        if url == "https://site/history.json":
-            return io.BytesIO(json.dumps([{"date": "2026-10-01"}, "noise"]).encode())
-        if url == "https://site/object.json":
-            return io.BytesIO(b'{"date": "2026-10-01"}')
-        raise urllib.error.URLError("offline")
+def published(url: str, timeout: float) -> io.BytesIO:
+    """The website of the dashboard, with its history, and a few broken ones."""
+    assert timeout == dashboard.TIMEOUT
+    if url == "https://site/history.json":
+        return io.BytesIO(
+            json.dumps(
+                [
+                    {"date": "2026-10-01", "repos": {}},
+                    "noise",
+                    {"date": 20261002},
+                    {"date": "2026-10-03", "repos": []},
+                    {"date": "2026-10-04"},
+                ]
+            ).encode()
+        )
+    if url == "https://site/object.json":
+        return io.BytesIO(b'{"date": "2026-10-01"}')
+    if url == "https://site/torn.json":
+        return io.BytesIO(b'[{"date": "2026-10-01", "re')
+    if url == "https://site/gone.json":
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+    if url == "https://site/busy.json":
+        raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)  # type: ignore[arg-type]
+    if url == "https://site/slow.json":
+        raise TimeoutError("timed out")
+    return opener(url, timeout)
 
+
+def test_the_history_comes_from_the_published_dashboard() -> None:
     assert dashboard.load_history("https://site/history.json", published) == [
-        {"date": "2026-10-01"}
+        {"date": "2026-10-01", "repos": {}},
+        {"date": "2026-10-04"},
     ]
-    assert dashboard.load_history("https://site/object.json", published) == []
+    # Nothing is published yet: the history starts today.
     assert dashboard.load_history("https://site/gone.json", published) == []
     assert dashboard.load_history("", published) == []
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("https://site/busy.json", "HTTP Error 503"),
+        ("https://site/slow.json", "timed out"),
+        ("https://site/offline.json", "offline"),
+        ("https://site/torn.json", "Unterminated string"),
+        ("https://site/object.json", "holds no list"),
+    ],
+)
+def test_a_history_that_cant_be_read_is_never_replaced(url: str, reason: str) -> None:
+    with pytest.raises(dashboard.HistoryError, match=reason):
+        dashboard.load_history(url, published)
+
+
+def test_the_dashboard_keeps_its_page_when_the_history_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "site" / "index.html"
+
+    code = dashboard.main(
+        [
+            "--owner",
+            "Dennis-Otto",
+            "--out",
+            str(out),
+            "--history",
+            "https://site/busy.json",
+        ],
+        api=simulated(ROUTES),
+        opener=published,
+        now=NOW,
+        download=downloader,
+    )
+
+    assert code == 2
+    assert "the history at https://site/busy.json" in capsys.readouterr().err
+    assert not (tmp_path / "site").exists()
 
 
 def test_the_history_keeps_one_entry_a_day() -> None:
@@ -434,6 +831,27 @@ def test_the_health_table_shows_where_a_value_moved() -> None:
     assert '<td class="bad" title="a week ago 10 min">12 min ↑</td>' in page
 
 
+def test_the_health_table_shows_a_failed_run_instead_of_no_value() -> None:
+    row = dashboard.Row(
+        "Dennis-Otto/demo",
+        runs={
+            "CI": dashboard.Run("failure", "https://ci"),
+            "Mutation": dashboard.Run("failure", "https://mutation"),
+        },
+        health=dashboard.Health(ci_minutes=0.4),
+    )
+
+    page = dashboard.render([row], "Dennis-Otto", "v0.6.0", NOW)
+
+    assert (
+        '<td class="bad" title="CI: the last run failed">'
+        '<a href="https://ci">✘ failed</a></td>'
+    ) in page
+    assert '<a href="https://mutation">✘ failed</a>' in page
+    # A value that a successful run left stays, however short the run.
+    assert "<td>&lt; 1 min</td>" in page
+
+
 @pytest.mark.parametrize(
     ("hours", "text"),
     [(None, dashboard.DASH), (0.2, "< 1 h"), (5.4, "5 h"), (72.0, "3 d")],
@@ -444,13 +862,6 @@ def test_the_time_to_a_first_answer(hours: float | None, text: str) -> None:
 
 def test_the_dashboard_writes_its_history(tmp_path: Path) -> None:
     out = tmp_path / "site" / "index.html"
-
-    def published(url: str) -> io.BytesIO:
-        if url == "https://site/history.json":
-            return io.BytesIO(
-                json.dumps([{"date": "2026-10-01", "repos": {}}]).encode()
-            )
-        return opener(url)
 
     code = dashboard.main(
         [
@@ -471,7 +882,11 @@ def test_the_dashboard_writes_its_history(tmp_path: Path) -> None:
     history = json.loads(
         (tmp_path / "site" / "history.json").read_text(encoding="utf-8")
     )
-    assert [entry["date"] for entry in history] == ["2026-10-01", "2026-10-08"]
+    assert [entry["date"] for entry in history] == [
+        "2026-10-01",
+        "2026-10-04",
+        "2026-10-08",
+    ]
     assert "Dennis-Otto/demo" in history[-1]["repos"]
 
 
