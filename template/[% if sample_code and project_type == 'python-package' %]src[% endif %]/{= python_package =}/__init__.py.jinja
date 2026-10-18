@@ -1,4 +1,5 @@
-"""{= project_name =}: {= description =}"""
+[#- A quote at the end of the description would end the docstring early. -#]
+"""{= project_name =}: [% if description.endswith('"') %]{= description[:-1] =}\"[% else %]{= description =}[% endif %]"""
 
 __all__ = ["greet"]
 

@@ -37,7 +37,7 @@ ROOT = Path(__file__).parents[1]
 REPO = "Dennis-Otto/demo"
 SHA = "a" * 40
 # How release-please releases the blueprint, below 1.0.0.
-BLUEPRINT = Releases((0, 12, 0), frozenset({"feat", "fix", "perf", "deps"}), True)
+BLUEPRINT = Releases((0, 12, 0), frozenset({"feat", "fix", "perf", "revert"}), True)
 
 
 class FakeApi:
@@ -98,7 +98,7 @@ def test_the_releases_of_the_blueprint() -> None:
 
     assert releases is not None
     assert releases.version == version_of(manifest["."])
-    assert releases.kinds == {"feat", "fix", "perf", "revert", "deps"}
+    assert releases.kinds == {"feat", "fix", "perf", "revert"}
     assert releases.minor_pre_major
     assert not releases.patch_pre_major
 

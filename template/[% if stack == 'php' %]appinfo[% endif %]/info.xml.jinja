@@ -11,13 +11,22 @@
 	<licence>{= license =}</licence>
 	<author homepage="https://github.com/{= owner =}">{= author | e =}</author>
 	<namespace>{= nextcloud_namespace =}</namespace>
+[%- set repository = 'https://github.com/' ~ owner ~ '/' ~ project_slug %]
+[#- The App Store takes addresses of https only. #]
+[%- set website = homepage if homepage.startswith('https://') else '' %]
 	<documentation>
-		<user>https://github.com/{= owner =}/{= project_slug =}#readme</user>
+		<user>{= (website or repository ~ '#readme') | e =}</user>
 	</documentation>
 	<category>tools</category>
-	<website>https://github.com/{= owner =}/{= project_slug =}</website>
-	<bugs>https://github.com/{= owner =}/{= project_slug =}/issues</bugs>
-	<repository type="git">https://github.com/{= owner =}/{= project_slug =}.git</repository>
+	<website>{= (website or repository) | e =}</website>
+[%- if discussions %]
+	<discussion>{= repository =}/discussions</discussion>
+[%- endif %]
+	<bugs>{= repository =}/issues</bugs>
+	<repository type="git">{= repository =}.git</repository>
+[%- if sponsor %]
+	<donation type="other" title="GitHub Sponsors">https://github.com/sponsors/{= sponsor =}</donation>
+[%- endif %]
 	<dependencies>
 		<php min-version="8.2"/>
 		<nextcloud min-version="33" max-version="35"/>

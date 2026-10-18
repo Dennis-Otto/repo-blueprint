@@ -1,1 +1,5 @@
-[% set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" %][% filter replace(guard, "") %][% include ".github/workflows/ci-" ~ ci_workflow ~ ".yml" %][% endfilter -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+[#- The checks of each stack, without the jobs that only the blueprint skips; those of
+    Python are the blueprint's own CI, which runs every job. -#]
+[%- set guard = "    # Not in the blueprint itself; generated repositories don't have this line.\n    if: github.repository != 'Dennis-Otto/repo-blueprint'\n" -%]
+{= replaced(".github/workflows/ci-" ~ ci_workflow ~ ".yml", [] if ci_workflow == 'python' else [[guard, ""]]) -=}

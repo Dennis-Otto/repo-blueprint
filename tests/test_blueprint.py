@@ -22,6 +22,7 @@ from blueprint import cli
 from blueprint.checklist import (
     APP_NAME_LIMIT,
     RELEASE_APP_PERMISSIONS,
+    Step,
     best_practices,
     checklist,
     release_app_name,
@@ -2377,6 +2378,43 @@ def test_the_checklist_names_the_delivery(
         assert len(texts) == 11
     else:
         assert any(text in step for step in texts)
+
+
+def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
+    github: FakeGitHub, root: Path
+) -> None:
+    def listing() -> Step:
+        settings = Settings.load(root / ".github/repository.toml")
+        settings.variables["PUBLISH_TO"] = "hacs"
+        steps = checklist(Api(github), REPO, settings, root, reuse=lambda repo: False)
+        found = [step for step in steps if step.text.startswith("Description and")]
+        assert [step.text for step in found] == [
+            "Description and topics set (HACS lists them)"
+        ]
+        # Before the step of the HACS default repositories, which needs it.
+        assert "HACS default repositories" in steps[steps.index(found[0]) + 1].text
+        return found[0]
+
+    # Named in the settings, but not yet on GitHub.
+    step = listing()
+    assert step.done is False
+    assert step.how == "python3 blueprint.py settings apply"
+
+    run(github, root, "settings", "apply")
+    assert listing().done is True
+
+    # Without topics, HACS doesn't list the integration, and its check fails.
+    (root / ".github/repository.toml").write_text(
+        CONFIG.replace('topics = ["b", "a"]', "topics = []"), encoding="utf-8"
+    )
+    run(github, root, "settings", "apply")
+    step = listing()
+    assert step.done is False
+    assert step.how == (
+        'copier update --defaults --vcs-ref=:current: --data "topics=home-assistant,'
+        ' hacs", which names them in .github/repository.toml, then:'
+        " python3 blueprint.py settings apply"
+    )
 
 
 def without_release_app(root: Path) -> Settings:

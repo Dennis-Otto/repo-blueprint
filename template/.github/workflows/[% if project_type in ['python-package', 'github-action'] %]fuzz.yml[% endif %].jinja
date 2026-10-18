@@ -1,1 +1,2 @@
-[% filter replace('stacks/fuzz/requirements.txt', 'requirements-fuzz.txt') %][% include ".github/workflows/fuzz.yml" %][% endfilter -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+{= replaced(".github/workflows/fuzz.yml", [["stacks/fuzz/requirements.txt", "requirements-fuzz.txt"]]) -=}

@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from blueprint.github import Api
-from blueprint.settings import Settings, check
+from blueprint.settings import Drift, Settings, check
 
 # The permissions of the release app, as its settings page names them and as the link
 # that registers it does, with the access that the bots need: the settings bot,
@@ -347,10 +347,30 @@ def checklist(
             "then run Actions -> Register the app with the id of the app.",
         ),
     }
+    if target == "hacs":
+        steps.append(listing(settings, drift))
     if target in delivery:
         text, how = delivery[target]
         steps.append(Step(text, None, how))
     return steps
+
+
+def listing(settings: Settings, drift: list[Drift]) -> Step:
+    """HACS lists an integration by the description and the topics of its repository,
+    and its check fails without topics: the settings as code name both, and settings
+    apply sets them on GitHub."""
+    named = all(settings.repository.get(key) for key in ("description", "topics"))
+    applied = not any(
+        item.setting in ("repository.description", "repository.topics")
+        for item in drift
+    )
+    how = "python3 blueprint.py settings apply"
+    if not named:
+        how = (
+            'copier update --defaults --vcs-ref=:current: --data "topics=home-assistant,'
+            ' hacs", which names them in .github/repository.toml, then: ' + how
+        )
+    return Step("Description and topics set (HACS lists them)", named and applied, how)
 
 
 def describe_steps(steps: list[Step]) -> str:

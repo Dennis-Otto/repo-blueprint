@@ -1,0 +1,22 @@
+[#- A file of the blueprint, such as one of its workflows, as a template renders it
+    for a project: path is the file, and pairs the texts that the template replaces,
+    each as [old, new], or [old, new, count] for the first count of them only. The
+    render stops when the file no longer holds one of the old texts, such as after a
+    change of the comment or the step that the template looks for: without the check,
+    the template left the file as it was, and every repository got the blueprint's
+    own text. Import it with context, so that the file sees the answers:
+
+        [%- from "includes/replace.jinja" import replaced with context -%]
+        {= replaced(".github/workflows/docs.yml", [["old", "new"]]) -=}
+-#]
+[%- macro replaced(path, pairs) -%]
+[%- set text -%][% include path %][%- endset -%]
+[%- set result = namespace(text=text) -%]
+[%- for pair in pairs -%]
+[%- if pair[0] not in result.text -%]
+{= the_replaced_text | mandatory(path ~ " no longer holds the text that its template replaces, " ~ (pair[0] | to_json) ~ ": change the template in template/ together with the file.") =}
+[%- endif -%]
+[%- set result.text = result.text | replace(pair[0], pair[1], pair[2] if pair | length > 2 else none) -%]
+[%- endfor -%]
+{= result.text =}
+[%- endmacro -%]
