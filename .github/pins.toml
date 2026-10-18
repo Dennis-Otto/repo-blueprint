@@ -24,3 +24,8 @@ sha256 = "9bee5a756a83c5a6b1f040e9a2ade9e902e4a57211afc174cd8ac5c4f913958f"
 url = "https://download.nextcloud.com/server/releases/nextcloud-{version}.zip"
 version = "33.0.8"
 sha256 = "d974bcbe446edaf87ae17113200b362495abbdb89d7900d65d930fe7a9dc9474"
+
+[download."anchore/syft"]
+url = "https://github.com/anchore/syft/releases/download/v{version}/syft_{version}_linux_amd64.tar.gz"
+version = "1.52.0"
+sha256 = "caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d"

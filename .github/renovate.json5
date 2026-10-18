@@ -40,7 +40,7 @@
       // release and writes its sha256 beside the version and into .github/pins.toml,
       // so that the update merges on its own like any other.
       matchManagers: ["custom.regex"],
-      matchDepNames: ["sigstore/gitsign", "infection/infection", "ChristophWurst/krankerl", "nextcloud/server"],
+      matchDepNames: ["sigstore/gitsign", "infection/infection", "ChristophWurst/krankerl", "nextcloud/server", "anchore/syft"],
       matchFileNames: [".github/workflows/**", ".github/sign-tag.sh"],
       enabled: true,
       postUpgradeTasks: {

@@ -2,11 +2,12 @@ name: Release verification
 
 # The release verification bot. It checks a release the way its users can: every
 # asset carries the signed provenance of this repository's release workflow, both in
-# GitHub and in the attached bundle; the SBOM is attached; the release is immutable
-# and its commit signed; and where the repository variable PUBLISH_TO delivers it,
-# the same release is there. The release workflow runs it after every release, and
-# it checks the latest release every week. A failed check fails the run, which GitHub
-# reports to the maintainer. https://github.com/Dennis-Otto/repo-blueprint
+# GitHub and in the attached bundle; the SBOMs are attached and describe what the
+# release ships, by its name and version; the release is immutable and its commit
+# signed; and where the repository variable PUBLISH_TO delivers it, the same release
+# is there. The release workflow runs it after every release, and it checks the
+# latest release every week. A failed check fails the run, which GitHub reports to
+# the maintainer. https://github.com/Dennis-Otto/repo-blueprint
 
 on:
   workflow_call:
@@ -141,6 +142,31 @@ jobs:
           else
             fail "The release has no SBOM as CycloneDX."
           fi
+          # The SBOMs describe what the release ships, under the name of the repository
+          # and the version of the release, as build-release.yml writes them. Those of a
+          # release made before describe the folder of the repository, which the weekly
+          # run only notes.
+          version="${TAG#v}"
+          name="${GH_REPO#*/}"
+          # The variables of the filters are jq's, not the shell's.
+          # shellcheck disable=SC2016
+          spdx='[.relationships[] | select(.spdxElementId == "SPDXRef-DOCUMENT" and .relationshipType == "DESCRIBES")
+            | .relatedSpdxElement] as $roots
+            | any(.packages[]; (.SPDXID | IN($roots[])) and .name == $name and .versionInfo == $version)'
+          # shellcheck disable=SC2016
+          cyclonedx='.metadata.component.name == $name and .metadata.component.version == $version'
+          for sbom in *.spdx.json *.cdx.json; do
+            [[ -f "$sbom" ]] || continue
+            filter="$spdx"
+            [[ "$sbom" == *.cdx.json ]] && filter="$cyclonedx"
+            if jq -e --arg name "$name" --arg version "$version" "$filter" "$sbom" >/dev/null; then
+              pass "$sbom describes $name $version, what the release ships."
+            elif [[ "$WEEKLY" == true ]]; then
+              echo "::notice::$sbom is older than the SBOMs of what a release ships."
+            else
+              fail "$sbom doesn't describe $name $version, what the release ships."
+            fi
+          done
           for vex in *.openvex.json; do
             [[ -f "$vex" ]] || continue
             if jq -e '."@context" == "https://openvex.dev/ns/v0.2.0" and (.statements | length > 0)' "$vex" >/dev/null; then
@@ -171,7 +197,6 @@ jobs:
             fi
           done
 
-          version="${TAG#v}"
           case "$PUBLISH_TO" in
             pypi)
               name="${GH_REPO#*/}"
