@@ -2488,9 +2488,8 @@ def remapper(project: Path) -> Callable[[str], str]:
 
 
 def lychee_excludes(project: Path) -> list[str]:
-    return tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))[
-        "exclude"
-    ]
+    config = tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))
+    return [str(rule) for rule in config["exclude"]]
 
 
 def test_the_link_check_leaves_out_the_website_that_a_new_repository_gets_later(
