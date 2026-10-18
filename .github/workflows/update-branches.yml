@@ -32,7 +32,7 @@ on:
   workflow_run:
     # The workflows of the checks of this repository; the blueprint sets them for each kind of project.
     # Then those of the other required checks and of the scanners, the same in every repository.
-    workflows: [CI (python), Variants, Windows, Issue assistant sync, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security]
+    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security]
     types: [completed]
   # The schedule is only a safety net, for an event that GitHub lost and a pull
   # request whose fix passed its checks: every merge into main is a push of the

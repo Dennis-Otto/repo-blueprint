@@ -1,0 +1,27 @@
+# The answers of https://github.com/Dennis-Otto/paperless-sync,
+# as its .copier-answers.yml has them, without _commit and _src_path. The Variants
+# workflow makes a repository with them and updates one from the latest release,
+# and the Downstream workflow warns when they differ from those of the repository:
+# change them with the repository.
+author: Dennis Otto
+copyright: 2026 Dennis Otto
+description: Nextcloud app that syncs Paperless-ngx documents into Nextcloud Files,
+  by correspondent, type and year, and sends an inbox folder to Paperless. No WebDAV,
+  no Nextcloud password.
+discussions: true
+homepage: https://dennis-otto.github.io/paperless-sync/
+languages:
+- javascript-typescript
+license: AGPL-3.0-or-later
+nextcloud_app_id: paperless_sync
+nextcloud_namespace: PaperlessSync
+owner: Dennis-Otto
+project_name: Paperless Sync
+project_slug: paperless-sync
+project_type: nextcloud-app
+sample_code: false
+sponsor: Dennis-Otto
+successor: true
+test_workflows: ''
+topics: dms, document-archive, document-management, homelab, nextcloud, nextcloud-app,
+  paperless, paperless-ngx, php, self-hosted, selfhosted, synchronization

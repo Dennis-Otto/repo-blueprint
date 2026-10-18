@@ -17,7 +17,7 @@ These notes add to `AGENTS.md` what a coding agent needs to know about how the b
 
 - The template uses delimiters of its own, so that the `${{ }}` of GitHub Actions and the `[[ ]]` of Bash stay as they are: `[% … %]` for blocks, `{= … =}` for values and `[# … #]` for comments.
 - `[% include "path" %]` takes a file of the blueprint from the root of this repository, so that the blueprint and every repository share one copy. The files that the blueprint keeps equal to its own rendering are listed in `test_the_blueprint_follows_its_own_template`; change both, or the test fails.
-- The seven kinds of projects are the `project_type` of `copier.yml`; most files ask for the derived `stack` instead, which groups them. A change shows in every kind that it touches, and the Variants workflow runs the checks of each kind with its real tools, for a new repository and for one that the update brings from the latest release.
+- The seven kinds of projects are the `project_type` of `copier.yml`; most files ask for the derived `stack` instead, which groups them. A change shows in every kind that it touches, and the Variants workflow runs the checks of each kind with its real tools, for a new repository and for one that the update brings from the latest release, and updates one with the answers of each repository that takes the blueprint, from `tests/answers/`. The Downstream workflow updates those repositories themselves before the release (`downstream.py`); a new question of `copier.yml` gets its answer in each file of `tests/answers/`, as the repository will have it.
 
 ## Documentation
 

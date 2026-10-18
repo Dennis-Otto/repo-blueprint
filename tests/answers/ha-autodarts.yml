@@ -1,0 +1,30 @@
+# The answers of https://github.com/Dennis-Otto/ha-autodarts,
+# as its .copier-answers.yml has them, without _commit and _src_path. The Variants
+# workflow makes a repository with them and updates one from the latest release,
+# and the Downstream workflow warns when they differ from those of the repository:
+# change them with the repository.
+author: Dennis Otto
+copyright: 2026 Trkal and HACSAutodarts contributors; 2026 Dennis Otto
+description: 'Autodarts for Home Assistant: local realtime board control, X01, Cricket,
+  party and training games, tournaments and a bot, player statistics with heatmaps,
+  seven dashboard cards and fourteen blueprints, games started by voice. No cloud
+  account needed.'
+discussions: true
+ha_domain: autodarts
+homepage: https://dennis-otto.github.io/ha-autodarts/
+languages:
+- python
+- javascript-typescript
+license: MIT
+owner: Dennis-Otto
+project_name: Autodarts
+project_slug: ha-autodarts
+project_type: home-assistant
+python_package: autodarts
+sample_code: false
+sponsor: Dennis-Otto
+successor: true
+test_workflows: ''
+topics: autodarts, darts, hacs, home-assistant, home-assistant-custom-component, dartboard,
+  hacs-integration, home-assistant-blueprints, homeassistant, lovelace-card, darts-training,
+  home-assistant-integration, home-automation, lovelace-custom-card, smart-home

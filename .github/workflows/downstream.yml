@@ -1,0 +1,104 @@
+name: Downstream
+
+# The update of every repository that takes the blueprint, before a release brings it
+# there. downstream.py clones each repository of tests/answers/, read-only, and updates
+# it as its blueprint bot does, without --trust: once to the commit of main that the
+# pull request merges into and once to the pull request. The summary names, for each
+# repository, the files whose update the pull request changes and those that the
+# update leaves a conflict in. A conflict that the pull request brings into a file that
+# runs, such as a workflow or a script, fails the check, one in a page warns, and so do
+# answers in tests/answers/ that differ from those of the repository. In the pull
+# requests that change what the repositories get from the blueprint, and every week
+# for the update to main, since the repositories change on their own.
+#
+# No required check: a conflict can be the right change, with a line in the changelog
+# that says how a repository resolves it. The Variants workflow makes a repository with
+# the answers of each one and runs its checks.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  pull_request:
+    paths:
+      - copier.yml
+      - template/**
+      - includes/**
+      - stacks/**
+      - blueprint.py
+      - blueprint/**
+      - .github/**
+      - .devcontainer/**
+      - .githooks/**
+      - scripts/**
+      - LICENSES/**
+      - lychee.toml
+      - .vale.ini
+      - downstream.py
+      - tests/answers/**
+  schedule:
+    - cron: "40 5 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  downstream:
+    name: downstream
+    runs-on: ubuntu-24.04
+    # A few times its longest run, so that a run that hangs ends early; a step that
+    # installs ends after five minutes.
+    timeout-minutes: 15
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      # With every tag, for the version that each repository has.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 5
+        with:
+          python-version-file: .python-version
+      # uv installs the hash-pinned Copier in seconds and checks the hash of each
+      # package. Its cache keeps only the wheels that it built from source, under a key
+      # of the lock file: pre-built ones download faster than a cache restores them.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.12.18"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: stacks/copier/requirements.txt
+      # The Copier that the blueprint bot of each repository runs, with PyYAML.
+      - name: Install the hash-pinned Copier
+        timeout-minutes: 5
+        run: uv pip install --system --require-hashes -r stacks/copier/requirements.txt
+      # The public repositories, cloned without a token. In a pull request, the commit
+      # of GitHub that merges it; its first parent is the commit of main that it merges
+      # into.
+      - name: Update every repository that takes the blueprint
+        timeout-minutes: 12
+        run: |
+          arguments=(--head "$(git rev-parse HEAD)")
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            arguments+=(--base "$(git rev-parse HEAD^1)")
+          fi
+          python3 downstream.py "${arguments[@]}"
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: downstream
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
