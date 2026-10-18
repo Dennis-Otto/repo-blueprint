@@ -5,6 +5,7 @@
 # that adds it; its deploy job asks for each file after every deployment.
 ^https://dennis-otto\.github\.io/repo-blueprint/dashboard/(repos\.json|releases\.atom)$
 
-# The page for owners of their own, which only the Docs workflow publishes after the
-# merge that adds it; #314 removes this entry once the website has it.
-^https://dennis-otto\.github\.io/repo-blueprint/(de/)?own-account/$
+# The comparison and the page of each kind of project, which only the Docs workflow
+# publishes after the merge that adds them; #320 removes this entry once the website
+# has them.
+^https://dennis-otto\.github\.io/repo-blueprint/(de/)?(compare|kinds/[a-z-]+)\.html$
