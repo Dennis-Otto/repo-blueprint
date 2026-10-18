@@ -1,11 +1,32 @@
 # The settings of the repository as code. `blueprint.py settings check` compares them
 # with GitHub, and `blueprint.py settings apply` sets them:
-# https://github.com/Dennis-Otto/repo-blueprint#settings
+# https://github.com/Dennis-Otto/repo-blueprint#settings-as-code
 
 [repository]
-description = "A Copier template for GitHub repositories, with tests, releases, security checks and bots built in, for seven kinds of projects."
+description = "Copier template for self-maintaining GitHub repos (Python, Home Assistant/HACS, Nextcloud apps, GitHub Actions, Node/TypeScript, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update."
 homepage = "https://dennis-otto.github.io/repo-blueprint/"
-topics = ["copier", "copier-template", "repository-template", "github-actions", "release-automation", "supply-chain-security", "openssf", "dependabot"]
+topics = [
+  "copier",
+  "copier-template",
+  "project-template",
+  "repository-template",
+  "template",
+  "boilerplate",
+  "scaffolding",
+  "github-actions",
+  "ci-cd",
+  "devsecops",
+  "release-automation",
+  "release-please",
+  "renovate",
+  "supply-chain-security",
+  "slsa",
+  "sbom",
+  "openssf",
+  "home-assistant",
+  "nextcloud",
+  "python",
+]
 has_issues = true
 has_discussions = true
 has_projects = false

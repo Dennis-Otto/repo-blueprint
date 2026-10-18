@@ -2517,6 +2517,37 @@ def test_the_link_check_checks_the_anchors_that_it_can_see(
         assert not any(pattern.search(url) for pattern in excluded), url
 
 
+BLUEPRINT_ANCHOR = re.compile(
+    r"https://github\.com/Dennis-Otto/repo-blueprint"
+    r"(?:/blob/main/(?P<path>[\w./-]+\.md))?#(?P<anchor>[\w-]+)"
+)
+
+
+def test_every_link_to_a_heading_of_the_blueprint_finds_it() -> None:
+    # A link to a heading of the README or another Markdown file of the blueprint,
+    # in a file of the blueprint or of the template, such as the one at the top of
+    # every .github/repository.toml, leads to that heading: GitHub drops an anchor
+    # that it doesn't know without a word, and the link check reads no comment of a
+    # TOML file. The released sections of the changelog stay as they were.
+    links: dict[tuple[str, str], str] = {}
+    for name in files_of(ROOT):
+        data = (ROOT / name).read_bytes()
+        if name == "CHANGELOG.md" or b"Dennis-Otto/repo-blueprint" not in data:
+            continue
+        for link in BLUEPRINT_ANCHOR.finditer(data.decode("utf-8")):
+            links.setdefault((link["path"] or "README.md", link["anchor"]), name)
+    assert ("README.md", "settings-as-code") in links
+    assert ("SECURITY.md", "verify-a-release") in links
+    # GitHub draws #readme with a script, at the top of the README.
+    broken = {
+        f"{target}#{anchor}": name
+        for (target, anchor), name in links.items()
+        if anchor != "readme"
+        and anchor not in anchors((ROOT / target).read_text(encoding="utf-8"))
+    }
+    assert not broken
+
+
 def test_the_link_check_asks_for_a_file_of_github_where_github_answers(
     projects: dict[str, Path],
 ) -> None:

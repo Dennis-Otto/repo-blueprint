@@ -5,22 +5,23 @@ config:
 ---
 flowchart TB
     accTitle: The larger steps of the blueprint
-    accDescr: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags; 0.9 to 0.12 the diagrams that every app shows, the PR coach and the bot-health bot. The next release brings the screenshot bot; next come the visual changes in pull requests.
+    accDescr: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags; 0.9 and 0.10 the Rollout of every release, the branch bot and checks that get going again; 0.11 and 0.12 the diagrams that every app shows, the PR coach and the bot-health bot. The next release brings the blueprint for any owner, the screenshot bot and one report on every pull request; next come pages for every question, visual changes in pull requests and more kinds of projects.
 
     subgraph done ["Done"]
         direction TB
         early["`**0.1 – 0.3**<br>seven kinds of projects<br>settings as code<br>release bot`"]
         middle["`**0.4 – 0.5**<br>settings bot<br>Renovate<br>beta channel`"]
         late["`**0.6 – 0.8**<br>websites<br>SLSA Build Level 3<br>signed tags`"]
-        recent["`**0.9 – 0.12**<br>diagrams in every app<br>PR coach<br>bot-health bot`"]
-        early --> middle --> late --> recent
+        rollout["`**0.9 – 0.10**<br>Rollout of every release<br>branch bot<br>checks that restart`"]
+        recent["`**0.11 – 0.12**<br>diagrams in every app<br>PR coach<br>bot-health bot`"]
+        early --> middle --> late --> rollout --> recent
     end
 
-    soon(["`**The next release**<br>the screenshot bot`"])
-    next(["`**Next**<br>visual changes<br>in pull requests`"])
+    soon(["`**The next release**<br>any owner, one command<br>the screenshot bot<br>one report per pull request`"])
+    next(["`**Next**<br>pages for every question<br>visual changes in pull requests<br>more kinds of projects`"])
     done --> soon --> next
 
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     classDef plan fill:#526cfe2e,stroke:#526cfe,stroke-width:2px,stroke-dasharray:6 4
-    class early,middle,late,recent,soon done
+    class early,middle,late,rollout,recent,soon done
     class next plan
