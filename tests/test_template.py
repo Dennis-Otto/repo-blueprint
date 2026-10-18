@@ -7817,6 +7817,78 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
         assert tuple(int(part) for part in version.split(".")) >= least
         assert f"uvx --from copier=={version} copier copy gh:" in text
         assert f"pipx run --spec copier=={version} copier copy gh:" in text
+    # The one-liner on the page of each kind takes the same release, which the same
+    # manager keeps current.
+    assert '"/^docs/kinds/[a-z-]+(\\\\.de)?\\\\.md$/"' in renovate
+    for page in sorted((ROOT / "docs/kinds").glob("*.md")):
+        text = page.read_text(encoding="utf-8")
+        found = [match.groupdict() for match in re.finditer(pattern, text)]
+        assert [item["currentValue"] for item in found] == [version], page.name
+        assert f"uvx --from copier=={version} copier copy --data project_type=" in text
+
+
+# The pages of the kinds, in English and in German: the heading of the section of
+# the required checks, and the lines that say whether the kind adds a step of its
+# own to the checklist.
+KIND_PAGES = {
+    "md": (
+        "## The checks that a pull request needs",
+        "This kind adds these steps:",
+        "This kind adds no step of its own.",
+    ),
+    "de.md": (
+        "## Die Prüfungen, die ein Pull Request braucht",
+        "Diese Art bringt diese Schritte dazu:",
+        "Diese Art bringt keinen eigenen Schritt dazu.",
+    ),
+}
+
+
+def section_of(text: str, heading: str) -> str:
+    """A section of a page, from its heading up to the next one."""
+    start = text.index(f"\n{heading}\n")
+    end = text.find("\n## ", start + 1)
+    return text[start : end if end != -1 else len(text)]
+
+
+@pytest.mark.parametrize("language", KIND_PAGES)
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_page_of_a_kind_names_its_required_checks_and_its_steps(
+    projects: dict[str, Path], kind: str, language: str
+) -> None:
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    text = (ROOT / f"docs/kinds/{kind}.{language}").read_text(encoding="utf-8")
+    checks, some, none = KIND_PAGES[language]
+    # The names in code before the colon of each item: the checks themselves, not
+    # the files that the item names after them.
+    named = set()
+    for line in section_of(text, checks).splitlines():
+        if line.startswith("- "):
+            named.update(re.findall(r"`([^`]+)`", line.split(":", 1)[0]))
+    branch = tomllib.loads(
+        (projects[kind] / ".github/repository.toml").read_text(encoding="utf-8")
+    )["branch"]
+    assert named == set(branch["required_checks"])
+    # The steps that the checklist adds for the delivery of this kind, each with
+    # the link that the checklist shows.
+    target = settings.variables.get("PUBLISH_TO", "none")
+    source = (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
+    delivery = re.search(
+        rf'\n        "{re.escape(target)}": \((.*?)\n        \),', source, re.S
+    )
+    added = (delivery is not None) + (target == "hacs")
+    if added:
+        steps = text.split(f"\n{some}\n", 1)[1].split("\n## ", 1)[0]
+        # A step of two parts, such as the certificate and then the registration of a
+        # Nextcloud app, may take an item for each part.
+        assert steps.count("\n- ") >= added
+        assert delivery is not None
+        for link in re.findall(r"https://[^\s\"\\]+", delivery[1]):
+            if "{" not in link:
+                assert link in steps, link
+    else:
+        assert none in text
+        assert some not in text
 
 
 @pytest.mark.parametrize("kind", KINDS)
