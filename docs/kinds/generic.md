@@ -9,7 +9,7 @@ A repository of documentation, configuration or scripts, which needs no build an
 ## Start one
 
 ```sh
-uvx copier copy --data project_type=generic gh:Dennis-Otto/repo-blueprint my-repository
+uvx --from copier==9.18.2 copier copy --data project_type=generic gh:Dennis-Otto/repo-blueprint my-repository
 cd my-repository
 python3 .github/blueprint.py create
 ```

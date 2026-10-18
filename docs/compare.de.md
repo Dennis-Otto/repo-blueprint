@@ -29,7 +29,7 @@ Ein Strich heißt, dass das Werkzeug es nicht tut; *die Vorlage* heißt, dass es
 | --- | --- | --- | --- | --- | --- |
 | Änderungen der Vorlage nach dem Kopieren | ein Bot bringt jede Version als Pull Request | — | `cruft update` von Hand; `cruft check` scheitert, wenn es zurückliegt | `copier update` von Hand | jeder Lauf von `projen` schreibt die Dateien neu |
 | Updates getestet, bevor sie ankommen | an jeder Art und an den echten Repositories | — | — | die Vorlage | — |
-| Code, der beim Kopieren läuft | keiner | keiner | die Hooks der Vorlage, falls es welche gibt | die Tasks, Migrationen und Erweiterungen der Vorlage, falls es welche gibt, mit `--trust` | `.projenrc` bei jedem Lauf |
+| Code, der beim Kopieren läuft | keiner; danach `blueprint.py create` aus der Kopie, das du selbst startest | keiner | die Hooks der Vorlage, falls es welche gibt | die Tasks, Migrationen und Erweiterungen der Vorlage, falls es welche gibt, mit `--trust` | `.projenrc` bei jedem Lauf |
 | Was ein neues Repository braucht | Git, Python, uv und die GitHub CLI | einen Knopf auf GitHub | Python und `cookiecutter` | Python und `copier` | Node und `npx projen new` |
 | Einstellungen des Repositorys | als Code, mit einem Bot gegen Abweichungen | — | die Vorlage | die Vorlage | — |
 | Releases | release-please, signierte Tags, SLSA Build Level 3, SBOM, VEX, geprüft | die Vorlage | die Vorlage | die Vorlage | nach npm, und mit jsii nach PyPI, Maven, NuGet und Go |

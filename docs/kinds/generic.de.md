@@ -9,7 +9,7 @@ Ein Repository mit Dokumentation, Konfiguration oder Skripten, das keinen Build 
 ## Eines anlegen
 
 ```sh
-uvx copier copy --data project_type=generic gh:Dennis-Otto/repo-blueprint my-repository
+uvx --from copier==9.18.2 copier copy --data project_type=generic gh:Dennis-Otto/repo-blueprint my-repository
 cd my-repository
 python3 .github/blueprint.py create
 ```

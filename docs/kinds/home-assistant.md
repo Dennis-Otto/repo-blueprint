@@ -9,7 +9,7 @@ A custom integration for Home Assistant, with the checks of Home Assistant itsel
 ## Start one
 
 ```sh
-uvx copier copy --data project_type=home-assistant gh:Dennis-Otto/repo-blueprint my-integration
+uvx --from copier==9.18.2 copier copy --data project_type=home-assistant gh:Dennis-Otto/repo-blueprint my-integration
 cd my-integration
 python3 .github/blueprint.py create
 ```

@@ -29,7 +29,7 @@ A dash means that the tool doesn't do it; *the template* means that it depends o
 | --- | --- | --- | --- | --- | --- |
 | Changes of the template after the copy | a bot brings each release as a pull request | — | `cruft update` by hand; `cruft check` fails when it is behind | `copier update` by hand | each run of `projen` writes the files anew |
 | Updates tested before they arrive | on every kind and on the real repositories | — | — | the template | — |
-| Code that runs at the copy | none | none | the hooks of the template, if any | the tasks, migrations and extensions of the template, if any, with `--trust` | `.projenrc` at every run |
+| Code that runs at the copy | none; then `blueprint.py create` from the copy, which you start yourself | none | the hooks of the template, if any | the tasks, migrations and extensions of the template, if any, with `--trust` | `.projenrc` at every run |
 | What a new repository needs | Git, Python, uv and the GitHub CLI | a button on GitHub | Python and `cookiecutter` | Python and `copier` | Node and `npx projen new` |
 | Settings of the repository | as code, with a bot against drift | — | the template | the template | — |
 | Releases | release-please, signed tags, SLSA Build Level 3, SBOM, VEX, verified | the template | the template | the template | to npm, and with jsii to PyPI, Maven, NuGet and Go |

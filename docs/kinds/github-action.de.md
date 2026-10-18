@@ -9,7 +9,7 @@ Eine Composite Action, deren Code Python ist, auf dem Python 3.12 des Runners, s
 ## Eines anlegen
 
 ```sh
-uvx copier copy --data project_type=github-action gh:Dennis-Otto/repo-blueprint my-action
+uvx --from copier==9.18.2 copier copy --data project_type=github-action gh:Dennis-Otto/repo-blueprint my-action
 cd my-action
 python3 .github/blueprint.py create
 ```

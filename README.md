@@ -75,7 +75,7 @@ Five public repositories follow the blueprint, each with code of its own and the
 <!-- --8<-- [start:why] -->
 
 - **Rather than a template repository of GitHub:** *Use this template* copies the files once, without the settings, and nothing follows them later. The blueprint sets the rulesets, the security and the environments as code, and brings every improvement as a pull request.
-- **Rather than Cookiecutter and cruft:** the hooks of a Cookiecutter template run code on your machine, and `cruft update` waits until someone runs it. The blueprint runs no code of its own at the copy, and its bot updates every repository by itself.
+- **Rather than Cookiecutter and cruft:** the hooks of a Cookiecutter template run code on your machine, and `cruft update` waits until someone runs it. Copier runs none of the blueprint's code, so it needs no `--trust`; `blueprint.py create`, which you run next, is a file of the copy that you can read first. And the bot of the blueprint updates every repository by itself.
 - **Rather than another Copier template,** such as copier-uv or scientific-python/cookie, which serve Python projects well: the blueprint brings one standard to Home Assistant, Nextcloud, GitHub Actions, Node and containers too, with signed releases of SLSA Build Level 3, SBOMs and VEX, and tests each release on every kind and on the real repositories before it rolls out.
 - **Rather than projen:** projen writes the files of a project from code that runs at every synthesis, above all for TypeScript, AWS CDK and jsii. The blueprint needs no code of its own in the project: it keeps its own files current and leaves those of the project to you.
 

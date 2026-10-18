@@ -77,7 +77,7 @@ Fünf öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und
 <!-- --8<-- [start:why] -->
 
 - **Statt eines Template-Repositorys von GitHub:** *Use this template* kopiert die Dateien einmal, ohne die Einstellungen, und später folgt nichts. Der Blueprint setzt die Rulesets, die Sicherheit und die Environments als Code und bringt jede Verbesserung als Pull Request.
-- **Statt Cookiecutter und cruft:** Die Hooks einer Cookiecutter-Vorlage führen Code auf deinem Rechner aus, und `cruft update` wartet, bis jemand es startet. Der Blueprint führt beim Kopieren keinen eigenen Code aus, und sein Bot aktualisiert jedes Repository von selbst.
+- **Statt Cookiecutter und cruft:** Die Hooks einer Cookiecutter-Vorlage führen Code auf deinem Rechner aus, und `cruft update` wartet, bis jemand es startet. Copier führt keinen Code des Blueprints aus, also braucht es kein `--trust`; `blueprint.py create`, das du danach startest, ist eine Datei der Kopie, die du vorher lesen kannst. Und der Bot des Blueprints aktualisiert jedes Repository von selbst.
 - **Statt einer anderen Copier-Vorlage,** etwa copier-uv oder scientific-python/cookie, die Python-Projekten gut dienen: Der Blueprint bringt einen Standard auch zu Home Assistant, Nextcloud, GitHub Actions, Node und Containern, mit signierten Releases nach SLSA Build Level 3, SBOMs und VEX, und testet jede Version an jeder Art und an den echten Repositories, bevor sie ausrollt.
 - **Statt projen:** projen schreibt die Dateien eines Projekts aus Code, der bei jeder Synthese läuft, vor allem für TypeScript, AWS CDK und jsii. Der Blueprint braucht keinen eigenen Code im Projekt: Er hält seine eigenen Dateien aktuell und lässt dir die des Projekts.
 

@@ -9,7 +9,7 @@ A package for npm in TypeScript on Node 24, with the tools that Node brings itse
 ## Start one
 
 ```sh
-uvx copier copy --data project_type=node-package gh:Dennis-Otto/repo-blueprint my-package
+uvx --from copier==9.18.2 copier copy --data project_type=node-package gh:Dennis-Otto/repo-blueprint my-package
 cd my-package
 python3 .github/blueprint.py create
 ```
