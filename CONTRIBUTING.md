@@ -134,6 +134,10 @@ npm ci --prefix .github/a11y --ignore-scripts
 node .github/a11y/check.mjs site
 ```
 
+### The page of the automation
+
+The page *Automation* of every website has no file in `docs/`: at every build, the hooks write it from `.github/workflows/` and the required checks of `.github/repository.toml` and `.github/repository.project.toml`, in English and, on a website in German, in German too. Each workflow shows with the comment at its top, which is why every workflow starts with one that says what it does, with what starts it, each schedule in words, the checks of it that `main` requires and the environments and secrets that it uses. A word of the name of its file, by `KEYWORDS` of `.github/mkdocs_blueprint.py`, puts it into a group: checks, releases, bots, security or maintenance. The page draws the diagrams of the README live, from copies in the hook that a test keeps equal to `docs/diagrams/how-a-repository-looks-after-itself.mmd` and `from-a-change-to-a-release.mmd`; change both. A project's own `docs/automation.md` takes the place of the page, and `docs/automation.de.md` that of the German one.
+
 ### Pages in one column
 
 Pages have one column, so that they read well in the GitHub app and on a phone, which keep columns side by side and squeeze them until the text is a few words wide and the pictures tiny. A table holds tabular data, never a layout: no `<table>` that sets a picture beside text, and no `<td width="…">`. A picture or a GIF comes at full width below the text that it illustrates, and a long list goes into `<details>` with a `<summary>` that names it. `scripts/check.sh` fails on such a table and such a cell in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line, and `python3 blueprint.py pages --fix` puts the cells of a layout table one below the other, the text before its picture, and leaves out the widths.

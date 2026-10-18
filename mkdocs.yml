@@ -48,6 +48,7 @@ plugins:
           Home: Start
           Guide: Anleitung
           Security design: Sicherheitsdesign
+          Automation: Automatisierung
           Decisions: Entscheidungen
           Changelog: Änderungen
 
@@ -58,12 +59,13 @@ hooks:
   - .github/mkdocs_project.py
 
 # The menu, the same in both languages, with the titles of nav_translations above on
-# the German website.
+# the German website. The hooks write the page of the automation from the workflows.
 nav:
   - Home: index.md
   - Guide: guide.md
   - Roadmap: roadmap.md
   - Security design: security.md
+  - Automation: automation.md
   - Decisions: decisions/README.md
   - Changelog: changelog.md
   - Dashboard: https://dennis-otto.github.io/repo-blueprint/dashboard/
