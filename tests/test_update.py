@@ -969,6 +969,12 @@ def test_automerge_off_holds_the_open_pull_request_too(github: FakeGitHub) -> No
 
     assert github.pulls[1]["auto_merge"] is not None
     assert gh_calls(github) == [f"pr merge 1 --repo {REPO} --disable-auto"]
+    # Its description says so, and how to stop it.
+    assert (
+        "Its auto-merge is on, so it merges itself once every check passes, although"
+        " the repository variable `BLUEPRINT_AUTOMERGE` is `off`; turn its auto-merge"
+        " off to review it."
+    ) in github.pulls[1]["body"]
 
 
 def test_auto_merge_that_the_maintainer_turned_off_stays_off(

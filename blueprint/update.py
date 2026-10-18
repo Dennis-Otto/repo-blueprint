@@ -619,6 +619,12 @@ def merge_note(update: Update, merges: bool, automerge: bool) -> str:
     """What happens to the pull request once its checks pass."""
     if update.conflicts:
         return "It waits for you to merge it."
+    if merges and not automerge:
+        return (
+            "Its auto-merge is on, so it merges itself once every check passes,"
+            " although the repository variable `BLUEPRINT_AUTOMERGE` is `off`; turn"
+            " its auto-merge off to review it."
+        )
     if merges:
         return (
             "It merges itself once every check passes. To review every update before"
