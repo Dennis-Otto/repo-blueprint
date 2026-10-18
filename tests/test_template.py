@@ -4485,6 +4485,41 @@ def test_the_website_of_the_owner_lives_at_the_root(tmp_path: Path) -> None:
     assert (
         "\nrepo_url: https://github.com/Dennis-Otto/dennis-otto.github.io\n" in config
     )
+    # Its footer leads to no website of itself.
+    assert footer_of(project) == [
+        "https://github.com/Dennis-Otto",
+        "https://github.com/sponsors/Dennis-Otto",
+    ]
+
+
+def footer_of(project: Path) -> list[str]:
+    """The addresses of the links in the footer that the hooks of the website of
+    project give every page, with the addresses of its mkdocs.yml."""
+    spec = importlib.util.spec_from_file_location(
+        f"hooks_of_{re.sub(r'\W', '_', project.name)}",
+        project / ".github/mkdocs_blueprint.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    text = (project / "mkdocs.yml").read_text(encoding="utf-8")
+    addresses = dict(re.findall(r"^(site_url|repo_url): (\S+)$", text, re.M))
+    config = SimpleNamespace(
+        config_file_path=str(project / "mkdocs.yml"),
+        docs_dir=str(project / "docs"),
+        site_url=addresses["site_url"],
+        repo_url=addresses["repo_url"],
+        edit_uri=None,
+        theme={"language": "en"},
+        plugins={},
+        extra={},
+        extra_css=[],
+        extra_javascript=[],
+        nav=None,
+    )
+    hooks.on_config(config)
+    return [link["link"] for link in config.extra.get("social", [])]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -9573,6 +9608,28 @@ def test_every_website_shows_the_automation_of_its_repository(
     assert f"from the [Repo Blueprint]({blueprint})" in page
     nav = (project / "mkdocs.yml").read_text(encoding="utf-8").split("\nnav:\n")[1]
     assert "\n  - automation.md\n" in nav
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_leads_to_its_owner_and_asks_github_for_nothing(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+
+    # The profile of the owner, the website with all of their projects, and the
+    # sponsor button of the repository.
+    assert footer_of(project) == [
+        "https://github.com/Dennis-Otto",
+        "https://dennis-otto.github.io/",
+        "https://github.com/sponsors/Dennis-Otto",
+    ]
+    settings = (project / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
+    assert settings == (ROOT / ".github/mkdocs-blueprint.yml").read_text(
+        encoding="utf-8"
+    )
+    # No list of links in the settings of the blueprint takes their place.
+    assert "\n  social:" not in settings.partition("\nextra:\n")[2]
+    assert "asks the API of GitHub" in settings
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
