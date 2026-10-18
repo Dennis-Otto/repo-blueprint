@@ -232,11 +232,47 @@ jobs:
           fi
           uv pip install --system --require-hashes -r "$requirements"
 
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+      # As in the CI of an app: its tools on the PHP of its composer.json, beside the
+      # oldest PHP of its appinfo/info.xml.
+      - name: Find the PHP of the tools and the oldest PHP of the app
+        id: php
         if: matrix.kind == 'nextcloud-app'
+        working-directory: ${{ env.PROJECT }}
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import json
+          import sys
+          from xml.etree import ElementTree
+
+
+          def minor(version):
+              return ".".join(version.split(".")[:2])
+
+
+          with open("composer.json", encoding="utf-8") as manifest:
+              platform = json.load(manifest).get("config", {}).get("platform", {})
+          php = ElementTree.parse("appinfo/info.xml").find("dependencies/php")
+          oldest = minor(php.get("min-version", "")) if php is not None else ""
+          tools = minor(platform.get("php", "")) or oldest
+          if not tools:
+              sys.exit("Neither config.platform.php of composer.json nor appinfo/info.xml names a PHP.")
+          print(f"tools={tools}")
+          print(f"oldest={oldest or tools}")
+          EOF
+      - name: Set up the oldest PHP of the app
+        if: matrix.kind == 'nextcloud-app' && steps.php.outputs.oldest != steps.php.outputs.tools
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         timeout-minutes: 5
         with:
-          php-version: "8.2"
+          php-version: ${{ steps.php.outputs.oldest }}
+          extensions: dom, libxml, mbstring, xml
+          coverage: none
+      - name: Set up the PHP of the tools
+        if: matrix.kind == 'nextcloud-app'
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        timeout-minutes: 5
+        with:
+          php-version: ${{ steps.php.outputs.tools }}
           extensions: dom, libxml, mbstring, xml
           coverage: pcov
           tools: composer:v2

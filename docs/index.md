@@ -111,7 +111,7 @@ The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR c
 
     ---
 
-    php-cs-fixer, Psalm with its taint analysis and PHPUnit with every line covered; a signed package for the App Store.
+    php-cs-fixer, Psalm with its taint analysis and PHPUnit in random order with every line covered, the tools on PHP 8.3 and the code on PHP 8.2 as well; a signed package for the App Store.
 
 - :simple-githubactions:{ .lg .middle } **GitHub Action**
 

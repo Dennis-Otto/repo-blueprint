@@ -203,8 +203,8 @@ jobs:
         if: needs.plan.outputs.kind == 'php'
         timeout-minutes: 5
         with:
-          # Infection needs PHP 8.3 or newer. The app's locked dependencies stay those
-          # of its oldest PHP, which config.platform.php of composer.json sets.
+          # Infection needs PHP 8.3 or newer, the PHP of the tools of a new app, for
+          # which config.platform.php of composer.json locks them.
           php-version: "8.3"
           extensions: dom, libxml, mbstring, xml
           coverage: pcov

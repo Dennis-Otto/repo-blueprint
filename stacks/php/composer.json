@@ -19,7 +19,7 @@
 	"require-dev": {
 		"nextcloud/coding-standard": "^1.5",
 		"nextcloud/ocp": "^33.0",
-		"phpunit/phpunit": "^11.5",
+		"phpunit/phpunit": "^12.5",
 		"vimeo/psalm": "^6.0"
 	},
 	"scripts": {
@@ -33,7 +33,7 @@
 			"composer/installers": true
 		},
 		"platform": {
-			"php": "8.2.27"
+			"php": "8.3.16"
 		},
 		"sort-packages": true
 	}
