@@ -1,0 +1,8 @@
+### Performance
+
+- **The step Text files of `scripts/check.sh` takes about a second instead of a minute on Windows:** it started four or five processes for every file, which took 35 to 70 seconds in Git Bash for the 350 to 650 files of a repository, on every check and before every push, and 46 seconds in the Windows workflow. Now one `grep` checks each rule for all the files at once, and Perl, which comes with Git for Windows, macOS and Linux, reads the last byte of each; without Perl, `tail` does it file by file as before. The step finds what it found before, names each file with its problems in the same words and, in the CI, annotates each at its line.
+
+### Changes
+
+- **`scripts/check.sh` finds the conflict markers that a merge left:** a text file with a line of `<<<<<<<` or `>>>>>>>`, alone or followed by a space, fails the step Text files, with the line in the annotation, so that a conflict that nobody resolved, such as one that an update of the blueprint leaves in a file that no other check reads, can no longer reach `main`. During a merge, the steps list a file with a conflict once, not once for each side. A file that needs such a line on purpose, such as a test of a merge, builds it, as with `"<" * 7`.
+- **The CI never skips ShellCheck:** the step Shell scripts said "shellcheck is not installed here" and passed on a runner without ShellCheck, as on one whose image no longer has it. In the CI it fails now; on your machine it still leaves ShellCheck to the CI. The blueprint's own tools pin ShellCheck 0.11 with shellcheck-py, so that its checks run it on Windows and in the Windows workflow as well. The update brings both; a project's own lock files stay as they are.
