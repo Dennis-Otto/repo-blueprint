@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import configparser
 import contextlib
@@ -884,6 +885,57 @@ def test_the_settings_tool_keeps_the_ruff_settings_of_the_blueprint() -> None:
 
     assert own.pop("src") == [".."]
     assert own == pyproject["tool"]["ruff"]
+
+
+def settings_code() -> list[str]:
+    """The modules of the package whose code settings apply runs: the command line,
+    blueprint.settings and what it imports of the package, and so on."""
+    found = {"__init__.py", "cli.py"}
+    unread = ["settings.py"]
+    while unread:
+        name = unread.pop()
+        found.add(name)
+        tree = ast.parse((ROOT / "blueprint" / name).read_text(encoding="utf-8"))
+        imported = [
+            f"{node.module.removeprefix('blueprint.')}.py"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith("blueprint.")
+        ]
+        unread += [module for module in imported if module not in found]
+    return sorted(found)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_settings_bot_runs_when_its_code_changes(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # A release of the blueprint that changes how a setting is applied reaches GitHub
+    # with the merge of its update, not with the weekly run.
+    rendered = paths_of(workflows(projects[kind])["settings.yml"], "push")
+    own = paths_of(
+        (ROOT / ".github/workflows/settings.yml").read_text(encoding="utf-8"), "push"
+    )
+    modules = settings_code()
+
+    assert {"github.py", "settings.py"} < set(modules)
+    for name in modules:
+        assert runs_for(rendered, [f".github/blueprint/{name}"]), name
+        assert runs_for(own, [f"blueprint/{name}"]), name
+    for path in (
+        ".github/blueprint.py",
+        ".github/repository.toml",
+        ".github/repository.project.toml",
+        ".github/workflows/settings.yml",
+    ):
+        assert runs_for(rendered, [path]), path
+    assert runs_for(own, ["blueprint.py"])
+    # In the blueprint, a change of another bot starts no run.
+    assert not runs_for(own, ["blueprint/coach.py"])
+    # A change of the labels is the Labels workflow's: two workflows that create the
+    # same label at once would fail one of them.
+    assert not runs_for(rendered, [".github/labels.toml"])
 
 
 def test_the_readme_of_an_integration_works_in_hacs(projects: dict[str, Path]) -> None:

@@ -53,18 +53,26 @@ def checklist(
         else ""
     )
     drift = check(api, repo, settings)
-    secrets_missing = [item for item in drift if item.manual]
+    # What a person sets, which the API can't: the secrets and the files that the
+    # community profile counts, each a step of its own.
+    secrets_missing = [item for item in drift if item.setting.startswith("secret ")]
+    community = [item for item in drift if item.setting == "community profile"]
     target = settings.variables.get("PUBLISH_TO", "none")
     steps = [
         Step(
             "Settings as code applied",
-            len(drift) == len(secrets_missing),
+            all(item.manual for item in drift),
             "python3 blueprint.py settings apply",
         ),
         Step(
             "Secrets of the environments set",
             not secrets_missing,
             "\n".join(item.manual for item in secrets_missing),
+        ),
+        Step(
+            "Community profile complete (100 %)",
+            not community,
+            "\n".join(item.manual for item in community),
         ),
         Step(
             "Release app installed on the repository",
