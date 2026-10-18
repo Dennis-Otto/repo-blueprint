@@ -8,7 +8,8 @@ name: Weekly report
 
 on:
   schedule:
-    - cron: "0 6 * * 1"
+    # Not on the full hour, when GitHub has the most schedules to start.
+    - cron: "7 5 * * 1"
   workflow_dispatch:
 
 permissions: {}

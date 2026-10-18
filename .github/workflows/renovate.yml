@@ -1,7 +1,8 @@
 name: Renovate
 
-# The dependency bot of every repository of the blueprint. Every two hours, and on
-# demand, it runs Renovate for each repository of the owner that has a
+# The dependency bot of every repository of the blueprint. On its schedule, which
+# GitHub runs as it can, a few times a day and often hours late, and on demand, it
+# runs Renovate for each repository of the owner that has a
 # .github/renovate.json5, as the release app: it opens the updates of the actions,
 # the dependencies, the images and the pins, and the checks of each repository
 # decide whether they merge. The rules of the updates are in the

@@ -3,7 +3,7 @@ name: Issue assistant sync
 # The sync bot of the issue assistant, in the blueprint alone. The four workflows of
 # the issue assistant and its firewall policy are templates of its release, with which
 # the check issue-assistant compares every repository; the blueprint keeps the copies
-# in .github/ that every repository made from it renders. Every morning, and on
+# in .github/ that every repository made from it renders. Once a day, and on
 # demand, this workflow takes the latest published release of the issue assistant and,
 # once it has verified that the release workflow of the issue assistant made it, runs
 # install of that release in the root of the blueprint, takes over its firewall policy

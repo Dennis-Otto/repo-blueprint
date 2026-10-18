@@ -298,7 +298,7 @@ jobs:
   release:
     name: run the failed release again
     # The release of a merge, once: a run that a person started is theirs, and the
-    # hourly run looks again anyway.
+    # scheduled run looks again anyway.
     if: >-
       !github.event.repository.fork &&
       github.event.workflow_run.name == 'Release' &&

@@ -49,7 +49,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    Renovate, which the blueprint runs every two hours: actions, dependencies and images a week after their release, on Mondays, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows. Routine updates merge themselves once every check passes; the weekly refresh of every lock file waits for the maintainer. The issue *Dependency dashboard* lists every update that waits or failed.
+    Renovate, which the blueprint runs a few times a day: actions, dependencies and images a week after their release, on Mondays, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows. Routine updates merge themselves once every check passes; the weekly refresh of every lock file waits for the maintainer. The issue *Dependency dashboard* lists every update that waits or failed.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 

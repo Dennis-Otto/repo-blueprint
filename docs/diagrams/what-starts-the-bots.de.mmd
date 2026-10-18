@@ -1,0 +1,25 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Was die Bots startet
+    accDescr: Renovate, die Updates von Dependabot, der Release-Bot und der Branch-Bot mergen als Release-App, und eine Person als sie selbst, denn ein Merge mit dem Token eines Workflows startete keinen Workflow. So ist jeder Merge in main ein Push, der den Release-Bot und den Branch-Bot sofort startet; sie halten den Release-Pull-Request aktuell und bringen den nächsten Pull Request auf den neuesten Stand. Nur ein Ereignis, das GitHub verloren hat, wartet auf die Zeitpläne, wenige Läufe am Tag, die GitHub ausführt, wie es kann, oft Stunden zu spät, und jede Nacht startet der Bot für den Zustand der Bots einen Workflow, dessen Zeitplan GitHub verpasst hat.
+
+    merge["Renovate, die Updates von Dependabot, der Release-Bot und<br>der Branch-Bot mergen als Release-App, eine Person als sie selbst"]
+    push["Der Push in main startet den Release-Bot<br>und den Branch-Bot sofort"]
+    done["Der Release-Pull-Request ist aktuell, der nächste<br>Pull Request kommt auf den neuesten Stand"]
+    lost["Nur ein Ereignis, das GitHub verloren hat, wartet auf die<br>Zeitpläne, wenige Läufe am Tag, oft Stunden zu spät"]
+    health["Jede Nacht startet der Bot für den Zustand der Bots<br>einen Workflow, dessen Zeitplan GitHub verpasst hat"]
+
+    merge --> push
+    push --> done
+    done -.-> lost
+    lost -.-> health
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge,push,lost,health bot
+    class done done

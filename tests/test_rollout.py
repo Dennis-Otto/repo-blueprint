@@ -210,7 +210,7 @@ LATEST = "v1.2.0 2026-10-13T10:00:30Z"
     ("publish", "tag"),
     [
         # The run published it, whatever started it: the merge of the release pull
-        # request, the hourly schedule after the run of the merge failed, or a start by
+        # request, the daily schedule after the run of the merge failed, or a start by
         # hand that took up a draft; and however far main moved on meanwhile.
         ("success 2026-10-13T10:00:10Z", "v1.2.0"),
         ("success 2026-10-13T10:00:30Z", "v1.2.0"),
