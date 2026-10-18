@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,7 +48,7 @@ jobs:
       # checks the hash of each package. Its cache keeps only the wheels that it built
       # from source, under a key of the lock file: pre-built ones download faster
       # than a cache restores them.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
@@ -71,7 +71,7 @@ jobs:
           restore-keys: mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-
       # The frontend of the integration, such as its cards, if it has one; its tests
       # belong in scripts/check-project.sh.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: hashFiles('package.json') != ''
         timeout-minutes: 5
         with:
@@ -90,7 +90,7 @@ jobs:
           coverage xml -o "$RUNNER_TEMP/coverage.xml"
       - name: Keep the coverage report
         if: always() && hashFiles('.coverage') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage
           path: ${{ runner.temp }}/coverage.xml
@@ -117,7 +117,7 @@ jobs:
           python3 "$script" fix run "$CHECK" --keep "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the fixes for the fix bot
         if: failure() && steps.fix.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fixes-check
           path: ${{ runner.temp }}/fixes/
@@ -147,7 +147,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,7 +213,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       # HACS' moving ghcr.io/hacs/action:main image on purpose: it always validates
@@ -261,7 +261,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
