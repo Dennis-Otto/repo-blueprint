@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import re
@@ -24,6 +25,7 @@ from blueprint.settings import (
     ConfigError,
     Drift,
     Settings,
+    allows,
     apply_labels,
     apply_pages,
     check_actions,
@@ -31,9 +33,12 @@ from blueprint.settings import (
     check_environments,
     check_labels,
     check_pages,
+    check_security,
+    code_scanning_tools,
     load_labels,
     main_ruleset,
     merge,
+    references,
     ruleset_differences,
     tag_creation_ruleset,
     tag_ruleset,
@@ -121,6 +126,14 @@ RULES: dict[str, set[str]] = {
     },
     "code_scanning": {"code_scanning_tools"},
 }
+# The thresholds of a tool of code scanning that GitHub knows.
+ALERTS = {"none", "errors", "errors_and_warnings", "all"}
+SECURITY_ALERTS = {"none", "critical", "high_or_higher", "medium_or_higher", "all"}
+CODEQL = {
+    "tool": "CodeQL",
+    "alerts_threshold": "errors",
+    "security_alerts_threshold": "high_or_higher",
+}
 ACTOR_TYPES = {
     "Integration",
     "OrganizationAdmin",
@@ -187,6 +200,14 @@ def ruleset_problems(body: Any) -> list[str]:
                 problems.append(f"allowed_merge_methods {methods!r}")
             if not isinstance(count, int) or not 0 <= count <= 10:
                 problems.append(f"required_approving_review_count {count!r}")
+        if rule.get("type") == "code_scanning":
+            for tool in parameters.get("code_scanning_tools", []):
+                if (
+                    not isinstance(tool.get("tool"), str)
+                    or tool.get("alerts_threshold") not in ALERTS
+                    or tool.get("security_alerts_threshold") not in SECURITY_ALERTS
+                ):
+                    problems.append(f"code scanning tool {tool}")
         if rule.get("type") == "required_status_checks":
             for check in parameters.get("required_status_checks", []):
                 if not isinstance(check.get("context"), str) or not isinstance(
@@ -214,6 +235,7 @@ class FakeGitHub:
             "security_and_analysis": {
                 "secret_scanning": {"status": "disabled"},
                 "secret_scanning_push_protection": {"status": "disabled"},
+                "secret_scanning_non_provider_patterns": {"status": "disabled"},
             },
         }
         self.switches = {
@@ -231,6 +253,14 @@ class FakeGitHub:
             "allowed_actions": "selected",
             "sha_pinning_required": False,
         }
+        # The list of the selected actions, which GitHub keeps while they are allowed.
+        self.selected: dict[str, Any] = {
+            "github_owned_allowed": False,
+            "verified_allowed": True,
+            "patterns_allowed": [],
+        }
+        # The files of other repositories, such as actions: by owner/repo/path@ref.
+        self.contents: dict[str, str] = {}
         self.fork_approval = "first_time_contributors"
         self.rulesets: dict[int, dict[str, Any]] = {}
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
@@ -295,6 +325,11 @@ class FakeGitHub:
                 else (failure, "simulated failure")
             )
             return status, {"message": message}
+        content = re.fullmatch(
+            r"repos/([\w.-]+/[\w.-]+)/contents/([^?]+)\?ref=(.*)", path
+        )
+        if content and content[1] != REPO:
+            return self.content(*content.groups())
         return self.route(
             method, path.split("?")[0].removeprefix(f"repos/{REPO}"), payload
         )
@@ -332,6 +367,7 @@ class FakeGitHub:
                 self.fork_pr_approval,
             ),
             (r"/actions/permissions/workflow", self.workflow_permissions),
+            (r"/actions/permissions/selected-actions", self.selected_actions),
             (r"/actions/permissions", self.actions_permissions),
             (r"/rulesets(?:/(\d+))?", self.ruleset),
             (r"/actions/variables(?:/(\w+))?", self.variable),
@@ -396,6 +432,22 @@ class FakeGitHub:
             self.permissions = body
             return 204, None
         return 200, self.permissions
+
+    def selected_actions(self, method: str, body: Any) -> tuple[int, Any]:
+        if self.permissions["allowed_actions"] != "selected":
+            return 409, {"message": "The policy for allowed actions isn't selected"}
+        if method == "PUT":
+            self.selected.update(body)
+            return 204, None
+        return 200, self.selected
+
+    def content(self, repo: str, path: str, ref: str) -> tuple[int, Any]:
+        """A file of another repository, as the contents API answers it."""
+        key = f"{repo}/{urllib.parse.unquote(path)}@{urllib.parse.unquote(ref)}"
+        if key not in self.contents:
+            return 404, {"message": "Not Found"}
+        text = base64.b64encode(self.contents[key].encode()).decode()
+        return 200, {"type": "file", "encoding": "base64", "content": text}
 
     def ruleset(self, method: str, body: Any, number: str | None) -> tuple[int, Any]:
         if method == "GET" and number is None:
@@ -824,7 +876,7 @@ RULESETS = Path(__file__).parent / "data/rulesets"
 @pytest.mark.parametrize(
     ("fixture", "ruleset"),
     [
-        ("protect-main.json", main_ruleset(["check (python)", "reuse"])),
+        ("protect-main.json", main_ruleset(["check (python)", "reuse"], [CODEQL])),
         ("release-tags.json", tag_ruleset()),
         ("release-tag-creation.json", tag_creation_ruleset(4739928)),
     ],
@@ -916,6 +968,420 @@ def test_a_repository_without_permissions_data(github: FakeGitHub, root: Path) -
     drift = check_actions(Api(github), REPO, {"sha_pinning_required": True})
 
     assert drift == [Drift("actions.sha_pinning_required", True, False)]
+
+
+# --------------------------------------------------------------------------- merge gates
+
+SELECTED = """
+allowed_actions = "selected"
+
+[actions.selected]
+github_owned_allowed = true
+verified_allowed = false
+patterns_allowed = ["step-security/harden-runner@*", "vendor/composite@*"]
+"""
+WORKFLOW = """
+jobs:
+  check:
+    steps:
+      - uses: step-security/harden-runner@0123 # v2
+      - name: Check out
+        uses: actions/checkout@4567
+      - uses: ./.github/actions/local
+      - uses: 'docker://alpine:3@sha256:00'
+"""
+
+
+def with_selected_actions(root: Path, workflow: str = WORKFLOW) -> None:
+    """The configuration with the selected actions, and a workflow that runs some."""
+    config = CONFIG.replace(
+        'fork_pr_approval = "all_external_contributors"\n',
+        'fork_pr_approval = "all_external_contributors"\n' + SELECTED,
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    (root / ".github/workflows").mkdir(exist_ok=True)
+    (root / ".github/workflows/ci.yml").write_text(workflow, encoding="utf-8")
+
+
+def test_a_new_alert_of_code_scanning_stops_the_merge() -> None:
+    ruleset = main_ruleset(["a"], [CODEQL])
+
+    assert ruleset["rules"][-1] == {
+        "type": "code_scanning",
+        "parameters": {"code_scanning_tools": [CODEQL]},
+    }
+    assert ruleset_problems(ruleset) == []
+    # Without a tool, no rule.
+    assert "code_scanning" not in [
+        rule["type"] for rule in main_ruleset(["a"])["rules"]
+    ]
+
+
+def test_the_order_of_the_tools_of_code_scanning_is_no_difference() -> None:
+    zizmor = {**CODEQL, "tool": "zizmor"}
+    want = main_ruleset(["a"], [CODEQL, zizmor])
+    have = json.loads(json.dumps(main_ruleset(["a"], [zizmor, CODEQL])))
+    assert ruleset_differences(want, have) == []
+
+    have["rules"][-1]["parameters"]["code_scanning_tools"][0]["alerts_threshold"] = (
+        "all"
+    )
+    assert ruleset_differences(want, have) == ["code_scanning.code_scanning_tools"]
+    have["rules"].pop()
+    assert ruleset_differences(want, have) == ["rule code_scanning is missing"]
+
+
+def test_a_tool_of_the_project_replaces_that_of_the_blueprint(root: Path) -> None:
+    config = CONFIG.replace(
+        'required_checks = ["check (python)", "reuse"]\n',
+        'required_checks = ["check (python)", "reuse"]\ncode_scanning_tools = [\n'
+        '  { tool = "CodeQL", alerts_threshold = "errors",'
+        ' security_alerts_threshold = "high_or_higher" },\n]\n',
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    # While main still has alerts to fix, CodeQL stops no merge; zizmor joins.
+    (root / ".github/repository.project.toml").write_text(
+        "[branch]\ncode_scanning_tools = [\n"
+        '  { tool = "CodeQL", alerts_threshold = "none",'
+        ' security_alerts_threshold = "none" },\n'
+        '  { tool = "zizmor", alerts_threshold = "errors",'
+        ' security_alerts_threshold = "medium_or_higher" },\n]\n',
+        encoding="utf-8",
+    )
+
+    settings = Settings.load(root / ".github/repository.toml")
+
+    assert settings.rulesets[0]["rules"][-1]["parameters"]["code_scanning_tools"] == [
+        {
+            "tool": "CodeQL",
+            "alerts_threshold": "none",
+            "security_alerts_threshold": "none",
+        },
+        {
+            "tool": "zizmor",
+            "alerts_threshold": "errors",
+            "security_alerts_threshold": "medium_or_higher",
+        },
+    ]
+
+
+def test_apply_sets_the_rule_of_code_scanning(github: FakeGitHub, root: Path) -> None:
+    config = CONFIG.replace(
+        'required_checks = ["check (python)", "reuse"]\n',
+        'required_checks = ["check (python)", "reuse"]\ncode_scanning_tools = [\n'
+        '  { tool = "CodeQL", alerts_threshold = "errors",'
+        ' security_alerts_threshold = "high_or_higher" },\n]\n',
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+
+    run(github, root, "settings", "apply")
+
+    main = next(
+        item for item in github.rulesets.values() if item["name"] == "Protect main"
+    )
+    assert main["rules"][-1] == {
+        "type": "code_scanning",
+        "parameters": {"code_scanning_tools": [CODEQL]},
+    }
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "CodeQL",
+        {"tool": "CodeQL"},
+        {**CODEQL, "tool": ""},
+        {**CODEQL, "security_alerts_threshold": "high"},
+        {**CODEQL, "alerts_threshold": "warnings"},
+        {**CODEQL, "extra": True},
+    ],
+)
+def test_a_tool_of_code_scanning_without_its_thresholds_stops_the_run(
+    tool: Any,
+) -> None:
+    with pytest.raises(ConfigError, match="names a tool and its thresholds") as error:
+        code_scanning_tools([tool])
+
+    assert "high_or_higher, medium_or_higher" in str(error.value)
+    assert repr(tool) in str(error.value)
+
+
+def test_generic_secret_patterns_are_switched_on(
+    github: FakeGitHub, root: Path
+) -> None:
+    config = CONFIG.replace(
+        "secret_scanning_push_protection = true\n",
+        "secret_scanning_push_protection = true\n"
+        "secret_scanning_non_provider_patterns = true\n",
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+
+    run(github, root, "settings", "apply")
+
+    analysis = github.repo["security_and_analysis"]
+    assert analysis["secret_scanning_non_provider_patterns"] == {"status": "enabled"}
+    assert analysis["secret_scanning"] == {"status": "enabled"}
+
+
+def test_a_switch_that_github_does_not_offer_is_named_and_left_alone(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = CONFIG.replace(
+        "secret_scanning_push_protection = true\n",
+        "secret_scanning_push_protection = true\n"
+        "secret_scanning_non_provider_patterns = true\n",
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    del github.repo["security_and_analysis"]["secret_scanning_non_provider_patterns"]
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    assert (
+        "security.secret_scanning_non_provider_patterns: GitHub has"
+        ' "not offered", the configuration wants true'
+    ) in out
+    assert (
+        f"GitHub doesn't offer secret_scanning_non_provider_patterns for {REPO}; set"
+        " secret_scanning_non_provider_patterns = false in"
+        " .github/repository.project.toml"
+    ) in out
+    # The other switches come on all the same, and the one that isn't offered stays out.
+    analysis = github.repo["security_and_analysis"]
+    assert analysis["secret_scanning"] == {"status": "enabled"}
+    assert "secret_scanning_non_provider_patterns" not in analysis
+
+    # Switched off in the configuration, it is no difference.
+    (root / ".github/repository.toml").write_text(
+        config.replace("patterns = true", "patterns = false"), encoding="utf-8"
+    )
+    capsys.readouterr()
+    run(github, root, "settings", "check")
+    assert "non_provider_patterns" not in capsys.readouterr().out
+
+
+def test_switches_that_the_token_cannot_read_are_off(github: FakeGitHub) -> None:
+    del github.repo["security_and_analysis"]
+
+    drift = check_security(Api(github), REPO, {"secret_scanning": True})
+
+    assert drift == [Drift("security.secret_scanning", True, False)]
+
+
+def test_only_the_selected_actions_may_run(github: FakeGitHub, root: Path) -> None:
+    with_selected_actions(root)
+    github.permissions["allowed_actions"] = "all"
+
+    drift = check_actions(
+        Api(github),
+        REPO,
+        Settings.load(root / ".github/repository.toml").actions,
+    )
+    assert [
+        item.setting
+        for item in drift
+        if item.setting.startswith(("actions.allowed", "actions.selected"))
+    ] == [
+        "actions.allowed_actions",
+        "actions.selected.github_owned_allowed",
+        "actions.selected.verified_allowed",
+        "actions.selected.patterns_allowed",
+    ]
+
+    run(github, root, "settings", "apply")
+
+    assert github.permissions == {
+        "enabled": True,
+        "allowed_actions": "selected",
+        "sha_pinning_required": True,
+    }
+    assert github.selected == {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": ["step-security/harden-runner@*", "vendor/composite@*"],
+    }
+    # The list after the switch to the selected actions, which it needs.
+    puts = [path for method, path in github.calls if method == "PUT"]
+    assert puts.index(f"repos/{REPO}/actions/permissions") < puts.index(
+        f"repos/{REPO}/actions/permissions/selected-actions"
+    )
+    settings = Settings.load(root / ".github/repository.toml")
+    assert check_actions(Api(github), REPO, settings.actions, settings.workflows) == []
+
+
+def test_the_order_of_the_patterns_is_no_difference(github: FakeGitHub) -> None:
+    # GitHub ignores the case of owners and repositories, too.
+    github.selected = {"patterns_allowed": ["B@*", "a@*"]}
+
+    drift = check_actions(
+        Api(github),
+        REPO,
+        {
+            "allowed_actions": "selected",
+            "selected": {"patterns_allowed": ["a@*", "b@*"]},
+        },
+    )
+
+    assert drift == []
+
+
+def test_an_action_that_the_list_lacks_keeps_the_list_as_it_is(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root, WORKFLOW + "      - uses: Rogue/Action@89ab\n")
+    github.permissions["allowed_actions"] = "all"
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    assert "actions.selected.patterns_allowed lacks Rogue/Action@*" in out
+    assert (
+        '.github/workflows/ci.yml runs it: add "Rogue/Action@*" to patterns_allowed of'
+        " [actions.selected] in .github/repository.project.toml; until then the list"
+        " of the allowed actions on GitHub stays as it is"
+    ) in out
+    # Every action may still run, and the other settings of the actions are applied.
+    assert github.permissions == {
+        "enabled": True,
+        "allowed_actions": "all",
+        "sha_pinning_required": True,
+    }
+    assert ("PUT", f"repos/{REPO}/actions/permissions/selected-actions") not in (
+        github.calls
+    )
+
+    # Once the project lists it, the list comes.
+    (root / ".github/repository.project.toml").write_text(
+        '[actions.selected]\npatterns_allowed = ["rogue/action@*"]\n', encoding="utf-8"
+    )
+    assert run(github, root, "settings", "apply") == 1
+    assert github.permissions["allowed_actions"] == "selected"
+    assert "rogue/action@*" in github.selected["patterns_allowed"]
+
+
+def test_an_action_that_an_action_runs_in_turn_needs_its_pattern(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(
+        root,
+        WORKFLOW
+        + "      - uses: vendor/composite@abc\n"
+        + "  reuse:\n    uses: vendor/flows/.github/workflows/scan.yml@def\n",
+    )
+    (root / "action.yml").write_text("runs:\n  using: node24\n", encoding="utf-8")
+    (root / ".github/actions/local").mkdir(parents=True)
+    (root / ".github/actions/local/action.yml").write_text(
+        "runs:\n  steps:\n    - uses: vendor/composite@abc\n", encoding="utf-8"
+    )
+    github.contents = {
+        # A composite action that runs another, a local one, one of GitHub and one
+        # that the workflow names already.
+        "vendor/composite/action.yml@abc": (
+            "runs:\n  using: composite\n  steps:\n"
+            "    - uses: helper/setup/sub@1\n    - uses: ./x\n"
+            "    - uses: actions/cache@2\n"
+            "    - uses: step-security/harden-runner@0123\n"
+        ),
+        # An action whose file is action.yaml.
+        "helper/setup/sub/action.yaml@1": "runs:\n  using: node24\n",
+        # A reusable workflow, whose job runs an action that may not run.
+        "vendor/flows/.github/workflows/scan.yml@def": (
+            "jobs:\n  scan:\n    steps:\n      - uses: vendor/scanner@3\n"
+        ),
+    }
+
+    assert run(github, root, "settings", "check") == 1
+
+    out = capsys.readouterr().out
+    assert "lacks helper/setup/sub@*" in out
+    assert "vendor/composite runs it" in out
+    assert "lacks vendor/flows/.github/workflows/scan.yml@*" in out
+    assert "lacks vendor/scanner@*" in out
+    assert "vendor/flows/.github/workflows/scan.yml runs it" in out
+    # Those of GitHub, the listed ones and the local ones are no difference.
+    assert "actions/cache" not in out
+    assert "lacks vendor/composite" not in out
+    assert "./x" not in out
+
+
+def test_a_reference_is_read_in_the_characters_of_a_name() -> None:
+    # The file of an action comes from GitHub; no Markdown of it reaches the summary.
+    text = (
+        'steps:\n  - uses: a/b@1`<img src=x>`\n  - uses: "c/d/e.yml@2" # v2\n'
+        "    with:\n      uses: f/g@3\n  - run: echo uses: h/i@4\n"
+    )
+
+    assert references(text) == ["a/b@1", "c/d/e.yml@2", "f/g@3"]
+
+
+def test_an_action_whose_file_github_refuses_keeps_the_list_as_it_is(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.permissions["allowed_actions"] = "all"
+    github.fail[("GET", "repos/vendor/composite/contents/action.yml?ref=abc")] = 403
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    assert "actions.selected.patterns_allowed unknown for vendor/composite@abc" in out
+    assert "GitHub refused the file of vendor/composite@abc: GitHub answered 403" in out
+    assert github.permissions["allowed_actions"] == "all"
+    # The other settings are applied all the same.
+    assert github.permissions["sha_pinning_required"] is True
+
+
+@pytest.mark.parametrize(
+    ("reference", "allowed"),
+    [
+        ("actions/checkout@1", True),
+        ("GitHub/codeql-action/init@1", True),
+        ("Docker/login-action@1", True),
+        ("step-security/harden-runner@2", True),
+        ("step-security/harden-runner-fork@2", False),
+        ("actions/cache@3", False),
+        ("anyone/else@4", False),
+    ],
+)
+def test_the_patterns_follow_those_of_github(reference: str, allowed: bool) -> None:
+    selected = {
+        "github_owned_allowed": True,
+        "patterns_allowed": [
+            "docker/*",
+            "step-security/harden-runner@*",
+            "!actions/cache@*",
+        ],
+    }
+
+    assert allows(selected, reference) is allowed
+    # Without the actions of GitHub, only the patterns.
+    assert not allows({"patterns_allowed": []}, "actions/checkout@1")
+
+
+@pytest.mark.parametrize(
+    ("actions", "message"),
+    [
+        ('allowed_actions = "some"\n', "allowed_actions of [actions] is one of all"),
+        ('allowed_actions = "selected"\n', "needs the table [actions.selected]"),
+    ],
+)
+def test_actions_that_may_run_as_github_knows_them(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    actions: str,
+    message: str,
+) -> None:
+    config = CONFIG.replace(
+        'fork_pr_approval = "all_external_contributors"\n',
+        'fork_pr_approval = "all_external_contributors"\n' + actions,
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+
+    assert run(github, root, "settings", "check") == 2
+
+    assert message in capsys.readouterr().err
+    assert not github.calls
 
 
 def test_ruleset_differences_name_each_part() -> None:

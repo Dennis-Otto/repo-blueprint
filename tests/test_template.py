@@ -56,7 +56,7 @@ from blueprint.fixes import fixers
 from blueprint.mutation import default_paths
 from blueprint.pages import layouts, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
-from blueprint.settings import Settings
+from blueprint.settings import Settings, allows
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -538,6 +538,68 @@ def test_the_required_checks_exist(projects: dict[str, Path], project: str) -> N
         names.update(re.findall(r"^    name: (.+)$", text, re.M))
     for check in settings["branch"]["required_checks"]:
         assert check in names, check
+
+
+# The actions that listed actions run in turn, which no workflow names: `blueprint.py
+# settings check` finds them on GitHub, at the commit of each pin, and names those that
+# the list lacks. Each with the action that runs it.
+RUN_IN_TURN = {
+    "google/osv-scanner-action/osv-reporter-action@*": (
+        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml"
+    ),
+    "google/osv-scanner-action/osv-scanner-action@*": (
+        "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml"
+    ),
+    "oven-sh/setup-bun@*": "anthropics/claude-code-action",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = Settings.load(root / ".github/repository.toml")
+    assert settings.actions["allowed_actions"] == "selected"
+    selected = settings.actions["selected"]
+    assert selected["github_owned_allowed"] is True
+    assert selected["verified_allowed"] is False
+    # Every action and reusable workflow that a workflow names may run, or the
+    # workflow would fail to start once the settings bot applies the list.
+    assert [ref for ref in settings.workflows if not allows(selected, ref)] == []
+    # The list names nothing else, other than what these run in turn, in order.
+    named = {ref.partition("@")[0].casefold() for ref in settings.workflows}
+    patterns = selected["patterns_allowed"]
+    for pattern in patterns:
+        name = pattern.removesuffix("@*").casefold()
+        assert name in named or RUN_IN_TURN[pattern].casefold() in named, pattern
+    assert patterns == sorted(patterns, key=str.casefold)
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_new_alert_of_codeql_stops_the_merge(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = Settings.load(root / ".github/repository.toml")
+    main = next(item for item in settings.rulesets if item["name"] == "Protect main")
+    assert main["rules"][-1] == {
+        "type": "code_scanning",
+        "parameters": {
+            "code_scanning_tools": [
+                {
+                    "tool": "CodeQL",
+                    "alerts_threshold": "errors",
+                    "security_alerts_threshold": "high_or_higher",
+                }
+            ]
+        },
+    }
+    # A missing analysis stops a merge too, so CodeQL analyzes every pull request.
+    codeql = (root / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
+    trigger = re.search(r"^  pull_request:\n((?:    .+\n)*)", codeql, re.M)
+    assert trigger, codeql
+    assert "paths" not in trigger[1]
+    assert "\n    if:" not in job_of(codeql, "codeql")
+    assert settings.security["secret_scanning_non_provider_patterns"] is True
 
 
 @pytest.mark.parametrize("kind", KINDS)

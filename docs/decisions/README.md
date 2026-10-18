@@ -43,3 +43,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0035](0035-the-tools-of-a-nextcloud-app-run-on-a-newer-php-than-its-code.md) | The tools of a Nextcloud app run on a newer PHP than its code, which is checked on the oldest | accepted |
 | [0036](0036-a-request-to-github-tries-once-more-and-a-refused-write-fails.md) | A request to GitHub tries once more, and a write that GitHub refused fails | accepted |
 | [0037](0037-pictures-renew-themselves-by-their-pixels.md) | Pictures renew themselves by their pixels, through one pull request of a bot | accepted |
+| [0038](0038-new-alerts-and-unlisted-actions-stop-a-pull-request.md) | New alerts of code scanning and unlisted actions stop a pull request, and secret scanning looks for generic secrets | accepted |
