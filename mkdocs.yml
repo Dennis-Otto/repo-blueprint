@@ -6,7 +6,8 @@
 # https://squidfunk.github.io/mkdocs-material/
 #
 # The blueprint's own website: a start page in English and German, the guide, which
-# includes the READMEs, and the changelog, and the Dashboard workflow publishes it
+# includes the READMEs, the comparison, a page for each kind of project and the
+# changelog, and the Dashboard workflow publishes it
 # with the dashboard under dashboard/. Preview it while you write, at
 # http://127.0.0.1:8000, with the tools of stacks/docs/ in .venv-docs:
 #   python3 -m venv .venv-docs
@@ -47,6 +48,14 @@ plugins:
         nav_translations:
           Home: Start
           Guide: Anleitung
+          Comparison: Vergleich
+          Kinds of projects: Arten von Projekten
+          Home Assistant integration: Home-Assistant-Integration
+          Nextcloud app: Nextcloud-App
+          Python package: Python-Paket
+          Node package: Node-Paket
+          Container image: Container-Image
+          Repository without a build: Repository ohne Build
           Your own account: Dein eigenes Konto
           Security design: Sicherheitsdesign
           Automation: Automatisierung
@@ -64,6 +73,15 @@ hooks:
 nav:
   - Home: index.md
   - Guide: guide.md
+  - Comparison: compare.md
+  - Kinds of projects:
+      - Home Assistant integration: kinds/home-assistant.md
+      - Nextcloud app: kinds/nextcloud-app.md
+      - GitHub Action: kinds/github-action.md
+      - Python package: kinds/python-package.md
+      - Node package: kinds/node-package.md
+      - Container image: kinds/container.md
+      - Repository without a build: kinds/generic.md
   - Your own account: own-account.md
   - Roadmap: roadmap.md
   - Security design: security.md

@@ -6,9 +6,10 @@ hide:
 
 # Repo Blueprint
 
-A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that look after themselves: tests on every change, a release bot, security checks, an issue assistant and the settings of the repository as code, for seven kinds of projects, kept current by a bot with every new release of the blueprint.
+--8<-- "README.md:pitch"
 
 [Start a repository](#start-a-repository){ .md-button .md-button--primary }
+[Compare](compare.md){ .md-button }
 [Read the guide](guide.md){ .md-button }
 
 ![The social preview of the blueprint: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](images/social-preview.webp)
@@ -113,11 +114,15 @@ The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR c
 
     Ruff, mypy, tests, HACS and hassfest; a zip asset for HACS.
 
+    [:octicons-arrow-right-24: Home Assistant integration](kinds/home-assistant.md)
+
 - :simple-nextcloud:{ .lg .middle } **Nextcloud app**
 
     ---
 
     php-cs-fixer, Psalm with its taint analysis and PHPUnit in random order with every line covered, the tools on PHP 8.3 and the code on PHP 8.2 as well; a signed package for the App Store.
+
+    [:octicons-arrow-right-24: Nextcloud app](kinds/nextcloud-app.md)
 
 - :simple-githubactions:{ .lg .middle } **GitHub Action**
 
@@ -125,11 +130,15 @@ The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR c
 
     A composite action with Ruff, mypy, tests and a run of the action; release tags and a moving major tag.
 
+    [:octicons-arrow-right-24: GitHub Action](kinds/github-action.md)
+
 - :material-language-python:{ .lg .middle } **Python package**
 
     ---
 
     Ruff, mypy, tests and a build with Hatchling; PyPI with trusted publishing.
+
+    [:octicons-arrow-right-24: Python package](kinds/python-package.md)
 
 - :material-nodejs:{ .lg .middle } **Node package**
 
@@ -137,21 +146,41 @@ The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR c
 
     TypeScript, Biome, tsc and node:test with full coverage; npm with provenance.
 
+    [:octicons-arrow-right-24: Node package](kinds/node-package.md)
+
 - :material-docker:{ .lg .middle } **Container image**
 
     ---
 
     Alpine by digest, Hadolint, a build and a self-test; GHCR, multi-arch, with SBOM and provenance.
 
+    [:octicons-arrow-right-24: Container image](kinds/container.md)
+
+- :material-file-document-multiple-outline:{ .lg .middle } **Repository without a build**
+
+    ---
+
+    The text files and shell scripts are checked, and the releases come without a package.
+
+    [:octicons-arrow-right-24: Repository without a build](kinds/generic.md)
+
 </div>
 
-A repository without a build checks its text files and shell scripts and makes releases only. Every kind starts with a small working example and its tests, to be replaced with the real code. The [guide](guide.md#kinds-of-projects) names the stack of each kind.
+Every kind starts with a small working example and its tests, to be replaced with the real code. The [guide](guide.md#kinds-of-projects) names the stack of each kind.
 
 ## Start a repository
 
 --8<-- "README.md:quick-start"
 
 The guide describes how [your own account](guide.md#your-own-account) gets its release app and keeps its answers, and the page [Your own account](own-account.md) walks through a repository of your own step by step, with Renovate in the repository or as the Mend app and the issue assistant with or without AI; the guide also says what each repository needs [once](guide.md#once-per-repository), and how [an existing repository](guide.md#an-existing-repository) takes the blueprint.
+
+## Made with the blueprint
+
+--8<-- "README.md:made-with"
+
+## Why Repo Blueprint
+
+--8<-- "README.md:why"
 
 ## Learn more
 
@@ -164,6 +193,14 @@ The guide describes how [your own account](guide.md#your-own-account) gets its r
     Everything a new repository gets, the settings as code, the updates and what belongs to a project.
 
     [:octicons-arrow-right-24: Read the guide](guide.md)
+
+- :material-compare-horizontal:{ .lg .middle } **Comparison**
+
+    ---
+
+    The blueprint beside GitHub template repositories, Cookiecutter with cruft, other Copier templates and projen, also where they fit better.
+
+    [:octicons-arrow-right-24: Comparison](compare.md)
 
 - :material-map-marker-path:{ .lg .middle } **Roadmap**
 
