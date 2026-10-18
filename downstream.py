@@ -13,8 +13,8 @@ answers of each of these repositories, and
         that the update changes and those that it leaves a conflict in, and with
         --base the files whose update REF changes against BASE, such as the commit of
         main that a pull request merges into. An update that fails fails it, and so
-        does a conflict in a file that runs, such as a workflow or a script, that REF
-        brings. It warns of answers in tests/answers/ that differ from those of the
+        does a conflict that REF brings into a file that isn't a page of text, such
+        as a workflow, a script or the configuration of a bot. It warns of answers in tests/answers/ that differ from those of the
         repository.
     python3 downstream.py --answers
         writes tests/answers/ anew from the answers of each repository on GitHub.
@@ -60,9 +60,10 @@ HEADER = """\
 # and the Downstream workflow warns when they differ from those of the repository:
 # change them with the repository.
 """
-# The files that run, whose conflict breaks the checks or the bots of a repository,
-# not only a page of its text: workflows, hooks, scripts and code.
-RUNS = re.compile(r"^(?:\.github/workflows/|\.githooks/|scripts/)|\.(?:sh|py)$")
+# The pages of a repository, whose conflict leaves a text to resolve. Every other file
+# runs or is read by a tool, a workflow, a hook, a script, code or the configuration
+# of a check or a bot, and its conflict breaks them.
+PAGES = re.compile(r"\.(?:md|txt)$|(?:^|/)LICENSE[^/]*$", re.IGNORECASE)
 # Each clone and download tries three times, 10 and 20 seconds apart, as the
 # workflows do.
 TRIES = 3
@@ -107,9 +108,11 @@ class Update:
 
     @property
     def breaking(self) -> list[str]:
-        """The conflicts that REF brings into files that run."""
+        """The conflicts that REF brings into files that aren't pages."""
         return [
-            path for path in self.conflicts if self.ours(path) and RUNS.search(path)
+            path
+            for path in self.conflicts
+            if self.ours(path) and not PAGES.search(path)
         ]
 
 
@@ -171,9 +174,25 @@ def text_of(repository: str, answers: Mapping[str, Any]) -> str:
     return HEADER.format(repository=repository) + text
 
 
-def drift(ours: Mapping[str, Any], theirs: Mapping[str, Any]) -> list[str]:
-    """The answers that differ, but Copier's own."""
-    keys = (ours.keys() | theirs.keys()) - set(OWN)
+def questions(root: Path) -> set[str]:
+    """The questions of the template here, without Copier's settings."""
+    path = root / "copier.yml"
+    return {key for key in read(path) if not key.startswith("_")}
+
+
+def new(
+    ours: Mapping[str, Any], theirs: Mapping[str, Any], asked: set[str]
+) -> set[str]:
+    """The questions that tests/answers/ answers already and the repository not yet,
+    because its version of the blueprint predates them."""
+    return {key for key in ours.keys() - theirs.keys() if key in asked}
+
+
+def drift(
+    ours: Mapping[str, Any], theirs: Mapping[str, Any], asked: set[str]
+) -> list[str]:
+    """The answers that differ, but Copier's own and the new questions."""
+    keys = (ours.keys() | theirs.keys()) - set(OWN) - new(ours, theirs, asked)
     return sorted(key for key in keys if ours.get(key) != theirs.get(key))
 
 
@@ -272,7 +291,7 @@ def try_one(
         clone(source.format(repository=result.repository), folder, sleep)
         theirs = mapping(point(folder, template), ANSWERS_FILE)
         result.version = str(theirs.get("_commit", ""))
-        result.drift = drift(ours, theirs)
+        result.drift = drift(ours, theirs, questions(template))
         before: dict[str, bytes] = {}
         if base is not None:
             other = work / f"{answers.stem}-base"
@@ -292,6 +311,23 @@ def try_one(
     except Failed as error:
         result.error = str(error)
     return result
+
+
+def commits(root: Path, head: str, base: str | None) -> tuple[str, str | None]:
+    """head and base as commits of this checkout. Copier clones the checkout, whose
+    remote branches the clone lacks: origin/main would be its local main there. HEAD
+    stays HEAD, which brings the changes that aren't committed yet."""
+
+    def resolved(ref: str) -> str:
+        try:
+            return git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
+        except Failed as error:
+            raise Failed(f"{ref} is no commit of {root.as_posix()}") from error
+
+    return (
+        head if head == "HEAD" else resolved(head).strip(),
+        None if base is None else resolved(base).strip(),
+    )
 
 
 def short(ref: str) -> str:
@@ -444,10 +480,15 @@ def download(
 def refresh(root: Path, fetch: Fetch) -> list[str]:
     """Write each file of tests/answers/ anew from the answers of its repository."""
     written = []
+    asked = questions(root)
     for path in sorted((root / ANSWERS).glob("*.yml")):
-        repository = repository_of(read(path))
+        ours = read(path)
+        repository = repository_of(ours)
         url = RAW.format(repository=repository)
-        text = text_of(repository, mapping(fetch(url), url))
+        theirs = mapping(fetch(url), url)
+        # A new question keeps its answer until the Rollout brings it.
+        kept = {key: ours[key] for key in new(ours, theirs, asked)}
+        text = text_of(repository, {**theirs, **kept})
         if text != path.read_text(encoding="utf-8"):
             path.write_text(text, encoding="utf-8", newline="\n")
             written.append(
@@ -497,13 +538,18 @@ def main(
             return 2
         print("\n".join(written) or "Every answer is that of its repository.")
         return 0
+    try:
+        head, base = commits(root, arguments.head, arguments.base)
+    except Failed as error:
+        print(f"downstream.py: {error}", file=sys.stderr)
+        return 2
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
-        work = arguments.work or Path(temporary)
+        # The long path: Copier compares the folder with the path that Git names,
+        # which a short name of Windows, as TEMP has it, doesn't match.
+        work = (arguments.work or Path(temporary)).resolve()
         work.mkdir(parents=True, exist_ok=True)
-        updates = try_all(
-            root, arguments.head, arguments.base, arguments.source, work, sleep
-        )
-    text = summary(updates, arguments.head, arguments.base)
+        updates = try_all(root, head, base, arguments.source, work, sleep)
+    text = summary(updates, head, base)
     if arguments.summary:
         with arguments.summary.open("a", encoding="utf-8") as file:
             file.write(text)

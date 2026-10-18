@@ -9636,6 +9636,11 @@ def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
     website = step_of(job, "      - name: Build the website of the project")
     assert setting_of(website, "if") is None
     assert "> docs/index.md\n" in website
+    # Only in the adopted legs: a new repository must bring its own.
+    assert (
+        '          if [[ -n "$ANSWERS" && ! -f docs/index.md && ! -f docs/README.md ]];'
+        " then\n"
+    ) in website
     # No tool of its own code, which it alone has.
     own = [
         step
@@ -9702,6 +9707,13 @@ def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
     assert "write" not in workflow
     job = job_alone(workflow, "downstream")
     assert "          fetch-depth: 0\n          persist-credentials: false\n" in job
+    # The Copier of the blueprint bots, which Renovate updates apart from the tools
+    # of the tests.
+    assert (
+        "        run: uv pip install --system --require-hashes"
+        " -r stacks/copier/requirements.txt\n"
+    ) in job
+    assert "          cache-dependency-glob: stacks/copier/requirements.txt\n" in job
     run = script_of(job, "Update every repository that takes the blueprint")
     assert 'arguments=(--head "$(git rev-parse HEAD)")\n' in run
     assert 'arguments+=(--base "$(git rev-parse HEAD^1)")\n' in run

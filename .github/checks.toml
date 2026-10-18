@@ -454,9 +454,10 @@ passes."""
 title = "The update of the repositories that take the blueprint"
 problem = """The update of a repository of `tests/answers/` to the pull request, as its
 blueprint bot would run it after the release, failed, or leaves a conflict in a file
-that runs, such as a workflow, a hook or a script, which the pull request changes. The
-summary of the check names each repository with the files whose update the pull
-request changes and those with a conflict, and the log shows each conflict."""
+that isn't a page of text, such as a workflow, a script or the configuration of a
+bot, which the pull request changes. The summary of the check names each repository
+with the files whose update the pull request changes and those with a conflict, and
+the log shows each conflict."""
 why = """The Rollout brings every release to these repositories within minutes. A
 workflow or a script with a conflict breaks their checks or their bots until someone
 resolves it by hand, in every repository."""
@@ -466,7 +467,8 @@ machine:"""
 commands = ["python3 downstream.py --base origin/main"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """How a template takes up a change that a repository made is the decision
-of a person."""
+of a person. Answers of `tests/answers/` that differ from those of a repository only
+warn, and `python3 downstream.py --answers` writes them anew."""
 
 [check."mutation plan"]
 title = "The plan of the mutation tests"

@@ -345,9 +345,94 @@ def test_a_repository_without_its_answers_fails(
     assert f"| ? | {error} |" in run.summary
 
 
-def test_an_update_that_fails_fails(run: Run) -> None:
-    assert run("--head", "v9.9.9") == 1
-    assert "| v1.0.0 | could not be updated to v9.9.9: " in run.summary
+def test_an_update_that_fails_fails(blueprint: Path, run: Run) -> None:
+    head = commit(blueprint, {"copier.yml": '_min_copier_version: "99.0"\n' + COPIER})
+
+    assert run("--head", head) == 1
+    assert f"| v1.0.0 | could not be updated to {head[:7]}: " in run.summary
+
+
+def test_a_ref_that_is_no_commit_stops_before_any_update(
+    run: Run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert downstream.main(["--base", "v9.9.9"], root=run.blueprint) == 2
+    assert capsys.readouterr().err.startswith("downstream.py: v9.9.9 is no commit of ")
+
+
+def test_a_remote_branch_is_the_commit_of_the_checkout_not_of_the_clone(
+    blueprint: Path, run: Run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = git(blueprint, "rev-parse", "HEAD")
+    main = commit(
+        blueprint,
+        {"template/.github/workflows/ci.yml.jinja": "name: CI\n# The CI\n"},
+    )
+    commit(blueprint, {"template/README.md": "# Readme\n\nMore.\n"})
+    # origin/main is ahead of the local main, which Copier's clone of the checkout
+    # would take for origin/main.
+    git(blueprint, "checkout", "--quiet", "-b", "feature")
+    git(blueprint, "branch", "--force", "main", first)
+    git(blueprint, "update-ref", "refs/remotes/origin/main", main)
+
+    assert run("--base", "origin/main") == 0
+    assert "::error" not in capsys.readouterr().out
+    assert f"to HEAD, and against {main[:7]}." in run.summary
+    assert "| 1 | `.github/workflows/ci.yml` (base) |" in run.summary
+
+
+def test_a_folder_of_the_clones_with_another_spelling_of_its_path_works(
+    blueprint: Path, remote: Path, tmp_path: Path
+) -> None:
+    # As a short name of Windows in TEMP: a path that isn't the one Git names.
+    work = tmp_path / "elsewhere" / ".." / "work"
+    source = f"{remote.as_posix()}/{{repository}}"
+
+    assert (
+        downstream.main(
+            ["--source", source, "--work", str(work), "--summary", str(tmp_path / "s")],
+            root=blueprint,
+        )
+        == 0
+    )
+
+
+def test_a_conflict_in_a_configuration_fails(
+    blueprint: Path, remote: Path, run: Run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(blueprint, {"template/.github/repository.toml": 'name = "blueprint"\n'})
+    base = commit(blueprint, {})
+    git(blueprint, "tag", "v1.1.0")
+    project = remote / "Dennis-Otto" / "demo"
+    downstream.run(
+        project, sys.executable, "-m", "copier", "update", "--quiet", "--defaults"
+    )
+    commit(project, {".github/repository.toml": 'name = "ours"\n'})
+    head = commit(blueprint, {"template/.github/repository.toml": 'name = "new"\n'})
+
+    assert run("--head", head, "--base", base) == 1
+    assert (
+        "::error title=A conflict in Dennis-Otto/demo::The update leaves a conflict"
+        " in .github/repository.toml of Dennis-Otto/demo.\n"
+    ) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("path", "page"),
+    [
+        ("CONTRIBUTING.md", True),
+        ("docs/notes.txt", True),
+        ("LICENSE", True),
+        ("LICENSES/LICENSE.md", True),
+        (".github/workflows/ci.yml", False),
+        (".github/issue-assistant/config.toml", False),
+        ("mkdocs.yml", False),
+        ("Dockerfile", False),
+        ("tests/stubs/OC.php", False),
+    ],
+)
+def test_only_a_page_is_no_file_that_breaks(path: str, page: bool) -> None:
+    update = downstream.Update("Dennis-Otto/demo", Path("demo.yml"), conflicts=[path])
+    assert update.breaking == ([] if page else [path])
 
 
 def test_the_summary_goes_to_the_summary_of_the_job(
@@ -399,6 +484,24 @@ class Opener:
         return io.BytesIO(page.encode())
 
 
+def test_a_new_question_that_the_repository_has_not_yet_is_no_drift(
+    blueprint: Path, run: Run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(
+        blueprint,
+        {
+            "copier.yml": COPIER + "license:\n  type: str\n  default: MIT\n",
+            "tests/answers/demo.yml": downstream.text_of(
+                "Dennis-Otto/demo", {**ANSWERS, "license": "MIT"}
+            ),
+        },
+    )
+
+    assert run() == 0
+    assert "::warning" not in capsys.readouterr().out
+    assert "differ from those of a repository" not in run.summary
+
+
 RAW = "https://raw.githubusercontent.com/Dennis-Otto/demo/HEAD/.copier-answers.yml"
 THEIRS = (
     "# The answers of the blueprint\n_commit: v1.2.0\n"
@@ -427,6 +530,29 @@ def test_the_answers_are_written_anew_from_github(
     assert downstream.main(["--answers"], root=blueprint, fetch=fetch) == 0
     assert capsys.readouterr().out == "Every answer is that of its repository.\n"
     assert opener.urls == [RAW, RAW]
+
+
+def test_the_answer_of_a_new_question_stays_until_the_rollout(
+    blueprint: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = blueprint / "tests/answers/demo.yml"
+    write(
+        blueprint,
+        {
+            "copier.yml": COPIER + "license:\n  type: str\n  default: MIT\n",
+            "tests/answers/demo.yml": downstream.text_of(
+                "Dennis-Otto/demo", {**ANSWERS, "license": "MIT", "gone": 1}
+            ),
+        },
+    )
+
+    assert downstream.main(["--answers"], root=blueprint, fetch=lambda _: THEIRS) == 0
+    capsys.readouterr()
+    # The answer that is no question any more goes, that of the new one stays.
+    assert path.read_text(encoding="utf-8") == (
+        downstream.HEADER.format(repository="Dennis-Otto/demo")
+        + "license: MIT\nowner: Dennis-Otto\nproject_name: Demo 2\nproject_slug: demo\n"
+    )
 
 
 def test_a_download_tries_three_times(

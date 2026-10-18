@@ -76,10 +76,11 @@ jobs:
           version: "0.12.18"
           enable-cache: true
           prune-cache: true
-          cache-dependency-glob: requirements-dev.txt
+          cache-dependency-glob: stacks/copier/requirements.txt
+      # The Copier that the blueprint bot of each repository runs, with PyYAML.
       - name: Install the hash-pinned Copier
         timeout-minutes: 5
-        run: uv pip install --system --require-hashes -r requirements-dev.txt
+        run: uv pip install --system --require-hashes -r stacks/copier/requirements.txt
       # The public repositories, cloned without a token. In a pull request, the commit
       # of GitHub that merges it; its first parent is the commit of main that it merges
       # into.

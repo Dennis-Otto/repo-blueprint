@@ -233,8 +233,9 @@ jobs:
           NO_MKDOCS_2_WARNING: "true"
         run: |
           # A repository that takes the blueprint without its sample code brings its
-          # own home page, without which the Docs workflow builds no website.
-          if [[ ! -f docs/index.md && ! -f docs/README.md ]]; then
+          # own home page, without which the Docs workflow builds no website. Only
+          # the adopted legs plant one: a new repository must get its own.
+          if [[ -n "$ANSWERS" && ! -f docs/index.md && ! -f docs/README.md ]]; then
             printf '# %s\n\nThe home page of the repository.\n' "$ANSWERS" > docs/index.md
           fi
           uv venv --no-project --python "$(command -v python)" "$RUNNER_TEMP/docs"
