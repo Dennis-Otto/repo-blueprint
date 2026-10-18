@@ -39,3 +39,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0031](0031-mutation-tests-in-parts-with-the-logic-first-and-an-issue-on-a-drop.md) | The mutation tests run in parts, list the survivors that change the logic first and open an issue when the score drops | accepted |
 | [0032](0032-the-taint-analysis-knows-nextcloud-and-proves-that-it-still-sees.md) | The taint analysis of a Nextcloud app knows Nextcloud, and proves in every run that it still sees | accepted |
 | [0033](0033-schedules-are-only-a-safety-net.md) | Bots start from events, and their schedules are only a safety net | accepted |
+| [0034](0034-the-sboms-of-a-release-describe-what-it-ships.md) | The SBOMs of a release describe what it ships, by its name and version | accepted |

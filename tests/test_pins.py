@@ -83,13 +83,15 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
             "infection/infection",
             "ChristophWurst/krankerl",
             "nextcloud/server",
+            "anchore/syft",
         }
     )
     # gitsign in sign-tag.sh and in verify-release.yml, krankerl in the release and in
-    # the checks of a Nextcloud app.
+    # the checks of a Nextcloud app, and syft for the SBOMs of the release.
     assert sorted((pin.dep, pin.path) for pin in found) == [
         ("ChristophWurst/krankerl", ".github/workflows/build-release.yml"),
         ("ChristophWurst/krankerl", ".github/workflows/ci-php.yml"),
+        ("anchore/syft", ".github/workflows/build-release.yml"),
         ("infection/infection", ".github/workflows/mutation.yml"),
         ("nextcloud/server", ".github/workflows/build-release.yml"),
         ("sigstore/gitsign", ".github/sign-tag.sh"),

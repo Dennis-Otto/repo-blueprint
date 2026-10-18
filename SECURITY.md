@@ -29,7 +29,7 @@ If a fix needs longer, for example because the cause lies in an upstream project
 - Actions are pinned to commit hashes, tokens get the least permissions they need, and Renovate keeps actions, dependencies and images current, with the updates that fix a vulnerability at once.
 - OSV-Scanner checks every lock file against the OSV database of known vulnerabilities: in every pull request that changes a lock file, after every change of `main` and every week.
 - Harden-Runner records the network traffic of every job of the workflows, so that a connection that doesn't belong there shows.
-- Releases carry an SBOM as SPDX and as CycloneDX, the licenses of their third-party components (`THIRD_PARTY_NOTICES.md`), an OpenVEX document of the advisories that the project accepts with their reasons, and the signed provenance of an isolated build (SLSA Build Level 3); their tags are signed without a key by the release workflow (gitsign), which builds no release on a tag that it didn't sign; they are immutable once published and are verified as their users can after every release and every week.
+- Releases carry SBOMs of what they ship, under their name and version, as SPDX and as CycloneDX, the licenses of their third-party components (`THIRD_PARTY_NOTICES.md`), an OpenVEX document of the advisories that the project accepts with their reasons, and the signed provenance of an isolated build (SLSA Build Level 3); their tags are signed without a key by the release workflow (gitsign), which builds no release on a tag that it didn't sign; they are immutable once published and are verified as their users can after every release and every week.
 
 ## Findings of code scanning
 
@@ -55,6 +55,13 @@ git merge-base --is-ancestor vA.B.C vX.Y.Z && echo "no older than vA.B.C"
 gitsign verify-tag vX.Y.Z \
   --certificate-identity https://github.com/Dennis-Otto/repo-blueprint/.github/workflows/release.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Every release describes what it ships in an SBOM, as SPDX in `repo-blueprint.spdx.json` and as CycloneDX in `repo-blueprint.cdx.json`: the files of its tag, without those that only check, test and document the project, under the name `repo-blueprint` and the version of the release. A scanner such as [Grype](https://github.com/anchore/grype) checks it against the advisories it knows. When the project accepts an advisory in `osv-scanner.toml`, with its reason, the release carries the OpenVEX document `repo-blueprint.openvex.json` too, which tells the scanner that the advisory doesn't affect the release; without that document, leave out `--vex`:
+
+```sh
+gh release download vX.Y.Z --repo Dennis-Otto/repo-blueprint --pattern 'repo-blueprint.*.json'
+grype sbom:repo-blueprint.spdx.json --vex repo-blueprint.openvex.json
 ```
 
 ## Assurance case
