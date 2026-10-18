@@ -52,7 +52,12 @@ jobs:
       - name: Lint the workflows
         id: workflow-lint
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        # The image itself, as for REUSE: a step that names a docker:// image is
+        # an action too, and the allowed actions in .github/repository.toml can't
+        # name an image.
+        env:
+          ACTIONLINT: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        run: docker run --rm --volume "$PWD:/repo" --workdir /repo "$ACTIONLINT"
       # The image of the REUSE tool as it is, without the action, which builds an image
       # of its own in every run. Git, which the tool asks for the ignored files, works
       # in the folder of another user only when it is named safe.
@@ -361,7 +366,12 @@ jobs:
           EOF
           echo "::add-matcher::$RUNNER_TEMP/actionlint.json"
       - name: Lint the workflows
-        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        # The image itself, as for REUSE: a step that names a docker:// image is
+        # an action too, and the allowed actions in .github/repository.toml can't
+        # name an image.
+        env:
+          ACTIONLINT: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        run: docker run --rm --volume "$PWD:/repo" --workdir /repo "$ACTIONLINT"
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure
