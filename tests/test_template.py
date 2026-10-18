@@ -31,11 +31,13 @@ from xml.etree import ElementTree
 
 import pathspec
 import pytest
+import workflow_steps
 from copier import _main as copier_main
 from copier import run_copy
 from mypy import api as mypy_api
 from shared import copy_of, git_environment, once, run_folder
 from shell import BASH, in_bash
+from workflow_steps import RUN_URL, Answer, exact
 
 import downstream
 import pins
@@ -445,42 +447,39 @@ def test_the_next_runner_runs_the_variants_every_week(
         assert not (project / ".github/workflows/next-runner.yml").exists()
 
 
-def run_with_a_fake_gh(tmp_path: Path, script: str, environment: dict[str, str]) -> str:
-    """Runs the script of a step with a gh that answers `issue list` with $OPEN and
-    writes down every other call, and returns those calls."""
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-if [[ "$1 $2" == "issue list" ]]; then
-  echo "$OPEN"
-  exit 0
-fi
-echo "$*" >> calls
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
-    gh.chmod(0o755)
-    (tmp_path / "calls").touch()
-    assert BASH
-    done = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "URL": "https://github.com/o/r/actions/runs/1",
-            **environment,
-        },
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+def keep_the_issue_of_a_bot(
+    tmp_path: Path, name: str, step: str, open_issue: str, **variables: str
+) -> str:
+    """Runs the step of the job report that keeps the issue of a bot, with a gh whose
+    list of issues finds open_issue, and returns the calls that open, change or close
+    an issue, one on each line."""
+    done = workflow_steps.run_step(
+        tmp_path,
+        name,
+        "report",
+        step,
+        answers=[
+            Answer(r"issue list --state open .*", f"{open_issue}\n"),
+            Answer(r"issue (create|edit|close) .*"),
+        ],
+        env=variables,
     )
     assert done.returncode == 0, done.stderr
-    return (tmp_path / "calls").read_text(encoding="utf-8")
+    return "\n".join(done.called("issue (create|edit|close)"))
+
+
+def only_the_report_writes_issues(name: str) -> None:
+    """Only the job report of the workflow may write issues, which runs no code of the
+    project, and it needs no other right."""
+    assert "issues" not in workflow_steps.workflow(name).get("permissions", {})
+    jobs = workflow_steps.workflow(name)["jobs"]
+    writers = [
+        job_id
+        for job_id, settings in jobs.items()
+        if "issues" in (settings.get("permissions") or {})
+    ]
+    assert writers == ["report"]
+    assert jobs["report"]["permissions"] == {"issues": "write"}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -499,22 +498,20 @@ def test_a_failure_on_the_next_runner_keeps_an_issue_open(
     tmp_path: Path, result: str, open_issue: str, call: str
 ) -> None:
     # No pull request shows the run, so its warning needs a place of its own.
-    next_runner = (ROOT / ".github/workflows/next-runner.yml").read_text(
-        encoding="utf-8"
-    )
-    report = job_of(next_runner, "report")
-    assert "\n    needs: next-runner\n" in report
-    assert condition_of(report) == (
+    report = workflow_steps.job("next-runner.yml", "report")
+    assert report["needs"] == "next-runner"
+    assert report["if"] == (
         "!cancelled() && github.ref == 'refs/heads/main' && "
         """contains(fromJSON('["success", "failure"]'), needs.next-runner.result)"""
     )
     # Only the job that runs no code of the variants may write issues.
-    assert "\n    permissions:\n      issues: write\n    steps:" in report
-    assert next_runner.count("issues: write") == 1
-    calls = run_with_a_fake_gh(
+    only_the_report_writes_issues("next-runner.yml")
+    calls = keep_the_issue_of_a_bot(
         tmp_path,
-        script_of(next_runner, "Keep the issue of the next runner current"),
-        {"RESULT": result, "OPEN": open_issue, "RUNNER": NEXT_RUNNER},
+        "next-runner.yml",
+        "Keep the issue of the next runner current",
+        open_issue,
+        RESULT=result,
     )
 
     assert calls.startswith(call), calls
@@ -523,9 +520,7 @@ def test_a_failure_on_the_next_runner_keeps_an_issue_open(
     assert (f"The Variants workflow fails on {NEXT_RUNNER}," in calls) == (
         result == "failure"
     )
-    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
-        result == "failure"
-    )
+    assert (f"The latest failure: {RUN_URL}" in calls) == (result == "failure")
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -7020,88 +7015,69 @@ def test_the_pr_coach_runs_in_every_repository(
 
 
 def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -> None:
-    job = after_the_checks_job("cancelled")
-    assert "github.event.workflow_run.conclusion == 'cancelled'" in job
+    cancelled = workflow_steps.job("after-checks.yml", "cancelled")
+    assert "github.event.workflow_run.conclusion == 'cancelled'" in cancelled["if"]
     events = """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
-    assert events in job
+    assert events in cancelled["if"]
     # Twice at most, whatever cancels the run again.
-    assert "github.event.workflow_run.run_attempt < 3" in job
+    assert "github.event.workflow_run.run_attempt < 3" in cancelled["if"]
     # It reads the runs, their checks and pull requests and starts a run again; it
     # checks out nothing.
-    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
-    assert permissions.splitlines()[1:] == [
-        "      actions: write",
-        "      checks: read",
-        "      pull-requests: read",
-    ]
-    assert "actions/checkout" not in job
+    assert cancelled["permissions"] == {
+        "actions": "write",
+        "checks": "read",
+        "pull-requests": "read",
+    }
+    steps = cancelled["steps"]
+    assert not any("actions/checkout" in found.get("uses", "") for found in steps)
     # Every job of the run starts again, so that each of its checks reports.
-    assert 'gh run rerun "$RUN"\n' in job
-    assert "--failed" not in job
-    # The values of the event reach the script as variables only.
-    assert "${{" not in job[job.index("        run: |\n") :]
+    script = workflow_steps.step("after-checks.yml", "cancelled", CANCELLED_STEP)["run"]
+    assert 'gh run rerun "$RUN"\n' in script
+    assert "--failed" not in script
+    # The values of the event reach the scripts as variables only.
+    assert not any("${{" in found.get("run", "") for found in steps)
+
+
+CANCELLED_STEP = "Run the checks of the head of the pull request again"
 
 
 def run_the_bot_for_cancelled_checks(
     tmp_path: Path, pull: str, newer: str, message: str
-) -> tuple[str, str]:
-    job = after_the_checks_job("cancelled")
-    # Its script, up to the next step, such as the one of the PR coach.
-    step = job[job.index("        run: |\n") + len("        run: |\n") :]
-    end = re.search(r"^      [-#]", step, re.M)
-    script = textwrap.dedent(step[: end.start()] if end else step)
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+) -> tuple[list[str], str]:
     # gh answers as the API does, after the filters of jq.
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-echo "$*" >> "$CALLS"
-case "$*" in
-  "api repos/o/r/commits/abc1234def/pulls --jq "*) printf '%s\\n' "$PULL" ;;
-  "api repos/o/r/actions/workflows/3/runs?head_sha=abc1234def --paginate --jq "*) printf '%s\\n' "$NEWER" ;;
-  "api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq "*) printf '11\\n12\\n' ;;
-  "api repos/o/r/check-runs/1"[12]"/annotations --paginate --jq .[].message") printf '%s\\n' "$MESSAGE" ;;
-  "run rerun 5") ;;
-  *) echo "unexpected: gh $*" >&2; exit 1 ;;
-esac
-""",
-        encoding="utf-8",
-        newline="\n",
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "cancelled",
+        CANCELLED_STEP,
+        answers=[
+            Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", f"{pull}\n"),
+            Answer(
+                r"api repos/o/r/actions/workflows/3/runs\?head_sha=abc1234def"
+                r" --paginate --jq .+",
+                f"{newer}\n",
+            ),
+            Answer(
+                r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+",
+                "11\n12\n",
+            ),
+            Answer(
+                r"api repos/o/r/check-runs/1[12]/annotations --paginate"
+                r" --jq \.\[\]\.message",
+                f"{message}\n",
+            ),
+            exact("run rerun 5"),
+        ],
+        env={
+            "RUN": "5",
+            "ATTEMPT": "1",
+            "WORKFLOW": "3",
+            "NAME": "CodeQL",
+            "SHA": "abc1234def",
+        },
     )
-    gh.chmod(0o755)
-    calls = tmp_path / "calls"
-    summary = tmp_path / "summary"
-    calls.touch()
-    summary.touch()
-    environment = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "GH_REPO": "o/r",
-        "RUN": "5",
-        "ATTEMPT": "1",
-        "WORKFLOW": "3",
-        "NAME": "CodeQL",
-        "SHA": "abc1234def",
-        "GITHUB_STEP_SUMMARY": str(summary),
-        "CALLS": str(calls),
-        "PULL": pull,
-        "NEWER": newer,
-        "MESSAGE": message,
-    }
-    # As GitHub runs a step: bash -e.
-    assert BASH
-    result = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    return calls.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8")
+    assert done.returncode == 0, done.stderr
+    return done.commands, done.summary
 
 
 RACED = "Canceling since a higher priority waiting request for CodeQL-136 exists"
@@ -7127,7 +7103,7 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
     calls, written = run_the_bot_for_cancelled_checks(tmp_path, pull, newer, message)
 
     assert summary in written
-    assert ("run rerun 5\n" in calls) == summary.endswith("it runs again")
+    assert ("run rerun 5" in calls) == summary.endswith("it runs again")
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
@@ -8411,28 +8387,26 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
     tmp_path: Path, result: str, open_issue: str, call: str
 ) -> None:
     # No pull request shows the check, so its warning needs a place of its own.
-    newest = (ROOT / ".github/workflows/newest-python.yml").read_text(encoding="utf-8")
-    report = job_of(newest, "report")
-    assert condition_of(report) == (
+    report = workflow_steps.job("newest-python.yml", "report")
+    assert report["if"] == (
         "!cancelled() && github.ref == 'refs/heads/main' && "
         "(needs.newest-python.result == 'failure' || github.event_name == 'schedule')"
     )
     # Only the job without the code of the project may write issues.
-    assert "\n    permissions:\n      issues: write\n    steps:" in report
-    assert newest.count("issues: write") == 1
-    calls = run_with_a_fake_gh(
+    only_the_report_writes_issues("newest-python.yml")
+    calls = keep_the_issue_of_a_bot(
         tmp_path,
-        script_of(newest, "Keep the issue of the newest Python current"),
-        {"RESULT": result, "OPEN": open_issue},
+        "newest-python.yml",
+        "Keep the issue of the newest Python current",
+        open_issue,
+        RESULT=result,
     )
 
     if not call:
         assert calls == ""
         return
     assert calls.startswith(call), calls
-    assert ("The latest failure: https://github.com/o/r/actions/runs/1" in calls) == (
-        result == "failure"
-    )
+    assert (f"The latest failure: {RUN_URL}" in calls) == (result == "failure")
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
