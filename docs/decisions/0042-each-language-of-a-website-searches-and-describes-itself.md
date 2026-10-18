@@ -27,9 +27,9 @@ Option 3, in the hook of every website, `.github/mkdocs_blueprint.py`.
 - **An index for each language:** `search/search_index.en.json` holds the English pages, `search/search_index.de.json` the German ones and the English pages without a German version, at their address in `de/`, so that a German reader stays in the German menu. A page of a project website in the search of its owner's website, such as `ha-autodarts/de/games.html`, counts as German too. `search/search_index.json` keeps every language, for the search of the owner's website, which adds the index of each project. The i18n plugin no longer takes entries out of it (`reconfigure_search: false`), and a section whose page an index lacks gets one.
 - **Untranslated pages are copies:** a page that the German website shows in English has its text marked as English, the English page as its canonical address and `noindex`, and stays out of the search and the sitemap; its date speaks German. The English page names no German version.
 - **Full addresses:** every other page names its versions with their full addresses and `x-default`, the version of the default language.
-- **A description of each page,** the start of its first paragraph, at most 160 characters, unless its front matter has one; the home page of each language keeps the description of the website.
+- **A description of each page,** the start of its first paragraph that has words outside its links, at most 160 characters, unless its front matter has one; the home page of each language keeps the description of the website, and its preview card the name of the website as its title. The picture of a preview card may still show the description of the website: the social plugin starts drawing it before the hook knows the description of the page.
 - **The date of the newest file** that a page includes with `--8<--`, in the page and in the sitemap.
-- **No badges on the website,** and German names for the switch between light and dark.
+- **No status badges on the website,** while buttons such as those of My Home Assistant stay, and German names for the switch between light and dark.
 - **The template of the decision records,** and any page with `robots: noindex` in its front matter, stay out of the search and the sitemap.
 
 ## Consequences

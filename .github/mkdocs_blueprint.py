@@ -74,13 +74,21 @@ POSTERS = (".webp", ".png")
 MERMAID_BLOCK = re.compile(r'<pre class="mermaid"(?=>)')
 # The badges of a README, such as those of shields.io, of a workflow or of the
 # Scorecard: the website shows none. The privacy plugin would download each once,
-# as the build sees it, so the website would show a status that is long gone.
-BADGE = re.compile(r"https?://(?:img\.shields\.io/|[^\s\"'<>]*badge)", re.I)
+# as the build sees it, so the website would show a status that is long gone. A
+# button whose address names badges, such as those of My Home Assistant at
+# .../badges/hacs_repository.svg, shows no status and stays.
+BADGE = re.compile(
+    r"https?://(?:img\.shields\.io/|api\.reuse\.software/badge/"
+    r"|[^\s\"'<>]*/badge(?:\.svg)?(?=$|[?#]))",
+    re.I,
+)
 LINKED_IMAGE = re.compile(rf"<a\b{TAG}>\s*(?P<image><img\b{TAG}>)\s*</a>", re.I)
 EMPTY = re.compile(r"<p>\s*</p>\n?")
 # The first paragraph of a page, from which a page without a description in its
 # front matter takes the description that search engines and preview cards show, of
-# DESCRIPTION characters at most.
+# DESCRIPTION characters at most. A paragraph of links alone, such as the line that
+# leads to the version in another language, describes nothing.
+LINK = re.compile(r"<a\b[^>]*>.*?</a>", re.S)
 PARAGRAPH = re.compile(r"<p>(?P<inside>(?:(?!</p>).)*?)</p>", re.S)
 DESCRIPTION = 160
 
@@ -352,6 +360,13 @@ def on_page_markdown(markdown: str, page: Any, config: Any, files: Any) -> str:
         BUILT.unlisted.add(page.canonical_url)
         if untranslated(page, config):
             BUILT.untranslated.add(page.url)
+    if config.plugins.get("material/social") and page.file.dest_uri in homes(config):
+        # The preview card of a home page took its title from the menu: Home. The
+        # social plugin draws it after this hook.
+        social = page.meta.setdefault("social", {})
+        social.setdefault("cards_layout_options", {}).setdefault(
+            "title", config.site_name
+        )
     redate(markdown, page, config)
     # The sitemap tells search engines when a page changed last; MkDocs gives it the
     # date of the build.
@@ -707,18 +722,24 @@ def describe(page: Any, html_text: str, config: Any) -> None:
     Every page had the description of the website, so search engines saw the same
     text for each. The home page of each language keeps it.
     """
-    found = languages(config)
-    homes = {"index.html"} | ({f"{found.current}/index.html"} if found else set())
-    if page.meta.get("description") or page.file.dest_uri in homes:
+    if page.meta.get("description") or page.file.dest_uri in homes(config):
         return
     for paragraph in PARAGRAPH.finditer(html_text):
-        text = " ".join(
-            html.unescape(re.sub(r"<[^>]*>", "", paragraph["inside"])).split()
-        )
-        if text:
+        # A paragraph of pictures or of links alone describes nothing.
+        words = re.sub(r"<[^>]*>", "", LINK.sub("", paragraph["inside"]))
+        if re.search(r"\w", words):
+            text = " ".join(
+                html.unescape(re.sub(r"<[^>]*>", "", paragraph["inside"])).split()
+            )
             # MkDocs writes it into an attribute as it is.
             page.meta["description"] = shorten(text.replace('"', "'"), DESCRIPTION)
             return
+
+
+def homes(config: Any) -> set[str]:
+    """The home pages of the website, one of each language that is built."""
+    found = languages(config)
+    return {"index.html"} | ({f"{found.current}/index.html"} if found else set())
 
 
 def shorten(text: str, limit: int) -> str:
@@ -792,7 +813,13 @@ def versions(output: str, page: Any, config: Any, found: Languages) -> str:
             # The links of the languages, all in place of the first one.
             written, tags = tags, ""
             return written
-        if attrs.get("rel") == "canonical" and canonical:
+        # A project may have named another page as canonical, such as the one that
+        # replaced a page that moved; only the page itself becomes the original.
+        if (
+            attrs.get("rel") == "canonical"
+            and canonical
+            and urljoin(here, attrs.get("href") or "") == here
+        ):
             return element("link", {**attrs, "href": canonical})
         return match[0]
 

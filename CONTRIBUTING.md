@@ -120,9 +120,9 @@ The hook of every website, `.github/mkdocs_blueprint.py`, keeps each page in its
 
 - **The search** of a page looks only through the pages of its language: the hook writes `search/search_index.en.json` and `search/search_index.de.json` beside the index of every language, and a German page searches the German pages and the English ones that have no German version, at their address in `de/`. The sources of the live diagrams stay out of it, and so do the template of the decision records and a page with `robots: noindex` in its front matter.
 - **A page that the German website shows untranslated,** such as `de/roadmap.html` without a `roadmap.de.md`, is a copy of the English page: its text says it is English, its canonical address is that of the English page, no search engine lists it, and the English page names no German version.
-- **Every other page** names its versions in the other languages with their full addresses and `x-default`, and gets a description of its own from its first paragraph, unless its front matter has `description:`; the home page of each language keeps the `site_description` of `mkdocs.yml`.
+- **Every other page** names its versions in the other languages with their full addresses and `x-default`, and gets a description of its own from its first paragraph with words of its own, so not from a line of links such as the one to the other language, unless its front matter has `description:`; the home page of each language keeps the `site_description` of `mkdocs.yml`, and its preview card names the website, where it said *Home*. A canonical address that a hook of the project set, such as that of a page that moved, stays.
 - **The date of a page** is that of the newest file it is made of: the guide, which includes `README.md` with a line `--8<--`, changes with the README. The sitemap gives search engines the same date.
-- **The badges** of a README stay on GitHub: the website would show them as the build downloaded them.
+- **The badges** of a README stay on GitHub: the website would show them as the build downloaded them. Buttons such as those of My Home Assistant, `…/badges/hacs_repository.svg`, show no status and stay.
 - **The switch between light and dark** names itself in German on the German pages.
 
 ### Accessibility

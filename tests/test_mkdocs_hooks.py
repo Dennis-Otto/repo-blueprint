@@ -849,13 +849,22 @@ def test_the_website_shows_no_badges() -> None:
         "</p>\n"
         '<p><a href="https://example.org/"><img alt="Logo" src="https://example.org/'
         'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n'
+        '<p><img alt="REUSE" src="https://api.reuse.software/badge/github.com/o/r">'
+        '<img alt="Coverage" src="https://codecov.io/gh/o/r/graph/badge.svg?t=1">'
+        "</p>\n"
+    )
+    # A button of My Home Assistant shows no status: it stays, with its link.
+    button = (
+        '<p><a href="https://my.home-assistant.io/redirect/hacs_repository/">'
+        '<img alt="Open in HACS" '
+        'src="https://my.home-assistant.io/badges/hacs_repository.svg"></a></p>\n'
     )
 
-    assert hooks().without_badges(html) == (
+    assert hooks().without_badges(html + button) == (
         "<h1>Demo</h1>\n"
         "<p>Text with  in it.</p>\n"
         '<p><a href="https://example.org/"><img alt="Logo" src="https://example.org/'
-        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n'
+        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n' + button
     )
 
 
@@ -878,6 +887,15 @@ def test_a_page_describes_itself_with_its_first_paragraph() -> None:
     module.describe(empty, "<p><img alt='Only' src='a.png'></p>", bilingual())
 
     assert guide.meta == {"description": "The guide says 'why' & how."}
+    # The line that leads to the version in another language describes nothing.
+    switch = page_of("de/guide.html", locale="de")
+    module.describe(
+        switch,
+        '<p><a href="README.md">English version</a> · <a href="x">Demo</a></p>\n'
+        "<p>Die <a href='guide.html'>Anleitung</a>.</p>",
+        bilingual("de"),
+    )
+    assert switch.meta == {"description": "Die Anleitung."}
     assert own.meta == {"description": "Its own."}
     assert [home.meta for home in homes] == [{}, {}]
     assert empty.meta == {}
@@ -1213,6 +1231,47 @@ def test_an_untranslated_page_is_a_copy_that_search_engines_leave_out() -> None:
     assert 'rel="alternate"' not in english
     assert f'<link rel="canonical" href="{SITE}roadmap.html">' in english
     assert "noindex" not in english
+
+
+def test_an_untranslated_page_keeps_the_canonical_page_of_its_project() -> None:
+    # The page moved: a hook of the project names the page that replaced it.
+    moved = page_of(
+        "de/SETUP.html",
+        de=version("en", "de/SETUP.html"),
+        en=version("en", "SETUP.html"),
+    )
+    head = HEAD.format(canonical=SITE + "setup.html", en="../SETUP.html", de="x")
+
+    output = hooks().on_post_page(head, moved, bilingual("de"))
+
+    assert f'<link rel="canonical" href="{SITE}setup.html">' in output
+    assert "noindex" in output
+
+
+def test_the_preview_card_of_a_home_page_names_the_website() -> None:
+    module = hooks()
+    social = SimpleNamespace(plugins={"material/social": object()}, site_name="Demo")
+    german = bilingual("de", site_name="Demo")
+    german.plugins["material/social"] = object()
+    home = page_of("index.html")
+    own = page_of("index.html", meta={"social": {"cards_layout_options": {}}})
+    own.meta["social"]["cards_layout_options"]["title"] = "Own"
+    de_home = page_of("de/index.html", locale="de")
+    guide = page_of("guide.html")
+    without = page_of("index.html")
+
+    for page in (home, own, guide):
+        module.on_page_markdown("", page, social, [])
+    module.on_page_markdown("", de_home, german, [])
+    module.on_page_markdown("", without, SimpleNamespace(plugins={}), [])
+
+    card = {"social": {"cards_layout_options": {"title": "Demo"}}}
+    assert home.meta == card
+    assert de_home.meta == card
+    assert own.meta["social"]["cards_layout_options"] == {"title": "Own"}
+    assert guide.meta == {}
+    # Without the social plugin, no page has a card.
+    assert without.meta == {}
 
 
 def test_a_website_in_one_language_only_keeps_templates_from_search_engines() -> None:
