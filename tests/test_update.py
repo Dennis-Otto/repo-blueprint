@@ -23,15 +23,26 @@ from blueprint import cli
 from blueprint.github import Api, GitHubError
 from blueprint.update import (
     ANSWERS,
+    BODY_LENGTH,
+    BODY_LIMIT,
     BRANCH,
+    CUT,
+    FILES,
     LABEL,
     NOTICE,
+    REGULAR,
+    SOURCE,
     Change,
     Outdated,
+    Release,
+    Update,
     answered_release,
+    describe,
     lost_modes,
     mode_command,
+    releases_between,
     update_pull_request,
+    version_key,
 )
 
 REPO = "Dennis-Otto/demo"
@@ -155,6 +166,8 @@ class FakeGitHub:
         self.authors: dict[str, str] = {}
         self.pulls: dict[int, dict[str, Any]] = {}
         self.comments: dict[int, list[dict[str, Any]]] = {}
+        # The releases of each blueprint, the newest first, as GitHub lists them.
+        self.releases: dict[str, list[dict[str, Any]]] = {}
         self.next_id = 1
         self.signed = True
         self.tree_differs = False
@@ -210,6 +223,10 @@ class FakeGitHub:
             (r"issues/comments/(\d+)", self.edit_comment),
             (r"issues/(\d+)/labels(?:/(.+))?", self.label),
             (r"graphql", self.graphql),
+            (
+                r"repos/([\w.-]+/[\w.-]+)/releases\?per_page=(\d+)&page=(\d+)",
+                self.release,
+            ),
         ):
             match = re.fullmatch(pattern, path)
             if match:
@@ -409,6 +426,13 @@ class FakeGitHub:
         )
         self.set_ref(name, created)
         return 200, {"data": {"createCommitOnBranch": {"commit": {"oid": created}}}}
+
+    # ------------------------------------------------------------------ releases
+
+    def release(
+        self, method: str, body: Any, source: str, size: str, page: str
+    ) -> tuple[int, Any]:
+        return self.page(self.releases.get(source, []), size, page)
 
     # ------------------------------------------------------------------ issues
 
@@ -855,8 +879,11 @@ def test_conflicts_turn_auto_merge_off_and_label_the_pull_request(
     assert pull["auto_merge"] is None
     assert pull["labels"] == [LABEL]
     # Only the files of the update: the project's own lines like markers stay out.
-    assert "\n- `README.md`\n" in pull["body"]
+    assert "\n### Conflicts\n" in pull["body"]
+    assert "\n- [ ] `README.md`\n" in pull["body"]
     assert "docs/merging.md" not in pull["body"]
+    assert "\nIt waits for you to merge it. " in pull["body"]
+    assert "It merges itself" not in pull["body"]
 
     # Still conflicts with the next release: one label, and nothing to switch off.
     fresh_checkout(github)
@@ -908,6 +935,10 @@ def test_automerge_off_leaves_the_merge_to_the_maintainer(github: FakeGitHub) ->
 
     assert github.pulls[1]["auto_merge"] is None
     assert not [call for call in github.calls if call[0] == "gh"]
+    assert (
+        "It waits for you to merge it, as the repository variable"
+        " `BLUEPRINT_AUTOMERGE` is `off`"
+    ) in github.pulls[1]["body"]
 
 
 def test_automerge_off_holds_the_open_pull_request_too(github: FakeGitHub) -> None:
@@ -953,6 +984,7 @@ def test_auto_merge_that_the_maintainer_turned_off_stays_off(
 
     assert github.pulls[1]["auto_merge"] is None
     assert gh_calls(github) == [f"pr merge 1 --repo {REPO} --auto --squash"]
+    assert "Its auto-merge is off, so it waits for you" in github.pulls[1]["body"]
 
 
 def test_conflicts_never_merge_when_the_bot_stops_after_the_move(
@@ -1086,6 +1118,304 @@ def test_the_modes_that_create_commit_on_branch_loses() -> None:
 
 def test_the_release_of_answers_without_one() -> None:
     assert answered_release("project_name: Demo\n") == ""
+
+
+# --------------------------------------------------------------------------- the description
+
+
+def published(tag: str, notes: str = "", **fields: Any) -> dict[str, Any]:
+    """A release of the blueprint as GitHub lists it."""
+    return {
+        "tag_name": tag,
+        "html_url": f"https://github.com/{SOURCE}/releases/tag/{tag}",
+        "published_at": "2026-10-14T06:40:52Z",
+        "body": notes,
+        "draft": False,
+        "prerelease": False,
+        **fields,
+    }
+
+
+# The notes of a release of the blueprint: the text of its changelog, then the list of
+# every pull request that release-please wrote.
+WRITTEN = (
+    "### Features\n"
+    "\n"
+    "- **Dark mode:** every page follows the system (#183), thanks to @someone.\n"
+    "  Run `gh pr view #7 --repo @x` to see it.\n"
+    "\n"
+    "```sh\n"
+    "# Turn it on\n"
+    "blueprint.py dark #9 @nobody\n"
+    "```\n"
+    "\n"
+    "## Every pull request of this release\n"
+    "\n"
+    "### Features\n"
+    "\n"
+    "- dark mode (#183)\n"
+)
+# The notes of a release that release-please wrote alone.
+GENERATED = (
+    f"## [1.2.0](https://github.com/{SOURCE}/compare/v1.1.0...v1.2.0) (2026-10-13)\n"
+    "\n"
+    "\n"
+    "### Bug fixes\n"
+    "\n"
+    f"* keep the branch ([#12](https://github.com/{SOURCE}/issues/12))\n"
+)
+
+
+def test_the_description_shows_the_notes_of_every_release_it_brings(
+    github: FakeGitHub,
+) -> None:
+    github.releases[SOURCE] = [
+        published("v1.4.0", "Not yet.", draft=True),
+        published("v1.3.0", WRITTEN),
+        published("v1.3.0-beta.1", "A beta.", prerelease=True),
+        published("nightly", "No version."),
+        published("v1.2.0", GENERATED, published_at="2026-10-13T10:00:00Z"),
+        # A release without notes, a date or a page.
+        {"tag_name": "v1.1.0", "draft": False, "prerelease": False},
+        published("v1.0.0", "The release that the repository has."),
+        published("v0.9.0", "Older still."),
+    ]
+    stage(
+        github.root,
+        "v1.3.0",
+        {"README.md": "# Demo, updated\n", "new.txt": "new\n", "old.txt": None},
+    )
+
+    run(github)
+
+    release = f"https://github.com/{SOURCE}/releases/tag"
+    assert github.pulls[1]["body"] == (
+        f"Brings the repository from the blueprint's v1.0.0 to [v1.3.0]({release}/v1.3.0)"
+        " with `copier update`.\n"
+        "\n"
+        "[Every change of the blueprint from v1.0.0 to v1.3.0]"
+        f"(https://github.com/{SOURCE}/compare/v1.0.0...v1.3.0)\n"
+        "\n"
+        "### What the blueprint brings\n"
+        "\n"
+        "The notes of the 3 releases since v1.0.0, the newest first:\n"
+        "\n"
+        "<details>\n"
+        "<summary>v1.3.0 · 2026-10-14</summary>\n"
+        "\n"
+        # A level below the headings of the description; the references name the
+        # blueprint's issues, and nobody hears of every update; code stays as it is.
+        "#### Features\n"
+        "\n"
+        f"- **Dark mode:** every page follows the system ({SOURCE}#183), thanks to"
+        " @&#8203;someone.\n"
+        "  Run `gh pr view #7 --repo @x` to see it.\n"
+        "\n"
+        "```sh\n"
+        "# Turn it on\n"
+        "blueprint.py dark #9 @nobody\n"
+        "```\n"
+        "\n"
+        f"[The release v1.3.0]({release}/v1.3.0)\n"
+        "\n"
+        "</details>\n"
+        "\n"
+        "<details>\n"
+        "<summary>v1.2.0 · 2026-10-13</summary>\n"
+        "\n"
+        "#### Bug fixes\n"
+        "\n"
+        f"* keep the branch ([#12](https://github.com/{SOURCE}/issues/12))\n"
+        "\n"
+        f"[The release v1.2.0]({release}/v1.2.0)\n"
+        "\n"
+        "</details>\n"
+        "\n"
+        "<details>\n"
+        "<summary>v1.1.0</summary>\n"
+        "\n"
+        "The release has no notes.\n"
+        "\n"
+        f"[The release v1.1.0]({release}/v1.1.0)\n"
+        "\n"
+        "</details>\n"
+        "\n"
+        "### The files it changes\n"
+        "\n"
+        "<details>\n"
+        "<summary>4 files</summary>\n"
+        "\n"
+        "- `.copier-answers.yml`\n"
+        "- `README.md`\n"
+        "- `new.txt` (new)\n"
+        "- `old.txt` (deleted)\n"
+        "\n"
+        "</details>\n"
+        "\n"
+        "---\n"
+        "\n"
+        "It merges itself once every check passes. To review every update before it"
+        " merges, set the repository variable `BLUEPRINT_AUTOMERGE` to `off`. A newer"
+        " release of the blueprint moves this pull request on. Once you commit to its"
+        " branch, the bot leaves it to you.\n"
+    )
+    assert (
+        github.calls.count(("GET", f"repos/{SOURCE}/releases?per_page=100&page=1")) == 1
+    )
+
+
+def test_a_newer_release_brings_its_notes_to_the_open_pull_request(
+    github: FakeGitHub,
+) -> None:
+    github.releases[SOURCE] = [published("v1.1.0", "### Features\n\n- One.\n")]
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    assert "The notes of v1.1.0:\n" in github.pulls[1]["body"]
+    github.releases[SOURCE].insert(0, published("v1.2.0", "### Features\n\n- Two.\n"))
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    run(github)
+
+    body = github.pulls[1]["body"]
+    assert "The notes of the 2 releases since v1.0.0, the newest first:" in body
+    assert body.index("- Two.") < body.index("- One.")
+
+
+def test_an_update_from_past_a_release_compares_from_its_commit(
+    github: FakeGitHub,
+) -> None:
+    # Copier names a version past a tag as git describe does.
+    fresh_checkout(github, {ANSWERS: answers("v1.0.0-2-g1234abc")})
+    github.releases[SOURCE] = [
+        published("v1.1.0", "- One."),
+        published("v1.0.0", "- Had."),
+    ]
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+
+    run(github)
+
+    body = github.pulls[1]["body"]
+    assert f"(https://github.com/{SOURCE}/compare/1234abc...v1.1.0)" in body
+    assert "The notes of v1.1.0:" in body
+    assert "- Had." not in body
+
+
+def test_an_update_from_no_version_shows_the_notes_of_its_release(
+    github: FakeGitHub,
+) -> None:
+    fresh_checkout(github, {ANSWERS: answers("1234abc")})
+    github.releases[SOURCE] = [
+        published("v1.1.0", "- One."),
+        published("v1.0.0", "- Older."),
+    ]
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+
+    run(github)
+
+    body = github.pulls[1]["body"]
+    assert "The notes of v1.1.0:\n\n<details>" in body
+    assert "- Older." not in body
+
+
+def test_an_update_to_the_release_it_has_shows_no_notes(github: FakeGitHub) -> None:
+    github.releases[SOURCE] = [published("v1.0.0", "- Had.")]
+    stage(github.root, "v1.0.0", {"README.md": "# Demo, again\n"})
+
+    run(github)
+
+    body = github.pulls[1]["body"]
+    assert "Every change of the blueprint" not in body
+    assert "What the blueprint brings" not in body
+
+
+def test_releases_that_github_doesnt_list_leave_a_link(
+    github: FakeGitHub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.fail[("GET", f"repos/{SOURCE}/releases?per_page=100&page=1")] = 403
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+
+    assert run(github) == "Opened #1: the blueprint's v1.0.0 to v1.1.0."
+
+    assert f"::warning::GitHub didn't list the releases of {SOURCE}" in (
+        capsys.readouterr().out
+    )
+    assert (
+        f"GitHub didn't list the releases of {SOURCE} to the bot, so their notes are"
+        f" missing here: [its releases](https://github.com/{SOURCE}/releases)"
+    ) in github.pulls[1]["body"]
+
+
+def test_versions_and_what_names_none(github: FakeGitHub) -> None:
+    assert version_key("v1.2.3") == (1, 2, 3, 1)
+    assert version_key("1.2.3") == (1, 2, 3, 1)
+    # A prerelease comes before its release.
+    assert version_key("v1.2.3-beta.1") == (1, 2, 3, 0)
+    assert version_key("main") is None
+    # An update to a branch brings no release whose notes it could show.
+    assert releases_between(Api(github), SOURCE, "v1.0.0", "main") == []
+    assert github.calls == []
+
+
+def an_update(changes: int = 1, conflicts: Sequence[str] = ()) -> Update:
+    """An update from v1.0.0 to v1.2.0 that changes so many files."""
+    return Update(
+        source=SOURCE,
+        base="a" * 40,
+        base_tree="b" * 40,
+        tree="c" * 40,
+        before="v1.0.0",
+        after="v1.2.0",
+        changes=tuple(
+            Change(f"file-{number}.txt", REGULAR, REGULAR, "d" * 40)
+            for number in range(changes)
+        ),
+        conflicts=tuple(conflicts),
+    )
+
+
+def a_release(tag: str, notes: str) -> Release:
+    return Release(tag, f"https://github.com/{SOURCE}/releases/tag/{tag}", "", notes)
+
+
+def test_notes_too_long_for_the_description_become_links() -> None:
+    releases = [a_release("v1.2.0", "a" * 40000), a_release("v1.1.0", "b" * 40000)]
+
+    body = describe(an_update(), [], releases)
+
+    assert len(body) <= BODY_LENGTH
+    assert "<summary>v1.2.0</summary>" in body
+    assert "<summary>v1.1.0</summary>" not in body
+    assert (
+        "These releases have more notes than the description of a pull request holds;"
+        " their pages show them:\n"
+        "\n"
+        f"- [v1.1.0](https://github.com/{SOURCE}/releases/tag/v1.1.0)\n"
+    ) in body
+
+
+def test_a_description_longer_than_github_takes_is_cut() -> None:
+    many = [f"{'deep/' * 20}file-{number}.txt" for number in range(1000)]
+
+    body = describe(an_update(FILES + 5, conflicts=many), [])
+
+    assert len(body) == BODY_LIMIT
+    assert body.endswith(CUT)
+    assert "### The files it changes" not in body
+
+
+def test_the_files_beyond_the_list_are_counted() -> None:
+    body = describe(an_update(FILES + 5), [])
+
+    assert f"<summary>{FILES + 5} files</summary>" in body
+    assert (
+        f"- `file-{FILES - 1}.txt`\n- and 5 more, in the tab *Files changed*\n" in body
+    )
+    assert f"file-{FILES}.txt" not in body
+
+
+def test_one_file_is_no_files() -> None:
+    assert "<summary>1 file</summary>" in describe(an_update(), [])
 
 
 # --------------------------------------------------------------------------- errors and the command line

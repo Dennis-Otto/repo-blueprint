@@ -5695,6 +5695,26 @@ def test_the_blueprint_bot_keeps_one_pull_request(
     assert result.returncode == 0, result.stderr
     assert "--app APP" in result.stdout
     assert "--source SOURCE" in result.stdout
+    # Its description shows the written notes of every release that it brings, with
+    # the changelog of the tool that every kind has, and references that still lead
+    # to the issues of the blueprint.
+    notes = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.path.insert(0, '.github');"
+            " from blueprint.update import curated;"
+            " print(curated(sys.argv[1], 'Owner/blueprint'), end='')",
+            "### Features\n\n- Dark mode (#7).\n\n"
+            "## Every pull request of this release\n\n- dark mode\n",
+        ],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert notes.returncode == 0, notes.stderr
+    assert notes.stdout == "#### Features\n\n- Dark mode (Owner/blueprint#7)."
 
 
 def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
