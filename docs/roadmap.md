@@ -6,7 +6,7 @@ Where the blueprint is heading in the next twelve months, until October 2027, an
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/the-larger-steps-of-the-blueprint.dark.svg">
-  <img src="images/diagrams/the-larger-steps-of-the-blueprint.svg" alt="The larger steps of the blueprint: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags. Next comes a screenshot bot.">
+  <img src="images/diagrams/the-larger-steps-of-the-blueprint.svg" alt="The larger steps of the blueprint: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags; 0.9 to 0.12 the diagrams that every app shows, the PR coach and the bot-health bot. The next release brings the screenshot bot; next come the visual changes in pull requests.">
 </picture>
 
 The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELOG.md) names every change of every release. The larger steps so far:
@@ -17,14 +17,16 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 - **0.6:** a documentation website for every repository, the build of every release in an isolated workflow (SLSA Build Level 3), release tags signed without a key, mutation tests every week, the taint analysis of Psalm for a Nextcloud app, hints at the spelling and the style of the documents, the clean-up bot, the weekly report, the health of every repository on the dashboard and the documents that the Silver level of the OpenSSF Best Practices badge asks for.
 - **0.7:** the settings that every website shares, from the blueprint, and a successor that the owner designated on GitHub, who can carry the project on.
 - **0.8:** websites in more than one language, issue forms that point to the documentation, and the website of the owner itself made from the blueprint.
+- **0.9 to 0.12:** the diagrams as pictures that every reader sees, also in the GitHub app and the stores, the PR coach, which explains every check that fails, the bot-health bot, which keeps an issue open while a bot fails, an `AGENTS.md` for the coding agents, and checks and releases that stall get going again without a person.
 - **OpenSSF Best Practices:** the blueprint holds [the Silver level](https://www.bestpractices.dev/projects/15284) of the badge.
-- **The next release:** what the fragments in `changelog.d/` and the section *Unreleased* of the changelog list.
+- **The next release:** the screenshot bot, whose pictures change only when their pixels change, in every repository and for the blueprint's own documentation, and what the fragments in `changelog.d/` and the section *Unreleased* of the changelog list.
 
 ## Next
 
 | Topic | What it brings |
 | --- | --- |
-| **A screenshot bot** | Screenshots of a project that renew themselves when its interface changes |
+| **Visual changes in pull requests** | A pull request that changes what a picture of the screenshot bot shows shows the picture before and after the change in its report, rendered by the same script |
+| **More pictures for the screenshot bot** | Starter scripts for each kind of project, screenshots of the public GitHub pages for the blueprint's own documentation, and ha-autodarts on the shared workflow ([#271](https://github.com/Dennis-Otto/repo-blueprint/issues/271)) |
 
 ## Always
 

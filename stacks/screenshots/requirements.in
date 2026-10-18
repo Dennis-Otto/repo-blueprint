@@ -1,0 +1,7 @@
+# Pillow, which compares the pictures of the screenshot bot by their pixels: a
+# picture whose pixels stayed the same keeps its committed file. It has no
+# dependencies, and the hashes of all its wheels make the lock file hold for every
+# Python and system of a runner. Renovate compiles it again with the command in the
+# header of requirements.txt.
+# https://github.com/Dennis-Otto/repo-blueprint
+pillow==12.3.0

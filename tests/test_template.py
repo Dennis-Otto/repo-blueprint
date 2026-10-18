@@ -4061,6 +4061,8 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         "custom_components",
         "action.yml",
         "demo.py",
+        "scripts/screenshots.sh",
+        ".github/screenshots-paths.txt",
     ):
         assert not (project / sample).exists(), sample
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
@@ -7055,6 +7057,7 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
 BLUEPRINT_BOTS = {
     "Dashboard",
+    "Docs pictures",
     "Issue assistant sync",
     "Renovate",
     "Rollout",
@@ -8949,6 +8952,154 @@ def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
     assert found == [image.groups()]
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_screenshot_bot_is_in_every_repository_and_waits_for_its_script(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # Every repository has the screenshot bot of the blueprint, which renders nothing
+    # until the project has scripts/screenshots.sh. A new repository starts with one
+    # that renders the social preview, and with the list of the files it shows; both
+    # belong to the project from then on.
+    project = projects[kind]
+    found = workflows(project)
+    bot = found["screenshot-bot.yml"]
+    assert bot == (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
+        encoding="utf-8"
+    )
+    # Under a name of its own: a project's own screenshots.yml, as ha-autodarts has,
+    # stays the project's, and the picture bot of the blueprint's documentation stays
+    # in the blueprint.
+    assert "screenshots.yml" not in found
+    assert "docs-pictures.yml" not in found
+    assert (project / ".github/blueprint/screenshots.py").read_text(
+        encoding="utf-8"
+    ) == (ROOT / "blueprint/screenshots.py").read_text(encoding="utf-8")
+    assert (project / ".github/screenshots-requirements.txt").read_text(
+        encoding="utf-8"
+    ) == (ROOT / "stacks/screenshots/requirements.txt").read_text(encoding="utf-8")
+    script = (project / "scripts/screenshots.sh").read_text(encoding="utf-8")
+    assert script.startswith("#!/usr/bin/env bash\n")
+    assert "\nbash scripts/social-preview.sh\n" in script
+    paths = (project / ".github/screenshots-paths.txt").read_text(encoding="utf-8")
+    assert "\n.github/social-preview.html\n" in paths
+    copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    for owned in ("/scripts/screenshots.sh", ".github/screenshots-paths.txt"):
+        assert f"\n  - {owned}\n" in copier, owned
+        assert f"`{owned}`" in agents, owned
+    # The tool of the project knows the bot: with the script, it renders.
+    decided = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "screenshots", "due"],
+        cwd=project,
+        capture_output=True,
+        check=False,
+        text=True,
+        encoding="utf-8",
+    )
+    assert decided.returncode == 0, decided.stderr
+    assert "`scripts/screenshots.sh`" in decided.stdout
+
+
+def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
+    workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
+        encoding="utf-8"
+    )
+    # After a change of main, a release and every week; never for a pull request.
+    for trigger in ("push:\n    branches: [main]", "workflow_run:", "schedule:"):
+        assert f"\n  {trigger}" in workflow, trigger
+    assert "pull_request" not in workflow
+    assert "\npermissions: {}\n" in workflow
+    assert "  BRANCH: bot/screenshots\n" in workflow
+    assert '  HEADLINE: "docs: update the screenshots"\n' in workflow
+    plan = job_of(workflow, "plan")
+    assert " screenshots due --since " in plan
+    assert (
+        "startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')"
+        in condition_of(plan)
+    )
+    # Only the push run of a release, not its daily or manual runs on the same commit.
+    assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
+    # A push that is not due never replaces a waiting render of one that is.
+    assert not re.search(r"^concurrency:", workflow, re.M)
+    assert "concurrency:" not in plan
+    # The script of the project runs without secrets and with a token that reads.
+    render = job_of(workflow, "render")
+    assert "\n        run: bash scripts/screenshots.sh\n" in render
+    assert "    permissions:\n      contents: read\n" in render
+    for secret in ("secrets.", "environment:", "persist-credentials: true"):
+        assert secret not in render, secret
+    assert " screenshots keep " in render
+    assert (
+        "    concurrency:\n      group: ${{ github.workflow }}-render\n"
+        "      cancel-in-progress: false\n"
+    ) in render
+    assert "uv venv --quiet .venv-docs\n" in render
+    # Only the job that runs nothing of the script has the release app, and takes
+    # the pictures as data, checked by blueprint.py of main.
+    opener = job_of(workflow, "pull-request")
+    assert "      name: release\n" in opener
+    assert "bash scripts/screenshots.sh" not in opener
+    assert (
+        "sparse-checkout: |\n            .github/blueprint\n            blueprint\n"
+        in opener
+    )
+    assert " screenshots commit " in opener
+    assert (
+        "    concurrency:\n      group: ${{ github.workflow }}-pull-request\n"
+        "      cancel-in-progress: false\n"
+    ) in opener
+    assert "\n          permission-workflows: write\n" in opener
+    assert '\n          gh pr merge "$open" --auto --squash\n' in opener
+    assert 'author.login == \\"app/$APP_SLUG\\"' in opener
+    for job in (plan, render, opener):
+        for script in job.split("        run: |\n")[1:]:
+            assert "${{" not in script.split("\n      - ")[0]
+    # The bot-health bot keeps an issue open while the bot fails.
+    health = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    assert ", Screenshots, " in health
+    # zizmor accepts its start after a release, with the reason in its configuration.
+    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
+    for name in ("screenshot-bot.yml", "docs-pictures.yml"):
+        assert f"      - {name}\n" in dangerous, name
+
+
+def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> None:
+    # The recording and the dashboard of the README come from
+    # scripts/docs-pictures.sh, which the picture bot of the blueprint runs after a
+    # release that changed what they show, and on demand.
+    workflow = (ROOT / ".github/workflows/docs-pictures.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "  workflow_run:\n    workflows: [Release]\n" in workflow
+    assert "  workflow_dispatch:\n" in workflow
+    assert "pull_request" not in workflow
+    assert "  BRANCH: bot/pictures\n" in workflow
+    assert '  HEADLINE: "docs: renew the pictures"\n' in workflow
+    assert "  SCRIPT: scripts/docs-pictures.sh\n" in workflow
+    plan = job_of(workflow, "plan")
+    assert "github.repository == 'Dennis-Otto/repo-blueprint'" in condition_of(plan)
+    assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
+    assert '--script "$SCRIPT" --paths "$PATHS"' in plan
+    render = job_of(workflow, "render")
+    assert '\n        run: bash "$SCRIPT"\n' in render
+    for secret in ("secrets.", "environment:"):
+        assert secret not in render, secret
+    opener = job_of(workflow, "pull-request")
+    assert "      name: release\n" in opener
+    assert '\n          gh pr merge "$open" --auto --squash\n' in opener
+    for job in (plan, render, opener):
+        for script in job.split("        run: |\n")[1:]:
+            assert "${{" not in script.split("\n      - ")[0]
+    # The files whose change in a release can change the pictures.
+    listed = (ROOT / ".github/docs-pictures/paths.txt").read_text(encoding="utf-8")
+    for pattern in ("copier.yml", "template/**", ".github/workflows/**"):
+        assert f"\n{pattern}\n" in listed, pattern
+    script = (ROOT / "scripts/docs-pictures.sh").read_text(encoding="utf-8")
+    for picture in ("copier-copy.gif", "dashboard.png"):
+        assert f"docs/images/{picture}" in script, picture
+
+
 def test_the_tools_of_the_website_install_on_windows() -> None:
     # The plugin for the dates requires tzdata on Windows alone. pip-compile on Linux
     # left it out of the lock, and with --require-hashes pip refused all of it there.
@@ -9194,7 +9345,10 @@ SETUP = re.compile(
 )
 
 
-@pytest.mark.parametrize("name", [*UV_WORKFLOWS, "ci-container.yml"])
+@pytest.mark.parametrize(
+    "name",
+    [*UV_WORKFLOWS, "ci-container.yml", "screenshot-bot.yml", "docs-pictures.yml"],
+)
 def test_every_step_that_installs_builds_or_downloads_has_a_time_limit(
     name: str,
 ) -> None:

@@ -1,0 +1,11 @@
+# The files whose change in a release can change the pictures of
+# scripts/docs-pictures.sh, as the Docs pictures workflow reads them: the questions
+# and the output of Copier, the files and workflows of a new repository that the
+# recording lists, the image that records it, and the dashboard that the screenshot
+# shows. One pattern on each line, as the paths of a workflow; ! leaves files out.
+copier.yml
+template/**
+.github/workflows/**
+.github/docs-pictures/**
+stacks/copier/**
+dashboard.py

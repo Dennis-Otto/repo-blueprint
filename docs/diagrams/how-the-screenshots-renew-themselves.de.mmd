@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie sich die Screenshots selbst erneuern
+    accDescr: Nach einer Änderung von main, die eine Datei aus .github/screenshots-paths.txt betrifft, nach jedem Release, jede Woche und auf Wunsch sucht der Screenshot-Bot scripts/screenshots.sh; ohne das Skript rendert er nichts. Das Skript rendert die Bilder ohne Secrets, und jedes Bild, dessen Pixel gleich blieben, behält seine committete Datei. Haben sich Pixel geändert, hält ein Pull Request von bot/screenshots die neuen Bilder und merged sich selbst, sobald alle Prüfungen bestehen; sieht main aus wie gerendert, schließt der Bot ihn. So zeigt jedes Bild das Projekt, wie es ist.
+
+    event["`Eine Änderung von main, die eine<br>Datei der Liste betrifft, ein Release,<br>jede Woche oder von Hand`"]
+    script{"Hat das Repository<br>scripts/screenshots.sh?"}
+    off["Kein Skript:<br>Der Bot rendert nichts"]
+    render["Das Skript rendert<br>die Bilder, ohne Secrets"]
+    pixels{"Haben sich Pixel<br>gegenüber main geändert?"}
+    same["`Gleiche Pixel: Das Bild<br>behält seine committete Datei,<br>ein offener Pull Request schließt`"]
+    pr["`Ein Pull Request von<br>*bot/screenshots*, der<br>sich selbst merged`"]
+    done["Jedes Bild zeigt<br>das Projekt, wie es ist"]
+
+    event --> script
+    script -- "nein" --> off
+    script -- "ja" --> render --> pixels
+    pixels -- "nein" --> same --> done
+    pixels -- "ja" --> pr --> done
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class render,pr bot
+    class off person
+    class done done

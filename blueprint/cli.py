@@ -15,7 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import mutation
+from blueprint import mutation, screenshots
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
 from blueprint.changelog import (
@@ -389,6 +389,55 @@ def diagrams_command(arguments: argparse.Namespace, root: Path) -> int:
         )
     else:
         print("No ```mermaid block in the Markdown.")
+    return 0
+
+
+def screenshots_command(arguments: argparse.Namespace, root: Path) -> int:
+    if arguments.action == "due":
+        ready, reason = screenshots.due(
+            root, arguments.since, arguments.until, arguments.paths, arguments.script
+        )
+        print(reason)
+        return 0 if ready else 1
+    if arguments.action in ("keep", "restore"):
+        folder = arguments.folder if arguments.action == "keep" else None
+        try:
+            found = screenshots.keep(root, folder)
+        except ModuleNotFoundError as error:
+            # Pillow compares the pixels; a project's own tools may not have it.
+            wanted = ".github/screenshots-requirements.txt"
+            if not (root / wanted).is_file():
+                wanted = "stacks/screenshots/requirements.txt"
+            print(
+                f"blueprint.py: screenshots {arguments.action} needs {error.name}:"
+                f" python3 -m pip install --require-hashes -r {wanted}",
+                file=sys.stderr,
+            )
+            return 2
+        print(screenshots.summary(found), end="")
+        return 0
+    if arguments.action == "parts":
+        print(len(screenshots.parts(arguments.folder)))
+        return 0
+    if arguments.action == "commit":
+        if not arguments.repo:
+            print("blueprint.py: screenshots commit needs --repo", file=sys.stderr)
+            return 2
+        request = screenshots.commit_request(
+            arguments.folder,
+            arguments.repo,
+            arguments.branch,
+            arguments.head,
+            arguments.headline,
+            arguments.body,
+            arguments.part,
+        )
+        print(json.dumps(request))
+        return 0
+    text = screenshots.report(
+        arguments.folder, arguments.sha, arguments.run, arguments.script
+    )
+    print(text, end="")
     return 0
 
 
@@ -807,6 +856,81 @@ def main(
         help="comment: on the pull request whose blocks became pictures; "
         "pull-request: the description of the bot's pull request for main",
     )
+    screenshots_parser = commands.add_parser(
+        "screenshots",
+        help="the pictures that scripts/screenshots.sh renders, renewed by the "
+        "screenshot bot only when their pixels change",
+    )
+    screenshots_actions = screenshots_parser.add_subparsers(
+        dest="action", required=True
+    )
+    due_parser = screenshots_actions.add_parser(
+        "due",
+        help="whether the bot renders: with the script, and after a change only when "
+        "it touches a file of the list; exits 1 when not, and says why",
+    )
+    due_parser.add_argument(
+        "--since", default="", help="the commit before the change; empty for always"
+    )
+    due_parser.add_argument("--until", default="HEAD", help="the commit of the change")
+    due_parser.add_argument(
+        "--paths",
+        type=Path,
+        default=screenshots.PATHS,
+        help="the list of the files whose change can change the pictures",
+    )
+    due_parser.add_argument(
+        "--script",
+        type=Path,
+        default=screenshots.SCRIPT,
+        help="the script that renders",
+    )
+    screenshots_actions.add_parser(
+        "restore",
+        help="give each picture whose pixels the script didn't change its committed "
+        "file back, and list the others",
+    )
+    shots_keep_parser = screenshots_actions.add_parser(
+        "keep",
+        help="restore, then copy the pictures that look different into a folder, "
+        "for the screenshot bot",
+    )
+    shots_keep_parser.add_argument("folder", type=Path)
+    parts_parser = screenshots_actions.add_parser(
+        "parts", help="how many commits carry the pictures of a folder of keep"
+    )
+    parts_parser.add_argument("folder", type=Path)
+    shots_commit_parser = screenshots_actions.add_parser(
+        "commit",
+        help="the request to GitHub's GraphQL API that commits a part of what a "
+        "folder of keep holds onto a branch of --repo, once it is checked",
+    )
+    shots_commit_parser.add_argument("folder", type=Path)
+    shots_commit_parser.add_argument("--branch", required=True)
+    shots_commit_parser.add_argument(
+        "--head", required=True, help="the commit that the branch must still be at"
+    )
+    shots_commit_parser.add_argument("--headline", required=True)
+    shots_commit_parser.add_argument("--body", default="")
+    shots_commit_parser.add_argument(
+        "--part", type=int, default=1, help="which of the parts, from 1"
+    )
+    shots_report_parser = screenshots_actions.add_parser(
+        "report", help="the description of the bot's pull request"
+    )
+    shots_report_parser.add_argument("folder", type=Path)
+    shots_report_parser.add_argument(
+        "--sha", required=True, help="the commit that was rendered"
+    )
+    shots_report_parser.add_argument(
+        "--run", required=True, help="the link of the run of the workflow"
+    )
+    shots_report_parser.add_argument(
+        "--script",
+        type=Path,
+        default=screenshots.SCRIPT,
+        help="the script that rendered",
+    )
     fix_parser = commands.add_parser(
         "fix",
         help="the fix bot: the commands that fix what a check found, and the commits "
@@ -976,6 +1100,12 @@ def main(
     if arguments.command == "diagrams":
         try:
             return diagrams_command(arguments, root)
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "screenshots":
+        try:
+            return screenshots_command(arguments, root)
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
