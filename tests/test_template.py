@@ -1697,6 +1697,71 @@ def test_the_checks_find_the_same_problems_without_perl(
     assert (with_tail.returncode, with_tail.stdout) == (1, with_perl.stdout)
 
 
+def stub_in_front(folder: Path, name: str, script: str) -> str:
+    """A PATH with a bash script as the command name in front of the PATH of the
+    tests: the script runs the real command after it drops its own folder."""
+    folder.mkdir()
+    (folder / name).write_text(
+        f'#!/usr/bin/env bash\n{script}\nPATH="${{PATH#*:}}"\nexec {name} "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (folder / name).chmod(0o755)
+    return f"{folder}{os.pathsep}{os.environ['PATH']}"
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_find_the_same_problems_with_the_grep_of_macos(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The grep of macOS reads -Z as gzip, and ends no name with a NUL for it: the
+    # step asks for the NUL with --null, which every grep knows.
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    script = check[: check.index('step "Diagrams"')]
+    repository = a_repository_with_problems(tmp_path / "repository")
+    bsd = stub_in_front(
+        tmp_path / "bsd",
+        "grep",
+        'for word in "$@"; do\n'
+        '  if [[ "$word" == -[!-]*Z* ]]; then echo "-Z is gzip here" >&2; exit 2; fi\n'
+        "done",
+    )
+
+    gnu = run_the_steps(repository, script)
+    macos = run_the_steps(repository, script, path=bsd)
+
+    assert "has conflict markers" in gnu.stdout
+    assert (macos.returncode, macos.stdout, macos.stderr) == (1, gnu.stdout, "")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_stop_on_a_git_older_than_2_31(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "spaces.txt").write_bytes(b"spaces \n")
+    old = stub_in_front(
+        tmp_path / "old",
+        "git",
+        'for word in "$@"; do\n'
+        '  if [[ "$word" == --deduplicate ]]; then exit 129; fi\n'
+        "done",
+    )
+
+    result = run_the_steps(
+        repository, check[: check.index('step "Diagrams"')], path=old
+    )
+
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "\n== Text files\n",
+        "scripts/check.sh needs Git 2.31 or newer.\n",
+    )
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize("files", [{}, {"binary.bin": b"\0text \n"}])
 def test_the_checks_pass_without_text_files(

@@ -36,6 +36,13 @@ files() {
 }
 
 step "Text files"
+# --deduplicate is new in Git 2.31; an older git would list no files, and every step
+# would pass without checking anything. The coach has nothing to add to that.
+if ! git ls-files --deduplicate >/dev/null 2>&1; then
+  echo "scripts/check.sh needs Git 2.31 or newer." >&2
+  current=""
+  exit 1
+fi
 problems=0
 # A problem of a file: in the log, and in the CI also as an annotation at the first
 # line that matches the pattern, or at the end of the file, which the files of a pull
@@ -80,7 +87,7 @@ while IFS= read -r -d '' file; do
 done < <(files)
 text=()
 if ((${#names[@]} > 0)); then
-  mapfile -d '' text < <(printf '%s\0' "${names[@]}" | xargs -0 grep -IlsZ . --)
+  mapfile -d '' text < <(printf '%s\0' "${names[@]}" | xargs -0 grep -Ils --null . --)
 fi
 # The text files that a command lists, each with a NUL at its end, as the keys of the
 # array named first: one command for all the files, or a few for a long list, rather
@@ -100,9 +107,9 @@ marker=$'^(<{7}|>{7})( |\r|$)'
 if ((${#text[@]} > 0)); then
   # -U reads the bytes as they are: the grep of Git for Windows drops the CR at the
   # end of a line otherwise, and found no CRLF line endings there.
-  listed_by crlf grep -lZU $'\r'
-  listed_by blanks grep -lZUE '[[:blank:]]$'
-  listed_by markers grep -lZUE "$marker"
+  listed_by crlf grep -lU --null $'\r'
+  listed_by blanks grep -lUE --null '[[:blank:]]$'
+  listed_by markers grep -lUE --null "$marker"
   # The files whose last byte is no line break. Perl, which comes with Git for
   # Windows, macOS and Linux, reads the last byte of every file; tail, without it,
   # that of one file at a time.
