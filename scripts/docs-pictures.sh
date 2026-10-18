@@ -19,8 +19,9 @@ export MSYS_NO_PATHCONV=1
 root="$(pwd -W 2>/dev/null || pwd)"
 recording="$(mktemp)"
 png="$(mktemp)"
+page="$(mktemp)"
 log="$(mktemp)"
-trap 'rm -f "$recording" "$png" "$log"' EXIT
+trap 'rm -f "$recording" "$png" "$page" "$log"' EXIT
 
 # VHS, git and Copier: the image comes from a Dockerfile, so that Renovate keeps it
 # current. Its build context is the repository, for the requirements of Copier.
@@ -58,16 +59,24 @@ else
   exit 1
 fi
 
-# The dashboard as the website shows it, in the browser of the social preview. Python
-# first checks that the page loads: the browser would take a picture of an error too.
+# The dashboard as the website shows it, in the browser of the social preview. curl
+# fetches the page first, so a page that does not load fails here instead of becoming a
+# picture of an error. The page caps its width below that of its main table, which then
+# scrolls: the copy that the browser draws lifts the cap, so every column is in the
+# picture. The page has no scripts, and its base address keeps its links and pictures.
 dashboard="https://dennis-otto.github.io/repo-blueprint/dashboard/"
 browser="$(sed -n 's/^FROM //p' .github/social-preview/Dockerfile)"
-if docker run --rm "$browser" sh -c '
-  python3 -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=60)" "$1" &&
+# The curl of Git for Windows is a Windows program: it takes the Windows path of the file.
+saved="$(cygpath --mixed "$page" 2>/dev/null || echo "$page")"
+if curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+  --connect-timeout 10 --max-time 60 --output "$saved" "$dashboard" 2>"$log" &&
+  grep --quiet '</head>' "$page" &&
+  sed "0,/<\/head>/s||<base href=\"$dashboard\"><style>main { max-width: none; }</style></head>|" "$page" |
+  docker run --rm --interactive "$browser" sh -c 'cat >/tmp/dashboard.html &&
     /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell \
-    --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --window-size=1480,900 \
-    --virtual-time-budget=10000 --screenshot=/tmp/dashboard.png "$1" >&2 &&
-    cat /tmp/dashboard.png' sh "$dashboard" >"$png" 2>"$log" &&
+    --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --window-size=1760,900 \
+    --virtual-time-budget=10000 --screenshot=/tmp/dashboard.png file:///tmp/dashboard.html >&2 &&
+    cat /tmp/dashboard.png' >"$png" 2>>"$log" &&
   [[ -s "$png" ]]; then
   cp "$png" docs/images/dashboard.png
   echo "Rendered docs/images/dashboard.png."

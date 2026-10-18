@@ -791,7 +791,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         tmp_path,
         project_name="Repo Blueprint",
         project_slug="repo-blueprint",
-        description="A Copier template for GitHub repositories, with tests, releases, security checks and bots built in, for seven kinds of projects.",
+        description="Copier template for self-maintaining GitHub repos (Python, Home Assistant/HACS, Nextcloud apps, GitHub Actions, Node/TypeScript, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update.",
         project_type="github-action",
         python_package="blueprint",
         license="MIT-0",
