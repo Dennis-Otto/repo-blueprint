@@ -6,9 +6,12 @@
 For every public repository that is no fork and not archived, it shows the release of
 the blueprint it is on and the pull request that updates it, its latest release and the
 pull request of the next one, its open pull requests and those that conflict, the last
-run of its main workflows on main, and its OpenSSF Scorecard. It shows nothing that
-isn't public anyway: no finding of code scanning and no alert of Dependabot. The
-Dashboard workflow publishes it on GitHub Pages.
+run of its main workflows on main, the website among them, and its OpenSSF Scorecard.
+Beside the page it writes the same data as JSON, repos.json, the health of each day,
+history.json, and the newest releases of every repository as an Atom feed,
+releases.atom, at addresses that stay. It shows nothing that isn't public anyway: no
+finding of code scanning and no alert of Dependabot. The Dashboard workflow publishes
+it on GitHub Pages.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -52,6 +55,9 @@ WORKFLOWS = {
     "CodeQL": "codeql.yml",
     "Release": "release.yml",
     "Verification": "verify-release.yml",
+    # The Docs workflow builds the website on main and publishes it; in the blueprint,
+    # whose website the Dashboard workflow publishes, it builds and checks it.
+    "Website": "docs.yml",
     "Settings": "settings.yml",
     "Findings": "findings.yml",
     "Links": "links.yml",
@@ -77,6 +83,11 @@ PASSED = ("success", "neutral")
 UPDATE_BRANCH = "blueprint/update"
 # The seconds that a request to a website may take, such as one to the Scorecard.
 TIMEOUT = 30
+# Where the Dashboard workflow publishes the dashboard, which its feed links to.
+PUBLISHED = "https://dennis-otto.github.io/repo-blueprint/dashboard/"
+# The version of the shape of repos.json: a change that takes a field away or changes
+# its meaning raises it, a new field doesn't.
+SCHEMA = 1
 
 Opener = Callable[..., Any]
 
@@ -106,6 +117,9 @@ class Row:
     """What the dashboard shows of one repository."""
 
     repo: str
+    description: str = ""
+    homepage: str = ""
+    stars: int = 0
     kind: str = ""
     blueprint: str = ""
     update: Update | None = None
@@ -236,8 +250,18 @@ def scorecard(repo: str, opener: Opener) -> float | None:
     return float(score) if isinstance(score, int | float) else None
 
 
-def collect(api: Api, repo: str, opener: Opener) -> Row:
-    row = Row(repo)
+def collect(
+    api: Api, repo: str, opener: Opener, about: dict[str, Any] | None = None
+) -> Row:
+    """The row of repo, with what the list of the owner's repositories says about it,
+    about."""
+    about = about or {}
+    row = Row(
+        repo,
+        description=str(about.get("description") or ""),
+        homepage=str(about.get("homepage") or ""),
+        stars=int(about.get("stargazers_count") or 0),
+    )
     found = answers(api, repo)
     row.kind = found.get("project_type", "")
     row.blueprint = found.get("_commit", "")
@@ -268,14 +292,26 @@ def collect(api: Api, repo: str, opener: Opener) -> Row:
     return row
 
 
-def repositories(api: Api, owner: str) -> list[str]:
-    """The public repositories of the owner, without archived ones and forks."""
+def listing(api: Api, owner: str) -> list[dict[str, Any]]:
+    """The public repositories of the owner, without archived ones and forks, by name,
+    as GitHub lists them: with their description, website and stars."""
     found = api.get_all(f"users/{owner}/repos?type=owner&per_page=100")
     return sorted(
-        repo["full_name"]
-        for repo in found
-        if not repo.get("archived") and not repo.get("fork") and not repo.get("private")
+        (
+            repo
+            for repo in found
+            if not repo.get("archived")
+            and not repo.get("fork")
+            and not repo.get("private")
+        ),
+        key=lambda repo: str(repo["full_name"]),
     )
+
+
+def repositories(api: Api, owner: str) -> list[str]:
+    """The names of the public repositories of the owner, without archived ones and
+    forks."""
+    return [str(repo["full_name"]) for repo in listing(api, owner)]
 
 
 # ------------------------------------------------------------------------- health
@@ -325,6 +361,41 @@ class Health:
 
 def when(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+@dataclass
+class Release:
+    """A published release of a repository that is no prerelease."""
+
+    repo: str
+    tag: str
+    url: str
+    published: str
+    notes: str = ""
+
+
+def stable_releases(api: Api, repo: str) -> list[Release]:
+    """The published releases of repo, of the 100 newest that GitHub lists, without
+    prereleases and drafts, the newest first."""
+    found = api.get(f"repos/{repo}/releases?per_page=100") or []
+    stable = [
+        Release(
+            repo,
+            str(item.get("tag_name") or ""),
+            str(
+                item.get("html_url")
+                or f"https://github.com/{repo}/releases/tag/"
+                + urllib.parse.quote(str(item.get("tag_name") or ""))
+            ),
+            str(item["published_at"]),
+            str(item.get("body") or ""),
+        )
+        for item in found
+        if item.get("published_at")
+        and not item.get("prerelease")
+        and not item.get("draft")
+    ]
+    return sorted(stable, key=lambda release: when(release.published), reverse=True)
 
 
 def main_runs(api: Api, repo: str, workflow: str) -> list[dict[str, Any]]:
@@ -453,21 +524,21 @@ def median_minutes(runs: list[dict[str, Any]]) -> float | None:
 
 
 def health(
-    api: Api, download: Downloader, repo: str, now: datetime, ci: str = CI_FILES[0]
+    api: Api,
+    download: Downloader,
+    repo: str,
+    now: datetime,
+    ci: str = CI_FILES[0],
+    releases: Sequence[Release] | None = None,
 ) -> Health:
-    """The health of repo, whose CI is the workflow ci."""
+    """The health of repo, whose CI is the workflow ci and whose stable releases are
+    releases, which it fetches itself when it gets none."""
     since = now - WINDOW
-    releases = api.get(f"repos/{repo}/releases?per_page=100") or []
+    found = stable_releases(api, repo) if releases is None else releases
     return Health(
         coverage=report(coverage, api, download, repo, ci, "coverage"),
         mutation=report(mutation, api, download, repo, "mutation.yml", "mutation"),
-        releases=sum(
-            1
-            for release in releases
-            if release.get("published_at")
-            and not release.get("prerelease")
-            and when(release["published_at"]) >= since
-        ),
+        releases=sum(1 for release in found if when(release.published) >= since),
         answer_hours=answer_hours(api, repo, since),
         ci_minutes=median_minutes(main_runs(api, repo, ci)),
     )
@@ -518,6 +589,112 @@ def week_before(history: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
     target = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     older = [item for item in history if str(item.get("date", "")) <= target]
     return dict((older[-1] if older else {}).get("repos") or {})
+
+
+# --------------------------------------------------------------------------- data
+
+# The releases that the feed holds, the newest first.
+FEED = 30
+# The characters of the notes of a release that its entry in the feed shows.
+SUMMARY = 500
+ATOM = "http://www.w3.org/2005/Atom"
+# What XML 1.0 has no place for: every control character but the tab and the line
+# breaks, which the notes of a release could hold and which would make the whole feed
+# unreadable.
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def known(value: Any) -> Any:
+    """value with None for every empty text in it: what isn't known, or isn't there."""
+    if isinstance(value, dict):
+        return {key: known(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [known(item) for item in value]
+    return None if value == "" else value
+
+
+def data(rows: list[Row], owner: str, latest: str, now: datetime) -> dict[str, Any]:
+    """What the dashboard shows, for repos.json: every repository, by name, with each
+    value that the page shows, and null where none is known."""
+    return dict(
+        known(
+            {
+                "schema": SCHEMA,
+                "generated": stamp(now),
+                "owner": owner,
+                "blueprint": latest,
+                "repos": [
+                    {
+                        "name": row.repo.split("/", 1)[1],
+                        "url": f"https://github.com/{row.repo}",
+                        **asdict(row),
+                        "release_url": f"https://github.com/{row.repo}/releases/tag/"
+                        + urllib.parse.quote(row.release)
+                        if row.release
+                        else "",
+                    }
+                    for row in rows
+                ],
+            }
+        )
+    )
+
+
+def summary(notes: str) -> str:
+    """The first SUMMARY characters of the notes of a release, as plain text, cut at
+    the end of a word."""
+    text = CONTROL.sub("", notes.replace("\r\n", "\n")).strip()
+    if len(text) <= SUMMARY:
+        return text
+    return text[:SUMMARY].rsplit(maxsplit=1)[0] + "…"
+
+
+def feed(releases: Sequence[Release], owner: str, url: str, now: datetime) -> str:
+    """The Atom feed of the newest FEED releases of every repository, for the
+    dashboard at url: ElementTree escapes every text and every attribute."""
+    newest = sorted(releases, key=lambda release: when(release.published), reverse=True)
+    address = urllib.parse.urljoin(url, "releases.atom")
+    ElementTree.register_namespace("", ATOM)
+    root = ElementTree.Element(f"{{{ATOM}}}feed")
+
+    def add(
+        parent: ElementTree.Element, tag: str, text: str = "", **attributes: str
+    ) -> ElementTree.Element:
+        element = ElementTree.SubElement(parent, f"{{{ATOM}}}{tag}", attributes)
+        element.text = text or None
+        return element
+
+    add(root, "title", f"The releases of the repositories of {owner}")
+    add(root, "id", address)
+    add(root, "link", rel="self", type="application/atom+xml", href=address)
+    add(root, "link", rel="alternate", type="text/html", href=url)
+    add(root, "updated", newest[0].published if newest else stamp(now))
+    author = add(root, "author")
+    add(author, "name", owner)
+    add(author, "uri", f"https://github.com/{owner}")
+    add(root, "generator", "dashboard.py", uri=f"https://github.com/{BLUEPRINT}")
+    for release in newest[:FEED]:
+        name = release.repo.split("/", 1)[1]
+        entry = add(root, "entry")
+        add(entry, "title", f"{name} {release.tag}")
+        add(entry, "id", release.url)
+        add(entry, "link", rel="alternate", type="text/html", href=release.url)
+        add(entry, "updated", release.published)
+        add(entry, "published", release.published)
+        add(entry, "category", term=name)
+        text = summary(release.notes)
+        if text:
+            add(entry, "summary", text, type="text")
+    ElementTree.indent(root)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        + ElementTree.tostring(root, encoding="unicode")
+        + "\n"
+    )
 
 
 # --------------------------------------------------------------------------- page
@@ -705,17 +882,24 @@ def render(
         )
         lines.append("<tr>" + "".join(cells) + "</tr>")
     header = "".join(f"<th>{html.escape(head)}</th>" for head in heads)
-    stamp = now.strftime("%Y-%m-%d %H:%M UTC")
+    moment = now.strftime("%Y-%m-%d %H:%M UTC")
     return (
         "<!doctype html>\n"
         '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         "<title>Repository dashboard</title>\n"
+        '<link rel="alternate" type="application/atom+xml" '
+        'title="The releases of every repository" href="releases.atom">\n'
+        '<link rel="alternate" type="application/json" '
+        'title="The data of the dashboard" href="repos.json">\n'
         f"<style>{STYLE}</style>\n</head>\n<body>\n<main>\n"
         "<h1>Repository dashboard</h1>\n"
         f"<p>The public repositories of {html.escape(owner)} and the bots of the "
         f'<a href="https://github.com/{BLUEPRINT}">repo blueprint</a>, '
-        f"as of {stamp}. The blueprint's latest release is {html.escape(latest or DASH)}.</p>\n"
+        f"as of {moment}. The blueprint's latest release is {html.escape(latest or DASH)}. "
+        'The same data as JSON: <a href="repos.json">repos.json</a>, the health of '
+        'each day: <a href="history.json">history.json</a>, and the releases of every '
+        'repository as a feed: <a href="releases.atom">releases.atom</a>.</p>\n'
         f'<div class="table"><table>\n<thead><tr>{header}</tr></thead>\n<tbody>\n'
         + "\n".join(lines)
         + "\n</tbody>\n</table></div>\n"
@@ -743,6 +927,11 @@ def main(
         default="",
         help="the address of the history.json of the published dashboard, if any",
     )
+    parser.add_argument(
+        "--url",
+        default=PUBLISHED,
+        help="the address where the dashboard is published, which its feed links to",
+    )
     arguments = parser.parse_args(argv)
     api = api or Api()
     now = now or datetime.now(UTC)
@@ -753,10 +942,14 @@ def main(
             "tag_name", ""
         )
         rows = [
-            collect(api, repo, opener) for repo in repositories(api, arguments.owner)
+            collect(api, str(found["full_name"]), opener, found)
+            for found in listing(api, arguments.owner)
         ]
+        published: list[Release] = []
         for row in rows:
-            row.health = health(api, download, row.repo, now, row.ci)
+            releases = stable_releases(api, row.repo)
+            published += releases
+            row.health = health(api, download, row.repo, now, row.ci, releases)
     except (GitHubError, HistoryError) as error:
         print(f"dashboard.py: {error}", file=sys.stderr)
         return 2
@@ -768,6 +961,13 @@ def main(
     arguments.out.with_name("history.json").write_text(
         json.dumps(add_to_history(history, rows, now), indent=1) + "\n",
         encoding="utf-8",
+    )
+    arguments.out.with_name("repos.json").write_text(
+        json.dumps(data(rows, arguments.owner, latest, now), indent=1) + "\n",
+        encoding="utf-8",
+    )
+    arguments.out.with_name("releases.atom").write_text(
+        feed(published, arguments.owner, arguments.url, now), encoding="utf-8"
     )
     print(f"Wrote the dashboard of {len(rows)} repositories to {arguments.out}.")
     return 0

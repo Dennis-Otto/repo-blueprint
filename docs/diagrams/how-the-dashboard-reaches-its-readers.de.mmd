@@ -1,0 +1,39 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie das Dashboard seine Leser erreicht
+    accDescr: Alle zwei Stunden, nach einer Änderung des Changelogs und auf Abruf führt der Dashboard-Workflow dashboard.py aus, das liest, was GitHub von jedem öffentlichen Repository des Besitzers zeigt: seine Releases, Pull Requests, Läufe und Berichte und sein Scorecard. Es schreibt die Seite und daneben dieselben Daten als repos.json, die Gesundheit jedes Tages als history.json und die 30 neuesten Releases als Atom-Feed releases.atom. GitHub Pages veröffentlicht sie unter Adressen, die bleiben, und der Job, der veröffentlicht, fragt jede Datei ab. Menschen lesen die Seite, die Website des Besitzers liest repos.json, und Feedreader folgen releases.atom.
+
+    start["Alle zwei Stunden · eine Änderung des Changelogs<br>auf Abruf"]
+    collect["dashboard.py<br>was GitHub von jedem Repository zeigt<br>Releases · Pull Requests · Läufe · Scorecard"]
+    page["index.html<br>die Seite"]
+    data["repos.json<br>dieselben Daten"]
+    history["history.json<br>die Gesundheit jedes Tages"]
+    feed["releases.atom<br>die 30 neuesten Releases"]
+    pages["GitHub Pages<br>/repo-blueprint/dashboard/<br>jede Datei abgefragt"]
+    people["Menschen"]
+    hub["Die Website des Besitzers"]
+    readers["Feedreader"]
+
+    start --> collect
+    collect --> page
+    collect --> data
+    collect --> history
+    collect --> feed
+    page --> pages
+    data --> pages
+    history --> pages
+    feed --> pages
+    pages --> people
+    pages --> hub
+    pages --> readers
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    class collect bot
+    class page,data,history,feed,pages done
+    class people,hub,readers person

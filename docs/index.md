@@ -201,8 +201,8 @@ The guide describes what each repository needs [once](guide.md#once-per-reposito
 
     ---
 
-    Every public repository of the owner at a glance: the release of the blueprint it is on, its releases, pull requests, runs, Scorecard and health.
+    Every public repository of the owner at a glance: the release of the blueprint it is on, its releases, pull requests, runs, website, Scorecard and health, with the same data as JSON and a feed of every release.
 
-    [:octicons-arrow-right-24: Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/)
+    [:octicons-arrow-right-24: Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) · [JSON](https://dennis-otto.github.io/repo-blueprint/dashboard/repos.json) · [Feed](https://dennis-otto.github.io/repo-blueprint/dashboard/releases.atom)
 
 </div>
