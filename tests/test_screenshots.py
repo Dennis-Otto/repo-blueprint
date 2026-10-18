@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -435,6 +436,23 @@ def test_keep_leaves_the_folder_away_when_every_picture_looks_the_same(
     assert git_in(root, "status", "--porcelain") == ""
 
 
+def test_keep_keeps_a_deletion_alone_too(tmp_path: Path) -> None:
+    # A script that dropped a picture and changed no other pixels.
+    root = repository(
+        tmp_path / "repository",
+        {"docs/images/a.png": png(), "docs/images/gone.png": png()},
+    )
+    (root / "docs/images/gone.png").unlink()
+    folder = tmp_path / "kept"
+    found = keep(root, folder)
+    assert found == Kept((Picture("docs/images/gone.png", "deleted"),))
+    assert (folder / "deleted.txt").read_text(
+        encoding="utf-8"
+    ) == "docs/images/gone.png\n"
+    assert not (folder / "files").exists()
+    assert kept(folder) == found
+
+
 def test_keep_names_a_picture_it_cant_read(tmp_path: Path) -> None:
     root = repository(
         tmp_path / "repository", {"docs/images/a.png": b"\x89PNG\r\n\x1a\nold"}
@@ -727,6 +745,24 @@ def test_the_commands_of_the_screenshot_bot(
     assert capsys.readouterr().out.startswith("These pictures look different:")
     assert main(["screenshots", "restore"], root=root) == 0
     assert "| `docs/images/other.png` | changed | 25.00 % |" in capsys.readouterr().out
+    # Without Pillow, the command names what installs it.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(sys.modules, "PIL", None)
+        assert main(["screenshots", "restore"], root=root) == 2
+        assert (
+            "screenshots restore needs PIL: python3 -m pip install --require-hashes"
+            " -r stacks/screenshots/requirements.txt"
+        ) in capsys.readouterr().err
+        (root / ".github").mkdir()
+        (root / ".github/screenshots-requirements.txt").write_text(
+            "pillow\n", encoding="utf-8"
+        )
+        assert main(["screenshots", "keep", str(folder)], root=root) == 2
+        assert (
+            "screenshots keep needs PIL: python3 -m pip install --require-hashes"
+            " -r .github/screenshots-requirements.txt"
+        ) in capsys.readouterr().err
+        shutil.rmtree(root / ".github")
     assert main(["screenshots", "parts", str(folder)], root=root) == 0
     assert capsys.readouterr().out == "1\n"
 

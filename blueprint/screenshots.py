@@ -256,6 +256,8 @@ def keep(root: Path, folder: Path | None = None) -> Kept:
     found = Kept(tuple(pictures), tuple(sorted(ignored)))
     if folder is None or not pictures:
         return found
+    # Also when the script only deleted pictures, which leaves nothing to copy.
+    folder.mkdir(parents=True, exist_ok=True)
     for picture in pictures:
         if picture.status != "deleted":
             target = folder / "files" / picture.path

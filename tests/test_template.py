@@ -9017,6 +9017,11 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
         "startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')"
         in condition_of(plan)
     )
+    # Only the push run of a release, not its daily or manual runs on the same commit.
+    assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
+    # A push that is not due never replaces a waiting render of one that is.
+    assert not re.search(r"^concurrency:", workflow, re.M)
+    assert "concurrency:" not in plan
     # The script of the project runs without secrets and with a token that reads.
     render = job_of(workflow, "render")
     assert "\n        run: bash scripts/screenshots.sh\n" in render
@@ -9024,6 +9029,10 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     for secret in ("secrets.", "environment:", "persist-credentials: true"):
         assert secret not in render, secret
     assert " screenshots keep " in render
+    assert (
+        "    concurrency:\n      group: ${{ github.workflow }}-render\n"
+        "      cancel-in-progress: false\n"
+    ) in render
     assert "uv venv --quiet .venv-docs\n" in render
     # Only the job that runs nothing of the script has the release app, and takes
     # the pictures as data, checked by blueprint.py of main.
@@ -9035,6 +9044,10 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
         in opener
     )
     assert " screenshots commit " in opener
+    assert (
+        "    concurrency:\n      group: ${{ github.workflow }}-pull-request\n"
+        "      cancel-in-progress: false\n"
+    ) in opener
     assert "\n          permission-workflows: write\n" in opener
     assert '\n          gh pr merge "$open" --auto --squash\n' in opener
     assert 'author.login == \\"app/$APP_SLUG\\"' in opener
@@ -9066,6 +9079,7 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
     assert "  SCRIPT: scripts/docs-pictures.sh\n" in workflow
     plan = job_of(workflow, "plan")
     assert "github.repository == 'Dennis-Otto/repo-blueprint'" in condition_of(plan)
+    assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
     assert '--script "$SCRIPT" --paths "$PATHS"' in plan
     render = job_of(workflow, "render")
     assert '\n        run: bash "$SCRIPT"\n' in render

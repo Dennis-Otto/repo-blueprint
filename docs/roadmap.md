@@ -26,6 +26,7 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 | Topic | What it brings |
 | --- | --- |
 | **Visual changes in pull requests** | A pull request that changes what a picture of the screenshot bot shows shows the picture before and after the change in its report, rendered by the same script |
+| **More pictures for the screenshot bot** | Starter scripts for each kind of project, screenshots of the public GitHub pages for the blueprint's own documentation, and ha-autodarts on the shared workflow ([#271](https://github.com/Dennis-Otto/repo-blueprint/issues/271)) |
 
 ## Always
 

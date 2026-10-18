@@ -5,7 +5,8 @@
 # request with each picture whose pixels changed; one whose pixels stayed the same
 # keeps its file. To see what it would change, run it, then
 # `python3 .github/blueprint.py screenshots restore`, which gives every picture that
-# looks the same its committed file back and lists the others.
+# looks the same its committed file back and lists the others. It needs Pillow:
+# `python3 -m pip install --require-hashes -r .github/screenshots-requirements.txt`.
 #
 # For now, it renders the social preview, .github/social-preview.png, from
 # .github/social-preview.html. Add the pictures of the project below: a page of its

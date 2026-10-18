@@ -401,7 +401,20 @@ def screenshots_command(arguments: argparse.Namespace, root: Path) -> int:
         return 0 if ready else 1
     if arguments.action in ("keep", "restore"):
         folder = arguments.folder if arguments.action == "keep" else None
-        print(screenshots.summary(screenshots.keep(root, folder)), end="")
+        try:
+            found = screenshots.keep(root, folder)
+        except ModuleNotFoundError as error:
+            # Pillow compares the pixels; a project's own tools may not have it.
+            wanted = ".github/screenshots-requirements.txt"
+            if not (root / wanted).is_file():
+                wanted = "stacks/screenshots/requirements.txt"
+            print(
+                f"blueprint.py: screenshots {arguments.action} needs {error.name}:"
+                f" python3 -m pip install --require-hashes -r {wanted}",
+                file=sys.stderr,
+            )
+            return 2
+        print(screenshots.summary(found), end="")
         return 0
     if arguments.action == "parts":
         print(len(screenshots.parts(arguments.folder)))

@@ -30,11 +30,6 @@ on:
 
 permissions: {}
 
-# One run at a time, which ends what it started with the branch and the pull request.
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 env:
   # The branch of the pull request, and the first line of its commits and its title.
   BRANCH: bot/screenshots
@@ -43,12 +38,14 @@ env:
 jobs:
   plan:
     name: plan the screenshots
-    # Of the runs of the Release workflow, only one that passed for the merge of a
-    # release pull request made a release.
+    # Of the runs of the Release workflow, only one that passed for the push of the
+    # merge of a release pull request made a release; its daily, manual and restarted
+    # runs see the same release commit while main stays on it.
     if: >-
       !github.event.repository.fork && (
         github.event_name != 'workflow_run' || (
           github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
           startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')
         )
       )
@@ -98,6 +95,12 @@ jobs:
     name: render the screenshots
     needs: plan
     if: needs.plan.outputs.due == 'true'
+    # One render at a time. Only a due run waits here, so a push that changes none
+    # of the listed files never replaces a waiting render of one that did; a newer
+    # render that replaces it renders a newer main.
+    concurrency:
+      group: ${{ github.workflow }}-render
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     # The script may start a demo of the project in containers.
     timeout-minutes: 60
@@ -183,6 +186,10 @@ jobs:
     needs: render
     # Once main was rendered, to open, update or close the pull request.
     if: vars.RELEASE_AUTOMATION_CLIENT_ID != '' && needs.render.result == 'success'
+    # One run at a time ends what it started with the branch and the pull request.
+    concurrency:
+      group: ${{ github.workflow }}-pull-request
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The environment holds the private key of the release app; only main may use it.

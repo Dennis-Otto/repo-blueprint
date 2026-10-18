@@ -38,12 +38,14 @@ env:
 jobs:
   plan:
     name: plan the pictures
-    # Of the runs of the Release workflow, only one that passed for the merge of a
-    # release pull request made a release.
+    # Of the runs of the Release workflow, only one that passed for the push of the
+    # merge of a release pull request made a release; its daily, manual and restarted
+    # runs see the same release commit while main stays on it.
     if: >-
       github.repository == 'Dennis-Otto/repo-blueprint' && (
         github.event_name == 'workflow_dispatch' || (
           github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
           startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')
         )
       )
