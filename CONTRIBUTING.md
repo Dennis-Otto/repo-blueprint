@@ -104,7 +104,17 @@ On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place
 Pictures make the documentation easier to follow, and so do [diagrams](#diagrams):
 
 - **Pictures** are files in `docs/images/`. A page of `docs/` names one as `images/…`, a README as `docs/images/…`, and a hook of the website (`.github/mkdocs_project.py`) shows it there too.
-- **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker. The Docs pictures workflow runs it after every release that changed a file of `.github/docs-pictures/paths.txt`, and on demand, and keeps one pull request from `bot/pictures` with the pictures whose pixels changed, which merges itself. To see what a change of yours changes, run it, then `python3 blueprint.py screenshots restore`, which gives every picture that looks the same its committed file back.
+- **On the website**, the hook of every website (`.github/mkdocs_blueprint.py`) makes the pictures quick to load: the first one of a page loads first, every other one as the reader comes to it, and a PNG, a GIF or a WebP gets its width and height, so that the page doesn't shift. A `<picture>` with a `<source media="(prefers-color-scheme: dark)">` becomes a picture for each theme, which follows the switch of the website and loads only in its theme, and opens enlarged among the pictures of that theme. A GIF with `NAME.mp4` beside it plays as that video, a third of its size, while it is in view, with `NAME.webp` or `NAME.png` until it plays; a reader who asks the system for less motion starts it.
+- **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` with its video `copier-copy.mp4` and its last screen `copier-copy.webp`, and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker, which also makes `docs/images/social-preview.webp`, the social preview of the home page at a seventh of its size. The Docs pictures workflow runs it after every release that changed a file of `.github/docs-pictures/paths.txt`, and on demand, and keeps one pull request from `bot/pictures` with the pictures whose pixels changed, which merges itself. To see what a change of yours changes, run it, then `python3 blueprint.py screenshots restore`, which gives every picture that looks the same its committed file back.
+
+### Accessibility
+
+Every website meets WCAG 2.2 AA: the stylesheet of the blueprint, `.github/mkdocs-blueprint.css`, gives the theme the contrast that it asks for and underlines the links in the text, which a color alone doesn't set apart for every reader. The check *docs* proves it after each build: `.github/a11y/check.mjs` opens every page in Chrome, in the light and the dark theme, and runs [axe-core](https://github.com/dequelabs/axe-core) on it; each serious or critical violation shows in the summary of the check and as an annotation at its page, with a link that explains the fix. For one release it only reports, so that every repository can fix its pages first; then it fails the check. To run it on your machine after a build, with Google Chrome, or another Chrome or Chromium named in `CHROME`:
+
+```sh
+npm ci --prefix .github/a11y --ignore-scripts
+node .github/a11y/check.mjs site
+```
 
 ### Pages in one column
 

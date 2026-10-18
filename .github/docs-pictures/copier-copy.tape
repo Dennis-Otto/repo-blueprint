@@ -1,6 +1,7 @@
 # A copy of the blueprint in the terminal, as the documentation shows it: VHS types
-# the command and the answers, and records the terminal into a GIF.
-# scripts/docs-pictures.sh plays it in the image of the Dockerfile next to it.
+# the command and the answers, records the terminal into a GIF and takes a picture of
+# its last screen. scripts/docs-pictures.sh plays it in the image of the Dockerfile
+# next to it, and makes the video of the website and a smaller GIF from it.
 # The commands of a tape: https://github.com/charmbracelet/vhs
 
 Output docs/images/copier-copy.gif
@@ -18,7 +19,8 @@ Set Margin 20
 Set MarginFill "#0a0f1d"
 Set WindowBar Colorful
 Set BorderRadius 12
-Set Framerate 15
+# Ten frames a second keep the GIF small; the typing still reads as typing.
+Set Framerate 10
 Set TypingSpeed 40ms
 Set CursorBlink false
 # The dark navy and the colors of the social preview, .github/social-preview.html.
@@ -95,6 +97,9 @@ Enter
 Wait /\(Y.n\)$/
 Sleep 500ms
 Enter
+# No other workflows of tests, whose question shows no default.
+Sleep 700ms
+Enter
 
 # Copier writes the files and says what comes next, and the prompt comes back.
 Wait@60s /^\$$/
@@ -107,4 +112,8 @@ Sleep 3s
 Type "ls paperless-sync/.github/workflows"
 Sleep 300ms
 Enter
-Sleep 4s
+Sleep 1s
+# The last screen, which the website shows before its video plays. VHS writes it
+# with the next frame, so the recording goes on after it.
+Screenshot docs/images/copier-copy.png
+Sleep 3s

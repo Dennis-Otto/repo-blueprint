@@ -8,6 +8,18 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["local>Dennis-Otto/repo-blueprint//.github/renovate-blueprint.json5"],
+  customManagers: [
+    {
+      // The release of Mermaid that the hook of every website names for Material,
+      // which reaches every repository with the hook.
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/mkdocs_blueprint\\.py$/"],
+      matchStrings: [
+        "https://unpkg\\.com/(?<depName>mermaid)@(?<currentValue>\\d+\\.\\d+\\.\\d+)/dist/mermaid\\.min\\.js",
+      ],
+      datasourceTemplate: "npm",
+    },
+  ],
   packageRules: [
     {
       // The Renovate of the Renovate workflow, pinned by digest, follows the line
@@ -25,6 +37,22 @@
       matchFileNames: [".github/prose/**"],
       enabled: true,
       groupName: "the tools of the prose check",
+    },
+    {
+      // The tools of the accessibility check of the websites, which every repository
+      // gets from here.
+      matchFileNames: [".github/a11y/**"],
+      enabled: true,
+      groupName: "the tools of the accessibility check",
+    },
+    {
+      // The Mermaid that every website draws its diagrams with, within the major
+      // version that Material loads: .github/mkdocs_blueprint.py warns when Material
+      // loads another one, which fails the check docs, and then both move.
+      matchManagers: ["custom.regex"],
+      matchDepNames: ["mermaid"],
+      allowedVersions: "<12",
+      groupName: "the tools of the websites",
     },
     {
       // The uv that the workflows set up, which every repository gets from here.

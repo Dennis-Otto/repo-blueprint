@@ -11,7 +11,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 [Start a repository](#start-a-repository){ .md-button .md-button--primary }
 [Read the guide](guide.md){ .md-button }
 
-![The social preview of the blueprint: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](https://raw.githubusercontent.com/Dennis-Otto/repo-blueprint/main/.github/social-preview.png)
+![The social preview of the blueprint: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](images/social-preview.webp)
 
 ## How a repository looks after itself
 

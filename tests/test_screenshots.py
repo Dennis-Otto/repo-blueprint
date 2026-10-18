@@ -140,6 +140,8 @@ def commit(root: Path, files: dict[str, bytes], message: str = "Change") -> str:
         ("img/photo.jpeg", True),
         ("docs/images/copier-copy.gif", True),
         ("docs/images/hero.webp", True),
+        # The video that the website plays in place of a GIF.
+        ("docs/images/copier-copy.mp4", True),
         (".github/social-preview.png", True),
         ("docs/images/diagrams/steps.svg", False),
         ("docs/index.md", False),
@@ -162,6 +164,9 @@ def test_a_picture_starts_as_its_kind_does() -> None:
     assert looks_like_its_kind("a.JPG", b"\xff\xd8\xff\xe0rest")
     assert looks_like_its_kind("a.webp", b"RIFF\0\0\0\0WEBPVP8 ")
     assert not looks_like_its_kind("a.webp", b"RIFF\0\0\0\0WAVEfmt ")
+    assert looks_like_its_kind("a.mp4", b"\0\0\0\x20ftypisom\0\0\x02\0")
+    assert not looks_like_its_kind("a.mp4", b"\0\0\0\x20moov")
+    assert not looks_like_its_kind("a.mp4", png())
     assert not looks_like_its_kind("a.png", b"<svg>")
     assert not looks_like_its_kind("a.gif", png())
 
@@ -461,6 +466,19 @@ def test_keep_names_a_picture_it_cant_read(tmp_path: Path) -> None:
     assert keep(root, tmp_path / "kept").pictures == (
         Picture("docs/images/a.png", "changed", None),
     )
+
+
+def test_keep_takes_a_video_whose_bytes_changed(tmp_path: Path) -> None:
+    # Pillow reads no video, so a video counts as changed by its bytes alone.
+    video = b"\0\0\0\x20ftypisom\0\0\x02\0"
+    root = repository(
+        tmp_path / "repository",
+        {"docs/images/a.mp4": video + b"old", "docs/images/b.mp4": video},
+    )
+    write(root, {"docs/images/a.mp4": video + b"new", "docs/images/b.mp4": video})
+    kept = keep(root, tmp_path / "kept")
+    assert kept.pictures == (Picture("docs/images/a.mp4", "changed", None),)
+    assert (tmp_path / "kept/files/docs/images/a.mp4").read_bytes() == video + b"new"
 
 
 def test_keep_fails_on_a_picture_that_is_no_picture(tmp_path: Path) -> None:

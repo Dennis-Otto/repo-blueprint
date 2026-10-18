@@ -27,13 +27,17 @@ from typing import Any
 
 SCRIPT = Path("scripts/screenshots.sh")
 PATHS = Path(".github/screenshots-paths.txt")
-# The pictures that the bot commits, by their endings, and how each file starts.
+# The pictures that the bot commits, by their endings, and how each file starts; an
+# MP4 starts with the size of its first box, which looks_like_its_kind skips. A
+# video, such as one that a website plays in place of a GIF, has no pixels that
+# Pillow reads, so it counts as changed when its bytes change.
 SIGNATURES = {
     ".png": (b"\x89PNG\r\n\x1a\n",),
     ".jpg": (b"\xff\xd8\xff",),
     ".jpeg": (b"\xff\xd8\xff",),
     ".gif": (b"GIF87a", b"GIF89a"),
     ".webp": (b"RIFF",),
+    ".mp4": (b"ftyp",),
 }
 PART = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
 # What one request to GitHub's GraphQL API carries at most: larger sets of pictures
@@ -101,6 +105,8 @@ def looks_like_its_kind(path: str, data: bytes) -> bool:
     suffix = Path(path).suffix.lower()
     if suffix == ".webp" and data[8:12] != b"WEBP":
         return False
+    if suffix == ".mp4":
+        data = data[4:]
     return data.startswith(SIGNATURES[suffix])
 
 
