@@ -31,6 +31,10 @@ needs_git = pytest.mark.skipif(
 needs_bash = pytest.mark.skipif(
     BASH is None or GIT is None, reason="the steps run in bash, Git Bash on Windows"
 )
+# The steps run sync_issue_assistant.py, copied into a repository of their own. In the
+# copy of the mutation tests, that is the code with the mutants, which runs only where
+# mutmut set it up, so the Mutation workflow leaves them out.
+runs_the_script = pytest.mark.mutation_unsafe
 
 OLD = "a12fb7227ff7d966809cad4e043e159977fccfcd"
 NEW = "c61378e2e2fb454402774a2d3bb75296739ce2d0"
@@ -624,6 +628,9 @@ def test_the_blueprint_pins_one_release_of_the_issue_assistant() -> None:
         )
 
 
+# In the copy of the mutation tests, the script that the test copies is the code with
+# the mutants, which runs only where mutmut set it up.
+@pytest.mark.mutation_unsafe
 @needs_git
 def test_the_script_runs_as_the_workflow_runs_it(tmp_path: Path) -> None:
     root = blueprint(tmp_path / "blueprint")
@@ -905,6 +912,7 @@ def blueprint_with_script(root: Path) -> Path:
     return blueprint(root, {**BLUEPRINT, "sync_issue_assistant.py": script})
 
 
+@runs_the_script
 @needs_bash
 @pytest.mark.parametrize(
     ("lint", "current"),
@@ -941,6 +949,7 @@ def test_the_sync_finds_the_latest_release(
     ]
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_needs_a_published_release(tmp_path: Path) -> None:
     root = with_script(
@@ -976,6 +985,7 @@ def verify(
     return result, calls, summary
 
 
+@runs_the_script
 @needs_bash
 @pytest.mark.parametrize("status", ["identical", "ahead"])
 def test_a_signed_attested_immutable_release_on_main_passes(
@@ -997,6 +1007,7 @@ def test_a_signed_attested_immutable_release_on_main_passes(
     )
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_asks_github_again(tmp_path: Path) -> None:
     result, calls, _ = verify(
@@ -1011,6 +1022,7 @@ def test_the_sync_asks_github_again(tmp_path: Path) -> None:
     ]
 
 
+@runs_the_script
 @needs_bash
 @pytest.mark.parametrize(
     ("variables", "plans", "signed", "error"),
@@ -1080,6 +1092,7 @@ def test_any_other_release_of_the_issue_assistant_stops_the_sync(
     )
 
 
+@runs_the_script
 @needs_bash
 def test_a_signature_that_could_not_be_checked_refuses_nothing(tmp_path: Path) -> None:
     result, _, summary = verify(tmp_path, signed=2)
@@ -1092,6 +1105,7 @@ def test_a_signature_that_could_not_be_checked_refuses_nothing(tmp_path: Path) -
     assert summary == ""
 
 
+@runs_the_script
 @needs_bash
 def test_a_question_without_an_answer_refuses_nothing(tmp_path: Path) -> None:
     result, _, summary = verify(tmp_path, plans={"immutable": "fail\nfail\nfail\n"})
@@ -1100,6 +1114,7 @@ def test_a_question_without_an_answer_refuses_nothing(tmp_path: Path) -> None:
     assert summary == ""
 
 
+@runs_the_script
 @needs_bash
 def test_an_attestation_that_github_could_not_check_refuses_nothing(
     tmp_path: Path,
@@ -1115,6 +1130,7 @@ def test_an_attestation_that_github_could_not_check_refuses_nothing(
     assert summary == ""
 
 
+@runs_the_script
 @needs_bash
 @pytest.mark.parametrize(
     ("have", "latest", "older"),
@@ -1194,6 +1210,7 @@ def install(
     return result, calls, output, summary, root
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_installs_the_verified_commit(tmp_path: Path) -> None:
     result, calls, output, summary, root = install(tmp_path, FETCH_FAILURES="1")
@@ -1219,6 +1236,7 @@ def test_the_sync_installs_the_verified_commit(tmp_path: Path) -> None:
     assert sync.kept(kept) == sync.changed_files(root)
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_without_changes_says_so(tmp_path: Path) -> None:
     root = blueprint_with_script(tmp_path / "blueprint")
@@ -1244,6 +1262,7 @@ def test_the_sync_without_changes_says_so(tmp_path: Path) -> None:
     )
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_stops_when_the_commit_cant_be_fetched(tmp_path: Path) -> None:
     result, calls, output, _, _ = install(tmp_path, FETCH_FAILURES="3")
@@ -1291,6 +1310,7 @@ def pull_request(
 HEADLINE = "fix(deps): update the issue assistant to v1.3.1"
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_opens_a_pull_request_that_merges_itself(tmp_path: Path) -> None:
     result, calls, summary = pull_request(tmp_path)
@@ -1328,6 +1348,7 @@ def test_the_sync_opens_a_pull_request_that_merges_itself(tmp_path: Path) -> Non
     )
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_moves_its_pull_request_on_to_a_newer_release(tmp_path: Path) -> None:
     result, calls, _ = pull_request(
@@ -1351,6 +1372,7 @@ def test_the_sync_moves_its_pull_request_on_to_a_newer_release(tmp_path: Path) -
     assert calls[-1] == "gh pr merge bot/issue-assistant --auto --squash"
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_keeps_a_pull_request_of_the_same_release(tmp_path: Path) -> None:
     result, calls, summary = pull_request(tmp_path, OPEN=f"12\\t{HEADLINE}")
@@ -1365,6 +1387,7 @@ def test_the_sync_keeps_a_pull_request_of_the_same_release(tmp_path: Path) -> No
     )
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_leaves_a_branch_with_someone_elses_commit_alone(
     tmp_path: Path,
@@ -1386,6 +1409,7 @@ def test_the_sync_leaves_a_branch_with_someone_elses_commit_alone(
     )
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_closes_its_pull_request_when_main_has_the_release(
     tmp_path: Path,
@@ -1402,6 +1426,7 @@ def test_the_sync_closes_its_pull_request_when_main_has_the_release(
     assert summary == "main has the issue assistant v1.3.1; closed #12.\n"
 
 
+@runs_the_script
 @needs_bash
 def test_the_sync_without_a_pull_request_has_nothing_to_do(tmp_path: Path) -> None:
     result, calls, summary = pull_request(tmp_path, changed=False)

@@ -15,6 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
+from blueprint import mutation
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
 from blueprint.changelog import (
@@ -236,6 +237,104 @@ def bot_health_command(
         return 0 if healthy else 1
     print(renovate_report(api, repo, Path(arguments.log), arguments.run), end="")
     return 0
+
+
+def show_mutant(name: str) -> str:
+    """The change of a mutant, as mutmut show prints it: mutmut of this Python, which
+    the step installed, without the folder of the project ahead of its modules."""
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", "-P", "-m", "mutmut", "show", name],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    ).stdout
+
+
+def read_output(path: Path) -> str:
+    """What a tool printed, with the carriage returns of its spinner."""
+    if not path.is_file():
+        return ""
+    with path.open(encoding="utf-8", errors="replace", newline="") as file:
+        return file.read()
+
+
+def parts_count(text: str) -> int | None:
+    """The number of parts of a run: auto, or none, for the estimate."""
+    if text in ("", "auto"):
+        return None
+    if not text.isdigit() or int(text) < 1:
+        raise ValueError(f"the parts of a run are a number or auto, not {text!r}")
+    return int(text)
+
+
+def mutation_command(
+    arguments: argparse.Namespace,
+    root: Path,
+    api: Api | None,
+) -> int:
+    if arguments.action == "plan":
+        kind, parts = mutation.plan(root, parts_count(arguments.parts))
+        print(f"kind={kind}")
+        print(f"parts={json.dumps(parts, ensure_ascii=False)}")
+        for part in parts:
+            print(
+                f"Part {part['part']} of {part['parts']}: about {part['mutants']} "
+                "mutants",
+                file=sys.stderr,
+            )
+        return 0
+    if arguments.action == "collect":
+        number, _, total = arguments.part.partition("/")
+        output = Path(arguments.output)
+        part = mutation.collect(
+            Path(arguments.results).read_text(encoding="utf-8", errors="replace"),
+            read_output(output),
+            arguments.patterns.split(),
+            arguments.status,
+            (int(number), int(total or 1)),
+            show_mutant,
+            os.cpu_count() or 4,
+        )
+        Path(arguments.out).write_text(
+            json.dumps(part, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        )
+        silent = mutation.Report.of([part]).silent
+        if silent:
+            print(mutation.no_mutant_ran(part))
+        return 1 if silent else 0
+    if arguments.action == "issue":
+        folder = Path(arguments.folder)
+        now = mutation.read_previous(folder / "mutation.json")
+        if now is None:
+            print(f"No mutation.json in {folder}: the issue stays as it is.")
+            return 1
+        previous = mutation.read_previous(folder / "previous.json")
+        api = api or Api()
+        repo = arguments.repo or current_repo(api)
+        print(mutation.keep_issue(api, repo, now, previous))
+        return 0
+    report = mutation.Report.of(mutation.read_parts(Path(arguments.parts_folder)))
+    previous = mutation.baseline_of(mutation.read_previous(arguments.previous))
+    now = report.data(arguments.run, datetime.now(UTC))
+    # An incomplete run keeps the last complete one, so that the next run compares
+    # with that, and a drop past an incomplete run still shows.
+    if not now["complete"] and previous is not None:
+        now["baseline"] = previous
+    out = Path(arguments.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "mutation.json").write_text(
+        json.dumps(now, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
+    # What the run compared with, for the job that keeps the issue of a drop.
+    if previous is not None:
+        (out / "previous.json").write_text(
+            json.dumps(previous, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        )
+    (out / "results.txt").write_text(report.results_text(), encoding="utf-8")
+    (out / "survivors.md").write_text(mutation.survivors_text(report), encoding="utf-8")
+    sys.stdout.write(mutation.summary(report, now, previous))
+    return 0 if report.measured and not report.silent and not report.missing else 1
 
 
 def diagrams_command(arguments: argparse.Namespace, root: Path) -> int:
@@ -782,6 +881,62 @@ def main(
             "--app", required=True, help="the slug of the release app, which commits"
         )
         bot_parser.add_argument("--url", required=True, help="the run of the checks")
+    mutation_parser = commands.add_parser(
+        "mutation",
+        help="the parts of a run of the mutation tests, the results of each and the "
+        "report of the run, for the Mutation workflow",
+    )
+    mutation_actions = mutation_parser.add_subparsers(dest="action", required=True)
+    plan_parser = mutation_actions.add_parser(
+        "plan",
+        help="the tool and the parts of the run, as lines for $GITHUB_OUTPUT",
+    )
+    plan_parser.add_argument(
+        "--parts",
+        default="auto",
+        help="the number of parts, or auto for the estimate of the mutants",
+    )
+    collect_mutants_parser = mutation_actions.add_parser(
+        "collect",
+        help="the results of one part, with the change and the kind of each survivor",
+    )
+    collect_mutants_parser.add_argument("results", help="what mutmut results printed")
+    collect_mutants_parser.add_argument("output", help="what mutmut run printed")
+    collect_mutants_parser.add_argument(
+        "--part", required=True, help="the part and the parts, such as 1/3"
+    )
+    collect_mutants_parser.add_argument(
+        "--patterns", default="", help="the names of the mutants of the part"
+    )
+    collect_mutants_parser.add_argument(
+        "--status", type=int, default=0, help="the exit code of mutmut run"
+    )
+    collect_mutants_parser.add_argument(
+        "--out", required=True, help="the results of the part, in JSON"
+    )
+    mutation_report_parser = mutation_actions.add_parser(
+        "report",
+        help="the score of the run and its survivors, the logic first, and the issue "
+        "when the score drops",
+    )
+    mutation_report_parser.add_argument(
+        "parts_folder", metavar="PARTS", help="the folder with the results of the parts"
+    )
+    mutation_report_parser.add_argument(
+        "--out", required=True, help="the folder for the artifact of the run"
+    )
+    mutation_report_parser.add_argument(
+        "--previous", type=Path, help="mutation.json of the run before"
+    )
+    mutation_report_parser.add_argument("--run", default="", help="the link of the run")
+    mutation_issue_parser = mutation_actions.add_parser(
+        "issue",
+        help="open, keep or close the one issue of a dropped score, from the report",
+    )
+    mutation_issue_parser.add_argument(
+        "folder",
+        help="the folder of the report, with mutation.json and previous.json",
+    )
     pages_parser = commands.add_parser(
         "pages",
         help="the READMEs, CONTRIBUTING files and pages of docs/ in one column, for "
@@ -839,6 +994,12 @@ def main(
             file=sys.stderr,
         )
         return 2
+    if arguments.command == "mutation":
+        try:
+            return mutation_command(arguments, root, api)
+        except (OSError, ValueError, GitHubError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
     if arguments.command == "pages":
         try:
             return pages_command(arguments, root)
