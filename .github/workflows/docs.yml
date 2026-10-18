@@ -12,8 +12,11 @@ name: Docs
 # website for a week, which the report of the PR coach links. The tools are the
 # hash-pinned ones of stacks/docs/requirements-docs.txt, which the blueprint keeps
 # current, and the files that Material downloads for the website stay in a cache for a
-# week. After the build, axe-core checks every page in the light and the dark scheme
-# for what WCAG 2.2 A and AA ask, with the locked tools of .github/a11y/.
+# week. After the build, lychee checks every link and anchor of the pages that were
+# built, blueprint.py site-check what the hooks of the website promise, and axe-core
+# every page in the light and the dark scheme for what WCAG 2.2 A and AA ask, with
+# the locked tools of .github/a11y/. The job that publishes the website signs its
+# provenance and asks the published website for its pages.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -47,6 +50,7 @@ jobs:
       pages: read # whether GitHub Pages publishes from this workflow
     outputs:
       publish: ${{ steps.site.outputs.publish }}
+      languages: ${{ steps.promises.outputs.languages }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -147,9 +151,59 @@ jobs:
           folder=.cache/plugin/privacy
           [[ ! -d "$folder" ]] || find "$folder" -type f ! -name '*.woff2' ! -name '*.woff'             ! -name '*.ttf' ! -name '*.css' ! -name '*.js' -delete
       - name: Build the website
+        id: build
         if: steps.site.outputs.build == 'true'
         timeout-minutes: 5
         run: mkdocs build --strict
+      # What the hooks of .github/mkdocs_blueprint.py promise, in the files that the
+      # real plugins wrote, so that a new version of Material or of the i18n plugin
+      # that breaks a hook fails here, before the website is published: a sitemap in
+      # every folder of pages of a website in several languages, which its language
+      # switch reads, the 404 page of the default language at the root, one canonical
+      # address on every page, and the full addresses of its other languages. It
+      # also names the further languages and the path of the address, for the steps
+      # that follow. The checks after the build run even when one before them failed,
+      # so that a run names everything to fix.
+      - name: Check what the hooks of the website promise
+        id: promises
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" site-check site --output "$GITHUB_OUTPUT"
+      # The 404 page links the files of the website by the path of its address, such
+      # as /repo/assets/ for a project website; a folder of that path leads lychee
+      # to site/.
+      - name: Lay out the address of the website
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          ADDRESS: ${{ runner.temp }}/address
+          ROOT: ${{ steps.promises.outputs.root }}
+        run: |
+          mkdir -p "$(dirname "$ADDRESS${ROOT%/}")"
+          ln -s "$GITHUB_WORKSPACE/site" "$ADDRESS${ROOT%/}"
+      # Every link and anchor of the pages that MkDocs built, also those that a page
+      # writes in HTML, such as its cards, those of the theme and those of the 404
+      # page, which the strict build doesn't check. lychee reads the files of site/
+      # alone and asks no server, so a site that is down can't fail it; the Links
+      # workflow checks the links to other sites every week. It runs in site/, away
+      # from lychee.toml and .lycheeignore, which are the rules of those links.
+      - name: Check the links and anchors of the website
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        timeout-minutes: 5
+        with:
+          workingDirectory: site
+          args: --offline --include-fragments --root-dir ${{ runner.temp }}/address --no-progress '**/*.html'
+          output: ${{ runner.temp }}/website-links.md
+      # The checks of this project alone on its website, such as those of its
+      # robots.txt, in scripts/check-site.sh, which gets the folder of the website.
+      # The blueprint never writes that file, so it stays the project's own.
+      - name: Check the website as this project does
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && hashFiles('scripts/check-site.sh') != '' }}
+        timeout-minutes: 5
+        run: bash scripts/check-site.sh site
       # The accessibility of the website: .github/a11y/check.mjs opens every page in
       # the Google Chrome of the runner, in the light and the dark scheme, and names
       # each serious or critical violation of WCAG 2.2 A or AA that axe-core finds,
@@ -157,30 +211,31 @@ jobs:
       # release it only reports, so that every repository can fix its pages before it
       # fails the check.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: steps.site.outputs.build == 'true'
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5
         with:
           node-version: 24
       - name: Set up the accessibility check
-        if: steps.site.outputs.build == 'true'
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5
         run: npm ci --prefix .github/a11y --ignore-scripts --no-audit --no-fund
       # The tests of the check itself, which the blueprint keeps.
       - name: Test the accessibility check
-        if: steps.site.outputs.build == 'true' && hashFiles('.github/a11y/check.test.mjs') != ''
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && hashFiles('.github/a11y/check.test.mjs') != '' }}
         timeout-minutes: 5
         run: node --test .github/a11y/check.test.mjs
       - name: Check the accessibility of the website
-        if: steps.site.outputs.build == 'true'
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         continue-on-error: true
         timeout-minutes: 5
         env:
           REPORT_ONLY: "true"
         run: node .github/a11y/check.mjs site
       # The website of a pull request, for a week: the report of the PR coach links
-      # it, so that a reviewer sees the pages as they will look after the merge.
+      # it, so that a reviewer sees the pages as they will look after the merge, also
+      # when a check of its links or of its hooks failed.
       - name: Keep the website of the pull request
-        if: steps.site.outputs.build == 'true' && github.event_name == 'pull_request'
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.event_name == 'pull_request' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         timeout-minutes: 5
         with:
@@ -232,7 +287,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     permissions:
-      id-token: write # proves to GitHub Pages which workflow publishes
+      attestations: write # keeps the signed provenance of the website
+      id-token: write # proves to GitHub Pages and to Sigstore which workflow publishes
       pages: write # publishes the website
     steps:
       - name: Record the network traffic of the job
@@ -242,3 +298,56 @@ jobs:
       - name: Publish the website on GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      # The provenance of what GitHub Pages publishes, artifact.tar of the artifact
+      # github-pages, signed with Sigstore for this workflow and its commit, as the
+      # release workflow signs every release. This job signs it, not the job docs,
+      # which runs the code of pull requests and gets no id-token. SECURITY.md shows
+      # how gh attestation verify checks it.
+      - name: Take the website that GitHub Pages publishes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 5
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages
+      - name: Attest the provenance of the website
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        timeout-minutes: 5
+        with:
+          subject-path: ${{ runner.temp }}/pages/artifact.tar
+      # The published website answers: the home page of every language with a page,
+      # and an address that leads nowhere with the status 404. The servers of GitHub
+      # Pages may take a moment after the deployment, so each request is tried again
+      # for about a minute.
+      - name: Ask the published website for its pages
+        timeout-minutes: 5
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          LANGUAGES: ${{ needs.docs.outputs.languages }}
+        run: |
+          home="${PAGE_URL%/}/"
+          page="$RUNNER_TEMP/page.html"
+          failed=0
+          for language in "" $LANGUAGES; do
+            [[ "$language" =~ ^[A-Za-z0-9_-]*$ ]] || continue
+            address="$home${language:+$language/}"
+            if curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 10 \
+              --connect-timeout 10 --max-time 30 --output "$page" "$address" &&
+              grep -qF '<title>' "$page"; then
+              echo "- $address answers with its page." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=The published website::$address answers with no page: GitHub Pages doesn't serve the website that this run published."
+              failed=1
+            fi
+          done
+          # The status that it asks for is an error, so curl tries again only after
+          # an error of the server or of the network.
+          missing="${home}no-such-page-$GITHUB_SHA"
+          status="$(curl --silent --retry 5 --retry-delay 10 --connect-timeout 10 --max-time 30 \
+            --output /dev/null --write-out '%{http_code}' "$missing" || true)"
+          if [[ "$status" == 404 ]]; then
+            echo "- $missing answers with 404, as an address that leads nowhere does." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=The published website::$missing answers with the status $status, not 404: GitHub Pages must answer an address that leads nowhere with its 404 page."
+            failed=1
+          fi
+          exit "$failed"

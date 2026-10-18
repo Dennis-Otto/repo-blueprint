@@ -61,7 +61,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    The documentation in `docs/` as a website with search and a light and a dark theme, in English and German. Every pull request builds it strictly, every change of `main` publishes it on GitHub Pages.
+    The documentation in `docs/` as a website with search and a light and a dark theme, in English and German. Every pull request builds it strictly and checks every link and anchor of the built pages, every change of `main` publishes it on GitHub Pages and signs it.
 
 - :material-sitemap-outline:{ .lg .middle } **Diagrams**
 

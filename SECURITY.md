@@ -64,6 +64,15 @@ gh release download vX.Y.Z --repo Dennis-Otto/repo-blueprint --pattern 'repo-blu
 grype sbom:repo-blueprint.spdx.json --vex repo-blueprint.openvex.json
 ```
 
+## Verify the website
+
+The Dashboard workflow publishes the website on GitHub Pages and signs the build provenance of what it publishes with Sigstore, as the release workflow signs a release: `artifact.tar` of the artifact `github-pages` of its run, which GitHub keeps for a day. It then asks the published website for the home page of each of its languages, and for an address that leads nowhere, which must answer with 404, and fails when one doesn't. Take the artifact of the run that published the website, and check it with the GitHub CLI:
+
+```sh
+gh run download RUN_ID --repo Dennis-Otto/repo-blueprint --name github-pages
+gh attestation verify artifact.tar --repo Dennis-Otto/repo-blueprint --signer-workflow Dennis-Otto/repo-blueprint/.github/workflows/dashboard.yml
+```
+
 ## Assurance case
 
 This section argues why the way the project is changed, built and delivered meets the requirements of this policy. The software itself, what it protects, where its trust boundaries lie when it runs and which risks remain, is the subject of [docs/security.md](docs/security.md).

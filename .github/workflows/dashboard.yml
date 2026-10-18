@@ -58,6 +58,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    outputs:
+      languages: ${{ steps.promises.outputs.languages }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -90,6 +92,12 @@ jobs:
       - name: Build the documentation
         timeout-minutes: 5
         run: mkdocs build --strict
+      # What the hooks of the website promise, as the check docs checks it, and the
+      # further languages, whose home pages the job that publishes asks for.
+      - name: Check what the hooks of the website promise
+        id: promises
+        timeout-minutes: 5
+        run: python3 blueprint.py site-check site --output "$GITHUB_OUTPUT"
       - name: Collect the state of every repository
         timeout-minutes: 5
         env:
@@ -126,7 +134,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     permissions:
-      id-token: write # proves to GitHub Pages which workflow publishes
+      attestations: write # keeps the signed provenance of the website
+      id-token: write # proves to GitHub Pages and to Sigstore which workflow publishes
       pages: write # publishes the website
     steps:
       - name: Record the network traffic of the job
@@ -136,3 +145,56 @@ jobs:
       - name: Publish the website on GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      # The provenance of what GitHub Pages publishes, artifact.tar of the artifact
+      # github-pages, signed with Sigstore for this workflow and its commit, as the
+      # release workflow signs every release. This job signs it, not the job build,
+      # which needs no id-token. SECURITY.md shows how gh attestation verify checks
+      # it.
+      - name: Take the website that GitHub Pages publishes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 5
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages
+      - name: Attest the provenance of the website
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        timeout-minutes: 5
+        with:
+          subject-path: ${{ runner.temp }}/pages/artifact.tar
+      # The published website answers: the home page of every language with a page,
+      # and an address that leads nowhere with the status 404. The servers of GitHub
+      # Pages may take a moment after the deployment, so each request is tried again
+      # for about a minute.
+      - name: Ask the published website for its pages
+        timeout-minutes: 5
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          LANGUAGES: ${{ needs.build.outputs.languages }}
+        run: |
+          home="${PAGE_URL%/}/"
+          page="$RUNNER_TEMP/page.html"
+          failed=0
+          for language in "" $LANGUAGES; do
+            [[ "$language" =~ ^[A-Za-z0-9_-]*$ ]] || continue
+            address="$home${language:+$language/}"
+            if curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 10 \
+              --connect-timeout 10 --max-time 30 --output "$page" "$address" &&
+              grep -qF '<title>' "$page"; then
+              echo "- $address answers with its page." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=The published website::$address answers with no page: GitHub Pages doesn't serve the website that this run published."
+              failed=1
+            fi
+          done
+          # The status that it asks for is an error, so curl tries again only after
+          # an error of the server or of the network.
+          missing="${home}no-such-page-$GITHUB_SHA"
+          status="$(curl --silent --retry 5 --retry-delay 10 --connect-timeout 10 --max-time 30 \
+            --output /dev/null --write-out '%{http_code}' "$missing" || true)"
+          if [[ "$status" == 404 ]]; then
+            echo "- $missing answers with 404, as an address that leads nowhere does." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=The published website::$missing answers with the status $status, not 404: GitHub Pages must answer an address that leads nowhere with its 404 page."
+            failed=1
+          fi
+          exit "$failed"
