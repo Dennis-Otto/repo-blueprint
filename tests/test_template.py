@@ -11230,9 +11230,57 @@ def test_infection_gets_a_php_that_it_runs_on() -> None:
     # than the PHP of the tools of an app that hasn't moved them to PHP 8.3 yet.
     workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
     assert "INFECTION_VERSION: 0.35." in workflow
-    versions = re.findall(r'php-version: "(\d+)\.(\d+)"', workflow)
-    assert versions
-    assert all((int(major), int(minor)) >= (8, 3) for major, minor in versions)
+    find = step_of(workflow, "      - name: Find the PHP of the tools\n")
+    setup = step_of(workflow, "      - name: Set up the PHP of the tools\n")
+    assert workflow.index(find) < workflow.index(setup)
+    assert workflow.index(setup) < workflow.index("composer install")
+    assert "        id: php\n" in find
+    assert "          php-version: ${{ steps.php.outputs.version }}\n" in setup
+    # No PHP of its own beside that of the tools.
+    assert workflow.count("uses: shivammathur/setup-php@") == 1
+    assert 'php-version: "' not in workflow
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        # A new app: its tools on PHP 8.3.
+        ({"php": "8.3.16"}, "version=8.3\n"),
+        # An app that moved its tools to a newer PHP runs the mutants on it.
+        ({"php": "8.4.1"}, "version=8.4\n"),
+        ({"php": "9.0"}, "version=9.0\n"),
+        # An app whose tools are older still gets the PHP that Infection needs.
+        ({"php": "8.2.27"}, "version=8.3\n"),
+        ({}, "version=8.3\n"),
+    ],
+)
+def test_the_mutants_run_on_the_php_of_the_tools(
+    tmp_path: Path, platform: dict[str, str], expected: str
+) -> None:
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    script = script_of(workflow, "Find the PHP of the tools")
+    app = tmp_path / "app"
+    app.mkdir()
+    config: dict[str, object] = {"sort-packages": True}
+    if platform:
+        config["platform"] = platform
+    manifest = {"require": {"php": "^8.2"}, "config": config}
+    (app / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+    output = tmp_path / "output"
+    output.touch()
+
+    result, _ = run_workflow_step(
+        tmp_path,
+        script,
+        app,
+        # The Python of the tests, not one that the PATH of Windows names.
+        {"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        GITHUB_OUTPUT=output.as_posix(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.read_text(encoding="utf-8") == expected
 
 
 def test_a_pull_request_that_changes_how_the_mutants_run_tries_them() -> None:

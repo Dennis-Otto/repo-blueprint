@@ -271,7 +271,9 @@
     {
       // The filter above let PHPUnit 13, which needs PHP 8.4, through to the apps
       // (Dennis-Otto/paperless-sync#80), whose checks could never pass: PHPUnit 12
-      // is the newest that runs on PHP 8.3.
+      // is the newest that runs on PHP 8.3. A project whose tools run on PHP 8.4
+      // lifts this limit in .github/renovate.json5 with its own allowedVersions for
+      // phpunit/phpunit, beside its newer PHP.
       matchManagers: ["composer"],
       matchDepNames: ["phpunit/phpunit"],
       allowedVersions: "<13",

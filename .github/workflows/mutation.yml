@@ -199,13 +199,28 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+      # Infection needs PHP 8.3 or newer. The tools run on the PHP of
+      # config.platform.php in composer.json, for which Composer locks them, so the
+      # mutants run on that PHP, and on PHP 8.3 for an app whose tools are older.
+      - name: Find the PHP of the tools
         if: needs.plan.outputs.kind == 'php'
+        id: php
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+          import json
+
+          with open("composer.json", encoding="utf-8") as manifest:
+              platform = json.load(manifest).get("config", {}).get("platform", {})
+          tools = tuple(int(part) for part in platform.get("php", "0.0").split(".")[:2])
+          major, minor = max(tools, (8, 3))
+          print(f"version={major}.{minor}")
+          EOF
+      - name: Set up the PHP of the tools
+        if: needs.plan.outputs.kind == 'php'
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         timeout-minutes: 5
         with:
-          # Infection needs PHP 8.3 or newer, the PHP of the tools of a new app, for
-          # which config.platform.php of composer.json locks them.
-          php-version: "8.3"
+          php-version: ${{ steps.php.outputs.version }}
           extensions: dom, libxml, mbstring, xml
           coverage: pcov
           tools: composer:v2

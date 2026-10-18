@@ -33,7 +33,7 @@ Option 2:
 
 ## Consequences
 
-- A new app starts on PHPUnit 12. An app made before moves its tools in its own `composer.json`, which the update never touches: `config.platform.php` to `8.3.16`, then `composer update --lock`, and Renovate brings PHPUnit 11 and 12 in pull requests of their own.
+- A new app starts on PHPUnit 12. An app made before moves its tools in its own `composer.json`, which the update never touches: `config.platform.php` to `8.3.16`, then `composer update --lock`, and Renovate brings PHPUnit 11 and 12 in pull requests of their own. Until the app moves, Renovate already looks for releases for PHP 8.3, the PHP of its filter: its pull request for PHPUnit 12 fails, because Composer cannot install PHPUnit 12 for `config.platform.php` 8.2. The move, not that pull request, brings PHPUnit 12, so it follows the update of the blueprint soon, which keeps that time short.
 - The dev container runs PHP 8.3, the PHP of the tools, without PHP 8.2: there, the step *Oldest PHP* leaves the oldest PHP to the CI.
 - A test that depends on the order of the tests fails now and then, with the seed of its order in the log; `vendor/bin/phpunit --random-order-seed SEED` runs that order again, as `CONTRIBUTING.md` of the app says.
 - When the tools move to PHP 8.4, the platform of `stacks/php/composer.json`, the PHP of Renovate's filter and the limit of PHPUnit move together; a test of the template fails until they agree.
