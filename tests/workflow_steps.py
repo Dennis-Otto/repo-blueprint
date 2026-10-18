@@ -353,23 +353,29 @@ ACTS = {
     "merges": r"\bgh pr merge\b",
     "comments": r"\bgh (?:pr|issue) comment\b|\bgh (?:pr|issue) close\b.*--comment\b",
     "deletes": (
-        r"\bgh (?:release|cache|label|run|repo) delete\b|--method DELETE\b"
-        r"|-X DELETE\b|--delete-branch\b|\bgit push\b.*(?:--delete\b|\s:\S)"
+        r"\bgh (?:release|cache|label|run|repo|issue|secret|variable) delete\b"
+        r"|(?:--method[= ]?|(?<!\S)-X ?)DELETE\b|--delete-branch\b"
+        r"|\bgit(?:\s+-[cC]\s+\S+)*\s+push\b.*(?:--delete\b|\s:\S)"
     ),
     "dispatches": r"\bgh workflow run\b|\bgh run rerun\b|/dispatches\b",
-    "opens": r"\bgh (?:pr|issue|release|label) create\b",
+    "opens": r"\bgh (?:pr|issue|release|label) create\b|\bgh (?:pr|issue) reopen\b",
     "closes": r"\bgh (?:pr|issue) close\b",
+    "cancels": r"\bgh run cancel\b",
     "edits": (
-        r"\bgh (?:pr|issue|release|label) edit\b|\bgh release upload\b"
+        r"\bgh (?:pr|issue|release|label|repo) edit\b|\bgh release upload\b"
         r"|\bgh pr (?:update-branch|ready|review)\b"
+        r"|\bgh (?:pr|issue) (?:lock|unlock)\b|\bgh issue transfer\b"
+        r"|\bgh (?:secret|variable) set\b|\bgh workflow (?:enable|disable)\b"
     ),
-    "writes": r"--method (?:POST|PATCH|PUT)\b|-X (?:POST|PATCH|PUT)\b",
-    "pushes": r"\bgit push\b",
+    "writes": r"(?:--method[= ]?|(?<!\S)-X ?)(?:POST|PATCH|PUT)\b",
+    "pushes": r"\bgit(?:\s+-[cC]\s+\S+)*\s+push\b",
 }
+# gh takes the method of the API in any case.
+IGNORING_CASE = {"deletes", "writes"}
 # A call of the API with fields and no method is a POST: a write, other than a query
 # of GraphQL.
 FIELDS = re.compile(
-    r"\bgh api\b(?!.*(?:--method|-X)\b)"
+    r"\bgh api\b(?!.*(?:--method\b|(?<!\S)-X))"
     r"(?=.*\s(?:-[fF]|--field|--raw-field|--input)\s)"
 )
 QUERY = re.compile(r"""\bgh api graphql\b.*\bquery=["']?query\b""")
@@ -383,9 +389,11 @@ def acts_of(script: str) -> list[str]:
         for line in lines
         if not line.lstrip().startswith("#")
         for act, pattern in ACTS.items()
-        if re.search(pattern, line)
+        if re.search(pattern, line, re.IGNORECASE if act in IGNORING_CASE else 0)
     }
     for line in lines:
+        if line.lstrip().startswith("#"):
+            continue
         if FIELDS.search(line) and not QUERY.search(line):
             acts.add("writes")
     return sorted(acts)

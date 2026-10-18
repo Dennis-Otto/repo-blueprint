@@ -157,7 +157,9 @@ def test_the_fake_gh_filters_json_with_jq_as_gh_does(
     tmp_path: Path, demo: Path
 ) -> None:
     (demo / ".github/workflows/demo.yml").write_text(
-        DEMO.replace("gh api repos/o/r/raw", "gh api repos/o/r/raw --jq '.[].name'"),
+        DEMO.replace(
+            "gh api repos/o/r/raw", "gh api repos/o/r/raw --jq '.[] | .name, .id'"
+        ),
         encoding="utf-8",
     )
     done = run_step(
@@ -166,15 +168,19 @@ def test_the_fake_gh_filters_json_with_jq_as_gh_does(
         "demo",
         "Calls",
         answers=[
-            Answer(r"api repos/o/r/raw --jq .*", json=[{"name": "a"}, {"name": "b"}]),
+            Answer(
+                r"api repos/o/r/raw --jq .*",
+                json=[{"name": "a", "id": None}, {"name": "b", "id": {"x": [1, 2]}}],
+            ),
             Answer(r".*"),
         ],
         root=demo,
     )
 
     assert done.returncode == 0, done.stderr
-    # As gh prints the strings that the filter makes: raw, one on each line.
-    assert done.stdout == "a\nb\n"
+    # As gh prints what the filter makes, one result on each line: a string raw, null
+    # as an empty line and anything else as compact JSON.
+    assert done.stdout == 'a\n\nb\n{"x":[1,2]}\n'
 
 
 def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -> None:
@@ -196,7 +202,27 @@ def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -
         ('gh api "repos/$GH_REPO/issues" -f title="$title"', ["writes"]),
         ("gh api graphql --input - --jq .data", ["writes"]),
         ("git push origin refs/tags/v1", ["pushes"]),
+        # The other ways to write the same commands.
+        ("gh api --method=DELETE repos/o/r/git/refs/heads/x", ["deletes"]),
+        ("gh api -X put repos/o/r/topics -f names[]=a", ["writes"]),
+        ("gh api -XPATCH repos/o/r", ["writes"]),
+        ("gh api --method=post repos/o/r/labels", ["writes"]),
+        ("git -C repo push origin HEAD", ["pushes"]),
+        ("git -c user.name=bot push origin :old", ["deletes", "pushes"]),
+        ('gh issue reopen "$n"', ["opens"]),
+        ('gh pr reopen "$n"', ["opens"]),
+        ('gh issue delete "$n" --yes', ["deletes"]),
+        ('gh issue lock "$n"', ["edits"]),
+        ('gh pr unlock "$n"', ["edits"]),
+        ('gh issue transfer "$n" o/other', ["edits"]),
+        ("gh secret set TOKEN < token", ["edits"]),
+        ("gh variable delete NAME", ["deletes"]),
+        ('gh run cancel "$run"', ["cancels"]),
+        ("gh workflow disable mutation.yml", ["edits"]),
+        ("gh repo edit --enable-wiki=false", ["edits"]),
         # Reading only, or a comment.
+        ('# gh api "repos/$GH_REPO/issues" -f title=x', []),
+        ("gh api --method=GET search/issues -f q=x", []),
         ("gh api graphql -f query='query { viewer { login } }'", []),
         ('gh api -X GET search/issues -f q="$query"', []),
         ('gh pr list --json number\n# gh pr merge "$number"', []),

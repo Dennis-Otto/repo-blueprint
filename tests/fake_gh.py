@@ -52,8 +52,9 @@ def read(arguments: list[str]) -> dict[str, str]:
 
 
 def filtered(answer: Any, arguments: list[str]) -> tuple[str, str, int]:
-    """The JSON of an answer as gh prints it: through the filter of --jq, which gh
-    applies as jq -r does, or as it is."""
+    """The JSON of an answer as gh prints it: through the filter of --jq, or as it is.
+    Through --jq, gh prints a string raw, null as an empty line and other values as
+    compact JSON, one result on each line."""
     flags = [index for index, word in enumerate(arguments) if word in ("--jq", "-q")]
     if not flags or flags[-1] + 1 >= len(arguments):
         return json.dumps(answer) + "\n", "", 0
@@ -61,16 +62,25 @@ def filtered(answer: Any, arguments: list[str]) -> tuple[str, str, int]:
     if jq is None:
         return "", "fake gh: an answer through --jq needs jq\n", 127
     done = subprocess.run(
-        [jq, "-r", arguments[flags[-1] + 1]],
+        [jq, "-c", arguments[flags[-1] + 1]],
         input=json.dumps(answer).encode(),
         capture_output=True,
         check=False,
     )
-    return (
-        done.stdout.decode().replace("\r\n", "\n"),
-        done.stderr.decode(),
-        done.returncode,
+    printed = "".join(
+        f"{shown(json.loads(line))}\n"
+        for line in done.stdout.decode().replace("\r\n", "\n").splitlines()
     )
+    return printed, done.stderr.decode(), done.returncode
+
+
+def shown(value: Any) -> str:
+    """One result of --jq as gh prints it."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return json.dumps(value, separators=(",", ":"))
 
 
 def main(arguments: list[str]) -> int:
