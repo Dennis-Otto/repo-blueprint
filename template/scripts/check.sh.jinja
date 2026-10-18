@@ -276,7 +276,11 @@ rm -f build/psalm-canary.json
 vendor/bin/psalm --config=.github/psalm/canary.xml --taint-analysis --threads=1 --no-cache \
   --no-progress --monochrome --report=build/psalm-canary.json >build/psalm-canary.log 2>&1 &
 canary=$!
-vendor/bin/psalm --threads=1 --no-cache
+if ! vendor/bin/psalm --threads=1 --no-cache; then
+  # A check that stops here leaves no canary running behind it.
+  kill "$canary" 2>/dev/null || true
+  exit 1
+fi
 
 step "Psalm taint canary"
 # The controller of .github/psalm/canary/ lets the input of a request reach each kind of

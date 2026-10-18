@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
 import tomllib
 import warnings
 from collections.abc import Iterator, Mapping
@@ -2508,6 +2509,9 @@ def test_the_canary_has_a_path_to_each_kind_of_sink(projects: dict[str, Path]) -
         "return new RedirectResponse($url); // expect: TaintedHeader",
     ):
         assert call in canary, call
+    # Nextcloud routes to a public static method too, so its parameters are input.
+    assert "\tpublic static function back(string $url): RedirectResponse {\n" in canary
+    assert "isStatic" not in plugin
     # The sources that the plugin adds by their methods: the term of a search and the
     # answer of another server.
     assert "$this->folder->get($query->getTerm()); // expect: TaintedFile" in canary
@@ -2666,6 +2670,60 @@ def test_the_canary_of_the_taint_analysis_runs_beside_the_types(
             "\n== Psalm taint canary\nThe taint analysis missed a path.\n"
             "Psalm ran with --config=.github/psalm/canary.xml\n"
         )
+
+
+@pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
+def test_a_failed_check_of_the_types_leaves_no_canary_running(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Psalm"\n')
+    steps = check[start : check.index('step "Tests, with every line covered"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    (repository / "scripts/psalm.sh").write_text(
+        check[: check.index('step "Text files"')] + steps,
+        encoding="utf-8",
+        newline="\n",
+    )
+    psalm = repository / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    # The canary takes its time and says when it is stopped; the types have an error.
+    psalm.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            echo "psalm $*" >> "$CALLS"
+            if [[ "$1" == --config=* ]]; then
+              trap 'kill "$!"; echo "canary stopped" >> "$CALLS"; exit 143' TERM
+              sleep 30 &
+              wait
+              echo "canary finished" >> "$CALLS"
+              exit 0
+            fi
+            echo "ERROR: a type"
+            exit 2
+            """
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    psalm.chmod(0o755)
+
+    result, _ = run_workflow_step(
+        tmp_path, "bash scripts/psalm.sh\n", repository, {"php": "exit 0\n"}
+    )
+
+    # The check stops at the types, and stops the canary that it started.
+    assert result.returncode == 1
+    assert "== Psalm taint canary" not in result.stdout
+    calls = tmp_path / "calls"
+    for _ in range(100):
+        if "canary stopped" in calls.read_text(encoding="utf-8"):
+            break
+        time.sleep(0.1)
+    assert "canary stopped" in calls.read_text(encoding="utf-8")
+    assert "canary finished" not in calls.read_text(encoding="utf-8")
 
 
 def test_code_scanning_shows_the_paths_of_the_taint_analysis() -> None:

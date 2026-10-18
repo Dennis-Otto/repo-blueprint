@@ -63,6 +63,13 @@ final class CanaryController extends Controller {
 		return new RedirectResponse($url); // expect: TaintedHeader
 	}
 
+	/**
+	 * Nextcloud routes to a public static method of a controller as well.
+	 */
+	public static function back(string $url): RedirectResponse {
+		return new RedirectResponse($url); // expect: TaintedHeader
+	}
+
 	public function query(string $table): DataResponse {
 		$this->db->executeQuery('SELECT * FROM ' . $table); // expect: TaintedSql
 		return new DataResponse();

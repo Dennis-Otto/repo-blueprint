@@ -149,7 +149,6 @@ final class NextcloudTaintPlugin implements AfterCodebasePopulatedInterface, Aft
 			|| !$codebase->taint_flow_graph
 			|| !$method instanceof ClassMethod
 			|| !$method->isPublic()
-			|| $method->isStatic()
 			|| $method->isMagic()
 			|| !$codebase->classExtendsOrImplements($class, self::CONTROLLER)
 		) {
