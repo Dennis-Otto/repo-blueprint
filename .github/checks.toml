@@ -114,17 +114,29 @@ commits them onto a branch of this repository."""
 
 [check.docs]
 title = "The website"
-problem = """The website doesn't build strictly: a link or an anchor leads nowhere, a
-page is missing from the navigation of `mkdocs.yml`, or MkDocs warns about a page. When
-the log names a font or a script that Material couldn't download, its server had a
-hiccup: that usually passes when the job runs again, and a build that finds them in
-the cache of the week, which a push to `main` saves, downloads nothing."""
+problem = """The website doesn't build strictly, or a check of the built website failed.
+The build fails when a link or an anchor leads nowhere, a page is missing from the
+navigation of `mkdocs.yml`, or MkDocs warns about a page. After the build, lychee
+checks every link and anchor of the built pages, also those written in HTML, such as
+`<a href="…">` in a card, and `blueprint.py site-check` what the hooks of the website
+promise, such as a sitemap in every folder of pages and the 404 page in the default
+language; `scripts/check-site.sh` adds the checks of the project. When the log names a
+font or a script that Material couldn't download, its server had a hiccup: that
+usually passes when the job runs again, and a build that finds them in the cache of
+the week, which a push to `main` saves, downloads nothing."""
 why = """A strict build keeps every link of the documentation working; a warning
-today is a broken page for a reader tomorrow."""
-fix = """Fix what the log of the check names. Install the tools of the website as the
-section Website of CONTRIBUTING.md shows, and build it as the check does; with them,
-`bash scripts/check.sh` builds it as well:"""
-commands = [".venv-docs/bin/mkdocs build --strict"]
+today is a broken page for a reader tomorrow. The checks of the built website see what
+the build doesn't: the links that a page writes in HTML, and what a new version of
+Material or of its plugins changes in the pages."""
+fix = """Fix what the log of the check names: the page and the link that leads nowhere,
+or the file of the website that breaks a promise of its hooks. Install the tools of the
+website as the section Website of CONTRIBUTING.md shows, and build and check it as the
+check does (in the blueprint itself, the tool is `blueprint.py` without `.github/`);
+with them, `bash scripts/check.sh` builds it as well:"""
+commands = [
+  ".venv-docs/bin/mkdocs build --strict",
+  "python3 .github/blueprint.py site-check site",
+]
 docs = "CONTRIBUTING.md#website"
 autofix = """A link or a page that leads nowhere needs a person, who knows where it
 should lead."""

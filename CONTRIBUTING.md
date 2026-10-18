@@ -98,7 +98,7 @@ Every explanation in `.github/checks.toml` says in `autofix` how its check fixes
 
 ## Website
 
-MkDocs builds the website of the blueprint from `mkdocs.yml` and the pages in `docs/`, which include the READMEs and the changelog. The check *docs* builds it strictly in every pull request, and the Dashboard workflow publishes it with the dashboard. To see it while you write, at <http://127.0.0.1:8000>:
+MkDocs builds the website of the blueprint from `mkdocs.yml` and the pages in `docs/`, which include the READMEs and the changelog. The check *docs* builds it strictly in every pull request; after the build, lychee checks every link and anchor of the built pages, also those written in HTML, without asking a server, `python3 blueprint.py site-check site` what the hooks of the website promise, such as a sitemap in every folder of pages and the 404 page in the default language, and `scripts/check-site.sh`, where it exists, the website as this project alone does. The Dashboard workflow publishes it with the dashboard, signs its provenance and asks the published website for its pages. To see it while you write, at <http://127.0.0.1:8000>:
 
 ```sh
 python3 -m venv .venv-docs
@@ -106,7 +106,7 @@ python3 -m venv .venv-docs
 .venv-docs/bin/mkdocs serve
 ```
 
-On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place of `.venv-docs/bin/`; the dev container sets these tools up on its own. With them, `bash scripts/check.sh` builds the website strictly as well, as the check *docs* does, and without them it leaves that to the CI. The preview cards for social media come from the CI alone, because they need the Cairo library, which Windows doesn't have; where it is installed, `CI=true` before the command draws them too.
+On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place of `.venv-docs/bin/`; the dev container sets these tools up on its own. With them, `bash scripts/check.sh` builds the website strictly as well and checks what its hooks promise, as the check *docs* does, and without them it leaves that to the CI. The preview cards for social media come from the CI alone, because they need the Cairo library, which Windows doesn't have; where it is installed, `CI=true` before the command draws them too.
 
 Pictures make the documentation easier to follow, and so do [diagrams](#diagrams):
 

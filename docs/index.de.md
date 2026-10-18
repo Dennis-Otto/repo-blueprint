@@ -61,7 +61,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    Die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Design, auf Englisch und Deutsch. Jeder Pull Request baut sie streng, jede Änderung an `main` veröffentlicht sie auf GitHub Pages.
+    Die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Design, auf Englisch und Deutsch. Jeder Pull Request baut sie streng und prüft jeden Link und jeden Anker der gebauten Seiten, jede Änderung an `main` veröffentlicht sie auf GitHub Pages und signiert sie.
 
 - :material-sitemap-outline:{ .lg .middle } **Diagramme**
 

@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the website is checked and published
+    accDescr: The check docs builds the website strictly. Then lychee checks every link and anchor of the built pages without the network, blueprint.py site-check what the hooks of the website promise, scripts/check-site.sh what the project checks, and axe-core the accessibility of every page. A failure names the file and how to fix it. On main, the same build goes to GitHub Pages. The job that publishes it signs its provenance with Sigstore and asks the published website for the home page of each language and for an address that leads nowhere, which must answer 404.
+
+    you(["A pull request or a push to main"])
+    build["`**mkdocs build --strict**<br>the check docs`"]
+    links["`**lychee --offline**<br>every link and anchor<br>of the built pages`"]
+    promises["`**blueprint.py site-check**<br>sitemaps · 404 page · canonical<br>addresses · languages`"]
+    project["`**scripts/check-site.sh**<br>the project's own, if any`"]
+    access["`**axe-core**<br>WCAG 2.2 AA in both themes`"]
+    fail(["The coach names the file and the fix"])
+    pages["`**GitHub Pages**<br>on main only`"]
+    attest(["`**Signed provenance**<br>gh attestation verify`"])
+    ask(["`**The published website**<br>each home page · 404`"])
+
+    you --> build --> links --> promises --> project --> access
+    links -. "a broken link" .-> fail
+    promises -. "a broken promise" .-> fail
+    access -- "the same build" --> pages
+    pages --> attest
+    pages --> ask
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    classDef failed fill:#dc26262e,stroke:#dc2626,stroke-width:2px
+    class build,links,promises,project,access,pages bot
+    class you person
+    class attest,ask done
+    class fail failed

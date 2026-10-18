@@ -76,6 +76,8 @@ from blueprint.notices import third_party_notices
 from blueprint.pages import Layout, annotation, command, fixed, layouts, pages
 from blueprint.pr_report import about as pr_parts
 from blueprint.settings import CONFIG, ConfigError, Settings, apply, check, describe
+from blueprint.site_check import annotation as site_annotation
+from blueprint.site_check import check as check_site
 from blueprint.update import SOURCE, Outdated, update_pull_request
 from blueprint.vex import openvex
 
@@ -591,6 +593,36 @@ def pages_command(arguments: argparse.Namespace, root: Path) -> int:
     return 1
 
 
+def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
+    """What the website that MkDocs built promises, one broken promise on each line,
+    and in the CI also as annotations; with --output, the further languages and the
+    path of the address for the steps that follow."""
+    folder = Path(arguments.site).as_posix().rstrip("/") or "."
+    site = check_site(root / arguments.site)
+    if arguments.output:
+        with Path(arguments.output).open("a", encoding="utf-8") as file:
+            file.write(f"languages={' '.join(site.further)}\n")
+            file.write(f"root={site.root}\n")
+    if not site.findings:
+        languages = " ".join((site.default, *site.further)).strip() or "one language"
+        print(f"The website in {folder} keeps what its hooks promise ({languages}).")
+        return 0
+    for finding in site.findings:
+        print(f"{folder}/{finding.path}: {finding.message}")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for finding in site.findings:
+            print(site_annotation(finding, folder))
+    print(
+        f"{len(site.findings)} file(s) of the website break what the hooks of "
+        ".github/mkdocs_blueprint.py promise. A new version of Material or of "
+        "mkdocs-static-i18n that writes its pages differently, or a hook of the "
+        "project, changed them: build the website, compare the files named above "
+        "with what the hooks write, and report it to the blueprint if its hooks "
+        "need to change."
+    )
+    return 1
+
+
 def utf8_output() -> None:
     """Windows consoles default to a code page without the marks of the checklist, and
     to CRLF, which a file of the repository written from the output must not get."""
@@ -1068,6 +1100,20 @@ def main(
         help="put the cells of a layout table one below the other, the text before "
         "its picture, and leave out the widths of cells, first",
     )
+    site_check_parser = commands.add_parser(
+        "site-check",
+        help="what the website that MkDocs built promises: a sitemap in every folder "
+        "of pages, the 404 page in the default language, one canonical address and "
+        "full addresses of the other languages on every page",
+    )
+    site_check_parser.add_argument(
+        "site", help="the folder that MkDocs built the website into, such as site"
+    )
+    site_check_parser.add_argument(
+        "--output",
+        help="the file of the outputs of the step, $GITHUB_OUTPUT: the further "
+        "languages and the path of the address",
+    )
     arguments = parser.parse_args(argv)
 
     if arguments.command == "coverage":
@@ -1123,6 +1169,12 @@ def main(
         try:
             return mutation_command(arguments, root, api)
         except (OSError, ValueError, GitHubError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "site-check":
+        try:
+            return site_check_command(arguments, root)
+        except OSError as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command == "pages":

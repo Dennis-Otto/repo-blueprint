@@ -497,8 +497,14 @@ else
         echo "Tools that are out of date or incomplete install again as CONTRIBUTING.md shows."
         exit 1
       fi
+      echo "The website builds strictly."
+      # What the hooks of the website promise, as the check docs checks it after the
+      # build, with the Python and blueprint.py of the step Pages in one column.
+      if [[ -n "${python:-}" && -f "${tool:-}" ]] && ! "$python" "$tool" site-check "$site"; then
+        echo "The website breaks what its hooks promise; the lines above name each file."
+        exit 1
+      fi
     )
-    echo "The website builds strictly."
   fi
 fi
 
