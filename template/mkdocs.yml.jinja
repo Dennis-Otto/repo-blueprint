@@ -37,8 +37,11 @@ copyright: {= ('© ' ~ copyright) | to_json(ensure_ascii=False) =}
 #         name: Deutsch
 #         build: true
 
-# The menu. A tab in the header for each section.
+# The menu. A tab in the header for each section. The hooks of the blueprint write
+# the page of the automation, what each workflow does and when it runs, from
+# .github/workflows/ at every build; a page docs/automation.md of your own replaces it.
 nav:
   - Home: index.md
   - Security design: security.md
+  - Automation: automation.md
   - Decisions: decisions/README.md
