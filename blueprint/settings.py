@@ -554,7 +554,9 @@ def apply_labels(
                     raise
             current = {"name": name}
         path = urllib.parse.quote(current["name"], safe="")
-        api.patch(f"repos/{repo}/labels/{path}", body)
+        # GitHub renames a label, such as Bug to bug, through new_name.
+        update = {"new_name": name, **{k: v for k, v in body.items() if k != "name"}}
+        api.patch(f"repos/{repo}/labels/{path}", update)
 
 
 def load_labels(path: Path) -> dict[str, dict[str, str]]:

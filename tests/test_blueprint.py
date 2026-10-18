@@ -477,6 +477,9 @@ class FakeGitHub:
             if current is None:
                 return 404, {"message": "Not Found"}
             del self.labels[current]
+            # GitHub renames a label only through new_name, and ignores name.
+            assert "name" not in body, body
+            body = {**body, "name": body.get("new_name", current)}
         self.labels[body["name"]] = {
             "color": body["color"],
             "description": body["description"],
@@ -1318,6 +1321,31 @@ def test_a_gateway_that_fails_twice_stops_the_request(waits: list[float]) -> Non
     assert waits == [5]
 
 
+def test_a_post_that_a_gateway_timed_out_is_not_sent_twice(
+    waits: list[float],
+) -> None:
+    # GitHub has often opened the issue all the same: a second try would open two.
+    runner, calls = answers(http(502, {"message": "Bad Gateway"}), http(201, {}))
+
+    with pytest.raises(GitHubError, match="502: Bad Gateway"):
+        Api(runner).post("repos/x/issues", {"title": "t"})
+    assert len(calls) == 1
+    assert waits == []
+
+
+def test_a_run_stops_waiting_once_its_budget_is_spent(waits: list[float]) -> None:
+    # A rate limit that outlasts the waits: each workflow of a sweep fails fast.
+    limited = http(403, {"message": "You have exceeded a secondary rate limit."})
+    runner, calls = answers(*[limited] * 5)
+    api = Api(runner)
+
+    for workflow in range(3):
+        with pytest.raises(GitHubError, match="403"):
+            api.get(f"repos/x/actions/workflows/{workflow}")
+    assert waits == [60, 60]
+    assert len(calls) == 5
+
+
 @pytest.mark.parametrize(
     ("headers", "wait"),
     [
@@ -1437,13 +1465,15 @@ def test_a_list_that_fails_on_a_gateway_is_read_once_more(waits: list[float]) ->
     [
         ("", "gh: Resource not accessible by integration (HTTP 403)", 1, "403"),
         ("", "gh: not logged in", 1, "0: gh: not logged in"),
+        # A GitHub CLI before 2.48.
+        ("", "unknown flag: --slurp", 1, "needs GitHub CLI 2.48 or later"),
         # gh failed, whatever its message says.
         ("[]", "gh: unexpected end (HTTP 200)", 1, "200: gh: unexpected end"),
         ("not JSON", "", 0, "no list of pages"),
         ('{"a": 1}', "", 0, "no list of pages"),
         ("[" * 100_000, "", 0, "no list of pages"),
     ],
-    ids=["refused", "no status", "failed", "no JSON", "no list", "too deep"],
+    ids=["refused", "no status", "old gh", "failed", "no JSON", "no list", "too deep"],
 )
 def test_a_list_that_can_not_be_read(
     stdout: str, stderr: str, code: int, error: str

@@ -21,8 +21,14 @@ RATE_LIMIT_WAIT = 60
 # A longer wait, such as for a rate limit that resets in half an hour, would only hold
 # up the run: the request fails at once instead, and the next run tries again.
 LONGEST_WAIT = 90
+# All the waits of one run together: a run that asks many times, such as for each
+# workflow of the bot health, stops waiting once a rate limit outlasts it, and then
+# fails fast and reports what it couldn't do before its job times out.
+WAIT_BUDGET = 120
 # The most items that GitHub puts on a page of a list.
 PAGE = 100
+# The first GitHub CLI that reads every page into one list (gh api --slurp).
+MINIMUM_GH = "2.48"
 
 
 class GitHubError(Exception):
@@ -120,6 +126,10 @@ class Answer:
             found = re.search(r"\(HTTP (\d{3})\)", error)
             status = int(found[1]) if found else 0
             # gh failed, whatever status its message names.
+            if "unknown flag: --slurp" in error:
+                raise GitHubError(
+                    0, f"{error}; this needs GitHub CLI {MINIMUM_GH} or later"
+                )
             if found is None or status < 400:
                 raise GitHubError(status, error or result.stdout.strip())
             message = error.removeprefix("gh: ").replace(found[0], "").strip()
@@ -146,10 +156,11 @@ class Answer:
     def failed(self, missing_ok: bool) -> bool:
         return self.status >= 400 and not (missing_ok and self.status == 404)
 
-    def wait(self) -> float | None:
+    def wait(self, gateway: bool = True) -> float | None:
         """How long to wait before the request tries again; None when another try
-        can't change the answer, or only after too long a wait."""
-        if self.status in GATEWAY_ERRORS:
+        can't change the answer, or only after too long a wait. Without gateway, a
+        gateway error isn't tried again: GitHub may have done the request anyway."""
+        if gateway and self.status in GATEWAY_ERRORS:
             seconds: float = GATEWAY_WAIT
         elif rate_limited(self.status, self.message):
             seconds = RATE_LIMIT_WAIT
@@ -169,6 +180,8 @@ class Api:
 
     def __init__(self, runner: Runner = run_gh) -> None:
         self.runner = runner
+        # The seconds that this Api may still wait before it tries a request again.
+        self.budget: float = WAIT_BUDGET
 
     def answer(
         self,
@@ -176,12 +189,16 @@ class Api:
         payload: str | None,
         read: Callable[[subprocess.CompletedProcess[str]], Answer],
         missing_ok: bool,
+        gateway: bool = True,
     ) -> Answer:
         """The answer to a request, which tries once more after a wait where that can
-        change the answer; GitHubError when GitHub refused it."""
+        change the answer and the budget allows it; GitHubError when GitHub refused it.
+        Without gateway, a gateway error is the answer: for a request that isn't safe
+        to send twice."""
         answer = read(self.runner(arguments, payload))
-        wait = answer.wait() if answer.failed(missing_ok) else None
-        if wait is not None:
+        wait = answer.wait(gateway) if answer.failed(missing_ok) else None
+        if wait is not None and wait <= self.budget:
+            self.budget -= wait
             sleep(wait)
             answer = read(self.runner(arguments, payload))
         if answer.failed(missing_ok):
@@ -199,7 +216,11 @@ class Api:
         if body is not None:
             arguments += ["--input", "-"]
             payload = json.dumps(body)
-        answer = self.answer(arguments, payload, Answer.of_request, missing_ok)
+        # A POST that a gateway timed out has often been done all the same: sent
+        # twice, it would open a second issue, comment or workflow run.
+        answer = self.answer(
+            arguments, payload, Answer.of_request, missing_ok, method != "POST"
+        )
         return Response(answer.status, answer.data)
 
     def get(self, path: str) -> Json:
