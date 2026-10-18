@@ -2,12 +2,13 @@
 # tests and their properties (Hypothesis), run on every core (pytest-xdist) with their
 # coverage (pytest-cov) and a time limit for each (pytest-timeout), coverage, type
 # checks and lint, ShellCheck among it, which shellcheck-py brings for Linux, macOS
-# and Windows. Renovate keeps this list and the hash-pinned requirements-dev.txt
-# current.
+# and Windows, and Pillow, with which the tests draw the pictures of the screenshot
+# bot. Renovate keeps this list and the hash-pinned requirements-dev.txt current.
 copier
 coverage
 hypothesis
 mypy
+pillow
 pytest
 pytest-cov
 pytest-timeout

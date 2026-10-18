@@ -69,6 +69,12 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     Jedes Diagramm als Bild, das alle sehen, auch in der GitHub-App und in den Stores, gezeichnet aus seiner Mermaid-Quelle; die Website zeichnet die Quelle live. Die Bots reparieren sie selbst: im Pull Request, auf `main` und nach einem Update des Renderers.
 
+- :material-camera-outline:{ .lg .middle } **Screenshots**
+
+    ---
+
+    Die Bilder des Projekts erneuern sich selbst: Nach einer Änderung dessen, was sie zeigen, nach jedem Release und jede Woche führt der Screenshot-Bot `scripts/screenshots.sh` aus und hält einen Pull Request mit den Bildern, deren Pixel sich geändert haben, der sich selbst merged.
+
 - :material-cog-outline:{ .lg .middle } **Einstellungen als Code**
 
     ---

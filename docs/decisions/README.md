@@ -42,3 +42,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0034](0034-the-sboms-of-a-release-describe-what-it-ships.md) | The SBOMs of a release describe what it ships, by its name and version | accepted |
 | [0035](0035-the-tools-of-a-nextcloud-app-run-on-a-newer-php-than-its-code.md) | The tools of a Nextcloud app run on a newer PHP than its code, which is checked on the oldest | accepted |
 | [0036](0036-a-request-to-github-tries-once-more-and-a-refused-write-fails.md) | A request to GitHub tries once more, and a write that GitHub refused fails | accepted |
+| [0037](0037-pictures-renew-themselves-by-their-pixels.md) | Pictures renew themselves by their pixels, through one pull request of a bot | accepted |

@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the screenshots renew themselves
+    accDescr: After a change of main that touches a file of .github/screenshots-paths.txt, after every release, every week and on demand, the screenshot bot looks for scripts/screenshots.sh; without it, the bot renders nothing. The script renders the pictures without secrets, and each picture whose pixels stayed the same keeps its committed file. When pixels changed, one pull request from bot/screenshots holds the new pictures and merges itself once every check passes; when main looks as rendered, the bot closes it. So every picture shows the project as it is.
+
+    event["`A change of main that touches<br>a file of the list, a release,<br>every week or by hand`"]
+    script{"Has the repository<br>scripts/screenshots.sh?"}
+    off["No script:<br>the bot renders nothing"]
+    render["The script renders<br>the pictures, without secrets"]
+    pixels{"Did pixels change,<br>compared with main?"}
+    same["`Same pixels: the picture<br>keeps its committed file,<br>an open pull request closes`"]
+    pr["`One pull request from<br>*bot/screenshots* that<br>merges itself`"]
+    done["Every picture shows<br>the project as it is"]
+
+    event --> script
+    script -- "no" --> off
+    script -- "yes" --> render --> pixels
+    pixels -- "no" --> same --> done
+    pixels -- "yes" --> pr --> done
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class render,pr bot
+    class off person
+    class done done

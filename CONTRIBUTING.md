@@ -103,7 +103,7 @@ On Windows, use `py -3` in place of `python3` and `.venv-docs/Scripts/` in place
 Pictures make the documentation easier to follow, and so do [diagrams](#diagrams):
 
 - **Pictures** are files in `docs/images/`. A page of `docs/` names one as `images/…`, a README as `docs/images/…`, and a hook of the website (`.github/mkdocs_project.py`) shows it there too.
-- **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker: run it again after the questions of `copier.yml`, the output of Copier or the dashboard change.
+- **The recording and the screenshot** of the README, `docs/images/copier-copy.gif` and `docs/images/dashboard.png`, come from `bash scripts/docs-pictures.sh`, with Docker. The Docs pictures workflow runs it after every release that changed a file of `.github/docs-pictures/paths.txt`, and on demand, and keeps one pull request from `bot/pictures` with the pictures whose pixels changed, which merges itself. To see what a change of yours changes, run it, then `python3 blueprint.py screenshots restore`, which gives every picture that looks the same its committed file back.
 
 ### Pages in one column
 

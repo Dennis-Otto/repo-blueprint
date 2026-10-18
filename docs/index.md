@@ -69,6 +69,12 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     Every diagram as a picture that every reader sees, also in the GitHub app and the stores, drawn from its Mermaid source; the website draws the source live. The bots fix them by themselves: in a pull request, on `main` and after an update of the renderer.
 
+- :material-camera-outline:{ .lg .middle } **Screenshots**
+
+    ---
+
+    The pictures of the project renew themselves: after a change of what they show, after every release and every week, the screenshot bot runs `scripts/screenshots.sh` and keeps one pull request with the pictures whose pixels changed, which merges itself.
+
 - :material-cog-outline:{ .lg .middle } **Settings as code**
 
     ---

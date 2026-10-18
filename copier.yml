@@ -54,6 +54,8 @@ _skip_if_exists:
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html
+  - /scripts/screenshots.sh
+  - .github/screenshots-paths.txt
   - .github/repository.project.toml
   - .github/checks.project.toml
   - .github/workflows/action-test.yml
