@@ -9,6 +9,7 @@ description: 'The projects of Dennis Otto in one place: Home Assistant, Nextclou
   and Paperless, GitHub automation and the blueprint they all share.'
 discussions: false
 homepage: https://dennis-otto.github.io/
+issue_assistant_ai: true
 languages: []
 license: MIT
 owner: Dennis-Otto
@@ -18,6 +19,7 @@ project_type: generic
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
 release_app_id: '4739928'
+renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true

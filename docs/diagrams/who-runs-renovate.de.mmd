@@ -1,0 +1,25 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wer Renovate ausführt
+    accDescr: Die Antwort renovate_runner entscheidet, wer Renovate für ein Repository ausführt. Der Eigentümer des Blueprints behält den Hub, den Renovate-Workflow des Blueprints, der es für jedes seiner Repositorys ausführt, auf dem die Release-App installiert ist. Jeder andere Eigentümer bekommt einen Renovate-Workflow im Repository selbst, der es alle zwei Stunden als Release-App ausführt, nur für dieses Repository, mit demselben Renovate und denselben Regeln; oder er installiert die Mend-Renovate-App, die keinen Workflow braucht und bei jedem Push kommt. Jeder Weg liest die Regeln aus .github/renovate.json5 und öffnet die Updates als Pull Requests, deren Checks entscheiden, ob sie gemergt werden.
+
+    answer{{"`**renovate_runner**`"}}
+    hub["`**hub**<br>der Renovate-Workflow des Blueprints,<br>für jedes Repository seines Eigentümers`"]
+    self["`**self**<br>.github/workflows/renovate.yml,<br>alle zwei Stunden, als Release-App,<br>nur für dieses Repository`"]
+    mend(["`**mend**<br>du installierst die Mend-Renovate-App;<br>kein Workflow`"])
+    rules["Die Regeln aus .github/renovate.json5<br>und die des Blueprints"]
+    updates["Pull Requests mit den Updates,<br>die gemergt werden, sobald jeder Check besteht"]
+
+    answer --> hub & self & mend
+    hub & self & mend --> rules --> updates
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class hub,self,rules bot
+    class answer,mend person
+    class updates done

@@ -288,6 +288,29 @@ release_app_id:
   validator: >-
     [% if not (release_app_id | regex_search('^[0-9]+$')) %]Copy the App ID, a number, from the settings page of the app.[% endif %]
 
+# Who runs Renovate, which opens the updates of the dependencies: a workflow of the
+# repository itself, as the release app; the Mend Renovate app, which the owner
+# installs; or the Renovate workflow of the blueprint, which runs it for every
+# repository of the blueprint's owner and only for them.
+renovate_runner:
+  type: str
+  help: Who runs Renovate, which opens the updates of the dependencies
+  choices:
+    A Renovate workflow in this repository, as the release app (self): self
+    The Mend Renovate app, which the owner installs (mend): mend
+    The Renovate workflow of the blueprint, for the repositories of its owner (hub): hub
+  default: "[% if owner == blueprint_owner.account %]hub[% else %]self[% endif %]"
+  validator: >-
+    [% if renovate_runner == 'hub' and owner != blueprint_owner.account %]The Renovate workflow of the blueprint runs only for the repositories of {= blueprint_owner.account =}: choose a workflow in this repository (self) or the Mend Renovate app (mend).[% elif renovate_runner != 'hub' and owner == blueprint_owner.account %]The Renovate workflow of the blueprint already runs for every repository of {= blueprint_owner.account =} that has its rules, so a second Renovate would fight it over the branches: choose the blueprint's workflow (hub).[% endif %]
+
+# The issue assistant labels the issues and answers its commands without AI; with
+# AI, the engine of .github/issue-assistant/config.toml, Claude, also analyzes each
+# new issue, with its secret in the environment issue-assistant.
+issue_assistant_ai:
+  type: bool
+  help: Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant
+  default: true
+
 sample_code:
   type: bool
   help: Start with sample code and tests; an existing repository that takes the blueprint answers no

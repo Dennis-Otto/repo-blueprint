@@ -167,6 +167,85 @@ def release_app(api: Api, repo: str, settings: Settings) -> tuple[Step, Step]:
     return registered, installed
 
 
+# Who runs Renovate, by the answer renovate_runner of the blueprint in
+# .copier-answers.yml: the Renovate workflow of the blueprint for the repositories of
+# its owner, which was the only one before the answer; the Renovate workflow of the
+# repository itself; or the Mend Renovate app.
+RENOVATE_RUNNERS = ("hub", "self", "mend")
+MEND_APP = "https://github.com/apps/renovate"
+# The issue that Renovate keeps open once it runs, by the rules of the blueprint.
+DASHBOARD = "Dependency dashboard"
+
+
+def renovate_runner(root: Path) -> str:
+    """Who runs Renovate for the repository in root."""
+    answers = root / ".copier-answers.yml"
+    text = answers.read_text(encoding="utf-8") if answers.exists() else ""
+    match = re.search(r"^renovate_runner: *['\"]?(\w+)", text, re.MULTILINE)
+    return match.group(1) if match and match.group(1) in RENOVATE_RUNNERS else "hub"
+
+
+def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
+    """Renovate, which runs once its issue Dependency dashboard is open, and how it
+    comes to run."""
+    issues = api.get_all(f"repos/{repo}/issues?labels=dependencies&state=open")
+    running = any(
+        isinstance(issue, dict)
+        and issue.get("title") == DASHBOARD
+        and "pull_request" not in issue
+        for issue in issues
+    )
+    runner = renovate_runner(root)
+    if runner == "self":
+        how = [
+            "The Renovate workflow of this repository runs it every two hours as the"
+            " release app, once the app is installed; start its first run:",
+            f"https://github.com/{repo}/actions/workflows/renovate.yml",
+        ]
+    elif runner == "mend":
+        how = [
+            "Install the Mend Renovate app on this repository; it reads"
+            " .github/renovate.json5 and opens the dashboard on its first run:",
+            f"{MEND_APP}/installations/new",
+            *ignored_author(api, settings),
+        ]
+    else:
+        how = [
+            "The Renovate workflow of the blueprint runs it every two hours for each"
+            " repository of its owner on which the release app is installed; its next"
+            " run after the installation opens the dashboard."
+        ]
+    return Step(
+        f"Renovate runs: its issue '{DASHBOARD}' is open", running, "\n".join(how)
+    )
+
+
+def ignored_author(api: Api, settings: Settings) -> list[str]:
+    """The rule that lets the Mend Renovate app take the commits of the release app,
+    with which the branch bot and the fix bot update its branches, for none of
+    someone else, which would stop it from rebasing them."""
+    name = str(settings.variables.get("RELEASE_APP", "")).strip()
+    user = api.get(f"users/{name}%5Bbot%5D") if name else None
+    number = user.get("id") if isinstance(user, dict) else None
+    known = number is not None
+    address = (
+        f"{number}+{name}[bot]" if known else "ID+NAME[bot]"
+    ) + "@users.noreply.github.com"
+    return [
+        "The branch bot and the fix bot commit to its branches as the release app;"
+        " so that Renovate goes on rebasing them, add to .github/renovate.json5:",
+        f'gitIgnoredAuthors: ["{address}"]',
+        *(
+            []
+            if known
+            else [
+                "with the name of the release app for NAME, and for ID the number of"
+                " its bot user: gh api users/NAME%5Bbot%5D --jq .id"
+            ]
+        ),
+    ]
+
+
 def listed(access: str) -> str:
     """The permissions of the release app with that access, as a sentence lists them."""
     names = [name for name, _, need in RELEASE_APP_PERMISSIONS if need == access]
@@ -215,6 +294,7 @@ def checklist(
             "\n".join(item.manual for item in community),
         ),
         installed,
+        renovate(api, repo, settings, root),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
             "(the issue assistant closes them with the release)",

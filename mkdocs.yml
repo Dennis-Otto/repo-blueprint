@@ -47,6 +47,7 @@ plugins:
         nav_translations:
           Home: Start
           Guide: Anleitung
+          Your own account: Dein eigenes Konto
           Security design: Sicherheitsdesign
           Automation: Automatisierung
           Decisions: Entscheidungen
@@ -63,6 +64,7 @@ hooks:
 nav:
   - Home: index.md
   - Guide: guide.md
+  - Your own account: own-account.md
   - Roadmap: roadmap.md
   - Security design: security.md
   - Automation: automation.md

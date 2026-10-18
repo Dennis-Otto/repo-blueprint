@@ -7,6 +7,7 @@ import base64
 import configparser
 import contextlib
 import datetime
+import difflib
 import fnmatch
 import hashlib
 import importlib.util
@@ -6814,6 +6815,109 @@ def test_the_blueprint_bot_goes_on_with_its_release_app(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("client", "key", "missing"),
+    [
+        (
+            "",
+            "false",
+            "names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID",
+        ),
+        (
+            "Iv23liOcto",
+            "false",
+            "has no private key of its release app in the secret"
+            " RELEASE_AUTOMATION_PRIVATE_KEY of the environment release",
+        ),
+    ],
+    ids=["no app", "no key"],
+)
+def test_renovate_says_what_its_release_app_lacks(
+    tmp_path: Path, client: str, key: str, missing: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "renovate",
+        "Check that the release app is set up",
+        env={"CLIENT_ID": client, "KEY_SET": key},
+    )
+
+    assert done.returncode == 1
+    assert done.stdout.splitlines() == [
+        f"::error::This repository {missing}, which Renovate runs as; no dependency"
+        " was updated."
+    ]
+    assert done.summary.startswith(
+        "### Renovate needs the release app of the owner\n\n"
+        f"This repository {missing}. "
+    )
+    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
+    assert done.calls == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_goes_on_with_its_release_app(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "renovate",
+        "Check that the release app is set up",
+        env={"CLIENT_ID": "Iv23liOcto", "KEY_SET": "true"},
+    )
+
+    assert done.returncode == 0
+    assert done.stdout == ""
+    assert done.summary == ""
+    # Before the token of the app, which would fail without it.
+    names = [
+        found.get("name")
+        for found in workflow_steps.job("renovate.yml", "renovate")["steps"]
+    ]
+    assert names.index("Check that the release app is set up") + 1 == names.index(
+        "Create a token of the release app"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_commits_as_the_bot_user_of_its_release_app(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "renovate",
+        "Name the bot user of the release app",
+        answers=[
+            exact(
+                "api users/dennis-otto-release-automation%5Bbot%5D --jq .id",
+                "321826887\n",
+            )
+        ],
+        env={"SLUG": "dennis-otto-release-automation"},
+    )
+
+    assert done.returncode == 0
+    # The bot user and the author that the bot of the blueprint has always had.
+    assert done.outputs == {
+        "username": "dennis-otto-release-automation[bot]",
+        "git-author": "dennis-otto-release-automation[bot] <321826887+"
+        "dennis-otto-release-automation[bot]@users.noreply.github.com>",
+    }
+    found = workflow_steps.step(
+        "renovate.yml", "renovate", "Name the bot user of the release app"
+    )
+    assert found["env"]["SLUG"] == "${{ steps.app.outputs.app-slug }}"
+    run = workflow_steps.step("renovate.yml", "renovate", "Run Renovate")
+    assert run["env"]["RENOVATE_USERNAME"] == "${{ steps.bot.outputs.username }}"
+    assert run["env"]["RENOVATE_GIT_AUTHOR"] == "${{ steps.bot.outputs.git-author }}"
+    # The settings of the bot name no owner, no app and no repository: the workflow
+    # does, from the token, so that they serve every owner.
+    bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    for key in ("autodiscover", "username", "gitAuthor", "repositories"):
+        assert f"{key}:" not in bot, key
+    assert not BLUEPRINT_OWNER.search(bot)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_release_bot_explains_a_missing_release_app(tmp_path: Path) -> None:
     found = workflow_steps.step(
         "release.yml", "release-please", "Explain a missing release app"
@@ -6885,6 +6989,174 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
     )
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "`python3 .github/blueprint.py checklist` shows how to register" in toml
+    # Renovate runs in the repository itself, and the issue assistant with its AI.
+    assert answers["renovate_runner"] == "self"
+    assert answers["issue_assistant_ai"] is True
+    assert (project / ".github/workflows/renovate.yml").is_file()
+
+
+def test_a_foreign_owner_runs_renovate_in_their_own_repository(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="generic",
+        owner="octo-org",
+    )
+
+    workflow = (project / ".github/workflows/renovate.yml").read_text("utf-8")
+    hub = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    # The workflow of the blueprint, for this repository alone: the job without the
+    # name of the blueprint, a token of the release app for this repository, and this
+    # repository in place of every repository of the owner. The rest is the same, the
+    # Renovate that it pins by digest and its schedule too.
+    changed = [
+        line
+        for line in difflib.unified_diff(
+            hub.splitlines(), workflow.splitlines(), lineterm="", n=0
+        )
+        if line[:1] in "+-" and not line.startswith(("+++", "---"))
+    ]
+    assert changed == [
+        "-    if: github.event_name != 'pull_request' && github.repository =="
+        " 'Dennis-Otto/repo-blueprint'",
+        "+    if: github.event_name != 'pull_request'",
+        "-          # In the blueprint, every repository of the installation, on"
+        " purpose: the",
+        "-          # app is installed on exactly the repositories that Renovate keeps"
+        " current.",
+        "-          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]",
+        "-          # In the blueprint, every repository of the owner on which the app is",
+        "-          # installed and that has a .github/renovate.json5.",
+        '-          RENOVATE_AUTODISCOVER: "true"',
+        "-          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*",
+        "+          # This repository alone, by its name, also after a rename.",
+        "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
+    ]
+    parsed = yaml.safe_load(workflow)
+    assert parsed[True]["schedule"] == [{"cron": "17 */2 * * *"}]
+    steps = {step.get("name"): step for step in parsed["jobs"]["renovate"]["steps"]}
+    assert "owner" not in steps["Create a token of the release app"]["with"]
+    run = steps["Run Renovate"]
+    assert re.fullmatch(
+        r"\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", run["with"]["renovate-version"]
+    )
+    assert run["env"]["RENOVATE_REPOSITORIES"] == "${{ github.repository }}"
+    assert run["env"]["RENOVATE_USERNAME"] == "${{ steps.bot.outputs.username }}"
+    assert not {"RENOVATE_AUTODISCOVER", "RENOVATE_AUTODISCOVER_FILTER"} & set(
+        run["env"]
+    )
+    # The settings of the bot of the blueprint, without the command of its pins.py,
+    # which no repository has.
+    own = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    start = own.index("  // The one command that a rule may run after an update")
+    end = own.index("\n", own.index("  allowedCommands: ")) + 1
+    bot = (project / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    assert bot == own[:start] + own[end:]
+    assert "allowedCommands" not in bot
+    # Renovate updates the Renovate of the workflow on its line "# renovate:" alone,
+    # by the same rule as in the blueprint.
+    rules = (project / ".github/renovate-blueprint.json5").read_text("utf-8")
+    assert (
+        "// workflows current; the Renovate workflow of this repository runs it"
+        in rules
+    )
+    rule = rules[rules.index("    {\n      // The Renovate of the Renovate workflow") :]
+    rule = rule[: rule.index("    },\n") + len("    },\n")]
+    assert rule in (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    # The action may run, and the bot-health bot watches the workflow.
+    settings = Settings.load(project / ".github/repository.toml")
+    selected = settings.actions["selected"]
+    assert [ref for ref in settings.workflows if not allows(selected, ref)] == []
+    assert any(
+        ref.startswith("renovatebot/github-action@") for ref in settings.workflows
+    )
+    health = yaml.safe_load(
+        (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    )
+    assert "Renovate" in health[True]["workflow_run"]["workflows"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_hub_of_the_blueprint_runs_renovate_for_its_owner(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    assert answers["renovate_runner"] == "hub"
+    assert not (project / ".github/workflows/renovate.yml").exists()
+    assert not (project / ".github/renovate-global.json5").exists()
+    toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "renovatebot/github-action" not in toml
+    rules = (project / ".github/renovate-blueprint.json5").read_text("utf-8")
+    assert "ghcr.io/renovatebot/renovate" not in rules
+    assert "the Renovate workflow of the blueprint runs it for every" in rules
+    health = yaml.safe_load(
+        (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
+    )
+    assert "Renovate" not in health[True]["workflow_run"]["workflows"]
+
+
+def test_a_foreign_owner_may_take_the_mend_app_and_leave_out_the_ai(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner="mend",
+        issue_assistant_ai=False,
+    )
+
+    # The Mend Renovate app reads .github/renovate.json5 alone: no workflow, no
+    # settings of a bot and no action of Renovate.
+    assert not (project / ".github/workflows/renovate.yml").exists()
+    assert not (project / ".github/renovate-global.json5").exists()
+    assert (project / ".github/renovate.json5").is_file()
+    rules = (project / ".github/renovate-blueprint.json5").read_text("utf-8")
+    assert "// workflows current; the Mend Renovate app runs it. An update" in rules
+    toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "renovatebot/github-action" not in toml
+    # The issue assistant without AI: the variable switches the AI off, and the
+    # environment, still for main alone, asks for no secret of an engine, so that the
+    # checklist can pass without one.
+    settings = Settings.load(project / ".github/repository.toml")
+    assert settings.variables["ISSUE_ASSISTANT_AI"] == "off"
+    assert settings.environments["issue-assistant"]["secrets"] == []
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in toml
+    # No reporter reads that an AI reads their issue, and the check of the issue
+    # assistant asks no file to say so.
+    support = (project / "SUPPORT.md").read_text(encoding="utf-8")
+    assert "Claude" not in support
+    assert "No AI reads the issues of this project" in support
+    assert "**A duplicate** of an open issue, as the maintainer names it" in support
+    config = tomllib.loads(
+        (project / ".github/issue-assistant/config.toml").read_text("utf-8")
+    )
+    assert config["transparency"]["files"] == []
+    assert config["engine"]["name"] == "claude"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_issue_assistant_names_its_ai_by_default(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    settings = Settings.load(project / ".github/repository.toml")
+    # The variable is always set, so that a later answer turns the AI on again.
+    assert settings.variables["ISSUE_ASSISTANT_AI"] == "on"
+    assert settings.environments["issue-assistant"]["secrets"] == [
+        "CLAUDE_CODE_OAUTH_TOKEN"
+    ]
+    assert "Claude, an AI by Anthropic" in (project / "SUPPORT.md").read_text("utf-8")
+    config = tomllib.loads(
+        (project / ".github/issue-assistant/config.toml").read_text("utf-8")
+    )
+    assert config["transparency"]["files"] == ["SUPPORT.md"]
 
 
 def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> None:
@@ -6906,6 +7178,7 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
         "RELEASE_APP": "octo-org-release-automation",
         "RELEASE_AUTOMATION_CLIENT_ID": "Iv23liOcto",
         "RELEASE_AUTOMATION_APP_ID": "12345",
+        "ISSUE_ASSISTANT_AI": "on",
     }
     creation = next(
         ruleset
@@ -6952,8 +7225,18 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
             },
             "Copy the App ID, a number",
         ),
+        (
+            {"owner": "octo-org", "renovate_runner": "hub"},
+            "The Renovate workflow of the blueprint runs only for the repositories of"
+            " Dennis-Otto",
+        ),
+        (
+            {"owner": "Dennis-Otto", "renovate_runner": "mend"},
+            "The Renovate workflow of the blueprint already runs for every repository"
+            " of Dennis-Otto",
+        ),
     ],
-    ids=["no owner", "owner", "app", "client id", "app id"],
+    ids=["no owner", "owner", "app", "client id", "app id", "hub", "not hub"],
 )
 def test_the_questions_of_the_owner_refuse_what_github_would_not_take(
     tmp_path: Path, data: dict[str, str], message: str
@@ -6985,7 +7268,14 @@ def test_the_owner_of_the_blueprint_keeps_the_answers_of_its_repositories(
     answers = yaml.safe_load(
         (projects["generic"] / ".copier-answers.yml").read_text(encoding="utf-8")
     )
-    keys = ("author", "release_app", "release_app_client_id", "release_app_id")
+    keys = (
+        "author",
+        "release_app",
+        "release_app_client_id",
+        "release_app_id",
+        "renovate_runner",
+        "issue_assistant_ai",
+    )
     for name, theirs in ANSWERS.items():
         assert {key: theirs[key] for key in keys} == {
             key: answers[key] for key in keys
@@ -7136,9 +7426,16 @@ def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
     # The bot's merge commits come from the release app, as Renovate's own commits
     # do, so Renovate doesn't take the branch for edited and keeps it current.
     assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in text
-    bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
-    assert 'username: "dennis-otto-release-automation[bot]"' in bot
-    assert 'gitAuthor: "dennis-otto-release-automation[bot] <' in bot
+    # Renovate commits as the bot user of the same app, whose name and author the
+    # Renovate workflow takes from the token of the app.
+    token = workflow_steps.step(
+        "renovate.yml", "renovate", "Create a token of the release app"
+    )
+    assert token["with"]["client-id"] == "${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}"
+    named = workflow_steps.step(
+        "renovate.yml", "renovate", "Name the bot user of the release app"
+    )
+    assert named["env"]["SLUG"] == "${{ steps.app.outputs.app-slug }}"
 
 
 def test_the_branch_bot_moves_its_line_on_at_once() -> None:

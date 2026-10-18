@@ -75,7 +75,9 @@ patterns_allowed = [
   "ossf/scorecard-action@*",
   # Run by anthropics/claude-code-action.
   "oven-sh/setup-bun@*",
-  "pypa/gh-action-pypi-publish@*",
+  "pypa/gh-action-pypi-publish@*",[% if renovate_runner == 'self' %]
+  # The Renovate workflow of this repository.
+  "renovatebot/github-action@*",[% endif %]
   "shivammathur/setup-php@*",
   "step-security/harden-runner@*",
   "zizmorcore/zizmor-action@*",
@@ -120,6 +122,11 @@ RELEASE_AUTOMATION_APP_ID = "{= release_app_id =}"
 # and runs the bots: `python3 .github/blueprint.py checklist` shows how to register
 # one, and `copier update` with its answers names it here.
 [%- endif %]
+# Whether the issue assistant analyzes each new issue with its AI engine, by the
+# answer issue_assistant_ai of the blueprint. "off" labels the issues and answers
+# the commands without an engine, which needs no secret; the settings bot sets the
+# variable either way, so a later answer turns the AI on or off again.
+ISSUE_ASSISTANT_AI = "{= 'on' if issue_assistant_ai else 'off' =}"
 
 # GitHub Pages, which publishes the website that the Docs workflow builds from
 # mkdocs.yml and docs/.
@@ -131,7 +138,12 @@ build_type = "workflow"
 secrets = [{= ((["RELEASE_AUTOMATION_PRIVATE_KEY"] if release_app else []) + (["APP_PRIVATE_KEY", "APPSTORE_TOKEN"] if publish_to == 'nextcloud-appstore' else [])) | map('to_json') | join(', ') =}]
 
 [environments.issue-assistant]
+[%- if issue_assistant_ai %]
 secrets = ["CLAUDE_CODE_OAUTH_TOKEN"]
+[%- else %]
+# No AI engine and no secret of one; only main may use the environment still.
+secrets = []
+[%- endif %]
 [% if publish_to == 'pypi' %]
 [environments.pypi]
 secrets = []

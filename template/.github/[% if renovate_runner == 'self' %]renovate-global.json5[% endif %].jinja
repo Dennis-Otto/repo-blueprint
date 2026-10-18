@@ -1,0 +1,5 @@
+[#- The settings of the Renovate bot of the blueprint, for the Renovate workflow of this
+    repository, without the command of the blueprint's own pins.py. -#]
+[%- filter regex_replace("  // The one command that a rule may run after an update(?:.|\n)*?  allowedCommands: .*\n", "") -%]
+[%- include ".github/renovate-global.json5" -%]
+[%- endfilter -%]
