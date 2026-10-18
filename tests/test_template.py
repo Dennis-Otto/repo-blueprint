@@ -2462,8 +2462,250 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
 
 
 def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> None:
+    project = projects["nextcloud-app"]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Psalm sees no input in a Nextcloud app on its own, which passes the parameters of
+    # a request to a controller as arguments, and none of the sinks of Nextcloud: the
+    # plugin of the blueprint teaches it both, for the app and for its canary.
+    plugin = ".github/psalm/NextcloudTaintPlugin.php"
+    assert (project / plugin).is_file()
+    for config in ("psalm.xml", ".github/psalm/canary.xml"):
+        root = ElementTree.parse(project / config).getroot()
+        plugins = root.find("psalm:plugins", PSALM)
+        assert plugins is not None, config
+        assert [entry.get("filename") for entry in plugins] == [plugin], config
+    # The canary proves that the analysis still sees, before it checks the app, whose
+    # paths the CI shows in code scanning.
+    steps = re.findall(r'^step "(Psalm[^"]*)"$', check, re.M)
+    assert steps == ["Psalm", "Psalm taint canary", "Psalm taint analysis"]
+    assert (
+        "\nvendor/bin/psalm --taint-analysis --threads=1 --no-cache"
+        " --report=build/psalm-taint.sarif\n" in check
+    )
+    # Only a Nextcloud app has PHP.
+    for kind in KINDS:
+        if kind != "nextcloud-app":
+            assert not (projects[kind] / ".github/psalm").exists(), kind
+
+
+def test_the_canary_has_a_path_to_each_kind_of_sink(projects: dict[str, Path]) -> None:
+    psalm = projects["nextcloud-app"] / ".github/psalm"
+    plugin = (psalm / "NextcloudTaintPlugin.php").read_text(encoding="utf-8")
+    canary = (psalm / "canary/CanaryController.php").read_text(encoding="utf-8")
+    expected = re.findall(r"// expect: (\w+)$", canary, re.M)
+    # Each kind of sink that the plugin adds, and the queries, which nextcloud/ocp
+    # marks itself, for a parameter of a controller, which only the plugin makes input.
+    issues = {"FILE": "TaintedFile", "SSRF": "TaintedSSRF", "HEADER": "TaintedHeader"}
+    kinds = set(re.findall(r"TaintKind::INPUT_(\w+)", plugin))
+    assert kinds == set(issues)
+    assert set(expected) == {*issues.values(), "TaintedSql"}
+    # A sink of an interface, of the interface that it extends, of the data of the
+    # app, and of a constructor.
+    for call in (
+        "$this->folder->newFile($name); // expect: TaintedFile",
+        "$this->file->move('/user/files/' . $target); // expect: TaintedFile",
+        "$this->appData->getFile($name); // expect: TaintedFile",
+        "return new RedirectResponse($url); // expect: TaintedHeader",
+    ):
+        assert call in canary, call
+    # The sources that the plugin adds by their methods: the term of a search and the
+    # answer of another server.
+    assert "$this->folder->get($query->getTerm()); // expect: TaintedFile" in canary
+    assert "->getBody();" in canary
+    for source in ("'getTerm'", "'getBody'"):
+        assert source in plugin, source
+    # What the canary must not find: input that a function of the app escapes, and the
+    # parameters of a class that is no controller.
+    assert "@psalm-taint-escape file" in canary
+    assert "$this->folder->newFile(self::fileName($name));\n" in canary
+    assert "final class CanaryService {" in canary
+    # A name that nextcloud/ocp no longer has stops the analysis, instead of leaving it
+    # blind to that sink.
+    assert "throw self::changed(" in plugin
+
+
+PHP = shutil.which("php")
+
+
+@pytest.mark.skipif(PHP is None, reason="the comparison of the canary runs in PHP")
+@pytest.mark.parametrize("change", ["none", "missed", "unexpected", "no report"])
+def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
+    projects: dict[str, Path], tmp_path: Path, change: str
+) -> None:
+    assert PHP
+    shutil.copytree(projects["nextcloud-app"] / ".github/psalm", tmp_path / "psalm")
+    canary = tmp_path / "psalm/canary/CanaryController.php"
+    lines = canary.read_text(encoding="utf-8").splitlines()
+    expected = [
+        (number, found[1])
+        for number, line in enumerate(lines, 1)
+        if (found := re.search(r"// expect: (\w+)$", line))
+    ]
+    # As Psalm reports each path: its kind, the file and the line where it arrives.
+    issues = [
+        {"type": issue, "file_path": canary.as_posix(), "line_from": number}
+        for number, issue in expected
+    ]
+    escaped = lines.index("\t\t$this->folder->newFile(self::fileName($name));") + 1
+    if change == "missed":
+        issues.pop(0)
+    elif change == "unexpected":
+        issues.append(
+            {
+                "type": "TaintedFile",
+                "file_path": canary.as_posix(),
+                "line_from": escaped,
+            }
+        )
+    if change != "no report":
+        (tmp_path / "psalm-canary.json").write_text(
+            json.dumps(issues), encoding="utf-8"
+        )
+
+    result = subprocess.run(
+        [PHP, "psalm/check-canary.php", "psalm-canary.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    if change == "none":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == (
+            f"The taint analysis finds each of the {len(expected)} paths of the canary,"
+            " and no other.\n"
+        )
+        return
+    assert result.returncode == 1
+    number, issue = expected[0]
+    message = {
+        "missed": "The taint analysis missed the path that the canary expects at"
+        f" CanaryController.php:{number} {issue}.\n",
+        "unexpected": "The taint analysis found a path at"
+        f" CanaryController.php:{escaped} TaintedFile, which the canary doesn't"
+        " expect.\n",
+        "no report": "Psalm wrote no report of the canary to psalm-canary.json; its"
+        " output above says why.\n",
+    }[change]
+    assert message in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("sees", [True, False])
+def test_the_canary_of_the_taint_analysis_runs_beside_the_types(
+    projects: dict[str, Path], tmp_path: Path, sees: bool
+) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
-    assert "vendor/bin/psalm --taint-analysis" in check
+    start = check.index('step "Psalm"\n')
+    steps = check[start : check.index('step "Tests, with every line covered"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the steps.
+    (repository / "scripts/psalm.sh").write_text(
+        check[: check.index('step "Text files"')] + steps,
+        encoding="utf-8",
+        newline="\n",
+    )
+    # The report of a run before, which passed.
+    (repository / "build").mkdir()
+    (repository / "build/psalm-canary.json").write_text("every path", encoding="utf-8")
+    psalm = repository / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    psalm.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            echo "psalm $*" >> "$CALLS"
+            echo "Psalm ran with $1"
+            if [[ "$1" == --config=* && -n "$SEES" ]]; then
+              echo "every path" > build/psalm-canary.json
+            fi
+            """
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    psalm.chmod(0o755)
+    php = (
+        'grep -q "every path" "$2" 2>/dev/null && exit 0\n'
+        "echo 'The taint analysis missed a path.'\n"
+        "exit 1\n"
+    )
+
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/psalm.sh\n",
+        repository,
+        {"php": php},
+        SEES="yes" if sees else "",
+    )
+
+    # The canary runs in the background, with the plugin and the public API of
+    # Nextcloud of the app, and writes its findings for the comparison.
+    canary = (
+        "psalm --config=.github/psalm/canary.xml --taint-analysis --threads=1"
+        " --no-cache --no-progress --monochrome --report=build/psalm-canary.json"
+    )
+    assert canary in calls
+    assert "psalm --threads=1 --no-cache" in calls
+    assert "php .github/psalm/check-canary.php build/psalm-canary.json" in calls
+    analysis = (
+        "psalm --taint-analysis --threads=1 --no-cache --report=build/psalm-taint.sarif"
+    )
+    if sees:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert analysis in calls
+        assert "Psalm ran with --config" not in result.stdout
+    else:
+        # An analysis that has gone blind, or a canary that wrote no report, checks no
+        # app, and shows what Psalm said; the report of a run before doesn't count.
+        assert result.returncode == 1
+        assert analysis not in calls
+        assert result.stdout.endswith(
+            "\n== Psalm taint canary\nThe taint analysis missed a path.\n"
+            "Psalm ran with --config=.github/psalm/canary.xml\n"
+        )
+
+
+def test_code_scanning_shows_the_paths_of_the_taint_analysis() -> None:
+    workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
+    assert "\npermissions:\n  contents: read\n\n" in workflow
+    check = job_alone(workflow, "check")
+    keep = step_of(check, "      - name: Keep the report of the taint analysis")
+    assert "        id: taint\n" in keep
+    # Also when the analysis found a path, which fails the check.
+    assert (
+        "        if: always() && hashFiles('build/psalm-taint.sarif') != ''\n" in keep
+    )
+    assert "          path: build/psalm-taint.sarif\n" in keep
+    assert "    outputs:\n" in check
+    assert "      taint: ${{ steps.taint.outcome }}\n" in check
+    # The job that runs the tools of Composer and the code of a pull request can't
+    # write alerts; the one that uploads them runs no code of the app.
+    assert "security-events" not in check
+    report = job_alone(workflow, "taint-report")
+    assert "    name: taint report (php)\n" in report
+    assert "    needs: check\n" in report
+    assert condition_of(report) == (
+        "!cancelled() && needs.check.outputs.taint == 'success' &&"
+        " (github.event_name != 'pull_request' ||"
+        " github.event.pull_request.head.repo.full_name == github.repository)"
+    )
+    assert "    permissions:\n      contents: read\n      security-events: write\n" in (
+        report
+    )
+    for code in ("composer", "scripts/check.sh", "vendor/bin"):
+        assert code not in report, code
+    assert "          persist-credentials: false\n" in report
+    upload = step_of(report, "      - name: Upload the paths to code scanning")
+    assert "        uses: github/codeql-action/upload-sarif@" in upload
+    assert (
+        "          sarif_file: ${{ runner.temp }}/psalm-taint/psalm-taint.sarif\n"
+        in upload
+    )
+    assert "          category: psalm-taint\n" in upload
+    assert report.endswith(explain_step("taint report (php)"))
 
 
 def test_psalm_reads_ahead_only_the_packages_that_composer_cannot_load(
@@ -2491,9 +2733,16 @@ def test_psalm_reads_ahead_only_the_packages_that_composer_cannot_load(
         if not package.get("autoload") and package.get("type", "library") == "library"
     )
     assert read_ahead == without_autoloader == ["vendor/nextcloud/ocp"]
-    # Neither run keeps a cache of its own, so that no result depends on one.
+    # The canary of the taint analysis reads the same, from the root of the repository.
+    canary = ElementTree.parse(project / ".github/psalm/canary.xml").getroot()
+    assert canary.get("resolveFromConfigFile") == "false"
+    extra = canary.find("psalm:extraFiles", PSALM)
+    assert extra is not None
+    assert [str(entry.get("name")) for entry in extra] == read_ahead
+    # No run keeps a cache of its own, so that no result depends on one.
     check = (project / "scripts/check.sh").read_text(encoding="utf-8")
-    assert check.count(" --threads=1 --no-cache\n") == 2
+    assert check.count("vendor/bin/psalm ") == 3
+    assert check.count(" --threads=1 --no-cache") == 3
 
 
 @pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")

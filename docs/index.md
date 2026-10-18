@@ -37,7 +37,7 @@ A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that
 
     ---
 
-    CodeQL, OpenSSF Scorecard, dependency review, a secret scan, SBOMs, the security audit of the workflows and every lock file against the OSV database. Every action is pinned to a commit hash.
+    CodeQL, the taint analysis of Psalm for the PHP of a Nextcloud app, OpenSSF Scorecard, dependency review, a secret scan, SBOMs, the security audit of the workflows and every lock file against the OSV database. Every action is pinned to a commit hash.
 
 - :material-rocket-launch-outline:{ .lg .middle } **Releases**
 

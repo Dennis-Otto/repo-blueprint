@@ -37,7 +37,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 
     ---
 
-    CodeQL, OpenSSF Scorecard, Dependency Review, Secret Scan, SBOMs, die Sicherheitsprüfung der Workflows und jede Lock-Datei gegen die OSV-Datenbank. Jede Action ist auf einen Commit-Hash gepinnt.
+    CodeQL, die Taint-Analyse von Psalm für das PHP einer Nextcloud-App, OpenSSF Scorecard, Dependency Review, Secret Scan, SBOMs, die Sicherheitsprüfung der Workflows und jede Lock-Datei gegen die OSV-Datenbank. Jede Action ist auf einen Commit-Hash gepinnt.
 
 - :material-rocket-launch-outline:{ .lg .middle } **Releases**
 

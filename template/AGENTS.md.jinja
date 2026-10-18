@@ -31,7 +31,7 @@ On Windows, run them in Git Bash. While you work, the quicker steps of the check
 - `XDEBUG_MODE=coverage vendor/bin/phpunit --coverage-text`: the tests, with every line of `lib/` covered.
 - `vendor/bin/phpunit --filter name`: one test.
 - `vendor/bin/php-cs-fixer fix`: the format of the code, in the coding standard of Nextcloud.
-- `vendor/bin/psalm --threads=1 --no-cache`, and with `--taint-analysis`: the types at the strictest level, and untrusted input that reaches HTML, SQL, a shell or a file.
+- `vendor/bin/psalm --threads=1 --no-cache`, and with `--taint-analysis`: the types at the strictest level, and untrusted input, such as a parameter of a request to a controller or the answer of another server, that reaches HTML, SQL, a shell, a file, a request to another server or a header. A function that makes input safe for a sink says so with `@psalm-taint-escape` and a comment on why; `.github/psalm/` belongs to the blueprint.
 [%- elif stack == 'node' -%]
 On Windows, run them in Git Bash. While you work, the quicker steps of the checks:
 
