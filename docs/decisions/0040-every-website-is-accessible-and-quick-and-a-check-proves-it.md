@@ -37,4 +37,4 @@ On the slow phone, the home page of the blueprint loads 1.6 MB instead of 3.5 MB
 
 Mermaid is now the largest part of a page with a diagram, almost 1 MB. Drawing the diagrams live is [decision 0016](0016-diagrams-as-pictures-of-their-sources.md); the pictures that the Markdown shows are a few kilobytes, so showing those on the website as well would make such a page small too, at the cost of text to search and select.
 
-The check adds about a minute to the check *docs*. A project whose own pages, colors or stylesheets fail it has one release to fix them; the summary of the check names each one. Once that release reached every repository, the check fails on what it finds.
+The check adds about a minute and a half to the check *docs* of the blueprint, whose 95 pages it checks through 50. A project whose own pages, colors or stylesheets fail it has one release to fix them; the summary of the check names each one. Once that release reached every repository, the check fails on what it finds.
