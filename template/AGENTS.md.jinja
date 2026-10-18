@@ -37,7 +37,7 @@ On Windows, run them in Git Bash. While you work, the quicker steps of the check
 On Windows, run them in Git Bash. While you work, the quicker steps of the checks:
 
 - `npm test`: the tests, with every line, branch and function covered.
-- `npx biome check --write .`: the format of the code, and the fixes that Biome can make for its rules.
+- `npx --no -- biome check --write .`: the format of the code, and the fixes that Biome can make for its rules.
 - `npm run typecheck`: the types, in the strict mode of the compiler.
 - `npm run build`: the package.
 [%- elif stack == 'container' -%]

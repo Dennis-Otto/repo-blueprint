@@ -28,6 +28,6 @@ Option 2:
 
 ## Consequences
 
-- `package.json` belongs to the project, so a package made before keeps its own until it adds Biome with `npm install --save-dev @biomejs/biome`: until then the step says so and passes, so that the update of the blueprint fails no check. The same holds for the reporter of the script `test`; without it the CI keeps no report, and the coach reports without coverage, as before.
+- `package.json` belongs to the project, so a package made before keeps its own until it adds Biome with `npm install --save-dev --ignore-scripts @biomejs/biome`: until then the step says so and passes, so that the update of the blueprint fails no check. The same holds for the reporter of the script `test`; without it the CI keeps no report, and the coach reports without coverage, as before.
 - A package that needs an install script, such as one that builds a native module, runs it on purpose, with `npm rebuild NAME`, in a script of its own.
 - Mutation tests for Node, with Stryker, are a step of their own still to take; the Mutation workflow covers Python and PHP.

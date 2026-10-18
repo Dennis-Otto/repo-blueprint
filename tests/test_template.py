@@ -1342,6 +1342,24 @@ def test_npm_never_runs_the_install_scripts_of_the_packages(
 
 
 @pytest.mark.parametrize("kind", KINDS)
+def test_npx_never_fetches_a_package_in_place_of_biome(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The unscoped package `biome` on npm is not Biome: without --no, npx fetches
+    # and runs it when @biomejs/biome is not installed, and in the CI or for an
+    # agent it asks no question first. Every documented install skips the scripts.
+    project = projects[kind]
+    for path in text_files(project):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        where = path.relative_to(project)
+        for line in re.findall(r"^.*\bnpx\b.*\bbiome\b.*$", text, re.MULTILINE):
+            assert not re.search(r"\bnpx (?!--no -- )", line), f"{where}: {line}"
+        adds = r"^.*\bnpm (?:install|i) (?:--save-dev|-D)\b.*$"
+        for line in re.findall(adds, text, re.MULTILINE):
+            assert "--ignore-scripts" in line, f"{where}: {line}"
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_a_node_package_lints_and_formats_its_code_with_biome(
     projects: dict[str, Path], kind: str
 ) -> None:
@@ -1431,7 +1449,8 @@ def test_the_lint_of_a_node_package_waits_for_biome_in_its_package_json(
     else:
         assert result.stdout == (
             "\n== Lint and format\npackage.json lacks @biomejs/biome, which lints and "
-            "formats the code; add it: npm install --save-dev @biomejs/biome\n"
+            "formats the code; add it: npm install --save-dev --ignore-scripts "
+            "@biomejs/biome\n"
         )
         assert not calls.exists()
 
@@ -4030,7 +4049,7 @@ AGENT_COMMANDS = {
     "node-package": [
         "npm ci --ignore-scripts",
         "`npm test`",
-        "`npx biome check --write .`",
+        "`npx --no -- biome check --write .`",
     ],
     "container": ["docker run --rm demo-project:check --self-test"],
     "generic": ["no build and no tests of its own"],

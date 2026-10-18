@@ -430,11 +430,11 @@ step "Lint and format"
 # Biome, with the rules and the format of biome.jsonc; a warning fails as well, and
 # in the CI each finding is an annotation at its line too. package.json belongs to
 # the project: one from before the blueprint brought Biome gets it with
-# npm install --save-dev @biomejs/biome, as a new package has it.
+# npm install --save-dev --ignore-scripts @biomejs/biome, as a new package has it.
 if grep -q '"@biomejs/biome"' package.json; then
   npx --no -- biome ci --error-on-warnings .
 else
-  echo "package.json lacks @biomejs/biome, which lints and formats the code; add it: npm install --save-dev @biomejs/biome"
+  echo "package.json lacks @biomejs/biome, which lints and formats the code; add it: npm install --save-dev --ignore-scripts @biomejs/biome"
 fi
 
 step "Types"

@@ -839,8 +839,8 @@ why = """One format and one set of rules keep the code readable for everyone and
 bugs, such as a variable that is never used or a comparison that is always true,
 before they run."""
 fix = """Let Biome format the code and make the fixes that are safe, then fix the rest
-by hand; `biome.jsonc` holds the settings, and `npx biome explain RULE` explains a
-rule:"""
+by hand; `biome.jsonc` holds the settings, and `npx --no -- biome explain RULE`
+explains a rule:"""
 commands = ["npx --no -- biome check --write ."]
 docs = "CONTRIBUTING.md#coding-standards"
 autofix = ["npx --no -- biome check --write ."]
