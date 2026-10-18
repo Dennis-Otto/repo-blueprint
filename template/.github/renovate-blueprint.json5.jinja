@@ -178,6 +178,11 @@
       enabled: false,
     },
     {
+      // So do the tools of the accessibility check of the website.
+      matchFileNames: [".github/a11y/**"],
+      enabled: false,
+    },
+    {
       matchDatasources: ["docker"],
       matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest"],
       groupName: "the images",

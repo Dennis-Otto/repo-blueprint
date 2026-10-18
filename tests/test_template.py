@@ -817,6 +817,11 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/prose/cspell.json",
         ".github/prose/package.json",
         ".github/prose/package-lock.json",
+        ".github/a11y/check.mjs",
+        ".github/a11y/package.json",
+        ".github/a11y/package-lock.json",
+        ".github/mkdocs-blueprint.css",
+        ".github/mkdocs-blueprint.js",
         ".github/cspell-words.txt",
         ".vale.ini",
         ".github/sign-tag.sh",
@@ -4949,6 +4954,8 @@ THE_TOOLS = [
     ("dockerfile", "final", ".devcontainer/Dockerfile"),
     ("dockerfile", "final", ".github/social-preview/Dockerfile"),
     ("npm", "devDependencies", ".github/prose/package.json"),
+    ("npm", "devDependencies", ".github/a11y/package.json"),
+    ("custom.regex", "", ".github/mkdocs_blueprint.py"),
     ("pre-commit", "repository", ".pre-commit-config.yaml"),
 ]
 THE_TOOLS_OF_A_KIND = {
@@ -8837,7 +8844,8 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         # The cards need Cairo, which Windows lacks: only the CI, where GitHub's
         # runners set CI to true, makes them, and a preview builds without them.
         "  social:\n    enabled: !ENV [CI, false]",
-        "  glightbox: {}",
+        # A picture for one scheme alone is in the lightbox of that scheme.
+        "  glightbox:\n    auto_themed: true",
         "  git-revision-date-localized:",
         "  - .github/mkdocs_blueprint.py",
         "    strict: false",
@@ -8892,6 +8900,72 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         for target in re.findall(r"\]\(([^)\s#]+)", text):
             if "://" not in target:
                 assert (page.parent / target).resolve().is_relative_to(pages), target
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_every_website_is_checked_for_its_accessibility(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    root = ROOT if kind == "blueprint" else projects[kind]
+    # The check, its tools and the stylesheet and script of the hook are the
+    # blueprint's, the same in every repository.
+    for name in (
+        ".github/a11y/check.mjs",
+        ".github/a11y/package.json",
+        ".github/a11y/package-lock.json",
+        ".github/mkdocs-blueprint.css",
+        ".github/mkdocs-blueprint.js",
+    ):
+        assert (root / name).read_bytes() == (ROOT / name).read_bytes(), name
+    # Each tool by its exact version, locked with its hash.
+    package = json.loads((root / ".github/a11y/package.json").read_text("utf-8"))
+    lock = json.loads((root / ".github/a11y/package-lock.json").read_text("utf-8"))
+    tools = package["devDependencies"]
+    assert set(tools) == {"@axe-core/playwright", "playwright-core"}
+    assert lock["packages"][""]["devDependencies"] == tools
+    for name, version in tools.items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", version), name
+        assert lock["packages"][f"node_modules/{name}"]["version"] == version
+    for name, locked in lock["packages"].items():
+        assert not name or locked["integrity"].startswith("sha512-"), name
+    ignored = (root / ".gitignore").read_text(encoding="utf-8").split("\n")
+    assert "/.github/a11y/node_modules/" in ignored
+    # The check docs runs it after the build, and reports for one release before
+    # it fails the check.
+    docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    step = docs[docs.index("      - name: Check the accessibility of the website\n") :]
+    assert re.split(r"\n      (?! )", step)[0].splitlines()[1:] == [
+        "        if: steps.site.outputs.build == 'true'",
+        "        continue-on-error: true",
+        "        timeout-minutes: 5",
+        "        env:",
+        '          REPORT_ONLY: "true"',
+        "        run: node .github/a11y/check.mjs site",
+    ]
+    assert docs.index("        run: mkdocs build --strict\n") < docs.index(step)
+    tools_step = (
+        "        run: npm ci --prefix .github/a11y --ignore-scripts --no-audit"
+        " --no-fund\n"
+    )
+    assert docs.index("        run: mkdocs build --strict\n") < docs.index(tools_step)
+    # The tests of the check run where the blueprint keeps them, before the check.
+    tests = "        run: node --test .github/a11y/check.test.mjs\n"
+    assert docs.index(tools_step) < docs.index(tests) < docs.index(step)
+    assert "hashFiles('.github/a11y/check.test.mjs') != ''" in docs
+    assert (root / ".github/a11y/check.test.mjs").is_file() == (kind == "blueprint")
+    setup = docs[: docs.index(step)].rsplit("      - uses: ", 1)[1]
+    assert setup.startswith("actions/setup-node@")
+    assert "          node-version: 24\n" in setup
+    if kind == "blueprint":
+        # The website with the dashboard, which the Dashboard workflow publishes.
+        dashboard = (root / ".github/workflows/dashboard.yml").read_text("utf-8")
+        # The pages of the documentation are the check docs', the dashboard alone
+        # is new.
+        assert dashboard.index("python3 dashboard.py") < dashboard.index(
+            "\n          node .github/a11y/check.mjs site dashboard/index.html\n"
+        )
+        for path in (".github/a11y/**", ".github/mkdocs-blueprint.css"):
+            assert f"\n      - {path}\n" in dashboard, path
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -9146,6 +9220,11 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
     for pattern in ("copier.yml", "template/**", ".github/workflows/**"):
         assert f"\n{pattern}\n" in listed, pattern
     script = (ROOT / "scripts/docs-pictures.sh").read_text(encoding="utf-8")
+    # The video that the website plays in place of the GIF, the picture that shows
+    # until it plays, and the smaller social preview of the home page.
+    assert '\n  tar -xf "$recording" -C docs/images\n' in script
+    for picture in ("copier-copy.mp4", "copier-copy.webp", "social-preview.webp"):
+        assert f" {picture}" in script, picture
     for picture in ("copier-copy.gif", "dashboard.png"):
         assert f"docs/images/{picture}" in script, picture
 

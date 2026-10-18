@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a website stays accessible and quick
+    accDescr: You write the pages in docs/. MkDocs builds the website with the hook and the stylesheet of the blueprint, which underline the links in the text, give the theme the contrast of WCAG 2.2 AA, load each picture as the reader comes to it and only in its theme, play a GIF with an MP4 beside it as that video, and pin the release of Mermaid. After the build, the check docs opens every page in Chrome, in the light and the dark theme, and runs axe-core on it; each serious or critical violation shows in the summary and as an annotation at its page. Without one, the website is published.
+
+    you(["You"])
+    pages["`**docs/** and the READMEs<br>pictures · a GIF with NAME.mp4<br>a picture for each theme`"]
+    build["MkDocs with the hook and<br>the stylesheet of the blueprint"]
+    site["`**site/**<br>underlined links · AA contrast<br>lazy pictures · a video<br>Mermaid of a fixed release`"]
+    check{"The check docs:<br>axe-core on every page<br>light and dark"}
+    report(["The summary and annotations<br>with the fix of each rule"])
+    published(["GitHub Pages"])
+
+    you -- "writes" --> pages --> build --> site --> check
+    check -- "a serious or<br>critical violation" --> report
+    report -.-> you
+    check -- "none, on main" --> published
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class build,check,report bot
+    class you,pages person
+    class site,published done

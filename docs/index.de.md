@@ -11,7 +11,7 @@ Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, 
 [Ein Repository anlegen](#ein-repository-anlegen){ .md-button .md-button--primary }
 [Zur Anleitung](guide.md){ .md-button }
 
-![Die Social Preview des Blueprints: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](https://raw.githubusercontent.com/Dennis-Otto/repo-blueprint/main/.github/social-preview.png)
+![Die Social Preview des Blueprints: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](images/social-preview.webp)
 
 ## Wie sich ein Repository selbst pflegt
 

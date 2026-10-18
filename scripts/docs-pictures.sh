@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Renders the pictures of the documentation into docs/images/: copier-copy.gif, a copy
 # of the blueprint in the terminal as .github/docs-pictures/copier-copy.tape plays it,
-# and dashboard.png, the dashboard of the repositories as the website publishes it.
-# Run it again after the questions, the output of Copier or the dashboard change.
+# with copier-copy.mp4, the same as a video that the website plays in its place, and
+# copier-copy.webp, its last screen, which the website shows until the video plays;
+# social-preview.webp, the social preview of .github/ at a seventh of its size, for
+# the home page of the website; and dashboard.png, the dashboard of the repositories
+# as the website publishes it. Run it again after the questions, the output of Copier,
+# the social preview or the dashboard change.
 #
 # It needs Docker and the network: VHS records the terminal while Copier clones the
 # blueprint from GitHub, and the headless Chromium of the social preview's image
@@ -13,10 +17,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # Git Bash on Windows: keep the container's paths and mount the Windows path.
 export MSYS_NO_PATHCONV=1
 root="$(pwd -W 2>/dev/null || pwd)"
-gif="$(mktemp)"
+recording="$(mktemp)"
 png="$(mktemp)"
 log="$(mktemp)"
-trap 'rm -f "$gif" "$png" "$log"' EXIT
+trap 'rm -f "$recording" "$png" "$log"' EXIT
 
 # VHS, git and Copier: the image comes from a Dockerfile, so that Renovate keeps it
 # current. Its build context is the repository, for the requirements of Copier.
@@ -28,14 +32,26 @@ if ! terminal="$(docker build --quiet --tag repo-blueprint-docs-pictures \
 fi
 
 # The pictures leave the containers through stdout, so they belong to whoever runs this.
+# ffmpeg makes the video from the GIF while its colors are still exact: H.264 at a
+# third of the size, with its index first, so that it starts while it loads; and the
+# pictures of the last screen and of the social preview WebPs of a fifth of the size
+# of their PNGs or less. Then gifsicle makes the GIF for GitHub less than half as
+# large, in 64 colors, which a terminal of 16 colors needs for the edges of its
+# letters.
 if docker run --rm --volume "$root:/work:ro" --entrypoint sh "$terminal" -c '
   mkdir -p /tmp/out/docs/images && cd /tmp/out &&
-    vhs /work/.github/docs-pictures/copier-copy.tape >&2 &&
-    cat docs/images/copier-copy.gif' >"$gif" 2>"$log" &&
-  [[ -s "$gif" ]]; then
+    vhs /work/.github/docs-pictures/copier-copy.tape >&2 && cd docs/images &&
+    ffmpeg -loglevel error -i copier-copy.gif -c:v libx264 -preset veryslow -crf 28 \
+      -pix_fmt yuv420p -movflags +faststart -an copier-copy.mp4 >&2 &&
+    ffmpeg -loglevel error -i copier-copy.png -c:v libwebp -quality 80 copier-copy.webp >&2 &&
+    ffmpeg -loglevel error -i /work/.github/social-preview.png -c:v libwebp -quality 85 \
+      social-preview.webp >&2 &&
+    gifsicle --batch --optimize=3 --lossy=100 --colors=64 copier-copy.gif >&2 &&
+    tar -cf - copier-copy.gif copier-copy.mp4 copier-copy.webp social-preview.webp' >"$recording" 2>"$log" &&
+  [[ -s "$recording" ]]; then
   mkdir -p docs/images
-  cp "$gif" docs/images/copier-copy.gif
-  echo "Rendered docs/images/copier-copy.gif."
+  tar -xf "$recording" -C docs/images
+  echo "Rendered docs/images/copier-copy.gif, .mp4 and .webp, and docs/images/social-preview.webp."
 else
   cat "$log" >&2
   echo "Recording .github/docs-pictures/copier-copy.tape failed." >&2

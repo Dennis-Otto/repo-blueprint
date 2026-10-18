@@ -15,8 +15,14 @@ theme:
   language: en
   icon:
     repo: fontawesome/brands/github
-  # Light or dark, as the reader's system prefers, with a switch in the header.
+  # Light or dark, as the reader's system prefers, also after it changes, until the
+  # reader picks one with the switch in the header: from the system's scheme to
+  # light, to dark and back.
   palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       toggle:
@@ -26,7 +32,7 @@ theme:
       scheme: slate
       toggle:
         icon: material/weather-sunny
-        name: Switch to light mode
+        name: Switch to the scheme of the system
   # No instant loading of pages: with it, the language switch would keep leading to
   # the page that was loaded first.
   features:
@@ -58,8 +64,11 @@ plugins:
   # scripts/check.sh, build the website without them.
   social:
     enabled: !ENV [CI, false]
-  # A picture opens enlarged with a click.
-  glightbox: {}
+  # A picture opens enlarged with a click, among those of the reader's scheme: a
+  # picture for one scheme alone, NAME.png#only-light or #only-dark, is in the
+  # gallery of that scheme.
+  glightbox:
+    auto_themed: true
   # The pages of other languages, such as index.de.md beside index.md. A website in
   # more than one language turns it on with its languages in mkdocs.yml; it comes
   # before the dates, which take the language of a page from it.
@@ -114,8 +123,9 @@ markdown_extensions:
   pymdownx.tilde: {}
 
 # What the plugins leave to do, such as the sitemap in every folder and a second
-# try of a download that fails. A project with hooks of its own lists this file
-# there too: its list replaces this one.
+# try of a download that fails, and the pictures, the stylesheet and the script that
+# make every page accessible and quick to load. A project with hooks of its own lists
+# this file there too: its list replaces this one.
 hooks:
   - .github/mkdocs_blueprint.py
 

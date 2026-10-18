@@ -27,13 +27,18 @@ from typing import Any
 
 SCRIPT = Path("scripts/screenshots.sh")
 PATHS = Path(".github/screenshots-paths.txt")
-# The pictures that the bot commits, by their endings, and how each file starts.
+# The pictures that the bot commits, by their endings, and how each file starts; an
+# MP4 starts with the size of its first box, which looks_like_its_kind skips. A
+# video, such as one that a website plays in place of a GIF, has no pixels that
+# Pillow reads, so it counts as changed when its bytes change; beside a GIF of the
+# same name, which it shows, only together with that GIF.
 SIGNATURES = {
     ".png": (b"\x89PNG\r\n\x1a\n",),
     ".jpg": (b"\xff\xd8\xff",),
     ".jpeg": (b"\xff\xd8\xff",),
     ".gif": (b"GIF87a", b"GIF89a"),
     ".webp": (b"RIFF",),
+    ".mp4": (b"ftyp",),
 }
 PART = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
 # What one request to GitHub's GraphQL API carries at most: larger sets of pictures
@@ -101,6 +106,8 @@ def looks_like_its_kind(path: str, data: bytes) -> bool:
     suffix = Path(path).suffix.lower()
     if suffix == ".webp" and data[8:12] != b"WEBP":
         return False
+    if suffix == ".mp4":
+        data = data[4:]
     return data.startswith(SIGNATURES[suffix])
 
 
@@ -209,6 +216,31 @@ def same_pixels(before: bytes, after: bytes) -> bool:
         return False
 
 
+def still_videos(root: Path, pictures: list[Picture]) -> list[Picture]:
+    """The pictures without each changed NAME.mp4 whose NAME.gif kept its pixels,
+    which gets its committed file back.
+
+    The script records the video again on each run, and its bytes differ with the
+    time that each step of the recording took, while the GIF of the same recording
+    looks the same; the video shows what that GIF shows.
+    """
+    shown = {picture.path for picture in pictures if picture.status != "deleted"}
+    left = []
+    for picture in pictures:
+        path = Path(picture.path)
+        gif = path.with_suffix(".gif").as_posix()
+        if (
+            picture.status == "changed"
+            and path.suffix.lower() == ".mp4"
+            and gif not in shown
+            and (root / gif).is_file()
+        ):
+            (root / path).write_bytes(committed(root, picture.path))
+            continue
+        left.append(picture)
+    return left
+
+
 def keep(root: Path, folder: Path | None = None) -> Kept:
     """Compares each picture that the script changed in the work tree with the one
     that the commit has, by its pixels: one that looks the same gets the committed
@@ -252,6 +284,7 @@ def keep(root: Path, folder: Path | None = None) -> Kept:
         except (OSError, ValueError):
             share = None
         pictures.append(Picture(path, "changed", share))
+    pictures = still_videos(root, pictures)
     pictures.sort(key=lambda picture: picture.path)
     found = Kept(tuple(pictures), tuple(sorted(ignored)))
     if folder is None or not pictures:
