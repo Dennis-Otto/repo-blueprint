@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The path of a release of the blueprint
+    accDescr: A pull request merges into main of the blueprint, and the Release workflow keeps the release pull request with the next version. Its merge, by the maintainer or by itself when it holds only updates, publishes the release with a signed tag and verifies it. The Rollout workflow then starts the blueprint bot of every repository that takes the blueprint, five today. Each bot verifies the release, runs copier update and keeps one update pull request as the release app, so that the checks of the repository run. Without conflicts it merges itself once they pass; with conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer. The dashboard shows the release of the blueprint that each repository is on.
+
+    merge(["A pull request merges<br>into main of the blueprint"])
+    release["Release workflow<br>keeps the release pull request<br>with the next version"]
+    publish["Its merge publishes the release<br>signs its tag and verifies it"]
+    rollout["Rollout workflow<br>starts the blueprint bot<br>of every repository"]
+    bot["Blueprint bot, in each of the five<br>verifies the release<br>and runs copier update"]
+    pull["One update pull request<br>as the release app"]
+    checks["The checks of the repository<br>test the update"]
+    merged["It merges itself<br>once every check passes"]
+    wait(["It waits for the maintainer<br>with conflicts or with<br>BLUEPRINT_AUTOMERGE off"])
+    dashboard(["The dashboard shows the release<br>that each repository is on"])
+
+    merge --> release --> publish --> rollout --> bot --> pull --> checks
+    checks --> merged --> dashboard
+    checks -. "conflicts" .-> wait
+    wait -. "resolved and merged" .-> dashboard
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class release,publish,rollout,bot,pull,checks,merged bot
+    class merge,wait person
+    class dashboard done
