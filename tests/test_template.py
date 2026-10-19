@@ -3098,6 +3098,44 @@ def test_the_ci_builds_with_the_krankerl_of_the_release() -> None:
     assert pins[0] == pins[1]
 
 
+# The PHP that each major version of Nextcloud runs on, oldest and newest, as its
+# lib/versioncheck.php says; its occ stops on any other one. Renovate moves
+# NEXTCLOUD_VERSION, and the release signs the app with that occ, which no check runs
+# before a release: a new major version gets its line here, from
+# https://github.com/nextcloud/server/blob/vNN.0.0/lib/versioncheck.php.
+NEXTCLOUD_PHP = {
+    33: ("8.2", "8.5"),
+    34: ("8.2", "8.5"),
+    35: ("8.3", "8.5"),
+}
+
+
+def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> None:
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    nextcloud = re.search(r"^ +NEXTCLOUD_VERSION: (\d+)\.", build, re.MULTILINE)
+    assert nextcloud
+    major = int(nextcloud[1])
+    assert major in NEXTCLOUD_PHP, (
+        f"Nextcloud {major}: add the PHP it runs on to NEXTCLOUD_PHP, from "
+        f"https://github.com/nextcloud/server/blob/v{major}.0.0/lib/versioncheck.php"
+    )
+    setup = "      - name: Set up PHP for the signing of the Nextcloud app"
+    php = re.search(r'php-version: "(\d+\.\d+)"', step_of(build, setup))
+    assert php
+
+    def minor(version: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in version.split("."))
+
+    oldest, newest = NEXTCLOUD_PHP[major]
+    assert minor(oldest) <= minor(php[1]) <= minor(newest), (
+        f"Nextcloud {major} runs on PHP {oldest} to {newest}, not on {php[1]}"
+    )
+    # The last PHP that setup-php sets up is the one that occ runs on.
+    sign = build.index("      - name: Build and sign the Nextcloud app\n")
+    assert build.index(setup) < sign
+    assert "uses: shivammathur/setup-php@" not in build[sign:]
+
+
 # Each curl of a script or of a step, with the lines it continues on; not one that a
 # comment names.
 CURL = re.compile(r"^[^#\n]*?\bcurl ((?:.*\\\n)*.*)$", re.MULTILINE)
