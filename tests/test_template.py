@@ -10102,11 +10102,14 @@ def test_the_check_docs_keeps_the_website_of_a_pull_request(
     step = docs[docs.index("      - name: Keep the website of the pull request\n") :]
     # Its lines up to the next comment or step.
     lines = re.split(r"\n      (?! )", step)[0].splitlines()[1:]
+    # Pinned to the commit of a release, which Renovate moves on.
+    pin = r"@[0-9a-f]{40} # v[\d.]+$"
+    assert re.search(pin, lines[1]), lines[1]
+    lines[1] = re.sub(pin, "", lines[1])
     assert lines == [
         "        if: ${{ !cancelled() && steps.build.outcome == 'success'"
         " && github.event_name == 'pull_request' }}",
-        "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-        " # v7.0.1",
+        "        uses: actions/upload-artifact",
         "        timeout-minutes: 5",
         "        with:",
         f"          name: {WEBSITE_ARTIFACT}",
