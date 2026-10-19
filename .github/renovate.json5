@@ -20,9 +20,13 @@
       datasourceTemplate: "npm",
     },
     {
-      // The Copier of the quick start in the READMEs, with uv and with pipx.
+      // The Copier of the quick start in the READMEs, with uv and with pipx, and
+      // that of the one-liner on the page of each kind.
       customType: "regex",
-      managerFilePatterns: ["/^README(\\.de)?\\.md$/"],
+      managerFilePatterns: [
+        "/^README(\\.de)?\\.md$/",
+        "/^docs/kinds/[a-z-]+(\\.de)?\\.md$/",
+      ],
       matchStrings: [
         "(?<depName>copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+) copier copy",
       ],
