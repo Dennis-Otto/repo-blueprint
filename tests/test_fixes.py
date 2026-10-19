@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -129,6 +130,8 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
         ("Pages in one column", "{blueprint} pages --fix"),
         ("Ruff", "ruff check --fix ."),
         ("Ruff", "ruff format ."),
+        # Of the blueprint alone, by its .github/checks.project.toml.
+        ("Tests, with every line and branch covered", "{python} reference.py"),
     ]
     # Without a check, as on your machine, the same.
     assert fixers(catalog, ROOT, None) == found
@@ -166,6 +169,11 @@ def test_a_command_runs_the_tool_of_the_repository(tmp_path: Path, script: str) 
     assert expanded("{blueprint} fix text", tmp_path).endswith(f" {script} fix text")
     assert python in expanded("{blueprint} fix text", tmp_path)
     assert expanded("ruff format .", tmp_path) == "ruff format ."
+    # A script of the repository runs with the Python of the bot as well.
+    assert shown("{python} reference.py", tmp_path) == "python3 reference.py"
+    assert expanded("{python} reference.py", tmp_path) == (
+        f"{shlex.quote(python)} reference.py"
+    )
 
 
 # ---------------------------------------------------------------- in the check

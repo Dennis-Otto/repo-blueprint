@@ -6,9 +6,10 @@ hide:
 
 # Repo Blueprint
 
-Eine [Copier](https://copier.readthedocs.io/)-Vorlage für GitHub-Repositories, die sich selbst pflegen: Tests bei jeder Änderung, ein Release-Bot, Sicherheitsprüfungen, ein Issue-Assistent und die Einstellungen des Repositorys als Code, für sieben Arten von Projekten, und ein Bot hält sie mit jeder neuen Version des Blueprints aktuell.
+--8<-- "README.de.md:pitch"
 
 [Ein Repository anlegen](#ein-repository-anlegen){ .md-button .md-button--primary }
+[Vergleichen](compare.md){ .md-button }
 [Zur Anleitung](guide.md){ .md-button }
 
 ![Die Social Preview des Blueprints: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](images/social-preview.webp)
@@ -113,11 +114,15 @@ Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, 
 
     Ruff, mypy, Tests, HACS und hassfest; ein Zip-Asset für HACS.
 
+    [:octicons-arrow-right-24: Home-Assistant-Integration](kinds/home-assistant.md)
+
 - :simple-nextcloud:{ .lg .middle } **Nextcloud-App**
 
     ---
 
     php-cs-fixer, Psalm mit seiner Taint-Analyse und PHPUnit in zufälliger Reihenfolge mit jeder Zeile abgedeckt, die Werkzeuge auf PHP 8.3 und der Code auch auf PHP 8.2; ein signiertes Paket für den App Store.
+
+    [:octicons-arrow-right-24: Nextcloud-App](kinds/nextcloud-app.md)
 
 - :simple-githubactions:{ .lg .middle } **GitHub Action**
 
@@ -125,11 +130,15 @@ Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, 
 
     Eine Composite Action mit Ruff, mypy, Tests und einem Lauf der Action; Release-Tags und ein mitwandernder Major-Tag.
 
+    [:octicons-arrow-right-24: GitHub Action](kinds/github-action.md)
+
 - :material-language-python:{ .lg .middle } **Python-Paket**
 
     ---
 
     Ruff, mypy, Tests und ein Build mit Hatchling; PyPI mit Trusted Publishing.
+
+    [:octicons-arrow-right-24: Python-Paket](kinds/python-package.md)
 
 - :material-nodejs:{ .lg .middle } **Node-Paket**
 
@@ -137,21 +146,41 @@ Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, 
 
     TypeScript, Biome, tsc und node:test mit voller Abdeckung; npm mit Provenance.
 
+    [:octicons-arrow-right-24: Node-Paket](kinds/node-package.md)
+
 - :material-docker:{ .lg .middle } **Container-Image**
 
     ---
 
     Alpine per Digest, Hadolint, ein Build und ein Selbsttest; GHCR, Multi-Arch, mit SBOM und Provenance.
 
+    [:octicons-arrow-right-24: Container-Image](kinds/container.md)
+
+- :material-file-document-multiple-outline:{ .lg .middle } **Repository ohne Build**
+
+    ---
+
+    Die Textdateien und Shell-Skripte werden geprüft, und die Releases kommen ohne Paket.
+
+    [:octicons-arrow-right-24: Repository ohne Build](kinds/generic.md)
+
 </div>
 
-Ein Repository ohne Build prüft seine Textdateien und Shell-Skripte und macht nur Releases. Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das durch den echten Code ersetzt wird. Die [Anleitung](guide.md#arten-von-projekten) nennt den Stack jeder Art.
+Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das durch den echten Code ersetzt wird. Die [Anleitung](guide.md#arten-von-projekten) nennt den Stack jeder Art.
 
 ## Ein Repository anlegen
 
 --8<-- "README.de.md:quick-start"
 
 Die Anleitung beschreibt, wie [dein eigenes Konto](guide.md#dein-eigenes-konto) zu seiner Release-App kommt und seine Antworten behält, und die Seite [Dein eigenes Konto](own-account.md) führt Schritt für Schritt durch ein eigenes Repository, mit Renovate im Repository oder als Mend-App und dem Issue-Assistenten mit oder ohne KI; die Anleitung sagt auch, was jedes Repository [einmal](guide.md#einmal-pro-repository) braucht und wie [ein bestehendes Repository](guide.md#ein-bestehendes-repository) den Blueprint übernimmt.
+
+## Mit dem Blueprint gebaut
+
+--8<-- "README.de.md:made-with"
+
+## Warum Repo Blueprint
+
+--8<-- "README.de.md:why"
 
 ## Mehr erfahren
 
@@ -164,6 +193,14 @@ Die Anleitung beschreibt, wie [dein eigenes Konto](guide.md#dein-eigenes-konto) 
     Alles, was ein neues Repository bekommt, die Einstellungen als Code, die Updates und was einem Projekt gehört.
 
     [:octicons-arrow-right-24: Zur Anleitung](guide.md)
+
+- :material-compare-horizontal:{ .lg .middle } **Vergleich**
+
+    ---
+
+    Der Blueprint neben Template-Repositorys von GitHub, Cookiecutter mit cruft, anderen Copier-Vorlagen und projen, auch dort, wo sie besser passen.
+
+    [:octicons-arrow-right-24: Zum Vergleich](compare.md)
 
 - :material-map-marker-path:{ .lg .middle } **Roadmap**
 

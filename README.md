@@ -10,13 +10,94 @@
 [![License: MIT-0](https://img.shields.io/badge/license-MIT--0-blue)](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE)
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/Dennis-Otto)
 
-![Repo Blueprint for GitHub repositories: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](docs/images/social-preview.webp)
+<!-- --8<-- [start:pitch] -->
 
-A [Copier](https://copier.readthedocs.io/) template for GitHub repositories that look after themselves: tests on every change, a release bot, security checks, an issue assistant and the settings of the repository as code, for seven kinds of projects. A bot brings every repository made from it up to each new release of the blueprint.
+**GitHub repositories that test, release, secure and update themselves — from one `copier copy`.**
 
-The [website of the blueprint](https://dennis-otto.github.io/repo-blueprint/) has this guide in English and German, together with the roadmap, the security design, the automation, the decisions and the dashboard.
+Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for seven kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python and Node packages, container images and repositories without a build. A new repository starts with more than 30 workflows, and a bot brings it up to every new release of the blueprint.
+
+- **Tested on every change.** `scripts/check.sh` runs the same checks on your machine and in the CI, with full coverage of the code. The PR coach explains every check that fails, and the fix bot commits what a command can fix.
+- **Released and signed by a bot.** Merging the release pull request publishes the release with its SBOM and the signed provenance of SLSA Build Level 3, and then verifies it as its users can.
+- **Secure from the first commit.** CodeQL, OpenSSF Scorecard, a secret scan and an audit of the workflows run from the start, every action is pinned to a commit hash, and about 90 to 100 answers of OpenSSF Best Practices are filled in.
+- **Up to date by itself.** Renovate updates the dependencies, the settings bot keeps the settings as code, and the blueprint bot brings every release of the blueprint as a pull request that its checks test before it merges. Five public repositories follow it today.
+
+<!-- --8<-- [end:pitch] -->
+
+The [website of the blueprint](https://dennis-otto.github.io/repo-blueprint/) has this guide in English and German, with [the comparison](https://dennis-otto.github.io/repo-blueprint/compare.html) with other templates, a page for each kind of project, the questions and answers, the troubleshooting, the architecture, the reference of every question, variable and secret, the roadmap, the security design, the automation, the decisions and the dashboard.
 
 <sub>💛 If the blueprint is useful to you, you can [support its development](https://github.com/sponsors/Dennis-Otto). [Deutsche Fassung](https://github.com/Dennis-Otto/repo-blueprint/blob/main/README.de.md).</sub>
+
+## Start a repository
+
+<!-- --8<-- [start:quick-start] -->
+
+Git, Python 3.12 or later, [uv](https://docs.astral.sh/uv/) and GitHub CLI 2.48 or later, signed in as an administrator of the account or organization that will own the repository (`gh auth login`):
+
+```sh
+uvx --from copier==9.18.2 copier copy gh:Dennis-Otto/repo-blueprint my-project
+cd my-project
+python3 .github/blueprint.py create
+```
+
+![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description, the kind of project, Python package, and the owner Dennis-Otto, takes the defaults for the rest, including the release app, writes the files and names the one command after it; the new repository has its community files, its checks and its workflows, and a dry run of python3 .github/blueprint.py create shows the commands that make it the repository on GitHub](docs/images/copier-copy.gif)
+
+With pipx in place of uv, the first line is `pipx run --spec copier==9.18.2 copier copy gh:Dennis-Otto/repo-blueprint my-project`, and a Copier of your own, Copier 9.8 or later, runs `copier copy gh:Dennis-Otto/repo-blueprint my-project`; on Windows, `py -3` runs Python in place of `python3`. Copying runs no code of the blueprint: the template has no tasks, migrations or Jinja extensions, so Copier needs no `--trust`.
+
+Copier asks for the name, a one-sentence description, the kind of project, the GitHub account or organization that owns it, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later), a few details of the kind and the release app of the owner, which may stay empty until the checklist has registered it. The homepage is the website that the Docs workflow publishes on GitHub Pages, unless you name another or none, and the README, the About box, the issue forms, the manifest of an integration and `appinfo/info.xml` of an app link it; each kind starts with topics of its own, such as `home-assistant, hacs` for an integration, which HACS needs to list it. Copier refuses an answer that would break a file: a description or a name with `"""`, `*/`, `]]>` or a backslash, which would end a docstring of Python, a comment of TypeScript or the CDATA of `appinfo/info.xml`, a Nextcloud app id that the App Store doesn't take, and topics that GitHub doesn't.
+
+`create` makes the repository of the copy, with no checkout of the blueprint: every copy brings `blueprint.py` in `.github/`. It takes the owner and the name from the answers of Copier, runs `git init --initial-branch=main`, commits the files with a sign-off, creates the repository with `gh repo create` and pushes to it, public unless you add `--private`, then applies the settings as code and prints the checklist: what is left for a person, such as the release app and the secrets, and which steps are done. `--dry-run` prints the commands and runs none. A folder that pushes to a remote already is no new copy, and `create` refuses it. Every workflow runs on `main`, so `settings check` names a repository whose default branch has another name.
+
+<!-- --8<-- [end:quick-start] -->
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-new-repository-starts.dark.svg">
+  <img src="docs/images/diagrams/how-a-new-repository-starts.svg" alt="How a new repository starts: copier copy writes the files of the project and runs no code of the blueprint. python3 .github/blueprint.py create, which every copy brings, makes the first commit on the branch main with a sign-off, creates the repository with gh repo create and pushes to it, applies the settings as code and shows the checklist. You take the steps that only a person can take, such as the release app and the secrets, and then the checks and the bots run.">
+</picture>
+
+## Made with the blueprint
+
+<!-- --8<-- [start:made-with] -->
+
+Five public repositories follow the blueprint, each with code of its own and the checks and bots of the blueprint; every release of the blueprint reaches them as a pull request:
+
+- **[Autodarts for Home Assistant](https://github.com/Dennis-Otto/ha-autodarts)**, a Home Assistant integration: local real-time board control, games, tournaments and statistics, without a cloud account. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/ha-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/ha-autodarts)
+- **[Issue assistant](https://github.com/Dennis-Otto/issue-assistant)**, a GitHub Action: a first analysis of every new issue by an AI that only reads, checked by a job without AI before it posts. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/issue-assistant/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/issue-assistant)
+- **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**, a Nextcloud app: the documents of Paperless-ngx in Nextcloud Files, by correspondent, type and year. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-sync/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-sync)
+- **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**, a Nextcloud app: the full-text search of Paperless-ngx in the unified search of Nextcloud. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-unified-search/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-unified-search)
+- **[dennis-otto.github.io](https://github.com/Dennis-Otto/dennis-otto.github.io)**, a repository without a build: the website with every project of its owner. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/dennis-otto.github.io/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/dennis-otto.github.io)
+
+[The dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) shows each of them at a glance: the release of the blueprint it is on, its checks, its releases and its Scorecard.
+
+<!-- --8<-- [end:made-with] -->
+
+## Why Repo Blueprint
+
+<!-- --8<-- [start:why] -->
+
+- **Rather than a template repository of GitHub:** *Use this template* copies the files once, without the settings, and nothing follows them later. The blueprint sets the rulesets, the security and the environments as code, and brings every improvement as a pull request.
+- **Rather than Cookiecutter and cruft:** the hooks of a Cookiecutter template run code on your machine, and `cruft update` waits until someone runs it. Copier runs none of the blueprint's code, so it needs no `--trust`; `blueprint.py create`, which you run next, is a file of the copy that you can read first. And the bot of the blueprint updates every repository by itself.
+- **Rather than another Copier template,** such as copier-uv or scientific-python/cookie, which serve Python projects well: the blueprint brings one standard to Home Assistant, Nextcloud, GitHub Actions, Node and containers too, with signed releases of SLSA Build Level 3, SBOMs and VEX, and tests each release on every kind and on the real repositories before it rolls out.
+- **Rather than projen:** projen writes the files of a project from code that runs at every synthesis, above all for TypeScript, AWS CDK and jsii. The blueprint needs no code of its own in the project: it keeps its own files current and leaves those of the project to you.
+
+[The comparison](https://dennis-otto.github.io/repo-blueprint/compare.html) puts them side by side, also where another tool fits better.
+
+<!-- --8<-- [end:why] -->
+
+## Kinds of projects
+
+| Kind | Stack | Checks | Delivery |
+| --- | --- | --- | --- |
+| [Home Assistant integration](https://dennis-otto.github.io/repo-blueprint/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, tests, HACS, hassfest | a zip asset for HACS |
+| [Nextcloud app](https://dennis-otto.github.io/repo-blueprint/kinds/nextcloud-app.html) | PHP 8.2 and newer, the tools on PHP 8.3, Composer | php-cs-fixer, Psalm with its taint analysis, the code and its packages on PHP 8.2, PHPUnit in random order with every line covered | signed package to the App Store |
+| [GitHub Action](https://dennis-otto.github.io/repo-blueprint/kinds/github-action.html) | Python 3.12 of the runner, composite action | Ruff, mypy, tests, a run of the action | release tags and a moving major tag |
+| [Python package](https://dennis-otto.github.io/repo-blueprint/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
+| [Node package](https://dennis-otto.github.io/repo-blueprint/kinds/node-package.html) | Node 24, TypeScript | Biome for the lint and the format, tsc, node:test with full coverage and its report in the PR coach, pack; npm installs without the scripts of the packages | npm with provenance |
+| [Container image](https://dennis-otto.github.io/repo-blueprint/kinds/container.html) | Alpine by digest | Hadolint, build, self-test | GHCR, multi-arch, with SBOM and provenance |
+| [Repository without a build](https://dennis-otto.github.io/repo-blueprint/kinds/generic.html) | | text files, shell scripts | releases only |
+
+Every kind starts with a small working example and its tests: replace it with the real code. Each kind has a page of its own on the website: what it gets, the checks that its pull requests need, its delivery, the steps of its checklist and the one line that copies it.
+
+![Repo Blueprint for GitHub repositories: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](docs/images/social-preview.webp)
 
 ## How a repository looks after itself
 
@@ -46,12 +127,15 @@ The website of every repository shows all of it on the page *Automation*, which 
 | **PR coach** | every check that fails says what it found, why that matters and how to fix it, with the commands to run: in the summary of the check, as its annotation and in one comment on the pull request that follows every push, also on a pull request from a fork; a title that is no Conventional Commit gets one that passes, and `scripts/check.sh` explains the step that stopped it on your machine too. The same comment says what a pull request of a person makes: the next version and the entry of the changelog, the coverage, and the website that it built with the pages that it changes | `.github/checks.toml`, `.github/checks.project.toml`, `after-checks.yml`, `docs.yml` |
 | **Fix bot** | a check that fails fixes what a command can fix, such as the format of the code, trailing whitespace and line endings, the rules of markdownlint and the pages in one column: the bot commits the fixes onto a branch of the repository, also one of Renovate, as one commit, suggests them at their lines on a pull request from a fork, and keeps one pull request with the fixes of `main` that merges itself; `python3 .github/blueprint.py fix run` makes the same fixes on your machine | `autofix` in `.github/checks.toml`, `after-checks.yml` |
 | **Mutation tests** | every week, thousands of small changes of the code run against the tests, a large project in parts of one job each, and the summary shows the share they notice and first the survivors that change the logic, with their changes; a low score is a report, never a failure, but a drop of the score of main opens one issue, and a run that measures nothing fails with the tests that fail without any mutant; a pull request that changes how they run tries them | `mutation.yml`: mutmut, Infection |
+| **Fuzzing** | for a Python package or a GitHub Action: coverage-guided fuzzing of every target in `fuzz/`, a minute each in every pull request that changes the code, the targets or the tools, and every week 25 minutes shared by all targets; a finding fails the run, with the input that caused it in the log | `fuzz.yml`: Atheris |
+| **Property tests** | in Python and Home Assistant projects: the property tests with new random inputs every night, beyond the fixed inputs of the CI; a failure shows its seed in the summary, and a run by hand with that seed replays it | `properties.yml`: Hypothesis |
 | **Flaky tests** | a test run that fails, or whose job runs out of time, runs its failed jobs once more, unless the same jobs broke for the commit before; a job that passes then is reported as flaky in one issue, with the step, the test and the error that failed | `after-checks.yml` |
 | **Cancelled checks** | the quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge | `after-checks.yml` |
 | **Failed releases** | the release of a merge that fails, as at a push of its tag that GitHub refuses for a moment, runs its failed jobs once more by itself, where they stopped | `after-checks.yml` |
 | **Bot health** | a bot or a scheduled workflow that fails on `main` runs its failed jobs once more where a second try can pass, and otherwise keeps one issue per workflow open, with the failed jobs, their steps and their first errors, which the next run that passes closes; every night, a look at the latest run of every workflow, those of the project too, which starts a workflow whose schedule GitHub missed or switched off; where a Renovate workflow runs, one issue with the warnings and errors of Renovate | `bot-health.yml`, `blueprint.py bot-health` |
 | **Fast checks** | a check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python checks the `main` of a Python project after every change and every week | the triggers and path filters of the workflows, `newest-python.yml` |
 | **Issues** | a first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix | the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) |
+| **Welcome** | a person's first pull request gets a comment with what helps it along: a title that is a Conventional Commit, the sign-off of every commit and `scripts/check.sh`; new issues get the analysis of the issue assistant instead | `welcome.yml` |
 | **Community** | README, contributing guide with the coding standards and the rule that every change brings its tests, code of conduct, security policy with how to verify a release and an assurance case, the security design of the software (`docs/security.md`), support, governance with the roles and the continuity of the project, issue forms, pull request template, records of the decisions that shape the project (`docs/decisions/`), discussions with forms for questions and ideas and an announcement of every release, sponsor button, social preview | |
 | **Website** | the documentation in `docs/` as a website with search and a light and a dark theme, which follows the system until the reader picks one, in English and, with German pages such as `index.de.md` next to the English ones, in German: every pull request builds it strictly and checks the built pages: every link and anchor, also those written in HTML, with lychee and without the network, and what the hooks of the website promise, such as a sitemap in every folder of pages and the 404 page in the default language, with `blueprint.py site-check`, and `scripts/check-site.sh` adds the checks of the project; so does `scripts/check.sh` once the tools of its preview are installed, on Linux, macOS and Windows; every change of `main` publishes the build of that check on GitHub Pages, with what a hook writes into `site/.well-known/`, with the fonts and scripts that it downloads kept in a cache for a week, signs its provenance, which `gh attestation verify` checks, and asks the published website for the home page of each language; accessible, with the contrast and the underlined links that WCAG 2.2 AA asks for, which axe-core checks on every page in both themes in every pull request; quick on a phone, with pictures that load as the reader comes to them, a GIF with an MP4 beside it played as that video, a picture for each theme loaded only in its theme, and the release of Mermaid that draws the diagrams pinned; in the language of each page for the search and search engines, with a description and the date of its newest file for each page, the full addresses of its languages, and a page without a translation kept from search engines; the badges stay on GitHub; a header that shows the version of the latest release, which the hooks read from git at the build, so that no page has the reader's browser ask the API of GitHub, which `blueprint.py site-check` checks, and a footer with links to the owner on GitHub, to their website with all of their projects and to GitHub Sponsors, as `.github/FUNDING.yml` names it, in the language of the page, unless `mkdocs.yml` sets `extra.social`; a page *Automation*, which the hooks write from `.github/workflows/` at every build, in English and German: every workflow with the comment at its top and what starts it, each schedule in words, the checks that `main` requires, and the environments and secrets that it uses, and a `docs/automation.md` of the project in its place | MkDocs with the Material theme, `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/` |
 | **Diagrams** | every diagram as a picture that every reader sees, also in the GitHub app, the stores and e-mails, which draw no Mermaid: a Mermaid source in `docs/diagrams/`, drawn as an SVG for the light and one for the dark theme, while the website draws the source live; the check *diagrams* draws the pictures anew in every pull request that changes a diagram or adds a `mermaid` block, and the diagram bot commits the sources and pictures onto its branch; on `main`, a pull request of the diagram bot fixes what is still missing and merges itself; `bash scripts/diagrams.sh --extract` turns the `mermaid` blocks of existing Markdown into sources and their pictures | `scripts/diagrams.sh` with mermaid-cli, `lint.yml`, `after-checks.yml`, `diagrams.yml` |
@@ -266,46 +350,9 @@ Every bot starts from an event, such as a merge into `main`, a pull request or t
 - **The blueprint:** its own schedules come to 259 runs a week, with Renovate for every repository (84) and the dashboard (84), which cost nothing in a public repository.
 - **Private repositories:** public repositories run Actions for free. A private one on GitHub Free has 2,000 minutes a month, and GitHub rounds every job up to a whole minute. Each run of a bot starts a short run of the bot-health bot after it, and each run of the release bot one of Issue lifecycle, which now skips the scheduled ones, so the schedules of every hour and every half hour came to close to 200 runs a day, about 6,000 a month had GitHub run them all, three times the free minutes. All the schedules of a project and the runs that they start now come to about 20 a day, about 600 a month. The checks of the pull requests cost more; decisions 0009 and 0027 keep their jobs few.
 
-## Kinds of projects
+## Set up a repository
 
-| Kind | Stack | Checks | Delivery |
-| --- | --- | --- | --- |
-| Home Assistant integration | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, tests, HACS, hassfest | a zip asset for HACS |
-| Nextcloud app | PHP 8.2 and newer, the tools on PHP 8.3, Composer | php-cs-fixer, Psalm with its taint analysis, the code and its packages on PHP 8.2, PHPUnit in random order with every line covered | signed package to the App Store |
-| GitHub Action | Python 3.12 of the runner, composite action | Ruff, mypy, tests, a run of the action | release tags and a moving major tag |
-| Python package | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
-| Node package | Node 24, TypeScript | Biome for the lint and the format, tsc, node:test with full coverage and its report in the PR coach, pack; npm installs without the scripts of the packages | npm with provenance |
-| Container image | Alpine by digest | Hadolint, build, self-test | GHCR, multi-arch, with SBOM and provenance |
-| Repository without a build | | text files, shell scripts | releases only |
-
-Every kind starts with a small working example and its tests: replace it with the real code.
-
-## Start a repository
-
-<!-- --8<-- [start:quick-start] -->
-
-Git, Python 3.12 or later, [uv](https://docs.astral.sh/uv/) and GitHub CLI 2.48 or later, signed in as an administrator of the account or organization that will own the repository (`gh auth login`):
-
-```sh
-uvx --from copier==9.18.2 copier copy gh:Dennis-Otto/repo-blueprint my-project
-cd my-project
-python3 .github/blueprint.py create
-```
-
-With pipx in place of uv, the first line is `pipx run --spec copier==9.18.2 copier copy gh:Dennis-Otto/repo-blueprint my-project`, and a Copier of your own, Copier 9.8 or later, runs `copier copy gh:Dennis-Otto/repo-blueprint my-project`; on Windows, `py -3` runs Python in place of `python3`. Copying runs no code of the blueprint: the template has no tasks, migrations or Jinja extensions, so Copier needs no `--trust`.
-
-Copier asks for the name, a one-sentence description, the kind of project, the GitHub account or organization that owns it, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later), a few details of the kind and the release app of the owner, which may stay empty until the checklist has registered it. The homepage is the website that the Docs workflow publishes on GitHub Pages, unless you name another or none, and the README, the About box, the issue forms, the manifest of an integration and `appinfo/info.xml` of an app link it; each kind starts with topics of its own, such as `home-assistant, hacs` for an integration, which HACS needs to list it. Copier refuses an answer that would break a file: a description or a name with `"""`, `*/`, `]]>` or a backslash, which would end a docstring of Python, a comment of TypeScript or the CDATA of `appinfo/info.xml`, a Nextcloud app id that the App Store doesn't take, and topics that GitHub doesn't.
-
-`create` makes the repository of the copy, with no checkout of the blueprint: every copy brings `blueprint.py` in `.github/`. It takes the owner and the name from the answers of Copier, runs `git init --initial-branch=main`, commits the files with a sign-off, creates the repository with `gh repo create` and pushes to it, public unless you add `--private`, then applies the settings as code and prints the checklist: what is left for a person, such as the release app and the secrets, and which steps are done. `--dry-run` prints the commands and runs none. A folder that pushes to a remote already is no new copy, and `create` refuses it. Every workflow runs on `main`, so `settings check` names a repository whose default branch has another name.
-
-![copier copy in the terminal: Copier clones the blueprint and asks for the name Paperless Sync, the repository, a description, the kind of project, Python package, and the owner Dennis-Otto, takes the defaults for the rest, including the release app, writes the files and names the one command after it; the new repository has its community files, its checks and its workflows, and a dry run of python3 .github/blueprint.py create shows the commands that make it the repository on GitHub](docs/images/copier-copy.gif)
-
-<!-- --8<-- [end:quick-start] -->
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-new-repository-starts.dark.svg">
-  <img src="docs/images/diagrams/how-a-new-repository-starts.svg" alt="How a new repository starts: copier copy writes the files of the project and runs no code of the blueprint. python3 .github/blueprint.py create, which every copy brings, makes the first commit on the branch main with a sign-off, creates the repository with gh repo create and pushes to it, applies the settings as code and shows the checklist. You take the steps that only a person can take, such as the release app and the secrets, and then the checks and the bots run.">
-</picture>
+What a person does once: the release app of the account and its defaults, the secrets and the delivery of each repository, and the way an existing repository takes the blueprint.
 
 ### Your own account
 
@@ -335,7 +382,7 @@ The blueprint works for every account and organization on GitHub, and a reposito
   <img src="docs/images/diagrams/how-an-owner-gets-a-release-app.svg" alt="How an owner gets a release app: You copy the blueprint with the question of the release app left empty. The checklist links the registration of the app on your account or organization, with its name and permissions filled in. You create the app and its private key, and name it with copier update and the name, Client ID and App ID of its settings page. After the commit, settings apply sets the variables and the ruleset of the release tags, and the checklist asks for the private key and the installation on the repository. Then the bots run as your app; until then the blueprint bot and the release bot say in their summary what is missing.">
 </picture>
 
-Two more answers decide what runs for you, and the page [Your own account](https://dennis-otto.github.io/repo-blueprint/own-account/) walks through every step:
+Two more answers decide what runs for you, and the page [Your own account](https://dennis-otto.github.io/repo-blueprint/own-account.html) walks through every step:
 
 - **Renovate,** by the answer `renovate_runner`. The blueprint's owner keeps `hub`, the Renovate workflow of the blueprint, which runs it for each of the owner's repositories. Every other owner gets `self`: `.github/workflows/renovate.yml`, the same workflow with the same Renovate, pinned by its digest, which runs it every two hours as the release app, with a token for that repository alone, and names the bot user of the app as the author of its commits. With `mend`, the owner installs the [Mend Renovate app](https://github.com/apps/renovate) instead, which comes at every push and needs no workflow. Every way reads the same rules, and `checklist` ticks Renovate off once its issue *Dependency dashboard* is open.
 - **The AI of the issue assistant,** by the answer `issue_assistant_ai`: without it, the variable `ISSUE_ASSISTANT_AI` is `off`, the environment `issue-assistant` asks for no secret, and `SUPPORT.md` says that no AI reads the issues; labels, reminders, closing and the commands of the maintainer go on, and the checklist passes without a token of Claude.
@@ -470,21 +517,11 @@ Every Monday, the Weekly report workflow posts in the [discussions](https://gith
 ## How the blueprint works
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-the-blueprint-works.dark.svg">
-  <img src="docs/images/diagrams/how-the-blueprint-works.svg" alt="How the blueprint works: Copier renders a new repository from the questions in copier.yml and the files in template/, which take in the workflows of .github/workflows/, the manifests of stacks/ and blueprint.py. Renovate keeps the workflows and the stacks current.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-path-of-a-release.dark.svg">
+  <img src="docs/images/diagrams/the-path-of-a-release.svg" alt="The path of a release of the blueprint: A pull request merges into main of the blueprint, and the Release workflow keeps the release pull request with the next version. Its merge, by the maintainer or by itself when it holds only updates, publishes the release with a signed tag and verifies it. The Rollout workflow then starts the blueprint bot of every repository that takes the blueprint, five today. Each bot verifies the release, runs copier update and keeps one update pull request as the release app, so that the checks of the repository run. Without conflicts it merges itself once they pass; with conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer. The dashboard shows the release of the blueprint that each repository is on.">
 </picture>
 
-- `copier.yml` holds the questions. `template/` holds the files of a new repository; a file or folder name such as `[% if stack == 'php' %]composer.json[% endif %]` carries its condition, and a name that renders empty is left out. The delimiters `{= =}` and `[% %]` appear in no workflow, script or manifest, so `${{ }}` of GitHub Actions and `[[ ]]` of Bash and TOML stay as they are.
-- The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Renovate keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.
-- `blueprint.py` starts the tool of the settings as code, the checklist and the bots. Its code is in `blueprint/`, a module for each task, with a `ruff.toml` of its own, so that the Ruff settings of a project don't apply to it.
-- `stacks/` holds the dependency manifests and lock files of each kind of project, which Renovate keeps current; a new project starts from them.
-- `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools, and also updates a repository of each kind from the latest release to the commit, which must bring every file of the blueprint as a new repository has it and pass the same checks: in every pull request but the release pull request, and every week. It updates one with the answers of each repository that takes the blueprint as well, from `tests/answers/`, without the sample code and with their licenses, languages and discussions, whose website and lint must pass too. The Downstream workflow clones each of these repositories and updates it as its blueprint bot does, to `main` and to the pull request: its summary names the files whose update the pull request changes and each conflict, before the release brings them there, and a conflict in a file that is not a page, such as a workflow, a script or a configuration, fails it (`downstream.py`). The Windows workflow runs `scripts/check.sh` on Windows as well, in Git Bash like a contributor there, every week and for each pull request that changes the code or the tests. The Next runner workflow runs the Variants every week on the runner that the jobs move to next.
-- `docs/` makes this documentation the website of the blueprint: its pages include the READMEs, and the Dashboard workflow publishes them with the dashboard under `dashboard/`.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-a-change-of-the-template-meets-the-repositories.dark.svg">
-  <img src="docs/images/diagrams/how-a-change-of-the-template-meets-the-repositories.svg" alt="How a change of the template meets the repositories before its release: A pull request changes what the repositories get from the blueprint. The Variants workflow makes a new repository of every kind, updates one of every kind from the latest release, and updates one with the answers of each repository in tests/answers, which must give every file as a new repository with these answers has it and pass the build of its website and the lint of its workflows and Markdown. The Downstream workflow clones each repository and updates it as its blueprint bot does, to main and to the pull request, and names the files whose update the pull request changes and every conflict; a conflict that the pull request brings into a workflow or a script fails it. Then the pull request merges, and the release and the Rollout bring it to every repository.">
-</picture>
+[The architecture](https://dennis-otto.github.io/repo-blueprint/architecture.html) shows how the blueprint is built, from `copier.yml` and `template/` to the workflows that it shares with every repository and the tests that try each change on every kind of project, and the path of a release from a merge to the update of every repository. The reference describes [every question of Copier](https://dennis-otto.github.io/repo-blueprint/reference/questions.html) and [every variable and secret](https://dennis-otto.github.io/repo-blueprint/reference/variables.html), written by `reference.py` from the sources that they describe, so that they can't drift. When something is unclear or doesn't work, see [the questions and answers](https://dennis-otto.github.io/repo-blueprint/faq.html) and [the troubleshooting](https://dennis-otto.github.io/repo-blueprint/troubleshooting.html).
 
 Where the blueprint is heading: [the roadmap](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/roadmap.md). What it protects and trusts: [its security design](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/security.md).
 

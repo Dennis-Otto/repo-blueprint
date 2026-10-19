@@ -59,3 +59,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0051](0051-every-owner-chooses-who-runs-renovate-and-whether-an-ai-reads-the-issues.md) | Every owner chooses who runs Renovate, and whether an AI reads the issues | accepted |
 | [0052](0052-roll-out-every-release-at-once.md) | Bring every release to every repository right after it is verified, and keep the weekly run as a safety net | accepted |
 | [0053](0053-answers-render-valid-files-and-every-repository-links-its-website.md) | The answers render valid files, and every new repository links its website and has the topics of its kind | accepted |
+| [0054](0054-the-reference-is-written-from-its-sources-and-committed.md) | The reference of the questions, variables and secrets is written from its sources and committed | accepted |
