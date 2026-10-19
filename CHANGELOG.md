@@ -9,10 +9,9 @@ requests when there is none.
 
 ## [0.13.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.2...v0.13.3) (2026-10-19)
 
-
 ### Bug fixes
 
-* **coach:** write the warning sign as an escape, so no file hides a character ([#341](https://github.com/Dennis-Otto/repo-blueprint/issues/341)) ([7716adc](https://github.com/Dennis-Otto/repo-blueprint/commit/7716adc50c6c3e04106bfec0e23294a40216f398))
+- **The PR coach writes its warning sign as an escape:** the sign before "stopped before the end" carried an invisible variation selector in `.github/blueprint/coach.py`, which a project that refuses characters a review on GitHub can't see, such as issue-assistant, failed in every update of the blueprint. A test keeps every file of the package free of such characters.
 
 ## [0.13.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.1...v0.13.2) (2026-10-19)
 
