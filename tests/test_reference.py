@@ -656,7 +656,7 @@ def test_the_fix_bot_writes_the_pages_anew() -> None:
 
 
 def test_the_names_of_the_assistant_are_those_of_its_workflows() -> None:
-    assert reference.ASSISTANT_NAMES <= set(reference.ABOUT)
+    assert set(reference.ABOUT) >= reference.ASSISTANT_NAMES
     text = (ROOT / reference.WORKFLOWS / "issue-assistant.yml").read_text(
         encoding="utf-8"
     )

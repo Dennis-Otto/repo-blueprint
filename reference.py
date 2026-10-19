@@ -705,7 +705,9 @@ def variables_page(
     template, the names of the template's workflows and the names of the answers."""
     found = names_of(workflows, settings)
     undescribed = sorted(
-        name for name, entry in found.items() if name not in ABOUT and not entry.of_assistant
+        name
+        for name, entry in found.items()
+        if name not in ABOUT and not entry.of_assistant
     )
     unused = sorted(set(ABOUT) - set(found) - ASSISTANT_NAMES)
     problems = [
