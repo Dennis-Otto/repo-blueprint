@@ -3,6 +3,7 @@ kinds of survivors, the report of the run and the issue of a score that dropped.
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
 import re
@@ -234,6 +235,63 @@ def test_the_estimate_counts_what_mutmut_changes() -> None:
 
 def test_code_that_doesnt_parse_has_no_estimate() -> None:
     assert estimate("def broken(:\n") is None
+
+
+# mutmut writes a whole copy of a function for each of its mutants, and Python compiles
+# every copy when a test imports the module. main() of blueprint/cli.py, with the parser
+# of every command, made 1,800 copies of its 640 lines: 51 MB of code that each part of
+# the Mutation workflow, and every project of the tests that runs its blueprint.py,
+# compiled for minutes, past the time limits of the run and of a test (#219). The
+# largest function now makes about 20,000 lines.
+MOST_COPIED_LINES = 50_000
+
+
+def copied_lines(path: Path) -> dict[str, int]:
+    """About the lines that mutmut writes for each function of a module: its lines
+    for each of its mutants."""
+    source = path.read_text(encoding="utf-8")
+    counts = estimate(source) or {}
+    lengths: dict[str, int] = {}
+    for name, function in mutation.functions(ast.parse(source)):
+        end = function.end_lineno or function.lineno
+        lengths[name] = lengths.get(name, 0) + end - function.lineno + 1
+    return {name: lengths[name] * count for name, count in counts.items()}
+
+
+# It reads the code as text, which the copy of the mutation tests has with every
+# mutant.
+@pytest.mark.mutation_unsafe
+def test_mutmut_makes_no_copy_of_a_function_too_large_to_compile() -> None:
+    root = Path(__file__).parent.parent
+    paths = [root / name for name in default_paths(root)]
+    modules = sorted(
+        {
+            path
+            for item in paths
+            for path in ([item] if item.is_file() else item.rglob("*.py"))
+        }
+    )
+    assert root / "blueprint/cli.py" in modules
+    heavy = {
+        f"{path.relative_to(root).as_posix()}: {name}": lines
+        for path in modules
+        for name, lines in copied_lines(path).items()
+        if lines > MOST_COPIED_LINES
+    }
+    # Split such a function into smaller ones, as the parser of blueprint.py is.
+    assert not heavy, heavy
+
+
+def test_the_copied_lines_of_a_function_are_its_lines_for_each_mutant(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "module.py"
+    module.write_text(
+        'def add(a, b=1):\n    total = a + b\n    return total\n\n\nNAME = "x"\n',
+        encoding="utf-8",
+    )
+    # Three lines, three mutants: the assignment, the operator and the default.
+    assert copied_lines(module) == {"x_add": 9}
 
 
 def test_the_modules_of_the_plan(tmp_path: Path) -> None:

@@ -11026,6 +11026,9 @@ def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
     assert found == [image.groups()]
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_screenshot_bot_is_in_every_repository_and_waits_for_its_script(
     projects: Mapping[str, Path], kind: str
@@ -11886,6 +11889,9 @@ def test_the_website_step_builds_the_website_strictly(
     assert list(temporary.iterdir()) == []
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize("broken", [False, True])
 def test_the_website_step_checks_what_the_hooks_promise(
