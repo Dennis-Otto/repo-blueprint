@@ -103,7 +103,7 @@ jobs:
       checks: read
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - name: Run the failed jobs once more
@@ -194,7 +194,7 @@ jobs:
       issues: write
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - name: Add the jobs that failed at first to the issue of flaky tests
@@ -314,7 +314,7 @@ jobs:
       actions: write
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - name: Run the failed jobs of the release once more
@@ -345,7 +345,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - name: Run the checks of the head of the pull request again
@@ -412,7 +412,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       # The default branch, for blueprint.py, the explanations and the versions of
@@ -504,7 +504,7 @@ jobs:
       pull-requests: write # the suggestions on a pull request from a fork, and the comment when the bot fails
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       # The tool of main, never the code of the pull request; the fixes are data.
@@ -671,7 +671,7 @@ jobs:
       HEADLINE: "docs: draw the diagrams anew"
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
       - name: Fetch the diagrams that the check drew
