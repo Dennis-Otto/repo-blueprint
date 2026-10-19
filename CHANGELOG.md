@@ -7,6 +7,17 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.3...v1.0.4) (2026-10-19)
+
+
+### Bug fixes
+
+* **deps:** update dependency nextcloud/server to v35 ([#330](https://github.com/Dennis-Otto/repo-blueprint/issues/330)) ([e94a67d](https://github.com/Dennis-Otto/repo-blueprint/commit/e94a67d181b2b197956037085d40ba5ce9b35601))
+* **deps:** update the actions ([#325](https://github.com/Dennis-Otto/repo-blueprint/issues/325)) ([2893561](https://github.com/Dennis-Otto/repo-blueprint/commit/28935612dad23a1cb58f9a0e5cc7800febfcaee6))
+* **deps:** update the actions ([#369](https://github.com/Dennis-Otto/repo-blueprint/issues/369)) ([ab55a8a](https://github.com/Dennis-Otto/repo-blueprint/commit/ab55a8a6e14f99d9e67cb8fe8c0a29faf869f342))
+* let the branch bot update pull requests that change workflows ([#361](https://github.com/Dennis-Otto/repo-blueprint/issues/361)) ([d26f5b6](https://github.com/Dennis-Otto/repo-blueprint/commit/d26f5b65dea8ba1588b7bfbda340f7e87bfd677e))
+* make Settings pass where GitHub keeps a security setting off ([#372](https://github.com/Dennis-Otto/repo-blueprint/issues/372)) ([40e96b3](https://github.com/Dennis-Otto/repo-blueprint/commit/40e96b3beb781e1c76489e1f3b2386a907a03a40))
+
 ## [1.0.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.2...v1.0.3) (2026-10-19)
 
 ### Bug fixes
