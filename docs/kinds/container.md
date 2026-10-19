@@ -9,7 +9,7 @@ An image for the GitHub Container Registry, built on a base that Renovate moves 
 ## Start one
 
 ```sh
-uvx --from copier==9.18.2 copier copy --data project_type=container gh:Dennis-Otto/repo-blueprint my-image
+uvx --from copier==9.19.0 copier copy --data project_type=container gh:Dennis-Otto/repo-blueprint my-image
 cd my-image
 python3 .github/blueprint.py create
 ```
