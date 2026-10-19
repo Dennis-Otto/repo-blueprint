@@ -7,6 +7,12 @@ requests when there is none.
 
 ## Unreleased
 
+## [0.13.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.1...v0.13.2) (2026-10-19)
+
+### Bug fixes
+
+* **deps:** update dependency playwright-core to v1.64.0 ([#327](https://github.com/Dennis-Otto/repo-blueprint/issues/327)) ([e268070](https://github.com/Dennis-Otto/repo-blueprint/commit/e268070ccf18989a3951521bf9065e4e01514c7a))
+
 ## [0.13.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.0...v0.13.1) (2026-10-19)
 
 ### Bug fixes
