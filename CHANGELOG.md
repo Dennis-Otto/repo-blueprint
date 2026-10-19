@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.1...v1.0.2) (2026-10-19)
+
+
+### Bug fixes
+
+* **deps:** refresh pip-compile outputs ([#348](https://github.com/Dennis-Otto/repo-blueprint/issues/348)) ([1217f30](https://github.com/Dennis-Otto/repo-blueprint/commit/1217f30378f29f4fe459c30a31bd4eee3d6c8030))
+
 ## [1.0.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.0...v1.0.1) (2026-10-19)
 
 ### Bug fixes
