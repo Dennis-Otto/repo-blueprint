@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.3...v1.0.0) (2026-10-19)
+
+
+### Documentation
+
+* release the blueprint as 1.0.0, its first stable version ([#352](https://github.com/Dennis-Otto/repo-blueprint/issues/352)) ([7c8d4c5](https://github.com/Dennis-Otto/repo-blueprint/commit/7c8d4c580ae81322f7829f2f5c1740136b9fdebe))
+
 ## [0.13.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.2...v0.13.3) (2026-10-19)
 
 ### Bug fixes
