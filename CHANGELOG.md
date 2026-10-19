@@ -7,6 +7,64 @@ requests when there is none.
 
 ## Unreleased
 
+## [0.13.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.12.0...v0.13.0) (2026-10-19)
+
+
+### Features
+
+* a screenshot bot in every repository, and pictures the bot renews ([#270](https://github.com/Dennis-Otto/repo-blueprint/issues/270)) ([d6026b2](https://github.com/Dennis-Otto/repo-blueprint/commit/d6026b2157677b049abe04e410f71e03e2d6a88b))
+* add `blueprint.py create` and a quick start that works for anyone ([#311](https://github.com/Dennis-Otto/repo-blueprint/issues/311)) ([823b64b](https://github.com/Dennis-Otto/repo-blueprint/commit/823b64b8d416e000fc5b78bf84a2471cc9f8850b))
+* bring every verified issue-assistant release into the blueprint automatically ([#211](https://github.com/Dennis-Otto/repo-blueprint/issues/211)) ([befd812](https://github.com/Dennis-Otto/repo-blueprint/commit/befd812c7c2580a8f773126e96c07fd88c769a36))
+* **ci:** a working Psalm taint analysis for Nextcloud apps ([#255](https://github.com/Dennis-Otto/repo-blueprint/issues/255)) ([9f436b9](https://github.com/Dennis-Otto/repo-blueprint/commit/9f436b97d71f0c8d64e0ee30643546b491aeebf3))
+* **dashboard:** publish the data as JSON and an Atom feed of all releases, and show the website deploys ([#306](https://github.com/Dennis-Otto/repo-blueprint/issues/306)) ([c1bc42d](https://github.com/Dennis-Otto/repo-blueprint/commit/c1bc42dcf8bb70e6e920391bf1b8fb6b47990ca4))
+* **deps:** Renovate's dependency dashboard, a whole-Monday window, fix(deps) for what users run, and tracked tool pins ([#245](https://github.com/Dennis-Otto/repo-blueprint/issues/245)) ([b41493c](https://github.com/Dennis-Otto/repo-blueprint/commit/b41493c053e7ea6efbe7d7b36dabb13611a94ecf))
+* **docs:** check the links and anchors of the built website, what the hooks promise and the published site ([#298](https://github.com/Dennis-Otto/repo-blueprint/issues/298)) ([250a6e3](https://github.com/Dennis-Otto/repo-blueprint/commit/250a6e30150999885314a2ee684ccbe2d600589d))
+* **docs:** generate an Automation page from the workflows in every website ([#299](https://github.com/Dennis-Otto/repo-blueprint/issues/299)) ([e3dba28](https://github.com/Dennis-Otto/repo-blueprint/commit/e3dba28fcbd5063abcd8fedcd85aa2437ed36d48))
+* **docs:** link every website to the owner's hub and show the version without asking GitHub from the browser ([#303](https://github.com/Dennis-Otto/repo-blueprint/issues/303)) ([61219d8](https://github.com/Dennis-Otto/repo-blueprint/commit/61219d88a751eadb7b474f869166144dc0f60253))
+* keep one sticky report on every pull request and suggest a fixed title ([#246](https://github.com/Dennis-Otto/repo-blueprint/issues/246)) ([553761a](https://github.com/Dennis-Otto/repo-blueprint/commit/553761acc2f3efe1548511a510f8f48fd599f813))
+* let any owner use the blueprint with their own release app ([#307](https://github.com/Dennis-Otto/repo-blueprint/issues/307)) ([e1f4148](https://github.com/Dennis-Otto/repo-blueprint/commit/e1f4148047e79da6d1b1124d776a75e762166f4d))
+* **mutation:** run large projects in parts, list the survivors of the logic first and open an issue when the score drops ([#253](https://github.com/Dennis-Otto/repo-blueprint/issues/253)) ([51c8b9e](https://github.com/Dennis-Otto/repo-blueprint/commit/51c8b9ede12d08ffa3e36f0f21438012ee54ccfd))
+* **node:** lint and format Node packages, report their coverage, and install without lifecycle scripts ([#295](https://github.com/Dennis-Otto/repo-blueprint/issues/295)) ([b306ff2](https://github.com/Dennis-Otto/repo-blueprint/commit/b306ff234d94daadaede1868eb375ee3664eb198))
+* **php:** run the PHP dev tool chain on PHP 8.3, randomise test order and stop unmergeable PHPUnit majors ([#263](https://github.com/Dennis-Otto/repo-blueprint/issues/263)) ([fcfa84c](https://github.com/Dennis-Otto/repo-blueprint/commit/fcfa84c81510175522eea4bbe47083adf73613cc))
+* pre-fill the OpenSSF Best Practices and Baseline answers in every repository ([#302](https://github.com/Dennis-Otto/repo-blueprint/issues/302)) ([38794eb](https://github.com/Dennis-Otto/repo-blueprint/commit/38794eb710d16b78811cd6c99fd6a7932dec9e6b))
+* pull requests fix their format, whitespace and Markdown by themselves, also on forks and main ([#224](https://github.com/Dennis-Otto/repo-blueprint/issues/224)) ([f317d12](https://github.com/Dennis-Otto/repo-blueprint/commit/f317d12bb07bc7ec4fd58d3887ba596e8812385d))
+* Renovate and optional AI triage for owners without the blueprint's Renovate hub ([#312](https://github.com/Dennis-Otto/repo-blueprint/issues/312)) ([8c5d9f8](https://github.com/Dennis-Otto/repo-blueprint/commit/8c5d9f8e6ce3d42fe991c8694107876ba96f63fe))
+* **security:** block merges that add code-scanning alerts, allow only listed actions, and scan for generic secrets ([#273](https://github.com/Dennis-Otto/repo-blueprint/issues/273)) ([df773a3](https://github.com/Dennis-Otto/repo-blueprint/commit/df773a32f5a859f426da8d387fd1e514fdc4d9e3))
+* show the notes of every skipped blueprint release in the update pull request ([#292](https://github.com/Dennis-Otto/repo-blueprint/issues/292)) ([c92a7fe](https://github.com/Dennis-Otto/repo-blueprint/commit/c92a7fe2adf3282d18bc50e7aaa547495056dac3))
+
+
+### Bug fixes
+
+* **changelog:** check every waiting fragment, and count only a new one as a pull request's entry ([#214](https://github.com/Dennis-Otto/repo-blueprint/issues/214)) ([ff3547c](https://github.com/Dennis-Otto/repo-blueprint/commit/ff3547ccf4872ec938b0c2c8e1d0b3e9c8f502e4))
+* **deps:** update dependency @types/node to v24.19.2 ([#322](https://github.com/Dennis-Otto/repo-blueprint/issues/322)) ([95012f5](https://github.com/Dennis-Otto/repo-blueprint/commit/95012f5d10a598451847ad5d6e93a9d89c7c3afa))
+* **deps:** update dependency nextcloud/server to v33.0.9 ([#323](https://github.com/Dennis-Otto/repo-blueprint/issues/323)) ([e271fb3](https://github.com/Dennis-Otto/repo-blueprint/commit/e271fb36c88d9e48c9f9297e80687bc12cf27367))
+* **deps:** update dependency uv [security] ([#233](https://github.com/Dennis-Otto/repo-blueprint/issues/233)) ([a219ca6](https://github.com/Dennis-Otto/repo-blueprint/commit/a219ca64cac1426607d7ea54436cc869d3535f59))
+* **deps:** update dependency uv to v0.13.0 ([#328](https://github.com/Dennis-Otto/repo-blueprint/issues/328)) ([aac6907](https://github.com/Dennis-Otto/repo-blueprint/commit/aac690731118a4104bf637352fbd1b10a2000096))
+* **deps:** update the issue assistant to v1.5.0 ([#236](https://github.com/Dennis-Otto/repo-blueprint/issues/236)) ([add5616](https://github.com/Dennis-Otto/repo-blueprint/commit/add5616a88bf795bc583bd49b27b79c5f798973c))
+* **docs:** accessible contrast, lazy images, a video instead of the 1.8 MB GIF, a pinned Mermaid and an accessibility gate ([#285](https://github.com/Dennis-Otto/repo-blueprint/issues/285)) ([c7eb5a3](https://github.com/Dennis-Otto/repo-blueprint/commit/c7eb5a328d0f274abe6e5a0c1530acfbaed06cb9))
+* **docs:** language-correct search, metadata and dates on every website ([#294](https://github.com/Dennis-Otto/repo-blueprint/issues/294)) ([687a3fd](https://github.com/Dennis-Otto/repo-blueprint/commit/687a3fd3b9802bc9c08b3da0da3cfb6d5b55a2de))
+* keep the tests' own Git repositories out of the repository that runs them ([#235](https://github.com/Dennis-Otto/repo-blueprint/issues/235)) ([6148f2c](https://github.com/Dennis-Otto/repo-blueprint/commit/6148f2cc69fccf60abb6dca751e388a9dd8dc727))
+* leave a project's own diagram sources alone, and keep each picture's alt in step with its source ([#220](https://github.com/Dennis-Otto/repo-blueprint/issues/220)) ([ed778d3](https://github.com/Dennis-Otto/repo-blueprint/commit/ed778d35dc08de181982dafa8f2d5b9de6c5fb20))
+* **nextcloud:** leave a committed infection.json5 out of the app package ([#223](https://github.com/Dennis-Otto/repo-blueprint/issues/223)) ([8400443](https://github.com/Dennis-Otto/repo-blueprint/commit/840044369c51c252fe14ab4ae1254ea4af5ace31))
+* **release:** attach SBOMs that describe the shipped package, named and versioned ([#261](https://github.com/Dennis-Otto/repo-blueprint/issues/261)) ([55c0661](https://github.com/Dennis-Otto/repo-blueprint/commit/55c0661c9484d350ebaff67667d8edd77eaafa3b))
+* say that a breaking change raises the minor version while a project is below 1.0.0 ([#227](https://github.com/Dennis-Otto/repo-blueprint/issues/227)) ([4a80ff5](https://github.com/Dennis-Otto/repo-blueprint/commit/4a80ff52d52e5b1520428edfc423700b9ef91b98))
+* **security:** escape untrusted file and branch names in bot comments and issues ([#240](https://github.com/Dennis-Otto/repo-blueprint/issues/240)) ([12159be](https://github.com/Dennis-Otto/repo-blueprint/commit/12159be6e439523f5b1a48823d679f044b04fd7e))
+* **security:** refuse a blueprint release older than the version a repository has ([#215](https://github.com/Dennis-Otto/repo-blueprint/issues/215)) ([005805c](https://github.com/Dennis-Otto/repo-blueprint/commit/005805cc5bd2fffb013508d4214c582097ba754e))
+* settings bot pages through labels and rulesets, reports failed writes, and runs when its code changes ([#267](https://github.com/Dennis-Otto/repo-blueprint/issues/267)) ([b4723d2](https://github.com/Dennis-Otto/repo-blueprint/commit/b4723d20642800272dcf09f8dfcc34c48845dc14))
+* show the real state of every repository on the dashboard and in the weekly report ([#276](https://github.com/Dennis-Otto/repo-blueprint/issues/276)) ([c8d89ef](https://github.com/Dennis-Otto/repo-blueprint/commit/c8d89ef05e0ab9c1cf9a1b9a4bd3f308e7682a51))
+* validate Copier answers and give new repositories topics, a homepage and links to their website ([#318](https://github.com/Dennis-Otto/repo-blueprint/issues/318)) ([107c87a](https://github.com/Dennis-Otto/repo-blueprint/commit/107c87ad154a518976d8eb68b7ea9f14b342fa7c))
+
+
+### Performance
+
+* check text files in one pass, catch conflict markers, and require shellcheck in CI ([#265](https://github.com/Dennis-Otto/repo-blueprint/issues/265)) ([a794ace](https://github.com/Dennis-Otto/repo-blueprint/commit/a794aced61bf7f46edb2cb772345a5eab5c95f38))
+* **ci:** bring one auto-merge pull request up to date at a time, and react when auto-merge is enabled ([#241](https://github.com/Dennis-Otto/repo-blueprint/issues/241)) ([55a98ae](https://github.com/Dennis-Otto/repo-blueprint/commit/55a98ae1e0794cd55698541a47022b0f5a950822))
+* **ci:** fold the lint, CodeQL and title jobs into fewer jobs ([#238](https://github.com/Dennis-Otto/repo-blueprint/issues/238)) ([f4c26ab](https://github.com/Dennis-Otto/repo-blueprint/commit/f4c26abb613d8e332f1306313f7f6c81ca9e8b17))
+* **ci:** install tools with uv and a lock-keyed cache, bound every step, and stop repeating docker work in each Variants leg ([#207](https://github.com/Dennis-Otto/repo-blueprint/issues/207)) ([fb04666](https://github.com/Dennis-Otto/repo-blueprint/commit/fb046663c4336e52b14599330ef6dbb7511b4813))
+* **ci:** merge Dependabot updates as the release app and poll less often ([#258](https://github.com/Dennis-Otto/repo-blueprint/issues/258)) ([8c31861](https://github.com/Dennis-Otto/repo-blueprint/commit/8c31861c65d243260e016327488227c5e0c8a874))
+* **docs:** build and publish the website in one job and keep Material's downloads in a cache ([#231](https://github.com/Dennis-Otto/repo-blueprint/issues/231)) ([51d3f5f](https://github.com/Dennis-Otto/repo-blueprint/commit/51d3f5f33ffa18ec460edf6566e605ed41645883))
+* run the tests in parallel with pytest-xdist in every Python repository and in the blueprint ([#230](https://github.com/Dennis-Otto/repo-blueprint/issues/230)) ([8329897](https://github.com/Dennis-Otto/repo-blueprint/commit/83298971be608668821a75265add6caeea4ba63f))
+
 ## [0.12.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.11.1...v0.12.0) (2026-10-14)
 
 ### Features
