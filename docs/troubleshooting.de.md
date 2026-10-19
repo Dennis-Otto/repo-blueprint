@@ -1,5 +1,5 @@
 ---
-description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Release-Pull-Request ohne Prüfungen und Renovate, das keine Updates öffnet."
+description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen und Renovate, das keine Updates öffnet."
 ---
 
 # Fehlerbehebung
@@ -60,6 +60,18 @@ Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copi
 - **Lass den Einstellungs-Bot sie anwenden:** Er läuft als die Release-App, die die Berechtigung *Administration* hat, nach jeder Änderung der Einstellungen als Code auf `main`, jede Woche und auf Wunsch unter *Actions → Settings → Run workflow*. Ändere `.github/repository.project.toml` in einem Pull Request, und die Einstellungen folgen seinem Merge.
 - **Bitte einen Administrator,** `settings apply` einmal auszuführen, für ein neues Repository, dessen Release-App noch nicht eingerichtet ist.
 - **Sieh nach, was abweicht,** mit `python3 .github/blueprint.py settings check`, das nichts ändert; manche Teile, etwa wer ein Ruleset umgehen darf, sieht nur ein Administrator.
+
+## Die Einstellungen nennen einen Schalter, den GitHub nicht umsetzt
+
+**Was du siehst:** Die Zusammenfassung des Settings-Workflows oder `python3 .github/blueprint.py settings apply` endet mit *GitHub doesn't do this for the repository, which fails nothing*, und darunter steht ein Schalter wie `security.secret_scanning_non_provider_patterns` mit der Zeile, mit der nicht mehr danach gefragt wird.
+
+**Warum:** Manche Schalter der Sicherheit bietet GitHub nur mit manchen Plänen an, etwa die allgemeinen Muster des Secret Scannings, die private Schlüssel, Verbindungszeichenfolgen und Passwörter finden, die kein Anbieter ausgestellt hat. Auf einem Repository eines Benutzers nimmt GitHub das Einschalten an und lässt sie trotzdem aus, oder es lässt sie in seiner Antwort weg. Der Einstellungs-Bot fragt in jedem Lauf wieder, damit ein Repository, dessen Plan den Schalter bekommt, ihn auch bekommt, und nennt, was GitHub gelassen hat, wie es war, ohne den Lauf fehlschlagen zu lassen ([Entscheidung 0055](decisions/0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md)).
+
+**Was zu tun ist:**
+
+- **Nichts,** wenn das Repository den Schalter bekommen soll, sobald sein Plan ihn hat: Der Hinweis bleibt in der Zusammenfassung jedes Laufs und lässt nichts fehlschlagen.
+- **Frag nicht mehr danach** mit der Zeile, die der Hinweis nennt, etwa `secret_scanning_non_provider_patterns = false` unter `[security]` in `.github/repository.project.toml`, in einem Pull Request; mit seinem Merge endet der Hinweis.
+- **Rechne damit, dass `settings check` ihn als Abweichung nennt:** Es schreibt nichts, und nur ein Schreiben zeigt, was GitHub behält.
 
 ## Der Release-Pull-Request hat keine Prüfungen
 
