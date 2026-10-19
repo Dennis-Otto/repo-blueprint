@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **No release takes a repository back to an older blueprint:** the blueprint bot checked that the tag of a release points at a commit of the blueprint's `main`, but not that this commit comes after the version the repository has, so a signed tag of a new version at an old commit of `main` would have taken every repository back to a blueprint without its later fixes. The bot now also compares the release with the `_commit` of `.copier-answers.yml` and refuses one that doesn't come after it, with the reason in the summary of the run. The section *Verify a release* of SECURITY.md now shows the same checks by hand: the name inside the tag, its commit on `main` and after your version, and its signature.

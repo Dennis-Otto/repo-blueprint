@@ -6,8 +6,10 @@
 # https://squidfunk.github.io/mkdocs-material/
 #
 # The blueprint's own website: a start page in English and German, the guide, which
-# includes the READMEs, the comparison, a page for each kind of project and the
-# changelog, and the Dashboard workflow publishes it
+# includes the READMEs, the comparison, a page for each kind of project, the questions
+# and answers, the troubleshooting, the architecture, the reference, which reference.py
+# writes from copier.yml and the workflows, and the changelog, and the Dashboard
+# workflow publishes it
 # with the dashboard under dashboard/. Preview it while you write, at
 # http://127.0.0.1:8000, with the tools of stacks/docs/ in .venv-docs:
 #   python3 -m venv .venv-docs
@@ -57,6 +59,12 @@ plugins:
           Container image: Container-Image
           Repository without a build: Repository ohne Build
           Your own account: Dein eigenes Konto
+          Questions and answers: Fragen und Antworten
+          Troubleshooting: Fehlerbehebung
+          Architecture: Architektur
+          Reference: Referenz
+          Questions of Copier: Fragen von Copier
+          Variables and secrets: Variablen und Secrets
           Security design: Sicherheitsdesign
           Automation: Automatisierung
           Decisions: Entscheidungen
@@ -83,6 +91,12 @@ nav:
       - Container image: kinds/container.md
       - Repository without a build: kinds/generic.md
   - Your own account: own-account.md
+  - Questions and answers: faq.md
+  - Troubleshooting: troubleshooting.md
+  - Architecture: architecture.md
+  - Reference:
+      - Questions of Copier: reference/questions.md
+      - Variables and secrets: reference/variables.md
   - Roadmap: roadmap.md
   - Security design: security.md
   - Automation: automation.md
