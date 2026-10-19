@@ -61,3 +61,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0053](0053-answers-render-valid-files-and-every-repository-links-its-website.md) | The answers render valid files, and every new repository links its website and has the topics of its kind | accepted |
 | [0054](0054-the-reference-is-written-from-its-sources-and-committed.md) | The reference of the questions, variables and secrets is written from its sources and committed | accepted |
 | [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md) | What GitHub doesn't do for a repository, such as a switch of security that its plan lacks, fails no run of the settings | accepted |
+| [0056](0056-every-function-stays-small-enough-for-the-copies-of-mutmut.md) | Every function stays small enough for the copies of mutmut: the parser of `blueprint.py` adds each group of commands in a function of its own | accepted |
