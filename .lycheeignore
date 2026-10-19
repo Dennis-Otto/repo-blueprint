@@ -9,3 +9,8 @@
 # publishes after the merge that adds them; #320 removes this entry once the website
 # has them.
 ^https://dennis-otto\.github\.io/repo-blueprint/(de/)?(compare|kinds/[a-z-]+)\.html$
+
+# The architecture, the questions and answers, the troubleshooting and the reference,
+# which only the Docs workflow publishes after the merge that adds them; #333 removes
+# this entry once the website has them.
+^https://dennis-otto\.github\.io/repo-blueprint/(de/)?(architecture|faq|troubleshooting|reference/(questions|variables))\.html$

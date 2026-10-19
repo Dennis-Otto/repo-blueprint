@@ -13,11 +13,11 @@
 #
 # Each also says in autofix how it fixes itself, so that a pull request fixes what a
 # command can fix: the commands that fix what it finds, a list in which {blueprint}
-# stands for python3 and the blueprint.py of the repository, or a sentence with the
-# reason why no command can. The job of a check that fails runs its commands, those of
-# a check of scripts/check.sh the commands of each step, and the fix bot commits their
-# fixes after the checks, or suggests them on a pull request from a fork. See "Pull
-# requests fix themselves" in CONTRIBUTING.md.
+# stands for python3 and the blueprint.py of the repository and {python} for python3
+# alone, or a sentence with the reason why no command can. The job of a check that
+# fails runs its commands, those of a check of scripts/check.sh the commands of each
+# step, and the fix bot commits their fixes after the checks, or suggests them on a
+# pull request from a fork. See "Pull requests fix themselves" in CONTRIBUTING.md.
 #
 # The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
 # Explain the checks and steps of this project alone in .github/checks.project.toml,

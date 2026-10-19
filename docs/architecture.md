@@ -1,0 +1,41 @@
+---
+description: "How Repo Blueprint is built and how a release of it travels: the template, the workflows that it shares with every repository, its tools and tests, and the path from a merge to the update of every repository."
+---
+
+# Architecture
+
+Repo Blueprint is one repository that is its own first user: the workflows that check, release and update it are the templates of the workflows of every repository made from it, and each of its releases reaches all of them as a pull request. This page shows how it is built and the path that a release takes. [The automation](https://dennis-otto.github.io/repo-blueprint/automation.html) describes every workflow, [the security design](security.md) what the blueprint protects and whom it trusts, the [reference](reference/questions.md) every question, variable and secret, and [the decisions](decisions/README.md) why it works the way it does.
+
+## How the blueprint works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-the-blueprint-works.dark.svg">
+  <img src="images/diagrams/how-the-blueprint-works.svg" alt="How the blueprint works: Copier renders a new repository from the questions in copier.yml and the files in template/, which take in the workflows of .github/workflows/, the manifests of stacks/ and blueprint.py. Renovate keeps the workflows and the stacks current.">
+</picture>
+
+- `copier.yml` holds the questions. `template/` holds the files of a new repository; a file or folder name such as `[% if stack == 'php' %]composer.json[% endif %]` carries its condition, and a name that renders empty is left out. The delimiters `{= =}` and `[% %]` appear in no workflow, script or manifest, so `${{ }}` of GitHub Actions and `[[ ]]` of Bash and TOML stay as they are.
+- The workflows in `.github/workflows/` run in this repository and are the templates of the workflows of every new repository: actionlint lints them and Renovate keeps their actions current here. A line marked *Not in the blueprint itself* switches a job off in this repository and disappears in new ones.
+- `blueprint.py` starts the tool of the settings as code, the checklist and the bots. Its code is in `blueprint/`, a module for each task, with a `ruff.toml` of its own, so that the Ruff settings of a project don't apply to it.
+- `stacks/` holds the dependency manifests and lock files of each kind of project, which Renovate keeps current; a new project starts from them.
+- `tests/` checks `blueprint.py` against a simulated GitHub and renders every kind of project; the Variants workflow renders each one and runs its own checks with its real tools, and also updates a repository of each kind from the latest release to the commit, which must bring every file of the blueprint as a new repository has it and pass the same checks: in every pull request but the release pull request, and every week. It updates one with the answers of each repository that takes the blueprint as well, from `tests/answers/`, without the sample code and with their licenses, languages and discussions, whose website and lint must pass too. The Downstream workflow clones each of these repositories and updates it as its blueprint bot does, to `main` and to the pull request: its summary names the files whose update the pull request changes and each conflict, before the release brings them there, and a conflict in a file that is not a page, such as a workflow, a script or a configuration, fails it (`downstream.py`). The Windows workflow runs `scripts/check.sh` on Windows as well, in Git Bash like a contributor there, every week and for each pull request that changes the code or the tests. The Next runner workflow runs the Variants every week on the runner that the jobs move to next.
+- `docs/` makes this documentation the website of the blueprint: its pages include the READMEs, and the Dashboard workflow publishes them with the dashboard under `dashboard/`.
+- `reference.py` writes the [reference](reference/questions.md) of the website from `copier.yml`, the workflows and the settings as code of the template, so that every question, variable and secret is described where people look for it; `tests/test_reference.py` fails while a page differs from them.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-a-change-of-the-template-meets-the-repositories.dark.svg">
+  <img src="images/diagrams/how-a-change-of-the-template-meets-the-repositories.svg" alt="How a change of the template meets the repositories before its release: A pull request changes what the repositories get from the blueprint. The Variants workflow makes a new repository of every kind, updates one of every kind from the latest release, and updates one with the answers of each repository in tests/answers, which must give every file as a new repository with these answers has it and pass the build of its website and the lint of its workflows and Markdown. The Downstream workflow clones each repository and updates it as its blueprint bot does, to main and to the pull request, and names the files whose update the pull request changes and every conflict; a conflict that the pull request brings into a workflow or a script fails it. Then the pull request merges, and the release and the Rollout bring it to every repository.">
+</picture>
+
+## The path of a release
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/the-path-of-a-release.dark.svg">
+  <img src="images/diagrams/the-path-of-a-release.svg" alt="The path of a release of the blueprint: A pull request merges into main of the blueprint, and the Release workflow keeps the release pull request with the next version. Its merge, by the maintainer or by itself when it holds only updates, publishes the release with a signed tag and verifies it. The Rollout workflow then starts the blueprint bot of every repository that takes the blueprint, five today. Each bot verifies the release, runs copier update and keeps one update pull request as the release app, so that the checks of the repository run. Without conflicts it merges itself once they pass; with conflicts, or with BLUEPRINT_AUTOMERGE set to off, it waits for the maintainer. The dashboard shows the release of the blueprint that each repository is on.">
+</picture>
+
+1. **A merge into `main`** of the blueprint starts the Release workflow, whose release-please keeps one release pull request with the next version, decided from the titles of the merged pull requests, and the entries of the changelog as its notes.
+2. **The release:** the maintainer merges the release pull request, or it merges itself once its checks pass when it holds only updates. The Release workflow signs its tag with gitsign, publishes the release with its SBOMs and signed provenance, and checks it as its users can.
+3. **The Rollout** workflow starts the blueprint bot of every repository of the release app right after the release, and the weekly run of the bots stays as a safety net, so that a fix reaches every repository within minutes ([decisions 0052](decisions/0052-roll-out-every-release-at-once.md) and [0010](decisions/0010-roll-out-one-repository-at-a-time.md)).
+4. **The blueprint bot** of each repository verifies the release before it changes anything: the release must be immutable, its tag must point at a commit of the blueprint's `main`, and the release workflow of the blueprint must have signed the tag ([decision 0020](decisions/0020-update-only-to-a-verified-release.md)). Then it runs `copier update` to it and keeps one pull request on the branch `blueprint/update`, as the release app, so that the checks of the repository run.
+5. **The checks** of the repository test the update as they test every pull request. Without conflicts, the pull request merges itself once every check passes; with conflicts, or with [`BLUEPRINT_AUTOMERGE`](reference/variables.md#blueprint_automerge) set to `off`, it waits for the maintainer, as [Troubleshooting](troubleshooting.md#an-update-of-the-blueprint-conflicts) shows.
+6. **The dashboard** shows the release of the blueprint that each repository is on, and the update pull request in the colour of its checks, at [dennis-otto.github.io/repo-blueprint/dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/).

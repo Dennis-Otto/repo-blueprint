@@ -257,6 +257,8 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
             assert "python3" not in command, (entry.key, command)
     fixed = [key for key, entry in explained.steps.items() if entry.autofix]
     assert fixed == [
+        # Of the blueprint alone, by its .github/checks.project.toml, which comes first.
+        "Tests, with every line and branch covered",
         "Text files",
         "Pages in one column",
         "Ruff",
