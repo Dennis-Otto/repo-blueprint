@@ -97,6 +97,11 @@ ANALYSIS = (
     "secret_scanning_push_protection",
     "secret_scanning_non_provider_patterns",
 )
+# The switches that the plan of a repository decides: GitHub accepts their write and
+# keeps them off where the plan lacks them, as on a repository of a user. Secret
+# scanning and its push protection are not among them: when GitHub keeps one of those
+# off, the run fails.
+PLAN_GATED = ("secret_scanning_non_provider_patterns",)
 # A switch that GitHub doesn't offer for a repository; it never comes on.
 UNOFFERED = "not offered"
 
@@ -173,7 +178,8 @@ def apply_security(api: Api, repo: str, drift: list[Drift]) -> None:
 
 def kept(repo: str, sent: list[Drift], have: list[Drift]) -> list[Drift]:
     """The drift after an apply that sent `sent`, in which a switch of
-    security_and_analysis that GitHub accepted but kept as it was is a notice.
+    security_and_analysis that depends on the plan and that GitHub accepted but kept
+    as it was is a notice.
 
     GitHub answers the write of a switch that the plan of the repository lacks with
     success and leaves the switch as it was, as it keeps the generic patterns of secret
@@ -183,7 +189,7 @@ def kept(repo: str, sent: list[Drift], have: list[Drift]) -> list[Drift]:
     tried = {
         item.setting
         for item in sent
-        if item.setting.removeprefix("security.") in ANALYSIS and not item.notice
+        if item.setting.removeprefix("security.") in PLAN_GATED and not item.notice
     }
     result = []
     for item in have:
@@ -195,7 +201,8 @@ def kept(repo: str, sent: list[Drift], have: list[Drift]) -> list[Drift]:
                 notice=True,
                 manual=(
                     f"GitHub accepted {key} = {json.dumps(item.want)} for {repo} but"
-                    f" keeps it {state}: the plan of the repository lacks the switch;"
+                    f" keeps it {state}, likely because the plan of the repository lacks"
+                    " the switch;"
                     f" set {key} = {json.dumps(item.have)} under [security] in"
                     " .github/repository.project.toml to stop asking for it"
                 ),

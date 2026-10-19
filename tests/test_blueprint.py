@@ -1263,7 +1263,7 @@ def test_a_switch_that_github_keeps_off_is_a_notice(
     ) in out
     assert (
         f"GitHub accepted secret_scanning_non_provider_patterns = true for {REPO} but"
-        " keeps it off: the plan of the repository lacks the switch; set"
+        " keeps it off, likely because the plan of the repository lacks the switch; set"
         " secret_scanning_non_provider_patterns = false under [security] in"
         " .github/repository.project.toml to stop asking for it"
     ) in out
@@ -1271,6 +1271,25 @@ def test_a_switch_that_github_keeps_off_is_a_notice(
     analysis = github.repo["security_and_analysis"]
     assert analysis["secret_scanning"] == {"status": "enabled"}
     assert analysis["secret_scanning_non_provider_patterns"] == {"status": "disabled"}
+
+
+def test_push_protection_that_github_keeps_off_still_fails_the_run(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Only a switch that depends on the plan becomes a notice; secret scanning and
+    its push protection are on every public repository, so GitHub keeping one off is
+    a fault that someone has to see."""
+    github.kept_off.add("secret_scanning_push_protection")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    differ, _, notices = out.partition("GitHub doesn't do this for the repository")
+    assert "security.secret_scanning_push_protection: GitHub has false" in differ
+    assert "secret_scanning_push_protection" not in notices
 
 
 def test_a_switch_that_github_keeps_off_is_named_after_what_differs(
@@ -2418,6 +2437,47 @@ def test_one_badge_of_openssf_best_practices_leads_to_the_other(
         " .bestpractices.json proposes, and answer the rest.",
         f"Then add its badge to the README: {badge}",
     ]
+
+
+def test_the_checklist_leaves_a_switch_that_github_keeps_off_neutral(
+    github: FakeGitHub,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    generic_patterns(root)
+    github.kept_off.add("secret_scanning_non_provider_patterns")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
+    capsys.readouterr()
+
+    run(github, root, "checklist")
+
+    out = capsys.readouterr().out
+    assert "  · Settings as code applied" in out
+    assert (
+        "python3 blueprint.py settings apply; it tells whether GitHub keeps"
+        " security.secret_scanning_non_provider_patterns off for the plan of the"
+        " repository"
+    ) in out
+
+
+def test_the_checklist_counts_push_protection_that_github_keeps_off_as_open(
+    github: FakeGitHub,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github.kept_off.add("secret_scanning_push_protection")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
+    capsys.readouterr()
+
+    run(github, root, "checklist")
+
+    assert "  ✘ Settings as code applied" in capsys.readouterr().out
 
 
 def test_the_checklist_tells_secrets_and_the_community_profile_apart(
