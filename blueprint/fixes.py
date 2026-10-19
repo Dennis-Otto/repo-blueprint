@@ -59,6 +59,8 @@ ARTIFACT = "fixes-"
 WORKFLOWS = ("Lint", "CI (*)")
 # In a command of autofix, blueprint.py of this repository, with the Python that runs.
 TOOL = "{blueprint}"
+# In a command of autofix, the Python that runs the bot, for a script of the repository.
+PYTHON = "{python}"
 # The first line of the body of each commit of the bot, before the run of the checks.
 MADE_BY = "Made by the commands of .github/checks.toml in the checks of"
 # How often the commands run at most, until they change nothing more.
@@ -99,14 +101,14 @@ def fixers(catalog: Catalog, root: Path, check: str | None) -> list[tuple[str, s
 
 def shown(command: str, root: Path) -> str:
     """A command of autofix as a person runs it."""
-    return command.replace(TOOL, tool_command(root))
+    return command.replace(TOOL, tool_command(root)).replace(PYTHON, "python3")
 
 
 def expanded(command: str, root: Path) -> str:
     """A command of autofix as the bot runs it, with the Python that runs the bot."""
     script = tool_command(root).removeprefix("python3 ")
     python = shlex.quote(Path(sys.executable).as_posix())
-    return command.replace(TOOL, f"{python} {script}")
+    return command.replace(TOOL, f"{python} {script}").replace(PYTHON, python)
 
 
 def run(

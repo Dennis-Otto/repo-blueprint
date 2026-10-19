@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import unicodedata
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -257,6 +258,8 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
             assert "python3" not in command, (entry.key, command)
     fixed = [key for key, entry in explained.steps.items() if entry.autofix]
     assert fixed == [
+        # Of the blueprint alone, by its .github/checks.project.toml, which comes first.
+        "Tests, with every line and branch covered",
         "Text files",
         "Pages in one column",
         "Ruff",
@@ -923,6 +926,43 @@ def body_of(github: FakeGitHub) -> str:
     return str(github.comments[0]["body"])
 
 
+# The code points that Unicode calls default ignorable beside its format characters:
+# no font draws them, such as the variation selector that follows an emoji.
+IGNORABLE = (
+    (0x034F, 0x034F),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFFA0, 0xFFA0),
+    (0xE0000, 0xE0FFF),
+)
+
+
+def test_the_package_hides_no_character() -> None:
+    # Every repository gets the package as .github/blueprint, and a project may fail
+    # a file with a character that a review on GitHub can't see, as issue-assistant
+    # does; the code writes such characters as escapes.
+    def hidden(char: str) -> bool:
+        code = ord(char)
+        return unicodedata.category(char) == "Cf" or any(
+            start <= code <= end for start, end in IGNORABLE
+        )
+
+    package = Path(blueprint.coach.__file__).parent
+    hiding = sorted(
+        f"{path.name}: U+{ord(char):04X}"
+        for path in package.glob("*.py")
+        for char in path.read_text("utf-8")
+        if hidden(char)
+    )
+    assert hiding == []
+    assert hidden(chr(0xFE0F))
+    assert hidden(chr(0x200B))
+    assert not hidden("e")
+
+
 def test_a_pull_request_from_a_fork_gets_one_report() -> None:
     github = FakeGitHub()
     # As the step of the workflow passes them: a run from a fork names no pull request.
@@ -935,7 +975,7 @@ def test_a_pull_request_from_a_fork_gets_one_report() -> None:
     assert github.writes() == [("POST", f"repos/{REPO}/issues/42/comments")]
     body = body_of(github)
     assert body.startswith(f"{MARKER}\n### PR coach\n\n**5 checks failed.**")
-    assert "\n\n1 check is still running.\n\n⚠️ **1 check stopped" in body
+    assert "\n\n1 check is still running.\n\n\u26a0\ufe0f **1 check stopped" in body
     assert "- `codeql` · [its log](https://github.com/Dennis-Otto/demo/" in body
     # A check of the workflows still runs, which starts the coach again when it ends.
     assert github.waits == []
@@ -1169,7 +1209,7 @@ def test_a_cancelled_check_has_not_passed() -> None:
     assert "Every check passed" not in body
     assert "⏳ No check has failed so far." in body
     assert (
-        "⚠️ **1 check stopped before the end**, cancelled or held, and hasn't passed "
+        "\u26a0\ufe0f **1 check stopped before the end**, cancelled or held, and hasn't passed "
         "until it runs again."
     ) in body
     assert "- `codeql` · [its log](https://github.com/Dennis-Otto/demo/" in body
