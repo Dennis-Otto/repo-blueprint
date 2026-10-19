@@ -1,6 +1,6 @@
 # New alerts of code scanning and unlisted actions stop a pull request, and secret scanning looks for generic secrets
 
-- Status: accepted
+- Status: accepted, amended by [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md), with which a switch that GitHub doesn't offer or keeps off fails no run
 - Date: 2026-10-18
 
 ## Context

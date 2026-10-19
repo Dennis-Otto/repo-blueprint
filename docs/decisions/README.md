@@ -43,7 +43,7 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0035](0035-the-tools-of-a-nextcloud-app-run-on-a-newer-php-than-its-code.md) | The tools of a Nextcloud app run on a newer PHP than its code, which is checked on the oldest | accepted |
 | [0036](0036-a-request-to-github-tries-once-more-and-a-refused-write-fails.md) | A request to GitHub tries once more, and a write that GitHub refused fails | accepted |
 | [0037](0037-pictures-renew-themselves-by-their-pixels.md) | Pictures renew themselves by their pixels, through one pull request of a bot | accepted |
-| [0038](0038-new-alerts-and-unlisted-actions-stop-a-pull-request.md) | New alerts of code scanning and unlisted actions stop a pull request, and secret scanning looks for generic secrets | accepted |
+| [0038](0038-new-alerts-and-unlisted-actions-stop-a-pull-request.md) | New alerts of code scanning and unlisted actions stop a pull request, and secret scanning looks for generic secrets | accepted, amended by [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md) |
 | [0039](0039-try-every-change-on-the-repositories-that-take-the-blueprint.md) | Try every change of the template on the answers and the files of the repositories that take the blueprint, before its release | accepted |
 | [0040](0040-every-step-of-a-bot-that-changes-github-runs-in-a-test.md) | Every step of a bot that changes something on GitHub runs in a test | accepted |
 | [0041](0041-every-website-is-accessible-and-quick-and-a-check-proves-it.md) | Every website is accessible and quick on a phone, and a check proves it | accepted |
@@ -60,3 +60,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0052](0052-roll-out-every-release-at-once.md) | Bring every release to every repository right after it is verified, and keep the weekly run as a safety net | accepted |
 | [0053](0053-answers-render-valid-files-and-every-repository-links-its-website.md) | The answers render valid files, and every new repository links its website and has the topics of its kind | accepted |
 | [0054](0054-the-reference-is-written-from-its-sources-and-committed.md) | The reference of the questions, variables and secrets is written from its sources and committed | accepted |
+| [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md) | What GitHub doesn't do for a repository, such as a switch of security that its plan lacks, fails no run of the settings | accepted |

@@ -251,6 +251,9 @@ class FakeGitHub:
                 "secret_scanning_non_provider_patterns": {"status": "disabled"},
             },
         }
+        # The switches of security_and_analysis that the plan of the repository lacks:
+        # GitHub answers their write with success and keeps them as they are.
+        self.kept_off: set[str] = set()
         self.switches = {
             "immutable-releases": False,
             "private-vulnerability-reporting": False,
@@ -423,7 +426,11 @@ class FakeGitHub:
         if method == "PATCH":
             for key, value in body.items():
                 if key == "security_and_analysis":
-                    self.repo[key].update(value)
+                    self.repo[key].update(
+                        (name, status)
+                        for name, status in value.items()
+                        if name not in self.kept_off
+                    )
                 else:
                     self.repo[key] = value
         return 200, self.repo
@@ -1173,15 +1180,21 @@ def test_a_tool_of_code_scanning_without_its_thresholds_stops_the_run(
     assert repr(tool) in str(error.value)
 
 
-def test_generic_secret_patterns_are_switched_on(
-    github: FakeGitHub, root: Path
-) -> None:
+def generic_patterns(root: Path) -> str:
+    """The configuration of the tests, with the generic patterns of secret scanning."""
     config = CONFIG.replace(
         "secret_scanning_push_protection = true\n",
         "secret_scanning_push_protection = true\n"
         "secret_scanning_non_provider_patterns = true\n",
     )
     (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    return config
+
+
+def test_generic_secret_patterns_are_switched_on(
+    github: FakeGitHub, root: Path
+) -> None:
+    generic_patterns(root)
 
     run(github, root, "settings", "apply")
 
@@ -1193,25 +1206,26 @@ def test_generic_secret_patterns_are_switched_on(
 def test_a_switch_that_github_does_not_offer_is_named_and_left_alone(
     github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    config = CONFIG.replace(
-        "secret_scanning_push_protection = true\n",
-        "secret_scanning_push_protection = true\n"
-        "secret_scanning_non_provider_patterns = true\n",
-    )
-    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    config = generic_patterns(root)
     del github.repo["security_and_analysis"]["secret_scanning_non_provider_patterns"]
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
 
-    assert run(github, root, "settings", "apply") == 1
+    # A notice, which fails nothing.
+    assert run(github, root, "settings", "apply") == 0
 
     out = capsys.readouterr().out
+    assert f"The settings of {REPO} match .github/repository.toml." in out
+    assert "GitHub doesn't do this for the repository, which fails nothing:" in out
     assert (
         "security.secret_scanning_non_provider_patterns: GitHub has"
         ' "not offered", the configuration wants true'
     ) in out
     assert (
         f"GitHub doesn't offer secret_scanning_non_provider_patterns for {REPO}; set"
-        " secret_scanning_non_provider_patterns = false in"
-        " .github/repository.project.toml"
+        " secret_scanning_non_provider_patterns = false under [security] in"
+        " .github/repository.project.toml to stop asking for it"
     ) in out
     # The other switches come on all the same, and the one that isn't offered stays out.
     analysis = github.repo["security_and_analysis"]
@@ -1225,6 +1239,88 @@ def test_a_switch_that_github_does_not_offer_is_named_and_left_alone(
     capsys.readouterr()
     run(github, root, "settings", "check")
     assert "non_provider_patterns" not in capsys.readouterr().out
+
+
+def test_a_switch_that_github_keeps_off_is_a_notice(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    generic_patterns(root)
+    # A repository of a user: GitHub accepts the generic patterns and keeps them off.
+    github.kept_off.add("secret_scanning_non_provider_patterns")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    # Every run asks again, and GitHub keeps them off again.
+    assert run(github, root, "settings", "apply") == 0
+
+    out = capsys.readouterr().out
+    assert f"The settings of {REPO} match .github/repository.toml." in out
+    assert "GitHub doesn't do this for the repository, which fails nothing:" in out
+    assert (
+        "security.secret_scanning_non_provider_patterns: GitHub has false,"
+        " the configuration wants true"
+    ) in out
+    assert (
+        f"GitHub accepted secret_scanning_non_provider_patterns = true for {REPO} but"
+        " keeps it off: the plan of the repository lacks the switch; set"
+        " secret_scanning_non_provider_patterns = false under [security] in"
+        " .github/repository.project.toml to stop asking for it"
+    ) in out
+    # The other switches come on all the same.
+    analysis = github.repo["security_and_analysis"]
+    assert analysis["secret_scanning"] == {"status": "enabled"}
+    assert analysis["secret_scanning_non_provider_patterns"] == {"status": "disabled"}
+
+
+def test_a_switch_that_github_keeps_off_is_named_after_what_differs(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    generic_patterns(root)
+    github.kept_off.add("secret_scanning_non_provider_patterns")
+
+    # The secret of the release environment is missing, which only a person can set.
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    differ, _, notices = out.partition("GitHub doesn't do this for the repository")
+    assert f"The settings of {REPO} differ from .github/repository.toml:" in differ
+    assert "secret RELEASE_AUTOMATION_PRIVATE_KEY" in differ
+    assert "non_provider_patterns" not in differ
+    assert "GitHub accepted secret_scanning_non_provider_patterns" in notices
+
+
+def test_a_switch_that_github_kept_off_still_differs_in_a_check(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Only a write shows that GitHub keeps a switch off; a check can't tell."""
+    generic_patterns(root)
+    github.kept_off.add("secret_scanning_non_provider_patterns")
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "check") == 1
+
+    out = capsys.readouterr().out
+    assert "security.secret_scanning_non_provider_patterns: GitHub has false" in out
+    assert "python3 blueprint.py settings apply sets what the API can set." in out
+
+
+def test_a_switch_whose_write_github_refused_is_no_notice(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    generic_patterns(root)
+    github.fail[("PATCH", f"repos/{REPO}")] = 403
+
+    assert run(github, root, "settings", "apply") == 2
+
+    captured = capsys.readouterr()
+    assert "the security could not be applied: GitHub answered 403" in captured.err
+    assert "fails nothing" not in captured.out
+    assert (
+        "security.secret_scanning_non_provider_patterns: GitHub has false"
+    ) in captured.out.partition("GitHub doesn't do")[0]
 
 
 def test_switches_that_the_token_cannot_read_are_off(github: FakeGitHub) -> None:

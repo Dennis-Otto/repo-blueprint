@@ -1,5 +1,5 @@
 ---
-description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a release pull request without checks, and Renovate that opens no updates."
+description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a switch of the security that GitHub keeps off, a release pull request without checks, and Renovate that opens no updates."
 ---
 
 # Troubleshooting
@@ -60,6 +60,18 @@ On Windows, create the environment with `py -3 -m venv %USERPROFILE%\.venvs\copi
 - **Let the settings bot apply them:** it runs as the release app, which has the permission *Administration*, after every change of the settings as code on `main`, every week and on demand under *Actions → Settings → Run workflow*. Change `.github/repository.project.toml` in a pull request, and the settings follow its merge.
 - **Ask an administrator** to run `settings apply` once, for a new repository whose release app is not set up yet.
 - **See what differs** with `python3 .github/blueprint.py settings check`, which changes nothing; some parts, such as who may bypass a ruleset, show only to an administrator.
+
+## The settings name a switch that GitHub doesn't do
+
+**What you see:** the summary of the Settings workflow, or `python3 .github/blueprint.py settings apply`, ends with *GitHub doesn't do this for the repository, which fails nothing*, and below it a switch such as `security.secret_scanning_non_provider_patterns` with the line that stops asking for it.
+
+**Why:** GitHub offers some switches of the security only with some plans, such as the generic patterns of secret scanning, which find private keys, connection strings and passwords that no provider issued. On a repository of a user GitHub accepts their write and keeps them off, or leaves them out of its answer. The settings bot asks again in every run, so that a repository whose plan gains the switch gets it, and names what GitHub kept as it was without failing the run ([decision 0055](decisions/0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md)).
+
+**What to do:**
+
+- **Nothing,** if the repository should get the switch once its plan has it: the notice stays in the summary of every run and fails nothing.
+- **Stop asking for it** with the line that the notice names, such as `secret_scanning_non_provider_patterns = false` under `[security]` in `.github/repository.project.toml`, in a pull request; the notice ends with its merge.
+- **Expect `settings check` to name it as a difference:** it writes nothing, and only a write shows what GitHub keeps.
 
 ## The release pull request has no checks
 
