@@ -7,6 +7,14 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.3...v1.0.4) (2026-10-19)
+
+### Bug fixes
+
+- **A Nextcloud app is signed with Nextcloud 35, on a PHP that it runs on:** the release signs a Nextcloud app with the `occ` of the Nextcloud server that the blueprint pins, now Nextcloud 35, which stops on PHP 8.2 because it needs PHP 8.3 to 8.5. The signing now runs on PHP 8.4, so a release of a Nextcloud app no longer stays a draft for that; the PHP that the app itself runs on is still the one of `appinfo/info.xml`. A test now checks the PHP of the signing against the Nextcloud that the release downloads, so the next major version of Nextcloud that Renovate brings shows its PHP before a release does.
+- **The settings bot passes where GitHub keeps a switch of the security off:** GitHub accepts the generic patterns of secret scanning (`secret_scanning_non_provider_patterns`) on a repository of a user and keeps them off, so `settings apply` found the same difference after every run and the Settings workflow failed on `main` of every repository, although it had applied the rulesets and every other setting. A switch of the security that depends on the plan of the repository and that GitHub accepts and keeps as it was, or a switch that GitHub doesn't offer at all, is now a notice under *GitHub doesn't do this for the repository, which fails nothing*, with the line of `.github/repository.project.toml` that stops asking for it; the bot asks again every time, so that a repository whose plan gains the switch gets it. Secret scanning, its push protection and every other setting that still differ after their write fail the run as before; the checklist shows such a switch with the neutral mark ([decision 0055](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md)).
+- **The branch bot brings a pull request up to date across a change of a workflow:** once `main` changed a workflow since a pull request left it, GitHub refused the update to the bot's token of the release app, which could not change workflows, so such a pull request, such as one of Renovate that updates the actions, stayed behind with a warning in every run and the Update branches workflow failed on `main`. The token may change workflows now, as Renovate's does; the bot still checks out only `main` and runs nothing of the pull request.
+
 ## [1.0.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.2...v1.0.3) (2026-10-19)
 
 ### Bug fixes

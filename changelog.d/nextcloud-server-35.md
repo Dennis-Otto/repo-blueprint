@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **A Nextcloud app is signed with Nextcloud 35, on a PHP that it runs on:** the release signs a Nextcloud app with the `occ` of the Nextcloud server that the blueprint pins, now Nextcloud 35, which stops on PHP 8.2 because it needs PHP 8.3 to 8.5. The signing now runs on PHP 8.4, so a release of a Nextcloud app no longer stays a draft for that; the PHP that the app itself runs on is still the one of `appinfo/info.xml`. A test now checks the PHP of the signing against the Nextcloud that the release downloads, so the next major version of Nextcloud that Renovate brings shows its PHP before a release does.
