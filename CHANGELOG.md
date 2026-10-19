@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [0.13.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.0...v0.13.1) (2026-10-19)
 
-
 ### Bug fixes
 
 * **deps:** update dependency pytest-homeassistant-custom-component to v0.13.372 ([#324](https://github.com/Dennis-Otto/repo-blueprint/issues/324)) ([d0f2cbd](https://github.com/Dennis-Otto/repo-blueprint/commit/d0f2cbdcacd8e18673fb8577664934c7610d0988))
