@@ -8091,6 +8091,31 @@ def test_a_failed_check_moves_the_line_of_the_branch_bot_on(
     assert ("the blueprint sets them" in update) == (project == "blueprint")
 
 
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_branch_bot_brings_a_branch_up_to_date_across_changes_of_workflows(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Bringing a pull request up to date merges main into its branch. When main changed
+    # a workflow since, GitHub refuses that merge to a token that may not change
+    # workflows, and the line stood still behind such a pull request (#350): the token
+    # of the branch bot may, as Renovate's does, and has nothing else beyond the line.
+    root = ROOT if project == "blueprint" else projects[project]
+    token = workflow_steps.step(
+        "update-branches.yml", "update", "Create a token of the release app", root
+    )
+    assert {
+        key: value
+        for key, value in token["with"].items()
+        if key.startswith("permission-")
+    } == {
+        "permission-checks": "read",
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+        "permission-statuses": "read",
+        "permission-workflows": "write",
+    }
+
+
 def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = release[release.index("  release-please:") : release.index("\n  assets:")]

@@ -7,6 +7,36 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.2...v1.0.3) (2026-10-19)
+
+### Bug fixes
+
+* **deps:** lock file maintenance ([#347](https://github.com/Dennis-Otto/repo-blueprint/issues/347)) ([b05ab7b](https://github.com/Dennis-Otto/repo-blueprint/commit/b05ab7b22b49f7862297f9547e273bc361cd97e4))
+
+## [1.0.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.1...v1.0.2) (2026-10-19)
+
+### Bug fixes
+
+* **deps:** refresh pip-compile outputs ([#348](https://github.com/Dennis-Otto/repo-blueprint/issues/348)) ([1217f30](https://github.com/Dennis-Otto/repo-blueprint/commit/1217f30378f29f4fe459c30a31bd4eee3d6c8030))
+
+## [1.0.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.0...v1.0.1) (2026-10-19)
+
+### Bug fixes
+
+* **deps:** lock file maintenance ([#346](https://github.com/Dennis-Otto/repo-blueprint/issues/346)) ([d8dae3b](https://github.com/Dennis-Otto/repo-blueprint/commit/d8dae3b85b942c87b38ca353c84e073b2ab189ee))
+
+## [1.0.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.3...v1.0.0) (2026-10-19)
+
+### Changes
+
+- **The blueprint is stable, at 1.0.0:** this release ends the rebuild of October 2026 and brings nothing else of its own. Below 1.0.0, a change that asked something of a repository made from the blueprint came as a minor version; from now on it is a new major version, 2.0.0 and so on, with what to do under *Breaking changes* in its notes, such as a required check that changed its name, a question of Copier that changed, or a file of the project to change by hand. Every other release is a minor or a patch version.
+
+## [0.13.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.2...v0.13.3) (2026-10-19)
+
+### Bug fixes
+
+- **The PR coach writes its warning sign as an escape:** the sign before "stopped before the end" carried an invisible variation selector in `.github/blueprint/coach.py`, which a project that refuses characters a review on GitHub can't see, such as issue-assistant, failed in every update of the blueprint. A test keeps every file of the package free of such characters.
+
 ## [0.13.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v0.13.1...v0.13.2) (2026-10-19)
 
 ### Bug fixes

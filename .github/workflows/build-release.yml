@@ -50,8 +50,8 @@ jobs:
       NEXTCLOUD_SHA256: 3c5c1798002167b70421898f820f709a40b0393de463a0f32f023b0c74e5a45d
       # The syft that writes the SBOMs.
       # renovate: datasource=github-releases depName=anchore/syft extractVersion=^v(?<version>.+)$
-      SBOM_SYFT_VERSION: 1.52.0
-      SBOM_SYFT_SHA256: caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d
+      SBOM_SYFT_VERSION: 1.54.1
+      SBOM_SYFT_SHA256: c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
