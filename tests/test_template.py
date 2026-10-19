@@ -2577,6 +2577,9 @@ BLUEPRINT_ANCHOR = re.compile(
 )
 
 
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
 def test_every_link_to_a_heading_of_the_blueprint_finds_it() -> None:
     # A link to a heading of the README or another Markdown file of the blueprint,
     # in a file of the blueprint or of the template, such as the one at the top of
