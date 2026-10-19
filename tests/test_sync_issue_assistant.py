@@ -250,6 +250,57 @@ def test_adopt_takes_the_release_over(
     assert "wrote .github/workflows/triage.yml\n" in capsys.readouterr().err
 
 
+# A reference.py that writes the page of the variables from the workflows, as the
+# blueprint's does, or that fails.
+REFERENCE = """\
+import pathlib, sys
+if pathlib.Path("fail").exists():
+    sys.exit("reference.py: describe NEW in ABOUT")
+names = sorted(p.name for p in pathlib.Path(".github/workflows").glob("*.yml"))
+page = pathlib.Path("docs/reference/variables.md")
+page.parent.mkdir(parents=True, exist_ok=True)
+page.write_text("\\n".join(names) + "\\n", encoding="utf-8", newline="\\n")
+print("reference.py: wrote docs/reference/variables.md")
+"""
+
+
+@needs_git
+def test_adopt_writes_the_reference_pages_anew(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = blueprint(tmp_path / "blueprint", {**BLUEPRINT, "reference.py": REFERENCE})
+
+    changed = sync.adopt(root, release(tmp_path / "release"), NEW, "v1.3.1")
+
+    assert "docs/reference/variables.md" in changed
+    assert "triage.yml\n" in text(root, "docs/reference/variables.md")
+    assert "reference.py: wrote docs/reference/variables.md\n" in (
+        capsys.readouterr().err
+    )
+    # The job of the pull request commits the page.
+    folder = tmp_path / "kept"
+    sync.keep(root, folder, changed)
+    assert "docs/reference/variables.md" in sync.kept(folder)
+
+
+@needs_git
+def test_adopt_stops_when_the_reference_pages_cant_be_written(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = blueprint(
+        tmp_path / "blueprint", {**BLUEPRINT, "reference.py": REFERENCE, "fail": ""}
+    )
+
+    with pytest.raises(sync.SyncError) as raised:
+        sync.adopt(root, release(tmp_path / "release"), NEW, "v1.3.1")
+
+    assert str(raised.value) == (
+        "reference.py could not write the reference pages for v1.3.1; its log above"
+        " says why."
+    )
+    assert "describe NEW in ABOUT" in capsys.readouterr().err
+
+
 def test_the_files_of_the_template_are_those_of_the_blueprint() -> None:
     for name in (
         "issue-assistant.yml",
@@ -450,6 +501,8 @@ def folder_with(root: Path, files: dict[str, str]) -> Path:
         ".github/workflows/-x.yml",
         "template/.github/workflows/x.yml",
         "template/copier.yml.jinja",
+        "docs/reference/other.md",
+        "docs/faq.md",
         ".git/config",
     ],
 )
