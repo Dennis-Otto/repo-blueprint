@@ -22,15 +22,18 @@ git commit -s -am "Resolve the conflicts of the blueprint update"
 git push
 ```
 
-Sobald du auf seinen Branch committest, überlässt der Bot dir den Branch: Ist ein neueres Release da, sagt er es in einem Kommentar, und nachdem du den Pull Request gemergt oder geschlossen hast, bringt sein nächster Lauf den Rest. Um neu anzufangen oder die Konflikte erst auf deinem Rechner zu sehen, führe das Update mit demselben Copier wie der Bot aus, dessen Version und Hashes `.github/copier-requirements.txt` festlegt, in einer virtuellen Umgebung:
+Sobald du auf seinen Branch committest, überlässt der Bot dir den Branch: Ist ein neueres Release da, sagt er es in einem Kommentar, und nachdem du den Pull Request gemergt oder geschlossen hast, bringt sein nächster Lauf den Rest. Um neu anzufangen oder die Konflikte erst auf deinem Rechner zu sehen, führe das Update mit demselben Copier wie der Bot aus, dessen Version und Hashes `.github/copier-requirements.txt` festlegt. Lege seine virtuelle Umgebung außerhalb des Checkouts an und starte von einem aktuellen `main` auf einem eigenen Branch: Copier bricht mit *Destination repository is dirty* ab, solange der Arbeitsbaum eine Änderung oder eine Datei enthält, die Git nicht ignoriert, und auf `blueprint/update` nennen die Antworten schon das neue Release.
 
 ```sh
-python3 -m venv .venv-copier
-.venv-copier/bin/pip install --require-hashes -r .github/copier-requirements.txt
-.venv-copier/bin/copier update --defaults --conflict inline
+python3 -m venv ~/.venvs/copier
+~/.venvs/copier/bin/pip install --require-hashes -r .github/copier-requirements.txt
+git switch main && git pull
+git status --short   # muss leer bleiben: committe oder stashe, was es zeigt
+git switch -c blueprint/local
+~/.venvs/copier/bin/copier update --defaults --conflict inline
 ```
 
-Unter Windows nimm `py -3` statt `python3` und `.venv-copier/Scripts/` statt `.venv-copier/bin/`.
+Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copier` an und startest ihre Programme aus `%USERPROFILE%\.venvs\copier\Scripts\` statt aus `~/.venvs/copier/bin/`.
 
 `--defaults` nimmt die Antworten aus `.copier-answers.yml`, und `--conflict inline` schreibt die Marker wie der Bot in die Dateien, statt Dateien mit abgelehnten Änderungen daneben. Eine Änderung, die ein Projekt in einer Datei des Blueprints behält, hat bei jedem Update, das dieselben Zeilen berührt, wieder Konflikte; verlege sie in eine Datei des Projekts, wo es eine gibt, wie die [Fragen und Antworten](faq.md#welche-dateien-darf-ein-projekt-ändern) zeigen.
 

@@ -26,7 +26,7 @@ Der Einstellungs-Bot setzt dann die Variable [`ISSUE_ASSISTANT_AI`](reference/va
 
 ## Wie verhindere ich, dass sich die Updates des Blueprints selbst mergen?
 
-Setze die Repository-Variable [`BLUEPRINT_AUTOMERGE`](reference/variables.md#blueprint_automerge) auf `off`: Jedes Update des Blueprints wartet dann auf dich, mit seinen Notizen und den Dateien, die es ändert, in seiner Beschreibung. Setze sie in `[variables]` von `.github/repository.project.toml`, das der Einstellungs-Bot anwendet, oder unter *Settings → Secrets and variables → Actions → Variables*; lösche sie, und die Updates mergen sich wieder selbst. Ein Update mit Konflikten wartet immer, ebenso eines, dessen Auto-Merge du abgeschaltet hast, das abgeschaltet bleibt.
+Setze die Repository-Variable [`BLUEPRINT_AUTOMERGE`](reference/variables.md#blueprint_automerge) auf `off`: Jedes Update des Blueprints wartet dann auf dich, mit seinen Notizen und den Dateien, die es ändert, in seiner Beschreibung. Setze sie in `[variables]` von `.github/repository.project.toml`, das der Einstellungs-Bot anwendet, oder unter *Settings → Secrets and variables → Actions → Variables*. Damit sie sich wieder selbst mergen, setze sie dort auf `on` oder lösche die Variable auf GitHub, mit `gh variable delete BLUEPRINT_AUTOMERGE` oder auf jener Seite: Der Einstellungs-Bot setzt Variablen, löscht aber nie eine, eine aus der Datei entfernte Zeile lässt `off` also stehen. Ein Update mit Konflikten wartet immer, ebenso eines, dessen Auto-Merge du abgeschaltet hast, das abgeschaltet bleibt.
 
 Die anderen Bots, die ihre eigenen Pull Requests mergen, haben eigene Schalter:
 

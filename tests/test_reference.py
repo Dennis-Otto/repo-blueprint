@@ -562,6 +562,109 @@ def test_a_name_without_a_description_or_a_description_without_a_name(
     )
 
 
+ASSISTANT_WORKFLOW = """\
+name: Discussion assistant
+
+# Answers new discussions. https://github.com/Dennis-Otto/issue-assistant
+
+on: discussion
+
+jobs:
+  answer:
+    steps:
+      - env:
+          KEY: ${{ secrets.NEW_AI_KEY }}
+          EXTRA: ${{ vars.EXTRA }}
+        run: echo
+"""
+
+
+def test_a_release_of_the_issue_assistant_needs_no_person(repository: Path) -> None:
+    # A release of the assistant brings a workflow with a secret that ABOUT doesn't
+    # know, and the sync writes the pages anew without a person.
+    write(repository, {".github/workflows/discussion.yml": ASSISTANT_WORKFLOW})
+    assert reference.workflow("discussion.yml", ASSISTANT_WORKFLOW).of_assistant
+    assert not reference.workflow("release.yml", RELEASE).of_assistant
+    page = reference.pages(repository)[reference.VARIABLES]
+    described = reference.ASSISTANT_NAME.format(
+        kind="secret", address=reference.ASSISTANT
+    )
+    assert f"### `NEW_AI_KEY`\n\n{described}\n" in page
+    assert (
+        "- [`NEW_AI_KEY`](#new_ai_key): A secret that the workflows of the [issue"
+        " assistant](https://github.com/Dennis-Otto/issue-assistant) read, from a"
+        " release of the assistant that the Issue assistant sync took over.\n"
+    ) in page
+    # A name that a workflow of the blueprint reads as well keeps its description.
+    assert "### `EXTRA`\n\nA variable of your own.\n" in page
+    variable = ASSISTANT_WORKFLOW.replace("secrets.NEW_AI_KEY", "vars.NEW_AI_MODE")
+    write(repository, {".github/workflows/discussion.yml": variable})
+    page = reference.pages(repository)[reference.VARIABLES]
+    assert "### `NEW_AI_MODE`\n\nA variable that the workflows of the" in page
+
+
+def test_only_the_workflows_of_the_assistant_may_bring_a_new_name(
+    repository: Path,
+) -> None:
+    # The Lint workflow names the assistant inside a job, not in the comment at its top.
+    lint = LINT.replace(
+        "    steps:\n",
+        "    steps:\n      # https://github.com/Dennis-Otto/issue-assistant\n",
+    ).replace("vars.EXTRA", "vars.EXTRA }} ${{ secrets.NEW_AI_KEY")
+    assert not reference.workflow("lint.yml", lint).of_assistant
+    write(
+        repository,
+        {
+            ".github/workflows/lint.yml": lint,
+            ".github/workflows/discussion.yml": ASSISTANT_WORKFLOW,
+        },
+    )
+    with pytest.raises(reference.PageError, match="describe NEW_AI_KEY in ABOUT"):
+        reference.pages(repository)
+    # So may the settings as code, whose names always need a description.
+    write(
+        repository,
+        {
+            ".github/workflows/lint.yml": LINT,
+            "template/.github/repository.toml.jinja": SETTINGS
+            + '\n[environments.discussions]\nsecrets = ["NEW_AI_KEY"]\n',
+        },
+    )
+    with pytest.raises(reference.PageError, match="describe NEW_AI_KEY in ABOUT"):
+        reference.pages(repository)
+
+
+def test_a_release_of_the_assistant_may_drop_its_names(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    names = dict.fromkeys(reference.ASSISTANT_NAMES, "Of the assistant.")
+    monkeypatch.setattr(reference, "ABOUT", {**ABOUT, **names})
+    page = reference.pages(repository)[reference.VARIABLES]
+    assert not any(f"`{name}`" in page for name in reference.ASSISTANT_NAMES)
+
+
+def test_the_fix_bot_writes_the_pages_anew() -> None:
+    from blueprint.coach import Catalog
+    from blueprint.fixes import fixers
+
+    catalog = Catalog.load(ROOT)
+    step = "Tests, with every line and branch covered"
+    entry = catalog.step(step)
+    assert entry is not None
+    assert entry.autofix == ("{python} reference.py",)
+    assert (step, "{python} reference.py") in fixers(catalog, ROOT, None)
+
+
+def test_the_names_of_the_assistant_are_those_of_its_workflows() -> None:
+    assert reference.ASSISTANT_NAMES <= set(reference.ABOUT)
+    text = (ROOT / reference.WORKFLOWS / "issue-assistant.yml").read_text(
+        encoding="utf-8"
+    )
+    assert reference.workflow("issue-assistant.yml", text).of_assistant
+    for name in reference.ASSISTANT_NAMES:
+        assert f".{name}" in text
+
+
 # ---------------------------------------------------------------- the command
 
 

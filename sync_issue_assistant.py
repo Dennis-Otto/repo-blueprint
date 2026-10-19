@@ -50,15 +50,19 @@ FIREWALL = Path(".github/egress-firewall.yaml")
 INCLUDES = Path("template/.github/workflows")
 # The templates of a release, in the checkout of its commit.
 TEMPLATES = Path("templates/.github")
-# What the sync may write, by paths of plain names: a workflow, the firewall policy and
-# the file of the template that renders a workflow. Anything else that install of a
-# release writes is new, and a maintainer takes it over by hand.
+# What the sync may write, by paths of plain names: a workflow, the firewall policy,
+# the file of the template that renders a workflow and the reference pages of the
+# website, which reference.py writes anew from the workflows. Anything else that
+# install of a release writes is new, and a maintainer takes it over by hand.
 NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 TAKEABLE = re.compile(
     rf"\.github/workflows/{NAME}\.yml"
     r"|\.github/egress-firewall\.yaml"
     rf"|template/\.github/workflows/{NAME}\.yml\.jinja"
+    r"|docs/reference/(?:questions|variables)\.md"
 )
+# The script that writes the reference pages, in the root of the blueprint.
+REFERENCE = Path("reference.py")
 COMMIT = (
     "mutation($input: CreateCommitOnBranchInput!) "
     "{ createCommitOnBranch(input: $input) { commit { oid } } }"
@@ -156,6 +160,7 @@ def adopt(root: Path, release: Path, ref: str, version: str) -> list[str]:
         if not rendered.is_file():
             rendered.parent.mkdir(parents=True, exist_ok=True)
             rendered.write_text(include(name), encoding="utf-8", newline="\n")
+    referenced(root, version)
     changed = changed_files(root)
     others = [
         path
@@ -169,6 +174,27 @@ def adopt(root: Path, release: Path, ref: str, version: str) -> list[str]:
             "release in the root of the blueprint, and add what is new to the template."
         )
     return changed
+
+
+def referenced(root: Path, version: str) -> None:
+    """Writes the reference pages of the website anew with reference.py of root, from
+    the workflows that install wrote, so that their check passes on the pull request
+    of the sync. Raises SyncError when reference.py fails."""
+    if not (root / REFERENCE).is_file():
+        return
+    written = subprocess.run(
+        [sys.executable, str(root / REFERENCE)],
+        cwd=root,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    print(written.stdout + written.stderr, end="", file=sys.stderr)
+    if written.returncode != 0:
+        raise SyncError(
+            f"reference.py could not write the reference pages for {version}; its "
+            "log above says why."
+        )
 
 
 def keep(root: Path, folder: Path, paths: Sequence[str]) -> None:
@@ -193,8 +219,8 @@ def kept(folder: Path) -> list[str]:
             relative = path.relative_to(files).as_posix()
             if path.is_symlink() or not TAKEABLE.fullmatch(relative):
                 raise SyncError(
-                    f"The sync kept {relative}, which is no workflow, firewall policy "
-                    "or file of the template that renders a workflow."
+                    f"The sync kept {relative}, which is no workflow, firewall policy, "
+                    "file of the template that renders a workflow or reference page."
                 )
             found.append(relative)
     if not found:

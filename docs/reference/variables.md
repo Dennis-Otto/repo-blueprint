@@ -33,7 +33,7 @@ What the workflows say of it:
 
 ### `BLUEPRINT_AUTOMERGE`
 
-`off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way. Delete the variable, and the updates merge themselves again.
+`off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way. Set it to `on`, or delete it with `gh variable delete BLUEPRINT_AUTOMERGE`, and the updates merge themselves again: the settings bot never deletes a variable, so removing its line from `.github/repository.project.toml` leaves `off` in place.
 
 - **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
 - **Read by:** [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository)

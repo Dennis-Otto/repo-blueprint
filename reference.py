@@ -43,7 +43,8 @@ GITHUB_TOKEN = "GITHUB_TOKEN"
 
 # What each variable and secret is for, in the words of a user. A name that a workflow
 # or the settings as code use without an entry here stops both commands, and so does
-# an entry whose name nothing uses any more.
+# an entry whose name nothing uses any more, except for the names of the issue
+# assistant below.
 ABOUT: dict[str, str] = {
     "ANTHROPIC_API_KEY": (
         "An API key of Anthropic, which the issue assistant takes in place of"
@@ -70,8 +71,10 @@ ABOUT: dict[str, str] = {
     "BLUEPRINT_AUTOMERGE": (
         "`off` makes every update of the blueprint wait for the maintainer, where its"
         " pull request would merge itself once every check passes; an update with"
-        " conflicts waits either way. Delete the variable, and the updates merge"
-        " themselves again."
+        " conflicts waits either way. Set it to `on`, or delete it with `gh variable"
+        " delete BLUEPRINT_AUTOMERGE`, and the updates merge themselves again: the"
+        " settings bot never deletes a variable, so removing its line from"
+        " `.github/repository.project.toml` leaves `off` in place."
     ),
     "CLAUDE_CODE_OAUTH_TOKEN": (
         "The token of a Claude subscription, which `claude setup-token` of Claude Code"
@@ -130,6 +133,23 @@ ABOUT: dict[str, str] = {
     ),
 }
 
+# The names in ABOUT that the workflows of the issue assistant read. The Issue
+# assistant sync takes each release of the assistant over by itself and writes these
+# pages anew, so a release may drop one of them without a person; a name that is new in
+# a release and that only workflows of the assistant read shows with ASSISTANT_NAME
+# until ABOUT describes it.
+ASSISTANT_NAMES = frozenset(
+    {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ISSUE_ASSISTANT_AI"}
+)
+ASSISTANT = "https://github.com/Dennis-Otto/issue-assistant"
+ASSISTANT_NAME = (
+    "A {kind} that the workflows of the [issue assistant]({address}) read, from a"
+    " release of the assistant that the Issue assistant sync took over. The README of"
+    " the assistant says what it does."
+)
+# A workflow of the issue assistant names the assistant in the comment at its top,
+# which starts at the first column; other workflows name it only inside their jobs.
+OF_ASSISTANT = re.compile(rf"^#.*{re.escape(ASSISTANT)}\b", re.M)
 # A variable or a secret of a workflow: ${{ vars.NAME }} or ${{ secrets.NAME }}.
 USE = re.compile(r"\b(vars|secrets)\.([A-Za-z_][A-Za-z0-9_]*)")
 # A value and a block of the delimiters of the template, {= … =} and [% … %].
@@ -488,6 +508,8 @@ class Name:
     setting: str | None = None
     # Whether the settings as code name the secret, so that the checklist asks for it.
     listed: bool = False
+    # Whether only workflows of the issue assistant read it.
+    of_assistant: bool = False
 
 
 @dataclass(frozen=True)
@@ -496,6 +518,10 @@ class Workflow:
     title: str
     text: str
     jobs: Mapping[str, Any]
+
+    @property
+    def of_assistant(self) -> bool:
+        return bool(OF_ASSISTANT.search(self.text))
 
 
 def workflow(file: str, text: str) -> Workflow:
@@ -577,7 +603,8 @@ def names_of(workflows: Sequence[Workflow], settings: str) -> dict[str, Name]:
     for flow in workflows:
         said = comments(flow.text)
         for kind, name in sorted(set(USE.findall(flow.text))):
-            entry = found.setdefault(name, Name(name, kind))
+            entry = found.setdefault(name, Name(name, kind, of_assistant=True))
+            entry.of_assistant = entry.of_assistant and flow.of_assistant
             entry.workflows.append(flow.file)
             entry.said += [(flow.file, s) for s in sentences_naming(name, said)]
             reference = f"{kind}.{name}"
@@ -585,9 +612,12 @@ def names_of(workflows: Sequence[Workflow], settings: str) -> dict[str, Name]:
                 if any(reference in text for text in strings_of(job)):
                     entry.environments.add(environment_of(job))
     for name, value in variables.items():
-        found.setdefault(name, Name(name, "vars")).setting = value
+        entry = found.setdefault(name, Name(name, "vars"))
+        entry.setting = value
+        entry.of_assistant = False
     for name, environments in secrets.items():
         entry = found.setdefault(name, Name(name, "secrets"))
+        entry.of_assistant = False
         entry.environments.update(environments)
         entry.listed = True
     return found
@@ -631,13 +661,22 @@ def set_by(entry: Name, answers: Sequence[str]) -> str:
     )
 
 
+def about(entry: Name) -> str:
+    """What a name is for: its entry in ABOUT, or for a name that only workflows of
+    the issue assistant read and that ABOUT doesn't know yet, ASSISTANT_NAME."""
+    if entry.name in ABOUT:
+        return ABOUT[entry.name]
+    kind = "variable" if entry.kind == "vars" else "secret"
+    return ASSISTANT_NAME.format(kind=kind, address=ASSISTANT)
+
+
 def name_section(
     entry: Name,
     titles: Mapping[str, str],
     scope: Mapping[str, str | None],
     answers: Sequence[str],
 ) -> list[str]:
-    lines = [f"### {code(entry.name)}", "", ABOUT[entry.name], ""]
+    lines = [f"### {code(entry.name)}", "", about(entry), ""]
     lines.append(f"- **Set by:** {set_by(entry, answers)}")
     read = [
         f"[{code(file)}]({BLOB}{WORKFLOWS.as_posix()}/{file})"
@@ -665,8 +704,10 @@ def variables_page(
     """docs/reference/variables.md from the workflows, the settings as code of the
     template, the names of the template's workflows and the names of the answers."""
     found = names_of(workflows, settings)
-    undescribed = sorted(set(found) - set(ABOUT))
-    unused = sorted(set(ABOUT) - set(found))
+    undescribed = sorted(
+        name for name, entry in found.items() if name not in ABOUT and not entry.of_assistant
+    )
+    unused = sorted(set(ABOUT) - set(found) - ASSISTANT_NAMES)
     problems = [
         f"describe {name} in ABOUT of reference.py, which a workflow or the settings"
         " as code use"
@@ -709,7 +750,7 @@ def variables_page(
         lines += [f"## {title}", ""]
         lines += [
             f"- [{code(entry.name)}](#{anchor(entry.name)}):"
-            f" {SENTENCE.split(ABOUT[entry.name])[0]}"
+            f" {SENTENCE.split(about(entry))[0]}"
             for entry in entries
         ]
         lines.append("")

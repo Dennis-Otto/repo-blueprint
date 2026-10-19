@@ -140,7 +140,7 @@ The page *Automation* of every website has no file in `docs/`: at every build, t
 
 ### The reference
 
-The pages of the reference, `docs/reference/questions.md` and `docs/reference/variables.md`, come from `reference.py`, which writes them from `copier.yml`, the workflows and `template/.github/repository.toml.jinja`, so that every question of Copier and every variable and secret is described and none drifts from its source. After a change of a question, of a variable or secret that a workflow reads, or of what the settings as code set, run `python3 reference.py` and commit the pages with it; `tests/test_reference.py` fails while a page differs from its sources. A new variable or secret needs its description, in the words of a user, in `ABOUT` of `reference.py`, and the test names each one that lacks it.
+The pages of the reference, `docs/reference/questions.md` and `docs/reference/variables.md`, come from `reference.py`, which writes them from `copier.yml`, the workflows and `template/.github/repository.toml.jinja`, so that every question of Copier and every variable and secret is described and none drifts from its source. After a change of a question, of a variable or secret that a workflow reads, or of what the settings as code set, run `python3 reference.py` and commit the pages with it; `tests/test_reference.py` fails while a page differs from its sources. A new variable or secret needs its description, in the words of a user, in `ABOUT` of `reference.py`, and the test names each one that lacks it. The fix bot runs `python3 reference.py` when the tests fail, by the autofix of `.github/checks.project.toml`, and the Issue assistant sync writes the pages anew for each release of the assistant that it takes over.
 
 ### Pages in one column
 

@@ -22,15 +22,18 @@ git commit -s -am "Resolve the conflicts of the blueprint update"
 git push
 ```
 
-Once you commit to its branch, the bot leaves the branch to you: when a newer release is out, it says so in one comment, and after you merge or close the pull request, its next run brings the rest. To start over, or to see the conflicts on your machine first, run the update with the same Copier as the bot, whose version and hashes `.github/copier-requirements.txt` pins, in a virtual environment:
+Once you commit to its branch, the bot leaves the branch to you: when a newer release is out, it says so in one comment, and after you merge or close the pull request, its next run brings the rest. To start over, or to see the conflicts on your machine first, run the update with the same Copier as the bot, whose version and hashes `.github/copier-requirements.txt` pins. Put its virtual environment outside the checkout, and start from a current `main` on a branch of your own: Copier stops with *Destination repository is dirty* while the working tree holds a change or a file that Git doesn't ignore, and on `blueprint/update` the answers already name the new release.
 
 ```sh
-python3 -m venv .venv-copier
-.venv-copier/bin/pip install --require-hashes -r .github/copier-requirements.txt
-.venv-copier/bin/copier update --defaults --conflict inline
+python3 -m venv ~/.venvs/copier
+~/.venvs/copier/bin/pip install --require-hashes -r .github/copier-requirements.txt
+git switch main && git pull
+git status --short   # must print nothing: commit or stash what it lists
+git switch -c blueprint/local
+~/.venvs/copier/bin/copier update --defaults --conflict inline
 ```
 
-On Windows, use `py -3` in place of `python3` and `.venv-copier/Scripts/` in place of `.venv-copier/bin/`.
+On Windows, create the environment with `py -3 -m venv %USERPROFILE%\.venvs\copier` and run its programs from `%USERPROFILE%\.venvs\copier\Scripts\` in place of `~/.venvs/copier/bin/`.
 
 `--defaults` takes the answers of `.copier-answers.yml`, and `--conflict inline` writes the markers into the files, as the bot does, rather than files of rejected changes beside them. A change that a project keeps in a file of the blueprint conflicts again with each update that touches the same lines; move it into a file of the project where one exists, as the [questions and answers](faq.md#which-files-may-a-project-change) show.
 
