@@ -4,4 +4,4 @@
 # Python and system of a runner. Renovate compiles it again with the command in the
 # header of requirements.txt.
 # https://github.com/Dennis-Otto/repo-blueprint
-pillow==12.3.0
+pillow==13.0.0
