@@ -7,6 +7,15 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.4...v1.0.5) (2026-10-23)
+
+### Bug fixes
+
+* **deps:** update dependency certifi to v2026.10.19 [security] ([#379](https://github.com/Dennis-Otto/repo-blueprint/issues/379)) ([04ddbb4](https://github.com/Dennis-Otto/repo-blueprint/commit/04ddbb480c66bb8f5af4629b412d04ee1300b058))
+* **deps:** update dependency copier to v9.19.0 ([#376](https://github.com/Dennis-Otto/repo-blueprint/issues/376)) ([a655658](https://github.com/Dennis-Otto/repo-blueprint/commit/a65565871e74c6056b4b6cf598b974bcdf447ebd))
+* **deps:** update dependency pillow to v13 [security] ([fc8fb7b](https://github.com/Dennis-Otto/repo-blueprint/commit/fc8fb7bd5fea1b0db48e4d19f2824725b0cab2b7))
+* **deps:** update dependency uv to v0.13.4 [security] ([#380](https://github.com/Dennis-Otto/repo-blueprint/issues/380)) ([5c43be2](https://github.com/Dennis-Otto/repo-blueprint/commit/5c43be2426548244889e5ab5cd2679d9be3d7de6))
+
 ## [1.0.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.3...v1.0.4) (2026-10-19)
 
 ### Bug fixes
