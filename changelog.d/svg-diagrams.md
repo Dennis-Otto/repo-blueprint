@@ -1,0 +1,7 @@
+### Bug fixes
+
+- **The websites show their pictures again:** since selectolax 1.0, the lightbox plugin took every picture out of the pages that it should have wrapped in a link, so no website showed a screenshot, a social preview or any other picture. The tools of the website now take selectolax 1.0.2, which fixes it, and the update brings them as `.github/docs-requirements.txt`. The build of a website now fails when a plugin takes a picture out of a page, and names the page.
+
+### Performance
+
+- **A page with a diagram loads no Mermaid:** the websites drew each diagram live with Mermaid, about 1 MB on every page that has one, such as the page *Automation* of every website, which then loaded about 1.3 MB on a phone. Now they show the pictures that `scripts/diagrams.sh` draws, as GitHub does, only in the theme that the reader switches to and as the reader comes to them, and the page of the automation loads about 320 KB; the text of a diagram is the text of its picture, but it can no longer be selected or found by the search. Every repository gets the pictures of the page of the automation in `.github/mkdocs-blueprint-diagrams/`. `blueprint.py site-check`, which the check *docs* runs, now fails on a page that loads more than 1,200 KB at once and names what it loads the most: a page of your website with a large first picture, or with a `mermaid` block that `bash scripts/diagrams.sh --extract` has not made pictures of yet, needs that fixed after the update. Decision 0058 says why.

@@ -627,7 +627,9 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
         "mkdocs-static-i18n that writes its pages differently, or a hook of the "
         "project, changed them: build the website, compare the files named above "
         "with what the hooks write, and report it to the blueprint if its hooks "
-        "need to change."
+        "need to change. A page that loads more than it may at once names what it "
+        "loads the most: a picture that is too large, or Mermaid, which a "
+        "```mermaid block loads and the pictures of scripts/diagrams.sh don't."
     )
     return 1
 
