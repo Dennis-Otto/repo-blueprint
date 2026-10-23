@@ -4,13 +4,3 @@
 # The data of the dashboard, which only the Dashboard workflow publishes after the merge
 # that adds it; its deploy job asks for each file after every deployment.
 ^https://dennis-otto\.github\.io/repo-blueprint/dashboard/(repos\.json|releases\.atom)$
-
-# The comparison and the page of each kind of project, which only the Docs workflow
-# publishes after the merge that adds them; #320 removes this entry once the website
-# has them.
-^https://dennis-otto\.github\.io/repo-blueprint/(de/)?(compare|kinds/[a-z-]+)\.html$
-
-# The architecture, the questions and answers, the troubleshooting and the reference,
-# which only the Docs workflow publishes after the merge that adds them; #333 removes
-# this entry once the website has them.
-^https://dennis-otto\.github\.io/repo-blueprint/(de/)?(architecture|faq|troubleshooting|reference/(questions|variables))\.html$

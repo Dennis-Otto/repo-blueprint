@@ -11410,6 +11410,71 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
         assert f"docs/images/{picture}" in script, picture
 
 
+def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> None:
+    # Wait+Screen of VHS reads the first lines of the terminal, as many as its screen
+    # has, and not the lines it shows once the output has scrolled: a question below
+    # them never matches, and the recording times out. What Copier says before its
+    # questions, five lines since 1.0.0, pushed the choice of the license below them
+    # (#375). The screen of the tape has 22 lines, as the run that failed showed; a
+    # change of its size needs that number counted again.
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    screen = 22
+    for setting in (
+        "Set FontSize 18",
+        "Set LineHeight 1.2",
+        "Set Height 720",
+        "Set Padding 20",
+        "Set Margin 20",
+        "Set WindowBar Colorful",
+    ):
+        assert f"\n{setting}\n" in tape, setting
+    columns = 121
+    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    # The output in the order of the tape: the command, what Copier says first and an
+    # empty line, and for each question its help, then the line of its answer, which
+    # holds the help of a choice while the choice waits. Every question that may be
+    # asked counts, so that the lines of a question are never fewer than the real ones.
+    before = copier["_message_before_copy"]
+    output = ["$ copier copy", *before.splitlines(), ""]
+    for name, question in copier.items():
+        if name.startswith("_") or question.get("when") is False:
+            continue
+        output.append(f"🎤 {question['help']}")
+        if question.get("multiselect"):
+            hint = "(Use arrow keys to move, <space> to select, <a> to toggle, "
+            output.append(f"   {hint}<i> to invert)")
+        elif "choices" in question:
+            output.append("   (Use arrow keys)")
+        else:
+            output.append("")
+    # The line of the screen on which each line of the output ends; the emoji of a
+    # question takes two columns.
+    ends = []
+    row = 0
+    for line in output:
+        row += max(1, -(-(len(line) + line.count("🎤")) // columns))
+        ends.append(row)
+    waits = re.findall(r"^Wait\+Screen(?:@\S+)? /(.+)/$", tape, flags=re.MULTILINE)
+    assert len(waits) >= 5
+    found = 0
+    for wait in waits:
+        found = next(
+            (
+                index
+                for index in range(found, len(output))
+                if re.search(wait, output[index])
+            ),
+            len(output),
+        )
+        assert found < len(output), f"Copier prints nothing that /{wait}/ matches"
+        assert ends[found] <= screen, f"/{wait}/ waits for line {ends[found]}"
+    # Each key of a later question waits for the line of the cursor.
+    assert "\nWait /Use arrow keys\\)$/\n" in tape
+    assert "\nWait /paperless_sync$/\n" in tape
+    assert "\nWait /to invert\\)$/\n" in tape
+    assert "\nWait /\\(Y.n\\)$/\n" in tape
+
+
 def test_the_tools_of_the_website_install_on_windows() -> None:
     # The plugin for the dates requires tzdata on Windows alone. pip-compile on Linux
     # left it out of the lock, and with --require-hashes pip refused all of it there.
