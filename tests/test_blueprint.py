@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 from collections.abc import Callable, Sequence
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
@@ -2896,6 +2897,13 @@ def test_the_reuse_status(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not reuse_compliant(REPO, opener(b'{"status": "non-compliant"}'))
     assert not reuse_compliant(REPO, opener(b"<html>"))
     assert not reuse_compliant(REPO, opener(urllib.error.URLError("offline")))
+    # An error as urlopen raises it, the answer of the server too: closed, as the
+    # newest Python warns of one left open.
+    error = urllib.error.HTTPError(
+        "https://api.reuse.software", 503, "Unavailable", Message(), io.BytesIO(b"")
+    )
+    assert not reuse_compliant(REPO, opener(error))
+    assert error.closed
 
 
 def test_a_repository_without_labels_toml(tmp_path: Path) -> None:

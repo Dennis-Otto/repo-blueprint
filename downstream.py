@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -471,6 +472,9 @@ def download(
                 text: str = response.read().decode("utf-8")
                 return text
         except OSError as error:
+            if isinstance(error, urllib.error.HTTPError):
+                # The error is the answer too, and holds its body until it is closed.
+                error.close()
             if attempt == TRIES:
                 raise Failed(f"{url} could not be downloaded: {error}") from error
             sleep(attempt * 10)
