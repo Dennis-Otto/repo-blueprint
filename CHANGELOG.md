@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [1.0.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.4...v1.0.5) (2026-10-23)
 
-
 ### Bug fixes
 
 * **deps:** update dependency certifi to v2026.10.19 [security] ([#379](https://github.com/Dennis-Otto/repo-blueprint/issues/379)) ([04ddbb4](https://github.com/Dennis-Otto/repo-blueprint/commit/04ddbb480c66bb8f5af4629b412d04ee1300b058))
