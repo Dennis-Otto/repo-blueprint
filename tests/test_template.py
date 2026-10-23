@@ -9847,7 +9847,9 @@ def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
     permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
     assert permissions.splitlines()[1:] == ["      actions: write"]
     script = script_of(job, "Run the failed jobs of the release once more")
-    assert script.startswith('gh run rerun "$RUN" --failed\n')
+    # It looks at the run first: a release that runs again already is left alone.
+    look = script.index('gh api "repos/$GH_REPO/actions/runs/$RUN"')
+    assert look < script.index('gh run rerun "$RUN" --failed')
     assert "${{" not in job[job.index("        run: |\n") :]
 
 

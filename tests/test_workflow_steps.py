@@ -18,6 +18,7 @@ from workflow_steps import (
     RUN_URL,
     SHA,
     Answer,
+    StepResult,
     acting_steps,
     acts_of,
     exact,
@@ -925,6 +926,7 @@ def test_the_major_tag_points_at_the_release(tmp_path: Path) -> None:
     ]
 
 
+@WITH_JQ
 def test_the_failed_jobs_of_a_release_run_once_more(tmp_path: Path) -> None:
     settings = job("after-checks.yml", "release")
     for part in (
@@ -935,20 +937,98 @@ def test_the_failed_jobs_of_a_release_run_once_more(tmp_path: Path) -> None:
         assert part in settings["if"]
     assert settings["permissions"] == {"actions": "write"}
 
-    done = run_step(
+    confirmed = "Requested rerun (failed jobs) of run 77\n"
+    done = rerun_the_release(
+        tmp_path, "completed", 1, exact("run rerun 77 --failed", confirmed)
+    )
+
+    assert done.returncode == 0, done.stderr
+    # The log shows that GitHub took the rerun.
+    assert confirmed in done.stdout
+    assert done.commands == [
+        'api repos/o/r/actions/runs/77 --jq "\\(.status) \\(.run_attempt)"',
+        "run rerun 77 --failed",
+    ]
+    assert done.summary == (
+        "The failed jobs of the release of abc1234 run once more, where they stopped.\n"
+    )
+
+
+def rerun_the_release(
+    tmp_path: Path, status: str, attempt: int, rerun: Answer
+) -> StepResult:
+    """The bot for failed releases after the first attempt of run 77 failed, with the
+    run as GitHub shows it now and the answer of its rerun."""
+    return run_step(
         tmp_path,
         "after-checks.yml",
         "release",
         "Run the failed jobs of the release once more",
-        answers=[exact("run rerun 77 --failed")],
+        answers=[
+            Answer(
+                r"api repos/o/r/actions/runs/77 --jq .*",
+                json={"id": 77, "status": status, "run_attempt": attempt},
+            ),
+            rerun,
+        ],
         env={"RUN": "77", "SHA": "abc1234def"},
     )
 
-    assert done.returncode == 0, done.stderr
-    assert done.commands == ["run rerun 77 --failed"]
-    assert done.summary == (
-        "The failed jobs of the release of abc1234 run once more, where they stopped.\n"
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("status", "attempt", "now"),
+    [
+        # A person ran it again before the bot started, as in run 39648756239.
+        ("in_progress", 2, "running"),
+        ("queued", 2, "waiting"),
+        # Its second attempt ended already, passed or failed: a third is a person's.
+        ("completed", 2, "done"),
+    ],
+)
+def test_the_bot_leaves_a_release_alone_that_ran_again_already(
+    tmp_path: Path, status: str, attempt: int, now: str
+) -> None:
+    done = rerun_the_release(
+        tmp_path, status, attempt, exact("run rerun 77 --failed", code=1)
     )
+
+    assert done.returncode == 0, done.stderr
+    assert not done.called("run rerun")
+    assert done.summary == (
+        f"The release of abc1234 ran again already: its attempt {attempt} is"
+        f" {now}. The bot leaves it alone.\n"
+    )
+
+
+@WITH_JQ
+def test_the_bot_leaves_a_release_alone_that_started_again_in_the_meantime(
+    tmp_path: Path,
+) -> None:
+    # It started again between the look at the run and the rerun.
+    refused = "run 77 cannot be rerun; This workflow is already running\n"
+    done = rerun_the_release(
+        tmp_path, "completed", 1, exact("run rerun 77 --failed", code=1, err=refused)
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.summary == (
+        "The release of abc1234 runs again already; the bot leaves it alone.\n"
+    )
+
+
+@WITH_JQ
+def test_the_bot_for_failed_releases_fails_when_github_refuses_otherwise(
+    tmp_path: Path,
+) -> None:
+    refused = "HTTP 403: Resource not accessible by integration\n"
+    done = rerun_the_release(
+        tmp_path, "completed", 1, exact("run rerun 77 --failed", code=1, err=refused)
+    )
+
+    assert done.returncode == 1
+    assert refused in done.stderr
+    assert done.summary == ""
 
 
 # The assets of a release.
