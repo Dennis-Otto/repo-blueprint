@@ -157,6 +157,18 @@ def test_the_override_is_the_title_and_the_lines_that_release_please_reads() -> 
         "Release-As: 2.0.0\n"
         "BREAKING CHANGE: the settings move (see the guide"
     )
+    # A note of a breaking change goes on up to a blank line or the next footer.
+    assert override(
+        "feat!: move the settings (#13)\n\nBREAKING CHANGE: the settings move to\n"
+        "repository.toml, see the guide.\n\nMore (text\n"
+        "BREAKING-CHANGE: the old names go\nfor good\nSigned-off-by: A <a@b.c>\n"
+        "Release-As: 3.0.0\nnot a note\n"
+    ) == (
+        "feat!: move the settings (#13)\n\n"
+        "BREAKING CHANGE: the settings move to\nrepository.toml, see the guide.\n"
+        "BREAKING-CHANGE: the old names go\nfor good\n"
+        "Release-As: 3.0.0"
+    )
     assert override(RENOVATE) == (
         "fix(deps): update dependency pillow to v13 [security] (#383)"
     )
@@ -247,6 +259,33 @@ def test_an_empty_description_gets_the_override_alone() -> None:
     assert github.edited == [(7, f"<!-- {START}\nfeat: a dark mode (#7)\n{END} -->")]
 
 
+def test_an_edit_that_github_refuses_leaves_the_others_and_release_please(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github = FakeGitHub(
+        [commit("a1", "fix: x (#1)\n\nThe body."), commit("b2", "fix: y (#2)\n\nMore.")]
+    )
+    github.pulls = {"a1": [merged(1, "a1")], "b2": [merged(2, "b2")]}
+    real = github.route
+
+    def route(method: str, path: str, body: Any) -> tuple[int, Any]:
+        if (method, path) == ("PATCH", f"repos/{REPO}/pulls/1"):
+            return 422, {"message": "body is too long (maximum is 65536 characters)"}
+        return real(method, path, body)
+
+    github.route = route  # type: ignore[method-assign]
+
+    assert cli.main(["--repo", REPO, "commit-overrides"], api=Api(github)) == 0
+    captured = capsys.readouterr()
+    assert [number for number, _ in github.edited] == [2]
+    assert captured.err.startswith(
+        "::warning::The release bot couldn't write the override of #1: GitHub answered"
+        " 422"
+    )
+    assert "- #1: GitHub refused the edit: `GitHub answered 422" in captured.out
+    assert "- #2: release-please reads `fix: y (#2)`" in captured.out
+
+
 def shas(github: FakeGitHub) -> list[str]:
     return [each["sha"] for each in since_last_release(Api(github), REPO, "main")]
 
@@ -269,12 +308,12 @@ def test_the_compare_stops_at_a_page_without_commits() -> None:
     assert shas(github) == [f"c{index}" for index in range(100)]
 
 
-def test_the_compare_reads_at_most_the_commits_that_github_compares() -> None:
-    # GitHub's compare lists 250 commits at most, and three pages hold them.
-    github = FakeGitHub([commit(f"c{index}", "docs: x") for index in range(400)])
+def test_the_compare_reads_every_commit_of_a_long_release() -> None:
+    # With paging, GitHub's compare lists every commit, the newest on the last page.
+    github = FakeGitHub([commit(f"c{index}", "docs: x") for index in range(450)])
 
-    assert len(shas(github)) == 300
-    assert len([path for _, path in github.calls if "/compare/" in path]) == 3
+    assert shas(github) == [f"c{index}" for index in range(450)]
+    assert len([path for _, path in github.calls if "/compare/" in path]) == 5
 
 
 def test_before_the_first_release_the_latest_commits_of_the_branch_count() -> None:

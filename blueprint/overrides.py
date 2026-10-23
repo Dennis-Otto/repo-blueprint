@@ -19,11 +19,13 @@ of its own, in an HTML comment that the page doesn't show.
 from __future__ import annotations
 
 import re
+import sys
 import urllib.parse
 from collections.abc import Iterator
 
-from blueprint.bot_health import default_branch
-from blueprint.github import Api, Json
+from blueprint.bot_health import code, default_branch
+from blueprint.coach import escape_data
+from blueprint.github import Api, GitHubError, Json
 from blueprint.pr_report import BREAKING, SHOWN, TITLE
 
 START = "BEGIN_COMMIT_OVERRIDE"
@@ -31,9 +33,11 @@ END = "END_COMMIT_OVERRIDE"
 # The lines of a message that release-please reads besides the title, as the report
 # of a pull request reads them in its description.
 FOOTER = re.compile(r"^(?:BREAKING[ -]CHANGE: |(?i:release-as): *v?\d).*$", re.M)
-# The most commits between two releases that the bot reads, as GitHub's compare does.
+# The start of a footer of Conventional Commits, which ends the note of a breaking
+# change before it, as a blank line does.
+TOKEN = re.compile(r"^(?:BREAKING[ -]CHANGE|[\w-]+)(?:: | #)")
+# The commits on a page of GitHub's compare, which with paging lists every commit.
 PAGE = 100
-MOST_COMMITS = 250
 
 
 def matters(message: str) -> bool:
@@ -54,8 +58,20 @@ def override(message: str) -> str:
     """What release-please reads instead of the message: its title, and its lines of
     Release-As and BREAKING CHANGE below it."""
     title = message.split("\n", 1)[0].strip()
-    footers = [line.strip() for line in FOOTER.findall(message)]
-    return "\n".join([title, "", *footers]) if footers else title
+    footers: list[list[str]] = []
+    # Whether the line goes on with the note of a breaking change above it.
+    note = False
+    for line in message.split("\n")[1:]:
+        if FOOTER.fullmatch(line):
+            footers.append([line.strip()])
+            note = line.startswith("BREAKING")
+        elif note and line.strip() and not TOKEN.match(line):
+            footers[-1].append(line.rstrip())
+        else:
+            note = False
+    if not footers:
+        return title
+    return "\n".join([title, "", *("\n".join(footer) for footer in footers)])
 
 
 def with_override(body: str, text: str) -> str:
@@ -71,7 +87,9 @@ def since_last_release(api: Api, repo: str, branch: str) -> Iterator[Json]:
     if isinstance(latest, dict):
         span = urllib.parse.quote(f"{latest['tag_name']}...{branch}", safe=".")
         read = 0
-        for page in range(1, MOST_COMMITS // PAGE + 2):
+        page = 0
+        while True:
+            page += 1
             compared = api.get(
                 f"repos/{repo}/compare/{span}?per_page={PAGE}&page={page}"
             )
@@ -116,9 +134,23 @@ def write_overrides(api: Api, repo: str) -> str:
         body = pull.get("body") or ""
         if START in body:
             continue
-        api.patch(
-            f"repos/{repo}/pulls/{pull['number']}", {"body": with_override(body, text)}
-        )
+        try:
+            api.patch(
+                f"repos/{repo}/pulls/{pull['number']}",
+                {"body": with_override(body, text)},
+            )
+        except GitHubError as error:
+            # One refused edit, such as of a description near GitHub's limit, leaves
+            # that commit as it was and lets release-please still run.
+            print(
+                f"::warning::The release bot couldn't write the override of"
+                f" #{pull['number']}: {escape_data(str(error))}",
+                file=sys.stderr,
+            )
+            lines.append(
+                f"- #{pull['number']}: GitHub refused the edit: {code(str(error))}"
+            )
+            continue
         title = text.split("\n", 1)[0].replace("`", "'")
         lines.append(f"- #{pull['number']}: release-please reads `{title}`")
     if not lines:
