@@ -82,6 +82,19 @@ ABOUT: dict[str, str] = {
         " The checklist asks for it while the answer `issue_assistant_ai` is on;"
         " `ANTHROPIC_API_KEY` works in its place."
     ),
+    "COPILOT_GITHUB_TOKEN": (
+        "A fine-grained token of GitHub with the permission *Copilot Requests* alone"
+        " and no access to repositories, with which the issue assistant analyzes each"
+        " new issue with Copilot, once `name` under `[engine]` of"
+        " `.github/issue-assistant/config.toml` is `copilot`. It counts the premium"
+        " requests of the Copilot plan of the token's owner."
+    ),
+    "GEMINI_API_KEY": (
+        "An API key of Google AI Studio, with which the issue assistant analyzes each"
+        " new issue with Gemini, once `name` under `[engine]` of"
+        " `.github/issue-assistant/config.toml` is `gemini`; free within the daily"
+        " limits of the free tier of the Gemini API."
+    ),
     GITHUB_TOKEN: (
         "The token that GitHub gives every run of a workflow, for its repository alone"
         " and with the permissions that its `permissions:` grant. What a workflow does"
@@ -91,12 +104,19 @@ ABOUT: dict[str, str] = {
     "ISSUE_ASSISTANT_AI": (
         "`off` makes the issue assistant label the issues and answer the commands of"
         " their comments without an AI engine, which then needs no secret; `on` lets"
-        " the engine analyze each new issue as well."
+        " the engine analyze each new issue as well. The reusable workflow of the"
+        " issue assistant, which `issue-assistant.yml` calls, reads it."
     ),
     "MUTATION_PARTS": (
         "The number of parts in which the mutation tests run, one job each, in place"
         " of the estimate from the number of mutants: more parts for a project whose"
         " parts run out of the six hours of a job."
+    ),
+    "OPENAI_API_KEY": (
+        "An API key of OpenAI, with which the issue assistant analyzes each new issue"
+        " with Codex, once `name` under `[engine]` of"
+        " `.github/issue-assistant/config.toml` is `codex`, at the prices of OpenAI's"
+        " API."
     ),
     "PUBLISH_TO": (
         "Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`,"
@@ -139,9 +159,22 @@ ABOUT: dict[str, str] = {
 # a release and that only workflows of the assistant read shows with ASSISTANT_NAME
 # until ABOUT describes it.
 ASSISTANT_NAMES = frozenset(
-    {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ISSUE_ASSISTANT_AI"}
+    {
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "COPILOT_GITHUB_TOKEN",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+    }
 )
 ASSISTANT = "https://github.com/Dennis-Otto/issue-assistant"
+# A job that calls a reusable workflow of the issue assistant passes it the secrets of
+# the engines by name, and its job analyze reads them in the caller's environment
+# issue-assistant, which only the default branch may use.
+ASSISTANT_REUSABLE = re.compile(
+    r"Dennis-Otto/issue-assistant/\.github/workflows/reusable-[\w-]+\.yml@"
+)
+ASSISTANT_ENVIRONMENT = "issue-assistant"
 ASSISTANT_NAME = (
     "A {kind} that the workflows of the [issue assistant]({address}) read, from a"
     " release of the assistant that the Issue assistant sync took over. The README of"
@@ -543,6 +576,8 @@ def strings_of(value: Any) -> Iterable[str]:
 
 
 def environment_of(job: Mapping[str, Any]) -> str | None:
+    if ASSISTANT_REUSABLE.match(str(job.get("uses", ""))):
+        return ASSISTANT_ENVIRONMENT
     environment = job.get("environment")
     if isinstance(environment, Mapping):
         return str(environment.get("name"))
