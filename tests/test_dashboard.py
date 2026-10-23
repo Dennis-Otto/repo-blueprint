@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import io
 import json
@@ -11,6 +12,7 @@ import urllib.error
 import zipfile
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from email.message import Message
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -296,6 +298,16 @@ def test_the_blueprint_finds_its_own_ci() -> None:
     assert row.ci == "ci-python.yml"
     assert row.runs["CI"] == dashboard.Run("success", "https://ci-python")
     assert row.runs["Renovate"] == dashboard.Run("failure", "https://renovate")
+
+
+def test_the_scorecard_closes_the_answer_of_an_error() -> None:
+    error = http_error(dashboard.SCORECARD_API + "Dennis-Otto/demo", 404, "Not Found")
+
+    def failing(url: str, timeout: float) -> io.BytesIO:
+        raise error
+
+    assert dashboard.scorecard("Dennis-Otto/demo", failing) is None
+    assert error.closed
 
 
 def test_repositories_without_the_blueprint_or_a_release() -> None:
@@ -740,6 +752,11 @@ def test_the_coverage_of_a_node_package_comes_from_its_lcov_report() -> None:
         dashboard.coverage({"lcov.info": b"SF:\xff\n"})
 
 
+def http_error(url: str, code: int, msg: str) -> urllib.error.HTTPError:
+    """An error as urlopen raises it: the answer of the server too, with its body."""
+    return urllib.error.HTTPError(url, code, msg, Message(), io.BytesIO(b"{}"))
+
+
 def published(url: str, timeout: float) -> io.BytesIO:
     """The website of the dashboard, with its history, and a few broken ones."""
     assert timeout == dashboard.TIMEOUT
@@ -760,9 +777,9 @@ def published(url: str, timeout: float) -> io.BytesIO:
     if url == "https://site/torn.json":
         return io.BytesIO(b'[{"date": "2026-10-01", "re')
     if url == "https://site/gone.json":
-        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+        raise http_error(url, 404, "Not Found")
     if url == "https://site/busy.json":
-        raise urllib.error.HTTPError(url, 503, "Unavailable", {}, None)  # type: ignore[arg-type]
+        raise http_error(url, 503, "Unavailable")
     if url == "https://site/slow.json":
         raise TimeoutError("timed out")
     return opener(url, timeout)
@@ -776,6 +793,21 @@ def test_the_history_comes_from_the_published_dashboard() -> None:
     # Nothing is published yet: the history starts today.
     assert dashboard.load_history("https://site/gone.json", published) == []
     assert dashboard.load_history("", published) == []
+
+
+@pytest.mark.parametrize("code", [404, 503])
+def test_the_history_closes_the_answer_of_an_error(code: int) -> None:
+    # Left open, it warns as the garbage collector closes it, which the newest Python
+    # does for every error that urlopen raises, and the tests fail on the warning.
+    error = http_error("https://site/history.json", code, "Failed")
+
+    def opener(url: str, timeout: float) -> io.BytesIO:
+        raise error
+
+    with contextlib.suppress(dashboard.HistoryError):
+        dashboard.load_history("https://site/history.json", opener)
+
+    assert error.closed
 
 
 @pytest.mark.parametrize(

@@ -27,6 +27,7 @@ import re
 import sys
 import time
 import tomllib
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -214,6 +215,9 @@ def download(
                     digest.update(chunk)
             return digest.hexdigest()
         except OSError as error:
+            if isinstance(error, urllib.error.HTTPError):
+                # The error is the answer too, and holds its body until it is closed.
+                error.close()
             if attempt == TRIES:
                 raise PinError([f"{url} could not be downloaded: {error}"]) from error
             sleep(attempt * 10)

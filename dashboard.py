@@ -245,7 +245,10 @@ def scorecard(repo: str, opener: Opener) -> float | None:
     try:
         with opener(SCORECARD_API + repo, timeout=TIMEOUT) as response:
             score = json.load(response).get("score")
-    except (OSError, ValueError, http.client.HTTPException):
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        if isinstance(error, urllib.error.HTTPError):
+            # The error is the answer too, and holds its body until it is closed.
+            error.close()
         return None
     return float(score) if isinstance(score, int | float) else None
 
@@ -554,9 +557,13 @@ def load_history(url: str, opener: Opener) -> list[dict[str, Any]]:
         with opener(url, timeout=TIMEOUT) as response:
             found = json.load(response)
     except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return []
-        raise HistoryError(f"the history at {url} can't be read: {error}") from error
+        # The error is the answer too, and holds its body until it is closed.
+        with error:
+            if error.code == 404:
+                return []
+            raise HistoryError(
+                f"the history at {url} can't be read: {error}"
+            ) from error
     except (OSError, ValueError, http.client.HTTPException) as error:
         raise HistoryError(f"the history at {url} can't be read: {error}") from error
     if not isinstance(found, list):

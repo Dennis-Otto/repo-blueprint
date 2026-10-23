@@ -349,10 +349,16 @@ def test_the_download_tries_three_times(tmp_path: Path) -> None:
     )
     assert waits == [10, 20]
 
+    errors: list[urllib.error.HTTPError] = []
+
     def broken(request: Any, timeout: float) -> Response:
-        raise urllib.error.HTTPError(
-            request.full_url, 404, "Not Found", Message(), None
+        # An error as urlopen raises it: the answer of the server too, with its body.
+        errors.append(
+            urllib.error.HTTPError(
+                request.full_url, 404, "Not Found", Message(), io.BytesIO(b"gone")
+            )
         )
+        raise errors[-1]
 
     waits.clear()
     with pytest.raises(pins.PinError) as raised:
@@ -361,6 +367,9 @@ def test_the_download_tries_three_times(tmp_path: Path) -> None:
         "https://example.org/tool could not be downloaded: HTTP Error 404: Not Found"
     ]
     assert waits == [10, 20]
+    # Each answer is closed, as the newest Python warns of one left open.
+    assert len(errors) == 3
+    assert all(error.closed for error in errors)
 
 
 def test_a_download_that_fails_writes_nothing(
