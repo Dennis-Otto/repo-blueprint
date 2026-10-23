@@ -1,27 +1,27 @@
-# The answers of https://github.com/Dennis-Otto/ha-autodarts,
+# The answers of https://github.com/Dennis-Otto/homedarts-for-autodarts,
 # as its .copier-answers.yml has them, without _commit and _src_path. The Variants
 # workflow makes a repository with them and updates one from the latest release,
 # and the Downstream workflow warns when they differ from those of the repository:
 # change them with the repository.
 author: Dennis Otto
 copyright: 2026 Trkal and HACSAutodarts contributors; 2026 Dennis Otto
-description: 'Autodarts for Home Assistant: local realtime board control, X01, Cricket,
-  party and training games, tournaments and a bot, player statistics with heatmaps,
-  seven dashboard cards and fourteen blueprints, games started by voice. No cloud
-  account needed.'
+description: 'Home Assistant integration for Autodarts boards and any dartboard: local
+  realtime board control, X01, Cricket, party and training games, tournaments and
+  a bot, player statistics with heatmaps, seven dashboard cards and fifteen blueprints,
+  games started by voice. No cloud account needed.'
 discussions: true
-ha_domain: autodarts
-homepage: https://dennis-otto.github.io/ha-autodarts/
+ha_domain: homedarts
+homepage: https://dennis-otto.github.io/homedarts-for-autodarts/
 issue_assistant_ai: true
 languages:
 - python
 - javascript-typescript
 license: MIT
 owner: Dennis-Otto
-project_name: Autodarts
-project_slug: ha-autodarts
+project_name: HomeDarts for Autodarts
+project_slug: homedarts-for-autodarts
 project_type: home-assistant
-python_package: autodarts
+python_package: homedarts
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
 release_app_id: '4739928'
@@ -29,7 +29,7 @@ renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true
-test_workflows: ''
+test_workflows: Visual check
 topics: autodarts, darts, hacs, home-assistant, home-assistant-custom-component, dartboard,
   hacs-integration, home-assistant-blueprints, homeassistant, lovelace-card, darts-training,
   home-assistant-integration, home-automation, lovelace-custom-card, smart-home

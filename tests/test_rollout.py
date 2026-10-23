@@ -279,7 +279,7 @@ def test_the_repositories_go_one_after_the_other_the_quickest_checks_first(
     rollout: Rollout,
 ) -> None:
     listing = (
-        "o/ha-autodarts o/paperless-sync o/r o/zeta o/issue-assistant "
+        "o/homedarts-for-autodarts o/paperless-sync o/r o/zeta o/issue-assistant "
         "o/paperless-unified-search o/dennis-otto.github.io o/alpha"
     )
 
@@ -295,11 +295,11 @@ def test_the_repositories_go_one_after_the_other_the_quickest_checks_first(
         "o/issue-assistant",
         "o/paperless-unified-search",
         "o/paperless-sync",
-        "o/ha-autodarts",
+        "o/homedarts-for-autodarts",
     ]
     assert rollout.read("output") == (
         "repositories=[" + ",".join(f'"{name}"' for name in planned) + "]\n"
-        "last=o/ha-autodarts\n"
+        "last=o/homedarts-for-autodarts\n"
     )
     summary = rollout.read("summary")
     assert "The blueprint bots bring v1.2.0 to these repositories" in summary
