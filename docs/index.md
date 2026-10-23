@@ -68,7 +68,7 @@ hide:
 
     ---
 
-    Every diagram as a picture that every reader sees, also in the GitHub app and the stores, drawn from its Mermaid source; the website draws the source live. The bots fix them by themselves: in a pull request, on `main` and after an update of the renderer.
+    Every diagram as a picture that every reader sees, also in the GitHub app and the stores, drawn from its Mermaid source; the website shows the same pictures, so a page with a diagram stays light. The bots fix them by themselves: in a pull request, on `main` and after an update of the renderer.
 
 - :material-camera-outline:{ .lg .middle } **Screenshots**
 
