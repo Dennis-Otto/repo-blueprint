@@ -114,8 +114,8 @@ def adopt(root: Path, release: Path, ref: str, version: str) -> list[str]:
     workflows of its templates; the firewall policy becomes that of its templates,
     which install keeps once a repository has one; every pin of the action names the
     release, also that of the check in the Lint workflow; and each workflow of the
-    templates gets the file of the template that renders it, for a workflow that is
-    new in the release. Raises SyncError when the release is no release of the issue
+    templates that install wrote gets the file of the template that renders it, for a
+    workflow that is new in the release. Raises SyncError when the release is no release of the issue
     assistant, when install fails, and when it changed a file that the sync doesn't
     take over."""
     if not SHA.fullmatch(ref):
@@ -155,9 +155,13 @@ def adopt(root: Path, release: Path, ref: str, version: str) -> list[str]:
         moved = PIN.sub(lambda _: pin, text)
         if moved != text:
             path.write_text(moved, encoding="utf-8", newline="\n")
+    # A workflow of the templates that install leaves out of the root, such as that
+    # of the discussions while config.toml names no category of them, gets no file
+    # of the template either: an include of a workflow that the root lacks fails
+    # every rendering of the template.
     for name in names:
         rendered = root / INCLUDES / f"{name}.jinja"
-        if not rendered.is_file():
+        if (root / WORKFLOWS / name).is_file() and not rendered.is_file():
             rendered.parent.mkdir(parents=True, exist_ok=True)
             rendered.write_text(include(name), encoding="utf-8", newline="\n")
     referenced(root, version)

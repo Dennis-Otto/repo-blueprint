@@ -437,6 +437,14 @@ def test_the_parts_of_a_workflow() -> None:
     assert reference.environment_of({"environment": {"name": "release"}}) == "release"
     assert reference.environment_of({"environment": "pypi"}) == "pypi"
     assert reference.environment_of({}) is None
+    # The reusable workflows of the issue assistant read the secrets that a job
+    # passes them in the caller's environment issue-assistant.
+    called = {
+        "uses": "Dennis-Otto/issue-assistant/.github/workflows/"
+        f"reusable-issue-assistant.yml@{'a' * 40} # v1.6.1"
+    }
+    assert reference.environment_of(called) == "issue-assistant"
+    assert reference.environment_of({"uses": "./.github/workflows/x.yml"}) is None
 
 
 def test_which_repositories_have_a_workflow() -> None:

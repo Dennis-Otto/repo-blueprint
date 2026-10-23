@@ -566,6 +566,12 @@ def test_the_required_checks_exist(projects: dict[str, Path], project: str) -> N
 # The actions that listed actions run in turn, which no workflow names: `blueprint.py
 # settings check` finds them on GitHub, at the commit of each pin, and names those that
 # the list lacks. Each with the action that runs it.
+# The reusable workflow of the issue assistant that runs its engines.
+ASSISTANT_REUSABLE = (
+    "Dennis-Otto/issue-assistant/.github/workflows/reusable-issue-assistant.yml"
+)
+# The start of each reusable workflow of the issue assistant.
+ASSISTANT_REUSABLE_OF = "Dennis-Otto/issue-assistant/.github/workflows/reusable-"
 RUN_IN_TURN = {
     "google/osv-scanner-action/osv-reporter-action@*": (
         "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml"
@@ -574,7 +580,18 @@ RUN_IN_TURN = {
         "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml"
     ),
     "oven-sh/setup-bun@*": "anthropics/claude-code-action",
+    "anthropics/claude-code-action@*": ASSISTANT_REUSABLE,
+    "openai/codex-action@*": ASSISTANT_REUSABLE,
 }
+
+
+def run_in_turn(pattern: str, named: set[str]) -> bool:
+    """Whether a workflow names what runs the action of the pattern, also through
+    another action that runs it in turn."""
+    runner = RUN_IN_TURN.get(pattern)
+    if runner is None:
+        return False
+    return runner.casefold() in named or run_in_turn(f"{runner}@*", named)
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -593,7 +610,7 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
     patterns = selected["patterns_allowed"]
     for pattern in patterns:
         name = pattern.removesuffix("@*").casefold()
-        assert name in named or RUN_IN_TURN[pattern].casefold() in named, pattern
+        assert name in named or run_in_turn(pattern, named), pattern
     assert patterns == sorted(patterns, key=str.casefold)
 
 
@@ -8959,7 +8976,15 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     for name in watched_by_bot_health(root) & after_checks - {"Update branches"}:
         text = named[name]
         for job in re.findall(r"^  ([\w-]+):$", text.split("\njobs:\n", 1)[1], re.M):
-            condition = condition_of(job_of(text, job))
+            body = job_of(text, job)
+            # A job that calls a reusable workflow of the issue assistant, as that of
+            # Findings, runs the job of the release, which has the condition: the
+            # check of the issue assistant keeps the workflow equal to the template
+            # of the release, and the tests of the assistant its condition.
+            if re.search(rf"^    uses: {re.escape(ASSISTANT_REUSABLE_OF)}", body, re.M):
+                assert "\n    steps:" not in body, (name, job)
+                continue
+            condition = condition_of(body)
             assert (
                 "github.event.workflow_run.head_branch == "
                 "github.event.repository.default_branch" in condition
