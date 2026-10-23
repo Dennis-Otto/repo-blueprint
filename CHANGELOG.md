@@ -9,10 +9,9 @@ requests when there is none.
 
 ## [1.0.7](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.6...v1.0.7) (2026-10-23)
 
-
 ### Bug fixes
 
-* **deps:** turn off Renovate's dependency dashboard ([#387](https://github.com/Dennis-Otto/repo-blueprint/issues/387)) ([46c078c](https://github.com/Dennis-Otto/repo-blueprint/commit/46c078c46b6e12371380ab9663e03ce097e4aaf7))
+- **Renovate keeps no issue open:** the issue *Dependency dashboard* stayed open in every repository, and closing it brought it back with the next run of the bot, so no repository could have no open issue. Renovate's dependency dashboard is now off: routine updates merge on their own, what waits for you is a pull request, and what fails reaches the issue *Renovate logs problems*. With this release, the next run of Renovate closes the issue *Dependency dashboard* of each repository by itself. The checklist of `blueprint.py` now ticks Renovate off once it has opened a pull request, instead of once its dashboard is open ([decision 0057](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0057-renovate-keeps-no-dependency-dashboard.md)).
 
 ## [1.0.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.5...v1.0.6) (2026-10-23)
 
