@@ -9,7 +9,7 @@ Eine App für Nextcloud in PHP, mit der Analyse von Psalm, die den Daten einer A
 ## Eines anlegen
 
 ```sh
-uvx --from copier==9.18.2 copier copy --data project_type=nextcloud-app gh:Dennis-Otto/repo-blueprint my-app
+uvx --from copier==9.19.0 copier copy --data project_type=nextcloud-app gh:Dennis-Otto/repo-blueprint my-app
 cd my-app
 python3 .github/blueprint.py create
 ```
