@@ -25,6 +25,7 @@ from hypothesis import strategies as st
 from shell import BASH, in_bash
 
 import blueprint.fixes
+import pins
 from blueprint import cli
 from blueprint.coach import BOT, FIX_HEADLINE, Catalog
 from blueprint.fixes import (
@@ -40,6 +41,7 @@ from blueprint.fixes import (
     artifacts_of,
     blob_sha,
     changeable,
+    changed,
     collect,
     commit_onto_branch,
     downloader,
@@ -133,6 +135,7 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
         ("Ruff", "ruff format ."),
         # Of the blueprint alone, by its .github/checks.project.toml.
         ("Tests, with every line and branch covered", "{python} reference.py"),
+        ("Tests, with every line and branch covered", "{python} pins.py"),
     ]
     # Without a check, as on your machine, the same.
     assert fixers(catalog, ROOT, None) == found
@@ -159,6 +162,65 @@ def test_a_step_without_an_explanation_fixes_nothing(tmp_path: Path) -> None:
     write(tmp_path, "scripts/check.sh", 'step "Ruff"\nstep "Mypy"\n')
 
     assert fixers(Catalog.load(tmp_path), tmp_path, None) == [("Ruff", "ruff format .")]
+
+
+def test_the_step_of_the_project_fixes_itself_within_its_if(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        ".github/checks.project.toml",
+        '[step."Checks of this project"]\nproblem = "a."\nwhy = "b."\nfix = "c."\n'
+        'autofix = ["node scripts/check-l10n.mjs --write"]\n',
+    )
+    # As scripts/check.sh runs it: indented, and only with a scripts/check-project.sh.
+    write(
+        tmp_path,
+        "scripts/check.sh",
+        'step "Ruff"\nif [[ -f scripts/check-project.sh ]]; then\n'
+        '  step "Checks of this project"\n  bash scripts/check-project.sh\nfi\n',
+    )
+
+    assert fixers(Catalog.load(tmp_path), tmp_path, "check (php)") == [
+        ("Checks of this project", "node scripts/check-l10n.mjs --write")
+    ]
+
+
+@needs_bash
+def test_a_pin_that_disagrees_with_its_record_gets_its_sha256(tmp_path: Path) -> None:
+    record = pins.load_record(ROOT)["sigstore/gitsign"]
+    wrong = "0" * 64
+    root = repository(
+        tmp_path / "repo",
+        {
+            "pins.py": (ROOT / "pins.py").read_bytes(),
+            ".github/pins.toml": pins.render_record({"sigstore/gitsign": record}),
+            # By hand, or by a merge that took the line of the other side.
+            ".github/sign-tag.sh": (
+                "# renovate: datasource=github-releases depName=sigstore/gitsign\n"
+                f"version={record.version}\n"
+                f'sha256="{wrong}"\n'
+            ),
+        },
+    )
+    assert pins.check(root) != []
+    commands = [
+        (name, command)
+        for name, command in fixers(Catalog.load(ROOT), ROOT, "check (python)")
+        if "pins.py" in command
+    ]
+
+    said = run_until_done(commands, root, shell=BASH)
+
+    assert said == ["- Tests, with every line and branch covered: `python3 pins.py`"]
+    assert pins.check(root) == []
+    assert (
+        (root / ".github/sign-tag.sh")
+        .read_text(encoding="utf-8")
+        .endswith(f'sha256="{record.sha256}"\n')
+    )
+    # A file that the fix bot commits, as it would no workflow.
+    assert changed(root) == [".github/sign-tag.sh"]
+    assert allowed(".github/sign-tag.sh")
+    assert not allowed(".github/workflows/verify-release.yml")
 
 
 @pytest.mark.parametrize("script", [".github/blueprint.py", "blueprint.py"])

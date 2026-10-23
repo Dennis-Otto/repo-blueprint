@@ -91,6 +91,9 @@ def test_the_blueprint_explains_every_required_check_and_every_step() -> None:
     assert "lint" in checks
     assert steps[0] == "Text files"
     assert "Website" in steps
+    # The last one, within its if, as scripts/check.sh runs it only with a
+    # scripts/check-project.sh.
+    assert steps[-1] == "Checks of this project"
     assert missing(explained, checks, steps) == []
     assert cli.main(["coach", "verify"], root=ROOT) == 0
     # Each link of them leads to a section of the contributing guide.
@@ -159,6 +162,36 @@ def test_a_check_and_a_step_without_an_explanation_fail_the_verification(
     )
     assert cli.main(["coach", "verify"], root=tmp_path) == 0
     assert "is explained" in capsys.readouterr().out
+
+
+def test_a_step_within_an_if_needs_its_explanation_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(tmp_path, ".github/checks.toml", f"[step.Ruff]{ENTRY}")
+    # As scripts/check.sh runs the checks of a project: indented, by blanks or a tab.
+    write(
+        tmp_path,
+        "scripts/check.sh",
+        'step "Ruff"\nif [[ -f scripts/check-project.sh ]]; then\n'
+        '  step "Checks of this project"\n  bash scripts/check-project.sh\nfi\n'
+        'if true; then\n\tstep "Tabbed"\n  step "$name"\n  # step "Comment"\nfi\n'
+        "echo 'step \"Echoed\"'\n",
+    )
+
+    assert check_steps(tmp_path) == ["Ruff", "Checks of this project", "Tabbed"]
+    assert cli.main(["coach", "verify"], root=tmp_path) == 1
+    error = capsys.readouterr().err
+    assert "the step Checks of this project of scripts/check.sh has no explanation" in (
+        error
+    )
+    assert "the step Tabbed of scripts/check.sh has no explanation" in error
+
+    write(
+        tmp_path,
+        ".github/checks.project.toml",
+        f'[step."Checks of this project"]{ENTRY}[step.Tabbed]{ENTRY}',
+    )
+    assert cli.main(["coach", "verify"], root=tmp_path) == 0
 
 
 def test_nothing_to_explain_without_the_files(tmp_path: Path) -> None:
