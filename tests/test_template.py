@@ -6205,6 +6205,32 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
     assert arguments[-1].strip().endswith("renovate --platform=local --dry-run=extract")
 
 
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_renovate_rules_read_the_committed_rules_without_their_presets(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # The step of the workflow takes the presets of the platform "local" out of the
+    # committed rules in Renovate's container; what is left must still be JSON5,
+    # without an empty element where a preset was, or Renovate can't read it.
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    (sed,) = re.findall(r"^\s*(sed -i .*local>.*)$", workflow, re.M)
+    root = ROOT if kind == "blueprint" else projects[kind]
+    names = (".github/renovate.json5", ".github/renovate-blueprint.json5")
+    for name in names:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(root / name, tmp_path / name)
+    assert BASH
+    subprocess.run([BASH, "-c", sed], cwd=tmp_path, check=True)
+
+    own, shared = (
+        renovate_rules((tmp_path / name).read_text(encoding="utf-8")) for name in names
+    )
+    assert own["extends"] == []
+    assert shared["extends"] == ["config:recommended", ":semanticCommits"]
+    for name in names:
+        assert "local>" not in (tmp_path / name).read_text(encoding="utf-8")
+
+
 def test_the_renovate_rules_run_for_every_change_of_a_lock_file() -> None:
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
     events = workflow[

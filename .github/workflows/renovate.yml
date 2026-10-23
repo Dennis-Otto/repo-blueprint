@@ -74,7 +74,8 @@ jobs:
           # but without a token and without looking anything up. The platform "local"
           # has no presets: the rules of the blueprint come in as those of the bot,
           # without the rules of .github/renovate-accepted.json5, which the validator
-          # checks.
+          # checks. sed takes the comma after a preset of its own as well, as JSON5 has
+          # no empty element in an array.
           git archive --output="$RUNNER_TEMP/repository.tar" HEAD
           # Renovate ends with exit code 1 after an error in its log; the log says which.
           status=0
@@ -83,7 +84,7 @@ jobs:
             --env RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 "$IMAGE" \
             bash -c '
               mkdir /tmp/repository && cd /tmp/repository && tar -xf /tmp/repository.tar
-              sed -i "s#\"local>[^\"]*\"##" .github/renovate.json5 .github/renovate-blueprint.json5
+              sed -i "s#\"local>[^\"]*\",\{0,1\}##" .github/renovate.json5 .github/renovate-blueprint.json5
               renovate --platform=local --dry-run=extract' > "$RUNNER_TEMP/extract.json" || status=$?
           # The lock files of pip-compile, as managerFilePatterns finds them.
           git ls-files | grep -E '(^|/)requirements[^/]*\.txt$' > "$RUNNER_TEMP/lock-files" || true
