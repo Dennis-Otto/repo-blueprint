@@ -35,6 +35,6 @@ Option 2.
 
 On the slow phone, the home page of the blueprint loads 1.6 MB instead of 3.5 MB, and its largest picture appears after 1.7 seconds instead of 7.5; the guide 1.7 MB instead of 3.8 MB, after 2.8 seconds instead of 8.9. axe-core finds no serious or critical violation on the 91 pages of the blueprint's website in either theme, and on ha-autodarts' website only its own demo page, whose colors are the project's.
 
-Mermaid is now the largest part of a page with a diagram, almost 1 MB. Drawing the diagrams live is [decision 0016](0016-diagrams-as-pictures-of-their-sources.md); the pictures that the Markdown shows are a few kilobytes, so showing those on the website as well would make such a page small too, at the cost of text to search and select.
+Mermaid is now the largest part of a page with a diagram, almost 1 MB. Drawing the diagrams live is [decision 0016](0016-diagrams-as-pictures-of-their-sources.md); the pictures that the Markdown shows are a few kilobytes, so showing those on the website as well would make such a page small too, at the cost of text to search and select. [Decision 0058](0058-every-website-shows-the-pictures-of-its-diagrams.md) does that, and the check weighs every page.
 
 The check adds about a minute and a half to the check *docs* of the blueprint, whose 95 pages it checks through 50. A project whose own pages, colors or stylesheets fail it has one release to fix them; the summary of the check names each one. Once that release reached every repository, the check fails on what it finds.

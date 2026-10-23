@@ -120,16 +120,22 @@ navigation of `mkdocs.yml`, or MkDocs warns about a page. After the build, lyche
 checks every link and anchor of the built pages, also those written in HTML, such as
 `<a href="…">` in a card, and `blueprint.py site-check` what the hooks of the website
 promise, such as a sitemap in every folder of pages and the 404 page in the default
-language; `scripts/check-site.sh` adds the checks of the project. When the log names a
+language, and that no page loads more than 1,200 KB at once, as it names a page that
+does with what it loads the most; `scripts/check-site.sh` adds the checks of the
+project. When the log names a
 font or a script that Material couldn't download, its server had a hiccup: that
 usually passes when the job runs again, and a build that finds them in the cache of
 the week, which a push to `main` saves, downloads nothing."""
 why = """A strict build keeps every link of the documentation working; a warning
 today is a broken page for a reader tomorrow. The checks of the built website see what
-the build doesn't: the links that a page writes in HTML, and what a new version of
-Material or of its plugins changes in the pages."""
+the build doesn't: the links that a page writes in HTML, what a new version of
+Material or of its plugins changes in the pages, and a page that takes a phone on a
+slow network more than a few seconds to load."""
 fix = """Fix what the log of the check names: the page and the link that leads nowhere,
-or the file of the website that breaks a promise of its hooks. Install the tools of the
+or the file of the website that breaks a promise of its hooks. A page that loads too
+much shows a smaller picture, or the pictures of a diagram in place of its ```mermaid
+block, which loads Mermaid, about 1 MB: `bash scripts/diagrams.sh --extract` makes
+them. Install the tools of the
 website as the section Website of CONTRIBUTING.md shows, and build and check it as the
 check does (in the blueprint itself, the tool is `blueprint.py` without `.github/`);
 with them, `bash scripts/check.sh` builds it as well:"""

@@ -107,8 +107,10 @@ TEMPLATES = {
     "templates/.github/egress-firewall.yaml": FIREWALL + "  - example.com\n",
 }
 # install as the issue assistant does it: the workflows of its templates with every
-# pin of the action moved to the release, and what a test adds in WRITE (paths to
-# write) and DELETE (paths to delete), or a failure.
+# pin of the action moved to the release, but those that a test names in LEAVE (as
+# install leaves out the workflow of the discussions while config.toml names no
+# category of them), and what a test adds in WRITE (paths to write) and DELETE (paths
+# to delete), or a failure.
 INSTALL = """\
 import os
 import re
@@ -123,6 +125,8 @@ if os.environ.get("INSTALL_FAILS"):
     print("Give the commit hash of the issue assistant's release.")
     sys.exit(1)
 for template in sorted((tool / "templates/.github/workflows").glob("*.yml")):
+    if template.name in os.environ.get("LEAVE", "").split():
+        continue
     text = re.sub(
         r"Dennis-Otto/issue-assistant@[0-9a-f]{40} # \\S+",
         f"Dennis-Otto/issue-assistant@{ref} # {version}",
@@ -248,6 +252,25 @@ def test_adopt_takes_the_release_over(
     assert text(root, ".github/workflows/ci.yml") == "name: CI\non: push\n"
     # The log says what install did.
     assert "wrote .github/workflows/triage.yml\n" in capsys.readouterr().err
+
+
+@needs_git
+def test_adopt_renders_no_workflow_that_install_left_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = blueprint(tmp_path / "blueprint")
+    tool = release(tmp_path / "release")
+    # install writes the workflow of the discussions only once config.toml names a
+    # category of them; an include of a workflow that the root lacks would fail every
+    # rendering of the template.
+    monkeypatch.setenv("LEAVE", "triage.yml")
+
+    changed = sync.adopt(root, tool, NEW, "v1.3.1")
+
+    assert ".github/workflows/triage.yml" not in changed
+    assert "template/.github/workflows/triage.yml.jinja" not in changed
+    assert not (root / "template/.github/workflows/triage.yml.jinja").exists()
+    assert sync.pinned(root) == [f"{NEW} v1.3.1"]
 
 
 # A reference.py that writes the page of the variables from the workflows, as the

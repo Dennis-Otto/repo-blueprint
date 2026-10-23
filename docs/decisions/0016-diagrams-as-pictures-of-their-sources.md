@@ -1,6 +1,6 @@
 # Show every diagram as a picture drawn from its Mermaid source, because the GitHub app draws no Mermaid
 
-- Status: accepted
+- Status: accepted; the website shows the pictures instead of drawing the source since [0058](0058-every-website-shows-the-pictures-of-its-diagrams.md)
 - Date: 2026-10-13
 
 ## Context
@@ -22,6 +22,8 @@ Option 3. A diagram is a source in `docs/diagrams/<name>.mmd`, `<name>.de.mmd` f
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-a-diagram-reaches-every-reader.dark.svg">
   <img src="../images/diagrams/how-a-diagram-reaches-every-reader.svg" alt="How a diagram reaches every reader: A diagram is a Mermaid source in docs/diagrams/. scripts/diagrams.sh draws it with mermaid-cli in Docker as an SVG picture for the light and one for the dark theme, which the Markdown shows with a picture element, so that the GitHub app, the stores, e-mails and github.com all show it. The website draws the source itself, live. In a pull request that changes a diagram, the check diagrams draws the pictures anew, and the diagram bot commits those that differ.">
 </picture>
+
+The picture shows the decision as it was made: since [0058](0058-every-website-shows-the-pictures-of-its-diagrams.md), the website shows the pictures as well, instead of drawing the source live.
 
 - **Pictures that every renderer shows:** the labels are SVG text, not HTML in a `foreignObject`, which many renderers of pictures leave out. So a label breaks a line with `<br>` alone, and a label in `` "`…`" `` takes `**bold**` and `*italic*`. The labels are measured with DejaVu Sans, which is wider than the fonts that readers have before it in the list, so that every label fits its box. The light picture has an opaque card, so that it stays readable where an app shows it on a dark background.
 - **The same pictures every time:** the container has no network, the shapes with curves get a fixed seed, and the coordinates are rounded to hundredths, so that drawing again changes nothing and a review sees only the diagrams that changed.

@@ -566,6 +566,12 @@ def test_the_required_checks_exist(projects: dict[str, Path], project: str) -> N
 # The actions that listed actions run in turn, which no workflow names: `blueprint.py
 # settings check` finds them on GitHub, at the commit of each pin, and names those that
 # the list lacks. Each with the action that runs it.
+# The reusable workflow of the issue assistant that runs its engines.
+ASSISTANT_REUSABLE = (
+    "Dennis-Otto/issue-assistant/.github/workflows/reusable-issue-assistant.yml"
+)
+# The start of each reusable workflow of the issue assistant.
+ASSISTANT_REUSABLE_OF = "Dennis-Otto/issue-assistant/.github/workflows/reusable-"
 RUN_IN_TURN = {
     "google/osv-scanner-action/osv-reporter-action@*": (
         "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml"
@@ -574,7 +580,18 @@ RUN_IN_TURN = {
         "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml"
     ),
     "oven-sh/setup-bun@*": "anthropics/claude-code-action",
+    "anthropics/claude-code-action@*": ASSISTANT_REUSABLE,
+    "openai/codex-action@*": ASSISTANT_REUSABLE,
 }
+
+
+def run_in_turn(pattern: str, named: set[str]) -> bool:
+    """Whether a workflow names what runs the action of the pattern, also through
+    another action that runs it in turn."""
+    runner = RUN_IN_TURN.get(pattern)
+    if runner is None:
+        return False
+    return runner.casefold() in named or run_in_turn(f"{runner}@*", named)
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -593,7 +610,7 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
     patterns = selected["patterns_allowed"]
     for pattern in patterns:
         name = pattern.removesuffix("@*").casefold()
-        assert name in named or RUN_IN_TURN[pattern].casefold() in named, pattern
+        assert name in named or run_in_turn(pattern, named), pattern
     assert patterns == sorted(patterns, key=str.casefold)
 
 
@@ -8930,7 +8947,15 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     for name in watched_by_bot_health(root) & after_checks - {"Update branches"}:
         text = named[name]
         for job in re.findall(r"^  ([\w-]+):$", text.split("\njobs:\n", 1)[1], re.M):
-            condition = condition_of(job_of(text, job))
+            body = job_of(text, job)
+            # A job that calls a reusable workflow of the issue assistant, as that of
+            # Findings, runs the job of the release, which has the condition: the
+            # check of the issue assistant keeps the workflow equal to the template
+            # of the release, and the tests of the assistant its condition.
+            if re.search(rf"^    uses: {re.escape(ASSISTANT_REUSABLE_OF)}", body, re.M):
+                assert "\n    steps:" not in body, (name, job)
+                continue
+            condition = condition_of(body)
             assert (
                 "github.event.workflow_run.head_branch == "
                 "github.event.repository.default_branch" in condition
@@ -10829,6 +10854,20 @@ def test_every_website_shows_the_automation_of_its_repository(
     assert f"from the [Repo Blueprint]({blueprint})" in page
     nav = (project / "mkdocs.yml").read_text(encoding="utf-8").split("\nnav:\n")[1]
     assert "\n  - automation.md\n" in nav
+    # The diagrams of the blueprint's README, as their pictures, which every
+    # repository gets beside the hook and its website serves: no Mermaid.
+    pictures = project / ".github/mkdocs-blueprint-diagrams"
+    for name in hooks.DIAGRAMS:
+        for scheme in ("", ".dark", ".de", ".de.dark"):
+            picture = f"{name}{scheme}.svg"
+            assert (pictures / picture).read_bytes() == (
+                ROOT / "docs/images/diagrams" / picture
+            ).read_bytes(), picture
+        assert f'  <img src="assets/images/automation/{name}.svg" alt="' in page
+    assert sorted(path.name for path in hooks.BUILT.pictures) == sorted(
+        f"{name}{scheme}.svg" for name in hooks.DIAGRAMS for scheme in ("", ".dark")
+    )
+    assert "\n```mermaid\n" not in page
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10989,11 +11028,16 @@ def test_every_project_draws_its_diagrams_as_pictures(
     assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
     for script in opener.split("        run: |\n")[1:]:
         assert "${{" not in script.split("\n      - ")[0]
-    # The website draws the sources live, and GitHub folds the pictures in diffs.
+    # The website shows the pictures, and GitHub folds them in diffs.
     hooks = (project / ".github/mkdocs_blueprint.py").read_text(encoding="utf-8")
     assert "def on_page_content(" in hooks
+    assert "live_diagrams" not in hooks
     attributes = (project / ".gitattributes").read_text(encoding="utf-8")
     assert "\ndocs/images/diagrams/*.svg linguist-generated=true\n" in attributes
+    assert (
+        "\n.github/mkdocs-blueprint-diagrams/*.svg linguist-generated=true\n"
+        in attributes
+    )
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/diagrams.sh`" in contributing
     assert "`docs/diagrams/" in contributing

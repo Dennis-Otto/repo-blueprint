@@ -4,6 +4,8 @@ site-check of blueprint.py, which the check docs runs after the build."""
 
 from __future__ import annotations
 
+import random
+import re
 from pathlib import Path
 
 import pytest
@@ -350,6 +352,139 @@ def test_a_page_says_what_it_is() -> None:
     assert found.alternates == [("en", "a.html")]
     assert found.parts == {"fr"}
     assert not found.asks_github
+
+
+# What a page loads at once, as Material and the hooks write it: its stylesheets,
+# among them the fonts of another server, its scripts, the configuration of the
+# search and the script that has it load the index of the page's language.
+HEAD = (
+    GENERATOR
+    + '<link rel="stylesheet" href="../assets/main.css">'
+    + '<link rel="stylesheet" href="https://fonts.example/css">'
+    + '<link rel="icon" href="../assets/icon.png">'
+    + '<script>(function(){var a=new URL("../search/search_index.json",location.href)'
+    + '.href,b=new URL("../search/search_index.de.json",location.href).href})()'
+    + "</script>"
+)
+SCRIPTS = (
+    '<script id="__config" type="application/json">{"base": "..", "search": '
+    '"../assets/worker.js"}</script>'
+    '<script src="../assets/bundle.js"></script>'
+    '<script src="../assets/bundle.js?v=1#again"></script>'
+)
+
+
+def noise(size: int, seed: int = 1) -> bytes:
+    """Bytes that no compression makes smaller."""
+    return random.Random(seed).randbytes(size)
+
+
+def heavy_site(tmp_path: Path) -> Path:
+    files = two_languages()
+    files["de/guide.html"] = page(
+        "de",
+        canonical=BASE + "de/guide.html",
+        alternates=versions("guide.html"),
+        head=HEAD,
+        body=(
+            '<img src="../images/hero.webp#only-light" alt="Hero">'
+            '<img src="../images/far.png" loading="lazy" alt="Far">'
+            '<video class="blueprint-video" src="../images/a.mp4" '
+            'poster="../images/a.webp" preload="none"></video>'
+            '<img src="/demo/images/rooted.png" alt="From the root">'
+            '<img src="../../outside.png" alt="Outside">'
+            '<img src="../images/missing.png" alt="Missing">'
+            '<img alt="Nothing">'
+            '<pre class="mermaid"><code>flowchart TB</code></pre>' + SCRIPTS
+        ),
+    )
+    # A diagram drawn live, and a large picture.
+    files["record.html"] = page(
+        "en",
+        canonical=BASE + "record.html",
+        body='<div class="mermaid"></div><img src="images/big.png" alt="Big">',
+    )
+    site = built(tmp_path, files)
+    for name, size in (
+        ("assets/main.css", 30_000),
+        ("assets/icon.png", 900_000),
+        ("assets/worker.js", 12_000),
+        ("assets/bundle.js", 40_000),
+        ("search/search_index.de.json", 200_000),
+        ("search/search_index.json", 900_000),
+        ("images/hero.webp", 60_000),
+        ("images/far.png", 2_000_000),
+        ("images/a.webp", 50_000),
+        ("images/rooted.png", 900_000),
+        ("images/big.png", 1_300_000),
+        ("assets/external/unpkg.com/mermaid@11.17.2/dist/mermaid.min.js", 0),
+    ):
+        (site / name).parent.mkdir(parents=True, exist_ok=True)
+        (site / name).write_bytes(noise(size))
+    (tmp_path / "outside.png").write_bytes(noise(900_000))
+    return site
+
+
+def test_no_page_loads_more_than_its_budget_at_once(tmp_path: Path) -> None:
+    site = heavy_site(tmp_path)
+    mermaid = site / "assets/external/unpkg.com/mermaid@11.17.2/dist/mermaid.min.js"
+    mermaid.write_bytes(noise(850_000))
+
+    found = messages(site)
+
+    # The page, its stylesheet, its scripts once, the search with the German index,
+    # the first picture and the poster of the video, and Mermaid: 1,242 KB and the
+    # page itself, without the icon, the picture that waits for the
+    # reader and every address that leads to no file of the website.
+    assert len(found) == 2
+    assert re.fullmatch(
+        r"de/guide\.html: loads 1,24\d KB at once, more than the 1,200 KB that a "
+        r"page may on a slow phone; the most: assets/external/unpkg\.com/mermaid@"
+        r"11\.17\.2/dist/mermaid\.min\.js \(850 KB\), search/search_index\.de\.json "
+        r"\(200 KB\), images/hero\.webp \(60 KB\); it draws a diagram live from a "
+        r"```mermaid block, which loads Mermaid: show the pictures of "
+        r"scripts/diagrams\.sh in its place",
+        found[0],
+    ), found[0]
+    assert found[1] == (
+        "record.html: loads 2,151 KB at once, more than the 1,200 KB that a page may "
+        "on a slow phone; the most: images/big.png (1,300 KB), assets/external/"
+        "unpkg.com/mermaid@11.17.2/dist/mermaid.min.js (850 KB), record.html (0 KB); "
+        "it draws a diagram live from a ```mermaid block, which loads Mermaid: show "
+        "the pictures of scripts/diagrams.sh in its place"
+    )
+
+
+def test_a_page_within_its_budget_passes(tmp_path: Path) -> None:
+    site = heavy_site(tmp_path)
+    (site / "images/big.png").write_bytes(noise(100))
+    # A website without the script of Mermaid, which its diagrams would load.
+    next(site.glob("assets/external/unpkg.com/mermaid@*/dist/mermaid.min.js")).unlink()
+
+    # The German guide loads 392 KB.
+    assert messages(site) == []
+
+
+def test_the_search_of_a_page_loads_its_worker_and_its_index() -> None:
+    def search(config: str, scripts: str = "") -> list[str]:
+        found = Page()
+        found.feed(
+            f'<script id="__config" type="application/json">{config}</script>'
+            f"<script>{scripts}</script>"
+        )
+        return found.search
+
+    assert search('{"base": "..", "search": "w.js"}') == [
+        "w.js",
+        "../search/search_index.json",
+    ]
+    assert search('{"search": "w.js"}', HEAD.split("<script>")[1]) == [
+        "w.js",
+        "../search/search_index.de.json",
+    ]
+    assert search('{"base": "."}') == []
+    assert search("[1]") == []
+    assert search("{not json") == []
 
 
 def test_an_annotation_names_the_file_on_one_line() -> None:

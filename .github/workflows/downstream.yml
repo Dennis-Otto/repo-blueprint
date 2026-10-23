@@ -32,6 +32,9 @@ on:
       - LICENSES/**
       - lychee.toml
       - .vale.ini
+      # The pictures of the page of the automation, which every repository gets.
+      - docs/images/diagrams/how-a-repository-looks-after-itself*.svg
+      - docs/images/diagrams/from-a-change-to-a-release*.svg
       - downstream.py
       - tests/answers/**
   schedule:
