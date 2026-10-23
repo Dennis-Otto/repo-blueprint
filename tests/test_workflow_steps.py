@@ -754,6 +754,36 @@ def test_the_release_pull_request_is_rebuilt_only_when_it_is_behind_main(
     )
 
 
+OVERRIDES = "Give release-please the title of each merged pull request"
+
+
+@pytest.mark.parametrize("script", [".github/blueprint.py", "blueprint.py"])
+def test_release_please_reads_the_overrides_that_the_step_before_writes(
+    tmp_path: Path, script: str
+) -> None:
+    # blueprint.py writes the overrides, which tests/test_overrides.py tests, with the
+    # token of the job, whose edit of a merged pull request starts no workflow.
+    names = [each.get("name") for each in job("release.yml", "release-please")["steps"]]
+    assert names.index(OVERRIDES) == (
+        names.index("Update the release pull request, or create the release") - 1
+    )
+    assert step("release.yml", "release-please", OVERRIDES)["env"] == {
+        "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
+    }
+    done = run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        OVERRIDES,
+        stubs={"python3": recording("python3", 'echo "- #383: the title"')},
+        files={script: ""},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == [f"python3 {script} --repo o/r commit-overrides"]
+    assert done.summary == "- #383: the title\n"
+
+
 BETA = "Publish a beta of the next release"
 SIGN_TAG = 'printf "%s\\n" "sign-tag $*" >> "$STUB_CALLS"\n'
 

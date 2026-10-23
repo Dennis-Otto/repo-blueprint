@@ -676,6 +676,46 @@ def test_a_breaking_change_below_1_0_0_is_said_to_raise_the_minor_version(
         assert f"`!` {said}." in contributing
 
 
+def release_pull_request_body(header: str) -> str:
+    """The description of the release pull request as release-please builds it, in
+    PullRequestBody.toString of src/util/pull-request-body.ts (release-please 17)."""
+    notes = "## [1.3.0](https://example.com) (2026-10-23)\n\n### Bug fixes\n\n* x (#1)"
+    return (
+        f"{header}\n---\n\n\n{notes}\n\n---\nThis PR was generated with Release Please."
+    )
+
+
+def parsed_header(body: str) -> str:
+    """The header of a description as release-please reads it back, in splitBody of
+    the same file: the lines above the first ---, trimmed."""
+    lines = body.strip().replace("\r\n", "\n").split("\n")
+    return "\n".join(lines[: lines.index("---")]).strip()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_release_pull_request_stays_as_it_is_while_main_stays(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # release-please leaves its pull request alone only when the description that it
+    # builds equals that of the open pull request as it reads it back, with a trimmed
+    # header (maybeUpdateExistingPullRequest of src/manifest.ts). A header that the
+    # trim changed, one that ended with a line end, made every run on the same commit
+    # force-push the pull request and start its checks again.
+    for root in (ROOT, projects[kind]):
+        config = json.loads(
+            (root / "release-please-config.json").read_text(encoding="utf-8")
+        )["packages"]["."]
+        header = config["pull-request-header"]
+        first = release_pull_request_body(header)
+        second = release_pull_request_body(parsed_header(first))
+
+        assert second == first
+        # A paragraph right above the --- of the notes would be a heading in Markdown;
+        # the comment ends the paragraph and shows nothing.
+        assert header.split("\n")[-1] == "<!-- The notes of the release follow. -->"
+        assert "\n\n<!--" in header
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_dependabot_watches_existing_folders(
     projects: dict[str, Path], kind: str
