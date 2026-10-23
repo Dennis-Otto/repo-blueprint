@@ -937,9 +937,14 @@ def test_the_failed_jobs_of_a_release_run_once_more(tmp_path: Path) -> None:
         assert part in settings["if"]
     assert settings["permissions"] == {"actions": "write"}
 
-    done = rerun_the_release(tmp_path, "completed", 1, exact("run rerun 77 --failed"))
+    confirmed = "Requested rerun (failed jobs) of run 77\n"
+    done = rerun_the_release(
+        tmp_path, "completed", 1, exact("run rerun 77 --failed", confirmed)
+    )
 
     assert done.returncode == 0, done.stderr
+    # The log shows that GitHub took the rerun.
+    assert confirmed in done.stdout
     assert done.commands == [
         'api repos/o/r/actions/runs/77 --jq "\\(.status) \\(.run_attempt)"',
         "run rerun 77 --failed",
@@ -972,17 +977,17 @@ def rerun_the_release(
 
 @WITH_JQ
 @pytest.mark.parametrize(
-    ("status", "attempt"),
+    ("status", "attempt", "now"),
     [
         # A person ran it again before the bot started, as in run 39648756239.
-        ("in_progress", 2),
-        ("queued", 2),
+        ("in_progress", 2, "running"),
+        ("queued", 2, "waiting"),
         # Its second attempt ended already, passed or failed: a third is a person's.
-        ("completed", 2),
+        ("completed", 2, "done"),
     ],
 )
 def test_the_bot_leaves_a_release_alone_that_ran_again_already(
-    tmp_path: Path, status: str, attempt: int
+    tmp_path: Path, status: str, attempt: int, now: str
 ) -> None:
     done = rerun_the_release(
         tmp_path, status, attempt, exact("run rerun 77 --failed", code=1)
@@ -992,7 +997,7 @@ def test_the_bot_leaves_a_release_alone_that_ran_again_already(
     assert not done.called("run rerun")
     assert done.summary == (
         f"The release of abc1234 ran again already: its attempt {attempt} is"
-        f" {status}. The bot leaves it alone.\n"
+        f" {now}. The bot leaves it alone.\n"
     )
 
 

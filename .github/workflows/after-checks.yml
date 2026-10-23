@@ -330,18 +330,24 @@ jobs:
           # started: then the run is theirs, and GitHub refuses a rerun while it runs.
           state="$(gh api "repos/$GH_REPO/actions/runs/$RUN" --jq '"\(.status) \(.run_attempt)"')"
           if [[ "$state" != "completed 1" ]]; then
-            echo "The release of ${SHA:0:7} ran again already: its attempt ${state#* } is ${state%% *}. The bot leaves it alone." >> "$GITHUB_STEP_SUMMARY"
+            case "${state%% *}" in
+              completed) now="done" ;;
+              queued | waiting | pending | requested) now="waiting" ;;
+              *) now="running" ;;
+            esac
+            echo "The release of ${SHA:0:7} ran again already: its attempt ${state#* } is $now. The bot leaves it alone." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           # It may also start again between the look and the rerun.
-          if ! refused="$(gh run rerun "$RUN" --failed 2>&1)"; then
-            if grep -q "already running" <<<"$refused"; then
+          if ! output="$(gh run rerun "$RUN" --failed 2>&1)"; then
+            if grep -q "already running" <<<"$output"; then
               echo "The release of ${SHA:0:7} runs again already; the bot leaves it alone." >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            printf '%s\n' "$refused" >&2
+            printf '%s\n' "$output" >&2
             exit 1
           fi
+          printf '%s\n' "$output"
           echo "The failed jobs of the release of ${SHA:0:7} run once more, where they stopped." >> "$GITHUB_STEP_SUMMARY"
 
   cancelled:
