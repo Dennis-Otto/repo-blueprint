@@ -20,7 +20,8 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 
 - **The example:** `custom_components/<domain>/` with its `manifest.json`, a config flow, translations in English and German and the brand icons, `hacs.json`, and the tests in `tests/` with pytest-homeassistant-custom-component, on Python 3.14. Replace it with the real code; its tests show how.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: Ruff, mypy and the tests with every line and branch covered, on every core.
-- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The advisories of the test tools that Home Assistant pins:** `osv-scanner.toml` accepts every advisory of the Pillow and the uv that Home Assistant pins for the tests, with its reason and until a date, so that OSV-Scanner passes from the first commit, and `.github/renovate-accepted.json5` keeps Renovate from a fix that the lock file can't take, as [the troubleshooting](../troubleshooting.md#osv-scanner-reports-a-version-that-another-package-pins) shows.
 - **Workflows of this kind:** the property tests with new random inputs every night (`properties.yml`) and the mutation tests with mutmut every week (`mutation.yml`).
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 

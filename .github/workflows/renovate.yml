@@ -58,7 +58,8 @@ jobs:
           IMAGE: ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435
         run: |
           docker run --rm --volume "$PWD:/usr/src/app" --workdir /usr/src/app "$IMAGE" \
-            renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5
+            renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 \
+              .github/renovate-accepted.json5
           docker run --rm --volume "$PWD:/usr/src/app" --workdir /usr/src/app \
             --env RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 "$IMAGE" \
             renovate-config-validator --strict
@@ -71,7 +72,9 @@ jobs:
           # and the file gets no update from then on, not even one that fixes a
           # vulnerability. So Renovate reads the committed files here, as in its runs
           # but without a token and without looking anything up. The platform "local"
-          # has no presets: the rules of the blueprint come in as those of the bot.
+          # has no presets: the rules of the blueprint come in as those of the bot,
+          # without the rules of .github/renovate-accepted.json5, which the validator
+          # checks.
           git archive --output="$RUNNER_TEMP/repository.tar" HEAD
           # Renovate ends with exit code 1 after an error in its log; the log says which.
           status=0
@@ -80,7 +83,7 @@ jobs:
             --env RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 "$IMAGE" \
             bash -c '
               mkdir /tmp/repository && cd /tmp/repository && tar -xf /tmp/repository.tar
-              sed -i "s#\"local>[^\"]*\"##" .github/renovate.json5
+              sed -i "s#\"local>[^\"]*\"##" .github/renovate.json5 .github/renovate-blueprint.json5
               renovate --platform=local --dry-run=extract' > "$RUNNER_TEMP/extract.json" || status=$?
           # The lock files of pip-compile, as managerFilePatterns finds them.
           git ls-files | grep -E '(^|/)requirements[^/]*\.txt$' > "$RUNNER_TEMP/lock-files" || true

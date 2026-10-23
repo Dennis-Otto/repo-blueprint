@@ -399,9 +399,12 @@ problem = """A lock file of the pull request pins a dependency with a known vuln
 of the OSV database; the summary of the check names each one."""
 why = """A dependency with a vulnerability ships it to every user of the project."""
 fix = """Update the dependency to a version that fixes it. An advisory that doesn't
-affect the project goes into `osv-scanner.toml` with the reason, in the same pull
-request."""
-docs = "https://google.github.io/osv-scanner/configuration/"
+affect the project goes into the `osv-scanner.toml` beside the lock file with the
+reason, in the same pull request: as `[[IgnoredVulns]]` alone, or, for a version that
+another package pins exactly, as `[[PackageOverrides]]` with `effectiveUntil`, from
+which `blueprint.py advisories --fix` writes the rule that keeps Renovate from trying
+to fix it."""
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#osv-scanner-reports-a-version-that-another-package-pins"
 autofix = """Which version fixes an advisory, and whether it affects the project, is
 the decision of a person."""
 
@@ -626,6 +629,23 @@ commands = ["python3 .github/blueprint.py fragments"]
 docs = "CONTRIBUTING.md#the-changelog"
 autofix = """Which kind of change an entry is and how a user reads it is the decision of
 a person; the log names the fragment and its problem."""
+
+[step."Accepted advisories"]
+problem = """`.github/renovate-accepted.json5` has other rules of Renovate than the versions
+that an `osv-scanner.toml` accepts with every advisory, or an `osv-scanner.toml` is one
+that OSV-Scanner can't use: a key that it doesn't know, or an entry of
+`[[PackageOverrides]]` without its package, version, ecosystem, reason or
+`effectiveUntil`; the log names each file and entry."""
+why = """Renovate doesn't read `osv-scanner.toml`: without its rule, it tries a fix of
+each accepted advisory in every run, which the lock file can't take, and logs an empty
+commit. OSV-Scanner ignores a whole file with a key that it doesn't know, and then
+reports every advisory that the file accepts."""
+fix = """Fix the `osv-scanner.toml` as the log says, then write the rules of Renovate from
+it and commit both (in the blueprint itself, the tool is `blueprint.py` without
+`.github/`):"""
+commands = ["python3 .github/blueprint.py advisories --fix"]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#osv-scanner-reports-a-version-that-another-package-pins"
+autofix = ["{blueprint} advisories --fix"]
 
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
