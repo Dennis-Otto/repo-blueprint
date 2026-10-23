@@ -11271,9 +11271,9 @@ def test_the_screenshot_bot_is_in_every_repository_and_waits_for_its_script(
     assert bot == (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
     )
-    # Under a name of its own: a project's own screenshots.yml, as ha-autodarts has,
-    # stays the project's, and the picture bot of the blueprint's documentation stays
-    # in the blueprint.
+    # Under a name of its own: a project's own screenshots.yml, as
+    # homedarts-for-autodarts has, stays the project's, and the picture bot of the
+    # blueprint's documentation stays in the blueprint.
     assert "screenshots.yml" not in found
     assert "docs-pictures.yml" not in found
     assert (project / ".github/blueprint/screenshots.py").read_text(

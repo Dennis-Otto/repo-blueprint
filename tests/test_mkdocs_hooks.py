@@ -1050,15 +1050,15 @@ def test_the_language_of_a_page_comes_from_its_path() -> None:
             "de/",
             "de.html",
             # The pages of a project website in the search of its owner's website.
-            "ha-autodarts/games.html",
-            "ha-autodarts/de/games.html",
-            "ha-autodarts/de.html",
+            "homedarts-for-autodarts/games.html",
+            "homedarts-for-autodarts/de/games.html",
+            "homedarts-for-autodarts/de.html",
         )
     ] == ["en", "de", "de", "en", "en", "de", "en"]
     assert found.versions("guide.html", "de") == ("de/guide.html",)
-    assert found.versions("ha-autodarts/games.html", "de") == (
-        "de/ha-autodarts/games.html",
-        "ha-autodarts/de/games.html",
+    assert found.versions("homedarts-for-autodarts/games.html", "de") == (
+        "de/homedarts-for-autodarts/games.html",
+        "homedarts-for-autodarts/de/games.html",
     )
 
 
@@ -1764,9 +1764,9 @@ def test_the_search_of_each_language_finds_its_pages(tmp_path: Path) -> None:
         entry("roadmap.html#done", "Done"),
         # A section whose page an older build left out.
         entry("guide.html#install", "Install"),
-        entry("ha-autodarts/games.html"),
-        entry("ha-autodarts/de/games.html"),
-        entry("ha-autodarts/coming-from.html"),
+        entry("homedarts-for-autodarts/games.html"),
+        entry("homedarts-for-autodarts/de/games.html"),
+        entry("homedarts-for-autodarts/coming-from.html"),
     ]
     index = tmp_path / "search/search_index.json"
     index.parent.mkdir()
@@ -1789,8 +1789,8 @@ def test_the_search_of_each_language_finds_its_pages(tmp_path: Path) -> None:
         "roadmap.html#done",
         "guide.html",
         "guide.html#install",
-        "ha-autodarts/games.html",
-        "ha-autodarts/coming-from.html",
+        "homedarts-for-autodarts/games.html",
+        "homedarts-for-autodarts/coming-from.html",
     ]
     assert [doc["location"] for doc in german["docs"]] == [
         "de/index.html",
@@ -1799,8 +1799,8 @@ def test_the_search_of_each_language_finds_its_pages(tmp_path: Path) -> None:
         "de/roadmap.html#done",
         "guide.html",
         "guide.html#install",
-        "ha-autodarts/de/games.html",
-        "ha-autodarts/coming-from.html",
+        "homedarts-for-autodarts/de/games.html",
+        "homedarts-for-autodarts/coming-from.html",
     ]
     assert german["docs"][3] == entry("de/roadmap.html#done", "Done")
     # After the i18n plugin and the hooks of a project that add to the index.

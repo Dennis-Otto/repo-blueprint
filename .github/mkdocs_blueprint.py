@@ -234,9 +234,9 @@ class Languages(NamedTuple):
 
     def of(self, location: str) -> str:
         """The language of a page by its path on the website: a further one for
-        de/guide.html, and for ha-autodarts/de/games.html, a page of a project
-        website that the website of its owner adds to its search; the default one
-        for every other page."""
+        de/guide.html, and for homedarts-for-autodarts/de/games.html, a page of a
+        project website that the website of its owner adds to its search; the
+        default one for every other page."""
         parts = location.split("/")
         if parts[0] in self.further:
             return parts[0]
@@ -247,7 +247,8 @@ class Languages(NamedTuple):
     def versions(self, location: str, language: str) -> tuple[str, ...]:
         """The paths where the version in language of the page of the default
         language at location would be: de/guide.html for guide.html, and also
-        ha-autodarts/de/games.html for ha-autodarts/games.html."""
+        homedarts-for-autodarts/de/games.html for
+        homedarts-for-autodarts/games.html."""
         head, slash, rest = location.partition("/")
         nested = (f"{head}/{language}/{rest}",) if slash else ()
         return (f"{language}/{location}", *nested)

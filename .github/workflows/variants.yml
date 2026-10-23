@@ -83,7 +83,7 @@ jobs:
           # assistant, whose check then asks no file to name an engine.
           - { kind: generic, start: new, owner: octo-org, ai: "false" }
           - { kind: generic, start: adopted, answers: dennis-otto.github.io }
-          - { kind: home-assistant, start: adopted, answers: ha-autodarts }
+          - { kind: home-assistant, start: adopted, answers: homedarts-for-autodarts }
           - { kind: github-action, start: adopted, answers: issue-assistant }
           - { kind: nextcloud-app, start: adopted, answers: paperless-sync }
           - { kind: nextcloud-app, start: adopted, answers: paperless-unified-search }

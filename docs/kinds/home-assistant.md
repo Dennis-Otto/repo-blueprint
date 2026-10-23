@@ -48,6 +48,6 @@ This kind adds these steps:
 
 ## A real repository
 
-[Autodarts for Home Assistant](https://github.com/Dennis-Otto/ha-autodarts) is made from the blueprint: local real-time board control, games, tournaments and statistics, with dashboard cards, end-to-end tests in a real Home Assistant and screenshots that renew themselves.
+[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) is made from the blueprint: local real-time board control, games, tournaments and statistics, with dashboard cards, end-to-end tests in a real Home Assistant and screenshots that renew themselves.
 
 How the blueprint compares with other templates: [the comparison](../compare.md).

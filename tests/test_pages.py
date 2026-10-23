@@ -28,7 +28,7 @@ ROOT = Path(__file__).parents[1]
 GIT = shutil.which("git")
 
 # The features of a README as a table: the text in one cell, its picture in the other,
-# as ha-autodarts had them.
+# as homedarts-for-autodarts had them.
 FEATURES = """\
 # Demo
 

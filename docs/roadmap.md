@@ -28,7 +28,7 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 | --- | --- |
 | **Documentation for every question** | A page for every question of Copier and every variable, an FAQ, help when something fails, a page on how the blueprint works, a comparison with other templates, and a page for each kind of project, with the repositories made from it |
 | **Visual changes in pull requests** | A pull request that changes what a picture of the screenshot bot shows shows the picture before and after the change in its report, rendered by the same script, and one that changes the website shows its changed pages, before and after |
-| **More pictures for the screenshot bot** | Starter scripts for each kind of project, screenshots of the public GitHub pages for the blueprint's own documentation, and ha-autodarts on the shared workflow ([#271](https://github.com/Dennis-Otto/repo-blueprint/issues/271)) |
+| **More pictures for the screenshot bot** | Starter scripts for each kind of project, screenshots of the public GitHub pages for the blueprint's own documentation, and HomeDarts for Autodarts on the shared workflow ([#271](https://github.com/Dennis-Otto/repo-blueprint/issues/271)) |
 | **A website that shows the blueprint** | A logo and colors of its own, a home page that shows what a repository gets, and a page that builds the command of `copier copy` from your answers |
 | **Commands in pull requests** | `/update`, `/retest` and `/automerge` in a comment of a pull request |
 | **More kinds of projects** | Cards for the dashboards of Home Assistant, apps of Home Assistant (add-ons), and actions in JavaScript and TypeScript |

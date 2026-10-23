@@ -48,6 +48,6 @@ Diese Art bringt diese Schritte dazu:
 
 ## Ein echtes Repository
 
-[Autodarts für Home Assistant](https://github.com/Dennis-Otto/ha-autodarts) ist aus dem Blueprint entstanden: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, mit Dashboard-Karten, End-to-End-Tests in einem echten Home Assistant und Screenshots, die sich selbst erneuern.
+[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) ist aus dem Blueprint entstanden: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, mit Dashboard-Karten, End-to-End-Tests in einem echten Home Assistant und Screenshots, die sich selbst erneuern.
 
 Wie sich der Blueprint mit anderen Vorlagen vergleicht: [der Vergleich](../compare.md).
