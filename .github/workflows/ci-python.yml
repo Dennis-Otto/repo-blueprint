@@ -87,6 +87,10 @@ jobs:
       - name: Fix what a command can fix
         id: fix
         if: failure() && contains(fromJSON('["pull_request", "push"]'), github.event_name)
+        # pins.py may download when a pinned version moved without its sha256: a
+        # download that hangs ends here, so that the steps after it still keep the
+        # fixes and explain the failure within the time of the job.
+        timeout-minutes: 2
         env:
           CHECK: "check (python)"
           EVENT: ${{ github.event_name }}
