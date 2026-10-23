@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.7](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.6...v1.0.7) (2026-10-23)
+
+
+### Bug fixes
+
+* **deps:** turn off Renovate's dependency dashboard ([#387](https://github.com/Dennis-Otto/repo-blueprint/issues/387)) ([46c078c](https://github.com/Dennis-Otto/repo-blueprint/commit/46c078c46b6e12371380ab9663e03ce097e4aaf7))
+
 ## [1.0.6](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.5...v1.0.6) (2026-10-23)
 
 ### Bug fixes
