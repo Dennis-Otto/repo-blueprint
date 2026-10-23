@@ -5,8 +5,11 @@
 
 # The tests of the blueprint check the reference pages of the website as well, which
 # reference.py writes from copier.yml, the workflows and the settings as code
-# (decision 0054): the fix bot writes them anew, a failing test of the code still needs
-# a person.
+# (decision 0054), and the sha256 of each pinned download, which pins.py writes beside
+# its version and into .github/pins.toml (decision 0029): the fix bot runs both, a
+# failing test of the code still needs a person. The step of the tests fails before
+# the step Checks of this project runs, and the fix bot runs the autofix of every step
+# of a failed check (python), so the commands belong here.
 [step."Tests, with every line and branch covered"]
 problem = """A test fails, or a line or a branch of the code runs in no test; the
 coverage report names the files and lines that it misses. A test also fails when it runs
@@ -14,22 +17,31 @@ longer than the `timeout` of `pyproject.toml` (the log says `Timeout`), or when 
 on another test: the tests run in parallel, in another order on each worker. In the
 blueprint, `tests/test_reference.py` also fails when a page of `docs/reference/` differs
 from what `reference.py` writes from `copier.yml`, the workflows and the settings as
-code, or when a variable or a secret has no description in `ABOUT` of `reference.py`."""
+code, or when a variable or a secret has no description in `ABOUT` of `reference.py`.
+`tests/test_pins.py` fails when a pinned download of the workflows or of
+`.github/sign-tag.sh` has a version or a sha256 other than `.github/pins.toml`, as after
+a version moved by hand, or by Renovate when the download of its post-upgrade task
+failed."""
 why = """Every line and branch under test means that every change of behavior shows in a
 test, so that a bug can't come back unnoticed. The reference pages say what their sources
-say only while they are written anew with each change of them."""
+say only while they are written anew with each change of them, and a download is safe
+to run only while it is checked against the sha256 of its version."""
 fix = """Fix the test that fails, or the code that it catches, and write a test for each
 line and branch that the report lists as missing. Make a slow test faster, or let it wait
 for a condition instead of a time; give a test that shares state with another one its own
 files and settings, such as `tmp_path`. Write the reference pages anew with `python3
-reference.py`, and describe a new variable or secret in `ABOUT` first. `coverage run -m
+reference.py`, and describe a new variable or secret in `ABOUT` first. `python3
+pins.py` downloads each version that moved and writes its sha256 beside it and into
+`.github/pins.toml`; the fix bot runs it too, but commits no change of
+`.github/workflows/`, which a person commits. `coverage run -m
 pytest` runs the tests one after another; `python -m pytest -n auto --cov` runs them in
 parallel as CI does, where pytest-xdist and pytest-cov are installed:"""
 commands = [
   "python3 reference.py",
+  "python3 pins.py",
   "coverage run -m pytest",
   "coverage report",
   "python -m pytest -n auto --cov",
 ]
 docs = "CONTRIBUTING.md#tests"
-autofix = ["{python} reference.py"]
+autofix = ["{python} reference.py", "{python} pins.py"]

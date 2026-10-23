@@ -1,0 +1,4 @@
+### Bug fixes
+
+- **The fix bot runs the fixes of your own checks:** the step *Checks of this project* of `scripts/check.sh`, which runs `scripts/check-project.sh`, is indented within its `if`, and the fix bot and `python3 .github/blueprint.py coach verify` looked only for steps at the start of a line. So the fix bot never ran the `autofix` that `.github/checks.project.toml` gives that step, such as a script that writes the translations anew, and `coach verify` didn't ask for its explanation. Both now find a step that is indented by blanks or a tab.
+- **A pinned download of the blueprint whose sha256 disagrees with `.github/pins.toml` fixes itself:** when the tests of the blueprint fail, the fix bot now runs `python3 pins.py` as well, which writes the sha256 of each pinned version, as after a version moved by hand or a download of Renovate that failed once. It commits what `pins.py` writes outside `.github/workflows/`; a workflow still needs a person.

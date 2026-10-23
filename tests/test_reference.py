@@ -659,7 +659,7 @@ def test_the_fix_bot_writes_the_pages_anew() -> None:
     step = "Tests, with every line and branch covered"
     entry = catalog.step(step)
     assert entry is not None
-    assert entry.autofix == ("{python} reference.py",)
+    assert "{python} reference.py" in entry.autofix
     assert (step, "{python} reference.py") in fixers(catalog, ROOT, None)
 
 
