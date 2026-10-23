@@ -68,7 +68,7 @@ hide:
 
     ---
 
-    Jedes Diagramm als Bild, das alle sehen, auch in der GitHub-App und in den Stores, gezeichnet aus seiner Mermaid-Quelle; die Website zeichnet die Quelle live. Die Bots reparieren sie selbst: im Pull Request, auf `main` und nach einem Update des Renderers.
+    Jedes Diagramm als Bild, das alle sehen, auch in der GitHub-App und in den Stores, gezeichnet aus seiner Mermaid-Quelle; die Website zeigt dieselben Bilder, sodass eine Seite mit Diagramm leicht bleibt. Die Bots reparieren sie selbst: im Pull Request, auf `main` und nach einem Update des Renderers.
 
 - :material-camera-outline:{ .lg .middle } **Screenshots**
 

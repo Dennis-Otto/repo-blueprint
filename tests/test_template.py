@@ -10827,6 +10827,20 @@ def test_every_website_shows_the_automation_of_its_repository(
     assert f"from the [Repo Blueprint]({blueprint})" in page
     nav = (project / "mkdocs.yml").read_text(encoding="utf-8").split("\nnav:\n")[1]
     assert "\n  - automation.md\n" in nav
+    # The diagrams of the blueprint's README, as their pictures, which every
+    # repository gets beside the hook and its website serves: no Mermaid.
+    pictures = project / ".github/mkdocs-blueprint-diagrams"
+    for name in hooks.DIAGRAMS:
+        for scheme in ("", ".dark", ".de", ".de.dark"):
+            picture = f"{name}{scheme}.svg"
+            assert (pictures / picture).read_bytes() == (
+                ROOT / "docs/images/diagrams" / picture
+            ).read_bytes(), picture
+        assert f'  <img src="assets/images/automation/{name}.svg" alt="' in page
+    assert sorted(path.name for path in hooks.BUILT.pictures) == sorted(
+        f"{name}{scheme}.svg" for name in hooks.DIAGRAMS for scheme in ("", ".dark")
+    )
+    assert "\n```mermaid\n" not in page
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10987,11 +11001,16 @@ def test_every_project_draws_its_diagrams_as_pictures(
     assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
     for script in opener.split("        run: |\n")[1:]:
         assert "${{" not in script.split("\n      - ")[0]
-    # The website draws the sources live, and GitHub folds the pictures in diffs.
+    # The website shows the pictures, and GitHub folds them in diffs.
     hooks = (project / ".github/mkdocs_blueprint.py").read_text(encoding="utf-8")
     assert "def on_page_content(" in hooks
+    assert "live_diagrams" not in hooks
     attributes = (project / ".gitattributes").read_text(encoding="utf-8")
     assert "\ndocs/images/diagrams/*.svg linguist-generated=true\n" in attributes
+    assert (
+        "\n.github/mkdocs-blueprint-diagrams/*.svg linguist-generated=true\n"
+        in attributes
+    )
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/diagrams.sh`" in contributing
     assert "`docs/diagrams/" in contributing

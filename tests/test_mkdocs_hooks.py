@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -294,9 +295,6 @@ def test_both_plugins_that_download_try_again_and_nothing_else_changes(
     assert retrying.Timeout is Network.Timeout
 
 
-SOURCE = 'flowchart TB\n    a["one<br>two"] --> b["A & B"]\n'
-
-
 def picture(src: str, dark: str = "") -> str:
     """A <picture> of a diagram, as scripts/diagrams.sh --extract writes it."""
     dark = dark or src.replace(".svg", ".dark.svg")
@@ -308,54 +306,98 @@ def picture(src: str, dark: str = "") -> str:
     )
 
 
-def live(source: str = SOURCE) -> str:
-    escaped = source.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return f'<pre class="mermaid"><code>{escaped}</code></pre>'
+def svg(width: str = "650.51", height: str = "1014.6", inside: str = "") -> bytes:
+    """A picture of a diagram, as scripts/diagrams.sh draws it."""
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="-12 -12 {width} {height}" '
+        'id="diagram-steps" xmlns="http://www.w3.org/2000/svg" class="flowchart" '
+        f'role="graphics-document document">{inside}</svg>\n'
+    ).encode()
 
 
-def draw(tmp_path: Path, html: str) -> str:
-    docs = tmp_path / "docs"
-    (docs / "diagrams").mkdir(parents=True, exist_ok=True)
-    (docs / "diagrams/steps.mmd").write_text(SOURCE, encoding="utf-8")
-    (docs / "diagrams/steps.de.mmd").write_text(
-        "flowchart TB\n  a --> b\n", encoding="utf-8"
+def shown(src: str, dark: str, width: str = "651", height: str = "1015") -> str:
+    """The pictures of a diagram for each scheme, as the website shows them."""
+    return "".join(
+        f'<img src="{path}" alt="Steps: one and two" width="{width}" '
+        f'height="{height}" loading="lazy" decoding="async">'
+        for path in (f"{src}#only-light", f"{dark}#only-dark")
     )
-    result: str = hooks().live_diagrams(html, docs / "diagrams")
-    return result
 
 
-def test_the_website_draws_a_diagram_from_its_source(tmp_path: Path) -> None:
+def test_the_website_shows_a_diagram_as_its_pictures(tmp_path: Path) -> None:
     # A README, which names the pictures from the root of the repository, and a page
-    # of docs/, which names them from its folder.
+    # of docs/, which names them from its folder. The pictures follow the scheme
+    # that the reader switches to, load as the reader comes to them and keep their
+    # place while they load; no Mermaid draws them.
     html = (
         "<h1>Demo</h1>\n"
         f"<p>{picture('docs/images/diagrams/steps.svg')}</p>\n"
         "<p>Text.</p>\n"
-        f"<p>\n{picture('../images/diagrams/steps.de.svg')}\n</p>\n"
+        f"<p>\n{picture('../images/diagrams/steps.svg')}\n</p>\n"
     )
+    media = {
+        "images/diagrams/steps.svg": svg(),
+        "images/diagrams/steps.dark.svg": svg(),
+    }
 
-    assert draw(tmp_path, html) == (
+    result = pictures(tmp_path, html, media, page="kinds/python.html")
+
+    assert result == (
         "<h1>Demo</h1>\n"
-        f"{live()}\n"
-        "<p>Text.</p>\n"
-        f"{live('flowchart TB' + chr(10) + '  a --> b' + chr(10))}\n"
+        "<p>"
+        + shown("../images/diagrams/steps.svg", "../images/diagrams/steps.dark.svg")
+        + "</p>\n<p>Text.</p>\n<p>\n"
+        + shown("../images/diagrams/steps.svg", "../images/diagrams/steps.dark.svg")
+        + "\n</p>\n"
     )
+    assert "mermaid" not in result
 
 
-def test_a_picture_in_a_paragraph_with_text_keeps_the_paragraph(tmp_path: Path) -> None:
-    html = f"<p>Before\n{picture('images/diagrams/steps.svg')}\nafter.</p>"
-
-    assert draw(tmp_path, html) == f"<p>Before\n{live()}\nafter.</p>"
-
-
-def test_other_pictures_stay_as_they_are(tmp_path: Path) -> None:
+def test_a_page_in_a_further_language_shows_the_pictures_of_its_language(
+    tmp_path: Path,
+) -> None:
+    # The i18n plugin serves images/diagrams/steps.de.svg for the German pages at
+    # de/images/diagrams/steps.svg, and steps.de.dark.svg, whose suffix names no
+    # language, as it is, for every page.
+    docs = tmp_path / "docs"
+    files = []
+    for name, served in (
+        ("images/diagrams/steps.de.svg", "de/images/diagrams/steps.svg"),
+        ("images/diagrams/steps.de.dark.svg", "images/diagrams/steps.de.dark.svg"),
+        ("guide.de.md", "de/guide.html"),
+    ):
+        (docs / name).parent.mkdir(parents=True, exist_ok=True)
+        (docs / name).write_bytes(svg("40", "30"))
+        files.append(File(name, str(docs), str(tmp_path / "site"), False))
+        files[-1].dest_uri = served
     html = (
-        f"<p>{picture('images/diagrams/missing.svg')}</p>\n"
-        f"<p>{picture('images/card.png', 'images/card-dark.png')}</p>\n"
-        '<p><img src="images/diagrams/steps.svg" alt="Steps"></p>\n'
+        f"<p>{picture('docs/images/diagrams/steps.de.svg')}</p>\n"
+        f"<p>{picture('images/diagrams/steps.de.svg')}</p>\n"
+        # A language that the website lacks.
+        '<p><img src="images/diagrams/steps.fr.svg" alt="Steps"></p>\n'
     )
 
-    assert draw(tmp_path, html) == html
+    result = hooks().on_page_content(
+        html,
+        page=SimpleNamespace(file=files[-1], meta={}),
+        config=SimpleNamespace(docs_dir=str(docs), plugins={}),
+        files=files,
+    )
+
+    pair = shown(
+        "images/diagrams/steps.svg", "../images/diagrams/steps.de.dark.svg", "40", "30"
+    )
+    assert result == (
+        f"<p>{pair}</p>\n<p>{pair}</p>\n"
+        '<p><img src="images/diagrams/steps.fr.svg" alt="Steps" loading="lazy"'
+        ' decoding="async"></p>\n'
+    )
+
+
+def test_a_picture_without_an_image_stays_as_it_is(tmp_path: Path) -> None:
+    html = '<p><picture><source srcset="images/card.webp"></picture></p>\n'
+
+    assert pictures(tmp_path, html, {}) == html
 
 
 # The stylesheet and the script of the blueprint
@@ -764,6 +806,10 @@ def test_the_size_of_a_picture_comes_from_its_first_bytes(tmp_path: Path) -> Non
             30, 20, save_all=True, append_images=[Image.new("RGB", (30, 20))]
         ),
         "a.svg": b"<svg width='3' height='4'/>",
+        "diagram.svg": svg(),
+        "prolog.svg": b'<?xml version="1.0"?>\n<svg height = "20px" width="10px">',
+        "wide.svg": b'<svg width="100%" height="40">',
+        "plain.svg": b'<svg viewBox="0 0 3 4">',
         "short.webp": b"RIFF\0\0\0\0WEBPVP8 ",
         "sound.wav": b"RIFF\0\0\0\0WAVEfmt " + bytes(20),
         "other.webp": b"RIFF\0\0\0\0WEBPALPH" + bytes(20),
@@ -779,11 +825,69 @@ def test_the_size_of_a_picture_comes_from_its_first_bytes(tmp_path: Path) -> Non
         "lossy.webp": (33, 17),
         "lossless.webp": (31, 19),
         "moving.webp": (30, 20),
-        "a.svg": None,
+        "a.svg": (3, 4),
+        "diagram.svg": (651, 1015),
+        "prolog.svg": (10, 20),
+        "wide.svg": None,
+        "plain.svg": None,
         "short.webp": None,
         "sound.wav": None,
         "other.webp": None,
     }
+
+
+def test_a_strict_build_fails_when_a_plugin_takes_pictures_out_of_a_page(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The lightbox wrapped each picture in its link with selectolax 1.0.0 and 1.0.1
+    # and took both out of the page.
+    module = hooks()
+    html = '<p><img src="images/a.png" alt="A"><img src="images/b.png" alt="B"></p>'
+    page = SimpleNamespace(
+        file=File("guide.md", str(tmp_path / "docs"), "site", False), meta={}
+    )
+    page.file.dest_uri = "guide.html"
+    config = SimpleNamespace(docs_dir=str(tmp_path / "docs"), plugins={}, site_url="")
+    module.on_page_content(html, page=page, config=config, files=[page.file])
+    wrapped = '<p><a class="glightbox" href="images/a.png"><img src="images/a.png"></a>'
+    assert module.BUILT.images == {"guide.html": 2}
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module.on_post_page(f"<html><body>{wrapped}</p></body></html>", page, config)
+
+    assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    assert (
+        "guide.md: a plugin took 1 of its 2 picture(s) out of the page, such as "
+        "mkdocs-glightbox" in caplog.text
+    )
+    assert module.BUILT.images == {}
+    # A page that keeps them, and one that the hook saw no content of.
+    caplog.clear()
+    module.on_page_content(html, page=page, config=config, files=[page.file])
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module.on_post_page(f"<html><body>{html}</body></html>", page, config)
+        module.on_post_page("<html><body></body></html>", page, config)
+    assert caplog.records == []
+    # The logo of the theme in the header makes up for no picture of the content.
+    logo = '<img src="assets/logo.png" alt="Logo">'
+    themed = (
+        f"<html><body><header>{logo}</header>"
+        f'<article class="md-content__inner md-typeset">{wrapped}</p></article>'
+        f"<nav>{logo}</nav></body></html>"
+    )
+    module.on_page_content(html, page=page, config=config, files=[page.file])
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module.on_post_page(themed, page, config)
+    assert "a plugin took 1 of its 2 picture(s)" in caplog.text
+
+
+def test_the_lightbox_wraps_each_picture_and_keeps_it() -> None:
+    # The lock of the tools of the website takes a selectolax with which the
+    # lightbox keeps every picture: 1.0.0 and 1.0.1 took them out of the page.
+    lock = (ROOT / "stacks/docs/requirements-docs.txt").read_text(encoding="utf-8")
+    pinned = re.search(r"^selectolax==(\S+) ", lock, re.M)
+    assert pinned is not None
+    assert pinned[1] not in ("1.0.0", "1.0.1")
 
 
 def test_the_lightbox_shows_the_pictures_of_the_reader_s_scheme() -> None:
@@ -848,7 +952,11 @@ def page_of(
 
 
 def test_the_search_leaves_out_the_sources_of_diagrams(tmp_path: Path) -> None:
-    html = f"<h1>Steps</h1>\n{live()}"
+    # A ```mermaid block of a project, which the website still draws live.
+    html = (
+        '<h1>Steps</h1>\n<pre class="mermaid"><code>flowchart TB\n'
+        "    a --&gt; b\n</code></pre>"
+    )
 
     assert pictures(tmp_path, html, {}) == html.replace(
         '<pre class="mermaid">', '<pre class="mermaid" data-search-exclude>'
@@ -1908,6 +2016,30 @@ jobs: {}
 }
 
 
+# The title and the description of each diagram of the page of the automation, by
+# its name, in its pictures.
+TOLD = {
+    "how-a-repository-looks-after-itself": ("Looks after itself", "Bots & you"),
+    "how-a-repository-looks-after-itself.de": ("Pflegt sich", "Bots & du"),
+    "from-a-change-to-a-release": ("To a release", 'A "fix" ships'),
+    "from-a-change-to-a-release.de": ("Zum Release", 'Ein "fix" erscheint'),
+}
+
+
+def draw_diagrams(folder: Path, told: dict[str, tuple[str, str]] = TOLD) -> None:
+    """The pictures of the diagrams of the page of the automation in folder, as
+    scripts/diagrams.sh draws them, with the title and the description of each."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, (title, description) in told.items():
+        inside = f'<title id="t">{title.replace("&", "&amp;")}</title>' + (
+            f'<desc id="d">{description.replace("&", "&amp;")}</desc>'
+            if description
+            else ""
+        )
+        for scheme in ("", ".dark"):
+            (folder / f"{name}{scheme}.svg").write_bytes(svg(inside=inside))
+
+
 def repository(root: Path, *, settings: bool = True) -> Path:
     """A repository with the workflows of WORKFLOWS and the required checks of its
     settings as code, both files of them."""
@@ -1916,6 +2048,7 @@ def repository(root: Path, *, settings: bool = True) -> Path:
     for name, text in WORKFLOWS.items():
         (folder / name).write_text(text, encoding="utf-8")
     (root / "docs").mkdir()
+    draw_diagrams(root / "docs/images/diagrams")
     if settings:
         (root / ".github/repository.toml").write_text(
             '[branch]\nrequired_checks = ["check (python)", "conventional title"]\n',
@@ -2462,28 +2595,133 @@ def test_a_page_of_another_plugin_keeps_the_date_of_the_build(
     assert plugin.rendered == []
 
 
-@pytest.mark.parametrize(("language", "suffix"), [("en", ""), ("de", ".de")])
-def test_the_automation_page_draws_the_diagrams_of_the_readme(
-    language: str, suffix: str
-) -> None:
-    overview, release = hooks().DIAGRAMS[language]
-    sources = ROOT / "docs/diagrams"
-
-    assert overview == (
-        sources / f"how-a-repository-looks-after-itself{suffix}.mmd"
-    ).read_text(encoding="utf-8")
-    assert release == (sources / f"from-a-change-to-a-release{suffix}.mmd").read_text(
-        encoding="utf-8"
+def automation_picture(src: str, dark: str, alt: str) -> str:
+    return (
+        "<picture>\n"
+        f'  <source media="(prefers-color-scheme: dark)" srcset="{dark}">\n'
+        f'  <img src="{src}" alt="{alt}">\n'
+        "</picture>"
     )
 
 
-def test_the_page_of_the_automation_draws_its_diagrams_live(tmp_path: Path) -> None:
-    page = automation(tmp_path)["automation.md"]
-    overview, release = hooks().DIAGRAMS["en"]
+@pytest.mark.parametrize(("language", "suffix"), [("en", ""), ("de", ".de")])
+def test_the_automation_page_shows_the_diagrams_of_the_readme(
+    language: str, suffix: str
+) -> None:
+    # The blueprint's README shows them, drawn from their sources.
+    readme = (ROOT / f"README{suffix}.md").read_text(encoding="utf-8")
+    for name in hooks().DIAGRAMS:
+        assert (ROOT / f"docs/diagrams/{name}{suffix}.mmd").is_file(), name
+        for scheme in ("", ".dark"):
+            picture = f"docs/images/diagrams/{name}{suffix}{scheme}.svg"
+            assert (ROOT / picture).is_file(), picture
+            assert f'"{picture}"' in readme, picture
 
-    assert f"\n```mermaid\n{overview}```\n" in page
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_page_of_the_automation_shows_the_pictures_of_its_diagrams(
+    tmp_path: Path, language: str
+) -> None:
+    # The blueprint itself: the pictures in docs/images/diagrams/, which the website
+    # serves as its files already. The text of each is its title and description.
+    module = hooks()
+    folder = repository(tmp_path)
+    config = website(tmp_path, *(("en", "de") if language == "de" else ()))
+    page = module.automation_pages(folder, config)[
+        "automation.md" if language == "en" else "automation.de.md"
+    ]
+
+    suffix = "" if language == "en" else ".de"
+    overview, release = (
+        automation_picture(
+            f"images/diagrams/{name}{suffix}.svg",
+            f"images/diagrams/{name}{suffix}.dark.svg",
+            alt,
+        )
+        for name, alt in (
+            (
+                "how-a-repository-looks-after-itself",
+                "Looks after itself: Bots &amp; you"
+                if language == "en"
+                else "Pflegt sich: Bots &amp; du",
+            ),
+            (
+                "from-a-change-to-a-release",
+                "To a release: A &quot;fix&quot; ships"
+                if language == "en"
+                else "Zum Release: Ein &quot;fix&quot; erscheint",
+            ),
+        )
+    )
+    assert f"\n\n{overview}\n\n## " in page
+    assert f"\n{release}\n\n### Release {{#release}}\n" in page
+    assert "\n```mermaid\n" not in page
+    assert module.BUILT.pictures == []
+
+
+def test_every_repository_serves_the_pictures_beside_the_hook(tmp_path: Path) -> None:
+    # A repository made from the blueprint has them in .github/, beside the hook,
+    # and none in docs/images/diagrams/.
+    repository(tmp_path)
+    shutil.rmtree(tmp_path / "docs/images")
+    beside = tmp_path / ".github/mkdocs-blueprint-diagrams"
+    draw_diagrams(beside, {"from-a-change-to-a-release": ("To a release", "")})
+    draw_diagrams(
+        beside, {"how-a-repository-looks-after-itself": ("Looks after itself", "")}
+    )
+    module = hooks()
+    # The hook as the repository has it, in its .github/.
+    module.__file__ = str(tmp_path / ".github/mkdocs_blueprint.py")
+    config = website(tmp_path)
+    index = File("index.md", config.docs_dir, config.site_dir, False)
+
+    files = module.on_files([index], config)
+
+    page = module.BUILT.pages["automation.md"]
+    assert (
+        automation_picture(
+            "assets/images/automation/from-a-change-to-a-release.svg",
+            "assets/images/automation/from-a-change-to-a-release.dark.svg",
+            "To a release",
+        )
+        in page
+    )
+    served = {
+        file.dest_uri: file.abs_src_path
+        for file in files
+        if file.dest_uri.startswith("assets/images/")
+    }
+    assert served == {
+        f"assets/images/automation/{name}{scheme}.svg": str(
+            beside.resolve() / f"{name}{scheme}.svg"
+        )
+        for name in module.DIAGRAMS
+        for scheme in ("", ".dark")
+    }
+    assert {file.site for file in files if file.dest_uri in served} == {
+        (config.site_dir, False)
+    }
+
+
+def test_a_diagram_without_its_pictures_is_left_out(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    folder = repository(tmp_path)
+    (tmp_path / "docs/images/diagrams/from-a-change-to-a-release.dark.svg").unlink()
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        page = hooks().automation_pages(folder, website(tmp_path))["automation.md"]
+
+    # A strict build fails on the warning.
+    assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    assert (
+        "The page of the automation lacks the pictures from-a-change-to-a-release.svg,"
+        " from-a-change-to-a-release.dark.svg, which copier update brings into"
+        " .github/mkdocs-blueprint-diagrams/." in caplog.text
+    )
+    assert "how-a-repository-looks-after-itself.svg" in page
+    assert "from-a-change-to-a-release" not in page
     assert "## Releases {#releases}\n\nThey make a signed release" in page
-    assert f"\n```mermaid\n{release}```\n\n### Release {{#release}}\n" in page
 
 
 def test_the_blueprint_and_every_repository_list_the_page_in_the_menu() -> None:
