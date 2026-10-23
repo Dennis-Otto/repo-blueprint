@@ -44,14 +44,10 @@ What the workflows say of it:
 
 ### `ISSUE_ASSISTANT_AI`
 
-`off` makes the issue assistant label the issues and answer the commands of their comments without an AI engine, which then needs no secret; `on` lets the engine analyze each new issue as well.
+`off` makes the issue assistant label the issues and answer the commands of their comments without an AI engine, which then needs no secret; `on` lets the engine analyze each new issue as well. The reusable workflow of the issue assistant, which `issue-assistant.yml` calls, reads it.
 
 - **Set by:** the settings as code: `.github/repository.toml` sets it, from [`issue_assistant_ai`](questions.md#issue_assistant_ai), and the settings bot applies it; `.github/repository.project.toml` can set another value
-- **Read by:** [`issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/issue-assistant.yml) (Issue assistant, every repository)
-
-What the workflows say of it:
-
-- `issue-assistant.yml`: Without the engine's secret in the environment issue-assistant, or with the repository variable `ISSUE_ASSISTANT_AI` set to "off", only labels and the lifecycle work.
+- **Read by:** no workflow
 
 ### `MUTATION_PARTS`
 
@@ -110,7 +106,10 @@ What the workflows say of it:
 - [`APPSTORE_TOKEN`](#appstore_token): The API token of the account of the Nextcloud App Store, with which the release submits the signed package and the workflow *Register app* registers the id of the app.
 - [`APP_PRIVATE_KEY`](#app_private_key): The private key of the certificate of a Nextcloud app, with which the release signs the package for the App Store and the workflow *Register app* proves the id of the app.
 - [`CLAUDE_CODE_OAUTH_TOKEN`](#claude_code_oauth_token): The token of a Claude subscription, which `claude setup-token` of Claude Code creates, with which the issue assistant analyzes each new issue with Claude.
+- [`COPILOT_GITHUB_TOKEN`](#copilot_github_token): A fine-grained token of GitHub with the permission *Copilot Requests* alone and no access to repositories, with which the issue assistant analyzes each new issue with Copilot, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `copilot`.
+- [`GEMINI_API_KEY`](#gemini_api_key): An API key of Google AI Studio, with which the issue assistant analyzes each new issue with Gemini, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `gemini`; free within the daily limits of the free tier of the Gemini API.
 - [`GITHUB_TOKEN`](#github_token): The token that GitHub gives every run of a workflow, for its repository alone and with the permissions that its `permissions:` grant.
+- [`OPENAI_API_KEY`](#openai_api_key): An API key of OpenAI, with which the issue assistant analyzes each new issue with Codex, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `codex`, at the prices of OpenAI's API.
 - [`RELEASE_AUTOMATION_PRIVATE_KEY`](#release_automation_private_key): The private key of the release app, the file that its settings page generates.
 
 ### `ANTHROPIC_API_KEY`
@@ -141,6 +140,20 @@ The token of a Claude subscription, which `claude setup-token` of Claude Code cr
 - **Set by:** you, as a secret of the environment `issue-assistant`, which only `main` may use: `gh secret set CLAUDE_CODE_OAUTH_TOKEN --env issue-assistant`, as the checklist shows
 - **Read by:** [`issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/issue-assistant.yml) (Issue assistant, every repository)
 
+### `COPILOT_GITHUB_TOKEN`
+
+A fine-grained token of GitHub with the permission *Copilot Requests* alone and no access to repositories, with which the issue assistant analyzes each new issue with Copilot, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `copilot`. It counts the premium requests of the Copilot plan of the token's owner.
+
+- **Set by:** you, as a secret of the environment `issue-assistant`, which only `main` may use: `gh secret set COPILOT_GITHUB_TOKEN --env issue-assistant`
+- **Read by:** [`issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/issue-assistant.yml) (Issue assistant, every repository)
+
+### `GEMINI_API_KEY`
+
+An API key of Google AI Studio, with which the issue assistant analyzes each new issue with Gemini, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `gemini`; free within the daily limits of the free tier of the Gemini API.
+
+- **Set by:** you, as a secret of the environment `issue-assistant`, which only `main` may use: `gh secret set GEMINI_API_KEY --env issue-assistant`
+- **Read by:** [`issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/issue-assistant.yml) (Issue assistant, every repository)
+
 ### `GITHUB_TOKEN`
 
 The token that GitHub gives every run of a workflow, for its repository alone and with the permissions that its `permissions:` grant. What a workflow does with it starts no other workflow, which is why the bots that open, update or merge pull requests act as the release app.
@@ -151,6 +164,13 @@ The token that GitHub gives every run of a workflow, for its repository alone an
 What the workflows say of it:
 
 - `release.yml`: A pull request of the release app starts the checks; one of the job's `GITHUB_TOKEN` would start none.
+
+### `OPENAI_API_KEY`
+
+An API key of OpenAI, with which the issue assistant analyzes each new issue with Codex, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `codex`, at the prices of OpenAI's API.
+
+- **Set by:** you, as a secret of the environment `issue-assistant`, which only `main` may use: `gh secret set OPENAI_API_KEY --env issue-assistant`
+- **Read by:** [`issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/issue-assistant.yml) (Issue assistant, every repository)
 
 ### `RELEASE_AUTOMATION_PRIVATE_KEY`
 
