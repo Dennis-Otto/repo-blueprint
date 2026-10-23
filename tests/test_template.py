@@ -5529,7 +5529,7 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
-def test_renovate_keeps_a_dependency_dashboard_and_the_whole_monday(
+def test_renovate_keeps_no_dependency_dashboard_and_the_whole_monday(
     projects: dict[str, Path], kind: str
 ) -> None:
     root = ROOT if kind == "blueprint" else projects[kind]
@@ -5537,21 +5537,20 @@ def test_renovate_keeps_a_dependency_dashboard_and_the_whole_monday(
         (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     )
     own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
-    # One issue lists the updates that wait, for their week, their window or the
-    # maintainer, and those that failed, with checkboxes to open or retry each: without
-    # it, a major update whose lock file couldn't be written closed itself unseen.
-    assert ":disableDependencyDashboard" not in shared["extends"] + own["extends"]
+    # No issue stays open for Renovate, so that a repository can have none: what
+    # waits for the maintainer is a pull request. Renovate closes the dashboard that
+    # an earlier release kept open only by its exact title, which therefore stays.
     assert {
         key: value
         for key, value in shared.items()
         if key.startswith("dependencyDashboard")
     } == {
-        "dependencyDashboard": True,
+        "dependencyDashboard": False,
         "dependencyDashboardTitle": "Dependency dashboard",
-        "dependencyDashboardLabels": ["dependencies"],
-        "dependencyDashboardOSVVulnerabilitySummary": "all",
     }
     assert not any(key.startswith("dependencyDashboard") for key in own)
+    # A rule that asks for the approval of the dashboard would open it again.
+    assert "DashboardApproval" not in json.dumps([shared, own])
     labels = tomllib.loads((root / ".github/labels.toml").read_text(encoding="utf-8"))
     assert "dependencies" in {label["name"] for label in labels["label"]}
     # GitHub starts the scheduled runs of the bot every two hours only roughly and

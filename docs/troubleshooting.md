@@ -89,9 +89,9 @@ When the token of the app fails, as for an app that isn't installed on the repos
 
 ## Renovate opens no updates
 
-**What you see:** no pull request of Renovate, or the issue *Dependency dashboard* is missing.
+**What you see:** no pull request of Renovate, and the checklist doesn't tick Renovate off.
 
-**Why, and what to do:** first, the rules may hold an update back: it comes a week after its release, on a Monday, unless it fixes a vulnerability, and the issue *Dependency dashboard* lists every update that waits or failed, with a checkbox to retry it. Otherwise it depends on who runs Renovate, by the answer [`renovate_runner`](reference/questions.md#renovate_runner):
+**Why, and what to do:** first, the rules may hold an update back: it comes a week after its release, on a Monday, unless it fixes a vulnerability, and Renovate keeps no issue that lists what waits ([decision 0057](decisions/0057-renovate-keeps-no-dependency-dashboard.md)). Otherwise it depends on who runs Renovate, by the answer [`renovate_runner`](reference/questions.md#renovate_runner):
 
 - **`self`, a workflow of the repository:** `.github/workflows/renovate.yml` runs as the release app; a run without the app says in its summary what is missing. *Actions → Renovate → Run workflow* starts one at once, and a pull request that changes the rules or a lock file shows whether Renovate still accepts and reads them.
 - **`mend`, the Mend Renovate app:** install the [Mend Renovate app](https://github.com/apps/renovate) on the repository; it comes at every push.

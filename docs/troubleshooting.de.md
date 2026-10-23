@@ -89,9 +89,9 @@ Scheitert das Token der App, etwa bei einer App, die im Repository nicht install
 
 ## Renovate öffnet keine Updates
 
-**Was du siehst:** kein Pull Request von Renovate, oder das Issue *Dependency dashboard* fehlt.
+**Was du siehst:** kein Pull Request von Renovate, und die Checkliste hakt Renovate nicht ab.
 
-**Warum, und was zu tun ist:** Zuerst können die Regeln ein Update zurückhalten: Es kommt eine Woche nach seinem Release, an einem Montag, außer es behebt eine Schwachstelle, und das Issue *Dependency dashboard* listet jedes Update, das wartet oder scheiterte, mit einem Kästchen, um es erneut zu versuchen. Sonst hängt es davon ab, wer Renovate ausführt, nach der Antwort [`renovate_runner`](reference/questions.md#renovate_runner):
+**Warum, und was zu tun ist:** Zuerst können die Regeln ein Update zurückhalten: Es kommt eine Woche nach seinem Release, an einem Montag, außer es behebt eine Schwachstelle, und Renovate hält kein Issue, das auflistet, was wartet ([Entscheidung 0057](decisions/0057-renovate-keeps-no-dependency-dashboard.md), englisch). Sonst hängt es davon ab, wer Renovate ausführt, nach der Antwort [`renovate_runner`](reference/questions.md#renovate_runner):
 
 - **`self`, ein Workflow des Repositorys:** `.github/workflows/renovate.yml` läuft als die Release-App; ein Lauf ohne die App sagt in seiner Zusammenfassung, was fehlt. *Actions → Renovate → Run workflow* startet sofort einen, und ein Pull Request, der die Regeln oder eine Lock-Datei ändert, zeigt, ob Renovate sie noch annimmt und liest.
 - **`mend`, die Mend-Renovate-App:** Installiere die [Mend-Renovate-App](https://github.com/apps/renovate) im Repository; sie kommt bei jedem Push.

@@ -293,6 +293,9 @@ class FakeGitHub:
         self.pages: dict[str, Any] | None = None
         # The open issues and pull requests, and the numbers of the bot users of apps.
         self.issues: list[dict[str, Any]] = []
+        # The pull requests of every state, newest first, as GitHub answers them,
+        # which a test may break.
+        self.pulls: list[Any] = []
         self.bots: dict[str, int] = {}
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
@@ -409,6 +412,7 @@ class FakeGitHub:
             (r"/community/profile", self.community_profile),
             (r"/pages", self.pages_site),
             (r"/issues", self.issue_list),
+            (r"/pulls", self.pull_list),
         ):
             match = re.fullmatch(pattern, path)
             if match:
@@ -418,6 +422,9 @@ class FakeGitHub:
 
     def issue_list(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.issues
+
+    def pull_list(self, method: str, body: Any) -> tuple[int, Any]:
+        return 200, self.pulls
 
     def community_profile(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.community
@@ -2378,7 +2385,7 @@ def test_the_checklist_of_a_finished_repository(
     run(github, root, "settings", "apply")
     set_secrets(github)
     github.og_image = True
-    github.issues = [DASHBOARD]
+    github.pulls = [RENOVATE]
     (root / "README.md").write_text(
         "[![Best](https://www.bestpractices.dev/projects/1/badge)]\n"
         "[![Baseline](https://www.bestpractices.dev/projects/1/baseline)]\n",
@@ -2393,7 +2400,7 @@ def test_the_checklist_of_a_finished_repository(
     assert "✔ Settings as code applied" in out
     assert "✔ Secrets of the environments set" in out
     assert "✔ Community profile complete (100 %)" in out
-    assert "✔ Renovate runs: its issue 'Dependency dashboard' is open" in out
+    assert "✔ Renovate runs: it has opened a pull request" in out
     assert "Sponsorships" not in out
     assert "✔ Registered with the REUSE API" in out
     assert "✔ OpenSSF Best Practices badge in the README" in out
@@ -2709,36 +2716,59 @@ def test_the_checklist_of_a_named_release_app_links_its_installation(
     assert ("GET", "users/Dennis-Otto") not in github.calls
 
 
-# The issue that Renovate keeps open once it runs.
-DASHBOARD = {"number": 7, "title": "Dependency dashboard", "labels": [{"name": "x"}]}
+# A pull request of Renovate, which shows that it runs.
+RENOVATE = {
+    "number": 7,
+    "title": "fix(deps): update the actions",
+    "head": {"ref": "renovate/the-actions"},
+}
 HUB = [
     "The Renovate workflow of the blueprint runs it every two hours for each"
     " repository of its owner on which the release app is installed; its next run"
-    " after the installation opens the dashboard."
+    " after the installation opens its pull requests."
 ]
 
 
-def test_the_checklist_knows_that_renovate_runs_by_its_dashboard(
+def test_the_checklist_knows_that_renovate_runs_by_its_pull_requests(
     github: FakeGitHub, root: Path
 ) -> None:
     settings = Settings.load(root / ".github/repository.toml")
-    # A pull request of Renovate is no dashboard, whatever its title.
-    github.issues = [
-        {"number": 8, "title": "Dependency dashboard", "pull_request": {"url": "x"}},
-        {"number": 9, "title": "fix(deps): update the actions"},
+    # Renovate keeps no issue open, so its old dashboard shows nothing; nor does a
+    # pull request of someone else with the title of an update, or one that GitHub
+    # answers without its branch.
+    github.issues = [{"number": 6, "title": "Dependency dashboard"}]
+    github.pulls = [
+        {
+            "number": 9,
+            "title": "fix(deps): update the actions",
+            "head": {"ref": "fix/deps"},
+        },
+        {"number": 8, "title": "fix(deps): update uv", "head": None},
+        {"number": 5, "title": "chore: a branch without its name", "head": {}},
+        "no pull request",
     ]
 
     waiting = renovate(Api(github), REPO, settings, root)
-    github.issues.append(DASHBOARD)
+    github.pulls.append(RENOVATE)
     running = renovate(Api(github), REPO, settings, root)
 
-    assert waiting.text == "Renovate runs: its issue 'Dependency dashboard' is open"
+    assert waiting.text == "Renovate runs: it has opened a pull request"
     assert waiting.done is False
     assert running.done is True
-    assert (
-        "GET",
-        f"repos/{REPO}/issues?labels=dependencies&state=open&per_page=100",
-    ) in github.calls
+    # The latest pull requests of every state, as Renovate merges most on its own.
+    assert ("GET", f"repos/{REPO}/pulls?state=all&per_page=100") in github.calls
+
+
+def test_the_checklist_waits_for_renovate_when_github_knows_no_pull_requests(
+    github: FakeGitHub, root: Path
+) -> None:
+    github.fail[("GET", f"repos/{REPO}/pulls?state=all&per_page=100")] = 404
+
+    step = renovate(
+        Api(github), REPO, Settings.load(root / ".github/repository.toml"), root
+    )
+
+    assert step.done is False
 
 
 @pytest.mark.parametrize(
@@ -2774,7 +2804,7 @@ def test_the_checklist_says_how_renovate_comes_to_run(
 
 MEND = [
     "Install the Mend Renovate app on this repository; it reads"
-    " .github/renovate.json5 and opens the dashboard on its first run:",
+    " .github/renovate.json5 and opens its pull requests from its first run:",
     "https://github.com/apps/renovate/installations/new",
     "The branch bot and the fix bot commit to its branches as the release app; so"
     " that Renovate goes on rebasing them, add to .github/renovate.json5:",

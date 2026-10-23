@@ -34,7 +34,7 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0026](0026-build-the-website-once-and-keep-its-downloads-a-week.md) | Build the website once, in the job of the check, and keep the downloads of Material for a week | accepted |
 | [0027](0027-few-jobs-that-each-run-several-checks.md) | Few jobs that each run several checks, so that a pull request waits for fewer runners, in two releases | accepted |
 | [0028](0028-bring-one-pull-request-at-a-time-up-to-date.md) | Bring one pull request at a time up to date, in the order of its auto-merge | accepted |
-| [0029](0029-a-dependency-dashboard-the-whole-monday-and-pins-with-their-checksum.md) | A dependency dashboard, the whole Monday, fix(deps) for what the users run, and pinned downloads that move with their checksum | accepted |
+| [0029](0029-a-dependency-dashboard-the-whole-monday-and-pins-with-their-checksum.md) | A dependency dashboard, the whole Monday, fix(deps) for what the users run, and pinned downloads that move with their checksum | accepted, amended by [0057](0057-renovate-keeps-no-dependency-dashboard.md) |
 | [0030](0030-one-report-on-each-pull-request.md) | One report on each pull request, which says what it makes | accepted |
 | [0031](0031-mutation-tests-in-parts-with-the-logic-first-and-an-issue-on-a-drop.md) | The mutation tests run in parts, list the survivors that change the logic first and open an issue when the score drops | accepted |
 | [0032](0032-the-taint-analysis-knows-nextcloud-and-proves-that-it-still-sees.md) | The taint analysis of a Nextcloud app knows Nextcloud, and proves in every run that it still sees | accepted |
@@ -56,9 +56,10 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0048](0048-the-dashboard-publishes-its-data-at-addresses-that-stay.md) | The dashboard publishes its data as JSON and a feed of the releases, at addresses that stay | accepted |
 | [0049](0049-every-owner-brings-their-own-release-app.md) | Every owner brings their own release app, and only the blueprint's owner gets its defaults | accepted |
 | [0050](0050-a-new-copy-becomes-its-repository-with-one-command.md) | A new copy becomes its repository on GitHub with one command that it brings, `blueprint.py create`, always on `main` | accepted |
-| [0051](0051-every-owner-chooses-who-runs-renovate-and-whether-an-ai-reads-the-issues.md) | Every owner chooses who runs Renovate, and whether an AI reads the issues | accepted |
+| [0051](0051-every-owner-chooses-who-runs-renovate-and-whether-an-ai-reads-the-issues.md) | Every owner chooses who runs Renovate, and whether an AI reads the issues | accepted, amended by [0057](0057-renovate-keeps-no-dependency-dashboard.md) |
 | [0052](0052-roll-out-every-release-at-once.md) | Bring every release to every repository right after it is verified, and keep the weekly run as a safety net | accepted |
 | [0053](0053-answers-render-valid-files-and-every-repository-links-its-website.md) | The answers render valid files, and every new repository links its website and has the topics of its kind | accepted |
 | [0054](0054-the-reference-is-written-from-its-sources-and-committed.md) | The reference of the questions, variables and secrets is written from its sources and committed | accepted |
 | [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md) | What GitHub doesn't do for a repository, such as a switch of security that its plan lacks, fails no run of the settings | accepted |
 | [0056](0056-every-function-stays-small-enough-for-the-copies-of-mutmut.md) | Every function stays small enough for the copies of mutmut: the parser of `blueprint.py` adds each group of commands in a function of its own | accepted |
+| [0057](0057-renovate-keeps-no-dependency-dashboard.md) | Renovate keeps no dependency dashboard, so that a repository can have no open issue | accepted |
