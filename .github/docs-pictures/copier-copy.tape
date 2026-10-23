@@ -38,9 +38,13 @@ Sleep 500ms
 Enter
 
 # The answers: the name, the description, the kind of project and the owner, and the
-# defaults for the rest, including the release app. Each key waits for its question. Wait+Screen reads only the first
-# screen of output, so the last questions wait for the line of the cursor instead,
-# or for a moment where that line stays empty.
+# defaults for the rest, including the release app. Each key waits for its question.
+# Wait+Screen reads only the first screen of output, its first 22 lines, even after
+# the output has scrolled: up to the copyright, a question and its answer take two
+# lines below the command and what Copier says first, and a test of the blueprint
+# keeps every Wait+Screen on that screen. The later questions wait for the line of
+# the cursor instead, which holds the default of a question, the help of a choice
+# or (Y/n), or for a moment where that line stays empty.
 Wait+Screen@60s /The name of the project/
 Sleep 500ms
 Type "Paperless Sync"
@@ -71,18 +75,17 @@ Enter
 Wait+Screen /The copyright of the license/
 Sleep 500ms
 Enter
-Wait+Screen /The license/
-Wait+Screen /Use arrow keys/
+# The license, a choice whose default, MIT, is selected.
+Wait /Use arrow keys\)$/
 Sleep 500ms
 Enter
-Wait+Screen /Python package or module/
+Wait /paperless_sync$/
 Sleep 500ms
 Enter
-Wait+Screen /The languages of the code/
-Wait+Screen /to invert/
+# The languages of the code, of which Python is selected, and GitHub Discussions, yes.
+Wait /to invert\)$/
 Sleep 500ms
 Enter
-Wait+Screen /GitHub Discussions/
 Wait /\(Y.n\)$/
 Sleep 500ms
 Enter
