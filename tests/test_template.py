@@ -11470,7 +11470,9 @@ def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> N
         assert ends[found] <= screen, f"/{wait}/ waits for line {ends[found]}"
     # Each key of a later question waits for the line of the cursor.
     assert "\nWait /Use arrow keys\\)$/\n" in tape
+    assert "\nWait /paperless_sync$/\n" in tape
     assert "\nWait /to invert\\)$/\n" in tape
+    assert "\nWait /\\(Y.n\\)$/\n" in tape
 
 
 def test_the_tools_of_the_website_install_on_windows() -> None:
