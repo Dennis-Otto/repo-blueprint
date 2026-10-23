@@ -50,7 +50,7 @@ hide:
 
     ---
 
-    Renovate, das der Blueprint mehrmals am Tag ausführt: Actions, Abhängigkeiten und Images eine Woche nach ihrem Release, montags, sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt. Routine-Updates mergen sich selbst, sobald alle Prüfungen grün sind; die wöchentliche Auffrischung jeder Lock-Datei wartet auf den Maintainer. Das Issue *Dependency dashboard* listet jedes Update, das wartet oder fehlschlug.
+    Renovate, das der Blueprint mehrmals am Tag ausführt: Actions, Abhängigkeiten und Images eine Woche nach ihrem Release, montags, sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt. Routine-Updates mergen sich selbst, sobald alle Prüfungen grün sind; die wöchentliche Auffrischung jeder Lock-Datei wartet als Pull Request auf den Maintainer. Renovate hält kein Issue offen.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 

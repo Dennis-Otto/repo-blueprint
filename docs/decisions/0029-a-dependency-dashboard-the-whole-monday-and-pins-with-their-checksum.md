@@ -1,6 +1,6 @@
 # A dependency dashboard, the whole Monday, fix(deps) for what the users run, and pinned downloads that move with their checksum
 
-- Status: accepted
+- Status: accepted, amended by [0057](0057-renovate-keeps-no-dependency-dashboard.md), which switches the dependency dashboard off again
 - Date: 2026-10-17
 
 ## Context
