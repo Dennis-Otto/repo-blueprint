@@ -74,6 +74,7 @@ from blueprint.fixes import (
 from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
 from blueprint.notices import third_party_notices
+from blueprint.overrides import write_overrides
 from blueprint.pages import Layout, annotation, command, fixed, layouts, pages
 from blueprint.pr_report import about as pr_parts
 from blueprint.settings import (
@@ -797,6 +798,12 @@ def add_changelog_parsers(
         help="release: the file to write the paths of the fragments into that the "
         "release takes in, one on each line, for the release bot to delete",
     )
+    commands.add_parser(
+        "commit-overrides",
+        help="write the title of each merged pull request since the last release "
+        "into its description, for release-please, which might not parse its squash "
+        "commit (the release bot)",
+    )
     beta_parser = commands.add_parser(
         "beta", help="the notes of a beta of the next release, for the release bot"
     )
@@ -1479,6 +1486,9 @@ def main(
             return 1 if outcome.warnings and not arguments.warnings_only else 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments)
+        if arguments.command == "commit-overrides":
+            print(write_overrides(api, repo), end="")
+            return 0
         settings = Settings.load(root / arguments.config, root)
         if arguments.command == "checklist":
             return checklist_command(api, repo, settings, root)
