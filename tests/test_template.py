@@ -2148,6 +2148,11 @@ def pages_step(check: str) -> str:
 
 def fragments_step(check: str) -> str:
     start = check.index('step "Changelog fragments"')
+    return check[start : check.index('step "Accepted advisories"', start)]
+
+
+def advisories_step(check: str) -> str:
+    start = check.index('step "Accepted advisories"')
     return check[start : check.index('step "Version"', start)]
 
 
@@ -2271,6 +2276,79 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "docker" not in fragments_step(check)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_the_rules_of_what_osv_scanner_accepts(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the fragments, with their Python and blueprint.py, the same in every kind
+    # of project and in the blueprint.
+    assert check.index('\nstep "Changelog fragments"\n') < check.index(
+        '\nstep "Accepted advisories"\n'
+    )
+    assert advisories_step(check) == advisories_step(generic) == advisories_step(own)
+    assert '  "$python" "$tool" advisories\n' in advisories_step(check)
+    assert "--fix" not in advisories_step(check).split("\nif ", 1)[1]
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_rules_that_osv_scanner_toml_does_not_have(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    script = (
+        check[: check.index('step "Text files"')]
+        + pages_step(check)
+        + advisories_step(check)
+    )
+    (project / "scripts/advisories.sh").write_text(
+        script, encoding="utf-8", newline="\n"
+    )
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("CI", "GITHUB_ACTIONS")
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/advisories.sh"],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    fine = step()
+    # A version accepted with every advisory, without its rule of Renovate.
+    (project / "osv-scanner.toml").write_text(
+        (ROOT / "stacks/home-assistant/osv-scanner.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    failed = step()
+
+    assert fine.returncode == 0, fine.stdout + fine.stderr
+    assert "\n== Accepted advisories\n" in fine.stdout
+    assert "No osv-scanner.toml accepts a version with every advisory" in fine.stdout
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert ".github/renovate-accepted.json5 differs from the versions" in failed.stdout
+    # The PR coach explains the step, with its fix.
+    assert "python3 .github/blueprint.py advisories --fix" in failed.stdout
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the
@@ -5505,6 +5583,51 @@ def test_renovate_reads_every_lock_file_of_a_project(
     assert names == expected.get(kind, [])
 
 
+# The project's own blueprint.py checks the rules, in a process of its own.
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    # Home Assistant pins Pillow and uv for the tests of every integration, so a new
+    # one accepts their advisories as the blueprint does in stacks/home-assistant/, in
+    # the root, where its requirements-test.txt is.
+    accepted = project / "osv-scanner.toml"
+    assert accepted.is_file() == (kind == "home-assistant")
+    if accepted.is_file():
+        assert accepted.read_text(encoding="utf-8") == (
+            ROOT / "stacks/home-assistant/osv-scanner.toml"
+        ).read_text(encoding="utf-8")
+        assert (project / "requirements-test.txt").is_file()
+    # The rules of the blueprint extend those of the project's osv-scanner.toml.
+    rules = renovate_rules(
+        (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    assert rules["extends"][-1] == (
+        "local>Dennis-Otto/demo-project//.github/renovate-accepted.json5"
+    )
+    preset = renovate_rules(
+        (project / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
+    )
+    names = [rule["matchPackageNames"] for rule in preset["packageRules"]]
+    assert names == ([["pillow"], ["uv"]] if kind == "home-assistant" else [])
+    for rule in preset["packageRules"]:
+        assert rule["matchFileNames"] == ["/^[^/]+$/"]
+        assert rule["description"].startswith("osv-scanner.toml accepts every")
+    # The step of scripts/check.sh passes in the new repository: its rules are those
+    # that blueprint.py writes from its osv-scanner.toml.
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    result = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "advisories"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def renovate_rules(text: str) -> dict[str, Any]:
     """The rules of a .json5 file of Renovate: JSON with comments, names without
     quotes and commas before a closing bracket."""
@@ -6080,6 +6203,32 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
         "TOKEN=" in argument and "WARN" not in argument for argument in arguments
     )
     assert arguments[-1].strip().endswith("renovate --platform=local --dry-run=extract")
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_the_renovate_rules_read_the_committed_rules_without_their_presets(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # The step of the workflow takes the presets of the platform "local" out of the
+    # committed rules in Renovate's container; what is left must still be JSON5,
+    # without an empty element where a preset was, or Renovate can't read it.
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    (sed,) = re.findall(r"^\s*(sed -i .*local>.*)$", workflow, re.M)
+    root = ROOT if kind == "blueprint" else projects[kind]
+    names = (".github/renovate.json5", ".github/renovate-blueprint.json5")
+    for name in names:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(root / name, tmp_path / name)
+    assert BASH
+    subprocess.run([BASH, "-c", sed], cwd=tmp_path, check=True)
+
+    own, shared = (
+        renovate_rules((tmp_path / name).read_text(encoding="utf-8")) for name in names
+    )
+    assert own["extends"] == []
+    assert shared["extends"] == ["config:recommended", ":semanticCommits"]
+    for name in names:
+        assert "local>" not in (tmp_path / name).read_text(encoding="utf-8")
 
 
 def test_the_renovate_rules_run_for_every_change_of_a_lock_file() -> None:
@@ -8736,7 +8885,12 @@ def test_every_project_fixes_what_a_command_can_fix(
     assert fix < keep < check.index("      - name: Explain the failure\n")
     assert f'          CHECK: "{name[1]}"\n' in check[fix:keep]
     steps = [step for step, _ in fixers(explained, project, name[1])]
-    expected = ["Text files", "Pages in one column", *FIXED_STEPS.get(stack, [])]
+    expected = [
+        "Text files",
+        "Pages in one column",
+        "Accepted advisories",
+        *FIXED_STEPS.get(stack, []),
+    ]
     assert list(dict.fromkeys(steps)) == expected, stack
     # Lint keeps what markdownlint fixed, and the fix bot after the checks takes the
     # fixes of both, with the CI of this kind among the workflows that it follows.

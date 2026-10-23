@@ -20,7 +20,7 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 
 - **Das Beispiel:** `src/index.ts`, gebaut nach `dist/`, die Tests in `test/`, `tsconfig.json` und `tsconfig.build.json`, `biome.jsonc` und `package.json` mit seiner Lock-Datei. Ersetze es durch den echten Code; seine Tests zeigen, wie.
 - **Die Schritte von `scripts/check.sh` für diese Art,** auf deinem Rechner wie in der CI: Biome für Lint und Format, tsc für die Typen, node:test mit jeder Zeile, jedem Zweig und jeder Funktion abgedeckt und seinem Bericht im PR-Coach, und `npm pack`; npm installiert ohne die Skripte der Pakete.
-- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
+- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
 - **Alles, was jedes Repository bekommt:** den PR-Coach und den Fix-Bot, den Release-Bot, Renovate, die Einstellungen als Code, den Issue-Assistenten, die Website auf Deutsch und Englisch, die Sicherheitsprüfungen und den Blueprint-Bot, wie [die Anleitung](../guide.md#was-ein-neues-repository-bekommt) sie nennt.
 
 ## Die Prüfungen, die ein Pull Request braucht

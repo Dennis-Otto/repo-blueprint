@@ -51,6 +51,8 @@ _skip_if_exists:
   - /.markdownlint.jsonc
   - .github/cspell-words.txt
   - .github/renovate.json5
+  - .github/renovate-accepted.json5
+  - /osv-scanner.toml
   - .github/findings.toml
   - .github/dependency-review.yml
   - .github/social-preview.html

@@ -1,5 +1,5 @@
 ---
-description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a switch of the security that GitHub keeps off, a release pull request without checks, and Renovate that opens no updates."
+description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
 ---
 
 # Troubleshooting
@@ -98,6 +98,32 @@ When the token of the app fails, as for an app that isn't installed on the repos
 - **`hub`, the Renovate workflow of the blueprint,** for the repositories of the blueprint's owner: the release app must be installed on the repository, which needs a `.github/renovate.json5`.
 
 Where a Renovate workflow runs, the bot-health bot keeps one issue open with the warnings and errors of Renovate.
+
+## OSV-Scanner reports a version that another package pins
+
+**What you see:** the check *osv-scanner* fails, and code scanning has open alerts of OSV-Scanner for a lock file whose dependency no update can move, so that the Findings workflow fails on `main` too. Renovate opens no pull request for them, and the issue *Renovate logs problems* lists `Detected empty commit - aborting git push` for a branch such as `renovate/pypi-pillow-vulnerability`. Home Assistant, for example, pins the Pillow and the uv that the tests of an integration install.
+
+**Why:** the package that pins the version, such as the test plugin of Home Assistant, holds it until its next release, so the lock file stays as it is: Renovate's fix of the vulnerability is an empty commit, in every run.
+
+**What to do:** accept every advisory of that version in the `osv-scanner.toml` beside the lock file, with the reason and the date when a person looks again, as an entry of `[[PackageOverrides]]`; OSV-Scanner reads the file in the folder of each lock file. A new Home Assistant integration has the entries for its test tools already.
+
+```toml
+[[PackageOverrides]]
+name = "pillow"
+version = "12.3.0"
+ecosystem = "PyPI"
+vulnerability.ignore = true
+effectiveUntil = 2026-11-22
+reason = "Home Assistant pins Pillow 12.3.0 for the tests; its next release moves it."
+```
+
+Then let `blueprint.py` write the rule of Renovate for it, and commit both files:
+
+```sh
+python3 .github/blueprint.py advisories --fix
+```
+
+`.github/renovate-accepted.json5` then has a rule for each such version, which `.github/renovate-blueprint.json5` extends: Renovate makes no update of that version in the lock files of that folder, which only the package that pins it moves. The step *Accepted advisories* of `scripts/check.sh` fails while the rules and the `osv-scanner.toml` files disagree, and when OSV-Scanner couldn't use a file: it ignores a whole file with a key that it doesn't know. After `effectiveUntil`, OSV-Scanner reports the advisories again; once the package that pins the version moves it, delete the entry. An advisory that doesn't affect the project, of a version that an update could move, goes into `[[IgnoredVulns]]` alone, with its `id` and reason, and the OpenVEX document of each release states those of the `osv-scanner.toml` in the root ([decision 0059](decisions/0059-accept-a-pinned-version-and-tell-renovate.md)).
 
 ## A scheduled workflow didn't run
 

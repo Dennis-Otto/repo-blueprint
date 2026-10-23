@@ -1,0 +1,39 @@
+// The versions that an osv-scanner.toml of this repository accepts with every
+// advisory, as rules of Renovate, which .github/renovate-blueprint.json5 extends:
+// Renovate opens no branch to fix a vulnerability of such a version, which the lock
+// file couldn't take, as for a version that another package pins exactly. The command
+// advisories of blueprint.py writes this file from the [[PackageOverrides]] of each
+// osv-scanner.toml, and scripts/check.sh fails when they disagree; change those, not
+// this file. https://github.com/Dennis-Otto/repo-blueprint
+{
+  "packageRules": [
+    {
+      "description": "stacks/home-assistant/osv-scanner.toml accepts every advisory of pillow 12.3.0 until 2026-11-22: Home Assistant 2026.10 pins Pillow 12.3.0, which only its test plugin installs here, for the tests of the integration; the next update of pytest-homeassistant-custom-component that brings Pillow 13 ends this.",
+      "matchFileNames": [
+        "/^stacks/home-assistant/[^/]+$/"
+      ],
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchPackageNames": [
+        "pillow"
+      ],
+      "matchCurrentVersion": "/^12\\.3\\.0$/",
+      "enabled": false
+    },
+    {
+      "description": "stacks/home-assistant/osv-scanner.toml accepts every advisory of uv 0.12.23 until 2026-11-22: Home Assistant 2026.10 pins uv 0.12.23, which only its test plugin installs here, for the tests of the integration; the next update of pytest-homeassistant-custom-component that brings uv 0.13.4 ends this.",
+      "matchFileNames": [
+        "/^stacks/home-assistant/[^/]+$/"
+      ],
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchPackageNames": [
+        "uv"
+      ],
+      "matchCurrentVersion": "/^0\\.12\\.23$/",
+      "enabled": false
+    }
+  ]
+}
