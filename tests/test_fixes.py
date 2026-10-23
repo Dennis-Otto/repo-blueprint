@@ -128,6 +128,7 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
     assert found == [
         ("Text files", "{blueprint} fix text"),
         ("Pages in one column", "{blueprint} pages --fix"),
+        ("Accepted advisories", "{blueprint} advisories --fix"),
         ("Ruff", "ruff check --fix ."),
         ("Ruff", "ruff format ."),
         # Of the blueprint alone, by its .github/checks.project.toml.

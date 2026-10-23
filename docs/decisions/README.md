@@ -64,3 +64,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0056](0056-every-function-stays-small-enough-for-the-copies-of-mutmut.md) | Every function stays small enough for the copies of mutmut: the parser of `blueprint.py` adds each group of commands in a function of its own | accepted |
 | [0057](0057-renovate-keeps-no-dependency-dashboard.md) | Renovate keeps no dependency dashboard, so that a repository can have no open issue | accepted |
 | [0058](0058-every-website-shows-the-pictures-of-its-diagrams.md) | Every website shows the pictures of its diagrams, so that a page with a diagram stays within 1.2 MB | accepted |
+| [0059](0059-accept-a-pinned-version-and-tell-renovate.md) | A version that another package pins is accepted with every advisory in `osv-scanner.toml`, and Renovate is told by a rule that `blueprint.py` writes | accepted |

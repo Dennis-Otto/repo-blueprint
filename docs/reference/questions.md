@@ -478,7 +478,7 @@ How the release bot finds the version: Python and Node in their manifests, the o
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.
 
 <details markdown>
-<summary>The 53 patterns of the files of a project</summary>
+<summary>The 55 patterns of the files of a project</summary>
 
 - `/README.md`
 - `/CHANGELOG.md`
@@ -500,6 +500,8 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/.markdownlint.jsonc`
 - `.github/cspell-words.txt`
 - `.github/renovate.json5`
+- `.github/renovate-accepted.json5`
+- `/osv-scanner.toml`
 - `.github/findings.toml`
 - `.github/dependency-review.yml`
 - `.github/social-preview.html`
