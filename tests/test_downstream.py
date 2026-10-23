@@ -9,6 +9,7 @@ import subprocess
 import sys
 import urllib.error
 from collections.abc import Callable, Mapping
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
@@ -568,6 +569,24 @@ def test_a_download_tries_three_times(
     assert sleeps == [10, 20]
     assert capsys.readouterr().err == (
         f"downstream.py: {RAW} could not be downloaded: <urlopen error offline>\n"
+    )
+
+
+def test_a_download_closes_the_answer_of_an_error(
+    blueprint: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An error as urlopen raises it, the answer of the server too: closed, as the
+    # newest Python warns of one left open.
+    error = urllib.error.HTTPError(RAW, 404, "Not Found", Message(), io.BytesIO(b""))
+    opener = Opener({RAW: error})
+
+    def fetch(url: str) -> str:
+        return downstream.download(url, opener, lambda seconds: None)
+
+    assert downstream.main(["--answers"], root=blueprint, fetch=fetch) == 2
+    assert error.closed
+    assert capsys.readouterr().err == (
+        f"downstream.py: {RAW} could not be downloaded: HTTP Error 404: Not Found\n"
     )
 
 
