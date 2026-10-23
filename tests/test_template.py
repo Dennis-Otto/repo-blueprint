@@ -2541,6 +2541,35 @@ def test_the_link_check_leaves_out_the_website_that_a_new_repository_gets_later(
         ).read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_link_check_leaves_out_only_the_cwe_that_refuses_the_ci(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # cwe.mitre.org gives the runners of GitHub no answer since 2026-10-23, so the
+    # link to the CWE Top 25 of SECURITY.md failed the check on main of every
+    # repository (#390).
+    project = projects[kind]
+    excludes = [re.compile(rule) for rule in lychee_excludes(project)]
+    links = re.findall(
+        r"\]\((https://cwe\.mitre\.org/[^)]*)\)",
+        (project / "SECURITY.md").read_text(encoding="utf-8"),
+    )
+    assert links == ["https://cwe.mitre.org/top25/"]
+    for url in (*links, "https://cwe.mitre.org/data/definitions/79.html"):
+        assert any(rule.search(url) for rule in excludes), url
+    # Only that site: a link to any other site that doesn't answer still fails, also
+    # to one that looks like it, and the check accepts no timeout.
+    for url in (
+        "https://www.mitre.org/",
+        "https://cve.mitre.org/",
+        "https://example.org/https://cwe.mitre.org/top25/",
+        "https://owasp.org/www-project-top-ten/",
+    ):
+        assert not any(rule.search(url) for rule in excludes), url
+    config = tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))
+    assert config["accept"] == ["200..=299", "403", "429"]
+
+
 def test_the_link_check_checks_the_anchors_that_it_can_see(
     projects: dict[str, Path],
 ) -> None:
