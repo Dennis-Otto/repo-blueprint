@@ -317,13 +317,22 @@ def is_code(node: ast.expr, code: Sequence[str]) -> bool:
 
 
 def copies_code(function: ast.FunctionDef, code: Sequence[str]) -> bool:
-    """Whether the function copies a module of the code, with shutil or read_bytes()."""
+    """Whether the function copies a module of the code, with shutil or read_bytes().
+
+    Bytes that a test only compares, as with the module that a repository gets from the
+    blueprint, stay in mutants/ and run nowhere else."""
+    compared = {
+        id(inner)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Compare)
+        for inner in ast.walk(node)
+    }
     for node in ast.walk(function):
         if not isinstance(node, ast.Call):
             continue
         called = node.func
         if isinstance(called, ast.Attribute) and called.attr == "read_bytes":
-            if is_code(called.value, code):
+            if id(node) not in compared and is_code(called.value, code):
                 return True
         elif isinstance(called, ast.Attribute | ast.Name) and node.args:
             name = called.attr if isinstance(called, ast.Attribute) else called.id
@@ -429,6 +438,10 @@ def test_marked(tmp_path):
 @runs_the_tool
 def test_marked_by_name(tmp_path):
     with_tool(tmp_path)
+
+
+def test_that_compares_its_bytes(tmp_path):
+    assert (tmp_path / "tool.py").read_bytes() == (ROOT / "tool.py").read_bytes()
 
 
 def test_that_reads_the_code_as_text():
