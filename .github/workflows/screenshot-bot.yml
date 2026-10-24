@@ -6,10 +6,12 @@ name: Screenshots
 # change can change them, as the paths of a workflow; without the script, every run
 # ends after its plan. After a change of main that touches a file of the list, after
 # every release, whose version a picture may show, every week and on demand, it runs
-# the script without secrets, with Docker and the tools of the website in .venv-docs
-# as CONTRIBUTING.md sets them up, and compares each picture that changed with the
-# one of main by its pixels: a picture whose pixels stayed the same keeps its file, so that a
-# new encoder, browser or runner changes nothing. When pixels changed, it keeps one
+# the script without secrets, with Docker, the whole history and the tools of the
+# website in .venv-docs as CONTRIBUTING.md sets them up; the script of a new
+# repository photographs the website and, by its kind, the integration in Home
+# Assistant or the app in Nextcloud, each in Docker. It compares each picture that
+# changed with the one of main by its pixels: a picture whose pixels stayed the same
+# keeps its file, so that a new encoder, browser or runner changes nothing. When pixels changed, it keeps one
 # pull request from the branch bot/screenshots, as the release app, which merges
 # itself once every check passes, and closes it when main looks as rendered without
 # it. The bot commits only pictures, by plain paths, outside .git and the workflows;
@@ -114,9 +116,12 @@ jobs:
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
+      # With the whole history, as the Docs workflow checks it out: a picture of the
+      # website shows the date of each page's last change, which git keeps.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         timeout-minutes: 5
         with:

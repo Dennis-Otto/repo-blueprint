@@ -1,6 +1,6 @@
 # Pictures renew themselves by their pixels, through one pull request of a bot
 
-- Status: accepted
+- Status: accepted, amended by [0065](0065-every-kind-photographs-itself-in-docker-with-the-playwright-of-the-browser.md), with which a new repository photographs its website and, by its kind, its integration or app, and the job *render* checks out the whole history
 - Date: 2026-10-18
 
 ## Context

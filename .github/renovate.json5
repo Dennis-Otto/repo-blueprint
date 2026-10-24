@@ -32,6 +32,16 @@
       ],
       datasourceTemplate: "pypi",
     },
+    {
+      // The Home Assistant and the Nextcloud of the pictures of a new repository,
+      // by tag and digest, in the template of its scripts/screenshots.sh.
+      customType: "regex",
+      managerFilePatterns: ["/^template/scripts/.*screenshots\\.sh.*\\.jinja$/"],
+      matchStrings: [
+        "(?:^|[\\s\"'=])(?<depName>[a-z0-9][a-z0-9._-]*(?:/[a-z0-9._-]+)+):(?<currentValue>v?\\d[a-zA-Z0-9._-]*)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+    },
   ],
   packageRules: [
     {
@@ -152,6 +162,23 @@
       matchFileNames: ["stacks/docs/**"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "the tools of the websites",
+    },
+    {
+      // The Nextcloud of the pictures of a new app stays within the max-version of
+      // its appinfo/info.xml, which tests/test_template.py checks: a new major
+      // version moves with that by hand.
+      matchFileNames: ["template/scripts/**"],
+      matchDepNames: ["docker.io/library/nextcloud"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
+    {
+      // The browser of the screenshots and the Playwright that drives it move
+      // together: the image of .github/social-preview/Dockerfile holds the browsers of
+      // one version of Playwright, stacks/screenshots/requirements-browser.txt the
+      // package of the same version, which tests/test_template.py keeps equal.
+      matchDepNames: ["mcr.microsoft.com/playwright/python", "playwright"],
+      groupName: "Playwright",
     },
   ],
 }

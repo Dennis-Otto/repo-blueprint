@@ -1,0 +1,31 @@
+# Every kind photographs itself in Docker, with the Playwright of the browser's image
+
+- Status: accepted
+- Date: 2026-10-25
+
+## Context
+
+The screenshot bot ([decision 0037](0037-pictures-renew-themselves-by-their-pixels.md)) renders whatever `scripts/screenshots.sh` renders, and a new repository started with a script that rendered only its social preview. Each project then had to find out on its own how to start its server, sign in, wait for a page and keep the pixels the same from run to run: HomeDarts for Autodarts and the two Nextcloud apps each solved it in their own way. The blueprint's own documentation showed what a repository gets in diagrams, but not the pages of GitHub that a maintainer then sees: an update of the blueprint with its checks, a release with its SBOMs and its provenance, the comment of the PR coach.
+
+A picture that changes without a change of the project is worse than none: the bot opens a pull request each week. The causes showed when the starter scripts ran twice in a row, again and again: Chromium drew the colored edges of LCD text differently; Home Assistant showed the domain of the integration as its title until its name had loaded, and notes of its start while it set up the integrations of the onboarding; the browser of Nextcloud started its background jobs on SQLite, which then answered a page with an error; Nextcloud showed the categories of its app store when it had reached it in time, blurred its background behind the menus a little differently each time, and lost a setting when the script wrote `config.php` while the image still did.
+
+## Options
+
+1. Leave the pictures to each project, with the social preview as the only start.
+2. A tool of the blueprint, such as `blueprint.py screenshots shoot`, that photographs what a file of the project lists. It needs Playwright in the tool and its tests, and each kind still needs its own way to start the server and to sign in.
+3. A starter script for each kind that the project owns and changes: it starts the server of its kind in Docker with the data of the repository, and Playwright photographs it in the image of the browser that renders the social preview already.
+
+## Decision
+
+Option 3.
+
+- **What a new repository photographs:** the home page of its website, built with the tools in `.venv-docs` and served in the container of the browser; a Home Assistant integration its page in Home Assistant, which runs with `custom_components/` and without `default_config:`, set up through the onboarding and the config flow of the API; a Nextcloud app the app in the apps of the settings of a Nextcloud on SQLite, whose administrator has a password that lives as long as the run. Each picture comes in the light and the dark theme, as `docs/images/screenshots/<name>.png` and `<name>.dark.png`, for a `<picture>`.
+- **A fixed clock, size and data:** the server and the browser share a Docker network without a way out, so what a picture shows comes from the repository alone, never from a server on the internet, such as the categories of Nextcloud's app store, which came one run and not the next. The clock of the browser stands still, its window is 1280×800 at a scale of 1, the locale and the time zone are fixed, motion is reduced and animations are off; the letters have gray edges (`--disable-lcd-text`); each picture waits for what it shows and loads its page again when it doesn't come, Home Assistant until it runs, without the notes of its start, and until the domain has left the title of the integration; Nextcloud gets its settings only after the image has written its own, runs its background jobs by cron, which never runs, has a background of one color behind its blurred menus, and no app store, first-run wizard or notes about updates.
+- **One browser, pinned twice and moved together:** the Chromium of `.github/social-preview/Dockerfile`, driven by the Playwright of `stacks/screenshots/requirements-browser.txt`, which each repository gets as `.github/screenshots-browser-requirements.txt` and installs with its hashes into an image of its own, built from that image, which Docker keeps until either changes. Renovate moves the image and the package in one pull request, and a test keeps their versions equal; while a repository's image runs ahead, the script starts the Chromium of the image.
+- **Servers that Renovate keeps current:** the images of Home Assistant and Nextcloud stand in the script by tag and digest, where Renovate finds them in every repository, and in the blueprint in the template. The Nextcloud stays within the `max-version` of `appinfo/info.xml`, which a test checks; a new major version moves with it by hand.
+- **The website as it is published:** the job *render* checks out the whole history, as the Docs workflow does, so that a picture shows the date of each page's last change.
+- **The pages of GitHub in the blueprint's documentation:** `scripts/docs-pictures.sh` photographs, with `.github/docs-pictures/github_pages.py` and the same browser, parts of public pages that no longer change, as a reader without an account sees them: the checks of a merged update of the blueprint, the assets of a published release and the comment of the PR coach on a merged pull request. The clock stands still long after them, so GitHub writes their dates in full, and a picture changes only when GitHub changes its pages.
+
+## Consequences
+
+A new repository has pictures of what it makes from its first run of the bot, and a project adds its own to the function `shoot()` of its script, with the same clock, size and themes. The scripts belong to the projects, so an update of the blueprint never changes them: a better starter reaches new repositories, and the changelog says what an existing one can take over. A render of Home Assistant or Nextcloud pulls an image of about a gigabyte and takes a few minutes. HomeDarts for Autodarts keeps its own `screenshots.yml` for now: it renders in six parallel jobs, records the live demo, a JSON file, in the same pull request, and blocks every host its jobs don't need; the shared workflow first needs jobs in parallel, files other than pictures and an allowlist of the project's hosts.

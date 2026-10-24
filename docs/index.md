@@ -74,7 +74,7 @@ hide:
 
     ---
 
-    The pictures of the project renew themselves: after a change of what they show, after every release and every week, the screenshot bot runs `scripts/screenshots.sh` and keeps one pull request with the pictures whose pixels changed, which merges itself.
+    The pictures of the project renew themselves: after a change of what they show, after every release and every week, the screenshot bot runs `scripts/screenshots.sh` and keeps one pull request with the pictures whose pixels changed, which merges itself. A new repository photographs its website and, by its kind, its integration or its app from the start.
 
 - :material-cog-outline:{ .lg .middle } **Settings as code**
 
