@@ -307,7 +307,10 @@ def mutation_command(
         )
         silent = mutation.Report.of([part]).silent
         if silent:
+            # The reason in the summary, and the annotation, which names the test that
+            # failed, in the log.
             print(mutation.no_mutant_ran(part))
+            print(mutation.no_mutant_ran_error(part), file=sys.stderr)
         return 1 if silent else 0
     if arguments.action == "issue":
         folder = Path(arguments.folder)

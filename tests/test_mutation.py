@@ -46,6 +46,7 @@ from blueprint.mutation import (
     module_name,
     modules,
     no_mutant_ran,
+    no_mutant_ran_error,
     plan,
     read_parts,
     read_previous,
@@ -292,6 +293,166 @@ def test_the_copied_lines_of_a_function_are_its_lines_for_each_mutant(
     )
     # Three lines, three mutants: the assignment, the operator and the default.
     assert copied_lines(module) == {"x_add": 9}
+
+
+# A test that copies a module of the code into a repository of its own, such as pins.py
+# for the fix bot, runs it there. In the copy of the mutation tests that is the code with
+# the mutants, which asks mutmut for its configuration, and outside of mutants/ mutmut
+# finds none: the test fails before any mutant, and so does every part of the Mutation
+# workflow (#405). Such a test gets the marker, and this test asks for it in the checks
+# of the pull request, not only the weekly run.
+UNSAFE = "pytest.mark.mutation_unsafe"
+COPIES = frozenset({"copy", "copy2", "copyfile", "copytree"})
+
+
+def is_code(node: ast.expr, code: Sequence[str]) -> bool:
+    """Whether node is the path of a module that mutmut mutates, as ROOT / "pins.py" or
+    ROOT / "blueprint" / "fixes.py"."""
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = node.left, node.right
+        if isinstance(left, ast.Name) and isinstance(right, ast.Constant):
+            return left.id == "ROOT" and str(right.value).split("/")[0] in code
+        node = left
+    return False
+
+
+def copies_code(function: ast.FunctionDef, code: Sequence[str]) -> bool:
+    """Whether the function copies a module of the code, with shutil or read_bytes()."""
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func
+        if isinstance(called, ast.Attribute) and called.attr == "read_bytes":
+            if is_code(called.value, code):
+                return True
+        elif isinstance(called, ast.Attribute | ast.Name) and node.args:
+            name = called.attr if isinstance(called, ast.Attribute) else called.id
+            if name in COPIES and is_code(node.args[0], code):
+                return True
+    return False
+
+
+def unmarked_copies(source: str, code: Sequence[str]) -> list[str]:
+    """The tests of a module that copy the code, themselves or through a helper or a
+    fixture of the module, without the marker mutation_unsafe."""
+    tree = ast.parse(source)
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    markers = {UNSAFE}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and UNSAFE in ast.unparse(node.value):
+            names = [target for target in node.targets if isinstance(target, ast.Name)]
+            if any(name.id == "pytestmark" for name in names):
+                return []
+            markers |= {name.id for name in names}
+    uses = {
+        name: {
+            node.id
+            for node in ast.walk(function)
+            if isinstance(node, ast.Name) and node.id in functions
+        }
+        | {argument.arg for argument in function.args.args if argument.arg in functions}
+        for name, function in functions.items()
+    }
+    copying = {
+        name for name, function in functions.items() if copies_code(function, code)
+    }
+    while grown := {
+        name for name in functions if name not in copying and uses[name] & copying
+    }:
+        copying |= grown
+    return [
+        name
+        for name in sorted(copying)
+        if name.startswith("test_")
+        and not any(
+            ast.unparse(decorator) in markers
+            for decorator in functions[name].decorator_list
+        )
+    ]
+
+
+def test_a_test_that_runs_a_copy_of_the_code_stays_out_of_the_mutation_tests() -> None:
+    root = Path(__file__).parent.parent
+    code = default_paths(root)
+    assert "pins.py" in code
+    assert "blueprint" in code
+
+    unmarked = {
+        f"{path.relative_to(root).as_posix()}::{name}": "needs @" + UNSAFE
+        for path in sorted((root / "tests").glob("test_*.py"))
+        for name in unmarked_copies(path.read_text(encoding="utf-8"), code)
+    }
+
+    assert not unmarked, unmarked
+
+
+def test_the_tests_that_run_a_copy_of_the_code() -> None:
+    source = """
+import shutil
+import pytest
+from shutil import copytree
+
+runs_the_tool = pytest.mark.mutation_unsafe
+
+
+def with_tool(root):
+    shutil.copy(ROOT / "tool.py", root)
+
+
+def repository(root):
+    return with_tool(root)
+
+
+def test_through_a_helper(tmp_path):
+    repository(tmp_path)
+
+
+def test_through_a_fixture(with_tool):
+    pass
+
+
+def test_with_its_bytes(tmp_path):
+    (tmp_path / "tool.py").write_bytes((ROOT / "tool.py").read_bytes())
+
+
+def test_with_a_package(tmp_path):
+    copytree(ROOT / "package" / "sub", tmp_path / "package")
+
+
+@pytest.mark.mutation_unsafe
+def test_marked(tmp_path):
+    with_tool(tmp_path)
+
+
+@runs_the_tool
+def test_marked_by_name(tmp_path):
+    with_tool(tmp_path)
+
+
+def test_that_reads_the_code_as_text():
+    assert "def" in (ROOT / "tool.py").read_text()
+
+
+def test_of_other_files(tmp_path):
+    shutil.copy(ROOT / "README.md", tmp_path)
+    shutil.copy(OTHER / "tool.py", tmp_path)
+    shutil.copy(tmp_path / ROOT, tmp_path)
+    shutil.rmtree(tmp_path)
+    print(len("tool.py"))
+"""
+    code = ["tool.py", "package"]
+
+    assert unmarked_copies(source, code) == [
+        "test_through_a_fixture",
+        "test_through_a_helper",
+        "test_with_a_package",
+        "test_with_its_bytes",
+    ]
+    # The marker of every test of the module.
+    everywhere = "pytestmark = [pytest.mark.mutation_unsafe]\n"
+    assert unmarked_copies(everywhere + source, code) == []
 
 
 def test_the_modules_of_the_plan(tmp_path: Path) -> None:
@@ -733,6 +894,25 @@ def test_why_no_mutant_ran() -> None:
     assert text.endswith("```text\nfailed to collect\n```")
     assert no_mutant_ran(part_data()) == (
         "No mutant ran. The end of the output of mutmut:\n\n```text\n\n```"
+    )
+
+
+def test_the_annotation_of_a_part_without_a_mutant_names_the_failing_test() -> None:
+    # The bot-health bot quotes it in its issue, in place of the exit code (#405).
+    test = "tests/test_fixes.py::test_a_pin[100%]"
+
+    assert no_mutant_ran_error(part_data(failing=[test])) == (
+        "::error title=No mutant ran::The tests fail without any mutant: "
+        "tests/test_fixes.py::test_a_pin[100%25]. A test that can't pass in the copy "
+        "of mutmut, mutants/, gets the marker @pytest.mark.mutation_unsafe; the "
+        "summary of the job says why."
+    )
+    assert "mutant: tests/a.py::one and 2 more. A test" in no_mutant_ran_error(
+        part_data(failing=["tests/a.py::one", "tests/a.py::two", "tests/a.py::six"])
+    )
+    assert no_mutant_ran_error(part_data()) == (
+        "::error title=No mutant ran::No mutant ran; the summary of the job has the "
+        "end of the output of mutmut."
     )
 
 
@@ -1246,7 +1426,13 @@ def test_a_part_from_the_command_line(
     )
 
     assert code == 1
-    assert "No mutant ran. The end of the output of mutmut:" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "No mutant ran. The end of the output of mutmut:" in captured.out
+    assert (
+        captured.err
+        == f"{no_mutant_ran_error(json.loads(out.read_text(encoding='utf-8')))}\n"
+    )
+    assert captured.err.startswith("::error title=No mutant ran::No mutant ran; ")
 
 
 def test_mutmut_shows_a_survivor_on_the_python_that_has_it(

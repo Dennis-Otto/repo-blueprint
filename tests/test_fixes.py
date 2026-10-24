@@ -184,6 +184,10 @@ def test_the_step_of_the_project_fixes_itself_within_its_if(tmp_path: Path) -> N
     ]
 
 
+# The fix bot runs pins.py in the repository, a copy of the one of the blueprint. In the
+# copy of the mutation tests, that is the code with the mutants, which asks mutmut for
+# its configuration and finds none outside of mutants/ (#405).
+@pytest.mark.mutation_unsafe
 @needs_bash
 def test_a_pin_that_disagrees_with_its_record_gets_its_sha256(tmp_path: Path) -> None:
     record = pins.load_record(ROOT)["sigstore/gitsign"]
