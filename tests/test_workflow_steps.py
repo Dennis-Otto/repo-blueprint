@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1595,3 +1596,69 @@ def test_a_title_that_is_no_conventional_commit_fails_without_a_label(
     assert done.returncode == 1
     assert done.stdout.startswith("::error::Use a Conventional Commit title")
     assert done.calls == []
+
+
+# What brings back a test that reads a workflow as text, or a fake gh of its own (#288):
+# a helper that slices out a job, a step or a setting, a slice of the text at a job or
+# at a line of a step, and an executable named gh that a test writes.
+FORBIDDEN = {
+    "a helper that slices workflow text": re.compile(
+        r"^def (?:job_of|job_alone|jobs_of|steps_of|step_of|setting_of)\(", re.M
+    ),
+    "a slice of workflow text": re.compile(
+        r"\.r?(?:index|find|split)\(\s*f?\"(?:\n)?  [a-z][\w-]*:\""
+        r"|\.r?(?:index|find|split)\(\s*f?\" +(?:run: \||- name: |if: )"
+    ),
+    "a fake gh of its own": re.compile(r"/ \"gh\"\)|\{\"gh\": "),
+}
+# The one fake gh and the helpers that parse the workflows.
+ALLOWED = {"fake_gh.py", "workflow_steps.py"}
+
+
+def forbidden_in(text: str) -> list[str]:
+    """Each line of the text of a test that reads a workflow as text or fakes gh on its
+    own, with what it does."""
+    return [
+        f"{text.count(chr(10), 0, found.start()) + 1}: {what}"
+        for what, pattern in FORBIDDEN.items()
+        for found in pattern.finditer(text)
+    ]
+
+
+def test_the_guard_finds_what_slices_workflow_text_or_fakes_gh() -> None:
+    # The samples, written so that the guard doesn't find them in this file: % is a
+    # dot, ~ a space.
+    samples = (
+        "def job_of(text: str, job: str) -> str:\n"
+        '    return text[text%index("  release:") :]\n'
+        'step = job%split("      - name: Sign the tag")[1]\n'
+        'run = job[job%rindex("        run: |") :]\n'
+        '(bin_dir /~"gh").write_text(FAKE)\n'
+        'stubs={"gh":~FAKE}\n'
+    )
+    assert forbidden_in(samples.replace("%", ".").replace("~", " ")) == [
+        "1: a helper that slices workflow text",
+        "2: a slice of workflow text",
+        "3: a slice of workflow text",
+        "4: a slice of workflow text",
+        "5: a fake gh of its own",
+        "6: a fake gh of its own",
+    ]
+    # A step that a test runs, and a job of the API, are fine.
+    assert (
+        forbidden_in(
+            'run_step(tmp_path, "release.yml", "publish", "Make it public")\n'
+            "def job_of_a_run(number: int) -> dict[str, object]:\n"
+        )
+        == []
+    )
+
+
+def test_no_test_slices_workflow_text_or_fakes_gh_on_its_own() -> None:
+    # Parsed workflows and run_step() with the one fake gh, as CONTRIBUTING.md says.
+    found = {
+        path.name: forbidden_in(path.read_text(encoding="utf-8"))
+        for path in sorted((ROOT / "tests").glob("*.py"))
+        if path.name not in ALLOWED
+    }
+    assert {name: lines for name, lines in found.items() if lines} == {}

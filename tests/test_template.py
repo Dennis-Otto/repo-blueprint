@@ -223,6 +223,22 @@ def workflows(project: Path) -> dict[str, str]:
     }
 
 
+def accepted_dangerous_triggers() -> set[str]:
+    """The workflows whose start on pull_request_target or workflow_run zizmor
+    accepts, with the reason in its configuration."""
+    zizmor = yaml.safe_load((ROOT / ".github/zizmor.yml").read_text(encoding="utf-8"))
+    return set(zizmor["rules"]["dangerous-triggers"]["ignore"])
+
+
+def check_names(workflow: str) -> set[str]:
+    """The checks that the jobs of a workflow report: the name of each job, or its id
+    where it has none."""
+    return {
+        str(found.get("name", job_id))
+        for job_id, found in parse(workflow)["jobs"].items()
+    }
+
+
 def triggers(workflow: str) -> dict[str, list[str]]:
     """The events that start a workflow, each with the lines of its settings, without
     their comments."""
@@ -640,7 +656,7 @@ def test_the_required_checks_exist(projects: dict[str, Path], project: str) -> N
     )
     names = set()
     for text in workflows(root).values():
-        names.update(re.findall(r"^    name: (.+)$", text, re.M))
+        names.update(check_names(text))
     for check in settings["branch"]["required_checks"]:
         assert check in names, check
 
@@ -5336,11 +5352,11 @@ def test_releases_are_announced_in_the_discussions(
     for form in ("q-a.yml", "ideas.yml"):
         assert (project / ".github/DISCUSSION_TEMPLATE" / form).is_file(), form
     release = workflows(project)["release.yml"]
-    publish = release[release.index("  publish:") :]
-    publish = publish[: publish.index("\n  pypi:")]
-    assert "discussions: write" in publish
+    publish = job_in(release, "publish")
+    assert publish["permissions"]["discussions"] == "write"
     # Only a release for everybody, not a prerelease, is announced.
-    assert publish.index("exit 0") < publish.index("--discussion-category")
+    script = script_of(publish, "Make the complete release public")
+    assert script.index("exit 0") < script.index("--discussion-category")
     assert "has_discussions = true" in (project / ".github/repository.toml").read_text(
         encoding="utf-8"
     )
@@ -5522,9 +5538,8 @@ def test_dependabot_merges_as_the_release_app(
     assert merge["run"] == (
         'gh pr merge --auto --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"'
     )
-    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
-    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
-    assert "      - dependabot-automerge.yml\n" in dangerous
+    dangerous = accepted_dangerous_triggers()
+    assert "dependabot-automerge.yml" in dangerous
 
 
 def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> None:
@@ -8571,9 +8586,8 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     assert '[[ "$GITHUB_EVENT_NAME" == pull_request_target ]]' in run
     assert "only=(--warnings-only)" in run
     assert "set -o pipefail" in run
-    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
-    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
-    assert "      - update-branches.yml\n" in dangerous
+    dangerous = accepted_dangerous_triggers()
+    assert "update-branches.yml" in dangerous
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -8619,14 +8633,19 @@ def test_the_branch_bot_brings_a_branch_up_to_date_across_changes_of_workflows(
 
 def test_a_beta_of_the_next_release_follows_every_change_for_users() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    job = release[release.index("  release-please:") : release.index("\n  assets:")]
-    assert "vars.BETA_CHANNEL == 'true'" in job
-    assert "github.event_name == 'push'" in job
-    assert "steps.release.outputs.release_created != 'true'" in job
+    job = job_in(release, "release-please")
+    beta = step_in(job, "beta")
+    condition = condition_of(beta)
+    assert "vars.BETA_CHANNEL == 'true'" in condition
+    assert "github.event_name == 'push'" in condition
+    assert "steps.release.outputs.release_created != 'true'" in condition
     # Dependency updates make no beta; the outputs carry a beta like a release.
-    assert '"${BASH_REMATCH[3]}" == deps*' in job
-    assert "steps.release.outputs.tag_name || steps.beta.outputs.tag" in job
-    assert 'gh release create "v$version" --draft --prerelease' in job
+    assert '"${BASH_REMATCH[3]}" == deps*' in beta["run"]
+    assert (
+        "steps.release.outputs.tag_name || steps.beta.outputs.tag"
+        in (job["outputs"]["tag"])
+    )
+    assert 'gh release create "v$version" --draft --prerelease' in beta["run"]
 
 
 # The workflows of the required checks besides the tests, the same in every repository.
@@ -8672,7 +8691,10 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
     )
-    assert "github.event.workflow_run.run_attempt == 1" in after
+    # The flaky-test bot runs a failed test once more, at its first attempt.
+    assert "github.event.workflow_run.run_attempt == 1" in condition_of(
+        after_the_checks_job("rerun")
+    )
 
 
 # The workflows of the pull requests of the blueprint that the bots after the checks
@@ -8795,7 +8817,7 @@ def test_the_bot_for_cancelled_checks_watches_every_required_check(
     providers = set()
     for path in (root / ".github/workflows").glob("*.yml"):
         text = path.read_text(encoding="utf-8")
-        if required & set(re.findall(r"^    name: (.+)$", text, re.M)):
+        if required & check_names(text):
             name = re.search(r"^name: (.+)$", text, re.M)
             assert name, path
             providers.add(name[1])
@@ -9538,9 +9560,8 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         assert "ref" not in checkout["with"], name
         assert "bot-health" in values_of(job), name
         assert job["permissions"]["issues"] == "write", name
-    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
-    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
-    assert "      - bot-health.yml\n" in dangerous
+    dangerous = accepted_dangerous_triggers()
+    assert "bot-health.yml" in dangerous
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -10388,8 +10409,9 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     # Contributors on Windows run scripts/check.sh in Git Bash; the other workflows
     # run on Linux only.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
-    assert "    runs-on: windows-2025\n" in windows
-    assert "    shell: bash\n" in windows
+    check = job_in(windows, "check")
+    assert check["runs-on"] == "windows-2025"
+    assert parse(windows)["defaults"]["run"]["shell"] == "bash"
     assert "run: pip install --require-hashes -r requirements-dev.txt\n" in windows
     assert "run: bash scripts/check.sh\n" in windows
     # Every week, and for each pull request that changes what the checks run, the
@@ -10413,7 +10435,9 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     settings = tomllib.loads(
         (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
     )
-    assert re.findall(r"^    name: (.+)$", windows, re.M) == ["check (Windows)"]
+    assert [job.get("name") for job in parse(windows)["jobs"].values()] == [
+        "check (Windows)"
+    ]
     assert "check (Windows)" not in settings["branch"]["required_checks"]
     for project in projects.values():
         assert not (project / ".github/workflows/windows.yml").exists()
@@ -10620,7 +10644,7 @@ def test_a_required_check_never_waits_for_a_path_filter(
     required = set(settings["branch"]["required_checks"])
     providers = 0
     for name, text in workflows(root).items():
-        if required & set(re.findall(r"^    name: (.+)$", text, re.M)):
+        if required & check_names(text):
             providers += 1
             events = triggers(text)
             assert {"pull_request", "pull_request_target"} & set(events), name
@@ -11765,10 +11789,9 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     health = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     assert ", Screenshots, " in health
     # zizmor accepts its start after a release, with the reason in its configuration.
-    zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
-    dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
+    dangerous = accepted_dangerous_triggers()
     for name in ("screenshot-bot.yml", "docs-pictures.yml"):
-        assert f"      - {name}\n" in dangerous, name
+        assert name in dangerous, name
 
 
 def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> None:
@@ -12827,36 +12850,32 @@ def test_a_release_is_built_in_isolation() -> None:
     workflows_dir = ROOT / ".github/workflows"
     release = (workflows_dir / "release.yml").read_text(encoding="utf-8")
     build = (workflows_dir / "build-release.yml").read_text(encoding="utf-8")
-    assets = release[release.index("  assets:") : release.index("\n  publish:")]
-    assert "uses: ./.github/workflows/build-release.yml" in assets
+    assets = job_in(release, "assets")
+    assert assets["uses"] == "./.github/workflows/build-release.yml"
     # The build gets the tag, its commit and the version as inputs, nothing else of
     # the caller.
     assert "needs." not in build
-    for name in ("tag", "sha", "version"):
-        line = f"      {name}: ${{{{ needs.release-please.outputs.{name} }}}}\n"
-        assert line in assets, name
+    assert assets["with"] == {
+        name: f"${{{{ needs.release-please.outputs.{name} }}}}"
+        for name in ("tag", "sha", "version")
+    }
     assert "workflow_call:" in build
     verify = (workflows_dir / "verify-release.yml").read_text(encoding="utf-8")
     assert 'build="$GH_REPO/.github/workflows/build-release.yml"' in verify
     # The build signs a Nextcloud app with the key of the environment release, which a
     # called workflow sees only with the secrets of its caller.
-    assert "secrets: inherit" in assets
-    assert "environment:\n      name: release" in build
+    assert assets["secrets"] == "inherit"
+    assert job_in(build, "assets")["environment"]["name"] == "release"
 
 
 def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    job = release[release.index("  release-please:") : release.index("\n  assets:")]
-    step = job[
-        job.index("id: resume") : job.index("- name: Write the text of Unreleased and")
-    ]
-    assert "github.event_name == 'workflow_dispatch'" in step
-    assert "--json isDraft" in step
+    job = job_in(release, "release-please")
+    step = step_in(job, "resume")
+    assert "github.event_name == 'workflow_dispatch'" in condition_of(step)
+    assert "--json isDraft" in step["run"]
     for output in ("created", "tag", "sha", "version", "major"):
-        line = next(
-            line for line in job.splitlines() if line.strip().startswith(f"{output}:")
-        )
-        assert "steps.resume.outputs." in line, output
+        assert "steps.resume.outputs." in job["outputs"][output], output
 
 
 # What each kind of release ships, which its SBOMs describe: the files of its package,
