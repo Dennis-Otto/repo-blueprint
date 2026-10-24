@@ -37,6 +37,8 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 Der Merge des Release-Pull-Requests veröffentlicht ein Release mit dem Zip der Integration, das `hacs.json` nennt, also installiert HACS dieses Zip. Das Release hat seine SBOM und die signierte Provenance nach SLSA Build Level 3.
 
+Nach jedem Release, und jede Woche für das neueste, prüft `verify-release.yml` das Zip so, wie HACS es installiert: Das Release hat das Zip, das `hacs.json` nennt, seine `manifest.json` liegt in der obersten Ebene des Zips, mit der Domain des Ordners in `custom_components/` und der Version des Releases, und HACS bietet es richtig an, ein Release jedem Nutzer und eine Beta nur denen, die Betas anzeigen. Eine Beta des Beta-Kanals hat ihre eigene Version in der `manifest.json` ihres Zips, etwa 1.3.0-beta.1, die Home Assistant ihren Testern zeigt ([Entscheidung 0065](../decisions/0065-the-release-verification-checks-the-zip-that-hacs-installs.md), englisch).
+
 ## Einmal von Hand
 
 `python3 .github/blueprint.py checklist` hakt jeden Schritt ab, den es sehen kann, und nennt den Rest, jeweils mit seinem Link: die Release-App des Eigentümers mit ihrem privaten Schlüssel, wie [dein eigenes Konto](../own-account.md) zeigt, das Token des Issue-Assistenten, außer seine KI ist aus, OpenSSF Best Practices, die REUSE-API und die Social Preview.
