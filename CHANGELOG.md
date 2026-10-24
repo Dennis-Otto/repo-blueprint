@@ -7,6 +7,24 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.7...v1.0.8) (2026-10-24)
+
+
+### Bug fixes
+
+* close the HTTP errors that the scripts catch, so the checks pass with the newest Python ([#399](https://github.com/Dennis-Otto/repo-blueprint/issues/399)) ([50b28a9](https://github.com/Dennis-Otto/repo-blueprint/commit/50b28a9853c0c1808a1bac4401aaebe3a4d04139))
+* **deps:** update the issue assistant to v1.6.1 ([#371](https://github.com/Dennis-Otto/repo-blueprint/issues/371)) ([1f4aef9](https://github.com/Dennis-Otto/repo-blueprint/commit/1f4aef9bdbe9cee06099aef833be5be6d04a6178))
+* **docs:** make the docs pictures pass again and drop the link exceptions of pages that are live ([#400](https://github.com/Dennis-Otto/repo-blueprint/issues/400)) ([aa80012](https://github.com/Dennis-Otto/repo-blueprint/commit/aa80012ae4505869dff143d117d8c98e09860f1e))
+* **docs:** the Links check passes again although cwe.mitre.org refuses the CI ([#397](https://github.com/Dennis-Otto/repo-blueprint/issues/397)) ([4394846](https://github.com/Dennis-Otto/repo-blueprint/commit/4394846d82d7f83f394ed72193b15d10f0bb456e))
+* leave a release alone that already runs again ([#396](https://github.com/Dennis-Otto/repo-blueprint/issues/396)) ([22b3084](https://github.com/Dennis-Otto/repo-blueprint/commit/22b3084dbe4c77b2d25ed522dc8e6deaab7be031))
+* let the fix bot and the coach find indented steps, and let the fix bot run pins.py ([#403](https://github.com/Dennis-Otto/repo-blueprint/issues/403)) ([f4f792d](https://github.com/Dennis-Otto/repo-blueprint/commit/f4f792d42bdaa4acf08bc95d08f58cab93ac6b04))
+* **security:** accept the advisories of the test tools that Home Assistant pins, and skip Renovate's branches for accepted advisories ([#398](https://github.com/Dennis-Otto/repo-blueprint/issues/398)) ([bdb9691](https://github.com/Dennis-Otto/repo-blueprint/commit/bdb9691606656fb246459634dc2e4f2fccc28c44))
+
+
+### Performance
+
+* **docs:** the websites show the pictures of the diagrams instead of drawing Mermaid live ([#393](https://github.com/Dennis-Otto/repo-blueprint/issues/393)) ([0506e8d](https://github.com/Dennis-Otto/repo-blueprint/commit/0506e8dcc429e1cbaf7f646264b920a15e28d71f))
+
 ## [1.0.7](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.6...v1.0.7) (2026-10-23)
 
 ### Bug fixes
