@@ -1,0 +1,23 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a download that hangs starts again
+    accDescr: Each download gets a limit of its own, well within the five minutes of its step, and a second or third attempt when it fails or hangs. A download of the website ends after 10 seconds without a connection or 30 without the next part of the file, and the hooks try it again after a second and then two. The setup of uv in the Variants gives way after two minutes to a second one from the releases of uv on GitHub. A container whose image failed to download starts again after 10 and then 20 seconds. Only what fails every attempt fails its step, and the flaky-test bot runs that job once more.
+
+    download["A download<br>of the website, of uv or of an image"]
+    limit["Its own time limit<br>10 s to connect and 30 s for the next part, 2 minutes for uv"]
+    again["Another attempt<br>after a pause, or from another server"]
+    passes["The step passes<br>with the file of any attempt"]
+    fails["The step fails after the last attempt<br>and the flaky-test bot runs the job once more"]
+
+    download --> limit --> again
+    again --> passes
+    again -.->|every attempt failed| fails
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class download,limit,again,fails bot
+    class passes done

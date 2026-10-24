@@ -168,7 +168,8 @@ def test_a_website_in_one_language_keeps_its_404_page(tmp_path: Path) -> None:
 
 class Network:
     """The requests of a plugin, with its errors, and an answer or an error for every
-    download in turn: a status code or an exception."""
+    download in turn: a status code or an exception. Each download must come with
+    the time limit timeout, which is the privacy plugin's own by default."""
 
     class ConnectionError(Exception):
         pass
@@ -176,12 +177,13 @@ class Network:
     class Timeout(Exception):
         pass
 
-    def __init__(self, *outcomes: int | Exception) -> None:
+    def __init__(self, *outcomes: int | Exception, timeout: object = 5) -> None:
         self.outcomes = list(outcomes)
+        self.timeout = timeout
         self.downloads: list[str] = []
 
     def get(self, url: str, **kwargs: Any) -> SimpleNamespace:
-        assert kwargs == {"timeout": 5}
+        assert kwargs == {"timeout": self.timeout}
         self.downloads.append(url)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
@@ -232,6 +234,27 @@ def test_a_download_that_times_out_is_tried_again(
     assert response.status_code == 200
     assert network.downloads == [URL, URL, URL]
     assert waits == [1, 2]
+
+
+def test_a_download_without_a_time_limit_gets_one(
+    monkeypatch: pytest.MonkeyPatch, waits: list[float]
+) -> None:
+    # The social plugin downloads the fonts of its preview cards with no time limit:
+    # a server that stopped answering held the build of the website until its step
+    # ran out of time, four times in the Variants in a week (#179). Now an attempt
+    # ends when the connection or the next bytes take too long, and the next starts.
+    module = hooks()
+    network = Network(Network.Timeout("Read timed out."), 200, timeout=module.TIMEOUT)
+    social = plugin(monkeypatch, "social", network)
+    module.on_config(mkdocs_config(plugins={"material/social": social}))
+
+    assert requests_of(social).get(URL).status_code == 200
+    assert network.downloads == [URL, URL]
+    assert waits == [1]
+    # Every attempt, with its pauses, ends well within the five minutes of the step
+    # that builds the website.
+    connect, read = module.TIMEOUT
+    assert module.ATTEMPTS * (connect + read) + sum(range(module.ATTEMPTS)) < 5 * 60
 
 
 def test_a_download_is_tried_again_after_an_error_of_the_server(
