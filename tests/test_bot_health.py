@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from blueprint import cli
 from blueprint.bot_health import (
@@ -19,6 +21,7 @@ from blueprint.bot_health import (
     LABEL_DESCRIPTION,
     LATE,
     MARKER,
+    MONTHS,
     MOST_JOBS,
     MOST_PROBLEMS,
     MOST_STARTS,
@@ -27,6 +30,7 @@ from blueprint.bot_health import (
     QUIET_RUNS,
     RENOVATE,
     RENOVATE_TITLE,
+    WEEKDAYS,
     Cron,
     Problem,
     Run,
@@ -36,6 +40,7 @@ from blueprint.bot_health import (
     dispatch_inputs,
     events_of,
     failures,
+    field_values,
     marker,
     missed_time,
     open_issue,
@@ -1066,6 +1071,136 @@ def test_the_missed_time_of_several_schedules() -> None:
     assert Cron.parse("0 0 * * *") == Cron.parse("0 0 * * 0-7")
     assert Cron.parse("0 0 * * 0") != Cron.parse("0 0 * * *")
     assert date(2026, 10, 13).isoweekday() == 2
+
+
+def cron_of(text: str) -> Cron:
+    cron = Cron.parse(text)
+    assert cron is not None, text
+    return cron
+
+
+@pytest.mark.parametrize(
+    ("text", "low", "high", "names", "values"),
+    [
+        ("*", 0, 59, (), set(range(60))),
+        ("5", 0, 59, (), {5}),
+        # Lists, ranges and steps, also of a range and from a value to the end.
+        ("1,3,5", 0, 59, (), {1, 3, 5}),
+        ("1-5", 0, 23, (), {1, 2, 3, 4, 5}),
+        ("*/15", 0, 59, (), {0, 15, 30, 45}),
+        ("10-50/20", 0, 59, (), {10, 30, 50}),
+        ("5/20", 0, 59, (), {5, 25, 45}),
+        ("1-3,20-23/2", 0, 23, (), {1, 2, 3, 20, 22}),
+        # Names, in any case, among numbers.
+        ("JAN,mar-May,12", 1, 12, MONTHS, {1, 3, 4, 5, 12}),
+        ("MON-FRI", 0, 7, WEEKDAYS, {1, 2, 3, 4, 5}),
+    ],
+)
+def test_the_values_of_a_field_of_a_cron(
+    text: str, low: int, high: int, names: tuple[str, ...], values: set[int]
+) -> None:
+    assert field_values(text, low, high, names) == values
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "60 * * * *",
+        "* 24 * * *",
+        "* * 0 * *",
+        "* * * 13 *",
+        "* * * * 8",
+        "*/0 * * * *",
+        "5-1 * * * *",
+        "1- * * * *",
+        "-1 * * * *",
+        "1,,2 * * * *",
+        "MON * * * *",
+        "1_0 * * * *",
+        "+5 * * * *",
+        "? * * * *",
+        "* * * *",
+        "* * * * * *",
+    ],
+)
+def test_a_cron_that_cron_cant_read(text: str) -> None:
+    assert Cron.parse(text) is None
+
+
+def test_sunday_is_0_and_7() -> None:
+    assert cron_of("0 0 * * 7").weekdays == {0}
+    assert cron_of("0 0 * * SUN,6-7").weekdays == {0, 6}
+
+
+def utc(text: str) -> datetime:
+    return datetime.fromisoformat(text).replace(tzinfo=UTC)
+
+
+def test_the_days_of_a_cron() -> None:
+    # Both kinds of day limited: either matches, as in cron; Friday the 9th and
+    # Tuesday the 13th.
+    either = cron_of("0 0 13 * FRI")
+    assert either.either
+    assert either.runs_on(utc("2026-10-09").date())
+    assert either.runs_on(utc("2026-10-13").date())
+    assert not either.runs_on(utc("2026-10-12").date())
+    # A field that starts with * limits nothing: both must match, an odd day that is
+    # a Monday, the 5th and the 19th of October 2026, but not Monday the 12th.
+    both = cron_of("0 0 */2 * 1")
+    assert not both.either
+    assert both.runs_on(utc("2026-10-05").date())
+    assert both.runs_on(utc("2026-10-19").date())
+    assert not both.runs_on(utc("2026-10-12").date())
+    assert not both.runs_on(utc("2026-10-07").date())
+    # A month that the cron doesn't name has no day of it.
+    assert not cron_of("0 0 * NOV *").runs_on(utc("2026-10-08").date())
+
+
+@pytest.mark.parametrize(
+    ("cron", "moment", "due"),
+    [
+        # The same minute, whatever its seconds.
+        ("17 4 * * *", "2026-10-08T04:17:59", "2026-10-08T04:17"),
+        # A minute before: the day before.
+        ("17 4 * * *", "2026-10-08T04:16:00", "2026-10-07T04:17"),
+        # An hour whose minute is still ahead, then an earlier hour of the day.
+        ("30 */6 * * *", "2026-10-08T06:10:00", "2026-10-08T00:30"),
+        ("5,35 * * * *", "2026-10-08T06:20:00", "2026-10-08T06:05"),
+        # Wednesday before Thursday, and the new year before October.
+        ("17 4 * * 3", "2026-10-08T06:05:00", "2026-10-07T04:17"),
+        ("0 0 1 1 *", "2026-10-08T06:05:00", "2026-01-01T00:00"),
+    ],
+)
+def test_the_last_time_a_cron_was_due(cron: str, moment: str, due: str) -> None:
+    assert cron_of(cron).last(utc(moment)) == utc(due)
+
+
+def listing_of(values: set[int]) -> str:
+    return ",".join(str(value) for value in sorted(values))
+
+
+@given(
+    st.sets(st.integers(0, 59), min_size=1),
+    st.sets(st.integers(0, 23), min_size=1),
+    st.sets(st.integers(0, 7), min_size=1),
+    st.datetimes(datetime(2026, 1, 1), datetime(2027, 12, 31)),
+)
+def test_a_cron_was_due_last_where_a_search_of_every_minute_finds_it(
+    minutes: set[int], hours: set[int], weekdays: set[int], moment: datetime
+) -> None:
+    cron = cron_of(
+        f"{listing_of(minutes)} {listing_of(hours)} * * {listing_of(weekdays)}"
+    )
+    moment = moment.replace(tzinfo=UTC)
+    due = moment.replace(second=0, microsecond=0)
+    while not (
+        due.minute in minutes
+        and due.hour in hours
+        and due.isoweekday() % 7 in {weekday % 7 for weekday in weekdays}
+    ):
+        due -= timedelta(minutes=1)
+
+    assert cron.last(moment) == due
 
 
 def test_the_inputs_that_start_a_workflow_as_its_schedule_does() -> None:
