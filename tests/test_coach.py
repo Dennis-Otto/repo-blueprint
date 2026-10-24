@@ -296,6 +296,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Text files",
         "Pages in one column",
         "Accepted advisories",
+        "Lock files",
         "Ruff",
         "Coding standard",
         "Lint and format",
