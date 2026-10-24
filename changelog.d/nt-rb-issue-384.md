@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **Renovate skips no lock file of a project in silence:** a new step of `scripts/check.sh`, *Lock files*, reads the header of every lock file of pip-compile in the repository as Renovate does, also of the lock files that belong to the project, and fails on one that Renovate can't compile again, such as a `requirements-test.txt` compiled with `uv pip compile --python-version 3.12`, without the `=`, which got no update for days with no more than the warning `pip-compile error`. `python3 .github/blueprint.py locks --fix` puts the `=` between each option and its value, and the fix bot runs it in a pull request.
