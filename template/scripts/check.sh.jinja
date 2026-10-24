@@ -221,6 +221,22 @@ else
   echo "Python 3.12 or newer is not installed here; the CI checks the accepted advisories."
 fi
 
+step "Lock files"
+# Renovate compiles each lock file of pip-compile, such as requirements-dev.txt, again
+# with the command in its header, and skips one whose command it can't read, in every
+# run and with no more than a warning in its log: the file gets no update, not even
+# one that fixes a vulnerability. The step reads each header as Renovate does; locks
+# --fix puts the = between an option and its value. The Python and blueprint.py of the
+# step before.
+if [[ -n "$python" ]]; then
+  "$python" "$tool" locks
+elif [[ -n "${CI:-}" ]]; then
+  echo "Checking the lock files needs Python 3.12 or newer, which this runner lacks."
+  exit 1
+else
+  echo "Python 3.12 or newer is not installed here; the CI checks the lock files."
+fi
+
 step "Version"
 # The release bot writes the version of each release into these files.
 release="$(grep -oE '"\.": *"[^"]+"' .release-please-manifest.json | grep -oE '[0-9][^"]*')"

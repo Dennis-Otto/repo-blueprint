@@ -647,6 +647,24 @@ commands = ["python3 .github/blueprint.py advisories --fix"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#osv-scanner-reports-a-version-that-another-package-pins"
 autofix = ["{blueprint} advisories --fix"]
 
+[step."Lock files"]
+problem = """Renovate can't read the command in the header of a lock file of pip-compile,
+such as `requirements-dev.txt`: an option without the = before its value, an option
+that Renovate doesn't know, `--no-header`, another output file or a source file that
+doesn't exist; the log names each file and what Renovate stumbles on."""
+why = """Renovate compiles each lock file again with the command in its header. It skips
+one whose command it can't read, in every run and with no more than the warning
+`pip-compile error` in its log: the file gets no update from then on, not even one that
+fixes a vulnerability."""
+fix = """Put the = between each option and its value, and commit the lock file (in the
+blueprint itself, the tool is `blueprint.py` without `.github/`). For the rest, compile
+the file again with the options that Renovate knows, such as `uv pip compile
+--generate-hashes --python-version=3.12 --output-file=requirements.txt
+requirements.in`:"""
+commands = ["python3 .github/blueprint.py locks --fix"]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#renovate-skips-a-lock-file"
+autofix = ["{blueprint} locks --fix"]
+
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
 version the release bot writes into every file that has one."""

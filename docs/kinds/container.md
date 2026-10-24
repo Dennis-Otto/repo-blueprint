@@ -20,7 +20,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 
 - **The example:** `Dockerfile`, which starts from Alpine pinned by its digest, and `app/entrypoint.sh`, which the self-test runs. Replace it with the real code; its tests show how.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: Hadolint for the `Dockerfile`, the build of the image and its self-test.
-- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 
 ## The checks that a pull request needs

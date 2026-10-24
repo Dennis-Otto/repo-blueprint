@@ -20,7 +20,7 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 
 - **Das Beispiel:** `action.yml`, das Modul der Action daneben, seine Tests in `tests/` und die Ziele des Fuzzings in `fuzz/`. Ersetze es durch den echten Code; seine Tests zeigen, wie.
 - **Die Schritte von `scripts/check.sh` für diese Art,** auf deinem Rechner wie in der CI: Ruff, mypy und die Tests mit jeder Zeile und jedem Zweig abgedeckt, auf jedem Kern.
-- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
+- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
 - **Workflows dieser Art:** ein Lauf der Action, wie ihre Nutzer sie ausführen, in jedem Pull Request (`action-test.yml`), Fuzzing mit Atheris (`fuzz.yml`), das neueste Python auf `main` (`newest-python.yml`), die Property-Tests jede Nacht (`properties.yml`) und die Mutationstests mit mutmut jede Woche (`mutation.yml`).
 - **Alles, was jedes Repository bekommt:** den PR-Coach und den Fix-Bot, den Release-Bot, Renovate, die Einstellungen als Code, den Issue-Assistenten, die Website auf Deutsch und Englisch, die Sicherheitsprüfungen und den Blueprint-Bot, wie [die Anleitung](../guide.md#was-ein-neues-repository-bekommt) sie nennt.
 

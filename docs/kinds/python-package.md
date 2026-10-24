@@ -20,7 +20,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 
 - **The example:** `src/<package>/` with its `py.typed`, the tests in `tests/`, the targets of the fuzzing in `fuzz/`, and `pyproject.toml`, for Python 3.12 and newer. Replace it with the real code; its tests show how.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: Ruff, mypy, the tests with every line and branch covered, on every core, and the build of the package.
-- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
 - **Workflows of this kind:** fuzzing with Atheris (`fuzz.yml`), the newest Python on `main` (`newest-python.yml`), the property tests every night (`properties.yml`) and the mutation tests with mutmut every week (`mutation.yml`).
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 
