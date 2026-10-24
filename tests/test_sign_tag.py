@@ -7,12 +7,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import workflow_steps
 from shell import BASH, in_bash
+from workflow_steps import Answer
 
 ROOT = Path(__file__).parents[1]
 GIT = shutil.which("git")
@@ -567,87 +568,40 @@ def test_the_tag_of_another_repository_verifies_against_its_release_workflow(
     assert "verify-tag v1.0.0" in calls
 
 
-def sign_step() -> str:
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    start = release.index("      - name: Sign the tag of a release")
-    return release[start : release.index("      - name:", start + 1)]
+# The step of the release bot that signs the tag of each merged release pull request.
+SIGN_STEP = "Sign the tag of a release that a merged release pull request makes"
 
 
 def run_the_sign_step(
     tmp_path: Path, pending: str, failures: int = 0, status: int = 0
-) -> tuple[subprocess.CompletedProcess[str], list[str], str, str]:
-    step = sign_step()
-    run = "        run: |\n"
-    script = textwrap.dedent(step[step.index(run) + len(run) :])
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    # gh answers as the API does, after the filters of jq, once it has failed as often
-    # as planned; the script of the tags only records how it is called.
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    stubs = {
-        "gh": """#!/usr/bin/env bash
-echo "gh $1 $2" >> "$CALLS"
-if [[ "$1 $2" != "api graphql" ]]; then
-  echo "unexpected: gh $*" >&2
-  exit 1
-fi
-failures="$(cat "$FAILURES")"
-if ((failures > 0)); then
-  echo $((failures - 1)) > "$FAILURES"
-  echo "gh: Bad Gateway (HTTP 502)" >&2
-  exit 1
-fi
-printf '%s\\n' "$PENDING"
-""",
-        "sleep": '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n',
-    }
-    for name, text in stubs.items():
-        (bin_dir / name).write_text(text, encoding="utf-8", newline="\n")
-        (bin_dir / name).chmod(0o755)
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github/sign-tag.sh").write_text(
-        'echo "sign-tag.sh $*" >> "$CALLS"\nexit "$STATUS"\n',
-        encoding="utf-8",
-        newline="\n",
+) -> tuple[workflow_steps.StepResult, list[str]]:
+    """Runs the step as GitHub does, with the fake gh answering the merged release
+    pull requests as the API does after the filters of jq, once it has failed as
+    often as planned, and a script of the tags that only records how it is called
+    and exits with status. Returns the result and the calls of the script."""
+    failing = Answer(
+        r"api graphql .*", err="gh: Bad Gateway (HTTP 502)\n", code=1, once=True
     )
-    calls = tmp_path / "calls"
-    summary = tmp_path / "summary"
-    output = tmp_path / "output"
-    for file in (calls, summary, output):
-        file.touch()
-    (tmp_path / "failures").write_text(f"{failures}\n", encoding="utf-8")
-    environment = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "GITHUB_REPOSITORY": "o/r",
-        "GITHUB_STEP_SUMMARY": str(summary),
-        "GITHUB_OUTPUT": str(output),
-        "STUBS": str(bin_dir),
-        "CALLS": str(calls),
-        "FAILURES": str(tmp_path / "failures"),
-        "PENDING": pending,
-        "STATUS": str(status),
-    }
-    # As GitHub runs a step: bash -e.
-    result = subprocess.run(
-        in_bash("-e", "step.sh"),
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+    result = workflow_steps.run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        SIGN_STEP,
+        answers=[*[failing] * failures, Answer(r"api graphql .*", f"{pending}\n")],
+        env={"STATUS": str(status)},
+        stubs={"sleep": workflow_steps.recording("sleep")},
+        files={
+            ".github/sign-tag.sh": 'echo "sign-tag.sh $*" >> "$STUB_CALLS"\n'
+            'exit "$STATUS"\n'
+        },
     )
-    recorded = calls.read_text(encoding="utf-8").splitlines()
+    recorded = result.stubbed
     signed = [line for line in recorded if line.startswith("sign-tag.sh ")]
     # GitHub is asked three times, 10 and 20 seconds apart.
     sleeps = [line for line in recorded if line.startswith("sleep ")]
     assert sleeps == ["sleep 10", "sleep 20"][: min(failures, 2)]
-    return (
-        result,
-        signed,
-        summary.read_text(encoding="utf-8"),
-        output.read_text(encoding="utf-8"),
-    )
+    assert len(result.called("api graphql")) == min(failures + 1, 3)
+    return result, signed
 
 
 @pytest.mark.parametrize(
@@ -670,14 +624,14 @@ printf '%s\\n' "$PENDING"
 def test_every_run_signs_the_tag_of_a_merged_release_pull_request(
     tmp_path: Path, pending: str, failures: int, signed: list[str]
 ) -> None:
-    result, calls, summary, output = run_the_sign_step(tmp_path, pending, failures)
+    result, calls = run_the_sign_step(tmp_path, pending, failures)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert calls == signed
     for call in signed:
-        assert f"The tag {call.split()[-2]} is signed." in summary
+        assert f"The tag {call.split()[-2]} is signed." in result.summary
     # release-please creates a release only once the step has signed its tag.
-    assert output == ("signed=true\n" if signed else "")
+    assert result.outputs == ({"signed": "true"} if signed else {})
 
 
 @pytest.mark.parametrize(
@@ -691,12 +645,10 @@ def test_every_run_signs_the_tag_of_a_merged_release_pull_request(
 def test_a_step_that_fails_creates_no_release(
     tmp_path: Path, failures: int, status: int, error: str
 ) -> None:
-    result, calls, summary, output = run_the_sign_step(
-        tmp_path, "abc123 1.2.0", failures, status
-    )
+    result, calls = run_the_sign_step(tmp_path, "abc123 1.2.0", failures, status)
 
     assert result.returncode == 1
     assert error in result.stdout
     assert calls == ([] if failures else ["sign-tag.sh v1.2.0 abc123"])
-    assert summary == ""
-    assert output == ""
+    assert result.summary == ""
+    assert result.outputs == {}

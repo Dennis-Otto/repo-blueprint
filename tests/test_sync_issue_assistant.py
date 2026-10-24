@@ -6,18 +6,19 @@ does, after the filters of jq."""
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
-import os
 import re
 import shutil
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 from typing import Any
 
 import pytest
-from shell import BASH, in_bash
+import workflow_steps
+from shell import BASH
+from workflow_steps import Answer, StepResult, condition_of, exact, step_in
 
 import sync_issue_assistant as sync
 from blueprint.bot_health import ONE_TRY, OWN_ISSUE
@@ -726,255 +727,213 @@ def test_the_script_runs_as_the_workflow_runs_it(tmp_path: Path) -> None:
 # The workflow
 
 
-def job(name: str) -> str:
-    content = WORKFLOW.read_text(encoding="utf-8")
-    start = content.index(f"\n  {name}:\n")
-    following = re.search(r"\n  [a-z-]+:\n", content[start + 1 :])
-    return (
-        content[start : start + 1 + following.start()] if following else content[start:]
-    )
-
-
-def step(job_name: str, name: str) -> str:
-    """The script of a step of a job, as the runner hands it to bash."""
-    content = job(job_name)
-    start = content.index(f"      - name: {name}\n")
-    run = content.index("        run: |\n", start) + len("        run: |\n")
-    lines = []
-    for line in content[run:].splitlines(keepends=True):
-        if line.strip() and not line.startswith("          "):
-            break
-        lines.append(line)
-    return textwrap.dedent("".join(lines))
+def adopt_job() -> dict[str, Any]:
+    return workflow_steps.job(WORKFLOW.name, "adopt")
 
 
 def test_the_sync_runs_every_morning_by_hand_and_for_its_pull_requests() -> None:
-    content = WORKFLOW.read_text(encoding="utf-8")
-    head = content[: content.index("\njobs:\n")]
-    assert '  schedule:\n    - cron: "20 5 * * *"\n' in head
-    assert "  workflow_dispatch:\n    inputs:\n      dry_run:\n" in head
+    parsed = workflow_steps.workflow(WORKFLOW.name)
+    events = parsed["on"]
+    assert events["schedule"] == [{"cron": "20 5 * * *"}]
+    assert "dry_run" in events["workflow_dispatch"]["inputs"]
     # A pull request that changes the bot runs it as a dry run.
-    assert (
-        "  pull_request:\n    paths:\n"
-        "      - .github/workflows/sync-issue-assistant.yml\n"
-        "      - .github/sign-tag.sh\n"
-        "      - sync_issue_assistant.py\n"
-    ) in head
-    assert (
-        "DRY_RUN: ${{ github.event_name == 'pull_request' || inputs.dry_run == true }}"
-        in head
+    assert events["pull_request"]["paths"][:3] == [
+        ".github/workflows/sync-issue-assistant.yml",
+        ".github/sign-tag.sh",
+        "sync_issue_assistant.py",
+    ]
+    assert parsed["env"]["DRY_RUN"] == (
+        "${{ github.event_name == 'pull_request' || inputs.dry_run == true }}"
     )
-    assert "permissions: {}\n" in head
+    assert parsed["permissions"] == {}
 
 
 def test_the_sync_verifies_the_release_before_it_installs() -> None:
-    adopt = job("adopt")
-    steps = adopt.split("\n      - ")
-    names = [part.split("\n", 1)[0] for part in steps]
-    find = names.index("name: Find the latest published release of the issue assistant")
-    verify = names.index("name: Verify the release before taking it over")
-    install = names.index("name: Install the release in the root of the blueprint")
+    adopt = adopt_job()
+    steps = adopt["steps"]
+    names = [step.get("name") for step in steps]
+    find = names.index("Find the latest published release of the issue assistant")
+    verify = names.index("Verify the release before taking it over")
+    install = names.index("Install the release in the root of the blueprint")
     assert find < verify < install
     # Nothing of the release runs before it is verified, and only after a verification
     # that passed, since a step that fails stops the job.
     assert not any(
-        "$RUNNER_TEMP/issue-assistant" in part for part in steps[: verify + 1]
+        "$RUNNER_TEMP/issue-assistant" in step.get("run", "")
+        for step in steps[: verify + 1]
     )
-    assert "$RUNNER_TEMP/issue-assistant" in steps[install]
+    assert "$RUNNER_TEMP/issue-assistant" in steps[install]["run"]
     # The job holds no secret and can only read.
-    assert "secrets." not in adopt
-    assert "environment:" not in adopt
-    assert "    permissions:\n      contents: read\n" in adopt
+    assert "secrets." not in json.dumps(adopt)
+    assert "environment" not in adopt
+    assert adopt["permissions"] == {"contents": "read"}
     # Both run for a release that the blueprint doesn't have yet, and in a dry run.
-    condition = "if: steps.release.outputs.current != 'true' || env.DRY_RUN == 'true'"
-    assert condition in steps[verify]
-    assert condition in steps[install]
+    condition = "steps.release.outputs.current != 'true' || env.DRY_RUN == 'true'"
+    assert condition_of(steps[verify]) == condition
+    assert condition_of(steps[install]) == condition
     # Exactly the verified commit is installed.
-    assert '"https://github.com/$SOURCE.git" "$COMMIT"' in steps[install]
-    assert 'adopt "$release" --ref "$COMMIT" --version "$TAG"' in steps[install]
-    assert "SOURCE: Dennis-Otto/issue-assistant\n" in WORKFLOW.read_text(
-        encoding="utf-8"
+    assert '"https://github.com/$SOURCE.git" "$COMMIT"' in steps[install]["run"]
+    assert (
+        'adopt "$release" --ref "$COMMIT" --version "$TAG"' in (steps[install]["run"])
+    )
+    assert workflow_steps.workflow(WORKFLOW.name)["env"]["SOURCE"] == (
+        "Dennis-Otto/issue-assistant"
     )
 
 
 def test_the_job_of_the_pull_request_runs_nothing_of_the_release() -> None:
-    pull = job("pull-request")
-    assert "    needs: adopt\n" in pull
+    pull = workflow_steps.job(WORKFLOW.name, "pull-request")
+    assert pull["needs"] == "adopt"
     # The release app, in the environment that only main may use, and never in a pull
     # request or a dry run.
-    assert "    environment:\n      name: release\n" in pull
-    assert (
-        "if: vars.RELEASE_AUTOMATION_CLIENT_ID != '' && github.event_name != 'pull_request'"
+    assert pull["environment"]["name"] == "release"
+    assert condition_of(pull) == (
+        "vars.RELEASE_AUTOMATION_CLIENT_ID != '' && github.event_name != 'pull_request'"
         " && inputs.dry_run != true"
-    ) in pull
-    assert "          permission-workflows: write\n" in pull
+    )
+    token = step_in(pull, "Create a token of the release app")
+    assert token["with"]["permission-workflows"] == "write"
     # No code of the release: only sync_issue_assistant.py of main and the artifact.
-    assert "issue_assistant.py install" not in pull
-    assert "$RUNNER_TEMP/issue-assistant" not in pull
-    assert (
-        "sparse-checkout: |\n            .github/workflows\n            template/.github/workflows\n"
-        in pull
+    assert "issue_assistant.py install" not in json.dumps(pull)
+    assert "$RUNNER_TEMP/issue-assistant" not in json.dumps(pull)
+    [checkout] = [
+        step
+        for step in pull["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert checkout["with"]["sparse-checkout"].startswith(
+        ".github/workflows\ntemplate/.github/workflows\n"
     )
 
 
 def test_the_bot_health_bot_keeps_the_issue_of_a_failed_run() -> None:
     # One issue per failing bot, from the bot-health bot, with the reason of a refusal
     # from its annotation: the sync keeps no issue of its own, which would be a second.
-    content = WORKFLOW.read_text(encoding="utf-8")
-    assert "issues: write" not in content
-    assert re.findall(r"^  ([a-z-]+):\n    name: ", content, re.M) == [
+    assert "issues: write" not in WORKFLOW.read_text(encoding="utf-8")
+    jobs = workflow_steps.workflow(WORKFLOW.name)["jobs"]
+    assert [key for key, job in jobs.items() if "name" in job] == [
         "adopt",
         "pull-request",
     ]
-    assert 'echo "::error::$1"' in step(
-        "adopt", "Verify the release before taking it over"
+    assert (
+        'echo "::error::$1"'
+        in (step_in(adopt_job(), "Verify the release before taking it over")["run"])
     )
-    health = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
-    watched = re.search(r"^    workflows: \[(.+)\]$", health, re.M)
-    assert watched
-    assert "Issue assistant sync" in watched[1].split(", ")
+    health = workflow_steps.workflow("bot-health.yml")
+    assert "Issue assistant sync" in health["on"]["workflow_run"]["workflows"]
     assert "Issue assistant sync" not in OWN_ISSUE | ONE_TRY
 
 
-GH = """#!/usr/bin/env bash
-printf 'gh %s\\n' "$*" >> "$CALLS"
-# The next outcome that the test planned for a kind of call, one per line, or the
-# usual one once it planned no more.
-next() {
-  outcome=""
-  if [[ -s "$STUBS/$1" ]]; then
-    outcome="$(head -n 1 "$STUBS/$1")"
-    tail -n +2 "$STUBS/$1" > "$STUBS/$1.next" && mv "$STUBS/$1.next" "$STUBS/$1"
-  fi
-  outcome="${outcome:-$2}"
-}
-fail() {
-  # As gh does: the body of the error on stdout, even with --jq.
-  echo '{"message":"Bad Gateway","status":"502"}'
-  echo "gh: Bad Gateway (HTTP 502)" >&2
-  exit 1
-}
-argument() {
-  local wanted="$1"
-  shift
-  while (($#)); do
-    if [[ "$1" == "$wanted" ]]; then
-      echo "$2"
-      return
-    fi
-    shift
-  done
-}
-case "$1 $2" in
-  "release view")
-    next release ok
-    [[ "$outcome" == fail ]] && fail
-    echo "$TAG"
-    ;;
-  "release verify")
-    next attestation ok
-    if [[ "$outcome" == fail ]]; then
-      echo "No attestations for tag $3"
-      exit 1
-    elif [[ "$outcome" == down ]]; then
-      echo "gh: Bad Gateway (HTTP 502)"
-      exit 1
-    fi
-    echo "Release $3 verified!"
-    ;;
-  "api repos/Dennis-Otto/issue-assistant/commits/"*) echo "$COMMIT" ;;
-  "api repos/Dennis-Otto/issue-assistant/releases/tags/v1.3.1")
-    next immutable "${IMMUTABLE:-true}"
-    [[ "$outcome" == fail ]] && fail
-    echo "$outcome"
-    ;;
-  "api repos/Dennis-Otto/issue-assistant/compare/"*) echo "${STATUS:-ahead}" ;;
-  "pr list") printf '%b' "${OPEN:-}" ;;
-  "pr close" | "pr merge") ;;
-  "pr edit" | "pr create") cp "$(argument --body-file "$@")" "$BODY" ;;
-  "api users/app[bot]") echo 42 ;;
-  "api graphql")
-    cp "$(argument --input "$@")" "$REQUEST"
-    echo c0ffee
-    ;;
-  "api repos/o/r/pulls/12/commits") printf '%b' "${OTHERS:-}" ;;
-  "api repos/o/r/git/ref/heads/"*) [[ " ${BRANCHES:-} " == *" ${2#repos/o/r/git/ref/heads/} "* ]] ;;
-  "api --method") ;;
-  *)
-    echo "unexpected: gh $*" >&2
-    exit 1
-    ;;
-esac
-"""
-SLEEP = '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n'
-PYTHON3 = '#!/usr/bin/env bash\nexec "$PYTHON" "$@"\n'
+SOURCE = "Dennis-Otto/issue-assistant"
+# As gh fails: the body of the error on stdout, even with --jq.
+BODY_OF_ERROR = '{"message":"Bad Gateway","status":"502"}\n'
+
+
+def bad_gateway(pattern: str) -> Answer:
+    return Answer(pattern, BODY_OF_ERROR, "gh: Bad Gateway (HTTP 502)\n", 1)
+
+
+def planned(kind: str, outcome: str, tag: str) -> Answer:
+    """The answer of gh for an outcome that the test planned for a kind of call: the
+    latest release, its attestation, or whether it is immutable."""
+    if kind == "release":
+        assert outcome == "fail", outcome
+        return bad_gateway(r"release view .*")
+    if kind == "immutable":
+        assert outcome == "fail", outcome
+        return bad_gateway(rf"api repos/{SOURCE}/releases/tags/v1\.3\.1 .*")
+    assert kind == "attestation", kind
+    verify = r"release verify .*"
+    if outcome == "fail":
+        return Answer(verify, f"No attestations for tag {tag}\n", code=1)
+    assert outcome == "down", outcome
+    return Answer(verify, "gh: Bad Gateway (HTTP 502)\n", code=1)
+
+
+def github(
+    plans: dict[str, list[str]],
+    *,
+    tag: str = "v1.3.1",
+    commit: str = NEW,
+    immutable: str = "true",
+    status: str = "ahead",
+    open_pulls: str = "",
+    others: str = "",
+    branches: tuple[str, ...] = (),
+) -> list[Answer]:
+    """How gh answers the steps of the sync: first the outcomes that the test planned,
+    one call each, then the usual ones. GitHub has the latest release tag at commit,
+    immutable or not, status against the main of the issue assistant, the open pull
+    requests of the bot, each as its number and its title, the commits of others on
+    its branch, and of the branches of the blueprint those named."""
+    once = [
+        dataclasses.replace(planned(kind, outcome, tag), once=True)
+        for kind, outcomes in plans.items()
+        for outcome in outcomes
+    ]
+    return [
+        *once,
+        Answer(r"release view .*", f"{tag}\n"),
+        Answer(r"release verify .*", f"Release {tag} verified!\n"),
+        Answer(rf"api repos/{SOURCE}/commits/.*", f"{commit}\n"),
+        Answer(rf"api repos/{SOURCE}/releases/tags/v1\.3\.1 .*", f"{immutable}\n"),
+        Answer(rf"api repos/{SOURCE}/compare/.*", f"{status}\n"),
+        Answer(r"pr list .*", open_pulls),
+        Answer(r"pr (?:close|merge|edit|create) .*"),
+        exact("api users/app[bot] --jq .id", "42\n"),
+        Answer(r"api graphql .*", "c0ffee\n"),
+        Answer(r"api repos/o/r/pulls/12/commits .*", others),
+        *(exact(f"api repos/o/r/git/ref/heads/{branch}") for branch in branches),
+        Answer(r"api repos/o/r/git/ref/heads/.*", code=1),
+        Answer(r"api --method .*"),
+    ]
+
+
+# The Python of the tests as python3, not one that the PATH of Windows names.
+PYTHON3 = f'exec "{Path(sys.executable).as_posix()}" "$@"\n'
 
 
 def run_step(
-    script: str,
-    cwd: Path,
     tmp_path: Path,
+    step: tuple[str, str],
+    *,
+    plans: dict[str, list[str]] | None = None,
+    answers: dict[str, Any] | None = None,
     stubs: dict[str, str] | None = None,
-    plans: dict[str, str] | None = None,
-    /,
-    **variables: str,
-) -> tuple[subprocess.CompletedProcess[str], list[str], str, str]:
-    """A step as GitHub runs it, bash -e, with gh, sleep and python3 stubbed first on
-    the PATH: its result, the calls of the stubs, its outputs and its summary."""
-    folder = tmp_path / "stubs"
-    folder.mkdir(exist_ok=True)
-    for name, content in {
-        "gh": GH,
-        "sleep": SLEEP,
-        "python3": PYTHON3,
-        **(stubs or {}),
-    }.items():
-        (folder / name).write_text(content, encoding="utf-8", newline="\n")
-        (folder / name).chmod(0o755)
-    for name, content in (plans or {}).items():
-        (folder / name).write_text(content, encoding="utf-8", newline="\n")
-    runner = tmp_path / "runner"
-    runner.mkdir(exist_ok=True)
-    files = {name: tmp_path / name for name in ("calls", "output", "summary")}
-    for path in files.values():
-        path.write_text("", encoding="utf-8")
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    environment = {
-        **os.environ,
-        "STUBS": folder.as_posix(),
-        "CALLS": files["calls"].as_posix(),
-        "PYTHON": Path(sys.executable).as_posix(),
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "RUNNER_TEMP": runner.as_posix(),
-        "GITHUB_OUTPUT": files["output"].as_posix(),
-        "GITHUB_STEP_SUMMARY": files["summary"].as_posix(),
-        "SOURCE": "Dennis-Otto/issue-assistant",
-        "BRANCH": "bot/issue-assistant",
-        "TAG": "v1.3.1",
-        "COMMIT": NEW,
-        **variables,
-    }
-    result = subprocess.run(
-        in_bash("-e", (tmp_path / "step.sh").as_posix()),
-        cwd=cwd,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+    env: dict[str, str] | None = None,
+) -> StepResult:
+    """A step of the sync as GitHub runs it, in the workspace tmp_path/workspace, with
+    the fake gh, which answers as github() does with plans and answers, a sleep that
+    notes its seconds, python3 the Python of the tests, and the variables of env."""
+    job, name = step
+    return workflow_steps.run_step(
+        tmp_path,
+        WORKFLOW.name,
+        job,
+        name,
+        answers=github(plans or {}, **(answers or {})),
+        env={"TAG": "v1.3.1", "COMMIT": NEW, **(env or {})},
+        stubs={
+            "sleep": workflow_steps.recording("sleep"),
+            "python3": PYTHON3,
+            **(stubs or {}),
+        },
     )
-    return (
-        result,
-        files["calls"].read_text(encoding="utf-8").splitlines(),
-        files["output"].read_text(encoding="utf-8"),
-        files["summary"].read_text(encoding="utf-8"),
-    )
+
+
+def slept(result: StepResult) -> list[str]:
+    return [call for call in result.stubbed if call.startswith("sleep ")]
 
 
 FIND = ("adopt", "Find the latest published release of the issue assistant")
 VERIFY = ("adopt", "Verify the release before taking it over")
 INSTALL_STEP = ("adopt", "Install the release in the root of the blueprint")
 PULL_REQUEST = ("pull-request", "Open, update or close the pull request of the release")
+
+
+def workspace(tmp_path: Path) -> Path:
+    """The checkout of the blueprint, where the steps run."""
+    return tmp_path / "workspace"
 
 
 def with_script(root: Path) -> Path:
@@ -986,6 +945,9 @@ def blueprint_with_script(root: Path) -> Path:
     """The blueprint with sync_issue_assistant.py committed, as the jobs check it out."""
     script = (ROOT / "sync_issue_assistant.py").read_text(encoding="utf-8")
     return blueprint(root, {**BLUEPRINT, "sync_issue_assistant.py": script})
+
+
+RELEASE_VIEW = f"release view --repo {SOURCE} --json tagName --jq .tagName"
 
 
 @runs_the_script
@@ -1000,65 +962,64 @@ def blueprint_with_script(root: Path) -> Path:
 def test_the_sync_finds_the_latest_release(
     tmp_path: Path, lint: str, current: bool
 ) -> None:
-    root = with_script(
-        written(tmp_path / "blueprint", {".github/workflows/lint.yml": lint})
-    )
+    with_script(written(workspace(tmp_path), {".github/workflows/lint.yml": lint}))
 
-    result, calls, output, summary = run_step(
-        step(*FIND), root, tmp_path, None, {"release": "fail\n"}
-    )
+    result = run_step(tmp_path, FIND, plans={"release": ["fail"]})
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == (
-        f"tag=v1.3.1\ncommit={NEW}\nurl={URL}\n" + ("current=true\n" if current else "")
-    )
-    assert summary == (
+    assert result.outputs == {
+        "tag": "v1.3.1",
+        "commit": NEW,
+        "url": URL,
+        **({"current": "true"} if current else {}),
+    }
+    assert result.summary == (
         "The blueprint has the issue assistant v1.3.1, the latest release.\n"
         if current
         else ""
     )
     # Not the newest tag: the latest published release, asked again after a failure.
-    assert calls[:3] == [
-        "gh release view --repo Dennis-Otto/issue-assistant --json tagName --jq .tagName",
-        "sleep 10",
-        "gh release view --repo Dennis-Otto/issue-assistant --json tagName --jq .tagName",
+    assert result.commands[:3] == [
+        RELEASE_VIEW,
+        RELEASE_VIEW,
+        f"api repos/{SOURCE}/commits/v1.3.1 --jq .sha",
     ]
+    assert slept(result) == ["sleep 10"]
 
 
 @runs_the_script
 @needs_bash
 def test_the_sync_needs_a_published_release(tmp_path: Path) -> None:
-    root = with_script(
-        written(tmp_path / "blueprint", {".github/workflows/lint.yml": LINT})
-    )
+    with_script(written(workspace(tmp_path), {".github/workflows/lint.yml": LINT}))
 
-    result, _, output, _ = run_step(step(*FIND), root, tmp_path, TAG="")
+    result = run_step(tmp_path, FIND, answers={"tag": ""})
 
     assert result.returncode == 1
     assert (
         "::error::The issue assistant has no published release to take over."
         in result.stdout
     )
-    assert output == ""
+    assert result.outputs == {}
 
 
 def verify(
     tmp_path: Path,
     signed: int = 0,
-    plans: dict[str, str] | None = None,
-    **variables: str,
-) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+    plans: dict[str, list[str]] | None = None,
+    **answers: str,
+) -> StepResult:
     """The step that verifies the release, with a sign-tag.sh that only records how it
     is called and exits with signed: 1 for a tag that isn't signed, 2 for one it could
     not check."""
-    root = written(
-        tmp_path / "blueprint",
-        {".github/sign-tag.sh": f'echo "sign-tag.sh $*" >> "$CALLS"\nexit {signed}\n'},
+    written(
+        workspace(tmp_path),
+        {
+            ".github/sign-tag.sh": (
+                f'echo "sign-tag.sh $*" >> "$STUB_CALLS"\nexit {signed}\n'
+            )
+        },
     )
-    result, calls, _, summary = run_step(
-        step(*VERIFY), root, tmp_path, None, plans, **variables
-    )
-    return result, calls, summary
+    return run_step(tmp_path, VERIFY, plans=plans, answers=answers)
 
 
 @runs_the_script
@@ -1067,17 +1028,17 @@ def verify(
 def test_a_signed_attested_immutable_release_on_main_passes(
     tmp_path: Path, status: str
 ) -> None:
-    result, calls, summary = verify(tmp_path, STATUS=status)
+    result = verify(tmp_path, status=status)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls == [
-        "gh api repos/Dennis-Otto/issue-assistant/releases/tags/v1.3.1 --jq .immutable",
-        f"gh api repos/Dennis-Otto/issue-assistant/compare/{NEW}...main --jq .status",
-        "gh release verify v1.3.1 --repo Dennis-Otto/issue-assistant",
-        f"sign-tag.sh verify v1.3.1 {NEW} Dennis-Otto/issue-assistant",
+    assert result.commands == [
+        f"api repos/{SOURCE}/releases/tags/v1.3.1 --jq .immutable",
+        f"api repos/{SOURCE}/compare/{NEW}...main --jq .status",
+        f"release verify v1.3.1 --repo {SOURCE}",
     ]
+    assert result.stubbed == [f"sign-tag.sh verify v1.3.1 {NEW} {SOURCE}"]
     assert "Release v1.3.1 verified!" in result.stdout
-    assert summary == (
+    assert result.summary == (
         "The release v1.3.1 of Dennis-Otto/issue-assistant is immutable, attested by"
         " GitHub, on its main and signed by its release workflow.\n"
     )
@@ -1086,25 +1047,21 @@ def test_a_signed_attested_immutable_release_on_main_passes(
 @runs_the_script
 @needs_bash
 def test_the_sync_asks_github_again(tmp_path: Path) -> None:
-    result, calls, _ = verify(
-        tmp_path, plans={"immutable": "fail\nfail\n", "attestation": "fail\n"}
+    result = verify(
+        tmp_path, plans={"immutable": ["fail", "fail"], "attestation": ["fail"]}
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert [call for call in calls if call.startswith("sleep")] == [
-        "sleep 10",
-        "sleep 20",
-        "sleep 10",
-    ]
+    assert slept(result) == ["sleep 10", "sleep 20", "sleep 10"]
 
 
 @runs_the_script
 @needs_bash
 @pytest.mark.parametrize(
-    ("variables", "plans", "signed", "error"),
+    ("answers", "plans", "signed", "error"),
     [
         (
-            {"IMMUTABLE": "false"},
+            {"immutable": "false"},
             {},
             0,
             "The release v1.3.1 of Dennis-Otto/issue-assistant is not immutable; the bot"
@@ -1112,14 +1069,14 @@ def test_the_sync_asks_github_again(tmp_path: Path) -> None:
         ),
         # The tag of a commit that main never had, or one past main.
         (
-            {"STATUS": "diverged"},
+            {"status": "diverged"},
             {},
             0,
             f"The tag v1.3.1 of Dennis-Otto/issue-assistant points at {NEW}, which is not"
             " on its main (diverged).",
         ),
         (
-            {"STATUS": "behind"},
+            {"status": "behind"},
             {},
             0,
             f"The tag v1.3.1 of Dennis-Otto/issue-assistant points at {NEW}, which is not"
@@ -1129,7 +1086,7 @@ def test_the_sync_asks_github_again(tmp_path: Path) -> None:
         # releases, three times.
         (
             {},
-            {"attestation": "fail\nfail\nfail\n"},
+            {"attestation": ["fail", "fail", "fail"]},
             0,
             "GitHub's attestation of the release v1.3.1 of Dennis-Otto/issue-assistant"
             " doesn't hold; the log of the run shows what gh release verify says.",
@@ -1147,47 +1104,47 @@ def test_the_sync_asks_github_again(tmp_path: Path) -> None:
 )
 def test_any_other_release_of_the_issue_assistant_stops_the_sync(
     tmp_path: Path,
-    variables: dict[str, str],
-    plans: dict[str, str],
+    answers: dict[str, str],
+    plans: dict[str, list[str]],
     signed: int,
     error: str,
 ) -> None:
-    result, _, summary = verify(tmp_path, signed, plans, **variables)
+    result = verify(tmp_path, signed, plans, **answers)
 
     assert result.returncode == 1
     assert f"::error::{error}" in result.stdout.splitlines()
     # The summary says why, what it means and what to do.
-    assert summary.startswith(
+    assert result.summary.startswith(
         "### The sync bot refused the release v1.3.1 of Dennis-Otto/issue-assistant\n\n"
         f"{error}\n\n"
     )
-    assert "Nothing has changed here." in summary
+    assert "Nothing has changed here." in result.summary
     assert (
         "(https://github.com/Dennis-Otto/issue-assistant/blob/main/SECURITY.md#verify-a-release)"
-        in summary
+        in result.summary
     )
 
 
 @runs_the_script
 @needs_bash
 def test_a_signature_that_could_not_be_checked_refuses_nothing(tmp_path: Path) -> None:
-    result, _, summary = verify(tmp_path, signed=2)
+    result = verify(tmp_path, signed=2)
 
     assert result.returncode == 1
     assert (
         "::error::The signature of the release v1.3.1 of Dennis-Otto/issue-assistant"
         " could not be checked; nothing has changed, and the next run checks it again."
     ) in result.stdout.splitlines()
-    assert summary == ""
+    assert result.summary == ""
 
 
 @runs_the_script
 @needs_bash
 def test_a_question_without_an_answer_refuses_nothing(tmp_path: Path) -> None:
-    result, _, summary = verify(tmp_path, plans={"immutable": "fail\nfail\nfail\n"})
+    result = verify(tmp_path, plans={"immutable": ["fail", "fail", "fail"]})
 
     assert result.returncode == 1
-    assert summary == ""
+    assert result.summary == ""
 
 
 @runs_the_script
@@ -1195,7 +1152,7 @@ def test_a_question_without_an_answer_refuses_nothing(tmp_path: Path) -> None:
 def test_an_attestation_that_github_could_not_check_refuses_nothing(
     tmp_path: Path,
 ) -> None:
-    result, _, summary = verify(tmp_path, plans={"attestation": "down\ndown\ndown\n"})
+    result = verify(tmp_path, plans={"attestation": ["down", "down", "down"]})
 
     assert result.returncode == 1
     assert (
@@ -1203,7 +1160,7 @@ def test_an_attestation_that_github_could_not_check_refuses_nothing(
         " Dennis-Otto/issue-assistant could not be checked; nothing has changed, and"
         " the next run checks it again."
     ) in result.stdout.splitlines()
-    assert summary == ""
+    assert result.summary == ""
 
 
 @runs_the_script
@@ -1221,13 +1178,9 @@ def test_the_sync_never_goes_back_to_an_older_release(
     tmp_path: Path, have: str, latest: str, older: bool
 ) -> None:
     lint = LINT.replace(pin(OLD, "v1.2.2"), pin(OLD, have))
-    root = with_script(
-        written(tmp_path / "blueprint", {".github/workflows/lint.yml": lint})
-    )
+    with_script(written(workspace(tmp_path), {".github/workflows/lint.yml": lint}))
 
-    result, _, output, summary = run_step(
-        step(*FIND), root, tmp_path, TAG=latest, COMMIT=NEW
-    )
+    result = run_step(tmp_path, FIND, answers={"tag": latest})
 
     if older:
         assert result.returncode == 1
@@ -1236,30 +1189,30 @@ def test_the_sync_never_goes_back_to_an_older_release(
             f" older than {have}, which the blueprint has; the bot never goes back to"
             " an older release."
         ) in result.stdout.splitlines()
-        assert summary.startswith(
+        assert result.summary.startswith(
             f"### The sync bot refused the release {latest} of"
             " Dennis-Otto/issue-assistant\n"
         )
     else:
         assert result.returncode == 0, result.stdout + result.stderr
-        assert summary == ""
-    assert "current=true" not in output
+        assert result.summary == ""
+    assert "current" not in result.outputs
 
 
 # git for the step that installs the release: the fetch of the verified commit and its
 # checkout bring the release that the test made; anything else is git itself.
 GIT_STUB = """#!/usr/bin/env bash
 if [[ "$1" == -C && "$3" == fetch ]]; then
-  echo "git fetch ${*:4}" >> "$CALLS"
-  failures=$(grep -c "^git fetch failed" "$CALLS" || true)
+  echo "git fetch ${*:4}" >> "$STUB_CALLS"
+  failures=$(grep -c "^git fetch failed" "$STUB_CALLS" || true)
   if ((failures < ${FETCH_FAILURES:-0})); then
-    echo "git fetch failed" >> "$CALLS"
+    echo "git fetch failed" >> "$STUB_CALLS"
     exit 128
   fi
   exit 0
 fi
 if [[ "$1" == -C && "$3" == checkout ]]; then
-  echo "git checkout ${*:4}" >> "$CALLS"
+  echo "git checkout ${*:4}" >> "$STUB_CALLS"
   cp -R "$RELEASE/." "$2/"
   exit 0
 fi
@@ -1267,47 +1220,47 @@ exec "$REAL_GIT" "$@"
 """
 
 
-def install(
-    tmp_path: Path, **variables: str
-) -> tuple[subprocess.CompletedProcess[str], list[str], str, str, Path]:
-    root = blueprint_with_script(tmp_path / "blueprint")
-    tool = release(tmp_path / "release")
+def install(tmp_path: Path, **variables: str) -> StepResult:
+    """The step that installs the release, which the test made, in the blueprint of
+    the workspace."""
     assert GIT
-    result, calls, output, summary = run_step(
-        step(*INSTALL_STEP),
-        root,
+    return run_step(
         tmp_path,
-        {"git": GIT_STUB},
-        None,
-        RELEASE=tool.as_posix(),
-        REAL_GIT=Path(GIT).as_posix(),
-        **variables,
+        INSTALL_STEP,
+        stubs={"git": GIT_STUB},
+        env={
+            "RELEASE": release(tmp_path / "release").as_posix(),
+            "REAL_GIT": Path(GIT).as_posix(),
+            **variables,
+        },
     )
-    return result, calls, output, summary, root
 
 
 @runs_the_script
 @needs_bash
 def test_the_sync_installs_the_verified_commit(tmp_path: Path) -> None:
-    result, calls, output, summary, root = install(tmp_path, FETCH_FAILURES="1")
+    root = blueprint_with_script(workspace(tmp_path))
+
+    result = install(tmp_path, FETCH_FAILURES="1")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls == [
-        f"git fetch --quiet --depth=1 https://github.com/Dennis-Otto/issue-assistant.git {NEW}",
+    fetch = f"git fetch --quiet --depth=1 https://github.com/{SOURCE}.git {NEW}"
+    assert result.stubbed == [
+        fetch,
         "git fetch failed",
         "sleep 10",
-        f"git fetch --quiet --depth=1 https://github.com/Dennis-Otto/issue-assistant.git {NEW}",
+        fetch,
         "git checkout --quiet --detach FETCH_HEAD",
     ]
-    assert output == "changed=true\n"
-    assert summary.startswith(
+    assert result.outputs == {"changed": "true"}
+    assert result.summary.startswith(
         "### The issue assistant v1.3.1\n\n"
         "`install` of the release in the root of the blueprint changes these files:\n\n"
         "- `.github/egress-firewall.yaml`: the firewall policy of the release\n"
     )
-    assert "+  queue: max\n" in summary
+    assert "+  queue: max\n" in result.summary
     # The new workflow shows in the changes too.
-    assert "+++ b/.github/workflows/triage.yml\n" in summary
+    assert "+++ b/.github/workflows/triage.yml\n" in result.summary
     kept = tmp_path / "runner/sync"
     assert sync.kept(kept) == sync.changed_files(root)
 
@@ -1315,49 +1268,40 @@ def test_the_sync_installs_the_verified_commit(tmp_path: Path) -> None:
 @runs_the_script
 @needs_bash
 def test_the_sync_without_changes_says_so(tmp_path: Path) -> None:
-    root = blueprint_with_script(tmp_path / "blueprint")
+    root = blueprint_with_script(workspace(tmp_path))
     sync.adopt(root, release(tmp_path / "first"), NEW, "v1.3.1")
     git_in(root, "add", "--all")
     git_in(root, "commit", "--quiet", "-m", "the release")
-    assert GIT
 
-    result, _, output, summary = run_step(
-        step(*INSTALL_STEP),
-        root,
-        tmp_path,
-        {"git": GIT_STUB},
-        None,
-        RELEASE=release(tmp_path / "release").as_posix(),
-        REAL_GIT=Path(GIT).as_posix(),
-    )
+    result = install(tmp_path)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == ""
-    assert (
-        summary == "The blueprint has every template of the issue assistant v1.3.1.\n"
+    assert result.outputs == {}
+    assert result.summary == (
+        "The blueprint has every template of the issue assistant v1.3.1.\n"
     )
 
 
 @runs_the_script
 @needs_bash
 def test_the_sync_stops_when_the_commit_cant_be_fetched(tmp_path: Path) -> None:
-    result, calls, output, _, _ = install(tmp_path, FETCH_FAILURES="3")
+    blueprint_with_script(workspace(tmp_path))
+
+    result = install(tmp_path, FETCH_FAILURES="3")
 
     assert result.returncode == 1
     assert (
         f"::error::The commit {NEW} of Dennis-Otto/issue-assistant could not be fetched;"
         " nothing has changed, and the next run tries again."
     ) in result.stdout
-    assert "git checkout --quiet --detach FETCH_HEAD" not in calls
-    assert output == ""
+    assert "git checkout --quiet --detach FETCH_HEAD" not in result.stubbed
+    assert result.outputs == {}
 
 
-def pull_request(
-    tmp_path: Path, changed: bool = True, **variables: str
-) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+def pull_request(tmp_path: Path, changed: bool = True, **answers: Any) -> StepResult:
     """The step of the pull request, on main as the job adopt found it, with what that
-    job kept."""
-    root = blueprint_with_script(tmp_path / "blueprint")
+    job kept, and gh answering as github() does with answers."""
+    root = blueprint_with_script(workspace(tmp_path))
     if changed:
         sync.keep(
             root,
@@ -1366,21 +1310,17 @@ def pull_request(
         )
         git_in(root, "checkout", "--quiet", "--", ".")
         git_in(root, "clean", "--quiet", "--force")
-    result, calls, _, summary = run_step(
-        step(*PULL_REQUEST),
-        root,
+    return run_step(
         tmp_path,
-        GH_REPO="o/r",
-        APP_SLUG="app",
-        CHANGED="true" if changed else "",
-        URL=URL,
-        SHA="abc1234",
-        RUN="https://github.com/o/r/actions/runs/5",
-        REQUEST=(tmp_path / "request.json").as_posix(),
-        BODY=(tmp_path / "body.md").as_posix(),
-        **variables,
+        PULL_REQUEST,
+        answers=answers,
+        env={
+            "APP_SLUG": "app",
+            "CHANGED": "true" if changed else "",
+            "URL": URL,
+            "SHA": "abc1234",
+        },
     )
-    return result, calls, summary
 
 
 HEADLINE = "fix(deps): update the issue assistant to v1.3.1"
@@ -1389,22 +1329,22 @@ HEADLINE = "fix(deps): update the issue assistant to v1.3.1"
 @runs_the_script
 @needs_bash
 def test_the_sync_opens_a_pull_request_that_merges_itself(tmp_path: Path) -> None:
-    result, calls, summary = pull_request(tmp_path)
+    result = pull_request(tmp_path)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls[1:] == [
-        "gh api repos/o/r/git/ref/heads/bot/issue-assistant-next",
-        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/issue-assistant-next -f sha=abc1234",
-        "gh api users/app[bot] --jq .id",
-        f"gh api graphql --input {(tmp_path / 'runner/commit.json').as_posix()} --jq .data.createCommitOnBranch.commit.oid",
-        "gh api repos/o/r/git/ref/heads/bot/issue-assistant",
-        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/issue-assistant -f sha=c0ffee",
-        "gh api --method DELETE repos/o/r/git/refs/heads/bot/issue-assistant-next",
-        f"gh pr create --base main --head bot/issue-assistant --title {HEADLINE} --body-file {(tmp_path / 'runner/body.md').as_posix()}",
-        "gh pr merge bot/issue-assistant --auto --squash",
+    assert result.commands[1:] == [
+        "api repos/o/r/git/ref/heads/bot/issue-assistant-next",
+        "api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/issue-assistant-next -f sha=abc1234",
+        "api users/app[bot] --jq .id",
+        f"api graphql --input {(tmp_path / 'runner/commit.json').as_posix()} --jq .data.createCommitOnBranch.commit.oid",
+        "api repos/o/r/git/ref/heads/bot/issue-assistant",
+        "api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/issue-assistant -f sha=c0ffee",
+        "api --method DELETE repos/o/r/git/refs/heads/bot/issue-assistant-next",
+        f"pr create --base main --head bot/issue-assistant --title {HEADLINE} --body-file {(tmp_path / 'runner/body.md').as_posix()}",
+        "pr merge bot/issue-assistant --auto --squash",
     ]
-    request = json.loads((tmp_path / "request.json").read_text(encoding="utf-8"))
-    commit = request["variables"]["input"]
+    [request] = result.read_by("api graphql", "--input")
+    commit = json.loads(request)["variables"]["input"]
     assert commit["expectedHeadOid"] == "abc1234"
     assert commit["message"]["headline"] == HEADLINE
     # The sign-off names the app's account, the author of the commit.
@@ -1412,13 +1352,13 @@ def test_the_sync_opens_a_pull_request_that_merges_itself(tmp_path: Path) -> Non
         "\n\nSigned-off-by: app[bot] <42+app[bot]@users.noreply.github.com>"
     )
     assert f"the verified release {URL}" in commit["message"]["body"]
-    body = (tmp_path / "body.md").read_text(encoding="utf-8")
+    [body] = result.read_by("pr create", "--body-file")
     assert body.startswith(f"The issue assistant [v1.3.1]({URL}) is out")
     assert (
         "- `.github/workflows/lint.yml`: every pin of the action moves to the release\n"
         in body
     )
-    assert summary == (
+    assert result.summary == (
         "The pull request of the issue assistant v1.3.1 from bot/issue-assistant has the"
         " commit c0ffee, and merges itself once every check passes.\n"
     )
@@ -1427,37 +1367,39 @@ def test_the_sync_opens_a_pull_request_that_merges_itself(tmp_path: Path) -> Non
 @runs_the_script
 @needs_bash
 def test_the_sync_moves_its_pull_request_on_to_a_newer_release(tmp_path: Path) -> None:
-    result, calls, _ = pull_request(
+    result = pull_request(
         tmp_path,
-        OPEN="12\\tfix(deps): update the issue assistant to v1.3.0",
+        open_pulls="12\tfix(deps): update the issue assistant to v1.3.0",
         # The merges of main by the branch bot are the app's.
-        OTHERS="",
-        BRANCHES="bot/issue-assistant",
+        others="",
+        branches=("bot/issue-assistant",),
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+    calls = result.commands
     assert (
-        "gh api --method PATCH repos/o/r/git/refs/heads/bot/issue-assistant -f sha=c0ffee -F force=true"
+        "api --method PATCH repos/o/r/git/refs/heads/bot/issue-assistant -f sha=c0ffee -F force=true"
         in calls
     )
     assert (
-        f"gh pr edit 12 --title {HEADLINE} --body-file {(tmp_path / 'runner/body.md').as_posix()}"
+        f"pr edit 12 --title {HEADLINE} --body-file {(tmp_path / 'runner/body.md').as_posix()}"
         in calls
     )
-    assert not any(call.startswith("gh pr create") for call in calls)
-    assert calls[-1] == "gh pr merge bot/issue-assistant --auto --squash"
+    assert not result.called("pr create")
+    assert calls[-1] == "pr merge bot/issue-assistant --auto --squash"
 
 
 @runs_the_script
 @needs_bash
 def test_the_sync_keeps_a_pull_request_of_the_same_release(tmp_path: Path) -> None:
-    result, calls, summary = pull_request(tmp_path, OPEN=f"12\\t{HEADLINE}")
+    result = pull_request(tmp_path, open_pulls=f"12\t{HEADLINE}")
 
     assert result.returncode == 0, result.stdout + result.stderr
     # The branch bot keeps it current with main; nothing is committed again.
-    assert calls[-1] == "gh pr merge 12 --auto --squash"
+    calls = result.commands
+    assert calls[-1] == "pr merge 12 --auto --squash"
     assert not any("graphql" in call or "--method" in call for call in calls)
-    assert summary == (
+    assert result.summary == (
         "#12 brings the issue assistant v1.3.1 already, and merges itself once every"
         " check passes.\n"
     )
@@ -1468,18 +1410,18 @@ def test_the_sync_keeps_a_pull_request_of_the_same_release(tmp_path: Path) -> No
 def test_the_sync_leaves_a_branch_with_someone_elses_commit_alone(
     tmp_path: Path,
 ) -> None:
-    result, calls, summary = pull_request(
+    result = pull_request(
         tmp_path,
-        OPEN="12\\tfix(deps): update the issue assistant to v1.3.0",
-        OTHERS="f00ba4\\n",
+        open_pulls="12\tfix(deps): update the issue assistant to v1.3.0",
+        others="f00ba4\n",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls[-1] == (
-        "gh api repos/o/r/pulls/12/commits --paginate --jq .[] | select((.parents |"
+    assert result.commands[-1] == (
+        "api repos/o/r/pulls/12/commits --paginate --jq .[] | select((.parents |"
         ' length) == 1 and .author.login != "app[bot]") | .sha'
     )
-    assert summary == (
+    assert result.summary == (
         "Someone else committed to bot/issue-assistant, so the bot leaves #12 as it is:"
         " merge or close it, and the next run brings the latest release.\n"
     )
@@ -1490,23 +1432,21 @@ def test_the_sync_leaves_a_branch_with_someone_elses_commit_alone(
 def test_the_sync_closes_its_pull_request_when_main_has_the_release(
     tmp_path: Path,
 ) -> None:
-    result, calls, summary = pull_request(
-        tmp_path, changed=False, OPEN=f"12\\t{HEADLINE}"
-    )
+    result = pull_request(tmp_path, changed=False, open_pulls=f"12\t{HEADLINE}")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls[-1] == (
-        "gh pr close 12 --delete-branch --comment `main` has the issue assistant v1.3.1"
+    assert result.commands[-1] == (
+        "pr close 12 --delete-branch --comment `main` has the issue assistant v1.3.1"
         " without this pull request: https://github.com/o/r/actions/runs/5"
     )
-    assert summary == "main has the issue assistant v1.3.1; closed #12.\n"
+    assert result.summary == "main has the issue assistant v1.3.1; closed #12.\n"
 
 
 @runs_the_script
 @needs_bash
 def test_the_sync_without_a_pull_request_has_nothing_to_do(tmp_path: Path) -> None:
-    result, calls, summary = pull_request(tmp_path, changed=False)
+    result = pull_request(tmp_path, changed=False)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert len(calls) == 1
-    assert summary == ""
+    assert len(result.commands) == 1
+    assert result.summary == ""

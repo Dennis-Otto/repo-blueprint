@@ -94,7 +94,7 @@ def run_of(
     }
 
 
-def job_of(
+def job_of_a_run(
     number: int,
     name: str,
     conclusion: str,
@@ -304,13 +304,13 @@ def test_a_first_failure_runs_its_failed_jobs_once_more(github: FakeGitHub) -> N
 def test_a_failure_that_stays_opens_one_issue(github: FakeGitHub) -> None:
     github.runs[1] = run_of(1, attempt=2, event="push")
     github.jobs[(1, 2)] = [
-        job_of(
+        job_of_a_run(
             11,
             "release",
             "failure",
             [("Set up job", "success"), ("Run release-please", "failure")],
         ),
-        job_of(12, "notes", "success"),
+        job_of_a_run(12, "notes", "success"),
     ]
     github.annotations[11] = [
         failure("warning", "Node 20 is deprecated"),
@@ -363,7 +363,7 @@ def test_a_failure_in_the_same_place_updates_the_issue_quietly(
     for number in (1, 2):
         github.runs[number] = run_of(number, attempt=2)
         github.jobs[(number, 2)] = [
-            job_of(10 + number, "release", "failure", [("Tag", "failure")])
+            job_of_a_run(10 + number, "release", "failure", [("Tag", "failure")])
         ]
     watch_run(api, REPO, 1, NOW)
 
@@ -382,7 +382,9 @@ def test_a_failure_in_the_same_place_updates_the_issue_quietly(
 def test_a_failure_in_another_place_adds_a_comment(github: FakeGitHub) -> None:
     number = github.add_issue(RELEASE, run=1, attempt=2, failed=3, where="old")
     github.runs[2] = run_of(2, attempt=2)
-    github.jobs[(2, 2)] = [job_of(21, "sign", "timed_out", [("Sign", "cancelled")])]
+    github.jobs[(2, 2)] = [
+        job_of_a_run(21, "sign", "timed_out", [("Sign", "cancelled")])
+    ]
 
     result = watch_run(api_of(github), REPO, 2, NOW)
 
@@ -560,8 +562,8 @@ def test_the_failed_jobs_name_their_place_and_their_first_error(
 ) -> None:
     run = Run.of(run_of(1, attempt=2))
     github.jobs[(1, 2)] = [
-        job_of(1, "only cancelled", "cancelled", [("Wait", "cancelled")]),
-        job_of(2, "passed", "success"),
+        job_of_a_run(1, "only cancelled", "cancelled", [("Wait", "cancelled")]),
+        job_of_a_run(2, "passed", "success"),
     ]
     github.fail[("GET", f"repos/{REPO}/check-runs/1/annotations?per_page=50")] = 403
 
@@ -570,7 +572,7 @@ def test_the_failed_jobs_name_their_place_and_their_first_error(
     assert (found.job, found.step, found.error) == ("only cancelled", "Wait", "")
 
     github.jobs[(1, 2)] = [
-        {**job_of(number, f"job {number}", "failure"), "steps": None}
+        {**job_of_a_run(number, f"job {number}", "failure"), "steps": None}
         for number in range(MOST_JOBS + 2)
     ]
     github.annotations[0] = [failure("failure", "Process completed with exit code 2.")]
