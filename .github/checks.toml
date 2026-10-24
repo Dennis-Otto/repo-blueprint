@@ -116,7 +116,8 @@ commits them onto a branch of this repository."""
 title = "The website"
 problem = """The website doesn't build strictly, or a check of the built website failed.
 The build fails when a link or an anchor leads nowhere, a page is missing from the
-navigation of `mkdocs.yml`, or MkDocs warns about a page. After the build, lychee
+navigation of `mkdocs.yml`, MkDocs warns about a page, or a page shows a picture
+from `main` of the repository that git doesn't track. After the build, lychee
 checks every link and anchor of the built pages, also those written in HTML, such as
 `<a href="…">` in a card, and `blueprint.py site-check` what the hooks of the website
 promise, such as a sitemap in every folder of pages and the 404 page in the default
@@ -132,7 +133,9 @@ the build doesn't: the links that a page writes in HTML, what a new version of
 Material or of its plugins changes in the pages, and a page that takes a phone on a
 slow network more than a few seconds to load."""
 fix = """Fix what the log of the check names: the page and the link that leads nowhere,
-or the file of the website that breaks a promise of its hooks. A page that loads too
+or the file of the website that breaks a promise of its hooks. A picture that a page
+shows from `main`, which the website serves from the checkout, needs its file
+committed with `git add`, or its address corrected. A page that loads too
 much shows a smaller picture, or the pictures of a diagram in place of its ```mermaid
 block, which loads Mermaid, about 1 MB: `bash scripts/diagrams.sh --extract` makes
 them. Install the tools of the
