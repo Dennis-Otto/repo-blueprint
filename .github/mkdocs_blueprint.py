@@ -33,6 +33,10 @@ log = logging.getLogger("mkdocs.hooks.blueprint")
 DOWNLOADING = ("material/privacy", "material/social")
 # How often a download is tried before the plugin gets its error.
 ATTEMPTS = 3
+# The seconds that an attempt waits for the connection and then for each next part
+# of the file, when the plugin names no time limit itself: the social plugin names
+# none, so a server that stopped answering held the build until the CI ended it.
+TIMEOUT = (10, 30)
 # The stylesheet and the script of every website: the path where the website serves
 # each, and the file beside this one that holds it.
 ASSETS = {
@@ -159,7 +163,8 @@ SNIPPET = re.compile(
 
 class Retrying:
     """The requests of a plugin, whose get tries a download again, after a second
-    and then two, when the network or the server fails."""
+    and then two, when the network or the server fails, and gives up on an attempt
+    after TIMEOUT unless the plugin names its own time limit."""
 
     def __init__(self, requests: Any) -> None:
         self.requests = requests
@@ -168,6 +173,7 @@ class Retrying:
         return getattr(self.requests, name)
 
     def get(self, url: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("timeout", TIMEOUT)
         transient = (self.requests.ConnectionError, self.requests.Timeout)
         for attempt in range(1, ATTEMPTS):
             try:
@@ -189,7 +195,8 @@ def on_config(config: Any) -> None:
 
     The plugins try every file once: the privacy plugin warns when a font of Google
     Fonts doesn't come within 5 seconds, which fails a strict build, and the social
-    plugin fails on any error of the network. The stylesheet and the script come
+    plugin fails on any error of the network and waits without end for a server that
+    stopped answering. The stylesheet and the script come
     before those of the project, whose extra_css replaces the list of the blueprint
     and whose rules win over them. The menu of mkdocs.yml belongs to the project, so
     the page comes after the security design there, unless the menu names it.
