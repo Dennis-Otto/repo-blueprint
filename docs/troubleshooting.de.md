@@ -44,7 +44,7 @@ Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copi
 **Warum, und was zu tun ist:**
 
 - **Ein Update hat eine Pflichtprüfung umbenannt.** Das Ruleset *Protect main* verlangt noch den alten Namen, den kein Workflow mehr meldet. Checke den Branch des Pull Requests aus und führe dort `python3 .github/blueprint.py settings apply` aus, gleich bevor du ihn mergst, damit das Ruleset die neuen Namen verlangt; der Einstellungs-Bot wendet dasselbe nach dem Merge an.
-- **Der Workflow ist nicht gestartet.** Sein Lauf unter *Actions* zeigt einen *startup failure*, wenn er eine Action nutzt, die in der Liste der erlaubten Actions fehlt. `python3 .github/blueprint.py settings check` nennt jede; trage ihr Muster für einen Workflow des Projekts in `[actions.selected]` von `.github/repository.project.toml` ein und wende die Einstellungen an.
+- **Der Workflow ist nicht gestartet.** Sein Lauf unter *Actions* zeigt einen *startup failure*, wenn er eine Action nutzt, die in der Liste der erlaubten Actions fehlt. `python3 .github/blueprint.py settings check` nennt jede; trage ihr Muster für einen Workflow des Projekts in `[actions.selected]` von `.github/repository.project.toml` ein und wende die Einstellungen an. Ein Schritt mit `uses: docker://…` scheitert genauso, weil GitHub das Image als Action zählt, die kein Muster erlaubt: Starte es stattdessen in einem `run:`-Schritt mit dem `docker run --rm`, das die Prüfung nennt.
 - **Der Pull Request kommt von einem Token, das keinen Workflow startet,** etwa dem Token eines Jobs: siehe [Der Release-Pull-Request hat keine Prüfungen](#der-release-pull-request-hat-keine-prüfungen).
 - **Der Pull Request kommt aus dem Fork eines externen Beitragenden:** Seine Workflows warten auf einen Maintainer, der sie mit *Approve and run* am Pull Request startet.
 - **Eine Prüfung allein dieses Projekts,** die `.github/repository.project.toml` verlangt, läuft in einem Workflow mit Pfadfilter, sodass ein Pull Request, der andere Dateien ändert, sie nie startet. Eine Pflichtprüfung läuft in jedem Pull Request: Entferne den Filter, oder lass den Job in seinen Schritten entscheiden, was er überspringt, damit er trotzdem Erfolg meldet.
@@ -86,6 +86,19 @@ Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copi
 3. Starte den Release-Workflow unter *Actions → Release → Run workflow*, oder merge den nächsten Pull Request. Er aktualisiert den Release-Pull-Request als die App, und seine Prüfungen starten.
 
 Scheitert das Token der App, etwa bei einer App, die im Repository nicht installiert ist, oder einem Schlüssel, der nicht zu ihr gehört, scheitert der Schritt, der das Token anfordert, und der Bot-Health-Bot hält ein Issue offen, bis ein Lauf besteht. Ein Pull Request, dessen Prüfungen aus einem anderen Grund nicht gestartet sind, startet sie, wenn eine Person ihn schließt und wieder öffnet.
+
+## Ein Bot sagt, dass er die Release-App braucht
+
+**Was du siehst:** Ein Lauf eines Bots, etwa Settings, der Blueprint-Bot, der Branch-Bot oder der Fix-Bot, zeigt die Annotation *This repository names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID* oder *has no private key of its release app*, und seine Zusammenfassung beginnt mit *… needs the release app of the owner*.
+
+**Warum:** Jeder Bot, der als Release-App handelt, prüft die App, bevor er nach ihrem Token fragt, in seinem Schritt *Check that the release app is set up*, und nennt, was fehlt, statt am Token mit einem Fehler zu scheitern, der nichts über die Ursache sagt. Ein Bot, dessen Arbeit die der App ist, schlägt fehl: der Blueprint-Bot, der Settings-Bot, der Upstream-Bot einer Nextcloud-App, Renovate in einem Workflow des Repositorys und das Rollout. Ein Bot, der einem Pull Request nur weiterhilft, warnt und macht ohne das Token weiter: der Fix-Bot, der Branch-Bot, der Diagramm- und der Screenshot-Bot, das Mergen der Updates von Dependabot und der Release-Bot.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/the-check-of-the-release-app.de.dark.svg">
+  <img src="images/diagrams/the-check-of-the-release-app.de.svg" alt="Die Prüfung der Release-App: Bevor ein Bot nach einem Token der Release-App fragt, prüft er, dass das Repository die App in der Variablen RELEASE_AUTOMATION_CLIENT_ID nennt und ihren privaten Schlüssel in der Umgebung release hat. Mit beidem fragt er nach dem Token und tut seine Arbeit. Fehlt eines, sagt er in einer Annotation und in seiner Zusammenfassung, was fehlt und dass die Checkliste es einrichtet. Ein Bot, dessen Arbeit die der App ist, wie der Blueprint-Bot, der Settings-Bot oder Renovate, schlägt dann fehl; einer, der einem Pull Request nur weiterhilft, wie der Fix-Bot oder der Branch-Bot, warnt und macht ohne das Token weiter.">
+</picture>
+
+**Was zu tun ist:** Geh die Schritte der Release-App durch, die `python3 .github/blueprint.py checklist` zeigt, wie die Seite [Dein eigenes Konto](own-account.md#3-die-release-app-registrieren) es tut: Registriere die App und nenne sie, sodass die Variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) sie nennt, installiere sie im Repository und setze ihren privaten Schlüssel als Secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) des Environments `release`. Der nächste Lauf jedes Bots tut seine Arbeit.
 
 ## Renovate öffnet keine Updates
 
@@ -140,6 +153,22 @@ python3 .github/blueprint.py locks --fix
 Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --output-file=requirements-test.txt requirements-test.in`, und Renovate behält ihn so, wenn es die Datei kompiliert. Eine Option, die Renovate nicht kennt, etwa `--python-platform`, `--no-header`, eine andere Ausgabedatei oder eine Quelldatei, die es nicht gibt, braucht eine Person: Kompiliere die Datei in ihrem Ordner neu, mit den Optionen, die Renovate kennt, wie im Beispiel. In einem Pull Request eines Branches des Repositorys führt der Fix-Bot `locks --fix` selbst aus.
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
+
+## Die Prüfung renovate rules scheitert
+
+**Was du siehst:** In einem Pull Request, der die Regeln von Renovate oder eine Lock-Datei ändert, scheitert die Prüfung *renovate rules* des Renovate-Workflows, in einem Repository, das Renovate selbst ausführt (die Antwort `renovate_runner` `self`), und im Blueprint. Ihre Annotationen nennen jedes Problem, etwa `Invalid configuration option` für eine Regel, `pip-compile error` für eine Lock-Datei oder `Renovate doesn't read the lock file requirements-test.txt.`; ihre Zusammenfassung und der Kommentar des PR-Coachs sagen, wie du es behebst.
+
+**Warum:** Renovate lehnt jede Regel ab, die es nicht kennt, und aktualisiert dann nichts mehr im Repository, und eine Datei, die es nicht lesen kann, überspringt es in jedem Lauf, mit nicht mehr als einer Warnung in seinem Log. Deshalb führt die Prüfung den Validator von Renovate auf `.github/renovate.json5`, `.github/renovate-blueprint.json5`, `.github/renovate-accepted.json5` und den Einstellungen des Bots in `.github/renovate-global.json5` aus und danach Renovate selbst, das jede committete Datei der Abhängigkeiten liest, ohne Token und ohne etwas nachzuschlagen. Eine Warnung oder eine Lock-Datei, die es nicht liest, lässt die Prüfung scheitern.
+
+**Was zu tun ist:** Korrigiere die Regel oder die Datei, die die Annotationen nennen; bei einer Lock-Datei schreibt `python3 .github/blueprint.py locks --fix` ihren Kopf so, wie Renovate ihn liest, wie [Renovate überspringt eine Lock-Datei](#renovate-überspringt-eine-lock-datei) zeigt. Mit Docker laufen dieselben Prüfungen auf deinem Rechner, die letzte auf den Dateien deines letzten Commits; die Prüfung selbst führt das Renovate aus, das `.github/workflows/renovate.yml` festlegt:
+
+```sh
+docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 .github/renovate-accepted.json5
+docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app -e RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict
+git archive HEAD | docker run --rm -i -e LOG_LEVEL=info -e RENOVATE_GITHUB_TOKEN_WARN=false -e RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 ghcr.io/renovatebot/renovate:latest bash -c 'mkdir /tmp/repository && cd /tmp/repository && tar -xf - && sed -i "s#\"local>[^\"]*\",\{0,1\}##" .github/renovate.json5 .github/renovate-blueprint.json5 && renovate --platform=local --dry-run=extract'
+```
+
+Der letzte Befehl nimmt die Presets des Blueprints aus den Regeln, da Renovate auf deinem Rechner keine Plattform hat, von der es sie holen könnte; die Regeln des Blueprints kommen als die des Bots hinein. Seine Zeile `Extracted dependencies` listet jede Datei, die Renovate liest, mit den Lock-Dateien jeder Quelle von pip-compile unter `lockFiles`; eine Zeile mit `WARN` oder `ERROR` nennt ein Problem, und nach einem Fehler endet Renovate mit dem Exit-Code 1. Unter Windows führe die Befehle in Git Bash mit `MSYS_NO_PATHCONV=1` vor `docker` aus, damit Git Bash die Pfade im Container in Ruhe lässt.
 
 ## Die Website nennt ein Bild, das Git nicht verfolgt
 

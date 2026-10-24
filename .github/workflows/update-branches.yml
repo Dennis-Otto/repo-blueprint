@@ -31,8 +31,8 @@ on:
   # A required check that fails moves the line on to the next pull request.
   workflow_run:
     # The workflows of the checks of this repository; the blueprint sets them for each kind of project.
-    # Then those of the other required checks and of the scanners, the same in every repository.
-    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security]
+    # Then those of the other required checks and of the scanners, the same in every repository, and Renovate for the check of its rules where it runs in the repository.
+    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security, Renovate]
     types: [completed]
   # The schedule is only a safety net, for an event that GitHub lost and a pull
   # request whose fix passed its checks: every merge into main is a push of the
@@ -63,7 +63,7 @@ jobs:
           contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion) &&
           (github.event.workflow_run.conclusion != 'failure' ||
             github.event.workflow_run.run_attempt > 1 ||
-            contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security"]'), github.event.workflow_run.name))))
+            contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate"]'), github.event.workflow_run.name))))
     # On the job, so that a run whose job skips, as after checks that passed, cancels
     # no run that updates.
     concurrency:
@@ -83,9 +83,46 @@ jobs:
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
+      # Without the release app of the owner, the run names what is missing rather than
+      # fail at the token; every workflow has this step, the same but for its variables.
+      - name: Check that the release app is set up
+        id: release-app
+        env:
+          CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+          # Who needs the app and for what, what happens without it, and whether the
+          # run fails then.
+          BOT: the branch bot
+          TASK: bring a pull request that waits for auto-merge up to date
+          WITHOUT: every pull request stays as it is
+          REQUIRED: "false"
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
+          elif [[ "$KEY_SET" != true ]]; then
+            missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          level=warning
+          if [[ "$REQUIRED" == true ]]; then
+            level=error
+          fi
+          echo "::$level::This repository $missing, which $BOT needs to $TASK; $WITHOUT."
+          {
+            echo "### ${BOT^} needs the release app of the owner"
+            echo
+            echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
+            echo
+            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. Once they are done, $BOT can $TASK in its next run."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$REQUIRED" == true ]]; then
+            exit 1
+          fi
       - name: Create a token of the release app
         id: app
-        if: vars.RELEASE_AUTOMATION_CLIENT_ID != ''
+        if: steps.release-app.outputs.ready == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}

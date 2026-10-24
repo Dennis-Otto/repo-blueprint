@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: Wie ein Eigentümer zu seiner Release-App kommt
-    accDescr: Du kopierst den Blueprint und lässt die Frage nach der Release-App leer. Die Checkliste verlinkt die Registrierung der App auf deinem Konto oder deiner Organisation, mit Name und Berechtigungen vorausgefüllt. Du legst die App und ihren privaten Schlüssel an und nennst sie mit copier update und dem Namen, der Client ID und der App ID ihrer Einstellungsseite. Nach dem Commit setzt settings apply die Variablen und das Ruleset der Release-Tags, und die Checkliste fragt nach dem privaten Schlüssel und der Installation auf dem Repository. Dann laufen die Bots als deine App; bis dahin sagen der Blueprint-Bot und der Release-Bot in ihrer Zusammenfassung, was fehlt.
+    accDescr: Du kopierst den Blueprint und lässt die Frage nach der Release-App leer. Die Checkliste verlinkt die Registrierung der App auf deinem Konto oder deiner Organisation, mit Name und Berechtigungen vorausgefüllt. Du legst die App und ihren privaten Schlüssel an und nennst sie mit copier update und dem Namen, der Client ID und der App ID ihrer Einstellungsseite. Nach dem Commit setzt settings apply die Variablen und das Ruleset der Release-Tags, und die Checkliste fragt nach dem privaten Schlüssel und der Installation auf dem Repository. Dann laufen die Bots als deine App; bis dahin sagt jeder Bot, der als sie handelt, in seiner Zusammenfassung, was fehlt.
 
     copy(["copier copy<br>Release-App leer"])
     link["`**checklist**<br>ein Link registriert die App<br>Name und Berechtigungen vorausgefüllt`"]

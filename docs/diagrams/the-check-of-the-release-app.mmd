@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The check of the release app
+    accDescr: Before a bot asks for a token of the release app, it checks that the repository names the app in the variable RELEASE_AUTOMATION_CLIENT_ID and has its private key in the environment release. With both, it asks for the token and does its work. Without one, it says in an annotation and in its summary which one is missing and that the checklist sets it up. A bot whose work is what the app does, such as the blueprint bot, the settings bot or Renovate, then fails; one that only helps a pull request along, such as the fix bot or the branch bot, warns and goes on without the token.
+
+    bot(["A bot that acts<br>as the release app"])
+    check["`**Check that the release app is set up**<br>RELEASE_AUTOMATION_CLIENT_ID<br>and its private key`"]
+    token["The token of the app,<br>then the work of the bot"]
+    missing["`The annotation and the summary<br>name what is missing and<br>**blueprint.py checklist**`"]
+    fails(["The blueprint, settings,<br>upstream bots, Renovate<br>and the Rollout fail"])
+    warns(["The fix, branch, diagram,<br>screenshot, merge and release<br>bots warn and go on"])
+
+    bot --> check
+    check -->|both set| token
+    check -->|one missing| missing
+    missing --> fails
+    missing --> warns
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class bot,check,missing bot
+    class fails,warns person
+    class token done

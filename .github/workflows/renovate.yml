@@ -57,12 +57,52 @@ jobs:
         env:
           IMAGE: ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435
         run: |
-          docker run --rm --volume "$PWD:/usr/src/app" --workdir /usr/src/app "$IMAGE" \
-            renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 \
-              .github/renovate-accepted.json5
-          docker run --rm --volume "$PWD:/usr/src/app" --workdir /usr/src/app \
-            --env RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 "$IMAGE" \
-            renovate-config-validator --strict
+          # The validator names a wrong rule only in its log, so it logs JSON here and
+          # each problem becomes an annotation with its file.
+          status=0
+          {
+            docker run --rm --volume "$PWD:/usr/src/app" --workdir /usr/src/app --env LOG_FORMAT=json "$IMAGE" \
+              renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 \
+                .github/renovate-accepted.json5 || status=$?
+            docker run --rm --volume "$PWD:/usr/src/app" --workdir /usr/src/app --env LOG_FORMAT=json \
+              --env RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 "$IMAGE" \
+              renovate-config-validator --strict || status=$?
+          } > "$RUNNER_TEMP/validate.json"
+          python3 - "$RUNNER_TEMP/validate.json" "$status" <<'PYTHON'
+          import json
+          import sys
+
+          log, status = sys.argv[1], int(sys.argv[2])
+          problems = {}
+          with open(log, encoding="utf-8") as lines:
+              for line in lines:
+                  try:
+                      entry = json.loads(line)
+                  except ValueError:
+                      print(line, end="")
+                      continue
+                  if not isinstance(entry, dict) or entry.get("level", 0) < 40:
+                      continue
+                  name = str(entry.get("file") or entry.get("configType") or "")
+                  name = name.removeprefix("/usr/src/app/")
+                  where = f"file={name}," if name else ""
+                  error = entry.get("err") or {}
+                  # A file that JSON5 can't parse: the line that it stops at.
+                  if error.get("lineNumber"):
+                      where += f"line={error['lineNumber']},"
+                  found = entry.get("errors", []) + entry.get("warnings", [])
+                  texts = [f"{item.get('topic', 'Renovate')}: {item.get('message', '')}" for item in found]
+                  if not texts:
+                      texts = [f"{entry.get('msg', '')}: {error.get('message', '')}".rstrip(": ")]
+                  for text in texts:
+                      problems.setdefault((where, text), None)
+          if status and not problems:
+              problems[("", f"The validator of Renovate ended with exit code {status}.")] = None
+          for where, text in problems:
+              print(f"::error {where}title=Renovate::{text}")
+          if problems:
+              sys.exit(1)
+          PYTHON
       - name: Read every file of the dependencies as Renovate does
         env:
           IMAGE: ghcr.io/renovatebot/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435
@@ -127,6 +167,16 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write(f"Renovate reads every file, the {len(expected)} lock files of pip-compile among them.\n")
           PYTHON
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: "renovate rules"
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
 
   renovate:
     name: renovate
@@ -156,31 +206,47 @@ jobs:
         with:
           persist-credentials: false
       # Renovate runs as the release app of the owner, whose token may change the
-      # workflows and starts the checks of its pull requests. Without it, the run says
-      # what to set up rather than fail at the token.
+      # workflows and starts the checks of its pull requests.
+      # Without the release app of the owner, the run names what is missing rather than
+      # fail at the token; every workflow has this step, the same but for its variables.
       - name: Check that the release app is set up
+        id: release-app
         env:
           CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+          # Who needs the app and for what, what happens without it, and whether the
+          # run fails then.
+          BOT: Renovate
+          TASK: update the dependencies
+          WITHOUT: no dependency was updated
+          REQUIRED: "true"
         run: |
           if [[ -z "$CLIENT_ID" ]]; then
             missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
           elif [[ "$KEY_SET" != true ]]; then
             missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
           else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::This repository $missing, which Renovate runs as; no dependency was updated."
+          level=warning
+          if [[ "$REQUIRED" == true ]]; then
+            level=error
+          fi
+          echo "::$level::This repository $missing, which $BOT needs to $TASK; $WITHOUT."
           {
-            echo "### Renovate needs the release app of the owner"
+            echo "### ${BOT^} needs the release app of the owner"
             echo
-            echo "This repository $missing. Renovate runs as the release app of the owner, a GitHub App whose token may change the workflows that an update touches and starts the checks of its pull requests, which the token of a job can't. No dependency was updated."
+            echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
             echo
-            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. The next run updates the dependencies."
+            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. Once they are done, $BOT can $TASK in its next run."
           } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          if [[ "$REQUIRED" == true ]]; then
+            exit 1
+          fi
       - name: Create a token of the release app
         id: app
+        if: steps.release-app.outputs.ready == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
