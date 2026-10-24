@@ -7,6 +7,19 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.0.9](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.8...v1.0.9) (2026-10-24)
+
+
+### Bug fixes
+
+* bots without a release app name what is missing instead of failing at the token ([#414](https://github.com/Dennis-Otto/repo-blueprint/issues/414)) ([46a2178](https://github.com/Dennis-Otto/repo-blueprint/commit/46a21787a9ae505f8be458d2d418d3d2cb117c66))
+* check in every repository that Renovate can compile each lock file again ([#408](https://github.com/Dennis-Otto/repo-blueprint/issues/408)) ([96031da](https://github.com/Dennis-Otto/repo-blueprint/commit/96031daf6f9df31e11940f006e5c3f891a0a2a02))
+* end a download that hangs and start it again ([#410](https://github.com/Dennis-Otto/repo-blueprint/issues/410)) ([38a709f](https://github.com/Dennis-Otto/repo-blueprint/commit/38a709fb5a663ba3eb0ee515d221a2bd20f2d1a6))
+* explain a failure of the check renovate rules through the PR coach ([#413](https://github.com/Dennis-Otto/repo-blueprint/issues/413)) ([2eb6643](https://github.com/Dennis-Otto/repo-blueprint/commit/2eb6643ca1d7250fdfcff0bd51d6157fb9725d67))
+* **mutation:** the Mutation run passes again and names a test that fails without any mutant ([#409](https://github.com/Dennis-Otto/repo-blueprint/issues/409)) ([2c35a3f](https://github.com/Dennis-Otto/repo-blueprint/commit/2c35a3f730fc712ffdc987cc422a0bd95af3afe5))
+* serve the repository's own raw/main pictures from the checkout in the website build ([#412](https://github.com/Dennis-Otto/repo-blueprint/issues/412)) ([02cbd5c](https://github.com/Dennis-Otto/repo-blueprint/commit/02cbd5c1aa15b7d6bca04344c50a384e710998ed))
+* settings check reports docker:// steps that the selected actions refuse ([#415](https://github.com/Dennis-Otto/repo-blueprint/issues/415)) ([19dd807](https://github.com/Dennis-Otto/repo-blueprint/commit/19dd807a9e17490fa83dc7a44d47c288ac112d67))
+
 ## [1.0.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.7...v1.0.8) (2026-10-24)
 
 ### Bug fixes
