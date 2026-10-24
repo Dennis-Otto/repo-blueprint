@@ -41,7 +41,8 @@ name: After the checks
 # the API and shows their text only as code, and waits up to three minutes for the
 # checks of other apps, such as the alerts of code scanning, which end after the last
 # workflow. The scanners, which run in the pull requests that change what they read,
-# start it as well. On a pull request of a person, the comment also says what the
+# start it as well, and so does the check of the rules of Renovate where Renovate
+# runs in the repository. On a pull request of a person, the comment also says what the
 # pull request makes: the next version, from its title and the release-please files
 # of main, and the entry that it adds to the changelog; the coverage of its tests
 # against that of main, file by file, from the coverage reports that the checks keep
@@ -79,8 +80,8 @@ name: After the checks
 on:
   workflow_run:
     # The workflows of the checks of this repository; the blueprint sets them for each kind of project.
-    # Then those of the other required checks and of the scanners, the same in every repository, and the release.
-    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security, Release]
+    # Then those of the other required checks and of the scanners, the same in every repository, Renovate for the check of its rules where it runs in the repository, and the release.
+    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, CodeQL, Dependency review, Docs, Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, Workflow security, Renovate, Release]
     types: [completed]
 
 permissions: {}
@@ -88,11 +89,11 @@ permissions: {}
 jobs:
   rerun:
     name: run the failed jobs again
-    # The tests only; the other required checks fail the same way again, and the
-    # release has a bot of its own.
+    # The tests only; the other checks fail the same way again, and the release has
+    # a bot of its own.
     if: >-
       !github.event.repository.fork &&
-      !contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Release"]'), github.event.workflow_run.name) &&
+      !contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate", "Release"]'), github.event.workflow_run.name) &&
       contains(fromJSON('["failure", "cancelled"]'), github.event.workflow_run.conclusion) &&
       github.event.workflow_run.run_attempt == 1
     concurrency:
@@ -182,7 +183,7 @@ jobs:
     name: report the flaky tests
     if: >-
       !github.event.repository.fork &&
-      !contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Release"]'), github.event.workflow_run.name) &&
+      !contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate", "Release"]'), github.event.workflow_run.name) &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.run_attempt > 1
     concurrency:

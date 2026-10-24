@@ -141,6 +141,22 @@ Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --o
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
 
+## Die Prüfung renovate rules scheitert
+
+**Was du siehst:** In einem Pull Request, der die Regeln von Renovate oder eine Lock-Datei ändert, scheitert die Prüfung *renovate rules* des Renovate-Workflows, in einem Repository, das Renovate selbst ausführt (die Antwort `renovate_runner` `self`), und im Blueprint. Ihre Annotationen nennen jedes Problem, etwa `Invalid configuration option` für eine Regel, `pip-compile error` für eine Lock-Datei oder `Renovate doesn't read the lock file requirements-test.txt.`; ihre Zusammenfassung und der Kommentar des PR-Coachs sagen, wie du es behebst.
+
+**Warum:** Renovate lehnt jede Regel ab, die es nicht kennt, und aktualisiert dann nichts mehr im Repository, und eine Datei, die es nicht lesen kann, überspringt es in jedem Lauf, mit nicht mehr als einer Warnung in seinem Log. Deshalb führt die Prüfung den Validator von Renovate auf `.github/renovate.json5`, `.github/renovate-blueprint.json5`, `.github/renovate-accepted.json5` und den Einstellungen des Bots in `.github/renovate-global.json5` aus und danach Renovate selbst, das jede committete Datei der Abhängigkeiten liest, ohne Token und ohne etwas nachzuschlagen. Eine Warnung oder eine Lock-Datei, die es nicht liest, lässt die Prüfung scheitern.
+
+**Was zu tun ist:** Korrigiere die Regel oder die Datei, die die Annotationen nennen; bei einer Lock-Datei schreibt `python3 .github/blueprint.py locks --fix` ihren Kopf so, wie Renovate ihn liest, wie [Renovate überspringt eine Lock-Datei](#renovate-überspringt-eine-lock-datei) zeigt. Mit Docker laufen dieselben Prüfungen auf deinem Rechner, die letzte auf den Dateien deines letzten Commits; die Prüfung selbst führt das Renovate aus, das `.github/workflows/renovate.yml` festlegt:
+
+```sh
+docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 .github/renovate-accepted.json5
+docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app -e RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict
+git archive HEAD | docker run --rm -i -e LOG_LEVEL=info -e RENOVATE_GITHUB_TOKEN_WARN=false -e RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 ghcr.io/renovatebot/renovate:latest bash -c 'mkdir /tmp/repository && cd /tmp/repository && tar -xf - && sed -i "s#\"local>[^\"]*\",\{0,1\}##" .github/renovate.json5 .github/renovate-blueprint.json5 && renovate --platform=local --dry-run=extract'
+```
+
+Der letzte Befehl nimmt die Presets des Blueprints aus den Regeln, da Renovate auf deinem Rechner keine Plattform hat, von der es sie holen könnte; die Regeln des Blueprints kommen als die des Bots hinein. Seine Zeile `Extracted dependencies` listet jede Datei, die Renovate liest, mit den Lock-Dateien jeder Quelle von pip-compile unter `lockFiles`; eine Zeile mit `WARN` oder `ERROR` nennt ein Problem, und nach einem Fehler endet Renovate mit dem Exit-Code 1. Unter Windows führe die Befehle in Git Bash mit `MSYS_NO_PATHCONV=1` vor `docker` aus, damit Git Bash die Pfade im Container in Ruhe lässt.
+
 ## Ein geplanter Workflow ist nicht gelaufen
 
 GitHub führt Zeitpläne aus, wie es kann, oft Stunden zu spät und manchmal gar nicht; deshalb startet der Blueprint seine Bots durch Ereignisse, etwa einen Merge in `main` oder das Ende einer Prüfung, und behält die Zeitpläne nur als Sicherheitsnetz ([Entscheidung 0033](decisions/0033-schedules-are-only-a-safety-net.md), englisch). Jede Nacht sieht der Bot-Health-Bot den neuesten Lauf jedes Workflows an und startet einen, dessen Zeitplan GitHub verpasst oder abgeschaltet hat. Ein Workflow mit *Run workflow* unter *Actions* startet von Hand sofort.

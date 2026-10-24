@@ -359,6 +359,15 @@ def test_the_workflows_are_the_blueprints_own(
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
+        if name in ("after-checks.yml", "update-branches.yml") and (
+            "renovate.yml" not in workflows(projects[kind])
+        ):
+            # The flaky-test bot and the branch bot know the check of the rules of
+            # Renovate, which only a repository with a Renovate workflow of its own
+            # runs.
+            source = source.replace(
+                '"Workflow security", "Renovate"', '"Workflow security"'
+            )
         if name == "bot-health.yml":
             # The bots it watches, without those of the blueprint alone in a project.
             watched = r"    # The bots and the scheduled workflows of every repository.*\n    workflows: \[.*\]\n"
@@ -6087,6 +6096,8 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
     job = job_of(workflow, "validate")
     step = job[job.index("      - name: Read every file of the dependencies") :]
+    # Up to the next step, the one that explains a failure.
+    step = step[: step.index(EXPLAIN_COMMENT)]
     run = "        run: |\n"
     script = textwrap.dedent(step[step.index(run) + len(run) :])
     # A checkout with two lock files of pip-compile, as GitHub leaves it.
@@ -7385,6 +7396,33 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     )
     assert "Renovate" in health[True]["workflow_run"]["workflows"]
+    # A pull request that changes the rules or a lock file gets the check of the
+    # rules, which explains its failure; the PR coach follows it, also on a pull
+    # request from a fork, and the flaky-test bot leaves it alone.
+    assert job_alone(workflow, "validate").endswith(explain_step("renovate rules"))
+    assert Catalog.load(project).check("renovate rules")
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (generic)",
+            "Docker E2E",
+            "Renovate",
+            "Release",
+        }
+        | OTHER_CHECKS
+        | SCANNER_WORKFLOWS
+    )
+    for job in ("rerun", "report"):
+        assert left_alone_by_the_flaky_test_bot(job_of(after, job)) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
+        ), job
+    # Its failure moves the line of the branch bot on at once, as a scanner's does.
+    update = (project / ".github/workflows/update-branches.yml").read_text("utf-8")
+    assert watched_after_the_checks(update) == watched_after_the_checks(after) - {
+        "Release"
+    }
+    assert '"Workflow security", "Renovate"]' in condition_of(job_of(update, "update"))
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -8221,7 +8259,7 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         condition,
     )
     assert listed
-    assert set(json.loads(listed[1])) == OTHER_CHECKS | SCANNER_WORKFLOWS
+    assert set(json.loads(listed[1])) == OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate"}
     # The token reads the checks and the statuses of the line.
     for permission in ("checks: read", "statuses: read", "contents: write"):
         assert f"          permission-{permission}\n" in job, permission
@@ -8343,6 +8381,8 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
             "Release",
             "Issue assistant sync",
             "Downstream",
+            # The check of the rules of Renovate, which the Renovate workflow runs here.
+            "Renovate",
         }
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
@@ -8360,7 +8400,6 @@ UNWATCHED = {
     "Issue lifecycle",
     "Welcome",
     "Mutation",
-    "Renovate",
 }
 
 
@@ -8397,7 +8436,13 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
+    # The Renovate workflow of the blueprint checks the rules of these projects, which
+    # have no Renovate workflow of their own.
     assert watched == names | OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+    for job in ("rerun", "report"):
+        assert left_alone_by_the_flaky_test_bot(job_of(after, job)) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+        ), job
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
@@ -8475,17 +8520,22 @@ def test_the_bot_for_cancelled_checks_watches_every_required_check(
     assert providers <= watched
 
 
+def left_alone_by_the_flaky_test_bot(job: str) -> set[str]:
+    """The workflows whose runs a job of the flaky-test bot leaves alone."""
+    listed = re.search(
+        r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)", job
+    )
+    assert listed, job
+    return set(json.loads(listed[1]))
+
+
 def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     # Their checks fail the same way again, or, as the changelog, pass once the pull
-    # request changed: no flaky test either way. The release has a bot of its own.
+    # request changed: no flaky test either way, and neither are the rules of
+    # Renovate. The release has a bot of its own.
     for job in ("rerun", "report"):
-        listed = re.search(
-            r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
-            after_the_checks_job(job),
-        )
-        assert listed, job
-        assert set(json.loads(listed[1])) == (
-            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+        assert left_alone_by_the_flaky_test_bot(after_the_checks_job(job)) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
         ), job
 
 
@@ -8626,10 +8676,17 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     )
     assert f"    name: {name}\n" in variant
     assert variant.endswith(explain_step(name))
-    # The scanners of the pull requests, which aren't required, explain theirs too.
-    for workflow, check in (("zizmor", "zizmor"), ("links", "links"), ("fuzz", "fuzz")):
+    # The scanners of the pull requests, which aren't required, explain theirs too, and
+    # so does the check of the rules of Renovate.
+    for workflow, job, check in (
+        ("zizmor", "zizmor", "zizmor"),
+        ("links", "links", "links"),
+        ("fuzz", "fuzz", "fuzz"),
+        ("renovate", "validate", "renovate rules"),
+    ):
         text = (ROOT / f".github/workflows/{workflow}.yml").read_text(encoding="utf-8")
-        assert job_alone(text, check).endswith(explain_step(check)), workflow
+        assert job_alone(text, job).endswith(explain_step(check)), workflow
+        assert Catalog.load(ROOT).check(check), check
     # And the checks on Windows, whose runner has python, not python3.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
     assert job_alone(windows, "check").endswith(

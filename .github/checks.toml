@@ -408,6 +408,30 @@ docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshoo
 autofix = """Which version fixes an advisory, and whether it affects the project, is
 the decision of a person."""
 
+[check."renovate rules"]
+title = "The rules of Renovate"
+problem = """Renovate doesn't accept the rules of the pull request, or doesn't read
+every file of the dependencies with them: a rule of `.github/renovate.json5` or a
+setting of the bot in `.github/renovate-global.json5` is wrong, or Renovate logs a
+warning or skips a lock file, such as one whose header it can't compile again; the
+annotations of the check name each one."""
+why = """A rule that Renovate refuses stops every update of the repository, also the
+fixes of vulnerabilities, and a file that it skips gets no update from then on, with no
+more than a warning in its log."""
+fix = """Correct the rule or the file that the annotations name; for a lock file,
+`blueprint.py locks --fix` writes its header as Renovate reads it. The check runs the
+Renovate that `.github/workflows/renovate.yml` pins; with Docker, the same checks run
+on your machine, the last one on the files of your last commit:"""
+commands = [
+  'docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 .github/renovate-accepted.json5',
+  'docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app -e RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict',
+  '''git archive HEAD | docker run --rm -i -e LOG_LEVEL=info -e RENOVATE_GITHUB_TOKEN_WARN=false -e RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 ghcr.io/renovatebot/renovate:latest bash -c 'mkdir /tmp/repository && cd /tmp/repository && tar -xf - && sed -i "s#\"local>[^\"]*\",\{0,1\}##" .github/renovate.json5 .github/renovate-blueprint.json5 && renovate --platform=local --dry-run=extract'''',
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#the-check-renovate-rules-fails"
+autofix = """Which rule is meant, only a person knows; a lock file that Renovate can't
+compile again fails the step Lock files of the tests too, whose fix writes its header
+anew."""
+
 [check."variant (*)"]
 title = "A new repository of one kind"
 problem = """A repository of this kind, made from the template of the pull request, fails
