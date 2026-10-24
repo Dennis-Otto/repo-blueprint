@@ -19,7 +19,7 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 ## Was du bekommst
 
 - **Das Beispiel:** keines, nur die Community-Dateien, die Website in `docs/` und die Workflows.
-- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
+- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
 - **Alles, was jedes Repository bekommt:** den PR-Coach und den Fix-Bot, den Release-Bot, Renovate, die Einstellungen als Code, den Issue-Assistenten, die Website auf Deutsch und Englisch, die Sicherheitsprüfungen und den Blueprint-Bot, wie [die Anleitung](../guide.md#was-ein-neues-repository-bekommt) sie nennt.
 
 ## Die Prüfungen, die ein Pull Request braucht

@@ -15,7 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import advisories, mutation, screenshots
+from blueprint import advisories, locks, mutation, screenshots
 from blueprint.bootstrap import CreateError, create
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -636,6 +636,38 @@ def advisories_command(arguments: argparse.Namespace, root: Path) -> int:
             "No osv-scanner.toml accepts a version with every advisory, and "
             f"{advisories.PRESET} has no rule."
         )
+    return 0
+
+
+def locks_command(arguments: argparse.Namespace, root: Path) -> int:
+    """Whether Renovate can compile each lock file of pip-compile again with the
+    command in its header; with --fix, it puts the = between each option and its
+    value first."""
+    names, skipped = locks.check(root)
+    if arguments.fix and skipped:
+        for name in locks.fix(root, skipped):
+            print(f"{name}: the = stands between each option and its value now")
+        names, skipped = locks.check(root)
+    for lock in skipped:
+        print(lock)
+    if skipped:
+        print(
+            "Renovate compiles each lock file again with the command in its header, "
+            "and skips one whose command it can't read, in every run and with no more "
+            "than a warning in its log: the file gets no update, not even one that "
+            f"fixes a vulnerability. {command(root)} locks --fix puts the = between "
+            "each option and its value; for the rest, compile the file again with the "
+            "options that Renovate knows, such as uv pip compile --generate-hashes "
+            "--python-version=3.12 --output-file=requirements.txt requirements.in."
+        )
+        return 1
+    if names:
+        print(
+            f"Renovate can compile each of the {len(names)} lock file(s) of pip-compile "
+            "again with the command in its header."
+        )
+    else:
+        print("No file here is a lock file of pip-compile, which Renovate compiles.")
     return 0
 
 
@@ -1269,6 +1301,22 @@ def add_advisories_parsers(
     )
 
 
+def add_locks_parsers(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Whether Renovate reads the header of each lock file of pip-compile."""
+    locks_parser = commands.add_parser(
+        "locks",
+        help="whether Renovate can compile each lock file of pip-compile again with "
+        "the command in its header, which it skips with no more than a warning",
+    )
+    locks_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="put the = between each option of the command and its value first",
+    )
+
+
 def add_pages_parsers(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -1331,6 +1379,7 @@ def parser() -> argparse.ArgumentParser:
         add_mutation_parsers,
         add_pages_parsers,
         add_advisories_parsers,
+        add_locks_parsers,
     ):
         add(commands)
     return parser
@@ -1405,6 +1454,12 @@ def standalone_command(
     if arguments.command == "advisories":
         try:
             return advisories_command(arguments, root)
+        except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "locks":
+        try:
+            return locks_command(arguments, root)
         except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2

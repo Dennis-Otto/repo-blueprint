@@ -125,6 +125,22 @@ python3 .github/blueprint.py advisories --fix
 
 `.github/renovate-accepted.json5` hat dann eine Regel für jede solche Version, die `.github/renovate-blueprint.json5` erweitert: Renovate macht kein Update dieser Version in den Lock-Dateien dieses Ordners, die nur das Paket bewegt, das sie festlegt. Der Schritt *Accepted advisories* von `scripts/check.sh` scheitert, solange die Regeln und die `osv-scanner.toml`-Dateien sich widersprechen, und wenn OSV-Scanner eine Datei nicht verwenden kann: Er ignoriert eine ganze Datei mit einem Schlüssel, den er nicht kennt. Nach `effectiveUntil` meldet OSV-Scanner die Advisories wieder; sobald das Paket, das die Version festlegt, sie bewegt, lösche den Eintrag. Ein Advisory, das das Projekt nicht betrifft, einer Version, die ein Update bewegen könnte, gehört allein in `[[IgnoredVulns]]`, mit seiner `id` und dem Grund, und das OpenVEX-Dokument jedes Releases nennt die der `osv-scanner.toml` im Wurzelordner ([Entscheidung 0059](decisions/0059-accept-a-pinned-version-and-tell-renovate.md), englisch).
 
+## Renovate überspringt eine Lock-Datei
+
+**Was du siehst:** Eine Lock-Datei wie `requirements-test.txt` bekommt kein Update, auch keins, das eine Schwachstelle behebt, und das Issue *Renovate logs problems* nennt `pip-compile error` für das Repository. Der Schritt *Lock files* von `scripts/check.sh` scheitert und nennt die Datei und das, woran Renovate hängen bleibt, etwa `--python-version without = before its value`.
+
+**Warum:** Renovate kompiliert jede Lock-Datei von pip-compile neu, mit dem Befehl in ihrem Kopf, der Zeile, die `pip-compile` oder `uv pip compile` darüber geschrieben hat. Es liest nur die Optionen, die es kennt, die mit einem Wert nur mit einem `=` davor, und überspringt eine Datei, deren Befehl es nicht lesen kann, in jedem Lauf und mit nicht mehr als einer Warnung in seinem Log. `uv pip compile --python-version 3.12` schreibt den Kopf genau so, ohne das `=`, also liest Renovate `3.12` als eine weitere Datei zum Kompilieren.
+
+**Was zu tun ist:** Lass `blueprint.py` das `=` zwischen jede Option und ihren Wert setzen, und committe die Lock-Datei:
+
+```sh
+python3 .github/blueprint.py locks --fix
+```
+
+Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --output-file=requirements-test.txt requirements-test.in`, und Renovate behält ihn so, wenn es die Datei kompiliert. Eine Option, die Renovate nicht kennt, etwa `--python-platform`, `--no-header`, eine andere Ausgabedatei oder eine Quelldatei, die es nicht gibt, braucht eine Person: Kompiliere die Datei in ihrem Ordner neu, mit den Optionen, die Renovate kennt, wie im Beispiel. In einem Pull Request eines Branches des Repositorys führt der Fix-Bot `locks --fix` selbst aus.
+
+Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
+
 ## Ein geplanter Workflow ist nicht gelaufen
 
 GitHub führt Zeitpläne aus, wie es kann, oft Stunden zu spät und manchmal gar nicht; deshalb startet der Blueprint seine Bots durch Ereignisse, etwa einen Merge in `main` oder das Ende einer Prüfung, und behält die Zeitpläne nur als Sicherheitsnetz ([Entscheidung 0033](decisions/0033-schedules-are-only-a-safety-net.md), englisch). Jede Nacht sieht der Bot-Health-Bot den neuesten Lauf jedes Workflows an und startet einen, dessen Zeitplan GitHub verpasst oder abgeschaltet hat. Ein Workflow mit *Run workflow* unter *Actions* startet von Hand sofort.
