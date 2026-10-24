@@ -125,6 +125,22 @@ python3 .github/blueprint.py advisories --fix
 
 `.github/renovate-accepted.json5` then has a rule for each such version, which `.github/renovate-blueprint.json5` extends: Renovate makes no update of that version in the lock files of that folder, which only the package that pins it moves. The step *Accepted advisories* of `scripts/check.sh` fails while the rules and the `osv-scanner.toml` files disagree, and when OSV-Scanner couldn't use a file: it ignores a whole file with a key that it doesn't know. After `effectiveUntil`, OSV-Scanner reports the advisories again; once the package that pins the version moves it, delete the entry. An advisory that doesn't affect the project, of a version that an update could move, goes into `[[IgnoredVulns]]` alone, with its `id` and reason, and the OpenVEX document of each release states those of the `osv-scanner.toml` in the root ([decision 0059](decisions/0059-accept-a-pinned-version-and-tell-renovate.md)).
 
+## Renovate skips a lock file
+
+**What you see:** a lock file such as `requirements-test.txt` gets no update, also none that fixes a vulnerability, and the issue *Renovate logs problems* lists `pip-compile error` for the repository. The step *Lock files* of `scripts/check.sh` fails and names the file and what Renovate stumbles on, such as `--python-version without = before its value`.
+
+**Why:** Renovate compiles each lock file of pip-compile again with the command in its header, the line that `pip-compile` or `uv pip compile` wrote on top of it. It reads only the options that it knows, those with a value only with an `=` before it, and skips a file whose command it can't read, in every run and with no more than a warning in its log. `uv pip compile --python-version 3.12` writes the header that way, without the `=`, so Renovate reads `3.12` as one more file to compile.
+
+**What to do:** let `blueprint.py` put the `=` between each option and its value, and commit the lock file:
+
+```sh
+python3 .github/blueprint.py locks --fix
+```
+
+The header then reads `uv pip compile --generate-hashes --python-version=3.12 --output-file=requirements-test.txt requirements-test.in`, and Renovate keeps it so when it compiles the file. An option that Renovate doesn't know, such as `--python-platform`, `--no-header`, another output file or a source file that doesn't exist needs a person: compile the file again in its folder with the options that Renovate knows, as in the example. In a pull request of a branch of the repository, the fix bot runs `locks --fix` itself.
+
+A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
+
 ## A scheduled workflow didn't run
 
 GitHub runs schedules as it can, often hours late and sometimes not at all, so the blueprint starts its bots from events, such as a merge into `main` or the end of a check, and keeps the schedules only as a safety net ([decision 0033](decisions/0033-schedules-are-only-a-safety-net.md)). Every night, the bot-health bot looks at the latest run of every workflow and starts one whose schedule GitHub missed or switched off. A workflow with *Run workflow* under *Actions* starts at once by hand.
