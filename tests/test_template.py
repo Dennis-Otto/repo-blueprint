@@ -13419,26 +13419,23 @@ def test_a_zip_that_hacs_would_install_wrong_fails_the_verification(
     assert "has 1 problem(s)." in done.summary
 
 
-@WITH_JQ
-@pytest.mark.parametrize(
-    "version",
-    [
-        # A release, whose version release-please has written into the manifest.json.
-        "1.2.3",
-        # A beta of main, whose manifest.json still has the version of the last release.
-        "1.3.0-beta.1",
-    ],
-)
-def test_the_zip_for_hacs_has_the_version_of_its_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
-) -> None:
+def package_for_hacs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    manifest: dict[str, Any],
+) -> tuple[workflow_steps.StepResult, Path]:
+    """Runs *Package the integration for HACS* of build-release.yml for the version, in
+    a checkout of a tag whose custom_components/demo/ has the manifest, and returns its
+    result and the folder of the assets; tmp_path/made.zip is the folder as git archive
+    zips it."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     checkout = tmp_path / "checkout"
     for name, text in {
         "hacs.json": json.dumps(HACS_JSON),
         "custom_components/demo/manifest.json": (
-            f"{json.dumps(HACS_MANIFEST, indent=2, ensure_ascii=False)}\n"
+            f"{json.dumps(manifest, indent=2, ensure_ascii=False)}\n"
         ),
         "custom_components/demo/sensor.py": "VALUE = 1\n",
         "custom_components/demo/translations/en.json": "{}\n",
@@ -13467,8 +13464,26 @@ def test_the_zip_for_hacs_has_the_version_of_its_release(
         "assets",
         "Package the integration for HACS",
         env={"VERSION": version, "ASSETS": assets.as_posix()},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
         workspace=checkout,
     )
+    return done, assets
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "version",
+    [
+        # A release, whose version release-please has written into the manifest.json.
+        "1.2.3",
+        # A beta of main, whose manifest.json still has the version of the last release.
+        "1.3.0-beta.1",
+    ],
+)
+def test_the_zip_for_hacs_has_the_version_of_its_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    done, assets = package_for_hacs(tmp_path, monkeypatch, version, HACS_MANIFEST)
 
     assert done.returncode == 0, done.stdout + done.stderr
     with (
@@ -13496,6 +13511,23 @@ def test_the_zip_for_hacs_has_the_version_of_its_release(
     # A release zips the folder of its tag as it is; a beta, a tree of its own.
     stamps = version != HACS_MANIFEST["version"]
     assert (done.runner_temp / "index").is_file() is stamps
+
+
+@WITH_JQ
+def test_a_zip_for_hacs_of_another_domain_fails_before_the_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A manifest.json whose domain isn't that of its folder: Home Assistant wouldn't
+    # load the integration, and a public release couldn't be fixed any more.
+    done, _ = package_for_hacs(
+        tmp_path, monkeypatch, "1.2.3", HACS_MANIFEST | {"domain": "other"}
+    )
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        "::error::The zip for HACS has no manifest.json of demo 1.2.3 at its root.\n"
+        in done.stdout
+    )
 
 
 # Fragments of the changelog: the check of a pull request and the release bot.
