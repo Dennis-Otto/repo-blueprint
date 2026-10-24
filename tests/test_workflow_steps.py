@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,11 +22,15 @@ from workflow_steps import (
     StepResult,
     acting_steps,
     acts_of,
+    condition_of,
     exact,
     job,
+    job_in,
+    parse,
     recording,
     run_step,
     step,
+    step_in,
     workflow,
 )
 
@@ -85,6 +90,10 @@ jobs:
         run: |
           false | true
           echo after
+      - name: Workspace
+        run: |
+          cat brought.txt given.txt
+          echo "$GITHUB_WORKSPACE"
 """
 
 
@@ -191,6 +200,93 @@ def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -
     assert (default.returncode, default.stdout) == (0, "after\n")
     strict = run_step(tmp_path / "2", "demo.yml", "demo", "Bash shell", root=demo)
     assert (strict.returncode, strict.stdout) == (1, "")
+
+
+def test_a_step_runs_in_the_checkout_that_the_test_made(
+    tmp_path: Path, demo: Path
+) -> None:
+    # A repository of the test, such as one with the history of a pull request, as
+    # the checkout of the job, with the files that the test gives it.
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "brought.txt").write_text("from the checkout\n", encoding="utf-8")
+
+    done = run_step(
+        tmp_path,
+        "demo.yml",
+        "demo",
+        "Workspace",
+        files={"given.txt": "from the test\n"},
+        root=demo,
+        workspace=checkout,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.splitlines() == [
+        "from the checkout",
+        "from the test",
+        checkout.as_posix(),
+    ]
+    assert done.workspace == checkout
+    assert not (tmp_path / "workspace").exists()
+
+
+# Text that a slice of the workflow takes for a job, a permission or a condition: the
+# comment above a job and the script of a step.
+SLICED = """\
+on: push
+permissions: {}
+jobs:
+  first:
+    # Not a job of its own, nor its condition or its permissions:
+    #   second:
+    #     if: always()
+    #     permissions:
+    #       contents: write
+    if: >-
+      github.event_name == 'push' &&
+      !cancelled()
+    permissions:
+      contents: read
+    steps:
+      - name: One
+        id: one
+        if: failure()
+        run: |
+          cat <<'EOF'
+            if: always()
+          second:
+          EOF
+  second:
+    steps:
+      - uses: actions/checkout@v6
+"""
+
+
+def test_a_job_its_permissions_and_conditions_come_from_the_parsed_workflow(
+    demo: Path,
+) -> None:
+    parsed = parse(SLICED)
+
+    # The same object for the same text, and the key on as YAML 1.1 reads it.
+    assert parse(SLICED) is parsed
+    assert parsed["on"] == "push"
+    assert parsed["permissions"] == {}
+    first = job_in(SLICED, "first")
+    assert condition_of(first) == "github.event_name == 'push' && !cancelled()"
+    assert first["permissions"] == {"contents": "read"}
+    one = step_in(first, "One")
+    assert step_in(first, "one") == one
+    assert condition_of(one) == "failure()"
+    second = job_in(parsed, "second")
+    assert condition_of(second) == ""
+    assert "permissions" not in second
+    with pytest.raises(AssertionError, match="no job third, but"):
+        job_in(parsed, "third")
+    with pytest.raises(AssertionError, match="no step 'Two', but"):
+        step_in(first, "Two")
+    with pytest.raises(AssertionError, match=r"demo.yml/demo: the job has no step"):
+        step("demo.yml", "demo", "Two", demo)
 
 
 @pytest.mark.parametrize(
@@ -1500,3 +1596,69 @@ def test_a_title_that_is_no_conventional_commit_fails_without_a_label(
     assert done.returncode == 1
     assert done.stdout.startswith("::error::Use a Conventional Commit title")
     assert done.calls == []
+
+
+# What brings back a test that reads a workflow as text, or a fake gh of its own (#288):
+# a helper that slices out a job, a step or a setting, a slice of the text at a job or
+# at a line of a step, and an executable named gh that a test writes.
+FORBIDDEN = {
+    "a helper that slices workflow text": re.compile(
+        r"^def (?:job_of|job_alone|jobs_of|steps_of|step_of|setting_of)\(", re.M
+    ),
+    "a slice of workflow text": re.compile(
+        r"\.r?(?:index|find|split)\(\s*f?\"(?:\n)?  [a-z][\w-]*:\""
+        r"|\.r?(?:index|find|split)\(\s*f?\" +(?:run: \||- name: |if: )"
+    ),
+    "a fake gh of its own": re.compile(r"/ \"gh\"\)|\{\"gh\": "),
+}
+# The one fake gh and the helpers that parse the workflows.
+ALLOWED = {"fake_gh.py", "workflow_steps.py"}
+
+
+def forbidden_in(text: str) -> list[str]:
+    """Each line of the text of a test that reads a workflow as text or fakes gh on its
+    own, with what it does."""
+    return [
+        f"{text.count(chr(10), 0, found.start()) + 1}: {what}"
+        for what, pattern in FORBIDDEN.items()
+        for found in pattern.finditer(text)
+    ]
+
+
+def test_the_guard_finds_what_slices_workflow_text_or_fakes_gh() -> None:
+    # The samples, written so that the guard doesn't find them in this file: % is a
+    # dot, ~ a space.
+    samples = (
+        "def job_of(text: str, job: str) -> str:\n"
+        '    return text[text%index("  release:") :]\n'
+        'step = job%split("      - name: Sign the tag")[1]\n'
+        'run = job[job%rindex("        run: |") :]\n'
+        '(bin_dir /~"gh").write_text(FAKE)\n'
+        'stubs={"gh":~FAKE}\n'
+    )
+    assert forbidden_in(samples.replace("%", ".").replace("~", " ")) == [
+        "1: a helper that slices workflow text",
+        "2: a slice of workflow text",
+        "3: a slice of workflow text",
+        "4: a slice of workflow text",
+        "5: a fake gh of its own",
+        "6: a fake gh of its own",
+    ]
+    # A step that a test runs, and a job of the API, are fine.
+    assert (
+        forbidden_in(
+            'run_step(tmp_path, "release.yml", "publish", "Make it public")\n'
+            "def job_of_a_run(number: int) -> dict[str, object]:\n"
+        )
+        == []
+    )
+
+
+def test_no_test_slices_workflow_text_or_fakes_gh_on_its_own() -> None:
+    # Parsed workflows and run_step() with the one fake gh, as CONTRIBUTING.md says.
+    found = {
+        path.name: forbidden_in(path.read_text(encoding="utf-8"))
+        for path in sorted((ROOT / "tests").glob("*.py"))
+        if path.name not in ALLOWED
+    }
+    assert {name: lines for name, lines in found.items() if lines} == {}
