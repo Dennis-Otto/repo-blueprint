@@ -371,9 +371,11 @@ def refused_images(found: dict[str, str]) -> list[Drift]:
             manual=(
                 f"{where} runs it, and GitHub refuses a step with docker:// unless"
                 " every action may run, whatever [actions.selected] lists: run the"
-                " image in a run: step instead, as docker run --rm"
-                f" {reference.removeprefix(DOCKER)}; until then the actions that may"
-                " run on GitHub never narrow"
+                " image in a run: step instead, as docker run --rm --volume"
+                ' "$PWD:/github/workspace" --workdir /github/workspace'
+                f" {reference.removeprefix(DOCKER)} with the step's with: args after"
+                " it and its entrypoint as --entrypoint; until then the actions that"
+                " may run on GitHub never narrow"
             ),
         )
         for reference, where in sorted(found.items())

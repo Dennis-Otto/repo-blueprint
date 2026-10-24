@@ -1553,9 +1553,10 @@ def test_an_image_of_docker_stops_the_selected_actions(
         ' "docker://", the configuration wants "docker run"\n'
         "      .github/workflows/ci.yml runs it, and GitHub refuses a step with"
         " docker:// unless every action may run, whatever [actions.selected] lists:"
-        " run the image in a run: step instead, as docker run --rm"
-        " alpine:3@sha256:00; until then the actions that may run on GitHub never"
-        " narrow"
+        " run the image in a run: step instead, as docker run --rm --volume"
+        ' "$PWD:/github/workspace" --workdir /github/workspace alpine:3@sha256:00'
+        " with the step's with: args after it and its entrypoint as --entrypoint;"
+        " until then the actions that may run on GitHub never narrow"
     ) in out
     # Also the image of a step of an action that a workflow runs.
     assert "refuses docker://ghcr.io/vendor/tool:1@sha256:11" in out
