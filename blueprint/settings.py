@@ -222,16 +222,17 @@ GITHUB_OWNERS = ("actions", "github")
 # such a name may have: the file of an action that GitHub gives is no Markdown for the
 # summary of the settings bot.
 USES = re.compile(r"""^[ \t]*(?:-[ \t]+)?uses:[ \t]*["']?([\w.:/@+-]+)""", re.MULTILINE)
+# A step that runs an image of Docker. GitHub counts it as an action, which it refuses
+# unless every action may run, and no pattern of [actions.selected] names an image.
+DOCKER = "docker://"
 
 
 def references(text: str) -> list[str]:
-    """The actions and reusable workflows that a workflow or an action names: not
-    those of the repository itself, which every policy allows, nor the images of
-    Docker, which no pattern names and which are pinned by their digest instead."""
+    """The actions and reusable workflows that a workflow or an action names, and the
+    images of Docker that its steps run, which GitHub counts as actions: not those of
+    the repository itself, which every policy allows."""
     return [
-        reference
-        for reference in USES.findall(text)
-        if not reference.startswith(("./", "docker://"))
+        reference for reference in USES.findall(text) if not reference.startswith("./")
     ]
 
 
@@ -268,7 +269,10 @@ def matches(pattern: str, reference: str) -> bool:
 
 def allows(selected: dict[str, Json], reference: str) -> bool:
     """Whether [actions.selected] lets the action or reusable workflow run. A pattern
-    with ! in front blocks what it names, also an action of GitHub."""
+    with ! in front blocks what it names, also an action of GitHub. No pattern lets an
+    image of Docker run, not even *."""
+    if reference.startswith(DOCKER):
+        return False
     patterns = [str(pattern) for pattern in selected.get("patterns_allowed") or []]
     if any(
         matches(pattern[1:], reference) for pattern in patterns if pattern[:1] == "!"
@@ -282,7 +286,10 @@ def allows(selected: dict[str, Json], reference: str) -> bool:
 
 def run_by(api: Api, reference: str) -> list[str]:
     """The actions and reusable workflows that an action or a reusable workflow runs in
-    turn, at the commit that it is pinned to: GitHub allows or blocks them as well."""
+    turn, at the commit that it is pinned to: GitHub allows or blocks them as well.
+    An image of Docker runs none, and GitHub has no file of it."""
+    if reference.startswith(DOCKER):
+        return []
     name, _, ref = reference.partition("@")
     owner, _, rest = name.partition("/")
     repo, _, path = rest.partition("/")
@@ -346,7 +353,32 @@ def check_actions(
     if want.get("allowed_actions") == "selected" and isinstance(selected, dict):
         active = have["allowed_actions"] == "selected"
         drift += check_selected_actions(api, repo, selected, active, named or {})
+    elif want.get("allowed_actions") == "local_only":
+        drift += refused_images(named or {})
     return drift
+
+
+def refused_images(found: dict[str, str]) -> list[Drift]:
+    """Every image of Docker that a step runs with docker://, which GitHub refuses
+    unless every action may run. No pattern allows it, so the step itself changes: it
+    runs the image with docker run. Until then, the actions that may run on GitHub
+    never narrow, which would stop the workflow."""
+    return [
+        Drift(
+            f"actions.allowed_actions refuses {reference}",
+            "docker run",
+            DOCKER,
+            manual=(
+                f"{where} runs it, and GitHub refuses a step with docker:// unless"
+                " every action may run, whatever [actions.selected] lists: run the"
+                " image in a run: step instead, as docker run --rm"
+                f" {reference.removeprefix(DOCKER)}; until then the actions that may"
+                " run on GitHub never narrow"
+            ),
+        )
+        for reference, where in sorted(found.items())
+        if reference.startswith(DOCKER)
+    ]
 
 
 def check_selected_actions(
@@ -371,7 +403,7 @@ def check_selected_actions(
     found, refused = actions_that_run(api, named)
     lacking: dict[str, str] = {}
     for reference, where in sorted(found.items()):
-        if not allows(selected, reference):
+        if not reference.startswith(DOCKER) and not allows(selected, reference):
             lacking.setdefault(pattern_of(reference), where)
     drift += [
         Drift(
@@ -400,7 +432,7 @@ def check_selected_actions(
         )
         for reference, answer in sorted(refused.items())
     ]
-    return drift
+    return drift + refused_images(found)
 
 
 def widen_selected_actions(api: Api, repo: str, selected: dict[str, Json]) -> None:

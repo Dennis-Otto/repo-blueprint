@@ -613,7 +613,8 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
     assert selected["github_owned_allowed"] is True
     assert selected["verified_allowed"] is False
     # Every action and reusable workflow that a workflow names may run, or the
-    # workflow would fail to start once the settings bot applies the list.
+    # workflow would fail to start once the settings bot applies the list. No step
+    # runs an image of Docker with docker://, which no pattern lets run (#281).
     assert [ref for ref in settings.workflows if not allows(selected, ref)] == []
     # The list names nothing else, other than what these run in turn, in order.
     named = {ref.partition("@")[0].casefold() for ref in settings.workflows}

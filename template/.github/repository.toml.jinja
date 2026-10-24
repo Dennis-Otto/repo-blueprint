@@ -41,7 +41,9 @@ sha_pinning_required = true
 # Workflows of pull requests from forks wait for the maintainer's approval.
 fork_pr_approval = "all_external_contributors"
 # Only the actions of GitHub and those of [actions.selected] may run, also in a
-# workflow that a pull request changes; those of this repository always may.
+# workflow that a pull request changes; those of this repository always may. A step
+# that runs an image with docker:// is an action that no pattern allows: it runs the
+# image with docker run instead.
 allowed_actions = "selected"
 
 # The actions and reusable workflows that the workflows name, and those that these run
