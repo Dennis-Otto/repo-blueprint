@@ -318,6 +318,38 @@ def test_both_plugins_that_download_try_again_and_nothing_else_changes(
     assert retrying.Timeout is Network.Timeout
 
 
+# The events of MkDocs 1.6. MkDocs takes every function of a hook whose name starts
+# with on_ for the event that the rest of its name names, and fails every build on
+# any other name, such as on_main, which no test of a function would notice.
+EVENTS = {
+    "build_error",
+    "config",
+    "env",
+    "files",
+    "nav",
+    "page_content",
+    "page_context",
+    "page_markdown",
+    "page_read_source",
+    "post_build",
+    "post_page",
+    "post_template",
+    "pre_build",
+    "pre_page",
+    "pre_template",
+    "serve",
+    "shutdown",
+    "startup",
+    "template_context",
+}
+
+
+def test_every_function_of_the_hooks_named_on_is_an_event_of_mkdocs() -> None:
+    names = {name for name in vars(hooks()) if name.startswith("on_")}
+
+    assert {name.removeprefix("on_") for name in names} <= EVENTS
+
+
 def picture(src: str, dark: str = "") -> str:
     """A <picture> of a diagram, as scripts/diagrams.sh --extract writes it."""
     dark = dark or src.replace(".svg", ".dark.svg")
@@ -816,6 +848,362 @@ def test_a_gif_without_a_video_stays_a_gif(tmp_path: Path) -> None:
         '<img src="images/b.png" alt="B" width="4" height="2" loading="lazy"'
         ' decoding="async">'
     )
+
+
+# A file of the repository on main, as a README names a picture so that it shows
+# wherever the README does, such as on PyPI or in the store of an app.
+MAIN = "https://github.com/Owner/demo/raw/main"
+REPOSITORY = "https://github.com/Owner/demo"
+CHECKOUT = "assets/images/repository"
+
+
+def checkout(
+    root: Path, tracked: dict[str, bytes], untracked: dict[str, bytes] | None = None
+) -> Path:
+    """A repository in root with the tracked files, which git adds, and the
+    untracked ones beside them."""
+    for name, data in {**tracked, **(untracked or {})}.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
+    for arguments in (["init", "--quiet"], ["add", "--", *tracked]):
+        subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def from_main(
+    root: Path,
+    html: str,
+    page: str = "index.html",
+    *,
+    files: list[File] | None = None,
+    repo_url: str | None = REPOSITORY,
+) -> tuple[str, list[File]]:
+    """The content of a page of the website of the repository in root after the
+    hook, and the files of the website then: the files of docs/ and the page, from
+    the same path as Markdown, unless files are given."""
+    docs = root / "docs"
+    docs.mkdir(exist_ok=True)
+    if files is None:
+        files = [
+            File(
+                path.relative_to(docs).as_posix(), str(docs), str(root / "site"), False
+            )
+            for path in sorted(docs.rglob("*"))
+            if path.is_file()
+        ]
+    shown = File(page.replace(".html", ".md"), str(docs), str(root / "site"), False)
+    shown.dest_uri = page
+    files.append(shown)
+    config = SimpleNamespace(
+        config_file_path=str(root / "mkdocs.yml"),
+        docs_dir=str(docs),
+        site_dir=str(root / "site"),
+        use_directory_urls=False,
+        repo_url=repo_url,
+        plugins={},
+    )
+    result: str = hooks().on_page_content(
+        html, page=SimpleNamespace(file=shown, meta={}), config=config, files=files
+    )
+    return result, files
+
+
+def served(files: list[File]) -> dict[str, str | None]:
+    """The files of the checkout that the website serves, by their paths there."""
+    return {
+        file.dest_uri: file.abs_src_path
+        for file in files
+        if file.dest_uri.startswith(f"{CHECKOUT}/")
+    }
+
+
+def test_a_picture_that_a_readme_shows_from_main_comes_from_the_checkout(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A pull request that adds a screenshot shows it on the website too: the privacy
+    # plugin would download it from main, which doesn't have it yet, and fail the
+    # strict build. A picture of docs/ is the one that the website has already.
+    root = checkout(
+        tmp_path,
+        {
+            "screenshots/new.png": png(8, 4),
+            "screenshots/new-dark.png": png(8, 4),
+            "docs/images/a.png": png(),
+        },
+    )
+    html = (
+        f'<p><img alt="New" src="{MAIN}/screenshots/new.png"></p>\n'
+        + themed_picture(
+            f"{MAIN}/screenshots/new.png", f"{MAIN}/screenshots/new-dark.png"
+        )
+        + '\n<p><img alt="Docs" src="https://raw.githubusercontent.com/owner/Demo/'
+        'refs/heads/main/docs/images/a.png"></p>'
+    )
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        shown, files = from_main(root, html, page="de/index.html")
+
+    folder = f"../{CHECKOUT}/screenshots"
+    assert shown == (
+        f'<p><img alt="New" src="{folder}/new.png" width="8" height="4"'
+        ' fetchpriority="high"></p>\n'
+        f'<img src="{folder}/new.png#only-light" alt="The settings" width="8"'
+        ' height="4" loading="lazy" decoding="async">'
+        f'<img src="{folder}/new-dark.png#only-dark" alt="The settings" width="8"'
+        ' height="4" loading="lazy" decoding="async">\n'
+        '<p><img alt="Docs" src="../images/a.png" width="4" height="2"'
+        ' loading="lazy" decoding="async"></p>'
+    )
+    # Each picture once, from its file in the checkout, and no file of docs/ in
+    # its place, whose path in docs/ may be the same.
+    assert served(files) == {
+        f"{CHECKOUT}/screenshots/new.png": str(root / "screenshots/new.png"),
+        f"{CHECKOUT}/screenshots/new-dark.png": str(root / "screenshots/new-dark.png"),
+    }
+    assert all(
+        file.src_uri == file.dest_uri
+        for file in files
+        if file.dest_uri.startswith(f"{CHECKOUT}/")
+    )
+    assert {file.site for file in files} == {(str(root / "site"), False)}
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        f"{MAIN}/screenshots/new.png",
+        "https://github.com/owner/DEMO/raw/HEAD/screenshots/new.png",
+        f"{REPOSITORY}/raw/refs/heads/main/screenshots/new.png",
+        f"{REPOSITORY}/blob/main/screenshots/new.png?raw=true",
+        "https://raw.githubusercontent.com/Owner/demo/main/screenshots/./new.png",
+        "https://raw.githubusercontent.com/Owner/demo/main/screenshots/new.png#top",
+    ],
+)
+def test_every_address_of_a_file_on_main_leads_to_the_checkout(
+    tmp_path: Path, address: str
+) -> None:
+    root = checkout(tmp_path, {"screenshots/new.png": png()})
+
+    shown, _ = from_main(root, f'<img src="{address}" alt="New">')
+
+    ending = "#top" if address.endswith("#top") else ""
+    assert shown == (
+        f'<img src="{CHECKOUT}/screenshots/new.png{ending}" alt="New" width="4"'
+        ' height="2" fetchpriority="high">'
+    )
+
+
+@pytest.mark.parametrize(
+    ("address", "repo_url"),
+    [
+        # Another repository, a release, the page of the file and no file at all.
+        ("https://github.com/Owner/other/raw/main/new.png", REPOSITORY),
+        (f"{REPOSITORY}/raw/v1.0.0/new.png", REPOSITORY),
+        (f"{REPOSITORY}/blob/main/new.png", REPOSITORY),
+        (f"{REPOSITORY}/raw/main", REPOSITORY),
+        (f"{REPOSITORY}/raw/main/", REPOSITORY),
+        ("https://raw.githubusercontent.com/Owner/demo", REPOSITORY),
+        # Out of the checkout.
+        (f"{REPOSITORY}/raw/main/../other/raw/main/new.png", REPOSITORY),
+        (f"{REPOSITORY}/raw/main//etc/new.png", REPOSITORY),
+        (f"{REPOSITORY}/raw/main/..", REPOSITORY),
+        # Other servers.
+        ("http://github.com/Owner/demo/raw/main/new.png", REPOSITORY),
+        ("https://example.com/Owner/demo/raw/main/new.png", REPOSITORY),
+        # A website of a repository elsewhere, or of no repository.
+        (f"{MAIN}/new.png", "https://gitlab.com/Owner/demo"),
+        (f"{MAIN}/new.png", "https://github.com/Owner"),
+        (f"{MAIN}/new.png", None),
+    ],
+)
+def test_a_picture_from_elsewhere_stays_as_it_is(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    address: str,
+    repo_url: str | None,
+) -> None:
+    root = checkout(tmp_path, {"new.png": png()})
+    html = f'<img src="{address}" alt="New" loading="lazy">'
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        shown, files = from_main(root, html, repo_url=repo_url)
+
+    assert (shown, served(files), caplog.records) == (html, {}, [])
+
+
+def test_the_repository_of_the_website_is_found_by_its_address(tmp_path: Path) -> None:
+    root = checkout(tmp_path, {"new.png": png()})
+    html = f'<img src="{MAIN}/new.png" alt="New">'
+
+    for repo_url in (f"{REPOSITORY}/", "https://GitHub.com/Owner/demo.git"):
+        shown, _ = from_main(root, html, repo_url=repo_url)
+        assert f'src="{CHECKOUT}/new.png"' in shown
+
+
+def test_a_source_of_a_picture_comes_from_the_checkout_too(tmp_path: Path) -> None:
+    # A <picture> with a source for another format and its densities, and no
+    # source for a scheme, stays a <picture>.
+    root = checkout(tmp_path, {"a.webp": webp(4, 2), "a@2x & 1.webp": webp(8, 4)})
+    html = (
+        "<picture>"
+        f'<source type="image/webp" srcset="{MAIN}/a.webp 1x, {MAIN}/a@2x%20&amp;%201.webp 2x,">'
+        '<source srcset="">'
+        '<img src="https://example.com/a.png" alt="A">'
+        "</picture>"
+    )
+
+    shown, files = from_main(root, html)
+
+    assert shown == (
+        "<picture>"
+        f'<source type="image/webp" srcset="{CHECKOUT}/a.webp 1x,'
+        f' {CHECKOUT}/a@2x%20%26%201.webp 2x, ">'
+        '<source srcset="">'
+        '<img src="https://example.com/a.png" alt="A" fetchpriority="high">'
+        "</picture>"
+    )
+    assert list(served(files)) == [f"{CHECKOUT}/a.webp", f"{CHECKOUT}/a@2x & 1.webp"]
+
+
+def test_a_picture_of_two_pages_comes_from_the_checkout_once(tmp_path: Path) -> None:
+    root = checkout(tmp_path, {"screenshots/new.png": png()})
+    html = f'<img src="{MAIN}/screenshots/new.png" alt="New">'
+
+    _, files = from_main(root, html, page="guide.html")
+    shown, files = from_main(root, html, page="de/guide.html", files=files)
+
+    assert f'src="../{CHECKOUT}/screenshots/new.png"' in shown
+    assert len(served(files)) == 1
+
+
+def test_a_gif_from_main_plays_as_the_video_beside_it_in_the_checkout(
+    tmp_path: Path,
+) -> None:
+    root = checkout(
+        tmp_path,
+        {"demo.gif": gif(), "demo.mp4": b"\0", "demo.png": png()},
+        {"demo.webp": webp(4, 2)},
+    )
+
+    shown, files = from_main(root, f'<p><img alt="Demo" src="{MAIN}/demo.gif"></p>')
+
+    assert shown == (
+        f'<p><video class="blueprint-video" src="{CHECKOUT}/demo.mp4"'
+        f' poster="{CHECKOUT}/demo.png" width="6" height="3" controls muted loop'
+        ' playsinline preload="none" aria-label="Demo"></video></p>'
+    )
+    # The poster that git doesn't track stays out, as main won't have it.
+    assert sorted(served(files)) == [
+        f"{CHECKOUT}/demo.gif",
+        f"{CHECKOUT}/demo.mp4",
+        f"{CHECKOUT}/demo.png",
+    ]
+
+
+def test_a_picture_that_main_would_lack_fails_a_strict_build(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A screenshot that git doesn't track, one that is gone and a folder: on main,
+    # each would be missing, which the privacy plugin, downloading them from main,
+    # found only once main had lost them.
+    root = checkout(tmp_path, {"screenshots/old.png": png()}, {"local.png": png()})
+    paths = ("local.png", "gone.png", "screenshots")
+    html = "".join(f'<img src="{MAIN}/{path}" alt="Missing">' for path in paths)
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        shown, files = from_main(root, html)
+
+    assert all(f'src="{MAIN}/{path}"' in shown for path in paths)
+    assert served(files) == {}
+    assert [record.getMessage() for record in caplog.records] == [
+        f"index.md shows {MAIN}/{path}, a file that git doesn't track in the "
+        "repository, so that the picture would be missing on main: add it with "
+        "git add, or correct its address."
+        for path in paths
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows makes no symbolic link")
+def test_a_link_out_of_the_checkout_is_not_served(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A symbolic link that git tracks, to a file outside the repository, which
+    # the website would publish.
+    (tmp_path / "secret.png").write_bytes(png())
+    root = tmp_path / "repository"
+    root.mkdir()
+    (root / "new.png").symlink_to(tmp_path / "secret.png")
+    checkout(root, {})
+    subprocess.run(["git", "add", "new.png"], cwd=root, check=True)
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        _, files = from_main(root, f'<img src="{MAIN}/new.png" alt="New">')
+
+    assert served(files) == {}
+    assert "a file that git doesn't track" in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows makes no symbolic link")
+def test_a_video_beside_a_gif_that_links_out_of_the_checkout_is_not_served(
+    tmp_path: Path,
+) -> None:
+    # The video beside a GIF that git tracks is a symbolic link to a file outside
+    # the repository, which the website would publish with the GIF.
+    (tmp_path / "secret.mp4").write_bytes(b"video")
+    root = tmp_path / "repository"
+    root.mkdir()
+    (root / "demo.mp4").symlink_to(tmp_path / "secret.mp4")
+    checkout(root, {"demo.gif": gif()})
+    subprocess.run(["git", "add", "demo.mp4"], cwd=root, check=True)
+
+    shown, files = from_main(root, f'<img src="{MAIN}/demo.gif" alt="Demo">')
+
+    assert f'src="{CHECKOUT}/demo.gif"' in shown
+    assert "<video" not in shown
+    assert sorted(served(files)) == [f"{CHECKOUT}/demo.gif"]
+
+
+def test_a_folder_beside_a_gif_is_not_served_as_its_video(tmp_path: Path) -> None:
+    # git tracks a file in a folder named like the video beside the GIF, which
+    # the website can't serve as a file.
+    root = checkout(tmp_path, {"demo.gif": gif(), "demo.mp4/notes.txt": b"notes"})
+
+    shown, files = from_main(root, f'<img src="{MAIN}/demo.gif" alt="Demo">')
+
+    assert "<video" not in shown
+    assert sorted(served(files)) == [f"{CHECKOUT}/demo.gif"]
+
+
+@pytest.mark.parametrize("command", [("no-such-git-of-the-test",), ("git", "--no")])
+def test_without_git_a_picture_from_main_stays_a_download(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    command: tuple[str, ...],
+) -> None:
+    # Without git, or outside a repository, the website can't tell what main will
+    # have, and the privacy plugin downloads the picture from there, as before.
+    module = hooks()
+    monkeypatch.setattr(module, "TRACKED", command)
+    root = checkout(tmp_path, {"new.png": png()})
+    html = f'<img src="{MAIN}/new.png" alt="New" loading="lazy">'
+    page = File("index.md", str(root / "docs"), str(root / "site"), False)
+    config = SimpleNamespace(
+        config_file_path=str(root / "mkdocs.yml"),
+        docs_dir=str(root / "docs"),
+        site_dir=str(root / "site"),
+        use_directory_urls=False,
+        repo_url=REPOSITORY,
+        plugins={},
+    )
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        shown = module.on_page_content(
+            html, page=SimpleNamespace(file=page, meta={}), config=config, files=[page]
+        )
+
+    assert (shown, caplog.records) == (html, [])
 
 
 def test_the_size_of_a_picture_comes_from_its_first_bytes(tmp_path: Path) -> None:

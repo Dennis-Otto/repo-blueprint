@@ -141,6 +141,14 @@ The header then reads `uv pip compile --generate-hashes --python-version=3.12 --
 
 A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
 
+## The website names a picture that git doesn't track
+
+**What you see:** the check *docs*, or `scripts/check.sh` with the tools of the website, fails with a warning such as `index.md shows https://github.com/OWNER/NAME/raw/main/screenshots/settings.png, a file that git doesn't track in the repository, so that the picture would be missing on main`.
+
+**Why:** a README shows its pictures from `main` of its own repository, so that they show wherever the README does, such as on PyPI or in the store of an app. The website serves such a picture from the checkout, so that the pull request that adds a screenshot shows it on its website too, before `main` has it ([decision 0062](decisions/0062-the-website-shows-the-pictures-of-its-repository-from-the-checkout.md)). A picture that git doesn't track would be missing on `main` once the pull request is merged: a new screenshot that isn't committed yet, one that the pull request deletes or moves, or a typo in its address.
+
+**What to do:** commit the picture, such as with `git add screenshots/settings.png`, or correct its address in the README. Without git, such as in a folder without its history, the website downloads the picture from `main` as before.
+
 ## A scheduled workflow didn't run
 
 GitHub runs schedules as it can, often hours late and sometimes not at all, so the blueprint starts its bots from events, such as a merge into `main` or the end of a check, and keeps the schedules only as a safety net ([decision 0033](decisions/0033-schedules-are-only-a-safety-net.md)). Every night, the bot-health bot looks at the latest run of every workflow and starts one whose schedule GitHub missed or switched off. A workflow with *Run workflow* under *Actions* starts at once by hand.

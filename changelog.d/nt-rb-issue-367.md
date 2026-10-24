@@ -1,0 +1,3 @@
+### Bug fixes
+
+- **A new screenshot shows on the website of its own pull request:** the website serves a picture that the README shows from `main` of its own repository, such as `https://github.com/OWNER/NAME/raw/main/screenshots/settings.png`, from the checkout, instead of downloading it from `main`, which doesn't have it before the merge and failed the strict build. A pull request that adds a screenshot no longer needs a second one to show it on the website, and a picture that git doesn't track, such as one that the pull request deletes while the README still shows it, fails the build with the page that shows it.

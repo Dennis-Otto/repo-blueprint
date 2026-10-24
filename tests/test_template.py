@@ -11060,6 +11060,69 @@ def test_every_website_leads_to_its_owner_and_asks_github_for_nothing(
     assert "asks the API of GitHub" in settings
 
 
+class WebsiteFile:
+    """A file of MkDocs, by the arguments of mkdocs.structure.files.File that the
+    hooks give it."""
+
+    def __init__(
+        self, path: str, src_dir: str, dest_dir: str, use_directory_urls: bool
+    ) -> None:
+        self.src_uri = self.dest_uri = path
+        self.abs_src_path = str(Path(src_dir) / path)
+        self.site = (dest_dir, use_directory_urls)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_shows_a_new_screenshot_of_its_readme_from_the_checkout(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # A pull request that adds a screenshot, which the README shows from main of
+    # the repository that mkdocs.yml names: the website of the pull request shows
+    # it from the checkout, as main doesn't have it yet.
+    project = projects[kind]
+    spec = importlib.util.spec_from_file_location(
+        f"screenshots_of_{kind.replace('-', '_')}",
+        project / ".github/mkdocs_blueprint.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    settings = (project / "mkdocs.yml").read_text(encoding="utf-8")
+    repo_url = re.search(r"^repo_url: (\S+)$", settings, re.M)
+    assert repo_url is not None
+    (tmp_path / "screenshots").mkdir()
+    (tmp_path / "screenshots/settings.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    for arguments in (["init", "--quiet"], ["add", "screenshots"]):
+        subprocess.run(
+            ["git", *arguments], cwd=tmp_path, check=True, capture_output=True
+        )
+    page = WebsiteFile("index.md", str(tmp_path / "docs"), "site", False)
+    page.dest_uri = "index.html"
+    config = SimpleNamespace(
+        config_file_path=str(tmp_path / "mkdocs.yml"),
+        docs_dir=str(tmp_path / "docs"),
+        site_dir=str(tmp_path / "site"),
+        use_directory_urls=False,
+        repo_url=repo_url[1],
+        plugins={},
+    )
+    files = [page]
+    screenshot = f"{repo_url[1]}/raw/main/screenshots/settings.png"
+
+    html = hooks.on_page_content(
+        f'<img alt="Settings" src="{screenshot}">',
+        page=SimpleNamespace(file=page, meta={}),
+        config=config,
+        files=files,
+    )
+
+    assert 'src="assets/images/repository/screenshots/settings.png"' in html
+    assert [file.abs_src_path for file in files[1:]] == [
+        str(tmp_path / "screenshots/settings.png")
+    ]
+
+
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
 def test_every_website_is_checked_for_its_accessibility(
     projects: Mapping[str, Path], kind: str
