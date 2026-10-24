@@ -44,7 +44,15 @@ from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
 from shared import copy_of, git_environment, once, run_folder
 from shell import BASH, in_bash
-from workflow_steps import RUN_URL, Answer, exact
+from workflow_steps import (
+    RUN_URL,
+    Answer,
+    condition_of,
+    exact,
+    job_in,
+    parse,
+    step_in,
+)
 
 import downstream
 import pins
@@ -215,20 +223,6 @@ def workflows(project: Path) -> dict[str, str]:
     }
 
 
-def job_of(workflow: str, name: str) -> str:
-    """The text of a job of a workflow, up to the next job."""
-    start = workflow.index(f"\n  {name}:\n")
-    end = re.compile(r"\n\n  [\w-]+:\n").search(workflow, start + 1)
-    return workflow[start : end.start() if end else len(workflow)]
-
-
-def condition_of(job: str) -> str:
-    """The condition of a job, on one line."""
-    found = re.search(r"^    if: (>-\n(?:      .+\n)+|.+)", job + "\n", re.M)
-    assert found, job
-    return " ".join(found[1].removeprefix(">-").split())
-
-
 def triggers(workflow: str) -> dict[str, list[str]]:
     """The events that start a workflow, each with the lines of its settings, without
     their comments."""
@@ -294,24 +288,98 @@ def files_of(root: Path) -> list[str]:
     ]
 
 
-def script_of(workflow: str, step: str) -> str:
-    """The script of a step of a workflow, as the runner hands it to bash."""
-    start = workflow.index(f"      - name: {step}\n")
-    run = workflow.index("        run: |\n", start) + len("        run: |\n")
-    lines = []
-    for line in workflow[run:].splitlines(keepends=True):
-        if line.strip() and not line.startswith("          "):
-            break
-        lines.append(line)
-    return textwrap.dedent("".join(lines))
+def step_named(found: str | Mapping[str, Any], name: str) -> dict[str, Any]:
+    """The one step of this name or id in a workflow, its text or parsed, or in a
+    parsed job."""
+    parsed = parse(found) if isinstance(found, str) else found
+    jobs = parsed["jobs"].values() if "jobs" in parsed else [parsed]
+    steps = [
+        dict(step)
+        for job in jobs
+        for step in job.get("steps") or []
+        if name in (step.get("name"), step.get("id"))
+    ]
+    assert len(steps) == 1, f"{len(steps)} steps are named {name!r}"
+    return steps[0]
 
 
-def step_of(workflow: str, start: str) -> str:
-    """The text of the step of a workflow whose first line starts with start, such as
-    "      - name: Run the checks", up to the next step or job."""
-    begin = workflow.index(f"\n{start}") + 1
-    end = re.compile(r"\n(?= {0,6}\S)").search(workflow, begin)
-    return workflow[begin : end.start() + 1 if end else len(workflow)]
+def job_with(found: str | Mapping[str, Any], name: str) -> dict[str, Any]:
+    """The one job of a workflow, its text or parsed, that has a step of this name or
+    id."""
+    parsed = parse(found) if isinstance(found, str) else found
+    jobs = [
+        dict(job)
+        for job in parsed["jobs"].values()
+        if any(
+            name in (step.get("name"), step.get("id"))
+            for step in job.get("steps") or []
+        )
+    ]
+    assert len(jobs) == 1, f"{len(jobs)} jobs have a step {name!r}"
+    return jobs[0]
+
+
+def names_of(settings: Mapping[str, Any]) -> list[str]:
+    """The names of the steps of a parsed job, in their order: the id of one without
+    a name, and the action that it uses without either."""
+    return [
+        step.get("name") or step.get("id") or step["uses"]
+        for step in settings.get("steps") or []
+    ]
+
+
+def names_of_jobs(found: str | Mapping[str, Any]) -> list[str]:
+    """The names of the jobs of a workflow, its text or parsed, in their order: the
+    id of a job without a name."""
+    parsed = parse(found) if isinstance(found, str) else found
+    return [job.get("name", key) for key, job in parsed["jobs"].items()]
+
+
+def app_permissions(settings: Mapping[str, Any]) -> dict[str, str]:
+    """The permissions that the steps of a parsed job ask a token of an app for, by
+    the inputs permission-* of actions/create-github-app-token."""
+    return {
+        key.removeprefix("permission-"): value
+        for step in steps_using(settings, "actions/create-github-app-token")
+        for key, value in step.get("with", {}).items()
+        if key.startswith("permission-")
+    }
+
+
+def scripts_of(settings: Mapping[str, Any]) -> str:
+    """The scripts of the steps of a parsed job, each on lines of its own, as bash
+    gets them."""
+    return "".join(
+        f"\n{step['run']}" for step in settings.get("steps") or [] if "run" in step
+    )
+
+
+def values_of(settings: object) -> str:
+    """The keys and values of a parsed workflow, job or step, each on lines of its
+    own, without the comments: to look for a name or a value anywhere in it."""
+    if isinstance(settings, Mapping):
+        return "\n".join(
+            f"{key}\n{values_of(value)}" for key, value in settings.items()
+        )
+    if isinstance(settings, list):
+        return "\n".join(values_of(value) for value in settings)
+    return str(settings)
+
+
+def steps_using(settings: Mapping[str, Any], action: str) -> list[dict[str, Any]]:
+    """The steps of a parsed job that use an action, such as actions/checkout."""
+    return [
+        dict(step)
+        for step in settings.get("steps") or []
+        if str(step.get("uses", "")).startswith(f"{action}@")
+    ]
+
+
+def script_of(found: str | Mapping[str, Any], step: str) -> str:
+    """The script of the one step of this name in a workflow, its text or parsed, or
+    in a parsed job, as the runner hands it to bash."""
+    script: str = step_named(found, step)["run"]
+    return script
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -424,13 +492,14 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
     for name, text in flows.items():
         if name in ISSUE_ASSISTANT_WORKFLOWS:
             continue
-        jobs = re.findall(r"^  [\w-]+:$", text.split("\njobs:\n", 1)[1], re.M)
-        runners = re.findall(r"^    runs-on: (.+)$", text, re.M)
-        callers = re.findall(r"^    uses: ", text, re.M)
-        # Every job names its runner, but one that calls a workflow, whose jobs do: the
-        # Variants, the build and the check of a release here, and OSV-Scanner its own.
-        assert len(runners) + len(callers) == len(jobs), name
-        for runner in runners:
+        for job_id, job in parse(text)["jobs"].items():
+            # Every job names its runner, but one that calls a workflow, whose jobs
+            # do: the Variants, the build and the check of a release here, and
+            # OSV-Scanner its own.
+            assert ("runs-on" in job) != ("uses" in job), f"{name}: {job_id}"
+            if "uses" in job:
+                continue
+            runner = job["runs-on"]
             assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
 
 
@@ -442,11 +511,14 @@ def test_the_next_runner_runs_the_variants_every_week(
     # Every week and by hand, not in pull requests: the next image breaks main and every
     # pull request alike, and none waits for it.
     assert set(triggers(next_runner)) == {"schedule", "workflow_dispatch"}
-    job = job_of(next_runner, "next-runner")
-    assert "    uses: ./.github/workflows/variants.yml\n" in job
-    assert f"    with:\n      runner: {NEXT_RUNNER}\n" in job
+    job = job_in(next_runner, "next-runner")
+    assert job["uses"] == "./.github/workflows/variants.yml"
+    assert job["with"] == {"runner": NEXT_RUNNER}
     # The issue of a failure names the runner that failed.
-    assert f"          RUNNER: {NEXT_RUNNER}\n" in job_of(next_runner, "report")
+    assert any(
+        found.get("env", {}).get("RUNNER") == NEXT_RUNNER
+        for found in job_in(next_runner, "report")["steps"]
+    )
     # The Variants take the runner from their caller or from a run by hand, and run on
     # the runner of the jobs otherwise: in pull requests and in their own weekly run.
     assert set(triggers(variants)) == {
@@ -460,14 +532,14 @@ def test_the_next_runner_runs_the_variants_every_week(
         f"        options: [{RUNNER}, {NEXT_RUNNER}]\n"
         f"        default: {RUNNER}\n"
     ) in variants
-    assert f"    runs-on: ${{{{ inputs.runner || '{RUNNER}' }}}}\n" in job_of(
-        variants, "variant"
+    assert job_in(variants, "variant")["runs-on"] == (
+        f"${{{{ inputs.runner || '{RUNNER}' }}}}"
     )
     # Neither the required check variants nor any other waits for the next runner.
     settings = tomllib.loads(
         (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
     )
-    names = re.findall(r"^    name: (.+)$", next_runner, re.M)
+    names = [job["name"] for job in parse(next_runner)["jobs"].values()]
     assert names == ["next runner", "report"]
     assert not set(names) & set(settings["branch"]["required_checks"])
     # The workflow of the blueprint alone, whose variants are those of every project.
@@ -636,10 +708,9 @@ def test_a_new_alert_of_codeql_stops_the_merge(
     }
     # A missing analysis stops a merge too, so CodeQL analyzes every pull request.
     codeql = (root / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
-    trigger = re.search(r"^  pull_request:\n((?:    .+\n)*)", codeql, re.M)
-    assert trigger, codeql
-    assert "paths" not in trigger[1]
-    assert "\n    if:" not in job_of(codeql, "codeql")
+    analysis = parse(codeql)
+    assert "paths" not in analysis["on"]["pull_request"]
+    assert "if" not in job_in(analysis, "codeql")
     assert settings.security["secret_scanning_non_provider_patterns"] is True
 
 
@@ -1126,34 +1197,36 @@ def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
     # to a commit of their branches falls behind with every commit to them.
     assert "uses: hacs/action" not in ci
     assert "uses: home-assistant/actions" not in ci
-    hacs = job_of(ci, "hacs")
-    validation = hacs[: hacs.index("      # The PR coach needs")]
-    assert validation.endswith("\n            ghcr.io/hacs/action:main\n")
+    hacs = job_in(ci, "hacs")
+    validation = step_in(hacs, "Validate the HACS metadata")
+    assert validation["run"].endswith("\n  ghcr.io/hacs/action:main\n")
     # HACS reads the repository through the API, so the job checks nothing out but
     # what the PR coach needs when it failed.
-    assert "actions/checkout" not in validation
-    assert hacs.count("actions/checkout") == 1
+    checkouts = [
+        found
+        for found in hacs["steps"]
+        if found.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert len(checkouts) == 1
+    assert condition_of(checkouts[0]) == "failure()"
+    assert hacs["steps"].index(checkouts[0]) > hacs["steps"].index(validation)
     # hassfest checks the checkout, read-only, exactly as the Variants workflow does.
     command = (
         'docker run --rm --volume "$PWD:/github/workspace:ro"'
         " ghcr.io/home-assistant/hassfest:latest\n"
     )
-    assert command in job_of(ci, "hassfest")
+    assert command in step_in(job_in(ci, "hassfest"), "Validate the integration")["run"]
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     assert command.replace("$PWD", "$PWD/$PROJECT") in variants
 
 
 def run_the_step_with_docker(
-    tmp_path: Path, job: str, environment: dict[str, str]
+    tmp_path: Path, step: Mapping[str, Any], environment: dict[str, str]
 ) -> tuple[str, list[str]]:
     # The step runs in the folder workspace/, as in the checkout of a runner.
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    # Its script, up to the next step, such as the one of the PR coach.
-    step = job[job.index("        run: |\n") + len("        run: |\n") :]
-    end = re.search(r"^      [-#]", step, re.M)
-    script = textwrap.dedent(step[: end.start()] if end else step)
-    (workspace / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    (workspace / "step.sh").write_text(step["run"], encoding="utf-8", newline="\n")
     # docker writes down what the container would get: its variables, its mounts,
     # with the folder of the step as $PWD, its folder, its image and its command.
     bin_dir = tmp_path / "bin"
@@ -1206,12 +1279,13 @@ def test_hacs_gets_the_inputs_of_its_action(
     ci = (projects["home-assistant"] / ".github/workflows/ci.yml").read_text(
         encoding="utf-8"
     )
-    hacs = job_of(ci, "hacs")
+    hacs = step_in(job_in(ci, "hacs"), "Validate the HACS metadata")
     # The inputs of the action reach its image as INPUT_ variables, as GitHub passes
     # them, and the event as a file, from which it reads the branch to validate.
     inputs = {
-        name: value.strip('"').replace("${{ github.token }}", "the token")
-        for name, value in re.findall(r"^          (INPUT_\w+): (.+)$", hacs, re.M)
+        name: value.replace("${{ github.token }}", "the token")
+        for name, value in hacs["env"].items()
+        if name.startswith("INPUT_")
     }
     event = (tmp_path / "event.json").as_posix()
 
@@ -1243,7 +1317,9 @@ def test_hassfest_shows_its_errors_as_annotations(
     runner_temp.mkdir()
 
     output, calls = run_the_step_with_docker(
-        tmp_path, job_of(ci, "hassfest"), {"RUNNER_TEMP": runner_temp.as_posix()}
+        tmp_path,
+        step_in(job_in(ci, "hassfest"), "Validate the integration"),
+        {"RUNNER_TEMP": runner_temp.as_posix()},
     )
 
     assert calls == [
@@ -1280,8 +1356,8 @@ def test_hadolint_runs_in_its_image_and_shows_its_findings_as_annotations(
     ci = (projects["container"] / ".github/workflows/ci.yml").read_text(
         encoding="utf-8"
     )
-    step = step_of(ci, "      - name: Lint the Dockerfile")
-    image = HADOLINT.search(step)
+    step = step_named(ci, "Lint the Dockerfile")
+    image = HADOLINT.search(step["run"])
     assert image
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
@@ -1303,7 +1379,7 @@ def test_hadolint_runs_in_its_image_and_shows_its_findings_as_annotations(
     # the checks of the image, whose output it would otherwise read as findings too.
     assert f"::add-matcher::{runner_temp.as_posix()}/hadolint.json\n" in output
     assert output.endswith("::remove-matcher owner=hadolint::\n")
-    assert "trap 'echo \"::remove-matcher owner=hadolint::\"' EXIT\n" in step
+    assert "trap 'echo \"::remove-matcher owner=hadolint::\"' EXIT\n" in step["run"]
     matcher = json.loads((runner_temp / "hadolint.json").read_text(encoding="utf-8"))
     pattern = matcher["problemMatcher"][0]["pattern"][0]
     # As Hadolint 2.15 writes a finding without colors.
@@ -1324,12 +1400,12 @@ def test_hadolint_runs_in_its_image_and_shows_its_findings_as_annotations(
     # The Variants workflow runs the same image in the container it renders, and only
     # there.
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    lint = step_of(variants, "      - name: Lint the Dockerfile")
+    lint = step_named(variants, "Lint the Dockerfile")
     assert (
-        "        if: matrix.start != 'adopted' && matrix.kind == 'container'\n" in lint
+        condition_of(lint) == "matrix.start != 'adopted' && matrix.kind == 'container'"
     )
-    command = step[step.index("docker run ") :].rstrip()
-    assert lint.rstrip().endswith(command.replace('"$PWD:', '"$PWD/$PROJECT:'))
+    command = step["run"][step["run"].index("docker run ") :].rstrip()
+    assert lint["run"].rstrip().endswith(command.replace('"$PWD:', '"$PWD/$PROJECT:'))
     assert HADOLINT.findall(variants) == [image[0]]
 
 
@@ -3077,10 +3153,20 @@ def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
     for workflow, name in ((lint, "lint"), (lint, "dco"), (links, "links")):
-        job = job_of(workflow, name)
-        assert "base.sha" not in job, name
-        assert "BASE_REF: ${{ github.event.pull_request.base.ref }}" in job, name
-        assert "fetch-depth: 0" in job or "'pull_request' && '0' ||" in job, name
+        job = job_in(workflow, name)
+        assert "base.sha" not in values_of(job), name
+        assert any(
+            step.get("env", {}).get("BASE_REF")
+            == "${{ github.event.pull_request.base.ref }}"
+            for step in job["steps"]
+        ), name
+        depths = [
+            str(step.get("with", {}).get("fetch-depth"))
+            for step in steps_using(job, "actions/checkout")
+        ]
+        assert any(
+            depth == "0" or "'pull_request' && '0' ||" in depth for depth in depths
+        ), name
 
 
 def check_the_sign_offs(
@@ -3091,7 +3177,7 @@ def check_the_sign_offs(
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
     pull_request = a_pull_request_on_a_newer_main(tmp_path, {}, *signed_off)
     (tmp_path / "step.sh").write_text(
-        script_of(lint, "Check the sign-off of every commit"),
+        script_of(job_in(lint, "lint"), "Check the sign-off of every commit"),
         encoding="utf-8",
         newline="\n",
     )
@@ -3211,24 +3297,29 @@ def test_the_prose_hints_give_vale_the_documents_that_the_pull_request_changes(
 
 def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
-    job = job_of(links, "links")
-    cache = job[job.index("      - name: Restore the answers of the sites\n") :]
-    assert "        uses: actions/cache@" in cache
-    assert "          path: .lycheecache\n" in cache
-    assert "          key: lychee-${{ github.run_id }}\n" in cache
-    assert "          restore-keys: lychee-\n" in cache
-    check = job[job.index("      - name: Check the links of the documentation\n") :]
-    assert (
-        "args: --config lychee.toml --no-progress --cache --max-cache-age 1d ${{ steps.documents.outputs.files }}\n"
-        in check
+    job = job_in(links, "links")
+    cache = step_in(job, "Restore the answers of the sites")
+    assert cache["uses"].startswith("actions/cache@")
+    assert cache["with"] == {
+        "path": ".lycheecache",
+        "key": "lychee-${{ github.run_id }}",
+        "restore-keys": "lychee-",
+    }
+    check = step_in(job, "Check the links of the documentation")
+    assert check["with"]["args"] == (
+        "--config lychee.toml --no-progress --cache --max-cache-age 1d"
+        " ${{ steps.documents.outputs.files }}"
     )
     # Without a document to check, neither runs; a changed document may have no link.
     for step in (cache, check):
-        assert "        if: steps.documents.outputs.files != ''\n" in step
-    assert "failIfEmpty: ${{ steps.documents.outputs.every == 'true' }}" in check
+        assert condition_of(step) == "steps.documents.outputs.files != ''"
+    assert check["with"]["failIfEmpty"] == (
+        "${{ steps.documents.outputs.every == 'true' }}"
+    )
     # A pull request compares its documents with its base.
-    assert (
-        "fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}" in job
+    [checkout] = steps_using(job, "actions/checkout")
+    assert checkout["with"]["fetch-depth"] == (
+        "${{ github.event_name == 'pull_request' && '0' || '1' }}"
     )
 
 
@@ -3273,30 +3364,26 @@ def test_the_prose_hints_install_their_tools_from_the_cache_of_npm(
     projects: dict[str, Path], kind: str
 ) -> None:
     folder = ROOT if kind == "blueprint" else projects[kind]
-    prose = job_of(
+    prose = job_in(
         (folder / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "lint"
     )
-    setup = step_of(prose, "      - uses: actions/setup-node@")
-    hints = step_of(
-        prose,
-        "      - name: Hint at the spelling and the style of the changed documents",
+    [setup] = steps_using(prose, "actions/setup-node")
+    hints = step_in(
+        prose, "Hint at the spelling and the style of the changed documents"
     )
-    assert "          cache: npm\n" in setup
-    lock = re.search(r"\n          cache-dependency-path: (\S+)\n", setup)
-    assert lock
-    assert (folder / lock[1]).is_file()
-    install = re.search(r"\n +npm ci --prefix (\S+) ", hints)
+    assert setup["with"]["cache"] == "npm"
+    lock = setup["with"]["cache-dependency-path"]
+    assert (folder / lock).is_file()
+    install = re.search(r"^ *npm ci --prefix (\S+) ", hints["run"], re.M)
     assert install
-    assert install[1] == Path(lock[1]).parent.as_posix()
+    assert install[1] == Path(lock).parent.as_posix()
     # Node and the packages come only for changed documents, the runs that install
     # them, so that every run with npm's cache has one to save.
-    changed = (
-        "        if: ${{ !cancelled() && steps.documents.outputs.changed == 'true' }}\n"
-    )
-    assert changed in setup
-    assert changed in hints
+    changed = "${{ !cancelled() && steps.documents.outputs.changed == 'true' }}"
+    assert condition_of(setup) == changed
+    assert condition_of(hints) == changed
     # The names that the step before found, which may hold spaces.
-    assert "\n          mapfile -d '' -t files < \"$RUNNER_TEMP/documents\"\n" in hints
+    assert "mapfile -d '' -t files < \"$RUNNER_TEMP/documents\"\n" in hints["run"]
 
 
 def test_a_nextcloud_app_packages_only_what_it_needs(
@@ -3372,8 +3459,8 @@ def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> No
         f"Nextcloud {major}: add the PHP it runs on to NEXTCLOUD_PHP, from "
         f"https://github.com/nextcloud/server/blob/v{major}.0.0/lib/versioncheck.php"
     )
-    setup = "      - name: Set up PHP for the signing of the Nextcloud app"
-    php = re.search(r'php-version: "(\d+\.\d+)"', step_of(build, setup))
+    setup = step_named(build, "Set up PHP for the signing of the Nextcloud app")
+    php = re.fullmatch(r"(\d+\.\d+)", setup["with"]["php-version"])
     assert php
 
     def minor(version: str) -> tuple[int, ...]:
@@ -3384,9 +3471,10 @@ def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> No
         f"Nextcloud {major} runs on PHP {oldest} to {newest}, not on {php[1]}"
     )
     # The last PHP that setup-php sets up is the one that occ runs on.
-    sign = build.index("      - name: Build and sign the Nextcloud app\n")
-    assert build.index(setup) < sign
-    assert "uses: shivammathur/setup-php@" not in build[sign:]
+    job = job_with(build, "Build and sign the Nextcloud app")
+    sign = names_of(job).index("Build and sign the Nextcloud app")
+    assert job["steps"].index(setup) < sign
+    assert not steps_using({"steps": job["steps"][sign:]}, "shivammathur/setup-php")
 
 
 # Each curl of a script or of a step, with the lines it continues on; not one that a
@@ -3502,13 +3590,15 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     ]
     # Restored before the install, under a key that changes with krankerl; GitHub
     # saves it only after a run that passed, which checked it.
-    restore = step_of(workflow, "      - name: Restore krankerl from the cache")
-    assert workflow.index(restore) < workflow.index("      - name: Install krankerl")
-    assert "uses: actions/cache@" in restore
-    assert "path: ${{ runner.temp }}/krankerl\n" in restore
-    assert (
-        "key: krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}\n"
-        in restore
+    names = names_of(job_with(workflow, "Restore krankerl from the cache"))
+    assert names.index("Restore krankerl from the cache") < names.index(
+        "Install krankerl, which builds the package of the app"
+    )
+    restore = step_named(workflow, "Restore krankerl from the cache")
+    assert restore["uses"].startswith("actions/cache@")
+    assert restore["with"]["path"] == "${{ runner.temp }}/krankerl"
+    assert restore["with"]["key"] == (
+        "krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}"
     )
     package = b"the package of krankerl\n"
     temp = tmp_path / "temp"
@@ -3829,42 +3919,41 @@ def test_a_failed_check_of_the_types_leaves_no_canary_running(
 
 def test_code_scanning_shows_the_paths_of_the_taint_analysis() -> None:
     workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
-    assert "\npermissions:\n  contents: read\n\n" in workflow
-    check = job_alone(workflow, "check")
-    keep = step_of(check, "      - name: Keep the report of the taint analysis")
-    assert "        id: taint\n" in keep
+    parsed = parse(workflow)
+    assert parsed["permissions"] == {"contents": "read"}
+    check = job_in(parsed, "check")
+    keep = step_in(check, "Keep the report of the taint analysis")
+    assert keep["id"] == "taint"
     # Also when the analysis found a path, which fails the check.
     assert (
-        "        if: always() && hashFiles('build/psalm-taint.sarif') != ''\n" in keep
+        condition_of(keep) == "always() && hashFiles('build/psalm-taint.sarif') != ''"
     )
-    assert "          path: build/psalm-taint.sarif\n" in keep
-    assert "    outputs:\n" in check
-    assert "      taint: ${{ steps.taint.outcome }}\n" in check
+    assert keep["with"]["path"] == "build/psalm-taint.sarif"
+    assert check["outputs"] == {"taint": "${{ steps.taint.outcome }}"}
     # The job that runs the tools of Composer and the code of a pull request can't
     # write alerts; the one that uploads them runs no code of the app.
-    assert "security-events" not in check
-    report = job_alone(workflow, "taint-report")
-    assert "    name: taint report (php)\n" in report
-    assert "    needs: check\n" in report
+    assert "permissions" not in check
+    report = job_in(parsed, "taint-report")
+    assert report["name"] == "taint report (php)"
+    assert report["needs"] == "check"
     assert condition_of(report) == (
         "!cancelled() && needs.check.outputs.taint == 'success' &&"
         " (github.event_name != 'pull_request' ||"
         " github.event.pull_request.head.repo.full_name == github.repository)"
     )
-    assert "    permissions:\n      contents: read\n      security-events: write\n" in (
-        report
-    )
+    assert report["permissions"] == {"contents": "read", "security-events": "write"}
     for code in ("composer", "scripts/check.sh", "vendor/bin"):
-        assert code not in report, code
-    assert "          persist-credentials: false\n" in report
-    upload = step_of(report, "      - name: Upload the paths to code scanning")
-    assert "        uses: github/codeql-action/upload-sarif@" in upload
-    assert (
-        "          sarif_file: ${{ runner.temp }}/psalm-taint/psalm-taint.sarif\n"
-        in upload
-    )
-    assert "          category: psalm-taint\n" in upload
-    assert report.endswith(explain_step("taint report (php)"))
+        assert code not in values_of(report), code
+    [checkout] = steps_using(report, "actions/checkout")
+    assert checkout["with"] == {"persist-credentials": False}
+    upload = step_in(report, "Upload the paths to code scanning")
+    assert upload["uses"].startswith("github/codeql-action/upload-sarif@")
+    assert upload["with"] == {
+        "sarif_file": "${{ runner.temp }}/psalm-taint/psalm-taint.sarif",
+        "category": "psalm-taint",
+    }
+    assert report["steps"][-1] == explain_step("taint report (php)")
+    explained_under_their_comments(workflow)
 
 
 def test_psalm_reads_ahead_only_the_packages_that_composer_cannot_load(
@@ -4112,25 +4201,26 @@ def test_the_code_of_a_nextcloud_app_parses_and_installs_on_its_oldest_php(
 
 def test_the_ci_of_a_nextcloud_app_keeps_the_packages_of_composer() -> None:
     workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
-    find = step_of(workflow, "      - name: Find the cache of Composer")
-    restore = step_of(
-        workflow, "      - name: Restore the packages of Composer from the cache"
-    )
-    install = workflow.index("      - name: Install the locked tools\n")
-    assert workflow.index(find) < workflow.index(restore) < install
-    assert "        id: composer\n" in find
+    job = job_with(workflow, "Find the cache of Composer")
+    find = step_in(job, "Find the cache of Composer")
+    restore = step_in(job, "Restore the packages of Composer from the cache")
+    names = names_of(job)
     assert (
-        '        run: echo "files=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"\n'
-        in find
+        names.index(find["name"])
+        < names.index(restore["name"])
+        < names.index("Install the locked tools")
     )
-    assert "        uses: actions/cache@" in restore
-    assert "          path: ${{ steps.composer.outputs.files }}\n" in restore
-    # A changed lock file starts from the packages of the one before.
-    assert (
-        "          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}\n"
-        in restore
+    assert find["id"] == "composer"
+    assert find["run"] == (
+        'echo "files=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"'
     )
-    assert "          restore-keys: composer-${{ runner.os }}-\n" in restore
+    assert restore["uses"].startswith("actions/cache@")
+    assert restore["with"] == {
+        "path": "${{ steps.composer.outputs.files }}",
+        # A changed lock file starts from the packages of the one before.
+        "key": "composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}",
+        "restore-keys": "composer-${{ runner.os }}-",
+    }
 
 
 # The two PHPs of the CI of a Nextcloud app, in the CI and in the Variants, which run
@@ -4141,38 +4231,50 @@ PHP_WORKFLOWS = [
 ]
 
 
-@pytest.mark.parametrize(("name", "condition"), PHP_WORKFLOWS)
+@pytest.mark.parametrize(("name", "guard"), PHP_WORKFLOWS)
 def test_the_tools_of_a_nextcloud_app_run_on_the_php_of_its_composer_json(
-    name: str, condition: str
+    name: str, guard: str
 ) -> None:
     workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
-    find = step_of(
-        workflow,
-        "      - name: Find the PHP of the tools and the oldest PHP of the app",
-    )
-    oldest = step_of(workflow, "      - name: Set up the oldest PHP of the app")
-    tools = step_of(workflow, "      - name: Set up the PHP of the tools")
+    job = job_with(workflow, "Find the PHP of the tools and the oldest PHP of the app")
+    find = step_in(job, "Find the PHP of the tools and the oldest PHP of the app")
+    oldest = step_in(job, "Set up the oldest PHP of the app")
+    tools = step_in(job, "Set up the PHP of the tools")
     # The oldest PHP first and that of the tools last, which php runs then; both
     # before Composer installs the tools.
-    assert workflow.index(find) < workflow.index(oldest) < workflow.index(tools)
-    assert workflow.index(tools) < workflow.index("composer install")
-    assert "        id: php\n" in find
+    names = names_of(job)
     assert (
-        f"        if: {condition}steps.php.outputs.oldest != steps.php.outputs.tools\n"
-        in oldest
+        names.index(find["name"])
+        < names.index(oldest["name"])
+        < names.index(tools["name"])
     )
-    assert "          php-version: ${{ steps.php.outputs.oldest }}\n" in oldest
-    assert "          coverage: none\n" in oldest
-    assert "          php-version: ${{ steps.php.outputs.tools }}\n" in tools
-    assert "          coverage: pcov\n" in tools
-    assert "          tools: composer:v2\n" in tools
+    installs = [
+        index
+        for index, step in enumerate(job["steps"])
+        if "composer install" in step.get("run", "")
+    ]
+    assert installs
+    assert names.index(tools["name"]) < installs[0]
+    assert find["id"] == "php"
+    assert condition_of(oldest) == (
+        f"{guard}steps.php.outputs.oldest != steps.php.outputs.tools"
+    )
+    assert oldest["with"]["php-version"] == "${{ steps.php.outputs.oldest }}"
+    assert oldest["with"]["coverage"] == "none"
+    assert tools["with"]["php-version"] == "${{ steps.php.outputs.tools }}"
+    assert tools["with"]["coverage"] == "pcov"
+    assert tools["with"]["tools"] == "composer:v2"
     # The same extensions on both, which the packages of the app may need.
-    extensions = "          extensions: dom, libxml, mbstring, xml\n"
-    assert extensions in oldest
-    assert extensions in tools
+    assert oldest["with"]["extensions"] == "dom, libxml, mbstring, xml"
+    assert tools["with"]["extensions"] == oldest["with"]["extensions"]
     # No PHP of its own beside the two that the app names.
-    assert workflow.count("uses: shivammathur/setup-php@") == 2
-    assert 'php-version: "' not in workflow
+    setups = [
+        step
+        for each in parse(workflow)["jobs"].values()
+        for step in steps_using(each, "shivammathur/setup-php")
+    ]
+    assert len(setups) == 2
+    assert all(step["with"]["php-version"].startswith("${{") for step in setups)
     # The same versions in the CI and in the Variants.
     ci = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
     assert script_of(
@@ -4242,14 +4344,18 @@ def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
     projects: dict[str, Path],
 ) -> None:
     workflow = (ROOT / ".github/workflows/ci-php.yml").read_text(encoding="utf-8")
-    restore = step_of(workflow, "      - name: Restore the cache of php-cs-fixer")
-    assert workflow.index(restore) < workflow.index("      - name: Run the checks\n")
-    assert "        uses: actions/cache@" in restore
-    assert "          path: .php-cs-fixer.cache\n" in restore
+    job = job_with(workflow, "Restore the cache of php-cs-fixer")
+    restore = step_in(job, "Restore the cache of php-cs-fixer")
+    names = names_of(job)
+    assert names.index(restore["name"]) < names.index("Run the checks")
+    assert restore["uses"].startswith("actions/cache@")
     tools = "${{ hashFiles('composer.lock', '.php-cs-fixer.dist.php') }}"
-    # Every run saves what it checked; the next one starts from the latest.
-    assert f"          key: php-cs-fixer-{tools}-${{{{ github.sha }}}}\n" in restore
-    assert f"          restore-keys: php-cs-fixer-{tools}-\n" in restore
+    assert restore["with"] == {
+        "path": ".php-cs-fixer.cache",
+        # Every run saves what it checked; the next one starts from the latest.
+        "key": f"php-cs-fixer-{tools}-${{{{ github.sha }}}}",
+        "restore-keys": f"php-cs-fixer-{tools}-",
+    }
     # php-cs-fixer keeps its cache there, as the configuration of the app leaves it,
     # and Git ignores it.
     project = projects["nextcloud-app"]
@@ -4380,40 +4486,31 @@ def test_a_dry_run_of_the_upstream_bot_shows_its_pull_request_and_changes_nothin
         ],
     ):
         subprocess.run(["git", *command], cwd=work, check=True)
-    script = script_of(
-        (ROOT / ".github/workflows/upstream.yml").read_text(encoding="utf-8"),
-        "Raise max-version to the newest major version of Nextcloud",
+    latest = "api repos/nextcloud/server/releases/latest --jq .tag_name"
+    pulls = (
+        f"pr list --head upstream/nextcloud-{newest} --state open --json number"
+        " --jq .[].number"
     )
 
-    result, calls = run_workflow_step(
+    result = workflow_steps.run_step(
         tmp_path,
-        script,
-        work,
-        {
-            # Only what a dry run may ask; it writes nothing to GitHub.
-            "gh": textwrap.dedent(
-                f"""\
-                case "$*" in
-                  "api repos/nextcloud/server/releases/latest --jq .tag_name") echo v{newest}.0.1 ;;
-                  "pr list --head upstream/nextcloud-{newest} --state open --json number --jq .[].number") ;;
-                  *) exit 1 ;;
-                esac
-                """
-            ),
-            "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+        "upstream.yml",
+        "nextcloud",
+        "Raise max-version to the newest major version of Nextcloud",
+        # Only what a dry run may ask; it writes nothing to GitHub.
+        answers=[exact(latest, f"v{newest}.0.1\n"), exact(pulls)],
+        env={
+            "GH_TOKEN": "token",
+            "GH_REPO": "Someone/app",
+            "AUTOMERGE": "",
+            "DRY_RUN": "true",
         },
-        GH_TOKEN="token",
-        GH_REPO="Someone/app",
-        AUTOMERGE="",
-        DRY_RUN="true",
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        workspace=work,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert [call for call in calls if call.startswith("gh ")] == [
-        "gh api repos/nextcloud/server/releases/latest --jq .tag_name",
-        f"gh pr list --head upstream/nextcloud-{newest} --state open --json number"
-        " --jq .[].number",
-    ]
+    assert result.commands == [latest, pulls]
     assert (
         f'A dry run: the pull request "feat: support Nextcloud {newest}" from the'
         f" branch upstream/nextcloud-{newest} would make this change."
@@ -5141,9 +5238,10 @@ def test_every_repository_proposes_its_answers_of_openssf_best_practices(
     assert "GitHub Discussions" in answers["discussion_justification"]
     # What osps_ac_04_01 says: every workflow starts with read-only permissions or none.
     for name, workflow in workflows(project).items():
-        top = re.search(r"^permissions:(.*(?:\n  .*)*)", workflow, re.MULTILINE)
-        assert top, name
-        assert re.fullmatch(r" (?:\{\}|read-all)|(?:\n  [\w-]+: read)+", top[1]), name
+        top = parse(workflow).get("permissions")
+        assert top in ({}, "read-all") or (
+            isinstance(top, dict) and set(top.values()) == {"read"}
+        ), name
 
 
 def test_the_answers_of_openssf_best_practices_follow_those_of_copier(
@@ -5384,33 +5482,33 @@ def test_dependabot_merges_as_the_release_app(
     # pull_request_target runs on main, the only branch that may use the environment
     # with the private key of the app, and the job checks out nothing.
     assert set(triggers(text)) == {"pull_request_target"}
-    job = job_of(text, "auto-merge")
-    assert "    environment:\n      name: release\n      deployment: false\n" in job
-    assert "actions/checkout" not in text
-    assert text.count("run: ") == 2
-    app = job.split("      - name: Create a token of the release app\n", 1)[1]
-    app = app.split("\n      - name: ", 1)[0]
+    job = job_in(text, "auto-merge")
+    assert job["environment"] == {"name": "release", "deployment": False}
+    assert len(parse(text)["jobs"]) == 1
+    assert not steps_using(job, "actions/checkout")
+    assert len([step for step in job["steps"] if "run" in step]) == 2
+    app = step_in(job, "Create a token of the release app")
     # A token that fails still lets the job's token turn auto-merge on, and says so.
-    assert "        continue-on-error: true\n" in app
-    parts = job.split("      - name: Explain a token of the release app that failed\n")
-    assert len(parts) == 2
-    explain = parts[1].split("\n      - name: ", 1)[0]
-    assert "        if: steps.app.outcome == 'failure'\n" in explain
-    assert "::warning title=Release app token failed::" in explain
-    assert '>> "$GITHUB_STEP_SUMMARY"' in explain
-    assert "vars.RELEASE_AUTOMATION_CLIENT_ID != ''" in app
-    assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in app
-    assert "private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}" in app
-    assert re.findall(r"permission-([\w-]+): (\w+)", app) == [
-        ("contents", "write"),
-        ("pull-requests", "write"),
-    ]
-    merge = job.split("      - name: Enable automatic squash merge", 1)[1]
+    assert app["continue-on-error"] is True
+    explain = step_in(job, "Explain a token of the release app that failed")
+    assert condition_of(explain) == "steps.app.outcome == 'failure'"
+    assert "::warning title=Release app token failed::" in explain["run"]
+    assert '>> "$GITHUB_STEP_SUMMARY"' in explain["run"]
+    assert condition_of(app).startswith("vars.RELEASE_AUTOMATION_CLIENT_ID != ''")
+    assert app["with"]["client-id"] == "${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}"
+    assert app["with"]["private-key"] == "${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}"
+    assert {
+        key: value
+        for key, value in app["with"].items()
+        if key.startswith("permission-")
+    } == {"permission-contents": "write", "permission-pull-requests": "write"}
+    merge = step_in(job, "Enable automatic squash merge for patch and minor updates")
     # Without the app, the job's own token still turns auto-merge on.
-    assert "GH_TOKEN: ${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}" in merge
-    assert (
-        'run: gh pr merge --auto --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"'
-        in merge
+    assert merge["env"]["GH_TOKEN"] == (
+        "${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}"
+    )
+    assert merge["run"] == (
+        'gh pr merge --auto --squash --match-head-commit "$PR_HEAD_SHA" "$PR_URL"'
     )
     zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
     dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
@@ -5424,8 +5522,10 @@ def test_the_release_bot_keeps_its_pull_request_current_with_every_merge() -> No
     text = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert triggers(text)["push"] == ["    branches: [main]"]
     assert triggers(text)["schedule"] == ['    - cron: "25 5 * * *"']
-    rebuild = text.split("      - name: Have the release pull request rebuilt", 1)[1]
-    assert rebuild.split("\n", 2)[1] == "        if: steps.app.outputs.token != ''"
+    rebuild = step_named(
+        text, "Have the release pull request rebuilt on the current main"
+    )
+    assert condition_of(rebuild) == "steps.app.outputs.token != ''"
     assert "skip-github-pull-request" not in text
 
 
@@ -6085,10 +6185,10 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
     tmp_path: Path, log: list[dict[str, object]], status: int, errors: list[str]
 ) -> None:
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
-    job = job_of(workflow, "validate")
-    step = job[job.index("      - name: Read every file of the dependencies") :]
-    run = "        run: |\n"
-    script = textwrap.dedent(step[step.index(run) + len(run) :])
+    script = script_of(
+        job_in(workflow, "validate"),
+        "Read every file of the dependencies as Renovate does",
+    )
     # A checkout with two lock files of pip-compile, as GitHub leaves it.
     checkout = tmp_path / "checkout"
     for name in ("requirements.txt", "stacks/demo/requirements.txt", "notes.txt"):
@@ -6217,21 +6317,14 @@ def test_the_renovate_rules_read_the_committed_rules_without_their_presets(
 
 def test_the_renovate_rules_run_for_every_change_of_a_lock_file() -> None:
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
-    events = workflow[
-        workflow.index("\n  pull_request:\n") : workflow.index("\n  workflow_dispatch:")
-        + 1
-    ]
-    for path in (
+    assert parse(workflow)["on"]["pull_request"]["paths"] == [
         ".github/renovate*.json5",
         ".github/workflows/renovate.yml",
-        '"**/requirements*.txt"',
-        '"**/requirements*.in"',
-    ):
-        assert f"      - {path}\n" in events, path
-    # The step lists the lock files as Renovate finds them.
-    step = workflow[
-        workflow.index("      - name: Read every file of the dependencies") :
+        "**/requirements*.txt",
+        "**/requirements*.in",
     ]
+    # The step lists the lock files as Renovate finds them.
+    step = script_of(workflow, "Read every file of the dependencies as Renovate does")
     pattern = re.search(r"grep -E '([^']+)'", step)
     assert pattern
     rules = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
@@ -6242,16 +6335,16 @@ def test_a_pull_request_checks_the_renovate_rules_without_waiting_for_the_bot() 
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
     # Renovate's run opens several pull requests of lock files at once: a group of
     # the whole workflow would let them wait for the bot and cancel each other.
-    assert not re.search(r"^concurrency:", workflow, re.M)
-    assert (
-        "    concurrency:\n"
-        "      group: renovate-rules-${{ github.event.pull_request.number }}\n"
-        "      cancel-in-progress: true\n"
-    ) in job_of(workflow, "validate")
+    assert "concurrency" not in parse(workflow)
+    assert job_in(workflow, "validate")["concurrency"] == {
+        "group": "renovate-rules-${{ github.event.pull_request.number }}",
+        "cancel-in-progress": True,
+    }
     # One run of the bot at a time, and a waiting one isn't cancelled by a check.
-    assert (
-        "    concurrency:\n      group: renovate\n      cancel-in-progress: false\n"
-    ) in job_of(workflow, "renovate")
+    assert job_in(workflow, "renovate")["concurrency"] == {
+        "group": "renovate",
+        "cancel-in-progress": False,
+    }
 
 
 def test_renovate_filters_composer_by_the_php_of_the_stack() -> None:
@@ -6362,20 +6455,22 @@ def test_every_release_of_the_blueprint_rolls_out_one_repository_at_a_time(
     projects: dict[str, Path],
 ) -> None:
     rollout = (ROOT / ".github/workflows/rollout.yml").read_text(encoding="utf-8")
-    plan = rollout[rollout.index("\n  plan:\n") : rollout.index("\n  rollout:\n")]
-    job = rollout[rollout.index("\n  rollout:\n") :]
+    parsed = parse(rollout)
+    plan = job_in(parsed, "plan")
+    job = job_in(parsed, "rollout")
     # After a successful run of the Release workflow on main, and only in the blueprint.
-    assert "workflows: [Release]" in rollout
-    assert "branches: [main]" in rollout
-    assert "github.event.workflow_run.conclusion == 'success'" in plan
-    assert "github.repository == 'Dennis-Otto/repo-blueprint'" in plan
+    assert parsed["on"]["workflow_run"]["workflows"] == ["Release"]
+    assert parsed["on"]["workflow_run"]["branches"] == ["main"]
+    assert "github.event.workflow_run.conclusion == 'success'" in values_of(plan)
+    assert "github.repository == 'Dennis-Otto/repo-blueprint'" in condition_of(plan)
     # A run of any event can make a release: for a push only the merge of a release
     # pull request, whose title the merge commit starts with, so that the merges of
     # every other pull request start no runner.
-    assert "github.event.workflow_run.event != 'push' ||" in plan
+    assert "github.event.workflow_run.event != 'push' ||" in condition_of(plan)
     prefix = "chore: release "
     assert (
-        f"startsWith(github.event.workflow_run.head_commit.message, '{prefix}')" in plan
+        f"startsWith(github.event.workflow_run.head_commit.message, '{prefix}')"
+        in condition_of(plan)
     )
     config = json.loads(
         (ROOT / "release-please-config.json").read_text(encoding="utf-8")
@@ -6385,44 +6480,47 @@ def test_every_release_of_the_blueprint_rolls_out_one_repository_at_a_time(
     # Release workflow that makes it public tells.
     assert "HEAD_SHA" not in rollout
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert "    name: publish the release\n" in release
-    assert 'select(.name == "publish the release")' in plan
+    assert "publish the release" in names_of_jobs(release)
+    assert 'select(.name == "publish the release")' in values_of(plan)
     # One repository after the other, every one of them, each with a token of its own
     # that can only start workflows and read; 15 looks at most before the next one.
-    assert "      max-parallel: 1\n      fail-fast: false\n" in job
-    assert "repository: ${{ fromJSON(needs.plan.outputs.repositories) }}" in job
-    assert "repositories: ${{ matrix.repository }}" in job
-    permissions = re.findall(r"^\s+permission-([\w-]+): (\w+)$", plan, re.M)
-    assert permissions == [("metadata", "read")]
-    permissions = re.findall(r"^\s+permission-([\w-]+): (\w+)$", job, re.M)
-    assert permissions == [
-        ("actions", "write"),
-        ("checks", "read"),
-        ("contents", "read"),
-        ("pull-requests", "read"),
-        ("statuses", "read"),
-    ]
-    assert "looks=15\n" in job
-    assert "    timeout-minutes: 25\n" in job
-    assert "gh workflow run blueprint-update.yml" in job
+    assert job["strategy"] == {
+        "max-parallel": 1,
+        "fail-fast": False,
+        "matrix": {"repository": "${{ fromJSON(needs.plan.outputs.repositories) }}"},
+    }
+    [token] = steps_using(job, "actions/create-github-app-token")
+    assert token["with"]["repositories"] == "${{ matrix.repository }}"
+    assert app_permissions(plan) == {"metadata": "read"}
+    assert app_permissions(job) == {
+        "actions": "write",
+        "checks": "read",
+        "contents": "read",
+        "pull-requests": "read",
+        "statuses": "read",
+    }
+    assert "looks=15\n" in values_of(job)
+    assert job["timeout-minutes"] == 25
+    assert "gh workflow run blueprint-update.yml" in values_of(job)
     # One rollout at a time in each repository, never for the whole workflow: GitHub
     # starts a Rollout run after every run of the Release workflow, and a group of the
     # workflow would let one that rolls nothing out cancel the waiting rollout of a
     # release. The group is on the job that a run without a release skips.
-    assert not re.search(r"^concurrency:", rollout, re.M)
-    assert re.findall(r"^\s+concurrency:$", rollout, re.M) == ["    concurrency:"]
-    assert (
-        "    concurrency:\n"
-        "      group: rollout-${{ matrix.repository }}\n"
-        "      cancel-in-progress: false\n"
-    ) in job
-    assert "    if: needs.plan.outputs.repositories != ''\n" in job
+    assert "concurrency" not in parsed
+    assert [key for key, each in parsed["jobs"].items() if "concurrency" in each] == [
+        "rollout"
+    ]
+    assert job["concurrency"] == {
+        "group": "rollout-${{ matrix.repository }}",
+        "cancel-in-progress": False,
+    }
+    assert condition_of(job) == "needs.plan.outputs.repositories != ''"
     zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
     assert "      - rollout.yml\n" in zizmor
     # The bot it starts can be started by hand; a project has no rollout of its own.
     for project in projects.values():
         update = project / ".github/workflows/blueprint-update.yml"
-        assert "  workflow_dispatch:\n" in update.read_text(encoding="utf-8")
+        assert "workflow_dispatch" in parse(update.read_text(encoding="utf-8"))["on"]
         assert not (project / ".github/workflows/rollout.yml").exists()
 
 
@@ -6544,59 +6642,44 @@ def test_the_blueprint_bot_keeps_one_pull_request(
     assert notes.stdout == "#### Features\n\n- Dark mode (Owner/blueprint#7)."
 
 
-def run_the_release_step(tmp_path: Path, source: str) -> tuple[int, str, str]:
-    """The step of the blueprint bot that finds the release to update to, with a gh
-    that knows the releases of the blueprint and of a fork, and their names as GitHub
-    spells them."""
-    text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
-    step = next(step for step in text.split("\n      - ") if "gh release view" in step)
-    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    (tmp_path / ".copier-answers.yml").write_text(
-        f"_commit: v1.0.0\n_src_path: {source}\n", encoding="utf-8", newline="\n"
+# The blueprints that GitHub knows, by their names as GitHub spells them, which it
+# finds in any case, and the latest release of each.
+BLUEPRINTS = {
+    "Dennis-Otto/repo-blueprint": "v1.2.0",
+    "Someone/blueprint": "v0.3.0",
+    "Someone/new": "",
+}
+
+
+def run_the_release_step(tmp_path: Path, source: str) -> workflow_steps.StepResult:
+    """The step of the blueprint bot that finds the release to update to, with the
+    fake gh, which knows the releases of the blueprint and of a fork, and their names
+    as GitHub spells them."""
+    answers = [
+        answer
+        for name, tag in BLUEPRINTS.items()
+        for answer in (
+            Answer(rf"(?i)api repos/{re.escape(name)} --jq \.full_name", f"{name}\n"),
+            exact(
+                f"release view --repo {name} --json tagName --jq .tagName",
+                f"{tag}\n" if tag else "",
+            ),
+        )
+    ]
+    not_found = Answer(
+        r"api repos/\S+ --jq \.full_name",
+        '{"message":"Not Found","status":"404"}\n',
+        "gh: Not Found (HTTP 404)\n",
+        1,
     )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-case "$*" in
-  "api repos/"*" --jq .full_name")
-    name="${2#repos/}"
-    case "${name,,}" in
-      dennis-otto/repo-blueprint) echo Dennis-Otto/repo-blueprint ;;
-      someone/blueprint) echo Someone/blueprint ;;
-      someone/new) echo Someone/new ;;
-      *) echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
-    esac
-    ;;
-  "release view --repo Dennis-Otto/repo-blueprint --json tagName --jq .tagName") echo v1.2.0 ;;
-  "release view --repo Someone/blueprint --json tagName --jq .tagName") echo v0.3.0 ;;
-  "release view --repo Someone/new --json tagName --jq .tagName") ;;
-  *) echo "unexpected: gh $*" >&2; exit 1 ;;
-esac
-""",
-        encoding="utf-8",
-        newline="\n",
+    return workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        "Find the latest published release of the blueprint",
+        answers=[*answers, not_found],
+        files={".copier-answers.yml": f"_commit: v1.0.0\n_src_path: {source}\n"},
     )
-    gh.chmod(0o755)
-    output = tmp_path / "output"
-    output.touch()
-    environment = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "GITHUB_OUTPUT": str(output),
-    }
-    assert BASH
-    result = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
-    return result.returncode, output.read_text(encoding="utf-8"), result.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -6605,28 +6688,25 @@ esac
     [
         (
             "https://github.com/Dennis-Otto/repo-blueprint.git",
-            "source=Dennis-Otto/repo-blueprint\ntag=v1.2.0\n",
+            "Dennis-Otto/repo-blueprint",
         ),
         # A repository made from a fork updates to the fork's releases, whose tags
         # the fork has.
-        ("gh:Someone/blueprint", "source=Someone/blueprint\ntag=v0.3.0\n"),
-        (
-            "https://github.com/Someone/blueprint",
-            "source=Someone/blueprint\ntag=v0.3.0\n",
-        ),
-        (
-            "git@github.com:Someone/blueprint.git",
-            "source=Someone/blueprint\ntag=v0.3.0\n",
-        ),
+        ("gh:Someone/blueprint", "Someone/blueprint"),
+        ("https://github.com/Someone/blueprint", "Someone/blueprint"),
+        ("git@github.com:Someone/blueprint.git", "Someone/blueprint"),
         # GitHub takes the name in any case, the signature of a tag only as GitHub
         # spells it.
-        ("gh:someone/BLUEPRINT", "source=Someone/blueprint\ntag=v0.3.0\n"),
+        ("gh:someone/BLUEPRINT", "Someone/blueprint"),
     ],
 )
 def test_the_blueprint_bot_updates_to_the_release_of_its_source(
     tmp_path: Path, source: str, output: str
 ) -> None:
-    assert run_the_release_step(tmp_path, source)[:2] == (0, output)
+    done = run_the_release_step(tmp_path, source)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.outputs == {"source": output, "tag": BLUEPRINTS[output]}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -6643,23 +6723,26 @@ def test_the_blueprint_bot_updates_to_the_release_of_its_source(
 def test_the_blueprint_bot_updates_only_from_a_blueprint_on_github(
     tmp_path: Path, source: str
 ) -> None:
-    code, output, stdout = run_the_release_step(tmp_path, source)
+    done = run_the_release_step(tmp_path, source)
 
-    assert code == 1
-    assert output == ""
+    assert done.returncode == 1
+    assert done.outputs == {}
+    assert done.calls == []
     assert (
         f"::error::The blueprint {source} is not a repository on GitHub; the bot"
         " updates only to a release that it can verify there."
-    ) in stdout.splitlines()
+    ) in done.stdout.splitlines()
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_blueprint_bot_needs_a_published_release(tmp_path: Path) -> None:
-    code, output, stdout = run_the_release_step(tmp_path, "gh:Someone/new")
+    done = run_the_release_step(tmp_path, "gh:Someone/new")
 
-    assert code == 1
-    assert output == ""
-    assert "::error::The blueprint Someone/new has no published release" in stdout
+    assert done.returncode == 1
+    assert done.outputs == {}
+    assert "::error::The blueprint Someone/new has no published release" in (
+        done.stdout
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -6670,38 +6753,49 @@ def test_the_blueprint_bot_verifies_the_release_before_it_updates(
     text = (project / ".github/workflows/blueprint-update.yml").read_text(
         encoding="utf-8"
     )
-    steps = text.split("\n      - ")
-    names = [step.split("\n", 1)[0] for step in steps]
-    release = names.index("name: Find the latest published release of the blueprint")
-    verify = names.index("name: Verify the release before updating to it")
-    update = names.index("name: Update to the latest release of the blueprint")
+    job = job_in(text, "update")
+    steps = job["steps"]
+    names = names_of(job)
+    release = names.index("Find the latest published release of the blueprint")
+    verify = names.index("Verify the release before updating to it")
+    update = names.index("Update to the latest release of the blueprint")
     # Between finding the release and the update, and nothing renders before it.
     assert release < verify < update
-    assert not any("copier update" in step for step in steps[1 : verify + 1])
+    assert not any("copier update" in values_of(step) for step in steps[: verify + 1])
     step = steps[verify]
-    assert "SOURCE: ${{ steps.release.outputs.source }}" in step
-    assert "TAG: ${{ steps.release.outputs.tag }}" in step
     # The job's own token reads the public blueprint; the step needs no secret.
-    assert "GH_TOKEN: ${{ github.token }}" in step
-    assert "secrets." not in step
-    assert 'ask "repos/$SOURCE/releases/tags/$TAG" --jq .immutable' in step
-    assert 'ask "repos/$SOURCE/compare/$commit...main" --jq .status' in step
+    assert step["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "SOURCE": "${{ steps.release.outputs.source }}",
+        "TAG": "${{ steps.release.outputs.tag }}",
+    }
+    script = step["run"]
+    assert "secrets." not in script
+    assert 'ask "repos/$SOURCE/releases/tags/$TAG" --jq .immutable' in script
+    assert 'ask "repos/$SOURCE/compare/$commit...main" --jq .status' in script
     # Not a commit before the version that the repository has.
-    assert "old=\"$(sed -n 's/^_commit: *//p' .copier-answers.yml)\"" in step
-    assert 'since="$(ask "repos/$SOURCE/compare/$old...$commit" --jq .status)"' in step
+    assert "old=\"$(sed -n 's/^_commit: *//p' .copier-answers.yml)\"" in script
+    assert 'since="$(ask "repos/$SOURCE/compare/$old...$commit" --jq .status)"' in (
+        script
+    )
     # The tag's signature, checked by the script that checks the release tags of the
     # repository itself, with gitsign pinned by version and checksum.
     assert (
         'bash .github/sign-tag.sh verify "$TAG" "$commit" "$SOURCE" || verified=$?'
-        in step
+        in script
     )
     assert (project / ".github/sign-tag.sh").read_text(encoding="utf-8") == (
         ROOT / ".github/sign-tag.sh"
     ).read_text(encoding="utf-8")
     # Copier updates to exactly the tag that was verified.
     assert (
-        'copier update --defaults --conflict inline --vcs-ref "$TAG"' in steps[update]
+        'copier update --defaults --conflict inline --vcs-ref "$TAG"'
+        in steps[update]["run"]
     )
+
+
+# The first question of the verification: whether the release is immutable.
+IMMUTABLE = "api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable"
 
 
 def run_the_verify_step(
@@ -6714,110 +6808,75 @@ def run_the_verify_step(
     since: str = "ahead",
     old: str = "v1.1.0",
     base: str = "v1.1.0",
-) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
-    """The step of the blueprint bot that verifies the release, with a gh that answers
-    for a release of a fork of the blueprint, after failing the first `failures` times
-    as GitHub does now and then, and a sign-tag.sh that only records how it is called
-    and fails where the tag isn't signed, or with 2 where it couldn't check it. The
-    repository has the version `old` of the blueprint, which gh knows as `base` and
-    compares with the release as `since`, or doesn't know where `since` is "missing"."""
-    text = (ROOT / ".github/workflows/blueprint-update.yml").read_text(encoding="utf-8")
-    step = next(
-        step
-        for step in text.split("\n      - ")
-        if step.startswith("name: Verify the release before updating to it")
+) -> workflow_steps.StepResult:
+    """The step of the blueprint bot that verifies the release, with the fake gh
+    answering for a release of a fork of the blueprint, after failing the first
+    `failures` calls as GitHub does now and then, and a sign-tag.sh that only records
+    how it is called and fails where the tag isn't signed, or with 2 where it couldn't
+    check it. The repository has the version `old` of the blueprint, which gh knows as
+    `base` and compares with the release as `since`, or doesn't know where `since` is
+    "missing"."""
+    bad_gateway = Answer(
+        ".*",
+        # As gh does: the body of the error on stdout, even with --jq.
+        '{"message":"Bad Gateway","status":"502"}\n',
+        "gh: Bad Gateway (HTTP 502)\n",
+        1,
+        once=True,
     )
-    script = textwrap.dedent(step.split("        run: |\n", 1)[1])
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    (tmp_path / ".copier-answers.yml").write_text(
-        "# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY\n"
-        + (f"_commit: {old}\n" if old else "")
-        + "_src_path: gh:Someone/blueprint\n",
-        encoding="utf-8",
-        newline="\n",
+    compare = f"api repos/Someone/blueprint/compare/{base}...abc123 --jq .status"
+    answers = [
+        *[bad_gateway] * failures,
+        exact(IMMUTABLE, f"{immutable}\n"),
+        exact("api repos/Someone/blueprint/commits/v1.2.0 --jq .sha", "abc123\n"),
+        exact(
+            "api repos/Someone/blueprint/compare/abc123...main --jq .status",
+            f"{status}\n",
+        ),
+        exact(
+            compare,
+            '{"message":"Not Found","status":"404"}\n',
+            code=1,
+            err="gh: Not Found (HTTP 404)\n",
+        )
+        if since == "missing"
+        else exact(compare, f"{since}\n"),
+    ]
+    return workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        "Verify the release before updating to it",
+        answers=answers,
+        env={
+            "SOURCE": "Someone/blueprint",
+            "TAG": "v1.2.0",
+            "SIGNED": "true" if signed else "false",
+            "UNCHECKED": "true" if unchecked else "false",
+        },
+        # The step waits 10 and 20 seconds between its questions; the test doesn't.
+        stubs={"sleep": workflow_steps.recording("sleep")},
+        files={
+            ".copier-answers.yml": (
+                "# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY\n"
+                + (f"_commit: {old}\n" if old else "")
+                + "_src_path: gh:Someone/blueprint\n"
+            ),
+            ".github/sign-tag.sh": 'echo "sign-tag.sh $*" >> "$STUB_CALLS"\n'
+            '[[ "$UNCHECKED" == true ]] && exit 2\n'
+            '[[ "$SIGNED" == true ]]\n',
+        },
     )
-    (tmp_path / ".github").mkdir()
-    (tmp_path / ".github/sign-tag.sh").write_text(
-        'echo "sign-tag.sh $*" >> "$CALLS"\n'
-        '[[ "$UNCHECKED" == true ]] && exit 2\n'
-        '[[ "$SIGNED" == true ]]\n',
-        encoding="utf-8",
-        newline="\n",
-    )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-echo "gh $*" >> "$CALLS"
-failed=$(grep -c "^HTTP 502" "$CALLS" || true)
-if ((failed < FAILURES)); then
-  echo "HTTP 502" >> "$CALLS"
-  # As gh does: the body of the error on stdout, even with --jq.
-  echo '{"message":"Bad Gateway","status":"502"}'
-  echo "gh: Bad Gateway (HTTP 502)" >&2
-  exit 1
-fi
-case "$*" in
-  "api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable") echo "$IMMUTABLE" ;;
-  "api repos/Someone/blueprint/commits/v1.2.0 --jq .sha") echo abc123 ;;
-  "api repos/Someone/blueprint/compare/abc123...main --jq .status") echo "$STATUS" ;;
-  "api repos/Someone/blueprint/compare/$BASE...abc123 --jq .status")
-    if [[ "$SINCE" == missing ]]; then
-      echo '{"message":"Not Found","status":"404"}'
-      echo "gh: Not Found (HTTP 404)" >&2
-      exit 1
-    fi
-    echo "$SINCE" ;;
-  *) echo "unexpected: gh $*" >&2; exit 1 ;;
-esac
-""",
-        encoding="utf-8",
-        newline="\n",
-    )
-    gh.chmod(0o755)
-    # The step waits 10 and 20 seconds between its questions; the test doesn't.
-    sleep = bin_dir / "sleep"
-    sleep.write_text(
-        '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n',
-        encoding="utf-8",
-        newline="\n",
-    )
-    sleep.chmod(0o755)
-    calls = tmp_path / "calls"
-    summary = tmp_path / "summary"
-    for file in (calls, summary):
-        file.touch()
-    environment = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "STUBS": str(bin_dir),
-        "CALLS": str(calls),
-        "GITHUB_STEP_SUMMARY": str(summary),
-        "SOURCE": "Someone/blueprint",
-        "TAG": "v1.2.0",
-        "IMMUTABLE": immutable,
-        "STATUS": status,
-        "SINCE": since,
-        "BASE": base,
-        "SIGNED": "true" if signed else "false",
-        "UNCHECKED": "true" if unchecked else "false",
-        "FAILURES": str(failures),
-    }
-    # As GitHub runs a step: bash -e.
-    result = subprocess.run(
-        in_bash("-e", "step.sh"),
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
-    return (
-        result,
-        calls.read_text(encoding="utf-8").splitlines(),
-        summary.read_text(encoding="utf-8"),
-    )
+
+
+def signed_by(result: workflow_steps.StepResult) -> list[str]:
+    """The calls of sign-tag.sh of a step."""
+    return [call for call in result.stubbed if call.startswith("sign-tag.sh ")]
+
+
+def slept(result: workflow_steps.StepResult) -> list[str]:
+    """The pauses of a step, which a stub of sleep only notes."""
+    return [call for call in result.stubbed if call.startswith("sleep ")]
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -6836,22 +6895,23 @@ esac
 def test_a_signed_immutable_release_on_main_passes(
     tmp_path: Path, status: str, since: str, old: str, base: str
 ) -> None:
-    result, calls, summary = run_the_verify_step(
+    result = run_the_verify_step(
         tmp_path, "true", status, signed=True, since=since, old=old, base=base
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     # Compared with the version that the repository has.
     assert (
-        f"gh api repos/Someone/blueprint/compare/{base}...abc123 --jq .status" in calls
+        f"api repos/Someone/blueprint/compare/{base}...abc123 --jq .status"
+        in result.commands
     )
     # The signature of the tag, of the release workflow of the blueprint, at the commit
     # that is on its main.
-    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert signed_by(result) == ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"]
     assert (
         "The release v1.2.0 of Someone/blueprint is immutable, on its main, no older"
         f" than {base} and signed by its release workflow."
-    ) in summary
+    ) in result.summary
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -6916,9 +6976,8 @@ def test_a_signed_immutable_release_on_main_passes(
 def test_any_other_release_stops_the_update(
     tmp_path: Path, immutable: str, status: str, since: str, signed: bool, error: str
 ) -> None:
-    result, calls, summary = run_the_verify_step(
-        tmp_path, immutable, status, signed, since=since
-    )
+    result = run_the_verify_step(tmp_path, immutable, status, signed, since=since)
+    summary = result.summary
 
     assert result.returncode == 1
     assert error in result.stdout.splitlines()
@@ -6935,86 +6994,80 @@ def test_any_other_release_stops_the_update(
     assert "is immutable, on its main, no older than" not in summary
     # The signature is checked last, only for an immutable release on main that
     # comes after the version of the repository.
-    verified = [call for call in calls if call.startswith("sign-tag.sh ")]
-    assert verified == (
+    assert signed_by(result) == (
         ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"] if not signed else []
     )
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_verification_asks_github_again_after_a_failure(tmp_path: Path) -> None:
-    result, calls, summary = run_the_verify_step(
-        tmp_path, "true", "ahead", signed=True, failures=2
-    )
+    result = run_the_verify_step(tmp_path, "true", "ahead", signed=True, failures=2)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls[:5] == [
-        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
-        "HTTP 502",
+    # The first question three times, the last of which GitHub answers, 10 and 20
+    # seconds apart.
+    assert result.commands[:4] == [IMMUTABLE] * 3 + [
+        "api repos/Someone/blueprint/commits/v1.2.0 --jq .sha"
+    ]
+    assert result.stubbed == [
         "sleep 10",
-        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
-        "HTTP 502",
-    ]
-    assert calls[5:7] == [
         "sleep 20",
-        "gh api repos/Someone/blueprint/releases/tags/v1.2.0 --jq .immutable",
+        "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint",
     ]
-    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
-    assert "is immutable, on its main, no older than v1.1.0 and signed" in summary
+    assert "is immutable, on its main, no older than v1.1.0 and signed" in (
+        result.summary
+    )
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_every_question_gets_its_answer_after_a_failure(tmp_path: Path) -> None:
     # One failure before the first answer, whose body gh prints too.
-    result, calls, summary = run_the_verify_step(
-        tmp_path, "true", "ahead", signed=True, failures=1
-    )
+    result = run_the_verify_step(tmp_path, "true", "ahead", signed=True, failures=1)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "::error::" not in result.stdout
     # The commit, not the body of the error before it, goes into the comparison.
-    assert "gh api repos/Someone/blueprint/compare/abc123...main --jq .status" in calls
-    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
-    assert "is immutable, on its main, no older than v1.1.0 and signed" in summary
+    assert (
+        "api repos/Someone/blueprint/compare/abc123...main --jq .status"
+        in result.commands
+    )
+    assert signed_by(result) == ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"]
+    assert "is immutable, on its main, no older than v1.1.0 and signed" in (
+        result.summary
+    )
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_a_signature_that_could_not_be_checked_fails_but_refuses_nothing(
     tmp_path: Path,
 ) -> None:
-    result, calls, summary = run_the_verify_step(
-        tmp_path, "true", "ahead", signed=True, unchecked=True
-    )
+    result = run_the_verify_step(tmp_path, "true", "ahead", signed=True, unchecked=True)
 
     assert result.returncode == 1
     assert (
         "::error::The signature of the release v1.2.0 of Someone/blueprint could not"
         " be checked; nothing has changed, and the next run checks it again."
     ) in result.stdout.splitlines()
-    assert calls[-1] == "sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"
+    assert signed_by(result) == ["sign-tag.sh verify v1.2.0 abc123 Someone/blueprint"]
     # Not a refusal: gitsign, GitHub or Sigstore didn't answer.
-    assert summary == ""
+    assert result.summary == ""
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_a_github_without_an_answer_fails_the_update_but_refuses_nothing(
     tmp_path: Path,
 ) -> None:
-    result, calls, summary = run_the_verify_step(
-        tmp_path, "true", "ahead", signed=True, failures=3
-    )
+    result = run_the_verify_step(tmp_path, "true", "ahead", signed=True, failures=3)
 
     assert result.returncode == 1
     assert "Bad Gateway" in result.stderr
     assert "::error::" not in result.stdout
-    assert calls.count("HTTP 502") == 3
-    assert [call for call in calls if call.startswith("sleep")] == [
-        "sleep 10",
-        "sleep 20",
-    ]
+    # Three times the first question, which GitHub never answers.
+    assert result.commands == [IMMUTABLE] * 3
+    assert slept(result) == ["sleep 10", "sleep 20"]
     # Not a refusal: GitHub didn't answer, and the next run asks again.
-    assert summary == ""
-    assert not any(call.startswith("sign-tag.sh") for call in calls)
+    assert result.summary == ""
+    assert signed_by(result) == []
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -7022,7 +7075,7 @@ def test_a_version_that_github_doesnt_know_fails_but_refuses_nothing(
     tmp_path: Path,
 ) -> None:
     # The version of the repository isn't in the blueprint, or GitHub doesn't answer.
-    result, calls, summary = run_the_verify_step(
+    result = run_the_verify_step(
         tmp_path, "true", "ahead", signed=True, since="missing"
     )
 
@@ -7034,17 +7087,15 @@ def test_a_version_that_github_doesnt_know_fails_but_refuses_nothing(
     ) in result.stdout.splitlines()
     assert "Not Found" in result.stderr
     # Asked three times, as every question.
-    compare = "gh api repos/Someone/blueprint/compare/v1.1.0...abc123 --jq .status"
-    assert calls.count(compare) == 3
-    assert summary == ""
-    assert not any(call.startswith("sign-tag.sh") for call in calls)
+    compare = "api repos/Someone/blueprint/compare/v1.1.0...abc123 --jq .status"
+    assert result.commands.count(compare) == 3
+    assert result.summary == ""
+    assert signed_by(result) == []
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_answers_without_a_version_fail_but_refuse_nothing(tmp_path: Path) -> None:
-    result, calls, summary = run_the_verify_step(
-        tmp_path, "true", "ahead", signed=True, old=""
-    )
+    result = run_the_verify_step(tmp_path, "true", "ahead", signed=True, old="")
 
     assert result.returncode == 1
     assert (
@@ -7052,9 +7103,9 @@ def test_answers_without_a_version_fail_but_refuse_nothing(tmp_path: Path) -> No
         " this repository has, so the bot can't tell whether v1.2.0 comes after it;"
         " nothing has changed."
     ) in result.stdout.splitlines()
-    assert not any("...abc123" in call for call in calls)
-    assert summary == ""
-    assert not any(call.startswith("sign-tag.sh") for call in calls)
+    assert not any("...abc123" in call for call in result.commands)
+    assert result.summary == ""
+    assert signed_by(result) == []
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -8198,7 +8249,7 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     ]
     assert "    types: [completed]" in events["workflow_run"]
     assert "often hours late" in text
-    job = job_of(text, "update")
+    job = job_in(text, "update")
     condition = condition_of(job)
     assert "github.event.pull_request.head.repo.full_name == github.repository" in (
         condition
@@ -8223,24 +8274,30 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     assert listed
     assert set(json.loads(listed[1])) == OTHER_CHECKS | SCANNER_WORKFLOWS
     # The token reads the checks and the statuses of the line.
-    for permission in ("checks: read", "statuses: read", "contents: write"):
-        assert f"          permission-{permission}\n" in job, permission
+    permissions = app_permissions(job)
+    for permission, access in (
+        ("checks", "read"),
+        ("statuses", "read"),
+        ("contents", "write"),
+    ):
+        assert permissions[permission] == access, permission
     assert (
         """contains(fromJSON('["failure", "timed_out", "startup_failure"]'), """
         "github.event.workflow_run.conclusion)" in condition
     )
     # A group on the job: a run whose job skips, as after checks that passed, would
     # otherwise cancel the run that updates.
-    assert not re.search(r"^concurrency:", text, re.M)
-    assert (
-        "    concurrency:\n      group: update-branches\n      cancel-in-progress: true\n"
-        in job
-    )
+    assert "concurrency" not in parse(text)
+    assert job["concurrency"] == {
+        "group": "update-branches",
+        "cancel-in-progress": True,
+    }
     # It checks out the default branch, without the token, and runs nothing of a pull
     # request: no value of the event reaches a command.
-    assert "persist-credentials: false" in job
-    assert "ref:" not in job
-    run = job[job.index("        run: |") :]
+    [checkout] = steps_using(job, "actions/checkout")
+    assert checkout["with"]["persist-credentials"] is False
+    assert "ref" not in checkout["with"]
+    [run] = [step["run"] for step in job["steps"] if "run" in step]
     assert "${{" not in run
     assert 'next-branch "${only[@]}" | tee -a "$GITHUB_STEP_SUMMARY"' in run
     # A run for auto-merge shows as a check of that pull request, and the bot-health
@@ -8326,9 +8383,9 @@ def watched_after_the_checks(workflow: str) -> set[str]:
     return set(watched[1].split(", "))
 
 
-def after_the_checks_job(name: str) -> str:
-    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    return job_of(after, name)
+def after_the_checks_job(name: str) -> dict[str, Any]:
+    """A job of the bots after the checks, parsed."""
+    return workflow_steps.job("after-checks.yml", name)
 
 
 def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
@@ -8481,19 +8538,12 @@ def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     for job in ("rerun", "report"):
         listed = re.search(
             r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
-            after_the_checks_job(job),
+            condition_of(after_the_checks_job(job)),
         )
         assert listed, job
         assert set(json.loads(listed[1])) == (
             OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
         ), job
-
-
-def job_alone(workflow: str, key: str) -> str:
-    """The text of a job, without the comment that comes before the next job."""
-    start = workflow.index(f"\n  {key}:\n")
-    end = re.compile(r"\n  [#\w-]").search(workflow, start + 1)
-    return workflow[start : end.start() if end else len(workflow)].rstrip("\n") + "\n"
 
 
 EXPLAIN_COMMENT = (
@@ -8502,19 +8552,40 @@ EXPLAIN_COMMENT = (
 )
 
 
-def explain_step(check: str, python: str = "python3") -> str:
-    """The last step of the job of a check: the PR coach explains its failure."""
-    value = f'"{check}"' if " " in check else check
-    return EXPLAIN_COMMENT + (
-        "      - name: Explain the failure\n"
-        "        if: failure()\n"
-        "        env:\n"
-        f"          CHECK: {value}\n"
-        "        run: |\n"
-        "          script=.github/blueprint.py\n"
-        '          [[ -f "$script" ]] || script=blueprint.py\n'
-        f'          {python} "$script" coach explain "$CHECK"\n'
+def explain_step(check: str, python: str = "python3") -> dict[str, Any]:
+    """The last step of the job of a check, parsed: the PR coach explains its
+    failure."""
+    return {
+        "name": "Explain the failure",
+        "if": "failure()",
+        "env": {"CHECK": check},
+        "run": "script=.github/blueprint.py\n"
+        '[[ -f "$script" ]] || script=blueprint.py\n'
+        f'{python} "$script" coach explain "$CHECK"\n',
+    }
+
+
+def comments_before(workflow: str, step: str) -> list[str]:
+    """The comment above each step of this name, in the order of the text of the
+    workflow, where alone its comments are."""
+    return re.findall(
+        rf"((?:^      #.*\n)*)^      - name: {re.escape(step)}\n", workflow, re.M
     )
+
+
+def explained_under_their_comments(workflow: str) -> None:
+    """Each step of the PR coach in a workflow is the last of its job, under the
+    comment that says what the coach does: for the checks of the job, or for the
+    job itself."""
+    explaining = [
+        job["steps"][-1]
+        for job in parse(workflow)["jobs"].values()
+        if job.get("steps") and job["steps"][-1].get("name") == "Explain the failure"
+    ]
+    assert comments_before(workflow, "Explain the failure") == [
+        PARTS_COMMENT if "FAILED" in step["env"] else EXPLAIN_COMMENT
+        for step in explaining
+    ]
 
 
 PARTS_COMMENT = (
@@ -8524,27 +8595,23 @@ PARTS_COMMENT = (
 )
 
 
-def explain_parts_step(check: str, failed: list[tuple[str, str]]) -> str:
-    """The last step of the job of a check that runs several others: the PR coach
-    explains each of them that failed, by its condition and its name."""
-    value = f'"{check}"' if " " in check else check
-    lines = "".join(
-        f"            ${{{{ {condition} && '{name}' || '' }}}}\n"
-        for condition, name in failed
-    )
-    return PARTS_COMMENT + (
-        "      - name: Explain the failure\n"
-        "        if: failure()\n"
-        "        env:\n"
-        f"          CHECK: {value}\n"
-        "          FAILED: |\n"
-        f"{lines}"
-        "        run: |\n"
-        "          script=.github/blueprint.py\n"
-        '          [[ -f "$script" ]] || script=blueprint.py\n'
-        '          mapfile -t parts < <(grep . <<<"$FAILED" || true)\n'
-        '          python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"\n'
-    )
+def explain_parts_step(check: str, failed: list[tuple[str, str]]) -> dict[str, Any]:
+    """The last step of the job of a check that runs several others, parsed: the PR
+    coach explains each of them that failed, by its condition and its name."""
+    return {
+        "name": "Explain the failure",
+        "if": "failure()",
+        "env": {
+            "CHECK": check,
+            "FAILED": "".join(
+                f"${{{{ {found} && '{name}' || '' }}}}\n" for found, name in failed
+            ),
+        },
+        "run": "script=.github/blueprint.py\n"
+        '[[ -f "$script" ]] || script=blueprint.py\n'
+        'mapfile -t parts < <(grep . <<<"$FAILED" || true)\n'
+        'python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"\n',
+    }
 
 
 # The checks that the job of each of these checks runs, in the order of its steps.
@@ -8557,15 +8624,10 @@ PARTS = {
 
 # Only what the PR coach needs, and only after a failure, for a job that checks out
 # nothing else.
-COACH_CHECKOUT = re.compile(
-    r"      - uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n"
-    r"        if: failure\(\)\n"
-    r"        with:\n"
-    r"          persist-credentials: false\n"
-    r"          sparse-checkout: \|\n"
-    r"            \.github\n"
-    r"            blueprint\n"
-)
+COACH_CHECKOUT = {
+    "if": "failure()",
+    "with": {"persist-credentials": False, "sparse-checkout": ".github\nblueprint\n"},
+}
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -8578,63 +8640,65 @@ def test_every_required_check_explains_its_failure(
     )
     jobs = {}
     for text in workflows(root).values():
-        for key in re.findall(r"^  ([\w-]+):\n    name: ", text, re.M):
-            job = job_alone(text, key)
-            name = re.search(r"^    name: (.+)$", job, re.M)
-            assert name
-            jobs[name[1]] = job
+        explained_under_their_comments(text)
+        for job in parse(text)["jobs"].values():
+            if "name" in job:
+                jobs[job["name"]] = job
     explained = Catalog.load(root)
     for check in settings["branch"]["required_checks"]:
         job = jobs[check]
         # The summary and the annotation of the check say how to fix it, those of a
         # check that runs several others for each of them that failed.
-        comment = PARTS_COMMENT if check in PARTS else EXPLAIN_COMMENT
         if check in PARTS:
             failed = re.findall(
-                r"^            \$\{\{ (.+) && '([^']+)' \|\| '' \}\}$", job, re.M
+                r"^\$\{\{ (.+) && '([^']+)' \|\| '' \}\}$",
+                job["steps"][-1]["env"]["FAILED"],
+                re.M,
             )
             assert [name for _, name in failed] == PARTS[check], check
-            assert job.endswith(explain_parts_step(check, failed)), check
-            for condition, name in failed:
+            assert job["steps"][-1] == explain_parts_step(check, failed), check
+            for found, name in failed:
                 assert explained.check(name), name
                 # Each step runs also when one before it failed, so that the check
                 # reports all of them.
-                for step in re.findall(r"steps\.([\w-]+)\.outcome", condition):
-                    assert f"        id: {step}\n" in job, step
+                for step in re.findall(r"steps\.([\w-]+)\.outcome", found):
+                    reported = step_in(job, step)
                     if name != PARTS[check][0]:
-                        assert (
-                            f"        id: {step}\n        if: ${{{{ !cancelled()" in job
-                        )
+                        assert condition_of(reported).startswith("${{ !cancelled()")
         else:
-            assert job.endswith(explain_step(check)), check
-        before = job[: job.index(comment)]
-        checkouts = before.count("actions/checkout@")
-        coach = COACH_CHECKOUT.findall(before)
-        assert checkouts == 1, check
+            assert job["steps"][-1] == explain_step(check), check
+        before = job["steps"][:-1]
+        checkouts = steps_using({"steps": before}, "actions/checkout")
+        assert len(checkouts) == 1, check
+        [checkout] = checkouts
+        assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", checkout["uses"])
         # A job that checks nothing out gets only what the PR coach needs.
-        if coach:
-            assert before.endswith(coach[0])
-            assert before.index("actions/checkout@") > before.index("run: |")
+        if {key: checkout.get(key) for key in ("if", "with")} == COACH_CHECKOUT:
+            assert before[-1] == checkout
+            assert any("run" in step for step in before[:-1])
 
 
 def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    variant = job_alone(variants, "variant")
+    variant = job_in(variants, "variant")
     name = (
         "${{ matrix.start == 'new' && 'variant' || matrix.start }}"
         " (${{ matrix.answers || matrix.kind }})"
     )
-    assert f"    name: {name}\n" in variant
-    assert variant.endswith(explain_step(name))
+    assert variant["name"] == name
+    assert variant["steps"][-1] == explain_step(name)
+    explained_under_their_comments(variants)
     # The scanners of the pull requests, which aren't required, explain theirs too.
     for workflow, check in (("zizmor", "zizmor"), ("links", "links"), ("fuzz", "fuzz")):
         text = (ROOT / f".github/workflows/{workflow}.yml").read_text(encoding="utf-8")
-        assert job_alone(text, check).endswith(explain_step(check)), workflow
+        assert job_in(text, check)["steps"][-1] == explain_step(check), workflow
+        explained_under_their_comments(text)
     # And the checks on Windows, whose runner has python, not python3.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
-    assert job_alone(windows, "check").endswith(
-        explain_step("check (Windows)", "python")
+    assert job_in(windows, "check")["steps"][-1] == explain_step(
+        "check (Windows)", "python"
     )
+    explained_under_their_comments(windows)
 
 
 # The checks that a job of several checks replaces. Their own jobs stay for one
@@ -8658,7 +8722,7 @@ def test_a_job_of_several_checks_replaces_their_jobs_in_the_required_checks(
     required = settings["branch"]["required_checks"]
     names = set()
     for workflow in workflows(root).values():
-        names |= set(re.findall(r"^    name: (.+)$", workflow, re.M))
+        names |= {job.get("name") for job in parse(workflow)["jobs"].values()}
     home_assistant = project == "home-assistant"
     for check, replaced in REPLACED.items():
         if check == "home-assistant" and not home_assistant:
@@ -8672,10 +8736,9 @@ def test_a_job_of_several_checks_replaces_their_jobs_in_the_required_checks(
 
 
 def test_one_job_runs_every_linter_and_reports_each_one() -> None:
-    lint = job_alone(
+    lint = job_in(
         (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "lint"
     )
-    steps = re.split(r"\n(?=      - )", lint)
     after = "${{ !cancelled() && steps.checkout.outcome == 'success'"
     for name in (
         "Lint the workflows",
@@ -8684,50 +8747,56 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
         "Check the issue assistant's set-up",
         "Check the sign-off of every commit",
     ):
-        step = next(step for step in steps if f"- name: {name}\n" in step)
         # Each linter runs also when one before it failed, but not without the files.
-        assert f"        if: {after}" in step, name
+        assert condition_of(step_in(lint, name)).startswith(after), name
     # REUSE runs its image, pinned to a digest, without the action, which builds an
     # image of its own in every run.
-    assert "fsfe/reuse-action" not in lint
-    assert re.search(r"REUSE: fsfe/reuse:[\d.]+@sha256:[0-9a-f]{64}\n", lint)
-    assert "GIT_CONFIG_KEY_0=safe.directory" in lint
+    assert "fsfe/reuse-action" not in values_of(lint)
+    assert re.search(r"^fsfe/reuse:[\d.]+@sha256:[0-9a-f]{64}$", values_of(lint), re.M)
+    assert "GIT_CONFIG_KEY_0=safe.directory" in values_of(lint)
     # The hints at the prose never fail the check.
-    for name in ("Find the changed documents", "Hint at the spelling"):
-        step = next(step for step in steps if f"- name: {name}" in step)
-        assert "        continue-on-error: true\n" in step, name
-    setup = next(step for step in steps if "actions/setup-node@" in step)
-    assert "        continue-on-error: true\n" in setup
+    hints = "Hint at the spelling and the style of the changed documents"
+    for name in ("Find the changed documents", hints):
+        assert step_in(lint, name)["continue-on-error"] is True, name
+    [setup] = steps_using(lint, "actions/setup-node")
+    assert setup["continue-on-error"] is True
     # Markdownlint fixes the head of the pull request after every other linter, as
     # the fixes of lint, and the PR coach explains last.
-    head = lint.index("- name: Check out the head of the pull request for the fixes")
-    assert lint.index("- name: Hint at the spelling") < head
-    assert "steps.markdown.outcome == 'failure'" in lint[head:]
-    assert "          name: fixes-lint\n" in lint
-    assert lint.index("          name: fixes-lint\n") < lint.index(PARTS_COMMENT)
+    names = names_of(lint)
+    head = names.index("Check out the head of the pull request for the fixes")
+    assert names.index(hints) < head
+    assert "steps.markdown.outcome == 'failure'" in values_of(lint["steps"][head:])
+    fixes = [
+        index
+        for index, step in enumerate(lint["steps"])
+        if step.get("with", {}).get("name") == "fixes-lint"
+    ]
+    assert len(fixes) == 1
+    assert fixes[0] < names.index("Explain the failure") == len(names) - 1
     # The sign-off and the changed documents need the history.
-    assert "          fetch-depth: 0\n" in lint
+    assert any(
+        step.get("with", {}).get("fetch-depth") == 0
+        for step in steps_using(lint, "actions/checkout")
+    )
 
 
 def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
     workflow = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
         encoding="utf-8"
     )
-    title = job_alone(workflow, "title")
-    assert (
-        "      - name: Require an entry in the changelog for a change for users\n"
-        in (title)
-    )
-    assert "        id: entry\n        if: ${{ !cancelled() }}\n" in title
-    assert "        id: fragments\n        if: ${{ !cancelled() &&" in title
+    title = job_in(workflow, "title")
+    assert "Require an entry in the changelog for a change for users" in names_of(title)
+    assert condition_of(step_in(title, "entry")) == "${{ !cancelled() }}"
+    assert condition_of(step_in(title, "fragments")).startswith("${{ !cancelled() &&")
     # It reads the files of the pull request through the API and sets its labels.
-    assert "      pull-requests: write\n" in title
+    assert title["permissions"]["pull-requests"] == "write"
     # The job changelog only reports for the rulesets that still require it: it
     # checks nothing out and runs nothing of the pull request.
-    changelog = job_alone(workflow, "changelog")
-    assert "actions/checkout@" not in changelog
-    assert "GH_TOKEN" not in changelog
-    assert changelog.count("      - name: ") == 2
+    changelog = job_in(workflow, "changelog")
+    assert not steps_using(changelog, "actions/checkout")
+    assert "GH_TOKEN" not in values_of(changelog)
+    assert len(changelog["steps"]) == 2
+    assert all("name" in step for step in changelog["steps"])
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -8755,31 +8824,34 @@ def test_one_job_runs_codeql_for_every_language(
 
 def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() -> None:
     job = after_the_checks_job("coach")
-    assert "    name: PR coach\n" in job
+    assert job["name"] == "PR coach"
     assert condition_of(job) == (
         "!github.event.repository.fork && "
         """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
     )
     # One report at a time for each commit, the newest last, and none cancelled.
+    assert job["concurrency"] == {
+        "group": "${{ github.workflow }}-coach-${{ github.event.workflow_run.head_sha }}",
+        "cancel-in-progress": False,
+    }
+    assert job["permissions"] == {
+        "actions": "read",
+        "checks": "read",
+        "contents": "read",
+        "pull-requests": "write",
+    }
+    after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
     assert (
-        "      group: ${{ github.workflow }}-coach-${{ github.event.workflow_run.head_sha }}\n"
-        "      cancel-in-progress: false\n"
-    ) in job
-    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
-    assert permissions.splitlines()[1:] == [
-        "      actions: read # the coverage reports and the website that the checks kept",
-        "      checks: read",
-        "      contents: read",
-        "      pull-requests: write",
-    ]
+        "      actions: read # the coverage reports and the website that the checks kept\n"
+        in after
+    )
     # The default branch, which the run is of, and only blueprint.py with the
     # explanations; nothing of the pull request.
-    checkout = job[job.index("actions/checkout@") : job.index("      - name: Fetch")]
-    assert "ref:" not in checkout
-    assert "persist-credentials: false" in checkout
-    assert (
-        "sparse-checkout: |\n            .github\n            blueprint\n" in checkout
-    )
+    [checkout] = steps_using(job, "actions/checkout")
+    assert checkout["with"] == {
+        "persist-credentials": False,
+        "sparse-checkout": ".github\nblueprint\n",
+    }
     # The values of the event reach the script as variables only.
     fetch = script_of(job, "Fetch the coverage reports of the head and of main")
     script = script_of(job, "Keep the one report of the PR coach up to date")
@@ -8787,11 +8859,18 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     assert '--repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER"' in script
     # The coverage is fetched in every run, also one that a bot started: the bots push
     # to pull requests of people too (update branches, the fix bot, the diagram bot).
-    step = job[job.index("      - name: Fetch the coverage") :]
-    assert "if:" not in step[: step.index("        run: |")]
-    assert "actor.type" not in job
-    assert "SHA: ${{ github.event.workflow_run.head_sha }}" in job
-    assert "NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}" in job
+    step = step_in(job, "Fetch the coverage reports of the head and of main")
+    assert "if" not in step
+    assert "actor.type" not in values_of(job)
+    variables = {
+        name: value
+        for each in job["steps"]
+        for name, value in each.get("env", {}).items()
+    }
+    assert variables["SHA"] == "${{ github.event.workflow_run.head_sha }}"
+    assert variables["NUMBER"] == (
+        "${{ github.event.workflow_run.pull_requests[0].number }}"
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -8859,16 +8938,20 @@ def test_every_project_fixes_what_a_command_can_fix(
     # The check of the project runs the commands of its steps when it fails, on the
     # head of the pull request, and keeps what they fixed before it explains itself.
     ci = (github / "workflows/ci.yml").read_text(encoding="utf-8")
-    check = job_alone(ci, "check")
-    name = re.search(r"^    name: (check \(.+\))$", check, re.M)
-    assert name
-    stack = name[1].removeprefix("check (").removesuffix(")")
-    assert "          fetch-depth: 2\n" in check
-    fix = check.index("      - name: Fix what a command can fix\n")
-    keep = check.index("      - name: Keep the fixes for the fix bot\n")
-    assert fix < keep < check.index("      - name: Explain the failure\n")
-    assert f'          CHECK: "{name[1]}"\n' in check[fix:keep]
-    steps = [step for step, _ in fixers(explained, project, name[1])]
+    check = job_in(ci, "check")
+    name = check["name"]
+    assert re.fullmatch(r"check \(.+\)", name)
+    stack = name.removeprefix("check (").removesuffix(")")
+    assert any(
+        step.get("with", {}).get("fetch-depth") == 2
+        for step in steps_using(check, "actions/checkout")
+    )
+    names = names_of(check)
+    fix = names.index("Fix what a command can fix")
+    keep = names.index("Keep the fixes for the fix bot")
+    assert fix < keep < names.index("Explain the failure")
+    assert step_in(check, "Fix what a command can fix")["env"]["CHECK"] == name
+    steps = [step for step, _ in fixers(explained, project, name)]
     expected = [
         "Text files",
         "Pages in one column",
@@ -8880,12 +8963,15 @@ def test_every_project_fixes_what_a_command_can_fix(
     # Lint keeps what markdownlint fixed, and the fix bot after the checks takes the
     # fixes of both, with the CI of this kind among the workflows that it follows.
     lint = (github / "workflows/lint.yml").read_text(encoding="utf-8")
-    assert "          name: fixes-markdown\n" in job_alone(lint, "markdown")
+    assert any(
+        step.get("with", {}).get("name") == "fixes-markdown"
+        for step in job_in(lint, "markdown")["steps"]
+    )
     after = (github / "workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert {name[1].replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
-    bot = job_alone(after, "fixes")
-    assert "startsWith(github.event.workflow_run.name, 'CI (')" in bot
-    assert "Dennis-Otto" not in bot
+    assert {name.replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
+    bot = job_in(after, "fixes")
+    assert "startsWith(github.event.workflow_run.name, 'CI (')" in condition_of(bot)
+    assert "Dennis-Otto" not in values_of(bot)
 
 
 def test_every_explanation_belongs_to_a_check_or_a_step(
@@ -8897,7 +8983,9 @@ def test_every_explanation_belongs_to_a_check_or_a_step(
     steps = set()
     for root in (ROOT, *projects.values()):
         for text in workflows(root).values():
-            names.update(re.findall(r"^    name: (.+)$", text, re.M))
+            names.update(
+                job["name"] for job in parse(text)["jobs"].values() if "name" in job
+            )
         check = (root / "scripts/check.sh").read_text(encoding="utf-8")
         steps.update(re.findall(r'^ *step "(.+)"$', check, re.M))
     # A name of a matrix, with its expressions, stands for every name it can be.
@@ -9114,14 +9202,13 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     assert "Update branches" in after_checks
     for name in watched_by_bot_health(root) & after_checks - {"Update branches"}:
         text = named[name]
-        for job in re.findall(r"^  ([\w-]+):$", text.split("\njobs:\n", 1)[1], re.M):
-            body = job_of(text, job)
+        for job, body in parse(text)["jobs"].items():
             # A job that calls a reusable workflow of the issue assistant, as that of
             # Findings, runs the job of the release, which has the condition: the
             # check of the issue assistant keeps the workflow equal to the template
             # of the release, and the tests of the assistant its condition.
-            if re.search(rf"^    uses: {re.escape(ASSISTANT_REUSABLE_OF)}", body, re.M):
-                assert "\n    steps:" not in body, (name, job)
+            if str(body.get("uses", "")).startswith(ASSISTANT_REUSABLE_OF):
+                assert "steps" not in body, (name, job)
                 continue
             condition = condition_of(body)
             assert (
@@ -9133,7 +9220,7 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
 def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     text = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     assert set(triggers(text)) == {"workflow_run", "schedule", "workflow_dispatch"}
-    run = job_of(text, "run")
+    run = job_in(text, "run")
     condition = condition_of(run)
     for part in (
         "github.event_name == 'workflow_run'",
@@ -9150,21 +9237,21 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     )
     assert ends
     assert set(json.loads(ends[1])) == FAILED | {"success"}
-    assert "github.event_name != 'workflow_run'" in condition_of(job_of(text, "sweep"))
+    assert "github.event_name != 'workflow_run'" in condition_of(job_in(text, "sweep"))
     # One run at a time per workflow, set on the job: a run that skips, for a pull
     # request, never replaces the waiting one for the default branch.
-    assert "\nconcurrency:" not in text
-    assert (
-        "group: ${{ github.workflow }}-${{ github.event.workflow_run.workflow_id }}"
-        in run
+    assert "concurrency" not in parse(text)
+    assert run["concurrency"]["group"] == (
+        "${{ github.workflow }}-${{ github.event.workflow_run.workflow_id }}"
     )
     for name in ("run", "sweep"):
-        job = job_of(text, name)
+        job = job_in(text, name)
         # The default branch, without the token in the checkout.
-        assert "persist-credentials: false" in job, name
-        assert "ref:" not in job, name
-        assert "bot-health" in job, name
-        assert "issues: write" in job, name
+        [checkout] = steps_using(job, "actions/checkout")
+        assert checkout["with"]["persist-credentials"] is False, name
+        assert "ref" not in checkout["with"], name
+        assert "bot-health" in values_of(job), name
+        assert job["permissions"]["issues"] == "write", name
     zizmor = (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
     dangerous = zizmor.split("  dangerous-triggers:", 1)[1].split("\n  self-", 1)[0]
     assert "      - bot-health.yml\n" in dangerous
@@ -9186,18 +9273,18 @@ def test_every_repository_has_the_labels_of_the_bot_health_bot(
 
 def test_renovate_reports_its_problems_in_one_issue() -> None:
     text = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
-    job = job_of(text, "renovate")
-    log = re.search(r"RENOVATE_LOG_FILE: (\S+)", job)
+    job = job_in(text, "renovate")
+    variables = step_in(job, "Run Renovate")["env"]
+    log = variables["RENOVATE_LOG_FILE"]
     # Renovate reads the path in lower case, and the action shares /tmp with it.
-    assert log
-    assert log[1].startswith("/tmp/")
-    assert log[1] == log[1].lower()
-    assert "RENOVATE_LOG_FILE_LEVEL: warn" in job
+    assert log.startswith("/tmp/")
+    assert log == log.lower()
+    assert variables["RENOVATE_LOG_FILE_LEVEL"] == "warn"
     step = "Keep the issue of Renovate's problems current"
-    assert job.index(f"- name: {step}") > job.index("- name: Run Renovate")
-    assert f"bot-health renovate {log[1]} " in script_of(text, step)
-    assert "if: ${{ !cancelled() }}" in job.split(f"- name: {step}", 1)[1]
-    assert "issues: write" in job
+    assert names_of(job).index(step) > names_of(job).index("Run Renovate")
+    assert f"bot-health renovate {log} " in script_of(job, step)
+    assert condition_of(step_in(job, step)) == "${{ !cancelled() }}"
+    assert job["permissions"]["issues"] == "write"
 
 
 # jq, which gh runs for its option --jq: the steps that rely on its filters run with
@@ -9206,57 +9293,50 @@ JQ = shutil.which("jq")
 WITH_JQ = pytest.mark.skipif(
     BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
 )
-# The answers of gh: an API call by its path, any other command by its first two
-# words, each through jq as gh does. The jq of gh ends its lines with LF on every
-# system, the jq of Windows with CRLF. What it is given to write, it keeps by the
-# words of its command, and the input of an API call as input. An answer with the
-# suffix .error is the error of gh, which fails.
-FAKE_GH = """#!/usr/bin/env bash
-echo "$*" >> "$CALLS"
-filter=""
-if [[ "$1" == api ]]; then
-  key=""
-  shift
-  while (($#)); do
-    case "$1" in
-      --jq) filter="$2"; shift 2 ;;
-      --input) cat -- "$2" >> "$WRITTEN/input"; shift 2 ;;
-      --method | -f | -F | -H) shift 2 ;;
-      --paginate | --silent) shift ;;
-      *) key="$1"; shift ;;
-    esac
-  done
-else
-  key="$1 $2"
-  shift 2
-  while (($#)); do
-    case "$1" in
-      --jq) filter="$2"; shift 2 ;;
-      --body) printf '%s' "$2" > "$WRITTEN/${key// /-}"; shift 2 ;;
-      --body-file) cp "$2" "$WRITTEN/${key// /-}"; shift 2 ;;
-      --state | --search | --json | --title | --label) shift 2 ;;
-      *) shift ;;
-    esac
-  done
-fi
-answer="$ANSWERS/$(tr '/ ?' '___' <<<"$key")"
-if [[ -f "$answer.error" ]]; then
-  cat "$answer.error" >&2
-  exit 1
-fi
-if [[ ! -f "$answer" ]]; then
-  case "$key" in
-    "run rerun" | "issue comment" | "issue create") exit 0 ;;
-  esac
-  echo "gh has no answer for $key" >&2
-  exit 1
-fi
-if [[ -n "$filter" ]]; then
-  jq -r "$filter" "$answer" | tr -d '\\r'
-else
-  cat "$answer"
-fi
-"""
+
+
+def gh_answers(answers: Mapping[str, object]) -> list[Answer]:
+    """How the fake gh answers the steps of the bots, by the answers of a test: a call
+    of the API by its path, such as repos/o/r/pulls/7/files or graphql, any other
+    command by its first two words, such as issue list, with JSON through the filter
+    of --jq as gh prints it, or with a text as it is. An answer whose key ends in
+    .error is the error of gh, which fails. A call that starts the failed jobs again,
+    comments or opens an issue needs no answer."""
+    found = []
+    for key, answer in answers.items():
+        name = key.removesuffix(".error")
+        pattern = (
+            rf"{re.escape(name)}(?: .*)?"
+            if " " in name
+            else rf"api(?: .*)? {re.escape(name)}(?: .*)?"
+        )
+        if key.endswith(".error"):
+            found.append(Answer(pattern, err=str(answer), code=1))
+        elif isinstance(answer, str):
+            found.append(Answer(pattern, answer))
+        else:
+            found.append(Answer(pattern, json=answer))
+    return [*found, Answer(r"(?:run rerun|issue comment|issue create) .*")]
+
+
+def written_by(result: workflow_steps.StepResult) -> dict[str, str]:
+    """What gh was given to write, by the first two words of its command, such as
+    issue-comment, from --body or --body-file, and what the calls of the API read
+    from --input, one after the other, as input."""
+    written: dict[str, str] = {}
+    for call, read in zip(result.calls, result.read, strict=True):
+        if call[0] == "api":
+            if "--input" in read:
+                written["input"] = written.get("input", "") + read["--input"]
+            continue
+        key = "-".join(call[:2])
+        if "--body-file" in read:
+            written[key] = read["--body-file"]
+        elif "--body" in call:
+            written[key] = call[call.index("--body") + 1]
+    return written
+
+
 TIMED_OUT = "The job has exceeded the maximum execution time of 30m0s"
 CANCELLED = "The operation was canceled."
 EXITED = "Process completed with exit code 1."
@@ -9325,71 +9405,51 @@ def test_codeql_files_the_results_of_each_language_under_its_category(
     assert "::error::CodeQL wrote no results." in done.stdout
 
 
+def run_after_the_checks(
+    tmp_path: Path,
+    job: str,
+    step: str,
+    answers: Mapping[str, object],
+    stubs: Mapping[str, str] | None = None,
+    files: Mapping[str, str] | None = None,
+    **variables: str,
+) -> workflow_steps.StepResult:
+    """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
+    answers as gh_answers() says, these stubs of other commands, and these files of
+    the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python) for the commit
+    abc1234def of the branch feature of o/r, unless the variables say otherwise."""
+    return workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        job,
+        step,
+        answers=gh_answers(answers),
+        env={
+            "RUN": "5",
+            "NAME": "CI (python)",
+            "BRANCH": "feature",
+            "HEAD_REPO": "o/r",
+            "SHA": "abc1234def",
+            **variables,
+        },
+        stubs=stubs,
+        files=files,
+    )
+
+
 def run_a_bot_after_the_checks(
     tmp_path: Path,
     job: str,
     step: str,
-    answers: dict[str, object],
-    stubs: dict[str, str] | None = None,
+    answers: Mapping[str, object],
+    stubs: Mapping[str, str] | None = None,
     **variables: str,
 ) -> tuple[list[str], str, dict[str, str]]:
-    """Runs a step of a bot after the checks, as GitHub does, with the fake gh and these
-    stubs of other commands; returns the calls of gh, the summary of the step and what
-    gh was given to write."""
-    (tmp_path / "step.sh").write_text(
-        script_of(after_the_checks_job(job), step), encoding="utf-8", newline="\n"
-    )
-    folders = {name: tmp_path / name for name in ("bin", "answers", "written")}
-    for folder in folders.values():
-        folder.mkdir()
-    for key, answer in answers.items():
-        (folders["answers"] / re.sub(r"[/ ?]", "_", key)).write_text(
-            answer if isinstance(answer, str) else json.dumps(answer),
-            encoding="utf-8",
-            newline="\n",
-        )
-    for name, text in {"gh": FAKE_GH, **(stubs or {})}.items():
-        (folders["bin"] / name).write_text(text, encoding="utf-8", newline="\n")
-        (folders["bin"] / name).chmod(0o755)
-    calls = tmp_path / "calls"
-    summary = tmp_path / "summary"
-    calls.touch()
-    summary.touch()
-    environment = {
-        **os.environ,
-        "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
-        "GH_REPO": "o/r",
-        "RUN": "5",
-        "NAME": "CI (python)",
-        "BRANCH": "feature",
-        "HEAD_REPO": "o/r",
-        "SHA": "abc1234def",
-        "RUNNER_TEMP": str(tmp_path),
-        "GITHUB_STEP_SUMMARY": str(summary),
-        "CALLS": str(calls),
-        "ANSWERS": str(folders["answers"]),
-        "WRITTEN": str(folders["written"]),
-        **variables,
-    }
-    assert BASH
-    result = subprocess.run(
-        [BASH, "-e", "step.sh"],
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    written = {
-        path.name: path.read_text(encoding="utf-8")
-        for path in folders["written"].iterdir()
-    }
-    return (
-        calls.read_text(encoding="utf-8").splitlines(),
-        summary.read_text(encoding="utf-8"),
-        written,
-    )
+    """Runs a step of a bot after the checks, which passes; returns the calls of gh,
+    the summary of the step and what gh was given to write."""
+    done = run_after_the_checks(tmp_path, job, step, answers, stubs, None, **variables)
+    assert done.returncode == 0, done.stderr
+    return done.commands, done.summary, written_by(done)
 
 
 def job_of_a_run(
@@ -9449,14 +9509,10 @@ def test_the_flaky_test_bot_takes_runs_that_failed_or_ran_out_of_time() -> None:
     )
     # It reads the jobs of the runs and their annotations, and starts the failed jobs
     # again; it checks out nothing.
-    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
-    assert permissions.splitlines()[1:] == [
-        "      actions: write",
-        "      checks: read",
-    ]
-    assert "actions/checkout" not in job
+    assert job["permissions"] == {"actions": "write", "checks": "read"}
+    assert not steps_using(job, "actions/checkout")
     # The values of the event reach the script as variables only.
-    assert "${{" not in job[job.index("        run: |\n") :]
+    assert all("${{" not in step.get("run", "") for step in job["steps"])
 
 
 @WITH_JQ
@@ -9983,13 +10039,12 @@ def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
         "github.event.workflow_run.run_attempt == 1",
     ):
         assert part in condition
-    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
-    assert permissions.splitlines()[1:] == ["      actions: write"]
+    assert job["permissions"] == {"actions": "write"}
     script = script_of(job, "Run the failed jobs of the release once more")
     # It looks at the run first: a release that runs again already is left alone.
     look = script.index('gh api "repos/$GH_REPO/actions/runs/$RUN"')
     assert look < script.index('gh run rerun "$RUN" --failed')
-    assert "${{" not in job[job.index("        run: |\n") :]
+    assert all("${{" not in step.get("run", "") for step in job["steps"])
 
 
 # The checks that take seconds, whose runs for different commits never cancel each
@@ -10099,21 +10154,17 @@ def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> 
     flows = workflows(ROOT)
     skipped = {"variants.yml": "variant", **SCANNERS}
     for name, job in skipped.items():
-        assert RELEASE_PULL_REQUEST in condition_of(job_of(flows[name], job)), name
+        assert RELEASE_PULL_REQUEST in condition_of(job_in(flows[name], job)), name
     # The hints at the prose, steps of lint, which start with the changed documents.
-    documents = step_of(
-        job_of(flows["lint.yml"], "lint"), "      - name: Find the changed documents"
-    )
-    found = re.search(r"^        if: >-\n((?:          .+\n)+)", documents, re.M)
-    assert found
-    assert RELEASE_PULL_REQUEST in " ".join(found[1].split())
+    documents = step_in(job_in(flows["lint.yml"], "lint"), "Find the changed documents")
+    assert RELEASE_PULL_REQUEST in condition_of(documents)
 
 
 def test_one_check_stands_for_every_variant() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    gate = job_of(variants, "variants")
-    assert "\n    name: variants\n" in gate
-    assert "\n    needs: variant\n" in gate
+    gate = job_in(variants, "variants")
+    assert gate["name"] == "variants"
+    assert gate["needs"] == "variant"
     # Also after a variant failed, so that the check reports the failure.
     assert condition_of(gate) == "always()"
     settings = tomllib.loads(
@@ -10359,72 +10410,52 @@ def test_the_check_docs_keeps_the_website_of_a_pull_request(
     # The artifact that the report of the PR coach links, by the name it looks for.
     root = ROOT if kind == "blueprint" else projects[kind]
     docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
-    step = docs[docs.index("      - name: Keep the website of the pull request\n") :]
-    # Its lines up to the next comment or step.
-    lines = re.split(r"\n      (?! )", step)[0].splitlines()[1:]
+    step = step_named(docs, "Keep the website of the pull request")
     # Pinned to the commit of a release, which Renovate moves on.
-    pin = r"@[0-9a-f]{40} # v[\d.]+$"
-    assert re.search(pin, lines[1]), lines[1]
-    lines[1] = re.sub(pin, "", lines[1])
-    assert lines == [
-        "        if: ${{ !cancelled() && steps.build.outcome == 'success'"
+    assert re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", step.pop("uses"))
+    assert step == {
+        "name": "Keep the website of the pull request",
+        "if": "${{ !cancelled() && steps.build.outcome == 'success'"
         " && github.event_name == 'pull_request' }}",
-        "        uses: actions/upload-artifact",
-        "        timeout-minutes: 5",
-        "        with:",
-        f"          name: {WEBSITE_ARTIFACT}",
-        "          path: site",
-        f"          retention-days: {WEBSITE_DAYS}",
-        "          include-hidden-files: true",
-    ]
+        "timeout-minutes": 5,
+        "with": {
+            "name": WEBSITE_ARTIFACT,
+            "path": "site",
+            "retention-days": WEBSITE_DAYS,
+            "include-hidden-files": True,
+        },
+    }
 
 
 def run_the_search_for_the_website(
     tmp_path: Path, root: Path, event: str, pages: str, fork: bool
 ) -> tuple[str, str]:
-    docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
-    script = tmp_path / "step.sh"
-    script.write_text(
-        script_of(docs, "Look for the website"), encoding="utf-8", newline="\n"
+    """The step of the check docs that looks for the website, in the checkout root, with
+    the fake gh answering as GitHub Pages does: its build type, or 404 where it is off;
+    returns what the step printed and its outputs, each on a line of its own."""
+    found = "api repos/o/r/pages --jq .build_type"
+    answer = (
+        exact(found, f"{pages}\n")
+        if pages
+        else exact(found, code=1, err="gh: Not Found (HTTP 404)\n")
     )
-    # gh answers as GitHub Pages does: its build type, or 404 where it is off.
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    gh = bin_dir / "gh"
-    gh.write_text(
-        """#!/usr/bin/env bash
-if [[ "$*" != "api repos/o/r/pages --jq .build_type" || -z "$PAGES" ]]; then
-  exit 1
-fi
-echo "$PAGES"
-""",
-        encoding="utf-8",
-        newline="\n",
+    done = workflow_steps.run_step(
+        tmp_path,
+        "docs.yml",
+        "docs",
+        "Look for the website",
+        answers=[answer],
+        env={
+            "EVENT": event,
+            "FORK": str(fork).lower(),
+            "GITHUB_REF": "refs/heads/main" if event == "push" else "refs/pull/1/merge",
+        },
+        workspace=root,
     )
-    gh.chmod(0o755)
-    output = tmp_path / "output"
-    output.touch()
-    environment = {
-        **os.environ,
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "EVENT": event,
-        "FORK": str(fork).lower(),
-        "GITHUB_REF": "refs/heads/main" if event == "push" else "refs/pull/1/merge",
-        "GITHUB_REPOSITORY": "o/r",
-        "GITHUB_OUTPUT": str(output),
-        "PAGES": pages,
-    }
-    assert BASH
-    result = subprocess.run(
-        [BASH, "-e", script.as_posix()],
-        cwd=root,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+    assert done.returncode == 0, done.stderr
+    return done.stdout, "".join(
+        f"{name}={value}\n" for name, value in done.outputs.items()
     )
-    assert result.returncode == 0, result.stderr
-    return result.stdout, output.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -10486,39 +10517,46 @@ def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_wee
     docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     # The check builds the website, and on main the same job hands it to GitHub Pages:
     # no job builds it a second time, and the required check keeps its name.
-    assert jobs_of(docs) == ["docs", "deploy"]
-    job = job_of(docs, "docs")
-    assert "\n    name: docs\n" in job
-    assert "      publish: ${{ steps.site.outputs.publish }}\n" in job
-    deploy = job_of(docs, "deploy")
-    assert "\n    needs: docs\n" in deploy
+    parsed = parse(docs)
+    assert list(parsed["jobs"]) == ["docs", "deploy"]
+    job = job_in(parsed, "docs")
+    assert job["name"] == "docs"
+    assert job["outputs"]["publish"] == "${{ steps.site.outputs.publish }}"
+    deploy = job_in(parsed, "deploy")
+    assert deploy["needs"] == "docs"
     assert condition_of(deploy) == "needs.docs.outputs.publish == 'true'"
     # An artifact needs no permission: the job of the check still only reads.
-    assert "    permissions:\n      contents: read\n      pages: read #" in job
-    assert ": write" not in job
-    build = job.index("      - name: Build the website\n")
-    upload = step_of(job, "      - name: Hand the website to GitHub Pages")
-    assert setting_of(upload, "if") == "steps.site.outputs.publish == 'true'"
-    assert "uses: actions/upload-pages-artifact@" in upload
-    assert "          path: site\n" in upload
+    assert job["permissions"] == {"contents": "read", "pages": "read"}
+    assert "      pages: read # whether GitHub Pages publishes" in docs
+    names = names_of(job)
+    build = names.index("Build the website")
+    upload = step_in(job, "Hand the website to GitHub Pages")
+    assert condition_of(upload) == "steps.site.outputs.publish == 'true'"
+    assert upload["uses"].startswith("actions/upload-pages-artifact@")
+    assert upload["with"]["path"] == "site"
     # Files and folders whose name starts with a dot, such as .well-known for
     # security.txt, reach the website; the action leaves them out otherwise.
-    assert "          include-hidden-files: true\n" in upload
-    assert job.index(upload) > build
+    assert upload["with"]["include-hidden-files"] is True
+    assert names.index(upload["name"]) > build
 
     # Material's cache of what its plugins download, as its documentation has it: one
     # for each ISO week and each configuration, which a run restores before the build,
     # or else the latest one of the same week, and which only a push saves, once.
-    restore = step_of(job, "      - name: Restore the downloads of the website")
-    save = step_of(job, "      - name: Keep the downloads of the website for the week")
-    assert "uses: actions/cache/restore@" in restore
-    assert "uses: actions/cache/save@" in save
-    assert job.index(restore) < build < job.index(save) < job.index(upload)
+    restore = step_in(job, "Restore the downloads of the website")
+    save = step_in(job, "Keep the downloads of the website for the week")
+    assert restore["uses"].startswith("actions/cache/restore@")
+    assert save["uses"].startswith("actions/cache/save@")
+    assert (
+        names.index(restore["name"])
+        < build
+        < names.index(save["name"])
+        < names.index(upload["name"])
+    )
     # Badges and pictures show the state of now, so the build downloads them anew.
-    fresh = step_of(job, "      - name: Download the badges and pictures anew")
-    assert setting_of(fresh, "if") == "steps.site.outputs.build == 'true'"
-    assert job.index(restore) < job.index(fresh) < build
-    installed = UV_PIP.search(job)
+    fresh = step_in(job, "Download the badges and pictures anew")
+    assert condition_of(fresh) == "steps.site.outputs.build == 'true'"
+    assert names.index(restore["name"]) < names.index(fresh["name"]) < build
+    installed = UV_PIP.search(values_of(job))
     assert installed
     lock = LOCK.search(installed[1])
     assert lock
@@ -10527,18 +10565,17 @@ def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_wee
         assert (folder / name).is_file(), name
     week = "mkdocs-material-${{ steps.week.outputs.id }}-"
     hashed = ", ".join(f"'{name}'" for name in files)
-    assert f"          key: {week}${{{{ hashFiles({hashed}) }}}}\n" in restore
-    assert f"          restore-keys: {week}\n" in restore
-    assert "          key: ${{ steps.cache.outputs.cache-primary-key }}\n" in save
-    saved_when = save.split("        if: >-\n", 1)[1].split("        uses: ", 1)[0]
-    assert " ".join(saved_when.split()) == (
+    assert restore["with"]["key"] == f"{week}${{{{ hashFiles({hashed}) }}}}"
+    assert restore["with"]["restore-keys"] == week
+    assert save["with"]["key"] == "${{ steps.cache.outputs.cache-primary-key }}"
+    assert condition_of(save) == (
         "steps.site.outputs.build == 'true' && github.event_name == 'push' &&"
         " steps.cache.outputs.cache-hit != 'true'"
     )
     # Where the plugins of Material keep their downloads, which no website moves, and
     # which git ignores.
     for step in (restore, save):
-        assert "          path: .cache\n" in step
+        assert step["with"]["path"] == ".cache"
     base = (folder / ".github/mkdocs-blueprint.yml").read_text(encoding="utf-8")
     assert "cache_dir" not in base
     assert "/.cache/" in (folder / ".gitignore").read_text(encoding="utf-8").split("\n")
@@ -10551,50 +10588,57 @@ def test_the_check_docs_checks_the_website_that_it_built(
     folder = ROOT if kind == "blueprint" else projects[kind]
     docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     links = (folder / ".github/workflows/links.yml").read_text(encoding="utf-8")
-    job = job_of(docs, "docs")
-    build = step_of(job, "      - name: Build the website")
-    assert setting_of(build, "id") == "build"
-    promises = step_of(job, "      - name: Check what the hooks of the website promise")
-    address = step_of(job, "      - name: Lay out the address of the website")
-    lychee = step_of(job, "      - name: Check the links and anchors of the website")
-    project = step_of(job, "      - name: Check the website as this project does")
-    accessible = step_of(job, "      - uses: actions/setup-node@")
-    publish = step_of(job, "      - name: Hand the website to GitHub Pages")
-    order = [job.index(step) for step in (build, promises, address, lychee, project)]
+    job = job_in(docs, "docs")
+    build = step_in(job, "Build the website")
+    assert build["id"] == "build"
+    promises = step_in(job, "Check what the hooks of the website promise")
+    address = step_in(job, "Lay out the address of the website")
+    lychee = step_in(job, "Check the links and anchors of the website")
+    project = step_in(job, "Check the website as this project does")
+    [accessible] = steps_using(job, "actions/setup-node")
+    publish = step_in(job, "Hand the website to GitHub Pages")
+    steps = job["steps"]
+    order = [steps.index(step) for step in (build, promises, address, lychee, project)]
     assert order == sorted(order)
-    assert order[-1] < job.index(accessible) < job.index(publish)
+    assert order[-1] < steps.index(accessible) < steps.index(publish)
     # Each check of the built website runs once the build passed, also when the
     # check before it failed, so that one run names everything to fix.
     built = "!cancelled() && steps.build.outcome == 'success'"
-    node = step_of(job, "      - name: Set up the accessibility check")
-    a11y_tests = step_of(job, "      - name: Test the accessibility check")
-    a11y = step_of(job, "      - name: Check the accessibility of the website")
+    node = step_in(job, "Set up the accessibility check")
+    a11y_tests = step_in(job, "Test the accessibility check")
+    a11y = step_in(job, "Check the accessibility of the website")
     for step in (promises, address, lychee, accessible, node, a11y):
-        assert setting_of(step, "if") == f"${{{{ {built} }}}}", step
-    assert setting_of(a11y_tests, "if") == (
+        assert condition_of(step) == f"${{{{ {built} }}}}", step
+    assert condition_of(a11y_tests) == (
         f"${{{{ {built} && hashFiles('.github/a11y/check.test.mjs') != '' }}}}"
     )
-    assert setting_of(project, "if") == (
+    assert condition_of(project) == (
         f"${{{{ {built} && hashFiles('scripts/check-site.sh') != '' }}}}"
     )
     # What the hooks promise, with the languages for the job that publishes.
-    assert setting_of(promises, "id") == "promises"
-    assert 'python3 "$script" site-check site --output "$GITHUB_OUTPUT"' in promises
-    assert "      languages: ${{ steps.promises.outputs.languages }}\n" in job
-    assert "          ROOT: ${{ steps.promises.outputs.root }}\n" in address
-    assert "          ADDRESS: ${{ runner.temp }}/address\n" in address
-    # lychee of the Links workflow, without the network and away from its rules.
-    pinned = re.search(r"uses: lycheeverse/lychee-action@\S+ # v\S+", links)
-    assert pinned
-    assert f"        {pinned[0]}\n" in lychee
-    assert "          workingDirectory: site\n" in lychee
+    assert promises["id"] == "promises"
     assert (
-        "          args: --offline --include-fragments --root-dir"
-        " ${{ runner.temp }}/address --no-progress '**/*.html'\n"
-    ) in lychee
-    assert "fail:" not in lychee
+        'python3 "$script" site-check site --output "$GITHUB_OUTPUT"' in promises["run"]
+    )
+    assert job["outputs"]["languages"] == "${{ steps.promises.outputs.languages }}"
+    assert address["env"] == {
+        "ADDRESS": "${{ runner.temp }}/address",
+        "ROOT": "${{ steps.promises.outputs.root }}",
+    }
+    # lychee of the Links workflow, without the network and away from its rules.
+    assert (
+        lychee["uses"]
+        == step_named(links, "Check the links of the documentation")["uses"]
+    )
+    assert lychee["uses"].startswith("lycheeverse/lychee-action@")
+    assert lychee["with"]["workingDirectory"] == "site"
+    assert lychee["with"]["args"] == (
+        "--offline --include-fragments --root-dir"
+        " ${{ runner.temp }}/address --no-progress '**/*.html'"
+    )
+    assert "fail" not in lychee["with"]
     # The checks of the project alone, in a file that the blueprint never writes.
-    assert "        run: bash scripts/check-site.sh site\n" in project
+    assert project["run"] == "bash scripts/check-site.sh site"
     assert not (folder / "scripts/check-site.sh").exists()
 
 
@@ -10608,29 +10652,40 @@ def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
         if not path.exists():
             assert kind != "blueprint"
             continue
-        deploy = job_of(path.read_text(encoding="utf-8"), "deploy")
+        text = path.read_text(encoding="utf-8")
+        deploy = job_in(text, "deploy")
+        assert deploy["permissions"] == {
+            "attestations": "write",
+            "id-token": "write",
+            "pages": "write",
+        }
+        # Each permission says what it is for.
         assert (
-            "    permissions:\n"
             "      attestations: write # keeps the signed provenance of the website\n"
             "      id-token: write # proves to GitHub Pages and to Sigstore which"
             " workflow publishes\n"
             "      pages: write # publishes the website\n"
-        ) in deploy
-        published = deploy.index("uses: actions/deploy-pages@")
-        taken = step_of(deploy, "      - name: Take the website that GitHub Pages")
-        attested = step_of(deploy, "      - name: Attest the provenance of the website")
-        asked = step_of(deploy, "      - name: Ask the published website for its pages")
-        assert published < deploy.index(taken) < deploy.index(attested)
-        assert deploy.index(attested) < deploy.index(asked)
-        assert "uses: actions/download-artifact@" in taken
-        assert "          name: github-pages\n" in taken
-        assert "uses: actions/attest-build-provenance@" in attested
-        assert "          subject-path: ${{ runner.temp }}/pages/artifact.tar\n" in (
-            attested
+        ) in text
+        steps = deploy["steps"]
+        [published] = steps_using(deploy, "actions/deploy-pages")
+        taken = next(
+            step
+            for step in steps
+            if step.get("name", "").startswith("Take the website that GitHub Pages")
         )
-        assert (
-            f"          LANGUAGES: ${{{{ needs.{before}.outputs.languages }}}}\n"
-        ) in asked
+        attested = step_in(deploy, "Attest the provenance of the website")
+        asked = step_in(deploy, "Ask the published website for its pages")
+        assert steps.index(published) < steps.index(taken) < steps.index(attested)
+        assert steps.index(attested) < steps.index(asked)
+        assert taken["uses"].startswith("actions/download-artifact@")
+        assert taken["with"]["name"] == "github-pages"
+        assert attested["uses"].startswith("actions/attest-build-provenance@")
+        assert attested["with"]["subject-path"] == (
+            "${{ runner.temp }}/pages/artifact.tar"
+        )
+        assert asked["env"]["LANGUAGES"] == (
+            f"${{{{ needs.{before}.outputs.languages }}}}"
+        )
     security = (folder / "SECURITY.md").read_text(encoding="utf-8")
     signer = "dashboard.yml" if kind == "blueprint" else "docs.yml"
     repository = "Dennis-Otto/" + (
@@ -10646,9 +10701,7 @@ def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_cache_of_the_website_belongs_to_the_iso_week(tmp_path: Path) -> None:
     docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
-    step = step_of(docs, "      - name: Name the cache of this week")
-    script = setting_of(step, "run")
-    assert script
+    script = script_of(docs, "Name the cache of this week")
     output = tmp_path / "output"
     output.touch()
     assert BASH
@@ -10670,9 +10723,7 @@ def test_the_website_downloads_its_badges_anew_and_keeps_its_fonts(
     tmp_path: Path,
 ) -> None:
     docs = (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
-    step = step_of(docs, "      - name: Download the badges and pictures anew")
-    block = step.split("        run: |\n", 1)[1]
-    script = "".join(line[10:] for line in block.splitlines(keepends=True))
+    script = script_of(docs, "Download the badges and pictures anew")
     assert "find " in script
     assert BASH
     # Without a cache there is nothing to clean up, and the step still passes.
@@ -10742,12 +10793,12 @@ def test_the_pr_coach_reads_every_coverage_report_of_the_checks() -> None:
         "ci-php.yml",
         "ci-node.yml",
     }
-    node = step_of(
+    node = step_named(
         (ROOT / ".github/workflows/ci-node.yml").read_text(encoding="utf-8"),
-        "      - name: Keep the coverage report",
+        "Keep the coverage report",
     )
-    assert "if: always() && hashFiles('lcov.info') != ''" in node
-    assert "path: lcov.info\n" in node
+    assert condition_of(node) == "always() && hashFiles('lcov.info') != ''"
+    assert node["with"]["path"] == "lcov.info"
     assert "--test-reporter-destination=lcov.info" in (
         ROOT / "template/[% if stack == 'node' %]package.json[% endif %].jinja"
     ).read_text(encoding="utf-8")
@@ -10787,27 +10838,28 @@ RUNS_OF_THE_HEAD = [
 def test_the_pr_coach_fetches_the_coverage_of_the_head_and_of_main(
     tmp_path: Path, report: str
 ) -> None:
-    output = tmp_path / "output"
-    # What the download of the head gives, which the fake gh doesn't write.
-    (tmp_path / "head").mkdir()
-    (tmp_path / "head" / report).touch()
-    calls, summary, _ = run_a_bot_after_the_checks(
+    runner = (tmp_path / "runner").as_posix()
+    done = run_after_the_checks(
         tmp_path,
         "coach",
         "Fetch the coverage reports of the head and of main",
         {"run list": RUNS_OF_THE_HEAD, "run download": ""},
-        GITHUB_OUTPUT=str(output),
+        # What the download of the head gives, which the fake gh doesn't write.
+        files={f"$RUNNER_TEMP/head/{report}": ""},
     )
 
+    assert done.returncode == 0, done.stderr
+    calls = done.commands
     assert calls[0].startswith("run list --commit abc1234def --status completed ")
-    assert calls[1] == f"run download 11 --name coverage --dir {tmp_path}/head"
+    assert calls[1] == f"run download 11 --name coverage --dir {runner}/head"
     # main: the newest run of the same workflow, as the fake answers with the runs.
     assert calls[2].startswith("run list --workflow 3 --branch main --event push ")
-    assert calls[3] == f"run download 8 --name coverage --dir {tmp_path}/base"
-    assert output.read_text(encoding="utf-8") == (
-        f"head={tmp_path}/head/{report}\nbase={tmp_path}/base/{report}\n"
-    )
-    assert not summary
+    assert calls[3] == f"run download 8 --name coverage --dir {runner}/base"
+    assert done.outputs == {
+        "head": f"{runner}/head/{report}",
+        "base": f"{runner}/base/{report}",
+    }
+    assert not done.summary
 
 
 @WITH_JQ
@@ -10823,18 +10875,19 @@ def test_the_pr_coach_fetches_the_coverage_of_the_head_and_of_main(
 def test_the_pr_coach_reports_without_coverage_before_the_tests_kept_it(
     tmp_path: Path, answers: dict[str, object]
 ) -> None:
-    output = tmp_path / "output"
-    calls, summary, _ = run_a_bot_after_the_checks(
+    done = run_after_the_checks(
         tmp_path,
         "coach",
         "Fetch the coverage reports of the head and of main",
         answers,
-        GITHUB_OUTPUT=str(output),
     )
 
-    assert summary == "No run of the tests of abc1234 kept a coverage report so far.\n"
-    assert not output.exists()
-    assert not any("--branch main" in call for call in calls)
+    assert done.returncode == 0, done.stderr
+    assert done.summary == (
+        "No run of the tests of abc1234 kept a coverage report so far.\n"
+    )
+    assert done.outputs == {}
+    assert not any("--branch main" in call for call in done.commands)
 
 
 @WITH_JQ
@@ -10851,21 +10904,23 @@ def test_the_pr_coach_reports_without_coverage_before_the_tests_kept_it(
 def test_the_pr_coach_hands_the_coverage_to_its_report(
     tmp_path: Path, coverage: str, expected: str
 ) -> None:
-    calls, summary, _ = run_a_bot_after_the_checks(
+    done = run_after_the_checks(
         tmp_path,
         "coach",
         "Keep the one report of the PR coach up to date",
         {},
-        {"python3": '#!/usr/bin/env bash\necho "python3 $*" >> "$CALLS"\necho done\n'},
+        {"python3": workflow_steps.recording("python3", "echo done")},
         NUMBER="7",
         COVERAGE=coverage,
         COVERAGE_BASE=coverage and "/t/b",
     )
 
-    assert calls == [
+    assert done.returncode == 0, done.stderr
+    assert done.calls == []
+    assert done.stubbed == [
         "python3 blueprint.py --repo o/r coach report abc1234def --pull 7 " + expected
     ]
-    assert summary == "done\n"
+    assert done.summary == "done\n"
 
 
 def test_the_coverage_report_of_the_blueprint_names_every_file_by_its_path() -> None:
@@ -11154,29 +11209,31 @@ def test_every_website_is_checked_for_its_accessibility(
     # The check docs runs it after the build, and reports for one release before
     # it fails the check.
     docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
-    step = docs[docs.index("      - name: Check the accessibility of the website\n") :]
-    assert re.split(r"\n      (?! )", step)[0].splitlines()[1:] == [
-        "        if: ${{ !cancelled() && steps.build.outcome == 'success' }}",
-        "        continue-on-error: true",
-        "        timeout-minutes: 5",
-        "        env:",
-        '          REPORT_ONLY: "true"',
-        "        run: node .github/a11y/check.mjs site",
-    ]
-    assert docs.index("        run: mkdocs build --strict\n") < docs.index(step)
-    tools_step = (
-        "        run: npm ci --prefix .github/a11y --ignore-scripts --no-audit"
-        " --no-fund\n"
+    step = step_named(docs, "Check the accessibility of the website")
+    assert step == {
+        "name": "Check the accessibility of the website",
+        "if": "${{ !cancelled() && steps.build.outcome == 'success' }}",
+        "continue-on-error": True,
+        "timeout-minutes": 5,
+        "env": {"REPORT_ONLY": "true"},
+        "run": "node .github/a11y/check.mjs site",
+    }
+    steps = job_with(docs, "Check the accessibility of the website")["steps"]
+    runs = [each.get("run") for each in steps]
+    built = runs.index("mkdocs build --strict")
+    tools = runs.index(
+        "npm ci --prefix .github/a11y --ignore-scripts --no-audit --no-fund"
     )
-    assert docs.index("        run: mkdocs build --strict\n") < docs.index(tools_step)
     # The tests of the check run where the blueprint keeps them, before the check.
-    tests = "        run: node --test .github/a11y/check.test.mjs\n"
-    assert docs.index(tools_step) < docs.index(tests) < docs.index(step)
-    assert "hashFiles('.github/a11y/check.test.mjs') != ''" in docs
+    tests = runs.index("node --test .github/a11y/check.test.mjs")
+    assert built < tools < tests < steps.index(step)
+    assert "hashFiles('.github/a11y/check.test.mjs') != ''" in condition_of(
+        steps[tests]
+    )
     assert (root / ".github/a11y/check.test.mjs").is_file() == (kind == "blueprint")
-    setup = docs[: docs.index(step)].rsplit("      - uses: ", 1)[1]
-    assert setup.startswith("actions/setup-node@")
-    assert "          node-version: 24\n" in setup
+    setup = [each for each in steps[: steps.index(step)] if "uses" in each][-1]
+    assert setup["uses"].startswith("actions/setup-node@")
+    assert setup["with"]["node-version"] == 24
     if kind == "blueprint":
         # The website with the dashboard, which the Dashboard workflow publishes.
         dashboard = (root / ".github/workflows/dashboard.yml").read_text("utf-8")
@@ -11213,14 +11270,15 @@ def test_every_project_draws_its_diagrams_as_pictures(
         (project / ".github/repository.toml").read_text(encoding="utf-8")
     )
     assert "diagrams" in settings["branch"]["required_checks"]
-    job = job_of(workflows(project)["lint.yml"], "diagrams")
-    assert "\n            bash scripts/diagrams.sh --extract\n" in job
-    assert "\n            git checkout --quiet --detach HEAD^2\n" in job
-    assert "          name: diagrams\n" in job
+    job = job_in(workflows(project)["lint.yml"], "diagrams")
+    scripts = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "\n  bash scripts/diagrams.sh --extract\n" in scripts
+    assert "\n  git checkout --quiet --detach HEAD^2\n" in scripts
+    assert any(step.get("with", {}).get("name") == "diagrams" for step in job["steps"])
     # The diagram bot commits what the check drew, onto a branch of the repository
     # alone, as the release app, with the tool of main; it never checks out a pull
     # request.
-    bot = job_of(workflows(project)["after-checks.yml"], "diagrams")
+    bot = job_in(workflows(project)["after-checks.yml"], "diagrams")
     condition = condition_of(bot)
     for part in (
         "!github.event.repository.fork",
@@ -11230,35 +11288,39 @@ def test_every_project_draws_its_diagrams_as_pictures(
         "github.event.workflow_run.head_repository.full_name == github.repository",
     ):
         assert part in condition, part
-    assert "      name: release\n" in bot
-    assert "ref:" not in bot
-    assert "sparse-checkout: |\n            .github/blueprint\n" in bot
-    assert ' diagrams commit "$kept" --branch "$BRANCH" \\\n' in bot
-    assert '--head "$SHA"' in bot
+    assert bot["environment"]["name"] == "release"
+    [checkout] = steps_using(bot, "actions/checkout")
+    assert "ref" not in checkout["with"]
+    assert checkout["with"]["sparse-checkout"] == ".github/blueprint\nblueprint\n"
+    scripts = "\n".join(step.get("run", "") for step in bot["steps"])
+    assert ' diagrams commit "$kept" --branch "$BRANCH" \\\n' in scripts
+    assert '--head "$SHA"' in scripts
     # Its commit lands on top of the branch and never needs to change a workflow.
-    assert "permission-workflows" not in bot
-    assert "      - name: Say on the pull request that the bot failed\n" in bot
+    assert "workflows" not in app_permissions(bot)
+    assert "Say on the pull request that the bot failed" in names_of(bot)
     # No expression in a script, where the name of a branch could run as code.
-    for script in bot.split("        run: |\n")[1:]:
-        assert "${{" not in script.split("\n      - ")[0]
+    assert "${{" not in scripts
     # The diagram bot of main keeps one pull request from bot/diagrams, which merges
     # itself; only the job that draws nothing has the release app.
-    main = workflows(project)["diagrams.yml"]
-    assert "  push:\n    branches: [main]\n" in main
-    assert "  schedule:\n" in main
-    assert "  BRANCH: bot/diagrams\n" in main
-    draw = job_of(main, "draw")
-    assert "\n          bash scripts/diagrams.sh --extract\n" in draw
-    assert "secrets." not in draw
-    assert "environment:" not in draw
-    opener = job_of(main, "pull-request")
-    assert "      name: release\n" in opener
-    assert "bash scripts/diagrams.sh" not in opener
+    main = parse(workflows(project)["diagrams.yml"])
+    assert main["on"]["push"]["branches"] == ["main"]
+    assert "schedule" in main["on"]
+    assert main["env"]["BRANCH"] == "bot/diagrams"
+    draw = job_in(main, "draw")
+    assert any(
+        "\nbash scripts/diagrams.sh --extract\n" in f"\n{step.get('run', '')}"
+        for step in draw["steps"]
+    )
+    assert "secrets." not in values_of(draw)
+    assert "environment" not in draw
+    opener = job_in(main, "pull-request")
+    assert opener["environment"]["name"] == "release"
+    assert "bash scripts/diagrams.sh" not in values_of(opener)
     # Its branch moves from an older main to the newest, across changes of workflows.
-    assert "\n          permission-workflows: write\n" in opener
-    assert '\n          gh pr merge "$BRANCH" --auto --squash\n' in opener
-    for script in opener.split("        run: |\n")[1:]:
-        assert "${{" not in script.split("\n      - ")[0]
+    assert app_permissions(opener)["workflows"] == "write"
+    scripts = "\n".join(step.get("run", "") for step in opener["steps"])
+    assert '\ngh pr merge "$BRANCH" --auto --squash\n' in f"\n{scripts}"
+    assert "${{" not in scripts
     # The website shows the pictures, and GitHub folds them in diffs.
     hooks = (project / ".github/mkdocs_blueprint.py").read_text(encoding="utf-8")
     assert "def on_page_content(" in hooks
@@ -11357,15 +11419,16 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
     )
+    parsed = parse(workflow)
     # After a change of main, a release and every week; never for a pull request.
-    for trigger in ("push:\n    branches: [main]", "workflow_run:", "schedule:"):
-        assert f"\n  {trigger}" in workflow, trigger
+    assert parsed["on"]["push"] == {"branches": ["main"]}
+    assert {"workflow_run", "schedule"} <= set(parsed["on"])
     assert "pull_request" not in workflow
-    assert "\npermissions: {}\n" in workflow
-    assert "  BRANCH: bot/screenshots\n" in workflow
-    assert '  HEADLINE: "docs: update the screenshots"\n' in workflow
-    plan = job_of(workflow, "plan")
-    assert " screenshots due --since " in plan
+    assert parsed["permissions"] == {}
+    assert parsed["env"]["BRANCH"] == "bot/screenshots"
+    assert parsed["env"]["HEADLINE"] == "docs: update the screenshots"
+    plan = job_in(parsed, "plan")
+    assert " screenshots due --since " in scripts_of(plan)
     assert (
         "startsWith(github.event.workflow_run.head_commit.message, 'chore: release ')"
         in condition_of(plan)
@@ -11373,40 +11436,45 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     # Only the push run of a release, not its daily or manual runs on the same commit.
     assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
     # A push that is not due never replaces a waiting render of one that is.
-    assert not re.search(r"^concurrency:", workflow, re.M)
-    assert "concurrency:" not in plan
+    assert "concurrency" not in parsed
+    assert "concurrency" not in plan
     # The script of the project runs without secrets and with a token that reads.
-    render = job_of(workflow, "render")
-    assert "\n        run: bash scripts/screenshots.sh\n" in render
-    assert "    permissions:\n      contents: read\n" in render
-    for secret in ("secrets.", "environment:", "persist-credentials: true"):
-        assert secret not in render, secret
-    assert " screenshots keep " in render
-    assert (
-        "    concurrency:\n      group: ${{ github.workflow }}-render\n"
-        "      cancel-in-progress: false\n"
-    ) in render
-    assert "uv venv --quiet .venv-docs\n" in render
+    render = job_in(parsed, "render")
+    assert "bash scripts/screenshots.sh" in [
+        step.get("run") for step in render["steps"]
+    ]
+    assert render["permissions"] == {"contents": "read"}
+    assert "secrets." not in values_of(render)
+    assert "environment" not in render
+    assert all(
+        step.get("with", {}).get("persist-credentials") is False
+        for step in steps_using(render, "actions/checkout")
+    )
+    assert " screenshots keep " in scripts_of(render)
+    assert render["concurrency"] == {
+        "group": "${{ github.workflow }}-render",
+        "cancel-in-progress": False,
+    }
+    assert "\nuv venv --quiet .venv-docs\n" in scripts_of(render)
     # Only the job that runs nothing of the script has the release app, and takes
     # the pictures as data, checked by blueprint.py of main.
-    opener = job_of(workflow, "pull-request")
-    assert "      name: release\n" in opener
-    assert "bash scripts/screenshots.sh" not in opener
-    assert (
-        "sparse-checkout: |\n            .github/blueprint\n            blueprint\n"
-        in opener
-    )
-    assert " screenshots commit " in opener
-    assert (
-        "    concurrency:\n      group: ${{ github.workflow }}-pull-request\n"
-        "      cancel-in-progress: false\n"
-    ) in opener
-    assert "\n          permission-workflows: write\n" in opener
-    assert '\n          gh pr merge "$open" --auto --squash\n' in opener
-    assert 'author.login == \\"app/$APP_SLUG\\"' in opener
+    opener = job_in(parsed, "pull-request")
+    assert opener["environment"]["name"] == "release"
+    assert "bash scripts/screenshots.sh" not in values_of(opener)
+    assert ".github/blueprint\nblueprint\n" in [
+        step.get("with", {}).get("sparse-checkout")
+        for step in steps_using(opener, "actions/checkout")
+    ]
+    assert " screenshots commit " in scripts_of(opener)
+    assert opener["concurrency"] == {
+        "group": "${{ github.workflow }}-pull-request",
+        "cancel-in-progress": False,
+    }
+    assert app_permissions(opener)["workflows"] == "write"
+    assert '\ngh pr merge "$open" --auto --squash\n' in scripts_of(opener)
+    assert 'author.login == \\"app/$APP_SLUG\\"' in scripts_of(opener)
     for job in (plan, render, opener):
-        for script in job.split("        run: |\n")[1:]:
-            assert "${{" not in script.split("\n      - ")[0]
+        assert "${{" not in scripts_of(job)
     # The bot-health bot keeps an issue open while the bot fails.
     health = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     assert ", Screenshots, " in health
@@ -11424,26 +11492,26 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
     workflow = (ROOT / ".github/workflows/docs-pictures.yml").read_text(
         encoding="utf-8"
     )
-    assert "  workflow_run:\n    workflows: [Release]\n" in workflow
-    assert "  workflow_dispatch:\n" in workflow
+    parsed = parse(workflow)
+    assert parsed["on"]["workflow_run"]["workflows"] == ["Release"]
+    assert "workflow_dispatch" in parsed["on"]
     assert "pull_request" not in workflow
-    assert "  BRANCH: bot/pictures\n" in workflow
-    assert '  HEADLINE: "docs: renew the pictures"\n' in workflow
-    assert "  SCRIPT: scripts/docs-pictures.sh\n" in workflow
-    plan = job_of(workflow, "plan")
+    assert parsed["env"]["BRANCH"] == "bot/pictures"
+    assert parsed["env"]["HEADLINE"] == "docs: renew the pictures"
+    assert parsed["env"]["SCRIPT"] == "scripts/docs-pictures.sh"
+    plan = job_in(parsed, "plan")
     assert "github.repository == 'Dennis-Otto/repo-blueprint'" in condition_of(plan)
     assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
-    assert '--script "$SCRIPT" --paths "$PATHS"' in plan
-    render = job_of(workflow, "render")
-    assert '\n        run: bash "$SCRIPT"\n' in render
-    for secret in ("secrets.", "environment:"):
-        assert secret not in render, secret
-    opener = job_of(workflow, "pull-request")
-    assert "      name: release\n" in opener
-    assert '\n          gh pr merge "$open" --auto --squash\n' in opener
+    assert '--script "$SCRIPT" --paths "$PATHS"' in scripts_of(plan)
+    render = job_in(parsed, "render")
+    assert 'bash "$SCRIPT"' in [step.get("run") for step in render["steps"]]
+    assert "secrets." not in values_of(render)
+    assert "environment" not in render
+    opener = job_in(parsed, "pull-request")
+    assert opener["environment"]["name"] == "release"
+    assert '\ngh pr merge "$open" --auto --squash\n' in scripts_of(opener)
     for job in (plan, render, opener):
-        for script in job.split("        run: |\n")[1:]:
-            assert "${{" not in script.split("\n      - ")[0]
+        assert "${{" not in scripts_of(job)
     # The files whose change in a release can change the pictures.
     listed = (ROOT / ".github/docs-pictures/paths.txt").read_text(encoding="utf-8")
     for pattern in ("copier.yml", "template/**", ".github/workflows/**"):
@@ -11561,37 +11629,12 @@ RENDERED_FROM = {
     "requirements-dev.txt": "stacks/python/requirements-dev.txt",
     "requirements-test.txt": "stacks/home-assistant/requirements-test.txt",
 }
-UV_VERSION = re.compile(
-    r'\n          # renovate: datasource=pypi depName=uv\n          version: "(\d+\.\d+\.\d+)"\n'
+# The comment above the version of uv, by which Renovate keeps it current.
+RENOVATE_UV = re.compile(
+    r'\n          # renovate: datasource=pypi depName=uv\n          version: "\d+\.\d+\.\d+"\n'
 )
 # The condition of the second attempt to set uv up, after the first one, steps.uv.
-SECOND_UV = re.compile(r"^        if: steps\.uv\.outcome == 'failure'\n", re.M)
-
-
-def jobs_of(workflow: str) -> list[str]:
-    """The names of the jobs of a workflow, in their order."""
-    return re.findall(r"^  ([\w-]+):\n", workflow.split("\njobs:\n", 1)[1], re.M)
-
-
-def steps_of(job: str) -> list[str]:
-    """The steps of a job of a workflow, each with the comments above it."""
-    steps: list[str] = []
-    comments = ""
-    for line in job.split("\n    steps:\n", 1)[1].splitlines(keepends=True):
-        if line.startswith("      - "):
-            steps.append(comments + line)
-            comments = ""
-        elif line.startswith("      #"):
-            comments += line
-        elif steps:
-            steps[-1] += line
-    return steps
-
-
-def setting_of(step: str, name: str) -> str | None:
-    """A setting of a step on one line, such as its if or its timeout-minutes."""
-    found = re.search(rf"^(?:      - |        ){name}: (.+)$", step, re.M)
-    return found[1] if found else None
+SECOND_UV = "steps.uv.outcome == 'failure'"
 
 
 def matches_glob(pattern: str, path: str) -> bool:
@@ -11637,11 +11680,15 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
         assert not PIP.search(workflow), name
         # No cache of pip's downloads either.
         assert "cache: pip" not in workflow, name
-        for job_name in jobs_of(workflow):
-            job = job_of(workflow, job_name)
-            steps = steps_of(job)
+        jobs = parse(workflow)["jobs"]
+        # Renovate keeps each version of uv current, by the comment above it.
+        assert len(RENOVATE_UV.findall(workflow)) == sum(
+            len(steps_using(job, "astral-sh/setup-uv")) for job in jobs.values()
+        ), name
+        for job_name, job in jobs.items():
+            steps = job.get("steps") or []
             for index, step in enumerate(steps):
-                commands = UV_PIP.findall(step)
+                commands = UV_PIP.findall(step.get("run", ""))
                 if not commands:
                     continue
                 assert all("--require-hashes " in command for command in commands)
@@ -11649,38 +11696,27 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
                 # test_a_hung_download_of_uv_gives_way_to_a_second_attempt checks.
                 setups = [
                     setup
-                    for setup in steps[:index]
-                    if "uses: astral-sh/setup-uv@" in setup
-                    and not SECOND_UV.search(setup)
+                    for setup in steps_using(
+                        {"steps": steps[:index]}, "astral-sh/setup-uv"
+                    )
+                    if condition_of(setup) != SECOND_UV
                 ]
                 assert len(setups) == 1, f"{name}: {job_name}"
                 setup = setups[0]
-                assert setting_of(setup, "if") in (None, setting_of(step, "if"))
-                assert "          enable-cache: true\n" in setup
-                assert "          prune-cache: true\n" in setup
-                version = UV_VERSION.search(setup)
-                assert version, setup
-                versions.add(version[1])
+                assert condition_of(setup) in ("", condition_of(step))
+                assert setup["with"]["enable-cache"] is True
+                assert setup["with"]["prune-cache"] is True
+                assert re.fullmatch(r"\d+\.\d+\.\d+", setup["with"]["version"]), setup
+                versions.add(setup["with"]["version"])
                 # After the Python that uv installs into.
-                python = [
-                    position
-                    for position, other in enumerate(steps)
-                    if "uses: actions/setup-python@" in other
-                ]
+                python = steps_using(job, "actions/setup-python")
                 assert python
-                assert python[0] < steps.index(setup)
-                glob = re.search(
-                    r"\n          cache-dependency-glob: (?:\|\n((?:            .+\n)+)|(.+)\n)",
-                    setup,
-                )
-                assert glob, setup
-                patterns = glob[1].split() if glob[1] else [glob[2]]
-                in_project = (
-                    setting_of(step, "working-directory") == "${{ env.PROJECT }}"
-                )
+                assert steps.index(python[0]) < steps.index(setup)
+                patterns = setup["with"]["cache-dependency-glob"].split()
+                in_project = step.get("working-directory") == "${{ env.PROJECT }}"
                 locks = [
                     RENDERED_FROM[lock] if in_project else lock
-                    for lock in LOCK.findall(step[step.index("        run: ") :])
+                    for lock in LOCK.findall(step["run"])
                 ]
                 assert locks, step
                 for lock in locks:
@@ -11688,8 +11724,10 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
                         f"{name}: {lock}"
                     )
                 # A step that always runs here installs a lock file that is here.
-                guarded = "github.repository != 'Dennis-Otto/repo-blueprint'" in job
-                if not guarded and setting_of(step, "if") is None:
+                guarded = "github.repository != 'Dennis-Otto/repo-blueprint'" in (
+                    condition_of(job)
+                )
+                if not guarded and "if" not in step:
                     assert any((folder / lock).is_file() for lock in locks), locks
                 installs += len(commands)
     # Every kind has a website, whose tools uv installs.
@@ -11703,30 +11741,27 @@ def test_a_hung_download_of_uv_gives_way_to_a_second_attempt() -> None:
     # five minutes, in two legs of the Variants at once (#179). Its first attempt
     # ends after two minutes without failing the job, and the second one takes uv
     # from its releases on GitHub, with the same settings otherwise.
-    def settings(setup: str) -> str:
-        return setup[setup.index("        with:\n") :]
-
     retried = []
     for name in UV_WORKFLOWS:
-        workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
-        for job_name in jobs_of(workflow):
-            steps = steps_of(job_of(workflow, job_name))
+        workflow = workflow_steps.workflow(name)
+        for job_name, job in workflow["jobs"].items():
+            steps = job.get("steps") or []
             for index, second in enumerate(steps):
-                if not SECOND_UV.search(second):
+                if condition_of(second) != SECOND_UV:
                     continue
                 first = steps[index - 1]
                 # The same action, of the same commit, right before.
-                action = first[first.index("      - uses: ") :].splitlines()[0]
-                assert action.startswith("      - uses: astral-sh/setup-uv@")
-                assert second.splitlines()[0] == action
-                assert "        id: uv\n" in first
-                assert "        continue-on-error: true\n" in first
-                assert setting_of(first, "if") is None
-                assert setting_of(first, "timeout-minutes") == "2"
-                assert setting_of(second, "timeout-minutes") == "5"
-                assert settings(second) == (
-                    settings(first) + "          download-from-astral-mirror: false\n"
-                )
+                assert first["uses"].startswith("astral-sh/setup-uv@")
+                assert second["uses"] == first["uses"]
+                assert first["id"] == "uv"
+                assert first["continue-on-error"] is True
+                assert "if" not in first
+                assert first["timeout-minutes"] == 2
+                assert second["timeout-minutes"] == 5
+                assert second["with"] == {
+                    **first["with"],
+                    "download-from-astral-mirror": False,
+                }
                 retried.append(f"{name}: {job_name}")
     assert retried == ["variants.yml: variant"]
 
@@ -11829,19 +11864,20 @@ def test_every_container_of_the_variants_may_start_again() -> None:
     # Before the first step that runs a container, and scripts/check.sh, whose
     # checks of a container start it too, in every leg.
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    steps = steps_of(job_of(variants, "variant"))
+    variant = job_in(variants, "variant")
+    steps = variant["steps"]
     retrying = [
         index
-        for index, step in enumerate(steps)
-        if "- name: Let a container whose image failed to download start again\n"
-        in step
+        for index, name in enumerate(names_of(variant))
+        if name == "Let a container whose image failed to download start again"
     ]
     assert len(retrying) == 1
-    assert setting_of(steps[retrying[0]], "if") is None
+    assert "if" not in steps[retrying[0]]
     running = [
         index
         for index, step in enumerate(steps)
-        if "docker run " in step or "bash scripts/check.sh" in step
+        if "docker run " in values_of(step)
+        or "bash scripts/check.sh" in values_of(step)
     ]
     assert running
     assert retrying[0] < min(running)
@@ -11917,7 +11953,7 @@ WORK = re.compile(
     r"|mkdocs build|copier (?:copy|update)|gh api)\b"
 )
 SETUP = re.compile(
-    r"uses: (?:actions/setup-\w+|astral-sh/setup-uv|shivammathur/setup-php"
+    r"(?:actions/setup-\w+|astral-sh/setup-uv|shivammathur/setup-php"
     r"|actions/cache(?:/restore|/save)?)@"
 )
 
@@ -11929,27 +11965,22 @@ SETUP = re.compile(
 def test_every_step_that_installs_builds_or_downloads_has_a_time_limit(
     name: str,
 ) -> None:
-    workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
     bounded = 0
-    for job_name in jobs_of(workflow):
-        job = job_of(workflow, job_name)
-        limit = re.search(r"^    timeout-minutes: (.+)$", job, re.M)
+    for job_name, job in workflow_steps.workflow(name)["jobs"].items():
+        limit = job.get("timeout-minutes")
         assert limit, f"{name}: {job_name}"
         if (name, job_name) in JOB_LIMITS:
-            assert limit[1] == str(JOB_LIMITS[name, job_name])
-        for step in steps_of(job):
-            code = "".join(
-                line
-                for line in step.splitlines(keepends=True)
-                if not line.lstrip().startswith("#")
-            )
-            if not (WORK.search(code) or SETUP.search(code)):
+            assert limit == JOB_LIMITS[name, job_name]
+        for step in job.get("steps") or []:
+            if not (
+                WORK.search(values_of(step)) or SETUP.match(str(step.get("uses", "")))
+            ):
                 continue
-            minutes = setting_of(step, "timeout-minutes")
-            assert minutes, f"{name}: {step}"
-            assert int(minutes) <= 10
-            if limit[1].isdigit():
-                assert int(minutes) < int(limit[1])
+            minutes = step.get("timeout-minutes")
+            assert isinstance(minutes, int), f"{name}: {step}"
+            assert minutes <= 10
+            if isinstance(limit, int):
+                assert minutes < limit
             bounded += 1
     assert bounded
 
@@ -11973,11 +12004,11 @@ def test_the_pr_coach_explains_a_step_before_the_checks_that_ran_out_of_time(
     ) in entry.problem
     # As the bot does for the checks of CI and the Variants.
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    rerun = job_of(after, "rerun")
-    assert 'gh run rerun "$RUN" --failed' in rerun
+    rerun = job_in(after, "rerun")
+    assert 'gh run rerun "$RUN" --failed' in scripts_of(rerun)
     left_out = re.search(
         r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
-        rerun,
+        condition_of(rerun),
     )
     assert left_out
     names = json.loads(left_out[1])
@@ -11995,23 +12026,21 @@ def test_mypy_starts_from_the_cache_of_the_last_run_that_passed(
     if "\nmypy\n" not in (folder / "scripts/check.sh").read_text(encoding="utf-8"):
         assert "mypy" not in ci
         return
-    job = job_of(ci, "check")
-    cache = step_of(job, "      - name: Restore the cache of mypy")
-    assert "uses: actions/cache@" in cache
+    job = job_in(ci, "check")
+    cache = step_in(job, "Restore the cache of mypy")
+    assert cache["uses"].startswith("actions/cache@")
     # Where mypy keeps it, which no project moves.
-    assert "          path: .mypy_cache\n" in cache
+    assert cache["with"]["path"] == ".mypy_cache"
     config = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8"))
     assert "cache_dir" not in config["tool"]["mypy"]
     assert ".mypy_cache/" in (folder / ".gitignore").read_text(encoding="utf-8")
     # Its own cache when no Python file changed, else the latest one of the same tools;
     # GitHub saves it after a run that passed.
-    key = re.search(r"\n          key: (.+)\n", cache)
-    restore = re.search(r"\n          restore-keys: (.+)\n", cache)
-    assert key
-    assert restore
-    assert restore[1] == "mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-"
-    assert key[1] == restore[1] + "${{ hashFiles('**/*.py') }}"
-    assert job.index(cache) < job.index("      - name: Run the checks\n")
+    key = cache["with"]["key"]
+    restore = cache["with"]["restore-keys"]
+    assert restore == "mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-"
+    assert key == restore + "${{ hashFiles('**/*.py') }}"
+    assert names_of(job).index(cache["name"]) < names_of(job).index("Run the checks")
 
 
 def test_mypy_keeps_no_finding_in_its_cache(
@@ -12049,24 +12078,29 @@ def test_mypy_keeps_no_finding_in_its_cache(
 
 def test_each_leg_of_the_variants_does_only_what_it_alone_can_show() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    job = job_of(variants, "variant")
+    job = job_in(variants, "variant")
     # An update must give every file of the blueprint as a new repository has it, and
     # keeps .github/renovate.json5 of the project: the rules of Renovate are checked
     # in the new repository of each kind.
-    update = step_of(
-        job,
-        "      - name: Render the project from the latest release and update it to this commit",
+    update = step_in(
+        job, "Render the project from the latest release and update it to this commit"
     )
-    assert "the update gives it another content than a new repository has" in update
-    renovate = step_of(
-        job, "      - name: Validate the rules of Renovate of the project"
+    assert (
+        "the update gives it another content than a new repository has"
+        in (update["run"])
     )
-    assert setting_of(renovate, "if") == "matrix.start == 'new'"
-    # Both legs of a kind fill one cache of uv, with the tools of that kind.
-    setup = step_of(job, "      - uses: astral-sh/setup-uv@")
-    assert "          cache-suffix: ${{ matrix.kind }}\n" in setup
+    renovate = step_in(job, "Validate the rules of Renovate of the project")
+    assert condition_of(renovate) == "matrix.start == 'new'"
+    # Both legs of a kind fill one cache of uv, with the tools of that kind, at
+    # either attempt to set uv up.
+    setups = steps_using(job, "astral-sh/setup-uv")
+    assert setups
+    for setup in setups:
+        assert setup["with"]["cache-suffix"] == "${{ matrix.kind }}"
     # No action that builds an image of its own when the job starts.
-    assert "uses: hadolint/" not in job
+    assert not any(
+        str(step.get("uses", "")).startswith("hadolint/") for step in job["steps"]
+    )
 
 
 # The answers of each repository that takes the blueprint, by the name of the
@@ -12120,57 +12154,49 @@ def test_the_answers_of_each_repository_render_every_file(
 
 def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    job = job_of(variants, "variant")
-    steps = ["      - " + step for step in job.split("\n      - ")[1:]]
+    job = job_in(variants, "variant")
     # The update with the answers of the repository, from the latest release.
-    update = step_of(
-        job,
-        "      - name: Render the project from the latest release and update it to this commit",
+    update = step_in(
+        job, "Render the project from the latest release and update it to this commit"
     )
-    assert setting_of(update, "if") == "matrix.start != 'new'"
+    assert condition_of(update) == "matrix.start != 'new'"
     assert (
-        '            data=(--data-file "$GITHUB_WORKSPACE/tests/answers/$ANSWERS.yml")\n'
-        in update
+        '  data=(--data-file "$GITHUB_WORKSPACE/tests/answers/$ANSWERS.yml")\n'
+        in update["run"]
     )
-    assert "      ANSWERS: ${{ matrix.answers }}\n" in job
+    assert job["env"]["ANSWERS"] == "${{ matrix.answers }}"
     # Its website, with the home page that the repository brings.
-    website = step_of(job, "      - name: Build the website of the project")
-    assert setting_of(website, "if") is None
-    assert "> docs/index.md\n" in website
+    website = step_in(job, "Build the website of the project")
+    assert "if" not in website
+    assert "> docs/index.md\n" in website["run"]
     # Only in the adopted legs: a new repository must bring its own.
     assert (
-        '          if [[ -n "$ANSWERS" && ! -f docs/index.md && ! -f docs/README.md ]];'
-        " then\n"
-    ) in website
+        '\nif [[ -n "$ANSWERS" && ! -f docs/index.md && ! -f docs/README.md ]]; then\n'
+    ) in f"\n{website['run']}"
     # No tool of its own code, which it alone has.
     own = [
         step
-        for step in steps
-        if step.split("\n")[0]
+        for step in job["steps"]
+        if step.get("name")
         in (
-            "      - name: Install the hash-pinned tools of the project",
-            "      - name: Find the PHP of the tools and the oldest PHP of the app",
-            "      - name: Set up the PHP of the tools",
-            "      - name: Install the locked tools of the app",
-            "      - name: Install the locked packages",
-            "      - name: Lint the Dockerfile",
-            "      - name: Run the checks of the project",
-            "      - name: Validate the integration with hassfest",
+            "Install the hash-pinned tools of the project",
+            "Find the PHP of the tools and the oldest PHP of the app",
+            "Set up the PHP of the tools",
+            "Install the locked tools of the app",
+            "Install the locked packages",
+            "Lint the Dockerfile",
+            "Run the checks of the project",
+            "Validate the integration with hassfest",
         )
-        or "uses: actions/setup-node@" in step.split("\n")[0]
-        or "python-version-file: ${{ env.PROJECT }}" in step
+        or ("name" not in step and step["uses"].startswith("actions/setup-node@"))
+        or "${{ env.PROJECT }}" in str(step.get("with", {}).get("python-version-file"))
     ]
     assert len(own) == 10
     for step in own:
-        assert (setting_of(step, "if") or "").startswith("matrix.start != 'adopted'"), (
-            step
-        )
+        assert condition_of(step).startswith("matrix.start != 'adopted'"), step
     # The lint of its workflows and of its Markdown, as in every leg.
     for name in ("Lint the workflows", "Lint the Markdown"):
-        assert (
-            setting_of(step_of(job, f"      - name: {name} of the project"), "if")
-            is None
-        )
+        assert "if" not in step_in(job, f"{name} of the project")
 
 
 # A file of the blueprint that a file of the template takes in.
@@ -12206,22 +12232,28 @@ def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
     assert included
     for name in included:
         assert any(fnmatch.fnmatch(name, pattern) for pattern in paths), name
-    assert "  contents: read\n" in workflow
+    parsed = parse(workflow)
+    assert parsed["permissions"] == {"contents": "read"}
     assert "write" not in workflow
-    job = job_alone(workflow, "downstream")
-    assert "          fetch-depth: 0\n          persist-credentials: false\n" in job
+    job = job_in(parsed, "downstream")
+    [checkout] = steps_using(job, "actions/checkout")
+    assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     # The Copier of the blueprint bots, which Renovate updates apart from the tools
     # of the tests.
     assert (
-        "        run: uv pip install --system --require-hashes"
-        " -r stacks/copier/requirements.txt\n"
-    ) in job
-    assert "          cache-dependency-glob: stacks/copier/requirements.txt\n" in job
+        "uv pip install --system --require-hashes -r stacks/copier/requirements.txt"
+        in [step.get("run") for step in job["steps"]]
+    )
+    assert [
+        setup["with"]["cache-dependency-glob"]
+        for setup in steps_using(job, "astral-sh/setup-uv")
+    ] == ["stacks/copier/requirements.txt"]
     run = script_of(job, "Update every repository that takes the blueprint")
     assert 'arguments=(--head "$(git rev-parse HEAD)")\n' in run
     assert 'arguments+=(--base "$(git rev-parse HEAD^1)")\n' in run
     assert 'python3 downstream.py "${arguments[@]}"\n' in run
-    assert job.endswith(explain_step("downstream"))
+    assert job["steps"][-1] == explain_step("downstream")
+    explained_under_their_comments(workflow)
     # No required check: a conflict can be the right change.
     settings = tomllib.loads(
         (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
@@ -12835,23 +12867,24 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     assert check.index('version="${TAG#v}"') < check.index("for sbom in")
     assert check.index('version="${TAG#v}"') < check.index('case "$PUBLISH_TO" in')
     # The name of the repository and the version of the release, in the build too.
-    step = step_of(build, f"      - name: {describe}")
-    assert "          NAME: ${{ github.event.repository.name }}\n" in step
-    assert "          VERSION: ${{ inputs.version }}\n" in step
+    variables = step_named(build, describe)["env"]
+    assert variables["NAME"] == "${{ github.event.repository.name }}"
+    assert variables["VERSION"] == "${{ inputs.version }}"
     # syft comes from its release, checked by its sha256, into the job that may write
     # the release; no action downloads its installer there.
     assert "anchore/sbom-action" not in build
     assert "sha256sum --check --strict" in write
     # After the package is built and before the assets are attested.
     order = [
-        "      - name: Build and sign the Nextcloud app\n",
-        "      - name: Unpack what the release ships\n",
-        f"      - name: {describe}\n",
-        "      - name: Write the advisories that don't affect the release\n",
-        "      - name: Attest the provenance of every asset\n",
+        "Build and sign the Nextcloud app",
+        "Unpack what the release ships",
+        describe,
+        "Write the advisories that don't affect the release",
+        "Attest the provenance of every asset",
     ]
-    assert [build.index(name) for name in order] == sorted(
-        build.index(name) for name in order
+    names = names_of(job_with(build, describe))
+    assert [names.index(name) for name in order] == sorted(
+        names.index(name) for name in order
     )
     # The advisories that don't affect the release name it as its SBOMs do, by the
     # default of the CLI: the tag without its v, as release.yml tags it. No --version,
@@ -12878,71 +12911,42 @@ class Step(NamedTuple):
     """What a step did with the fake gh: its result, the calls of gh, its summary, its
     outputs and what gh was given to write."""
 
-    result: subprocess.CompletedProcess[str]
+    result: workflow_steps.StepResult
     calls: list[str]
     summary: str
-    output: str
+    outputs: dict[str, str]
     written: dict[str, str]
 
 
 def run_a_step_with_the_fake_gh(
-    tmp_path: Path, script: str, answers: dict[str, object], **variables: str
+    tmp_path: Path,
+    step: tuple[str, str, str],
+    answers: Mapping[str, object],
+    files: Mapping[str, str] | None = None,
+    **variables: str,
 ) -> Step:
-    """Runs the script of a step in tmp_path/checkout, as GitHub runs it, with the fake
-    gh, the Python of the tests as python3, a sleep that only notes its seconds in
-    tmp_path/slept, and $RUNNER_TEMP in tmp_path/temp."""
+    """Runs a step, by its workflow, its job and its name, as GitHub runs it, in the
+    checkout tmp_path/checkout, with the fake gh answering as gh_answers() says, the
+    Python of the tests as python3, a sleep that only notes its seconds, and these
+    files of the checkout or of $RUNNER_TEMP."""
     checkout = tmp_path / "checkout"
     checkout.mkdir(exist_ok=True)
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    folders = {name: tmp_path / name for name in ("bin", "answers", "written", "temp")}
-    for folder in folders.values():
-        folder.mkdir()
-    for key, answer in answers.items():
-        (folders["answers"] / re.sub(r"[/ ?]", "_", key)).write_text(
-            answer if isinstance(answer, str) else json.dumps(answer),
-            encoding="utf-8",
-            newline="\n",
-        )
-    for tool, body in {
-        "gh": FAKE_GH,
-        "python3": f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
-        "sleep": f'#!/usr/bin/env bash\necho "$*" >> "{(tmp_path / "slept").as_posix()}"\n',
-    }.items():
-        (folders["bin"] / tool).write_text(body, encoding="utf-8", newline="\n")
-        (folders["bin"] / tool).chmod(0o755)
-    files = {name: tmp_path / name for name in ("calls", "summary", "output")}
-    for file in files.values():
-        file.touch()
-    assert BASH
-    result = subprocess.run(
-        [BASH, "-e", str(tmp_path / "step.sh")],
-        cwd=checkout,
-        env={
-            **os.environ,
-            "PATH": f"{folders['bin']}{os.pathsep}{os.environ['PATH']}",
-            "GH_REPO": "o/r",
-            "RUNNER_TEMP": str(folders["temp"]),
-            "GITHUB_STEP_SUMMARY": str(files["summary"]),
-            "GITHUB_OUTPUT": str(files["output"]),
-            "CALLS": str(files["calls"]),
-            "ANSWERS": str(folders["answers"]),
-            "WRITTEN": str(folders["written"]),
-            **variables,
+    workflow, job, name = step
+    done = workflow_steps.run_step(
+        tmp_path,
+        workflow,
+        job,
+        name,
+        answers=gh_answers(answers),
+        env=variables,
+        stubs={
+            "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+            "sleep": workflow_steps.recording("sleep"),
         },
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+        files=files,
+        workspace=checkout,
     )
-    return Step(
-        result,
-        files["calls"].read_text(encoding="utf-8").splitlines(),
-        files["summary"].read_text(encoding="utf-8"),
-        files["output"].read_text(encoding="utf-8"),
-        {
-            path.name: path.read_text(encoding="utf-8")
-            for path in folders["written"].iterdir()
-        },
-    )
+    return Step(done, done.commands, done.summary, done.outputs, written_by(done))
 
 
 def a_checkout_with_the_tool(tmp_path: Path, **fragments: str) -> Path:
@@ -12964,35 +12968,48 @@ def pull_request_files(*files: tuple[str, str]) -> list[dict[str, str]]:
     return [{"filename": name, "status": status} for name, status in files]
 
 
-def changelog_check() -> str:
-    title = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
-        encoding="utf-8"
-    )
-    # A step of the check of the title.
-    return job_alone(title, "title")
+# The steps of the check of the title that check the changelog, and the step of the
+# release bot that writes the changelog of the release.
+ENTRY = (
+    "pull-request-title.yml",
+    "title",
+    "Require an entry in the changelog for a change for users",
+)
+FRAGMENTS = (
+    "pull-request-title.yml",
+    "title",
+    "Check the fragments as the release takes them in",
+)
+RELEASE_CHANGELOG = (
+    "release.yml",
+    "release-please",
+    "Write the text of Unreleased and of the fragments into the release pull request",
+)
+
+
+def changelog_check() -> dict[str, Any]:
+    """The job of the check of the title, parsed, whose steps check the changelog."""
+    return workflow_steps.job("pull-request-title.yml", "title")
 
 
 def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None:
     job = changelog_check()
-    permissions = job[job.index("    permissions:\n") : job.index("    steps:\n")]
     # Writes only the labels of the pull request, which the title sets.
-    assert [
-        line.strip() for line in permissions.splitlines()[1:] if "#" not in line
-    ] == ["contents: read", "issues: write", "pull-requests: write"]
+    assert job["permissions"] == {
+        "contents": "read",
+        "issues": "write",
+        "pull-requests": "write",
+    }
     # The default branch, sparse, without credentials, and only for fragments or for
     # the PR coach after a failure.
-    checkout = job[job.index("      - uses: actions/checkout@") :]
-    checkout = checkout[: checkout.index("      - name:")]
-    assert (
-        "        if: ${{ !cancelled() && "
-        "(steps.entry.outputs.fragments == 'true' || failure()) }}\n"
-    ) in checkout
-    assert "          persist-credentials: false\n" in checkout
-    assert (
-        "          sparse-checkout: |\n            .github\n            blueprint\n"
-        in (checkout)
+    [checkout] = steps_using(job, "actions/checkout")
+    assert condition_of(checkout) == (
+        "${{ !cancelled() && (steps.entry.outputs.fragments == 'true' || failure()) }}"
     )
-    assert "ref:" not in checkout
+    assert checkout["with"] == {
+        "persist-credentials": False,
+        "sparse-checkout": ".github\nblueprint\n",
+    }
     # The values of the event reach the scripts as variables only.
     for step in (
         "Require an entry in the changelog for a change for users",
@@ -13164,10 +13181,7 @@ def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
 ) -> None:
     step = run_a_step_with_the_fake_gh(
         tmp_path,
-        script_of(
-            changelog_check(),
-            "Require an entry in the changelog for a change for users",
-        ),
+        ENTRY,
         {"repos/o/r/pulls/7/files": pull_request_files(*files)},
         NUMBER="7",
         TITLE=title,
@@ -13176,8 +13190,8 @@ def test_the_changelog_check_takes_an_entry_in_changelog_md_or_a_fragment(
 
     assert step.result.returncode == code, step.result.stderr
     assert message in step.result.stdout + step.summary
-    assert ("fragments=true" in step.output) == bool(fragments)
-    listed = tmp_path / "temp/fragments"
+    assert (step.outputs.get("fragments") == "true") == bool(fragments)
+    listed = tmp_path / "runner/fragments"
     assert (listed.read_text(encoding="utf-8").splitlines() if fragments else []) == (
         fragments
     )
@@ -13241,10 +13255,7 @@ def test_the_changelog_check_asks_github_three_times_for_the_files(
     # moment in which GitHub fails doesn't fail it at once.
     step = run_a_step_with_the_fake_gh(
         tmp_path,
-        script_of(
-            changelog_check(),
-            "Require an entry in the changelog for a change for users",
-        ),
+        ENTRY,
         {"repos/o/r/pulls/7/files.error": "gh: Bad Gateway (HTTP 502)\n"},
         NUMBER="7",
         TITLE=title,
@@ -13254,12 +13265,12 @@ def test_the_changelog_check_asks_github_three_times_for_the_files(
     assert step.result.returncode == 1
     assert len(step.calls) == 3
     assert all(call.startswith("api repos/o/r/pulls/7/files ") for call in step.calls)
-    assert (tmp_path / "slept").read_text(encoding="utf-8").split() == ["10", "20"]
+    assert step.result.stubbed == ["sleep 10", "sleep 20"]
     assert (
         "::error::GitHub did not list the files of this pull request. Run the check "
         "again." in step.result.stdout
     )
-    assert "fragments=true" not in step.output
+    assert "fragments" not in step.outputs
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the
@@ -13297,22 +13308,18 @@ def test_the_changelog_check_checks_each_fragment_as_the_release_takes_it_in(
 ) -> None:
     # main has the tool and the changelog; the fragments come from the pull request.
     a_checkout_with_the_tool(tmp_path)
-    step_script = script_of(
-        changelog_check(), "Check the fragments as the release takes them in"
-    )
-    # As the step before writes it, with LF on every system.
-    (tmp_path / "listed").write_text(
-        "".join(f"changelog.d/{name}\n" for name in fragments),
-        encoding="utf-8",
-        newline="\n",
-    )
     step = run_a_step_with_the_fake_gh(
         tmp_path,
-        f'cp "{(tmp_path / "listed").as_posix()}" "$RUNNER_TEMP/fragments"\n'
-        + step_script,
+        FRAGMENTS,
         {
             f"repos/o/r/contents/changelog.d/{name}?ref=abc123": text
             for name, text in fragments.items()
+        },
+        # As the step before writes it, with LF on every system.
+        {
+            "$RUNNER_TEMP/fragments": "".join(
+                f"changelog.d/{name}\n" for name in fragments
+            )
         },
         HEAD_SHA="abc123",
     )
@@ -13386,14 +13393,9 @@ def test_the_release_bot_writes_the_fragments_into_the_release_and_deletes_them(
     texts = {"a-dark-mode.md": FEATURE_FRAGMENT, "b-token.md": FIX_FRAGMENT}
     a_checkout_with_the_tool(tmp_path, **{name: texts[name] for name in fragments})
     branch = release_branch_changelog(MAIN_CHANGELOG)
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-
     step = run_a_step_with_the_fake_gh(
         tmp_path,
-        script_of(
-            release,
-            "Write the text of Unreleased and of the fragments into the release pull request",
-        ),
+        RELEASE_CHANGELOG,
         release_please_answers(branch, listed),
         PR="",
     )
@@ -13437,15 +13439,12 @@ def test_the_release_bot_leaves_a_release_that_is_written_already(
     branch = release_branch_changelog(MAIN_CHANGELOG)
     fragments = [Fragment("changelog.d/b-token.md", FIX_FRAGMENT)]
     written = release_changelog("1.3.0", MAIN_CHANGELOG, branch, fragments)
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    script = script_of(
-        release,
-        "Write the text of Unreleased and of the fragments into the release pull request",
-    )
-
     # Written and without the fragment: nothing to do.
     done = run_a_step_with_the_fake_gh(
-        tmp_path, script, release_please_answers(written, [".gitkeep"]), PR=""
+        tmp_path,
+        RELEASE_CHANGELOG,
+        release_please_answers(written, [".gitkeep"]),
+        PR="",
     )
     assert done.result.returncode == 0, done.result.stderr
     assert "The changelog of 1.3.0 is up to date." in done.result.stdout
@@ -13465,14 +13464,10 @@ def test_the_release_bot_stops_when_it_cannot_see_the_fragments_of_the_branch(
     answers["repos/o/r/contents/changelog.d?ref=abc123.error"] = (
         "gh: Server Error (HTTP 502)\n"
     )
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
     step = run_a_step_with_the_fake_gh(
         tmp_path,
-        script_of(
-            release,
-            "Write the text of Unreleased and of the fragments into the release pull request",
-        ),
+        RELEASE_CHANGELOG,
         answers,
         PR="",
     )
@@ -13520,65 +13515,72 @@ def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:
     assert f"GITSIGN_VERSION: {version[1]}" in verify
     assert f"GITSIGN_SHA256: {digest[1]}" in verify
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    job = release[release.index("  release-please:") : release.index("\n  assets:")]
-    assert "id-token: write" in job
+    job = job_in(release, "release-please")
+    assert job["permissions"]["id-token"] == "write"
     # The signed tag is there before release-please creates the release on it.
-    assert job.index('bash .github/sign-tag.sh "$tag" "$commit"') < job.index(
-        "googleapis/release-please-action"
-    )
+    steps = job["steps"]
+    signing = [
+        index
+        for index, step in enumerate(steps)
+        if 'bash .github/sign-tag.sh "$tag" "$commit"' in step.get("run", "")
+    ]
+    [please] = steps_using(job, "googleapis/release-please-action")
+    assert signing
+    assert signing[0] < steps.index(please)
 
 
 def test_every_release_run_signs_the_tag_of_a_merged_release() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    start = release.index("      - name: Sign the tag of a release")
-    step = release[start : release.index("      - name:", start + 1)]
+    job = job_in(release, "release-please")
+    step = step_in(
+        job, "Sign the tag of a release that a merged release pull request makes"
+    )
     # Not only the push of the merge, which can be lost: the next run, a schedule or a
     # dispatch, signs the tag before release-please creates the release on it.
-    assert "        if: steps.app.outputs.token != ''\n" in step
-    assert "event_name" not in step
-    assert "head_commit" not in step
+    assert condition_of(step) == "steps.app.outputs.token != ''"
+    assert "event_name" not in values_of(step)
+    assert "head_commit" not in values_of(step)
     # The merged release pull requests come from the list of pull requests, which
     # doesn't lag behind a merge as their search does.
-    assert 'pullRequests(labels: ["autorelease: pending"], states: MERGED' in step
-    assert "gh pr list" not in step
+    assert (
+        'pullRequests(labels: ["autorelease: pending"], states: MERGED' in (step["run"])
+    )
+    assert "gh pr list" not in step["run"]
     # A tag that exists already must be the signed one at the commit of the merge,
     # which sign-tag.sh checks (tests/test_sign_tag.py).
-    assert 'bash .github/sign-tag.sh "$tag" "$commit"' in step
+    assert 'bash .github/sign-tag.sh "$tag" "$commit"' in step["run"]
     # release-please creates a release only on a tag that the step signed: never on a
     # tag of its own, without a signature, for a release pull request merged after the
     # step looked, or in a run without the release app.
-    assert "        id: sign\n" in step
-    assert '          echo "signed=true" >> "$GITHUB_OUTPUT"\n' in step
-    please = release[release.index("        id: release\n") :]
-    please = please[: please.index("      - name:")]
-    assert "googleapis/release-please-action@" in please
-    skip = "skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}"
-    assert f"          {skip}\n" in please
+    assert step["id"] == "sign"
+    assert '\necho "signed=true" >> "$GITHUB_OUTPUT"\n' in step["run"]
+    please = step_in(job, "release")
+    assert please["uses"].startswith("googleapis/release-please-action@")
+    assert please["with"]["skip-github-release"] == (
+        "${{ steps.sign.outputs.signed != 'true' }}"
+    )
 
 
 def test_the_build_checks_the_tag_before_it_builds() -> None:
     build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
-    inputs = build[build.index("    inputs:") : build.index("permissions:")]
-    assert (
-        "      sha:\n"
-        "        description: The commit that the tag has to point at\n"
-        "        required: true\n"
-    ) in inputs
-    step = build[
-        build.index("      - name: Verify the tag before building") : build.index(
-            "actions/checkout@"
-        )
-    ]
+    sha = parse(build)["on"]["workflow_call"]["inputs"]["sha"]
+    assert sha["description"] == "The commit that the tag has to point at"
+    assert sha["required"] is True
+    job = job_with(build, "Verify the tag before building")
+    step = step_in(job, "Verify the tag before building")
+    # Before the checkout of the tag.
+    [checkout] = steps_using(job, "actions/checkout")
+    assert job["steps"].index(step) < job["steps"].index(checkout)
     # The script of the commit that runs the workflow, not the one of the tag.
-    assert "contents/.github/sign-tag.sh?ref=$GITHUB_SHA" in step
-    assert 'bash "$RUNNER_TEMP/sign-tag.sh" verify "$TAG" "$SHA"' in step
-    assert "SHA: ${{ inputs.sha }}" in step
+    assert "contents/.github/sign-tag.sh?ref=$GITHUB_SHA" in step["run"]
+    assert 'bash "$RUNNER_TEMP/sign-tag.sh" verify "$TAG" "$SHA"' in step["run"]
+    assert step["env"]["SHA"] == "${{ inputs.sha }}"
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     # The release at the merge, a beta at the commit of the run, and a draft taken up
     # at the last commit that changed the version.
     outputs = ("release", "beta", "resume")
     line = " || ".join(f"steps.{step}.outputs.sha" for step in outputs)
-    assert f"      sha: ${{{{ {line} }}}}\n" in release
+    assert job_in(release, "release-please")["outputs"]["sha"] == f"${{{{ {line} }}}}"
     assert 'echo "sha=$GITHUB_SHA"\n' in release
     manifest = "commits?path=.release-please-manifest.json&sha=$GITHUB_SHA&per_page=1"
     assert manifest in release
@@ -13593,9 +13595,9 @@ def test_a_release_of_a_scheduled_run_is_verified_in_full() -> None:
     assert "GITHUB_EVENT_NAME" not in verify
     assert verify.count('[[ "$WEEKLY" == true ]]') == 5
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    job = release[release.index("\n  verify:") :]
-    assert "uses: ./.github/workflows/verify-release.yml" in job
-    assert "      tag: ${{ needs.release-please.outputs.tag }}" in job
+    job = job_in(release, "verify")
+    assert job["uses"] == "./.github/workflows/verify-release.yml"
+    assert job["with"]["tag"] == "${{ needs.release-please.outputs.tag }}"
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -13631,15 +13633,16 @@ def test_the_code_of_a_project_meets_mutants_every_week(
 def mutation_step(name: str, kind: str) -> str:
     """The script of a step of the Mutation workflow for one kind of code, or with
     no kind of one that runs for every kind, as the plan and the report do."""
-    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
-    condition = rf"        if: .*== '{kind}'\n" if kind else ""
-    step = re.search(
-        rf"      - name: {re.escape(name)}\n{condition}"
-        r"(?:        (?!run: \|).*\n)*        run: \|\n((?:          .*\n|\n)+)",
-        workflow,
-    )
-    assert step, name
-    return textwrap.dedent(step[1])
+    steps = [
+        step
+        for job in workflow_steps.workflow("mutation.yml")["jobs"].values()
+        for step in job.get("steps") or []
+        if step.get("name") == name
+        and (not kind or condition_of(step).endswith(f"== '{kind}'"))
+    ]
+    assert steps, name
+    script: str = steps[0]["run"]
+    return script
 
 
 def run_mutation_step(
@@ -14012,67 +14015,79 @@ def test_the_report_puts_the_parts_together(tmp_path: Path, measured: bool) -> N
 
 
 def test_the_parts_and_the_report_hand_on_their_results() -> None:
-    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
-    jobs = {
-        name: workflow[start:]
-        for name, start in (
-            (match[1], match.start())
-            for match in re.finditer(r"^  (\w+):\n", workflow, re.M)
-        )
-    }
-    plan, mutation, report = jobs["plan"], jobs["mutation"], jobs["report"]
-    issue = jobs["issue"]
-    plan = plan[: plan.index("\n  mutation:")]
-    mutation = mutation[: mutation.index("\n  report:")]
-    report = report[: report.index("\n  # The one issue")]
+    workflow = workflow_steps.workflow("mutation.yml")
+    plan, mutation, report, issue = (
+        job_in(workflow, key) for key in ("plan", "mutation", "report", "issue")
+    )
+
+    def inputs(job: Mapping[str, Any]) -> list[dict[str, Any]]:
+        return [step.get("with", {}) for step in job["steps"]]
+
+    def variables(job: Mapping[str, Any]) -> list[dict[str, Any]]:
+        return [step.get("env", {}) for step in job["steps"]]
+
     # The plan gives the matrix of the parts, one job each.
-    assert "      parts: ${{ steps.plan.outputs.parts }}\n" in plan
-    assert "PARTS: ${{ vars.MUTATION_PARTS }}" in plan
-    assert "        include: ${{ fromJSON(needs.plan.outputs.parts) }}\n" in mutation
-    assert "      fail-fast: false\n" in mutation
-    assert "          PATTERNS: ${{ matrix.patterns }}\n" in mutation
+    assert plan["outputs"]["parts"] == "${{ steps.plan.outputs.parts }}"
+    assert {"PARTS": "${{ vars.MUTATION_PARTS }}"} in variables(plan)
+    assert mutation["strategy"]["matrix"]["include"] == (
+        "${{ fromJSON(needs.plan.outputs.parts) }}"
+    )
+    assert mutation["strategy"]["fail-fast"] is False
+    assert any(
+        found.get("PATTERNS") == "${{ matrix.patterns }}"
+        for found in variables(mutation)
+    )
     # Each part hands its results to the report, which puts them together also when a
     # part failed, and keeps the artifact that the dashboard and the next run read.
-    assert "          name: mutation-part-${{ matrix.part }}\n" in mutation
-    assert "    needs: [plan, mutation]\n" in report
-    assert (
-        "    if: ${{ !cancelled() && needs.plan.outputs.kind == 'python' }}\n" in report
+    assert "mutation-part-${{ matrix.part }}" in [
+        found.get("name") for found in inputs(mutation)
+    ]
+    assert report["needs"] == ["plan", "mutation"]
+    assert condition_of(report) == (
+        "${{ !cancelled() && needs.plan.outputs.kind == 'python' }}"
     )
-    assert (
-        "          pattern: mutation-part-*\n          path: ${{ runner.temp }}/parts\n"
-        in report
+    assert any(
+        found.get("pattern") == "mutation-part-*"
+        and found.get("path") == "${{ runner.temp }}/parts"
+        and found.get("merge-multiple") is True
+        for found in inputs(report)
     )
-    assert "          merge-multiple: true\n" in report
-    assert '--name mutation --dir "$RUNNER_TEMP/previous"' in report
-    assert '--previous "$RUNNER_TEMP/previous/mutation.json"' in report
-    assert (
-        "          name: mutation\n          path: ${{ runner.temp }}/mutation/\n"
-        in report
-    )
+    assert '--name mutation --dir "$RUNNER_TEMP/previous"' in scripts_of(report)
+    assert '--previous "$RUNNER_TEMP/previous/mutation.json"' in scripts_of(report)
     # The weekly run compares with the one before; an artifact lives 90 days at most.
-    assert "          retention-days: 90\n" in report
+    assert any(
+        found.get("name") == "mutation"
+        and found.get("path") == "${{ runner.temp }}/mutation/"
+        and found.get("retention-days") == 90
+        for found in inputs(report)
+    )
     # Only the job of the issue writes, the one issue of the default branch, and never
     # on a pull request, whose code the report runs.
     for job in (plan, mutation, report):
-        assert "      contents: read\n" in job
-        assert "write" not in job
-    assert "      actions: read\n" in report
-    assert "    name: mutation plan\n" in plan
-    assert "    name: mutation report\n" in report
-    assert "    name: mutation issue\n" in issue
-    assert "    needs: report\n" in issue
-    assert (
-        "    if: ${{ needs.report.result == 'success' && (github.event_name == "
+        assert job["permissions"]["contents"] == "read"
+        assert "write" not in values_of(job)
+    assert report["permissions"] == {"actions": "read", "contents": "read"}
+    assert plan["name"] == "mutation plan"
+    assert report["name"] == "mutation report"
+    assert issue["name"] == "mutation issue"
+    assert issue["needs"] == "report"
+    assert condition_of(issue) == (
+        "${{ needs.report.result == 'success' && (github.event_name == "
         "'schedule' || (github.event_name == 'workflow_dispatch' && github.ref_name "
-        "== github.event.repository.default_branch)) }}\n"
-    ) in issue
-    assert "    permissions:\n      contents: read\n      issues: write\n" in issue
-    assert (
-        "          name: mutation\n          path: ${{ runner.temp }}/mutation\n"
-        in (issue)
+        "== github.event.repository.default_branch)) }}"
     )
-    assert 'mutation issue "$RUNNER_TEMP/mutation"' in issue
-    assert workflow.count("issues: write") == 1
+    assert issue["permissions"] == {"contents": "read", "issues": "write"}
+    assert any(
+        found.get("name") == "mutation"
+        and found.get("path") == "${{ runner.temp }}/mutation"
+        for found in inputs(issue)
+    )
+    assert 'mutation issue "$RUNNER_TEMP/mutation"' in scripts_of(issue)
+    assert [
+        key
+        for key, job in workflow["jobs"].items()
+        if "write" in values_of(job.get("permissions", {}))
+    ] == ["issue"]
 
 
 # The end of the output of Infection.
@@ -14215,15 +14230,25 @@ def test_infection_gets_a_php_that_it_runs_on() -> None:
     # than the PHP of the tools of an app that hasn't moved them to PHP 8.3 yet.
     workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
     assert "INFECTION_VERSION: 0.35." in workflow
-    find = step_of(workflow, "      - name: Find the PHP of the tools\n")
-    setup = step_of(workflow, "      - name: Set up the PHP of the tools\n")
-    assert workflow.index(find) < workflow.index(setup)
-    assert workflow.index(setup) < workflow.index("composer install")
-    assert "        id: php\n" in find
-    assert "          php-version: ${{ steps.php.outputs.version }}\n" in setup
+    job = job_with(workflow, "Find the PHP of the tools")
+    find = step_in(job, "Find the PHP of the tools")
+    setup = step_in(job, "Set up the PHP of the tools")
+    steps = job["steps"]
+    installs = [
+        index
+        for index, step in enumerate(steps)
+        if "composer install" in step.get("run", "")
+    ]
+    assert installs
+    assert steps.index(find) < steps.index(setup) < installs[0]
+    assert find["id"] == "php"
+    assert setup["with"]["php-version"] == "${{ steps.php.outputs.version }}"
     # No PHP of its own beside that of the tools.
-    assert workflow.count("uses: shivammathur/setup-php@") == 1
-    assert 'php-version: "' not in workflow
+    assert [
+        step
+        for each in parse(workflow)["jobs"].values()
+        for step in steps_using(each, "shivammathur/setup-php")
+    ] == [setup]
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")

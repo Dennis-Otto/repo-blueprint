@@ -21,11 +21,15 @@ from workflow_steps import (
     StepResult,
     acting_steps,
     acts_of,
+    condition_of,
     exact,
     job,
+    job_in,
+    parse,
     recording,
     run_step,
     step,
+    step_in,
     workflow,
 )
 
@@ -85,6 +89,10 @@ jobs:
         run: |
           false | true
           echo after
+      - name: Workspace
+        run: |
+          cat brought.txt given.txt
+          echo "$GITHUB_WORKSPACE"
 """
 
 
@@ -191,6 +199,93 @@ def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -
     assert (default.returncode, default.stdout) == (0, "after\n")
     strict = run_step(tmp_path / "2", "demo.yml", "demo", "Bash shell", root=demo)
     assert (strict.returncode, strict.stdout) == (1, "")
+
+
+def test_a_step_runs_in_the_checkout_that_the_test_made(
+    tmp_path: Path, demo: Path
+) -> None:
+    # A repository of the test, such as one with the history of a pull request, as
+    # the checkout of the job, with the files that the test gives it.
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "brought.txt").write_text("from the checkout\n", encoding="utf-8")
+
+    done = run_step(
+        tmp_path,
+        "demo.yml",
+        "demo",
+        "Workspace",
+        files={"given.txt": "from the test\n"},
+        root=demo,
+        workspace=checkout,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.splitlines() == [
+        "from the checkout",
+        "from the test",
+        checkout.as_posix(),
+    ]
+    assert done.workspace == checkout
+    assert not (tmp_path / "workspace").exists()
+
+
+# Text that a slice of the workflow takes for a job, a permission or a condition: the
+# comment above a job and the script of a step.
+SLICED = """\
+on: push
+permissions: {}
+jobs:
+  first:
+    # Not a job of its own, nor its condition or its permissions:
+    #   second:
+    #     if: always()
+    #     permissions:
+    #       contents: write
+    if: >-
+      github.event_name == 'push' &&
+      !cancelled()
+    permissions:
+      contents: read
+    steps:
+      - name: One
+        id: one
+        if: failure()
+        run: |
+          cat <<'EOF'
+            if: always()
+          second:
+          EOF
+  second:
+    steps:
+      - uses: actions/checkout@v6
+"""
+
+
+def test_a_job_its_permissions_and_conditions_come_from_the_parsed_workflow(
+    demo: Path,
+) -> None:
+    parsed = parse(SLICED)
+
+    # The same object for the same text, and the key on as YAML 1.1 reads it.
+    assert parse(SLICED) is parsed
+    assert parsed["on"] == "push"
+    assert parsed["permissions"] == {}
+    first = job_in(SLICED, "first")
+    assert condition_of(first) == "github.event_name == 'push' && !cancelled()"
+    assert first["permissions"] == {"contents": "read"}
+    one = step_in(first, "One")
+    assert step_in(first, "one") == one
+    assert condition_of(one) == "failure()"
+    second = job_in(parsed, "second")
+    assert condition_of(second) == ""
+    assert "permissions" not in second
+    with pytest.raises(AssertionError, match="no job third, but"):
+        job_in(parsed, "third")
+    with pytest.raises(AssertionError, match="no step 'Two', but"):
+        step_in(first, "Two")
+    with pytest.raises(AssertionError, match=r"demo.yml/demo: the job has no step"):
+        step("demo.yml", "demo", "Two", demo)
 
 
 @pytest.mark.parametrize(

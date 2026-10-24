@@ -14,15 +14,16 @@ import shlex
 import shutil
 import subprocess
 import sys
-import textwrap
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
+import workflow_steps
 from hypothesis import given
 from hypothesis import strategies as st
-from shell import BASH, in_bash
+from shell import BASH
+from workflow_steps import Answer, condition_of, step_in
 
 import blueprint.fixes
 import pins
@@ -1707,157 +1708,148 @@ def test_fix_commit_suggest_and_main_from_the_command_line(
 # ---------------------------------------------------------------- the workflows
 
 
-def workflow(name: str) -> str:
-    return (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
-
-
-def job_of(text: str, name: str) -> str:
-    start = text.index(f"\n  {name}:\n")
-    following = re.search(r"\n\n  [a-z][a-z0-9-]*:\n", text[start + 1 :])
-    return text[start : start + 1 + following.start()] if following else text[start:]
-
-
-def step_of(text: str, name: str) -> str:
-    start = text.index(f"      - name: {name}\n")
-    following = text.find("\n      - ", start + 1)
-    comment = text.find("\n      # ", start + 1)
-    ends = [end for end in (following, comment) if end != -1]
-    return text[start : min(ends)] if ends else text[start:]
-
-
 @pytest.mark.parametrize(
     "path",
     sorted((ROOT / ".github/workflows").glob("ci-*.yml")),
     ids=lambda path: path.name,
 )
 def test_the_check_of_each_kind_of_project_keeps_its_fixes(path: Path) -> None:
-    check = job_of(path.read_text(encoding="utf-8"), "check")
-    explain = step_of(check, "Explain the failure")
-    name = re.search(r'CHECK: ("check \([a-z-]+\)")', explain)
-    assert name
+    check = workflow_steps.job(path.name, "check")
+    explain = step_in(check, "Explain the failure")
+    name = explain["env"]["CHECK"]
+    assert re.fullmatch(r"check \([a-z-]+\)", name)
 
-    fix = step_of(check, "Fix what a command can fix")
-    keep_step = step_of(check, "Keep the fixes for the fix bot")
+    fix = step_in(check, "Fix what a command can fix")
+    keep_step = step_in(check, "Keep the fixes for the fix bot")
 
     # Fix first, explain second: the explanation stays the last step.
-    assert check.index(fix) < check.index(keep_step) < check.index(explain)
-    assert "fetch-depth: 2" in check
-    assert (
-        'if: failure() && contains(fromJSON(\'["pull_request", "push"]\'), github.event_name)'
-        in fix
+    steps = check["steps"]
+    assert steps.index(fix) < steps.index(keep_step) < steps.index(explain)
+    assert steps[-1] == explain
+    assert any(
+        step.get("with", {}).get("fetch-depth") == 2
+        for step in steps
+        if step.get("uses", "").startswith("actions/checkout@")
     )
-    assert f"CHECK: {name[1]}" in fix
-    assert "git checkout --quiet --force --detach HEAD^2" in fix
-    assert 'fix run "$CHECK" --keep "$RUNNER_TEMP/fixes"' in fix
-    assert "if: failure() && steps.fix.outcome == 'success'" in keep_step
-    assert "name: fixes-check" in keep_step
-    assert "if-no-files-found: ignore" in keep_step
-    assert "include-hidden-files: true" in keep_step
+    assert condition_of(fix) == (
+        'failure() && contains(fromJSON(\'["pull_request", "push"]\'),'
+        " github.event_name)"
+    )
+    assert fix["env"]["CHECK"] == name
+    assert "git checkout --quiet --force --detach HEAD^2" in fix["run"]
+    assert 'fix run "$CHECK" --keep "$RUNNER_TEMP/fixes"' in fix["run"]
+    assert condition_of(keep_step) == "failure() && steps.fix.outcome == 'success'"
+    assert keep_step["with"]["name"] == "fixes-check"
+    assert keep_step["with"]["if-no-files-found"] == "ignore"
+    assert keep_step["with"]["include-hidden-files"] is True
 
 
 def test_the_markdown_fixes_itself_on_the_head_of_the_pull_request() -> None:
-    markdown = job_of(workflow("lint.yml"), "markdown")
+    markdown = workflow_steps.job("lint.yml", "markdown")
+    steps = markdown["steps"]
 
-    assert "fetch-depth: 2" in markdown
-    head = step_of(markdown, "Check out the head of the pull request for the fixes")
-    assert "if: failure() && github.event_name == 'pull_request'" in head
-    fix = step_of(markdown, "Fix what markdownlint can fix")
-    assert "continue-on-error: true" in fix
-    assert "fix: true" in fix
+    assert any(
+        step.get("with", {}).get("fetch-depth") == 2
+        for step in steps
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    head = step_in(markdown, "Check out the head of the pull request for the fixes")
+    assert condition_of(head) == "failure() && github.event_name == 'pull_request'"
+    fix = step_in(markdown, "Fix what markdownlint can fix")
+    assert fix["continue-on-error"] is True
+    assert fix["with"]["fix"] is True
     # The same action as the check, so that both have one version.
-    action = re.findall(r"uses: (DavidAnson/markdownlint-cli2-action@\w+)", markdown)
+    action = [
+        step["uses"]
+        for step in steps
+        if step.get("uses", "").startswith("DavidAnson/markdownlint-cli2-action@")
+    ]
     assert len(action) == 2
     assert len(set(action)) == 1
-    keep_step = step_of(markdown, "Keep the fixes for the fix bot")
-    assert "name: fixes-markdown" in keep_step
-    assert markdown.index(keep_step) < markdown.index(
-        "      - name: Explain the failure\n"
+    keep_step = step_in(markdown, "Keep the fixes for the fix bot")
+    assert keep_step["with"]["name"] == "fixes-markdown"
+    assert steps.index(keep_step) < steps.index(
+        step_in(markdown, "Explain the failure")
     )
-    assert 'fix keep "$RUNNER_TEMP/fixes"' in step_of(
-        markdown, "Keep the files that markdownlint fixed"
+    assert (
+        'fix keep "$RUNNER_TEMP/fixes"'
+        in (step_in(markdown, "Keep the files that markdownlint fixed")["run"])
     )
 
 
 def test_the_fix_bot_has_only_what_it_needs() -> None:
-    bot = job_of(workflow("after-checks.yml"), "fixes")
+    bot = workflow_steps.job("after-checks.yml", "fixes")
 
-    assert "    permissions:\n      actions: read #" in bot
-    assert "      contents: read #" in bot
-    assert "contents: write" not in bot.split("steps:")[0]
-    # Each token of the release app has only what its step needs.
-    branch = step_of(bot, "Create a token of the release app for the branch")
-    assert re.findall(r"permission-[\w-]+: \w+", branch) == [
-        "permission-contents: write"
-    ]
-    main = step_of(bot, "Create a token of the release app for main")
-    assert re.findall(r"permission-[\w-]+: \w+", main) == [
-        "permission-contents: write",
-        "permission-pull-requests: write",
-        "permission-workflows: write",
-    ]
-    # It checks out the tool of main, never the code of the pull request.
-    assert "sparse-checkout: |\n            .github\n            blueprint" in bot
-    assert "ref:" not in bot
-    assert "github.event.workflow_run.conclusion == 'failure'" in bot
-    assert "cancel-in-progress: false" in bot
-
-
-# gh and python3 for the steps of the fix bot: each call on one line of $CALLS, with
-# the line breaks of its arguments as \n.
-STUB = r"""#!/usr/bin/env bash
-args="$*"
-printf '%s\n' "$(basename "$0") ${args//$'\n'/\\n}" >> "$CALLS"
-case "$*" in
-  "issue list "*) echo "${ISSUE:-}" ;;
-esac
-"""
-
-
-def run_step(
-    script: str, tmp_path: Path, **variables: str
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    stubs = tmp_path / "stubs"
-    stubs.mkdir(exist_ok=True)
-    for name in ("gh", "python3"):
-        (stubs / name).write_text(STUB, encoding="utf-8", newline="\n")
-        (stubs / name).chmod(0o755)
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    calls = tmp_path / "calls"
-    environment = {
-        **os.environ,
-        "STUBS": stubs.as_posix(),
-        "CALLS": calls.as_posix(),
-        "RUNNER_TEMP": (tmp_path / "runner").as_posix(),
-        "GITHUB_OUTPUT": (tmp_path / "output").as_posix(),
-        "GITHUB_STEP_SUMMARY": (tmp_path / "summary").as_posix(),
-        **variables,
+    # The token of the job only reads the code, and writes no more than the issue of
+    # the bot of main and the suggestions and comments on a pull request.
+    assert bot["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "issues": "write",
+        "pull-requests": "write",
     }
-    result = subprocess.run(
-        in_bash("-e", (tmp_path / "step.sh").as_posix()),
-        cwd=tmp_path,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
+    # Each token of the release app has only what its step needs.
+    branch = step_in(bot, "Create a token of the release app for the branch")
+    assert permissions_of(branch) == {"permission-contents": "write"}
+    main = step_in(bot, "Create a token of the release app for main")
+    assert permissions_of(main) == {
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+        "permission-workflows": "write",
+    }
+    # It checks out the tool of main, never the code of the pull request.
+    [checkout] = [
+        step
+        for step in bot["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert checkout["with"]["sparse-checkout"].startswith(".github\nblueprint\n")
+    assert "ref" not in checkout["with"]
+    assert "github.event.workflow_run.conclusion == 'failure'" in condition_of(bot)
+    assert bot["concurrency"]["cancel-in-progress"] is False
+
+
+def permissions_of(step: dict[str, Any]) -> dict[str, str]:
+    """The permissions that a step asks a token of the release app for."""
+    return {
+        key: value
+        for key, value in step["with"].items()
+        if key.startswith("permission-")
+    }
+
+
+# gh answers the calls of the steps of the fix bot that write, and python3 runs no
+# tool: each call of it is written down.
+WRITES = Answer(r"(?:pr comment|issue (?:create|edit|close)) .*")
+PYTHON3 = {"python3": workflow_steps.recording("python3")}
+
+
+def run_fix_bot_step(
+    tmp_path: Path,
+    step: str,
+    answers: Sequence[Answer] = (WRITES,),
+    **variables: str,
+) -> workflow_steps.StepResult:
+    """Runs a step of the fix bot as GitHub does, with the fake gh."""
+    return workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "fixes",
+        step,
+        answers=answers,
+        env=variables,
+        stubs=PYTHON3,
     )
-    made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
-    return result, made
-
-
-def script_of(step: str) -> str:
-    run_at = step.index("        run: |\n") + len("        run: |\n")
-    return textwrap.dedent(step[run_at:])
 
 
 @needs_bash
 def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None:
-    bot = job_of(workflow("after-checks.yml"), "fixes")
     runner = (tmp_path / "runner").as_posix()
+    output = (tmp_path / "github/output").as_posix()
 
-    result, made = run_step(
-        script_of(step_of(bot, "Collect the fixes of the checks of the commit")),
+    done = run_fix_bot_step(
         tmp_path,
-        GH_REPO=REPO,
+        "Collect the fixes of the checks of the commit",
         RUN="5",
         SHA=SHA,
         EVENT="pull_request",
@@ -1865,21 +1857,19 @@ def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None
         NUMBER="",
     )
 
-    assert result.returncode == 0, result.stderr
-    assert made == [
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == [
         f"python3 blueprint.py --repo {REPO} fix collect 5 --sha {SHA} --event pull_request"
-        f" --branch feature --pull  --folder {runner}/fixes --output {(tmp_path / 'output').as_posix()}"
+        f" --branch feature --pull  --folder {runner}/fixes --output {output}"
     ]
     for name, action in (
         ("Suggest the fixes on the pull request from a fork", "suggest"),
         ("Commit the fixes onto the branch of the pull request", "commit"),
         ("Keep the pull request with the fixes of main", "main"),
     ):
-        (tmp_path / "calls").unlink()
-        result, made = run_step(
-            script_of(step_of(bot, name)),
+        done = run_fix_bot_step(
             tmp_path,
-            GH_REPO=REPO,
+            name,
             SHA=SHA,
             PULL="42",
             BRANCH="feature",
@@ -1887,11 +1877,12 @@ def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None
             URL="https://run",
             BASE="main",
         )
-        assert result.returncode == 0, result.stderr
-        assert made[0].startswith(
+        assert done.returncode == 0, done.stderr
+        assert done.stubbed[0].startswith(
             f"python3 blueprint.py --repo {REPO} fix {action} --sha {SHA}"
         )
-        assert made[0].endswith(f"--folder {runner}/fixes")
+        assert done.stubbed[0].endswith(f"--folder {runner}/fixes")
+        assert done.calls == []
 
 
 @needs_bash
@@ -1899,23 +1890,23 @@ def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None
 def test_the_fix_bot_says_on_the_pull_request_that_it_failed(
     tmp_path: Path, pull: str
 ) -> None:
-    step = step_of(
-        job_of(workflow("after-checks.yml"), "fixes"),
+    done = run_fix_bot_step(
+        tmp_path,
         "Say on the pull request that the fix bot failed",
+        PULL=pull,
+        URL="https://run/9",
     )
 
-    result, made = run_step(script_of(step), tmp_path, PULL=pull, URL="https://run/9")
-
-    assert result.returncode == 0, result.stderr
+    assert done.returncode == 0, done.stderr
     if pull:
-        assert made == [
-            "gh pr comment 42 --body The fix bot couldn't fix the findings of this pull "
+        assert done.commands == [
+            "pr comment 42 --body The fix bot couldn't fix the findings of this pull "
             "request that a command fixes (https://run/9); its summary says why. The PR "
             "coach names the command of each check that failed, which makes the fixes on "
             "your machine."
         ]
     else:
-        assert made == []
+        assert done.calls == []
 
 
 @needs_bash
@@ -1925,13 +1916,13 @@ def test_the_fix_bot_says_on_the_pull_request_that_it_failed(
         (
             "true",
             "",
-            "gh issue create --title The fix bot fails on main --label maintenance --body ",
+            "issue create --title The fix bot fails on main --label maintenance --body ",
         ),
-        ("true", "7", "gh issue edit 7 --body "),
+        ("true", "7", "issue edit 7 --body "),
         (
             "false",
             "7",
-            "gh issue close 7 --comment The fix bot passes again: https://run/9",
+            "issue close 7 --comment The fix bot passes again: https://run/9",
         ),
         ("false", "", ""),
     ],
@@ -1939,17 +1930,17 @@ def test_the_fix_bot_says_on_the_pull_request_that_it_failed(
 def test_the_fix_bot_of_main_keeps_one_issue_of_its_failures(
     tmp_path: Path, failed: str, issue: str, last: str
 ) -> None:
-    step = step_of(
-        job_of(workflow("after-checks.yml"), "fixes"),
+    done = run_fix_bot_step(
+        tmp_path,
         "Keep the issue of the fix bot of main current",
+        (Answer(r"issue list --state open .*", f"{issue}\n" if issue else ""), WRITES),
+        FAILED=failed,
+        URL="https://run/9",
     )
 
-    result, made = run_step(
-        script_of(step), tmp_path, FAILED=failed, ISSUE=issue, URL="https://run/9"
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert made[0].startswith("gh issue list --state open --search")
+    assert done.returncode == 0, done.stderr
+    made = done.commands
+    assert made[0].startswith("issue list --state open --search")
     if last:
         assert made[-1].startswith(last)
     else:

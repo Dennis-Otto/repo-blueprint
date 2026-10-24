@@ -1,205 +1,160 @@
 """Tests of the Rollout workflow, which brings every release of the blueprint to the
 repositories of the release app: the steps of .github/workflows/rollout.yml in bash,
-with a gh that answers as GitHub does, after the filters of jq, and a sleep that only
-counts."""
+as tests/workflow_steps.py runs them, with the fake gh answering as GitHub does after
+the filters of jq, and a sleep that only counts."""
 
 from __future__ import annotations
 
-import os
-import re
-import subprocess
-import textwrap
-from dataclasses import dataclass
+import dataclasses
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from shell import BASH, in_bash
+import workflow_steps
+from shell import BASH
+from workflow_steps import Answer, StepResult, exact
 
-ROOT = Path(__file__).parents[1]
-ROLLOUT = ROOT / ".github/workflows/rollout.yml"
 pytestmark = pytest.mark.skipif(
     BASH is None, reason="the steps run in bash, Git Bash on Windows"
 )
 
-GH = """#!/usr/bin/env bash
-echo "gh $*" >> "$CALLS"
-# The next outcome that the test planned for a kind of call, one per line, or the
-# usual one once it planned no more.
-next() {
-  outcome=""
-  if [[ -s "$STUBS/$1" ]]; then
-    outcome="$(head -n 1 "$STUBS/$1")"
-    tail -n +2 "$STUBS/$1" > "$STUBS/$1.next" && mv "$STUBS/$1.next" "$STUBS/$1"
-  fi
-  outcome="${outcome:-$2}"
+# The repositories that the tests start the blueprint bot of.
+REPOSITORIES = ("a", "b", "c")
+
+
+def failing_or(pattern: str, failed: bool, out: str) -> Answer:
+    """The answer of gh to the calls that match: out, or a moment in which GitHub
+    fails."""
+    if failed:
+        return Answer(pattern, err="gh: Bad Gateway (HTTP 502)\n", code=1)
+    return Answer(pattern, out)
+
+
+def answer(kind: str, outcome: str, values: dict[str, str]) -> Answer:
+    """How gh answers a kind of call with an outcome that the test planned: the
+    release, the jobs of the run, the listing of the repositories, the look for
+    the blueprint bot of a repository, its start, its run and its pull request."""
+    if kind == "release":
+        return failing_or(r"release view .*", outcome == "fail", values["latest"])
+    if kind == "jobs":
+        return failing_or(
+            r"api repos/o/r/actions/runs/7/jobs\?per_page=100 .*",
+            outcome == "fail",
+            values["publish"],
+        )
+    if kind == "listing":
+        return failing_or(r"api --paginate .*", outcome == "fail", values["listing"])
+    if kind.startswith("lookup-"):
+        call = (
+            f"api --include --silent repos/o/{kind.removeprefix('lookup-')}"
+            "/contents/.github/workflows/blueprint-update.yml"
+        )
+        if outcome == "nothing":
+            return exact(call, err="error connecting to api.github.com\n", code=1)
+        headers = f"HTTP/2.0 {outcome} Status\nContent-Type: application/json\n"
+        if outcome == "200":
+            return exact(call, headers)
+        return exact(call, headers, err=f"gh: Status (HTTP {outcome})\n", code=1)
+    if kind.startswith("dispatch-"):
+        repository = f"o/{kind.removeprefix('dispatch-')}"
+        call = f"workflow run blueprint-update.yml --repo {repository}"
+        if outcome == "ok":
+            return exact(call, f"https://github.com/{repository}/actions/runs/123\n")
+        # GitHub didn't name the run.
+        if outcome == "quiet":
+            return exact(call)
+        return exact(
+            call, err="could not create workflow dispatch event: HTTP 500\n", code=1
+        )
+    if kind == "bot":
+        return failing_or(r"run view .*", outcome == "error", f"{outcome}\n")
+    assert kind == "pull-request", kind
+    if outcome == "none":
+        return Answer(
+            r"pr view .*",
+            err='no pull requests found for branch "blueprint/update"\n',
+            code=1,
+        )
+    return failing_or(
+        r"pr view .*",
+        outcome == "error",
+        f"{outcome} https://github.com/o/b/pull/9\n",
+    )
+
+
+# The usual outcome of each kind of call, once the test planned no more.
+USUAL = {
+    "release": "ok",
+    "jobs": "ok",
+    "listing": "ok",
+    **{f"lookup-{name}": "200" for name in REPOSITORIES},
+    **{f"dispatch-{name}": "ok" for name in REPOSITORIES},
+    "bot": "completed success",
+    "pull-request": "passed",
 }
-case "$1 $2" in
-  "release view")
-    next release ok
-    if [[ "$outcome" == fail ]]; then
-      echo "gh: Bad Gateway (HTTP 502)" >&2
-      exit 1
-    fi
-    echo "$LATEST"
-    ;;
-  "api repos/o/r/actions/runs/7/jobs?per_page=100")
-    next jobs ok
-    if [[ "$outcome" == fail ]]; then
-      echo "gh: Bad Gateway (HTTP 502)" >&2
-      exit 1
-    fi
-    printf '%s\\n' "$PUBLISH"
-    ;;
-  "api --paginate")
-    next listing ok
-    if [[ "$outcome" == fail ]]; then
-      echo "gh: Bad Gateway (HTTP 502)" >&2
-      exit 1
-    fi
-    printf '%s\\n' $LISTING
-    ;;
-  # The look for the blueprint bot: gh api --include --silent repos/o/<name>/contents/...
-  "api --include")
-    name="${4#repos/o/}"
-    next "lookup-${name%%/*}" 200
-    if [[ "$outcome" == nothing ]]; then
-      echo "error connecting to api.github.com" >&2
-      exit 1
-    fi
-    printf 'HTTP/2.0 %s Status\\nContent-Type: application/json\\n' "$outcome"
-    if [[ "$outcome" != 200 ]]; then
-      echo "gh: Status (HTTP $outcome)" >&2
-      exit 1
-    fi
-    ;;
-  "workflow run")
-    next "dispatch-${5#o/}" ok
-    case "$outcome" in
-      ok) echo "https://github.com/$5/actions/runs/123" ;;
-      # GitHub didn't name the run.
-      quiet) ;;
-      *)
-        echo "could not create workflow dispatch event: HTTP 500" >&2
-        exit 1
-        ;;
-    esac
-    ;;
-  "run view")
-    next bot "completed success"
-    if [[ "$outcome" == error ]]; then
-      echo "gh: Bad Gateway (HTTP 502)" >&2
-      exit 1
-    fi
-    echo "$outcome"
-    ;;
-  "pr view")
-    next pull-request passed
-    case "$outcome" in
-      none)
-        echo 'no pull requests found for branch "blueprint/update"' >&2
-        exit 1
-        ;;
-      error)
-        echo "gh: Bad Gateway (HTTP 502)" >&2
-        exit 1
-        ;;
-      *) echo "$outcome https://github.com/o/b/pull/9" ;;
-    esac
-    ;;
-  *)
-    echo "unexpected: gh $*" >&2
-    exit 1
-    ;;
-esac
-"""
-SLEEP = '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n'
 
 
-def script_of(step: str) -> str:
-    """The script of the step of the Rollout workflow whose name starts with step."""
-    lines = ROLLOUT.read_text(encoding="utf-8").splitlines(keepends=True)
-    start = next(
-        index
-        for index, line in enumerate(lines)
-        if line.startswith(f"      - name: {step}")
-    )
-    run = lines.index("        run: |\n", start)
-    script = []
-    for line in lines[run + 1 :]:
-        if line.strip() and not line.startswith(" " * 10):
-            break
-        script.append(line)
-    return textwrap.dedent("".join(script))
-
-
-def order() -> str:
-    found = re.search(
-        r"^          ORDER: (.+)$", ROLLOUT.read_text(encoding="utf-8"), re.M
-    )
-    assert found
-    return found[1]
-
-
-@dataclass
+@dataclasses.dataclass
 class Rollout:
-    """The runner of a job of the rollout, with the stubs of gh and sleep."""
+    """The runner of the steps of the rollout, with the fake gh and a sleep that
+    only notes its seconds."""
 
     folder: Path
-    environment: dict[str, str]
+    planned: dict[str, list[str]] = dataclasses.field(default_factory=dict)
 
     def plan(self, kind: str, *outcomes: str) -> None:
-        (self.folder / "stubs" / kind).write_text(
-            "".join(f"{outcome}\n" for outcome in outcomes),
-            encoding="utf-8",
-            newline="\n",
-        )
+        """The next outcomes of a kind of call, one call each, before the usual."""
+        self.planned[kind] = list(outcomes)
 
-    def run(self, step: str, **variables: str) -> subprocess.CompletedProcess[str]:
-        """Runs the step as GitHub does, with bash -e."""
-        (self.folder / "step.sh").write_text(
-            script_of(step), encoding="utf-8", newline="\n"
-        )
-        return subprocess.run(
-            in_bash("-e", "step.sh"),
-            cwd=self.folder,
-            env={**self.environment, **variables},
-            capture_output=True,
-            encoding="utf-8",
-            check=False,
-        )
+    def answers(self, values: dict[str, str]) -> Iterator[Answer]:
+        for kind, outcomes in self.planned.items():
+            for outcome in outcomes:
+                yield dataclasses.replace(answer(kind, outcome, values), once=True)
+        for kind, outcome in USUAL.items():
+            yield answer(kind, outcome, values)
 
-    def read(self, name: str) -> str:
-        return (self.folder / name).read_text(encoding="utf-8")
-
-    def calls(self, *kinds: str) -> list[str]:
-        return [
-            call
-            for call in self.read("calls").splitlines()
-            if call.startswith(tuple(kinds))
+    def run(
+        self,
+        step: str,
+        *,
+        latest: str = "",
+        publish: str = "",
+        listing: str = "",
+        **variables: str,
+    ) -> StepResult:
+        """Runs the step whose name starts with step as GitHub does: gh answers
+        the release with latest, the jobs of the run with publish and the
+        repositories of the release app with listing, one name after the other."""
+        jobs = workflow_steps.workflow("rollout.yml")["jobs"]
+        [(job, name)] = [
+            (job_id, found["name"])
+            for job_id, settings in jobs.items()
+            for found in settings["steps"]
+            if found.get("name", "").startswith(step)
         ]
+        values = {
+            "latest": f"{latest}\n",
+            "publish": f"{publish}\n",
+            "listing": "".join(f"{each}\n" for each in listing.split()),
+        }
+        return workflow_steps.run_step(
+            self.folder,
+            "rollout.yml",
+            job,
+            name,
+            answers=list(self.answers(values)),
+            env={"TAG": "v1.2.0", **variables},
+            stubs={"sleep": workflow_steps.recording("sleep")},
+        )
 
 
 @pytest.fixture
 def rollout(tmp_path: Path) -> Rollout:
-    stubs = tmp_path / "stubs"
-    stubs.mkdir()
-    for name, text in {"gh": GH, "sleep": SLEEP}.items():
-        (stubs / name).write_text(text, encoding="utf-8", newline="\n")
-        (stubs / name).chmod(0o755)
-    (tmp_path / "runner").mkdir()
-    for name in ("calls", "summary", "output"):
-        (tmp_path / name).touch()
-    environment = {
-        **os.environ,
-        "STUBS": stubs.as_posix(),
-        "CALLS": (tmp_path / "calls").as_posix(),
-        "GITHUB_REPOSITORY": "o/r",
-        "GITHUB_STEP_SUMMARY": (tmp_path / "summary").as_posix(),
-        "GITHUB_OUTPUT": (tmp_path / "output").as_posix(),
-        "RUNNER_TEMP": (tmp_path / "runner").as_posix(),
-        "TAG": "v1.2.0",
-    }
-    return Rollout(tmp_path, environment)
+    return Rollout(tmp_path)
+
+
+def slept(result: StepResult) -> list[str]:
+    return [call for call in result.stubbed if call.startswith("sleep ")]
 
 
 # The latest release went public at 10:00:30.
@@ -224,22 +179,22 @@ LATEST = "v1.2.0 2026-10-13T10:00:30Z"
 def test_the_rollout_takes_the_release_that_the_run_published(
     rollout: Rollout, publish: str, tag: str
 ) -> None:
-    result = rollout.run("Find the release", RUN_ID="7", LATEST=LATEST, PUBLISH=publish)
+    result = rollout.run("Find the release", RUN_ID="7", latest=LATEST, publish=publish)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.read("output") == (f"tag={tag}\n" if tag else "")
+    assert result.outputs == ({"tag": tag} if tag else {})
     made_none = "The run made no release; the latest one, v1.2.0, went out before."
-    assert (made_none in rollout.read("summary")) == (not tag)
+    assert (made_none in result.summary) == (not tag)
 
 
 def test_started_by_hand_the_rollout_takes_the_latest_release(
     rollout: Rollout,
 ) -> None:
-    result = rollout.run("Find the release", RUN_ID="", LATEST=LATEST, PUBLISH="")
+    result = rollout.run("Find the release", RUN_ID="", latest=LATEST)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.read("output") == "tag=v1.2.0\n"
-    assert rollout.calls("gh api") == []
+    assert result.outputs == {"tag": "v1.2.0"}
+    assert result.called("api") == []
 
 
 @pytest.mark.parametrize(
@@ -260,13 +215,13 @@ def test_github_is_asked_again_for_the_release(
     result = rollout.run(
         "Find the release",
         RUN_ID="7",
-        LATEST=LATEST,
-        PUBLISH="success 2026-10-13T10:00:10Z",
+        latest=LATEST,
+        publish="success 2026-10-13T10:00:10Z",
     )
 
     # Three times at most, 15 seconds apart.
-    assert rollout.calls("sleep") == ["sleep 15", "sleep 15"]
-    assert rollout.read("output") == (f"tag={tag}\n" if tag else "")
+    assert slept(result) == ["sleep 15", "sleep 15"]
+    assert result.outputs == ({"tag": tag} if tag else {})
     assert result.returncode == (0 if tag else 1), result.stdout + result.stderr
     error = (
         "::error::The latest release, or the jobs of the run of the Release "
@@ -283,7 +238,8 @@ def test_the_repositories_go_one_after_the_other_the_quickest_checks_first(
         "o/paperless-unified-search o/dennis-otto.github.io o/alpha"
     )
 
-    result = rollout.run("List the repositories", LISTING=listing, ORDER=order())
+    # In the order of the workflow, which names the repositories by their checks.
+    result = rollout.run("List the repositories", listing=listing)
 
     assert result.returncode == 0, result.stdout + result.stderr
     # The blueprint itself is no repository to update; one that the order doesn't
@@ -297,14 +253,13 @@ def test_the_repositories_go_one_after_the_other_the_quickest_checks_first(
         "o/paperless-sync",
         "o/homedarts-for-autodarts",
     ]
-    assert rollout.read("output") == (
-        "repositories=[" + ",".join(f'"{name}"' for name in planned) + "]\n"
-        "last=o/homedarts-for-autodarts\n"
-    )
-    summary = rollout.read("summary")
-    assert "The blueprint bots bring v1.2.0 to these repositories" in summary
-    assert "".join(f"1. {name}\n" for name in planned) in summary
-    assert rollout.calls("sleep") == []
+    assert result.outputs == {
+        "repositories": "[" + ",".join(f'"{name}"' for name in planned) + "]",
+        "last": "o/homedarts-for-autodarts",
+    }
+    assert "The blueprint bots bring v1.2.0 to these repositories" in result.summary
+    assert "".join(f"1. {name}\n" for name in planned) in result.summary
+    assert slept(result) == []
 
 
 def test_the_repositories_are_listed_again_when_github_fails_for_a_moment(
@@ -312,11 +267,11 @@ def test_the_repositories_are_listed_again_when_github_fails_for_a_moment(
 ) -> None:
     rollout.plan("listing", "fail", "fail")
 
-    result = rollout.run("List the repositories", LISTING="o/b", ORDER=order())
+    result = rollout.run("List the repositories", listing="o/b")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.read("output") == 'repositories=["o/b"]\nlast=o/b\n'
-    assert rollout.calls("sleep") == ["sleep 15", "sleep 15"]
+    assert result.outputs == {"repositories": '["o/b"]', "last": "o/b"}
+    assert slept(result) == ["sleep 15", "sleep 15"]
 
 
 def test_repositories_that_cannot_be_listed_fail_the_rollout(
@@ -324,25 +279,27 @@ def test_repositories_that_cannot_be_listed_fail_the_rollout(
 ) -> None:
     rollout.plan("listing", "fail", "fail", "fail")
 
-    result = rollout.run("List the repositories", LISTING="o/b", ORDER=order())
+    result = rollout.run("List the repositories", listing="o/b")
 
     assert result.returncode == 1
     assert "::error::The repositories of the release app could not be listed." in (
         result.stdout
     )
-    assert rollout.read("output") == ""
+    assert result.outputs == {}
 
 
 def test_without_another_repository_nothing_rolls_out(rollout: Rollout) -> None:
-    result = rollout.run("List the repositories", LISTING="o/r", ORDER=order())
+    result = rollout.run("List the repositories", listing="o/r")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.read("output") == ""
-    assert "no other repository to bring v1.2.0 to" in rollout.read("summary")
+    assert result.outputs == {}
+    assert "no other repository to bring v1.2.0 to" in result.summary
 
 
-LOOKUP = "gh api --include --silent repos/o/b/contents/.github/workflows/blueprint-update.yml"
-DISPATCH = "gh workflow run blueprint-update.yml --repo o/b"
+LOOKUP = (
+    "api --include --silent repos/o/b/contents/.github/workflows/blueprint-update.yml"
+)
+DISPATCH = "workflow run blueprint-update.yml --repo o/b"
 
 
 @pytest.mark.parametrize(
@@ -365,14 +322,14 @@ def test_the_blueprint_bot_of_a_repository_is_started(
     result = rollout.run("Start the blueprint bot", REPOSITORY="o/b")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.read("output") == f"started=true\nrun={run}\n"
+    assert result.outputs == {"started": "true", "run": run}
     link = f": https://github.com/o/b/actions/runs/{run}" if run else ""
-    assert f"The blueprint bot of o/b brings v1.2.0{link}.\n" in rollout.read("summary")
-    assert rollout.calls("gh api") == [LOOKUP] * len(lookups)
-    assert rollout.calls("gh workflow") == [DISPATCH] * len(dispatches)
+    assert f"The blueprint bot of o/b brings v1.2.0{link}.\n" in result.summary
+    assert result.called("api") == [LOOKUP] * len(lookups)
+    assert result.called("workflow") == [DISPATCH] * len(dispatches)
     # 15 seconds apart.
     pauses = len(lookups) + len(dispatches) - 2
-    assert rollout.calls("sleep") == ["sleep 15"] * pauses
+    assert slept(result) == ["sleep 15"] * pauses
 
 
 @pytest.mark.parametrize("lookups", [["404"], ["500", "404"]])
@@ -384,9 +341,9 @@ def test_a_repository_without_a_blueprint_bot_is_left_out(
     result = rollout.run("Start the blueprint bot", REPOSITORY="o/b")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.read("output") == ""
-    assert "o/b has no blueprint bot." in rollout.read("summary")
-    assert rollout.calls("gh workflow") == []
+    assert result.outputs == {}
+    assert "o/b has no blueprint bot." in result.summary
+    assert result.called("workflow") == []
 
 
 @pytest.mark.parametrize(
@@ -417,9 +374,9 @@ def test_a_repository_whose_bot_cannot_be_started_fails_by_its_name(
 
     assert result.returncode == 1
     assert f"::error::Not started in o/b: {problem}." in result.stdout
-    assert f"✘ Not started in o/b: {problem}." in rollout.read("summary")
-    assert rollout.read("output") == ""
-    assert rollout.calls("gh workflow") == [DISPATCH] * len(dispatches)
+    assert f"✘ Not started in o/b: {problem}." in result.summary
+    assert result.outputs == {}
+    assert result.called("workflow") == [DISPATCH] * len(dispatches)
 
 
 def test_a_repository_that_fails_holds_up_none_after_it(rollout: Rollout) -> None:
@@ -429,7 +386,7 @@ def test_a_repository_that_fails_holds_up_none_after_it(rollout: Rollout) -> Non
 
     results = {
         name: rollout.run("Start the blueprint bot", REPOSITORY=f"o/{name}")
-        for name in ("a", "b", "c")
+        for name in REPOSITORIES
     }
 
     assert {name: result.returncode for name, result in results.items()} == {
@@ -438,13 +395,15 @@ def test_a_repository_that_fails_holds_up_none_after_it(rollout: Rollout) -> Non
         "c": 0,
     }
     assert "::error::Not started in o/b:" in results["b"].stdout
-    started = [call.split()[-1] for call in rollout.calls("gh workflow")]
+    started = [
+        call.split()[-1]
+        for result in results.values()
+        for call in result.called("workflow")
+    ]
     assert started == ["o/a", "o/b", "o/b", "o/b", "o/c"]
 
 
-def wait(
-    rollout: Rollout, run: str = "123", last: str = "false"
-) -> subprocess.CompletedProcess[str]:
+def wait(rollout: Rollout, run: str = "123", last: str = "false") -> StepResult:
     return rollout.run(
         "Wait for the blueprint bot",
         REPOSITORY="o/b",
@@ -485,17 +444,17 @@ def test_the_next_repository_waits_for_the_update_of_this_one(
     result = wait(rollout)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert summary in rollout.read("summary")
+    assert summary in result.summary
     # A look a minute.
-    assert rollout.calls("sleep") == ["sleep 60"] * looks
+    assert slept(result) == ["sleep 60"] * looks
     failed = "::warning::The checks of the update pull request of o/b failed:"
     assert (f"{failed} https://github.com/o/b/pull/9" in result.stdout) == (
         checks == ["failed"]
     )
     # The bot first: no look at the checks before it is done.
-    calls = rollout.calls("gh run", "gh pr")
-    if "gh pr view" in "".join(calls):
-        bot_looks = [call for call in calls if call.startswith("gh run")]
+    calls = result.called("run |pr ")
+    if result.called("pr view"):
+        bot_looks = [call for call in calls if call.startswith("run ")]
         assert calls[: len(bot_looks)] == bot_looks
 
 
@@ -511,8 +470,8 @@ def test_a_blueprint_bot_that_fails_fails_the_rollout_by_its_repository(
         "::error::The blueprint bot failed in o/b: https://github.com/o/b/actions/runs/123"
         in result.stdout
     )
-    assert "✘ The blueprint bot failed in o/b." in rollout.read("summary")
-    assert rollout.calls("gh pr") == []
+    assert "✘ The blueprint bot failed in o/b." in result.summary
+    assert result.called("pr ") == []
 
 
 def test_no_repository_waits_for_the_last_one(rollout: Rollout) -> None:
@@ -521,9 +480,9 @@ def test_no_repository_waits_for_the_last_one(rollout: Rollout) -> None:
     result = wait(rollout, last="true")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "The blueprint bot is done" in rollout.read("summary")
-    assert rollout.calls("gh pr") == []
-    assert rollout.calls("sleep") == ["sleep 60"]
+    assert "The blueprint bot is done" in result.summary
+    assert result.called("pr ") == []
+    assert slept(result) == ["sleep 60"]
 
 
 def test_without_the_name_of_its_run_only_the_checks_are_waited_for(
@@ -534,11 +493,11 @@ def test_without_the_name_of_its_run_only_the_checks_are_waited_for(
     result = wait(rollout, run="")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert rollout.calls("gh run") == []
+    assert result.called("run ") == []
     assert (
-        rollout.calls("gh pr")
+        result.called("pr ")
         == [
-            "gh pr view blueprint/update --repo o/b --json state,statusCheckRollup,url "
+            "pr view blueprint/update --repo o/b --json state,statusCheckRollup,url "
             "--jq the filter of jq"
         ]
         * 2

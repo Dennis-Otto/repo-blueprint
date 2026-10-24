@@ -10,7 +10,9 @@ it is, one of a known context, such as `${{ github.repository }}`, as the test r
 sets it, and every other from the test, which fails without it. gh is
 tests/fake_gh.py, which answers as the test planned and writes down every call, and
 other commands can be stubs. acting_steps() finds the steps that change something on
-GitHub, which tests/test_workflow_steps.py makes sure a test runs.
+GitHub, which tests/test_workflow_steps.py makes sure a test runs. parse(), job_in(),
+step_in() and condition_of() give the tests a job, a step and the condition of either
+from the parsed workflow, never from a slice of its text.
 """
 
 from __future__ import annotations
@@ -115,19 +117,50 @@ class StepResult:
 
 
 @cache
-def _parsed(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as file:
-        data: dict[Any, Any] = yaml.safe_load(file)
+def parse(text: str) -> dict[str, Any]:
+    """A workflow parsed from its text, such as one that a test rendered or changed:
+    the same object for the same text, which no test changes. A test reads a job, a
+    permission or a condition from it, never from a slice of the text, which can hold
+    a line of another job or of a comment."""
+    data: dict[Any, Any] = yaml.safe_load(text)
     # YAML 1.1, which PyYAML reads, takes the key on for true.
     if True in data:
         data["on"] = data.pop(True)
     return data
 
 
+@cache
+def _parsed(path: Path) -> dict[str, Any]:
+    return parse(path.read_text(encoding="utf-8"))
+
+
 def workflow(name: str, root: Path = ROOT) -> dict[str, Any]:
     """A workflow of .github/workflows, parsed; the same object for each test, which
     none changes."""
     return _parsed((root / ".github/workflows" / name).resolve())
+
+
+def job_in(found: Mapping[str, Any] | str, job_id: str) -> dict[str, Any]:
+    """A job of a workflow, parsed or as its text, by its id."""
+    parsed = parse(found) if isinstance(found, str) else found
+    jobs: dict[str, Any] = parsed["jobs"]
+    assert job_id in jobs, f"the workflow has no job {job_id}, but {sorted(jobs)}"
+    return dict(jobs[job_id])
+
+
+def step_in(settings: Mapping[str, Any], step_name: str) -> dict[str, Any]:
+    """A step of a parsed job, by its name or its id."""
+    steps = settings.get("steps") or []
+    for found in steps:
+        if step_name in (found.get("name"), found.get("id")):
+            return dict(found)
+    names = [found.get("name") or found.get("id") for found in steps]
+    raise AssertionError(f"the job has no step {step_name!r}, but {names}")
+
+
+def condition_of(settings: Mapping[str, Any]) -> str:
+    """The if of a job or a step on one line, as GitHub reads it, or "" without one."""
+    return " ".join(str(settings.get("if", "")).split())
 
 
 def job(name: str, job_id: str, root: Path = ROOT) -> dict[str, Any]:
@@ -139,12 +172,10 @@ def job(name: str, job_id: str, root: Path = ROOT) -> dict[str, Any]:
 
 def step(name: str, job_id: str, step_name: str, root: Path = ROOT) -> dict[str, Any]:
     """A step of a job, by its name or its id."""
-    steps = job(name, job_id, root).get("steps", [])
-    for found in steps:
-        if step_name in (found.get("name"), found.get("id")):
-            return dict(found)
-    names = [found.get("name") or found.get("id") for found in steps]
-    raise AssertionError(f"{name}/{job_id} has no step {step_name!r}, but {names}")
+    try:
+        return step_in(job(name, job_id, root), step_name)
+    except AssertionError as error:
+        raise AssertionError(f"{name}/{job_id}: {error}") from None
 
 
 def resolve(value: object, contexts: Mapping[str, str]) -> str | None:
@@ -216,11 +247,14 @@ def run_step(
     stubs: Mapping[str, str] | None = None,
     files: Mapping[str, str] | None = None,
     root: Path = ROOT,
+    workspace: Path | None = None,
 ) -> StepResult:
     """Runs the step of the job as GitHub does, in tmp_path: gh answers with answers,
     each stub, a name with the text of its bash, comes first on the PATH, and files are
     the files of the workspace by their paths, such as those that a checkout brings,
-    or of $RUNNER_TEMP by a path that starts with it, such as those of a step before."""
+    or of $RUNNER_TEMP by a path that starts with it, such as those of a step before.
+    The workspace is tmp_path/workspace, or the checkout of a repository that the test
+    made, such as one with the history of a pull request."""
     assert BASH, "the steps run in bash, Git Bash on Windows"
     found = step(workflow_name, job_id, step_name, root)
     script = found.get("run")
@@ -231,6 +265,8 @@ def run_step(
     folders = {
         name: tmp_path / name for name in ("workspace", "runner", "stubs", "github")
     }
+    if workspace is not None:
+        folders["workspace"] = workspace
     for folder in folders.values():
         folder.mkdir(parents=True, exist_ok=True)
     for name, text in (files or {}).items():

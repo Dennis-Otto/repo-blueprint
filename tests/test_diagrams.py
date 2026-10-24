@@ -11,12 +11,14 @@ import re
 import shutil
 import subprocess
 import sys
-import textwrap
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
+import workflow_steps
 from shell import BASH, in_bash
+from workflow_steps import Answer, StepResult, exact
 
 from blueprint.cli import main
 from blueprint.diagrams import (
@@ -1212,61 +1214,36 @@ def test_the_script_says_how_to_use_it(
 # The check diagrams of Lint, the diagram bot of After the checks and that of main
 
 
-def workflow_step(workflow: str, job: str, step: str) -> str:
-    """The script of a step of a job, as the runner hands it to bash."""
-    text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
-    start = text.index(f"      - name: {step}\n", text.index(f"\n  {job}:\n"))
-    run = text.index("        run: |\n", start) + len("        run: |\n")
-    lines = []
-    for line in text[run:].splitlines(keepends=True):
-        if line.strip() and not line.startswith("          "):
-            break
-        lines.append(line)
-    return textwrap.dedent("".join(lines))
-
-
 def run_step(
-    script: str, cwd: Path, tmp_path: Path, stubs: dict[str, str], **variables: str
-) -> tuple[subprocess.CompletedProcess[str], str, str]:
-    """A step as GitHub runs it, bash -e, with these stubs first on the PATH; its
-    result, its outputs and its summary."""
-    folder = tmp_path / "stubs"
-    folder.mkdir(exist_ok=True)
-    for name, text in {"python3": PYTHON3, **stubs}.items():
-        (folder / name).write_text(text, encoding="utf-8", newline="\n")
-        (folder / name).chmod(0o755)
-    runner = tmp_path / "runner"
-    runner.mkdir(exist_ok=True)
-    output = tmp_path / "output"
-    summary = tmp_path / "summary"
-    output.write_text("", encoding="utf-8")
-    summary.write_text("", encoding="utf-8")
-    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
-    environment = {
-        **os.environ,
-        "STUBS": folder.as_posix(),
-        "CALLS": (tmp_path / "calls").as_posix(),
-        "PYTHON": Path(sys.executable).as_posix(),
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "RUNNER_TEMP": runner.as_posix(),
-        "GITHUB_OUTPUT": output.as_posix(),
-        "GITHUB_STEP_SUMMARY": summary.as_posix(),
-        "GITHUB_REPOSITORY": "o/r",
-        **variables,
-    }
-    result = subprocess.run(
-        in_bash("-e", (tmp_path / "step.sh").as_posix()),
-        cwd=cwd,
-        env=environment,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
-    return (
-        result,
-        output.read_text(encoding="utf-8"),
-        summary.read_text(encoding="utf-8"),
+    step: tuple[str, str, str],
+    cwd: Path,
+    tmp_path: Path,
+    stubs: dict[str, str],
+    answers: Sequence[Answer] = (),
+    /,
+    **variables: str,
+) -> StepResult:
+    """A step of a workflow, by the workflow, the job and the name of the step, as
+    tests/workflow_steps.py runs it: in the checkout cwd, with the folders of the
+    runner in tmp_path, these stubs first on the PATH, python3 the Python of the
+    tests, and the fake gh answering with answers. A stub writes its calls into
+    tmp_path/calls."""
+    workflow, job, name = step
+    return workflow_steps.run_step(
+        tmp_path,
+        workflow,
+        job,
+        name,
+        answers=answers,
+        env={
+            "CALLS": (tmp_path / "calls").as_posix(),
+            "PYTHON": Path(sys.executable).as_posix(),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            **variables,
+        },
+        stubs={"python3": PYTHON3, **stubs},
+        workspace=cwd,
     )
 
 
@@ -1361,16 +1338,19 @@ def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
     )
     commit(root, "Files")
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW),
+    result = run_step(
+        DRAW,
         root,
         tmp_path,
         {"docker": DOCKER},
+        (),
         EVENT="workflow_dispatch",
+        APP="",
+        HEAD_REPOSITORY="",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == f"stale=true\nfix={ARTIFACT}\n"
+    assert result.outputs == {"stale": "true", "fix": ARTIFACT}
     name = "how-a-change-merges"
     assert files_of(tmp_path / "runner/diagrams") == {
         "deleted.txt": "docs/images/diagrams/gone.svg\n",
@@ -1381,10 +1361,15 @@ def test_the_check_keeps_what_differs_for_the_bot(tmp_path: Path) -> None:
         f"files/docs/images/diagrams/{name}.dark.svg": f"<svg {name} dark>\n",
         "files/docs/images/diagrams/steps.svg": "<svg steps>\n",
     }
-    assert summary.startswith("### Diagrams\nThe GitHub app shows a `mermaid` block")
-    assert f"- `README.md`: {PAGE}\n" in summary
-    assert "- `docs/images/diagrams/gone.svg`: deleted, its source is gone\n" in summary
-    assert summary.endswith(
+    assert result.summary.startswith(
+        "### Diagrams\nThe GitHub app shows a `mermaid` block"
+    )
+    assert f"- `README.md`: {PAGE}\n" in result.summary
+    assert (
+        "- `docs/images/diagrams/gone.svg`: deleted, its source is gone\n"
+        in result.summary
+    )
+    assert result.summary.endswith(
         f"Run it with Docker and commit what it changes. {ARTIFACT}\n"
     )
 
@@ -1397,6 +1382,8 @@ BOT = (
 DIFFER = ("lint.yml", "diagrams", "Report the diagrams that differ")
 # A pull request from a branch of this repository, which has the release app.
 SAME_REPOSITORY = {"EVENT": "pull_request", "APP": "Iv23li", "HEAD_REPOSITORY": "o/r"}
+# A pull request from a fork, onto whose branch no bot commits.
+FORK = {"EVENT": "pull_request", "APP": "", "HEAD_REPOSITORY": "fork/r"}
 
 
 @runs_a_copy_of_the_tool
@@ -1422,20 +1409,23 @@ def test_the_check_promises_the_bot_only_where_it_commits(
     commit(root, "Main")
     pull_request(root, {"README.md": "# Demo\n\n" + block(MERGES)})
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW),
+    result = run_step(
+        DRAW,
         root,
         tmp_path,
         {"docker": DOCKER},
+        (),
         EVENT="pull_request",
         APP=app,
         HEAD_REPOSITORY=head,
     )
-    reported, _, _ = run_step(workflow_step(*DIFFER), root, tmp_path, {}, FIX=fix)
+    reported = run_step(DIFFER, root, tmp_path, {}, (), FIX=fix)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == f"stale=true\nfix={fix}\n"
-    assert summary.endswith(f"Run it with Docker and commit what it changes. {fix}\n")
+    assert result.outputs == {"stale": "true", "fix": fix}
+    assert result.summary.endswith(
+        f"Run it with Docker and commit what it changes. {fix}\n"
+    )
     assert reported.returncode == 1
     assert f"with Docker. {fix} The summary of this run" in reported.stdout
 
@@ -1451,12 +1441,10 @@ def test_the_alt_of_a_page_follows_its_source(tmp_path: Path) -> None:
     commit(root, "Main")
     pull_request(root, {"docs/diagrams/steps.mmd": RETOLD})
 
-    result, output, _ = run_step(
-        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
-    )
+    result = run_step(DRAW, root, tmp_path, {"docker": DOCKER}, (), **FORK)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output.startswith("stale=true\n")
+    assert result.outputs["stale"] == "true"
     assert files_of(tmp_path / "runner/diagrams") == {
         "files/README.md": readme.replace(alt_text(DIAGRAM), alt_text(RETOLD))
     }
@@ -1473,12 +1461,10 @@ def test_a_changed_picture_is_checked_too(tmp_path: Path) -> None:
     commit(root, "Main")
     pull_request(root, {"README.md": readme.replace(alt_text(DIAGRAM), "Steps")})
 
-    result, output, _ = run_step(
-        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
-    )
+    result = run_step(DRAW, root, tmp_path, {"docker": DOCKER}, (), **FORK)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output.startswith("stale=true\n")
+    assert result.outputs["stale"] == "true"
     assert files_of(tmp_path / "runner/diagrams") == {"files/README.md": readme}
 
 
@@ -1507,13 +1493,11 @@ def test_the_check_passes_when_every_diagram_is_a_picture(
     commit(root, "Main")
     pull_request(root, change)
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
-    )
+    result = run_step(DRAW, root, tmp_path, {"docker": DOCKER}, (), **FORK)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == ""
-    assert summary == message
+    assert result.outputs == {}
+    assert result.summary == message
     assert (tmp_path / "calls").exists() == drawn
 
 
@@ -1526,14 +1510,12 @@ def test_a_block_waits_for_main_until_the_first_source(tmp_path: Path) -> None:
     commit(root, "Main")
     pull_request(root, {"README.md": "# Demo\n\n" + block(DIAGRAM)})
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
-    )
+    result = run_step(DRAW, root, tmp_path, {"docker": DOCKER}, (), **FORK)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == ""
-    assert summary.startswith("No page of this repository shows a picture")
-    assert summary.endswith("turns the blocks into pictures after the merge.\n")
+    assert result.outputs == {}
+    assert result.summary.startswith("No page of this repository shows a picture")
+    assert result.summary.endswith("turns the blocks into pictures after the merge.\n")
     assert (root / "README.md").read_text(encoding="utf-8").endswith(block(DIAGRAM))
     assert not (tmp_path / "calls").exists()
 
@@ -1558,13 +1540,11 @@ def test_the_update_leaves_sources_that_a_project_draws_itself(tmp_path: Path) -
     script_text = (root / "scripts/diagrams.sh").read_text(encoding="utf-8")
     pull_request(root, {"scripts/diagrams.sh": script_text + "# Updated\n"})
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW), root, tmp_path, {"docker": DOCKER}, EVENT="pull_request"
-    )
+    result = run_step(DRAW, root, tmp_path, {"docker": DOCKER}, (), **FORK)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == ""
-    assert summary.startswith("No page of this repository shows a picture")
+    assert result.outputs == {}
+    assert result.summary.startswith("No page of this repository shows a picture")
     assert not (tmp_path / "calls").exists()
     check = script(root, tmp_path, "--check")
     assert check.returncode == 0, check.stdout + check.stderr
@@ -1617,28 +1597,49 @@ def test_the_update_leaves_sources_that_a_project_draws_itself(tmp_path: Path) -
     assert script(root, tmp_path, "--check").returncode == 0
 
 
-# gh, as the API answers after the filters of jq.
-GH = """#!/usr/bin/env bash
-echo "gh $*" >> "$CALLS"
-case "$*" in
-  "run download 5 --name diagrams --dir "*)
-    [[ -n "${ARTIFACT:-}" ]] || exit 1
-    mkdir -p "$7" && cp -R "$ARTIFACT"/. "$7"
-    ;;
-  "api repos/o/r/commits/abc1234def --jq "*) printf '%s\\n' "${MESSAGE:-fix: a label}" ;;
-  "api repos/o/r/git/ref/heads/feature --jq .object.sha") printf '%s\\n' "$HEAD" ;;
-  "api repos/o/r/git/ref/heads/bot/diagrams") [[ -n "${EXISTS:-}" ]] ;;
-  "api repos/o/r/git/ref/heads/bot/diagrams-next") [[ -n "${LEFT:-}" ]] ;;
-  "api --method "*) ;;
-  "api users/app[bot] --jq .id") echo 42 ;;
-  "api graphql --input "*) cp "$4" "$REQUEST" && echo c0ffee ;;
-  "pr list --head bot/diagrams --state open --json number --jq "*) echo "${OPEN:-}" ;;
-  "pr comment "*|"pr create "*|"pr edit "*) cp "${@: -1}" "$BODY" ;;
-  "pr merge "*|"pr close "*) ;;
-  *) echo "unexpected: gh $*" >&2; exit 1 ;;
-esac
-"""
 HEADLINE = "docs: draw the diagrams anew"
+
+
+def bot_answers(
+    *,
+    artifact: bool = True,
+    message: str = "fix: a label",
+    head: str = "abc1234def",
+    open_number: str = "",
+    exists: bool = False,
+    left: bool = False,
+) -> list[Answer]:
+    """How the API answers the diagram bots, after the filters of jq: whether the
+    check kept an artifact, which the test lays out in $RUNNER_TEMP/diagrams as its
+    download brings it, the headline of the commit of the run, the head of the branch
+    of the pull request, the open pull request of bot/diagrams, and whether that
+    branch and the one that a failed run left behind exist."""
+    downloaded = (
+        Answer(r"run download 5 --name diagrams --dir .*")
+        if artifact
+        else Answer(
+            r"run download 5 --name diagrams --dir .*",
+            err="no artifact matches any of the names or patterns provided\n",
+            code=1,
+        )
+    )
+    return [
+        downloaded,
+        Answer(r"api repos/o/r/commits/abc1234def --jq .*", f"{message}\n"),
+        exact("api repos/o/r/git/ref/heads/feature --jq .object.sha", f"{head}\n"),
+        exact("api repos/o/r/git/ref/heads/bot/diagrams", code=0 if exists else 1),
+        exact("api repos/o/r/git/ref/heads/bot/diagrams-next", code=0 if left else 1),
+        Answer(r"api --method .*"),
+        exact("api users/app[bot] --jq .id", "42\n"),
+        Answer(r"api graphql --input .*", "c0ffee\n"),
+        Answer(
+            r"pr list --head bot/diagrams --state open --json number --jq .*",
+            f"{open_number}\n",
+        ),
+        Answer(r"pr (?:comment|create|edit|merge|close) .*"),
+    ]
+
+
 FETCH = ("after-checks.yml", "diagrams", "Fetch the diagrams that the check drew")
 COMMIT = (
     "after-checks.yml",
@@ -1654,12 +1655,12 @@ COMMIT = (
         # Another check of Lint failed.
         (
             False,
-            "",
+            "fix: a label",
             0,
             False,
             "The check diagrams kept nothing; another check failed.\n",
         ),
-        (True, "", 0, True, ""),
+        (True, "fix: a label", 0, True, ""),
         # The pictures of the bot's own commit differ again.
         (True, HEADLINE, 1, False, ""),
     ],
@@ -1667,26 +1668,29 @@ COMMIT = (
 def test_the_diagram_bot_takes_what_the_check_kept(
     tmp_path: Path, artifact: bool, message: str, code: int, found: bool, summary: str
 ) -> None:
-    folder = kept(tmp_path / "kept", {"docs/images/diagrams/steps.svg": "<svg >\n"})
-    variables = {"ARTIFACT": folder.as_posix()} if artifact else {}
-    if message:
-        variables["MESSAGE"] = message
+    if artifact:
+        kept(
+            tmp_path / "runner/diagrams", {"docs/images/diagrams/steps.svg": "<svg >\n"}
+        )
 
-    result, output, written = run_step(
-        workflow_step(*FETCH),
+    result = run_step(
+        FETCH,
         tmp_path,
         tmp_path,
-        {"gh": GH},
-        GH_REPO="o/r",
+        {},
+        bot_answers(artifact=artifact, message=message),
         RUN="5",
         SHA="abc1234def",
         HEADLINE=HEADLINE,
-        **variables,
     )
 
     assert result.returncode == code, result.stdout + result.stderr
-    assert (output == "found=true\n") == found
-    assert written == summary
+    assert result.called("run download") == [
+        f"run download 5 --name diagrams --dir {(tmp_path / 'runner').as_posix()}"
+        "/diagrams"
+    ]
+    assert (result.outputs == {"found": "true"}) == found
+    assert result.summary == summary
     if code:
         assert "differ again from what their sources draw" in result.stdout
     if found:
@@ -1697,30 +1701,29 @@ def test_the_diagram_bot_takes_what_the_check_kept(
 
 def run_the_diagram_bot(
     root: Path, tmp_path: Path, folder: Path, head: str = "abc1234def"
-) -> tuple[subprocess.CompletedProcess[str], str]:
+) -> StepResult:
     """The step of the diagram bot that commits what the check kept in folder."""
     shutil.copytree(folder, tmp_path / "runner/diagrams")
-    result, _, summary = run_step(
-        workflow_step(*COMMIT),
+    return run_step(
+        COMMIT,
         root,
         tmp_path,
-        {"gh": GH},
-        GH_REPO="o/r",
+        {},
+        bot_answers(head=head),
         APP_SLUG="app",
         BRANCH="feature",
         NUMBER="7",
         SHA="abc1234def",
-        HEAD=head,
         URL="https://github.com/o/r/actions/runs/5",
         HEADLINE=HEADLINE,
-        REQUEST=(tmp_path / "request.json").as_posix(),
-        BODY=(tmp_path / "body.md").as_posix(),
     )
-    return result, summary
 
 
-def calls(tmp_path: Path) -> list[str]:
-    return (tmp_path / "calls").read_text(encoding="utf-8").splitlines()
+def request_of(result: StepResult) -> dict[str, Any]:
+    """The request of the commit that the bot sent to the API of GraphQL."""
+    [request] = result.read_by("api graphql", "--input")
+    found: dict[str, Any] = json.loads(request)
+    return found
 
 
 @runs_a_copy_of_the_tool
@@ -1736,12 +1739,11 @@ def test_the_diagram_bot_commits_the_pictures_onto_the_branch(tmp_path: Path) ->
         "docs/images/diagrams/gone.svg\n",
     )
 
-    result, summary = run_the_diagram_bot(root, tmp_path, folder)
+    result = run_the_diagram_bot(root, tmp_path, folder)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert summary == "Committed the diagrams onto feature: c0ffee\n"
-    request = json.loads((tmp_path / "request.json").read_text(encoding="utf-8"))
-    commit = request["variables"]["input"]
+    assert result.summary == "Committed the diagrams onto feature: c0ffee\n"
+    commit = request_of(result)["variables"]["input"]
     assert commit["branch"] == {
         "repositoryNameWithOwner": "o/r",
         "branchName": "feature",
@@ -1768,7 +1770,7 @@ def test_the_diagram_bot_commits_the_pictures_onto_the_branch(tmp_path: Path) ->
         "deletions": [{"path": "docs/images/diagrams/gone.svg"}],
     }
     # Pictures drawn anew need no comment.
-    assert not any(call.startswith("gh pr ") for call in calls(tmp_path))
+    assert not result.called("pr ")
 
 
 @runs_a_copy_of_the_tool
@@ -1785,11 +1787,11 @@ def test_the_diagram_bot_commits_nothing_but_diagrams(
 ) -> None:
     root = with_tools(tmp_path / "main")
 
-    result, _ = run_the_diagram_bot(root, tmp_path, kept(tmp_path / "kept", files))
+    result = run_the_diagram_bot(root, tmp_path, kept(tmp_path / "kept", files))
 
     assert result.returncode != 0
     assert "blueprint.py: The diagrams of the check hold" in result.stderr
-    assert not (tmp_path / "request.json").exists()
+    assert not result.called("api graphql")
 
 
 @runs_a_copy_of_the_tool
@@ -1797,19 +1799,17 @@ def test_the_diagram_bot_commits_nothing_but_diagrams(
 def test_the_diagram_bot_leaves_a_branch_that_moved_on(tmp_path: Path) -> None:
     folder = kept(tmp_path / "kept", {"docs/images/diagrams/steps.svg": "<svg >\n"})
 
-    result, summary = run_the_diagram_bot(
+    result = run_the_diagram_bot(
         with_tools(tmp_path / "main"), tmp_path, folder, head="f00ba4"
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert summary == (
+    assert result.summary == (
         "feature moved on from abc1234; the checks of its new head draw the diagrams again.\n"
     )
-    assert not (tmp_path / "request.json").exists()
+    assert not result.called("api graphql")
 
 
-# gh, which only notes what it was asked.
-GH_NOTES = '#!/usr/bin/env bash\nprintf "gh %s\\n" "$*" >> "$CALLS"\n'
 FAILED = (
     "after-checks.yml",
     "diagrams",
@@ -1824,24 +1824,22 @@ def test_a_diagram_bot_that_fails_says_so_on_the_pull_request(
 ) -> None:
     # The failed check promised the bot's commit; without it, the pull request learns
     # what to do itself.
-    text = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    job = text[text.index("\n  diagrams:\n") :]
-    assert "        if: failure()\n" in job[job.index(f"      - name: {FAILED[2]}\n") :]
+    assert workflow_steps.condition_of(workflow_steps.step(*FAILED)) == "failure()"
 
-    result, _, _ = run_step(
-        workflow_step(*FAILED),
+    result = run_step(
+        FAILED,
         tmp_path,
         tmp_path,
-        {"gh": GH_NOTES},
-        GH_REPO="o/r",
+        {},
+        [Answer(r"pr comment .*")],
         BRANCH="feature",
         NUMBER=number,
         URL="https://github.com/o/r/actions/runs/8",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls(tmp_path) == [
-        f"gh pr comment {target} --body The diagram bot couldn't commit the diagrams"
+    assert result.commands == [
+        f"pr comment {target} --body The diagram bot couldn't commit the diagrams"
         " of this pull request (https://github.com/o/r/actions/runs/8). Run"
         " `bash scripts/diagrams.sh --extract` with Docker and commit what it changes,"
         " or take the files from the artifact `diagrams` of the check *diagrams*."
@@ -1876,25 +1874,19 @@ def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
     checked = tmp_path / "check"
     checked.mkdir()
 
-    result, output, _ = run_step(
-        workflow_step(*DRAW),
-        root,
-        checked,
-        {"docker": DOCKER},
-        **SAME_REPOSITORY,
-    )
+    result = run_step(DRAW, root, checked, {"docker": DOCKER}, (), **SAME_REPOSITORY)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == f"stale=true\nfix={BOT}\n"
+    assert result.outputs == {"stale": "true", "fix": BOT}
     # The bot commits what the check kept onto the head of the pull request.
     bot = tmp_path / "bot"
     bot.mkdir()
     shutil.copytree(checked / "runner/diagrams", tmp_path / "kept")
-    result, summary = run_the_diagram_bot(
+    result = run_the_diagram_bot(
         with_tools(tmp_path / "main"), bot, tmp_path / "kept", head="abc1234def"
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    request = json.loads((bot / "request.json").read_text(encoding="utf-8"))
+    request = request_of(result)
     assert sorted(
         addition["path"]
         for addition in request["variables"]["input"]["fileChanges"]["additions"]
@@ -1905,8 +1897,7 @@ def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
         "docs/images/diagrams/how-a-change-merges.svg",
     ]
     # One comment says which blocks became pictures.
-    assert "gh pr comment 7 --body-file " in "\n".join(calls(bot))
-    comment = (bot / "body.md").read_text(encoding="utf-8")
+    [comment] = result.read_by("pr comment 7 ", "--body-file")
     assert f"- `README.md`: {PAGE}\n" in comment
 
     git_in(root, "switch", "--quiet", "feature")
@@ -1924,12 +1915,10 @@ def test_a_pull_request_with_a_block_fixes_itself(tmp_path: Path) -> None:
     again.mkdir()
 
     # The checks of the bot's commit pass.
-    result, output, summary = run_step(
-        workflow_step(*DRAW), root, again, {"docker": DOCKER}, EVENT="pull_request"
-    )
+    result = run_step(DRAW, root, again, {"docker": DOCKER}, (), **SAME_REPOSITORY)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == ""
-    assert summary == "Every diagram is a picture of its source, as drawn.\n"
+    assert result.outputs == {}
+    assert result.summary == "Every diagram is a picture of its source, as drawn.\n"
     check = script(root, tmp_path, "--check")
     assert check.returncode == 0, check.stdout + check.stderr
 
@@ -1945,17 +1934,18 @@ def test_a_new_renderer_draws_the_pictures_anew(tmp_path: Path) -> None:
     updated = re.sub(r"@sha256:[0-9a-f]{64}", "@sha256:" + "1" * 64, script_text)
     pull_request(root, {"scripts/diagrams.sh": updated})
 
-    result, output, _ = run_step(
-        workflow_step(*DRAW),
+    result = run_step(
+        DRAW,
         root,
         tmp_path,
         {"docker": DOCKER},
+        (),
         **SAME_REPOSITORY,
         STYLE=" v2",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == f"stale=true\nfix={BOT}\n"
+    assert result.outputs == {"stale": "true", "fix": BOT}
     assert files_of(tmp_path / "runner/diagrams") == {
         "files/docs/images/diagrams/steps.svg": "<svg steps v2>\n",
         "files/docs/images/diagrams/steps.dark.svg": "<svg steps dark v2>\n",
@@ -1985,12 +1975,20 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(
     )
     commit(root, "A block that went around the check")
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW_MAIN), root, tmp_path, {"docker": DOCKER}, APP=app
+    result = run_step(
+        DRAW_MAIN,
+        root,
+        tmp_path,
+        {"docker": DOCKER},
+        (),
+        EVENT="schedule",
+        APP=app,
+        BEFORE="",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == "drawn=true\nstale=true\n"
+    assert result.outputs == {"drawn": "true", "stale": "true"}
+    summary = result.summary
     if app:
         assert summary.startswith("### Diagrams\nThe pull request of the diagram bot")
         assert "::warning::" not in result.stdout
@@ -2010,12 +2008,21 @@ def test_the_diagrams_of_main_are_drawn_for_their_pull_request(
     commit(root, "Drawn")
     again = tmp_path / "again"
     again.mkdir()
-    result, output, summary = run_step(
-        workflow_step(*DRAW_MAIN), root, again, {"docker": DOCKER}, APP=app
+    result = run_step(
+        DRAW_MAIN,
+        root,
+        again,
+        {"docker": DOCKER},
+        (),
+        EVENT="schedule",
+        APP=app,
+        BEFORE="",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert output == "drawn=true\n"
-    assert summary == "Every diagram of main is a picture of its source, as drawn.\n"
+    assert result.outputs == {"drawn": "true"}
+    assert result.summary == (
+        "Every diagram of main is a picture of its source, as drawn.\n"
+    )
 
 
 @runs_a_copy_of_the_tool
@@ -2043,22 +2050,26 @@ def test_a_push_to_main_draws_only_what_may_have_changed(
             (root / name).write_text(text + "\n" * number, encoding="utf-8")
         commit(root, f"Push {number}")
 
-    result, output, summary = run_step(
-        workflow_step(*DRAW_MAIN),
+    result = run_step(
+        DRAW_MAIN,
         root,
         tmp_path,
         {"docker": DOCKER},
+        (),
         EVENT="push",
+        APP="",
         BEFORE=before,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "calls").exists() == drawn
     if drawn:
-        assert output.startswith("drawn=true\n")
+        assert result.outputs["drawn"] == "true"
     else:
-        assert output == ""
-        assert summary == "The push changes no diagram and adds no `mermaid` block.\n"
+        assert result.outputs == {}
+        assert result.summary == (
+            "The push changes no diagram and adds no `mermaid` block.\n"
+        )
 
 
 def run_the_bot_of_main(
@@ -2067,32 +2078,24 @@ def run_the_bot_of_main(
     open_number: str = "",
     exists: bool = False,
     left: bool = False,
-) -> tuple[subprocess.CompletedProcess[str], str, list[str]]:
+) -> StepResult:
     root = with_tools(tmp_path / "main")
     if stale:
         shutil.copytree(
             kept(tmp_path / "kept", {"docs/guide.md": "# Guide\n"}),
             tmp_path / "runner/diagrams",
         )
-    result, _, summary = run_step(
-        workflow_step(*PULL_REQUEST),
+    return run_step(
+        PULL_REQUEST,
         root,
         tmp_path,
-        {"gh": GH},
-        GH_REPO="o/r",
+        {},
+        bot_answers(open_number=open_number, exists=exists, left=left),
         APP_SLUG="app",
-        BRANCH="bot/diagrams",
-        HEADLINE=HEADLINE,
         STALE="true" if stale else "",
         SHA="abc1234def",
         URL="https://github.com/o/r/actions/runs/6",
-        OPEN=open_number,
-        EXISTS="yes" if exists else "",
-        LEFT="yes" if left else "",
-        REQUEST=(tmp_path / "request.json").as_posix(),
-        BODY=(tmp_path / "body.md").as_posix(),
     )
-    return result, summary, calls(tmp_path)
 
 
 @runs_a_copy_of_the_tool
@@ -2100,37 +2103,37 @@ def run_the_bot_of_main(
 def test_the_bot_of_main_opens_one_pull_request_that_merges_itself(
     tmp_path: Path,
 ) -> None:
-    result, summary, made = run_the_bot_of_main(tmp_path, stale=True)
+    result = run_the_bot_of_main(tmp_path, stale=True)
 
     assert result.returncode == 0, result.stdout + result.stderr
     pull_request_list = (
-        "gh pr list --head bot/diagrams --state open --json number "
+        "pr list --head bot/diagrams --state open --json number "
         "--jq .[0].number // empty"
     )
-    assert made == [
+    assert result.commands == [
         pull_request_list,
         # The commit is made on a branch of its own, from the commit that was drawn.
-        "gh api repos/o/r/git/ref/heads/bot/diagrams-next",
-        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams-next"
+        "api repos/o/r/git/ref/heads/bot/diagrams-next",
+        "api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams-next"
         " -f sha=abc1234def",
-        "gh api users/app[bot] --jq .id",
-        f"gh api graphql --input {(tmp_path / 'runner/commit.json').as_posix()}"
+        "api users/app[bot] --jq .id",
+        f"api graphql --input {(tmp_path / 'runner/commit.json').as_posix()}"
         " --jq .data.createCommitOnBranch.commit.oid",
         # The branch of the pull request starts at that commit.
-        "gh api repos/o/r/git/ref/heads/bot/diagrams",
-        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams"
+        "api repos/o/r/git/ref/heads/bot/diagrams",
+        "api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams"
         " -f sha=c0ffee",
-        "gh api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
-        "gh pr create --base main --head bot/diagrams --title docs: draw the diagrams"
+        "api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
+        "pr create --base main --head bot/diagrams --title docs: draw the diagrams"
         f" anew --body-file {(tmp_path / 'runner/body.md').as_posix()}",
-        "gh pr merge bot/diagrams --auto --squash",
+        "pr merge bot/diagrams --auto --squash",
     ]
-    request = json.loads((tmp_path / "request.json").read_text(encoding="utf-8"))
+    request = request_of(result)
     assert request["variables"]["input"]["branch"]["branchName"] == "bot/diagrams-next"
     assert request["variables"]["input"]["expectedHeadOid"] == "abc1234def"
-    body = (tmp_path / "body.md").read_text(encoding="utf-8")
+    [body] = result.read_by("pr create", "--body-file")
     assert body.startswith("`main` has diagrams that not every reader sees")
-    assert summary == (
+    assert result.summary == (
         "The pull request of the diagrams from bot/diagrams has the commit c0ffee, "
         "and merges itself once every check passes.\n"
     )
@@ -2140,33 +2143,31 @@ def test_the_bot_of_main_opens_one_pull_request_that_merges_itself(
 @needs_bash
 def test_the_bot_of_main_updates_its_pull_request(tmp_path: Path) -> None:
     # A branch for the commit that a failed run left behind starts again, too.
-    result, _, made = run_the_bot_of_main(
+    result = run_the_bot_of_main(
         tmp_path, stale=True, open_number="9", exists=True, left=True
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    moved = [call for call in made if call.startswith("gh api --method PATCH ")]
+    made = result.commands
     # The head of the open pull request moves once, to the new commit, and never to
     # the commit of main, which would close the pull request.
-    assert moved == [
-        "gh api --method PATCH repos/o/r/git/refs/heads/bot/diagrams -f sha=c0ffee"
+    assert result.called("api --method PATCH ") == [
+        "api --method PATCH repos/o/r/git/refs/heads/bot/diagrams -f sha=c0ffee"
         " -F force=true",
     ]
     # The branch that a failed run left behind is never moved, which GitHub could
     # refuse, but made anew at the commit that was drawn, and removed at the end.
     scratch = [call for call in made if "bot/diagrams-next" in call]
     assert scratch == [
-        "gh api repos/o/r/git/ref/heads/bot/diagrams-next",
-        "gh api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
-        "gh api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams-next"
+        "api repos/o/r/git/ref/heads/bot/diagrams-next",
+        "api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
+        "api --method POST repos/o/r/git/refs -f ref=refs/heads/bot/diagrams-next"
         " -f sha=abc1234def",
-        "gh api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
+        "api --method DELETE repos/o/r/git/refs/heads/bot/diagrams-next",
     ]
-    assert (
-        f"gh pr edit 9 --body-file {(tmp_path / 'runner/body.md').as_posix()}" in made
-    )
-    assert not any(call.startswith("gh pr create") for call in made)
-    assert made[-1] == "gh pr merge bot/diagrams --auto --squash"
+    assert f"pr edit 9 --body-file {(tmp_path / 'runner/body.md').as_posix()}" in made
+    assert not result.called("pr create")
+    assert made[-1] == "pr merge bot/diagrams --auto --squash"
 
 
 @runs_a_copy_of_the_tool
@@ -2175,32 +2176,22 @@ def test_the_bot_of_main_updates_its_pull_request(tmp_path: Path) -> None:
 def test_the_bot_of_main_closes_its_pull_request_once_main_is_fixed(
     tmp_path: Path, open_number: str
 ) -> None:
-    result, summary, made = run_the_bot_of_main(
-        tmp_path, stale=False, open_number=open_number
-    )
+    result = run_the_bot_of_main(tmp_path, stale=False, open_number=open_number)
 
     assert result.returncode == 0, result.stdout + result.stderr
+    made = result.commands
     if open_number:
         assert made[1] == (
-            "gh pr close 9 --delete-branch --comment `main` has every diagram as a"
+            "pr close 9 --delete-branch --comment `main` has every diagram as a"
             " picture of its source without this pull request:"
             " https://github.com/o/r/actions/runs/6"
         )
-        assert summary == "main is fixed; closed #9.\n"
+        assert result.summary == "main is fixed; closed #9.\n"
     else:
         assert len(made) == 1
-        assert summary == ""
+        assert result.summary == ""
 
 
-# gh for the issue of the diagram bot.
-GH_ISSUES = """#!/usr/bin/env bash
-echo "gh $*" >> "$CALLS"
-case "$*" in
-  "issue list "*) echo "${ISSUE:-}" ;;
-  "issue create "*|"issue edit "*|"issue close "*) ;;
-  *) echo "unexpected: gh $*" >&2; exit 1 ;;
-esac
-"""
 REPORT = ("diagrams.yml", "report", "Keep the issue of the diagram bot current")
 
 
@@ -2211,42 +2202,42 @@ REPORT = ("diagrams.yml", "report", "Keep the issue of the diagram bot current")
         (
             "true",
             "",
-            "gh issue create --title The diagram bot fails --label maintenance --body ",
+            "issue create --title The diagram bot fails --label maintenance --body ",
         ),
-        ("true", "12", "gh issue edit 12 --body "),
+        ("true", "12", "issue edit 12 --body "),
         (
             "false",
             "12",
-            "gh issue close 12 --comment The diagram bot passes again:"
+            "issue close 12 --comment The diagram bot passes again:"
             " https://github.com/o/r/actions/runs/6",
         ),
-        ("false", "", "gh issue list "),
+        ("false", "", "issue list "),
     ],
 )
 def test_a_failed_run_of_the_bot_keeps_one_issue(
     tmp_path: Path, failed: str, issue: str, last: str
 ) -> None:
-    result, _, _ = run_step(
-        workflow_step(*REPORT),
+    result = run_step(
+        REPORT,
         tmp_path,
         tmp_path,
-        {"gh": GH_ISSUES},
-        GH_REPO="o/r",
+        {},
+        [
+            Answer(r"issue list .*", f"{issue}\n"),
+            Answer(r"issue (?:create|edit|close) .*"),
+        ],
         FAILED=failed,
-        ISSUE=issue,
         URL="https://github.com/o/r/actions/runs/6",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    # A body of more than one line takes more than one line of the calls.
-    made = (tmp_path / "calls").read_text(encoding="utf-8")
-    parts = made.split("\ngh ")
-    assert parts[0].startswith(
-        'gh issue list --state open --search "The diagram bot fails" in:title'
+    made = result.commands
+    assert made[0].startswith(
+        'issue list --state open --search "The diagram bot fails" in:title'
     )
-    assert len(parts) == (1 if last.startswith("gh issue list") else 2)
-    assert (parts[0] if len(parts) == 1 else "gh " + parts[-1]).startswith(last)
+    assert len(made) == (1 if last.startswith("issue list") else 2)
+    assert made[-1].startswith(last)
     if failed == "true":
-        assert made.endswith(
-            "\n\nThe latest failure: https://github.com/o/r/actions/runs/6\n"
+        assert made[-1].endswith(
+            "\n\nThe latest failure: https://github.com/o/r/actions/runs/6"
         )
