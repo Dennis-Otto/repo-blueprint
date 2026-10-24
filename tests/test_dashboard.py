@@ -18,12 +18,11 @@ from typing import Any
 from xml.etree import ElementTree
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 from shell import BASH
 from workflow_steps import run_step
 
 import dashboard
+from blueprint.bot_health import Cron
 from blueprint.github import Api
 
 NOW = datetime(2026, 10, 8, 6, 5, tzinfo=UTC)
@@ -672,7 +671,9 @@ SCHEDULES: dict[str, tuple[int, Any]] = {
         listed(
             # Due on Wednesday at 04:17, created 12 minutes later.
             scheduled_run("ci.yml", "2026-10-07T04:29:00Z"),
-            # Due at 20:05, 18 minutes; due at 22:05 the day before, 119.5 minutes.
+            # Due every two hours: GitHub drops most of these runs and starts the
+            # others hours late, so the time a run belongs to isn't clear, and they
+            # don't count.
             scheduled_run("dashboard.yml", "2026-10-07T20:23:00Z"),
             scheduled_run("dashboard.yml", "2026-10-08T00:04:30Z"),
             # Due on Sunday at 12:30, by the second of its two crons: 10 minutes.
@@ -714,7 +715,7 @@ def test_the_health_of_a_repository() -> None:
         releases=1,
         answer_hours=4.0,
         ci_minutes=4.0,
-        schedule_minutes=15.0,
+        schedule_minutes=11.0,
     )
 
 
@@ -737,134 +738,6 @@ def test_a_repository_without_reports_has_no_health_values() -> None:
     assert health == dashboard.Health()
 
 
-@pytest.mark.parametrize(
-    ("text", "low", "high", "names", "values"),
-    [
-        ("*", 0, 59, (), set(range(60))),
-        ("5", 0, 59, (), {5}),
-        # Lists, ranges and steps, also of a range and from a value to the end.
-        ("1,3,5", 0, 59, (), {1, 3, 5}),
-        ("1-5", 0, 23, (), {1, 2, 3, 4, 5}),
-        ("*/15", 0, 59, (), {0, 15, 30, 45}),
-        ("10-50/20", 0, 59, (), {10, 30, 50}),
-        ("5/20", 0, 59, (), {5, 25, 45}),
-        ("1-3,20-23/2", 0, 23, (), {1, 2, 3, 20, 22}),
-        # Names, in any case, among numbers.
-        ("JAN,mar-May,12", 1, 12, dashboard.MONTHS, {1, 3, 4, 5, 12}),
-        ("MON-FRI", 0, 7, dashboard.WEEKDAYS, {1, 2, 3, 4, 5}),
-    ],
-)
-def test_the_values_of_a_field_of_a_cron(
-    text: str, low: int, high: int, names: tuple[str, ...], values: set[int]
-) -> None:
-    assert dashboard.field_values(text, low, high, names) == values
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "60 * * * *",
-        "* 24 * * *",
-        "* * 0 * *",
-        "* * * 13 *",
-        "* * * * 8",
-        "*/0 * * * *",
-        "5-1 * * * *",
-        "1- * * * *",
-        "-1 * * * *",
-        "1,,2 * * * *",
-        "MON * * * *",
-        "? * * * *",
-        "* * * *",
-        "* * * * * *",
-    ],
-)
-def test_a_cron_that_cron_cant_read(text: str) -> None:
-    with pytest.raises(ValueError, match=r"invalid literal|no value from|no 5 fields"):
-        dashboard.Cron.parse(text)
-
-
-def test_sunday_is_0_and_7() -> None:
-    assert dashboard.Cron.parse("0 0 * * 7").weekdays == {0}
-    assert dashboard.Cron.parse("0 0 * * SUN,6-7").weekdays == {0, 6}
-
-
-def day(text: str) -> datetime:
-    return datetime.fromisoformat(text).replace(tzinfo=UTC)
-
-
-def test_the_days_of_a_cron() -> None:
-    # Both kinds of day limited: either matches, as in cron; Friday the 9th and
-    # Tuesday the 13th.
-    either = dashboard.Cron.parse("0 0 13 * FRI")
-    assert either.either
-    assert either.due_on(day("2026-10-09").date())
-    assert either.due_on(day("2026-10-13").date())
-    assert not either.due_on(day("2026-10-12").date())
-    # A field that starts with * limits nothing: both must match, an odd day that is
-    # a Monday, the 5th and the 19th of October 2026, but not Monday the 12th.
-    both = dashboard.Cron.parse("0 0 */2 * 1")
-    assert not both.either
-    assert both.due_on(day("2026-10-05").date())
-    assert both.due_on(day("2026-10-19").date())
-    assert not both.due_on(day("2026-10-12").date())
-    assert not both.due_on(day("2026-10-07").date())
-    # A month that the cron doesn't name has no day of it.
-    assert not dashboard.Cron.parse("0 0 * NOV *").due_on(day("2026-10-08").date())
-
-
-@pytest.mark.parametrize(
-    ("cron", "moment", "due"),
-    [
-        # The same minute, whatever its seconds.
-        ("17 4 * * *", "2026-10-08T04:17:59", "2026-10-08T04:17"),
-        # A minute before: the day before.
-        ("17 4 * * *", "2026-10-08T04:16:00", "2026-10-07T04:17"),
-        # An hour whose minute is still ahead, then an earlier hour of the day.
-        ("30 */6 * * *", "2026-10-08T06:10:00", "2026-10-08T00:30"),
-        ("5,35 * * * *", "2026-10-08T06:20:00", "2026-10-08T06:05"),
-        # Wednesday before Thursday, and the new year before October.
-        ("17 4 * * 3", "2026-10-08T06:05:00", "2026-10-07T04:17"),
-        ("0 0 1 1 *", "2026-10-08T06:05:00", "2026-01-01T00:00"),
-    ],
-)
-def test_the_last_time_a_cron_was_due(cron: str, moment: str, due: str) -> None:
-    assert dashboard.Cron.parse(cron).before(day(moment)) == day(due)
-
-
-def listing_of(values: set[int]) -> str:
-    return ",".join(str(value) for value in sorted(values))
-
-
-@given(
-    st.sets(st.integers(0, 59), min_size=1),
-    st.sets(st.integers(0, 23), min_size=1),
-    st.sets(st.integers(0, 7), min_size=1),
-    st.datetimes(datetime(2026, 1, 1), datetime(2027, 12, 31)),
-)
-def test_a_cron_was_due_last_where_a_search_of_every_minute_finds_it(
-    minutes: set[int], hours: set[int], weekdays: set[int], moment: datetime
-) -> None:
-    cron = dashboard.Cron.parse(
-        f"{listing_of(minutes)} {listing_of(hours)} * * {listing_of(weekdays)}"
-    )
-    moment = moment.replace(tzinfo=UTC)
-    due = moment.replace(second=0, microsecond=0)
-    while not (
-        due.minute in minutes
-        and due.hour in hours
-        and due.isoweekday() % 7 in {weekday % 7 for weekday in weekdays}
-    ):
-        due -= timedelta(minutes=1)
-
-    assert cron.before(moment) == due
-
-
-def test_a_cron_that_wasnt_due_within_a_year() -> None:
-    # February 30th never comes.
-    assert dashboard.Cron.parse("0 0 30 2 *").before(NOW) is None
-
-
 def test_the_schedules_of_a_workflow() -> None:
     text = (
         "on:\n"
@@ -884,7 +757,7 @@ def test_the_schedules_of_a_workflow() -> None:
     )
 
     assert dashboard.schedules(text) == [
-        dashboard.Cron.parse(cron)
+        Cron.parse(cron)
         for cron in ("17 4 * * 3", "5 */2 * * *", "0 6 * * 1-5", "40 4 * * 2")
     ]
 
@@ -900,14 +773,46 @@ def test_the_workflows_of_a_repository_come_in_one_query() -> None:
 def test_the_delay_of_the_scheduled_runs() -> None:
     api = simulated(SCHEDULES)
 
-    assert dashboard.schedule_minutes(api, "Dennis-Otto/demo", NOW) == 15.0
+    assert dashboard.schedule_minutes(api, "Dennis-Otto/demo", NOW) == 11.0
     # The delay of each run, rather than their median.
     one = dict(SCHEDULES)
     one[scheduled("demo")] = (
         200,
-        listed(scheduled_run("dashboard.yml", "2026-10-08T00:04:30Z")),
+        listed(scheduled_run("ci.yml", "2026-10-07T04:29:30Z")),
     )
-    assert dashboard.schedule_minutes(simulated(one), "Dennis-Otto/demo", NOW) == 119.5
+    assert dashboard.schedule_minutes(simulated(one), "Dennis-Otto/demo", NOW) == 12.5
+
+
+@pytest.mark.parametrize(
+    ("cron", "minutes"),
+    [
+        # Two hours apart: the run of 03:40 may well belong to 23:05 rather than to
+        # 02:05, so it doesn't count.
+        ("5 */2 * * *", None),
+        ("5 */6 * * *", None),
+        # Twelve hours apart and more, also of two crons together.
+        ("5 3,15 * * *", 35.0),
+        ("5 3 * * *", 35.0),
+    ],
+)
+def test_only_schedules_far_enough_apart_have_a_delay(
+    cron: str, minutes: float | None
+) -> None:
+    routes = {
+        scheduled("demo"): (
+            200,
+            listed(scheduled_run("bot.yml", "2026-10-07T03:40:00Z")),
+        ),
+        dashboard.workflows_query("Dennis-Otto/demo"): (
+            200,
+            texts(bot=f'on:\n  schedule:\n    - cron: "{cron}"\n'),
+        ),
+    }
+
+    assert (
+        dashboard.schedule_minutes(simulated(routes), "Dennis-Otto/demo", NOW)
+        == minutes
+    )
 
 
 def test_a_repository_without_scheduled_runs_has_no_delay() -> None:
@@ -955,6 +860,8 @@ def test_schedules_that_cant_be_read_leave_out_the_delay_alone(
         (0.6, "< 1 min"),
         (15.0, "15 min"),
         (59.4, "59 min"),
+        # Rounded to the hour, not to "60 min".
+        (59.6, "1.0 h"),
         (60.0, "1.0 h"),
         (258.7, "4.3 h"),
     ],
@@ -999,7 +906,7 @@ def test_a_broken_report_leaves_out_its_value_alone(
         releases=1,
         answer_hours=4.0,
         ci_minutes=4.0,
-        schedule_minutes=15.0,
+        schedule_minutes=11.0,
     )
     assert (
         "the coverage report of Dennis-Otto/demo is unreadable"
@@ -1386,7 +1293,7 @@ def test_the_dashboard_publishes_its_data_and_its_feed(tmp_path: Path) -> None:
     }
     assert demo["scorecard"] == 7.6
     assert (demo["health"]["coverage"], demo["health"]["releases"]) == (50.0, 2)
-    assert demo["health"]["schedule_minutes"] == 15.0
+    assert demo["health"]["schedule_minutes"] == 11.0
     # null where nothing is known, never an empty text.
     assert [behind[key] for key in ("description", "homepage", "release")] == [
         None,
