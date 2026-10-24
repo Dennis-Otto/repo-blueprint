@@ -1070,8 +1070,9 @@ jobs:
       - name: Check out
         uses: actions/checkout@4567
       - uses: ./.github/actions/local
-      - uses: 'docker://alpine:3@sha256:00'
 """
+# A step that runs an image of Docker, which GitHub counts as an action.
+IMAGE = "      - uses: 'docker://alpine:3@sha256:00'\n"
 
 
 def with_selected_actions(root: Path, workflow: str = WORKFLOW) -> None:
@@ -1528,14 +1529,101 @@ def test_an_action_that_an_action_runs_in_turn_needs_its_pattern(
     assert "./x" not in out
 
 
+def test_an_image_of_docker_stops_the_selected_actions(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # GitHub counts a docker:// step as an action and refuses it, whatever the list
+    # names: the workflow fails to start (#279).
+    with_selected_actions(
+        root, WORKFLOW + IMAGE + "      - uses: vendor/composite@abc\n"
+    )
+    github.contents = {
+        "vendor/composite/action.yml@abc": (
+            "runs:\n  using: composite\n  steps:\n"
+            "    - uses: docker://ghcr.io/vendor/tool:1@sha256:11\n"
+        ),
+    }
+    github.permissions["allowed_actions"] = "all"
+
+    assert run(github, root, "settings", "check") == 1
+
+    out = capsys.readouterr().out
+    assert (
+        "  actions.allowed_actions refuses docker://alpine:3@sha256:00: GitHub has"
+        ' "docker://", the configuration wants "docker run"\n'
+        "      .github/workflows/ci.yml runs it, and GitHub refuses a step with"
+        " docker:// unless every action may run, whatever [actions.selected] lists:"
+        " run the image in a run: step instead, as docker run --rm --volume"
+        ' "$PWD:/github/workspace" --workdir /github/workspace alpine:3@sha256:00'
+        " with the step's with: args after it and its entrypoint as --entrypoint;"
+        " until then the actions that may run on GitHub never narrow"
+    ) in out
+    # Also the image of a step of an action that a workflow runs.
+    assert "refuses docker://ghcr.io/vendor/tool:1@sha256:11" in out
+    assert "vendor/composite runs it, and GitHub refuses" in out
+    # No pattern names an image, and GitHub has no file of it to read.
+    assert "lacks docker" not in out
+    assert "unknown for docker" not in out
+    assert not [path for _, path in github.calls if "docker:" in path]
+
+    # The switch to the selected actions would stop the workflow, so it waits.
+    assert run(github, root, "settings", "apply") == 1
+    assert github.permissions["allowed_actions"] == "all"
+    assert ("PUT", f"repos/{REPO}/actions/permissions/selected-actions") not in (
+        github.calls
+    )
+
+
+def test_an_image_of_docker_stops_the_actions_of_the_repository_alone(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = CONFIG.replace(
+        'fork_pr_approval = "all_external_contributors"\n',
+        'fork_pr_approval = "all_external_contributors"\n'
+        'allowed_actions = "local_only"\n',
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    (root / ".github/workflows").mkdir(exist_ok=True)
+    (root / ".github/workflows/ci.yml").write_text(WORKFLOW + IMAGE, encoding="utf-8")
+    github.permissions["allowed_actions"] = "all"
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    assert "actions.allowed_actions refuses docker://alpine:3@sha256:00" in out
+    assert ".github/workflows/ci.yml runs it" in out
+    assert github.permissions["allowed_actions"] == "all"
+
+
+def test_every_action_may_run_also_an_image_of_docker(
+    github: FakeGitHub, root: Path
+) -> None:
+    (root / ".github/workflows").mkdir(exist_ok=True)
+    (root / ".github/workflows/ci.yml").write_text(WORKFLOW + IMAGE, encoding="utf-8")
+    settings = Settings.load(root / ".github/repository.toml")
+    github.permissions["allowed_actions"] = "all"
+
+    drift = check_actions(Api(github), REPO, settings.actions, settings.workflows)
+
+    assert "docker://alpine:3@sha256:00" in settings.workflows
+    assert [item.setting for item in drift if "docker" in item.setting] == []
+
+
 def test_a_reference_is_read_in_the_characters_of_a_name() -> None:
     # The file of an action comes from GitHub; no Markdown of it reaches the summary.
     text = (
         'steps:\n  - uses: a/b@1`<img src=x>`\n  - uses: "c/d/e.yml@2" # v2\n'
         "    with:\n      uses: f/g@3\n  - run: echo uses: h/i@4\n"
+        "  - uses: ./local\n  - uses: docker://alpine:3@sha256:00\n"
     )
 
-    assert references(text) == ["a/b@1", "c/d/e.yml@2", "f/g@3"]
+    # Not those of the repository, which every policy allows, but every image.
+    assert references(text) == [
+        "a/b@1",
+        "c/d/e.yml@2",
+        "f/g@3",
+        "docker://alpine:3@sha256:00",
+    ]
 
 
 def test_an_action_whose_file_github_refuses_keeps_the_list_as_it_is(
@@ -1580,6 +1668,8 @@ def test_the_patterns_follow_those_of_github(reference: str, allowed: bool) -> N
     assert allows(selected, reference) is allowed
     # Without the actions of GitHub, only the patterns.
     assert not allows({"patterns_allowed": []}, "actions/checkout@1")
+    # No pattern names an image of Docker.
+    assert not allows({"patterns_allowed": ["*"]}, "docker://alpine:3@sha256:00")
 
 
 @pytest.mark.parametrize(

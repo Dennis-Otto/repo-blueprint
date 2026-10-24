@@ -1,6 +1,6 @@
 # New alerts of code scanning and unlisted actions stop a pull request, and secret scanning looks for generic secrets
 
-- Status: accepted, amended by [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md), with which a switch that GitHub doesn't offer or keeps off fails no run
+- Status: accepted, amended by [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md), with which a switch that GitHub doesn't offer or keeps off fails no run, and by [0064](0064-an-image-of-docker-runs-with-docker-run.md), with which `settings check` names every step that runs an image with `docker://`
 - Date: 2026-10-18
 
 ## Context
