@@ -867,6 +867,16 @@ def tracked(root: Path, path: str) -> bool | None:
     return bool(listed.stdout) if listed.returncode == 0 else None
 
 
+def servable(root: Path, path: str) -> tuple[bool | None, bool]:
+    """Whether git tracks path in the repository at root, as tracked() tells, and
+    whether the website may serve it: a file that git tracks, inside the
+    repository, so that no symbolic link publishes a file from outside it."""
+    known = tracked(root, path)
+    source = (root / path).resolve()
+    inside = source.is_file() and source.is_relative_to(root.resolve())
+    return known, bool(known) and inside
+
+
 def serve(path: str, root: Path, config: Any, files: Any, where: Where) -> None:
     """Serve the file at path in the repository at root on the website, in CHECKOUT,
     with the video and the posters beside a GIF that git tracks, which the website
@@ -880,7 +890,7 @@ def serve(path: str, root: Path, config: Any, files: Any, where: Where) -> None:
     if path.lower().endswith(".gif"):
         stem = path[: -len(".gif")]
         beside = (f"{stem}{ending}" for ending in (".mp4", *POSTERS))
-        names += [name for name in beside if tracked(root, name)]
+        names += [name for name in beside if servable(root, name)[1]]
     for name in names:
         file = kind(
             f"{CHECKOUT}/{name}", str(root), config.site_dir, config.use_directory_urls
@@ -907,12 +917,10 @@ def checked_out(url: str, page: Any, config: Any, files: Any, where: Where) -> s
         target = f"{CHECKOUT}/{path}"
     if target not in where.found:
         root = Path(config.config_file_path).parent
-        known = tracked(root, path)
+        known, allowed = servable(root, path)
         if known is None:
             return url
-        source = (root / path).resolve()
-        inside = source.is_file() and source.is_relative_to(root.resolve())
-        if not known or not inside:
+        if not allowed:
             log.warning(
                 f"{page.file.src_uri} shows {url}, a file that git doesn't track in "
                 "the repository, so that the picture would be missing on main: add "

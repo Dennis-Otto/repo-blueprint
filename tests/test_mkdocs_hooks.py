@@ -1144,6 +1144,37 @@ def test_a_link_out_of_the_checkout_is_not_served(
     assert "a file that git doesn't track" in caplog.text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows makes no symbolic link")
+def test_a_video_beside_a_gif_that_links_out_of_the_checkout_is_not_served(
+    tmp_path: Path,
+) -> None:
+    # The video beside a GIF that git tracks is a symbolic link to a file outside
+    # the repository, which the website would publish with the GIF.
+    (tmp_path / "secret.mp4").write_bytes(b"video")
+    root = tmp_path / "repository"
+    root.mkdir()
+    (root / "demo.mp4").symlink_to(tmp_path / "secret.mp4")
+    checkout(root, {"demo.gif": gif()})
+    subprocess.run(["git", "add", "demo.mp4"], cwd=root, check=True)
+
+    shown, files = from_main(root, f'<img src="{MAIN}/demo.gif" alt="Demo">')
+
+    assert f'src="{CHECKOUT}/demo.gif"' in shown
+    assert "<video" not in shown
+    assert sorted(served(files)) == [f"{CHECKOUT}/demo.gif"]
+
+
+def test_a_folder_beside_a_gif_is_not_served_as_its_video(tmp_path: Path) -> None:
+    # git tracks a file in a folder named like the video beside the GIF, which
+    # the website can't serve as a file.
+    root = checkout(tmp_path, {"demo.gif": gif(), "demo.mp4/notes.txt": b"notes"})
+
+    shown, files = from_main(root, f'<img src="{MAIN}/demo.gif" alt="Demo">')
+
+    assert "<video" not in shown
+    assert sorted(served(files)) == [f"{CHECKOUT}/demo.gif"]
+
+
 @pytest.mark.parametrize("command", [("no-such-git-of-the-test",), ("git", "--no")])
 def test_without_git_a_picture_from_main_stays_a_download(
     tmp_path: Path,
