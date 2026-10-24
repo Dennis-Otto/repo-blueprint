@@ -5397,7 +5397,9 @@ def test_dependabot_merges_as_the_release_app(
     job = job_of(text, "auto-merge")
     assert "    environment:\n      name: release\n      deployment: false\n" in job
     assert "actions/checkout" not in text
-    assert text.count("run: ") == 2
+    # The check of the release app, the explanation of a token that failed and the
+    # merge.
+    assert text.count("run: ") == 3
     app = job.split("      - name: Create a token of the release app\n", 1)[1]
     app = app.split("\n      - name: ", 1)[0]
     # A token that fails still lets the job's token turn auto-merge on, and says so.
@@ -5408,7 +5410,7 @@ def test_dependabot_merges_as_the_release_app(
     assert "        if: steps.app.outcome == 'failure'\n" in explain
     assert "::warning title=Release app token failed::" in explain
     assert '>> "$GITHUB_STEP_SUMMARY"' in explain
-    assert "vars.RELEASE_AUTOMATION_CLIENT_ID != ''" in app
+    assert "steps.release-app.outputs.ready == 'true'" in app
     assert "client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}" in app
     assert "private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}" in app
     assert re.findall(r"permission-([\w-]+): (\w+)", app) == [
@@ -7238,134 +7240,230 @@ def test_answers_without_a_version_fail_but_refuse_nothing(tmp_path: Path) -> No
     assert not any(call.startswith("sign-tag.sh") for call in calls)
 
 
+# The step before every token of the release app, in every workflow: the same script,
+# with the bot, what it needs the app for and what happens without it in its variables.
+RELEASE_APP_CHECK = "Check that the release app is set up"
+NO_RELEASE_APP = "names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
+NO_PRIVATE_KEY = (
+    "has no private key of its release app in the secret"
+    " RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
+)
+# Each job that acts as the release app, its bot, and whether its run fails without the
+# app: a bot whose work is what the app does fails, one that only helps a pull request
+# along warns, and the pull request goes on without it.
+RELEASE_APP_BOTS = {
+    ("after-checks.yml", "diagrams"): ("the diagram bot", False),
+    ("after-checks.yml", "fixes"): ("the fix bot", False),
+    ("blueprint-update.yml", "update"): ("the blueprint bot", True),
+    ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
+    ("diagrams.yml", "pull-request"): ("the diagram bot", False),
+    ("docs-pictures.yml", "pull-request"): ("the picture bot", False),
+    ("release.yml", "release-please"): ("the release bot", False),
+    ("renovate.yml", "renovate"): ("Renovate", True),
+    ("rollout.yml", "plan"): ("the Rollout", True),
+    ("rollout.yml", "rollout"): ("the Rollout", True),
+    ("screenshot-bot.yml", "pull-request"): ("the screenshot bot", False),
+    ("settings.yml", "check"): ("the settings bot", True),
+    ("sync-issue-assistant.yml", "pull-request"): (
+        "the sync bot of the issue assistant",
+        False,
+    ),
+    ("update-branches.yml", "update"): ("the branch bot", False),
+    ("upstream.yml", "nextcloud"): ("the upstream bot", True),
+}
+
+
+def tokens_of_the_release_app(root: Path) -> Iterator[tuple[str, str, int]]:
+    """The workflow, the job and the index of each step that asks for a token of an app."""
+    for path in sorted((root / ".github/workflows").glob("*.yml")):
+        jobs = workflow_steps.workflow(path.name, root).get("jobs") or {}
+        for job_id, found in jobs.items():
+            for index, step in enumerate(found.get("steps", [])):
+                if "create-github-app-token" in step.get("uses", ""):
+                    yield path.name, job_id, index
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_token_of_the_release_app_comes_after_its_check(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    script = workflow_steps.step("blueprint-update.yml", "update", RELEASE_APP_CHECK)[
+        "run"
+    ]
+    checked = set()
+    for name, job_id, index in tokens_of_the_release_app(root):
+        steps = workflow_steps.job(name, job_id, root)["steps"]
+        token = steps[index]
+        where = f"{name}/{job_id}/{token['name']}"
+        assert token["with"]["client-id"] == "${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}"
+        # One check in the job, before each of its tokens, which only a set-up app asks
+        # for: a token without the app fails, and says only that its input is missing.
+        checks = [
+            i for i, found in enumerate(steps) if found.get("name") == RELEASE_APP_CHECK
+        ]
+        assert len(checks) == 1, where
+        assert checks[0] < index, where
+        assert "steps.release-app.outputs.ready == 'true'" in token["if"], where
+        check = steps[checks[0]]
+        assert check["id"] == "release-app"
+        # The same script everywhere, so that every bot says it the same way.
+        assert check["run"] == script, where
+        env = check["env"]
+        assert env["CLIENT_ID"] == "${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}"
+        assert env["KEY_SET"] == "${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}"
+        bot, required = RELEASE_APP_BOTS[name, job_id]
+        assert (env["BOT"], env["REQUIRED"]) == (bot, "true" if required else "false")
+        assert env["TASK"], where
+        assert env["WITHOUT"], where
+        checked.add((name, job_id))
+        if required:
+            continue
+        # A run that goes on without the app uses its token only once there is one, or
+        # takes the token of the job in its place.
+        output = f"steps.{token['id']}.outputs.token"
+        for later in steps[index + 1 :]:
+            uses = str({key: value for key, value in later.items() if key != "if"})
+            if output not in uses:
+                continue
+            instead = uses.count(f"{output} || ") == uses.count(output)
+            assert instead or f"{output} != ''" in later.get("if", ""), (
+                f"{where} → {later.get('name')}"
+            )
+    if project == "blueprint":
+        assert checked == set(RELEASE_APP_BOTS)
+    else:
+        # Every kind has the bots that the blueprint hands on, a Nextcloud app the
+        # upstream bot too; Renovate runs from the blueprint for its owner.
+        handed_on = {
+            ("after-checks.yml", "diagrams"),
+            ("after-checks.yml", "fixes"),
+            ("blueprint-update.yml", "update"),
+            ("dependabot-automerge.yml", "auto-merge"),
+            ("diagrams.yml", "pull-request"),
+            ("release.yml", "release-please"),
+            ("screenshot-bot.yml", "pull-request"),
+            ("settings.yml", "check"),
+            ("update-branches.yml", "update"),
+        }
+        if project == "nextcloud-app":
+            handed_on.add(("upstream.yml", "nextcloud"))
+        assert checked == handed_on
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("client", "key", "missing"),
-    [
-        (
-            "",
-            "false",
-            "names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID",
-        ),
-        (
-            "Iv23liOcto",
-            "false",
-            "has no private key of its release app in the secret"
-            " RELEASE_AUTOMATION_PRIVATE_KEY of the environment release",
-        ),
-    ],
-    ids=["no app", "no key"],
+    ("name", "job_id"), sorted(RELEASE_APP_BOTS), ids=lambda part: part
 )
-def test_the_blueprint_bot_says_what_its_release_app_lacks(
-    tmp_path: Path, client: str, key: str, missing: str
+def test_each_bot_says_that_it_needs_the_release_app(
+    tmp_path: Path, name: str, job_id: str
 ) -> None:
+    bot, required = RELEASE_APP_BOTS[name, job_id]
+    env = workflow_steps.step(name, job_id, RELEASE_APP_CHECK)["env"]
+    done = workflow_steps.run_step(
+        tmp_path,
+        name,
+        job_id,
+        RELEASE_APP_CHECK,
+        env={"CLIENT_ID": "", "KEY_SET": "false"},
+    )
+
+    level = "error" if required else "warning"
+    sentence = (
+        f"This repository {NO_RELEASE_APP}, which {bot} needs to {env['TASK']};"
+        f" {env['WITHOUT']}."
+    )
+    assert done.stdout.splitlines() == [f"::{level}::{sentence}"]
+    assert done.summary.startswith(
+        f"### {bot[0].upper()}{bot[1:]} needs the release app of the owner\n\n"
+        f"{sentence} The release app is a GitHub App of the owner, "
+    )
+    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
+    assert done.summary.endswith(
+        f" Once they are done, {bot} can {env['TASK']} in its next run.\n"
+    )
+    # A bot whose work is the app's fails; any other goes on, without the token.
+    assert done.returncode == (1 if required else 0)
+    assert done.outputs == {}
+    assert done.calls == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("name", "job_id"),
+    [("blueprint-update.yml", "update"), ("update-branches.yml", "update")],
+)
+def test_a_bot_says_that_its_release_app_lacks_the_private_key(
+    tmp_path: Path, name: str, job_id: str
+) -> None:
+    bot, required = RELEASE_APP_BOTS[name, job_id]
+    done = workflow_steps.run_step(
+        tmp_path,
+        name,
+        job_id,
+        RELEASE_APP_CHECK,
+        env={"CLIENT_ID": "Iv23liOcto", "KEY_SET": "false"},
+    )
+
+    assert done.stdout.startswith(
+        f"::{'error' if required else 'warning'}::This repository {NO_PRIVATE_KEY},"
+        f" which {bot} needs to "
+    )
+    assert NO_PRIVATE_KEY in done.summary
+    assert done.returncode == (1 if required else 0)
+    assert done.outputs == {}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_blueprint_bot_says_what_its_release_app_lacks(tmp_path: Path) -> None:
     done = workflow_steps.run_step(
         tmp_path,
         "blueprint-update.yml",
         "update",
-        "Check that the release app is set up",
-        env={"CLIENT_ID": client, "KEY_SET": key},
+        RELEASE_APP_CHECK,
+        env={"CLIENT_ID": "", "KEY_SET": "false"},
     )
 
-    assert done.returncode == 1
+    # In full, as the run of a bot that fails shows it.
     assert done.stdout.splitlines() == [
-        f"::error::This repository {missing}, which the blueprint bot needs to push an"
-        " update and open its pull request; nothing has changed."
+        f"::error::This repository {NO_RELEASE_APP}, which the blueprint bot needs to"
+        " push an update and open its pull request; nothing has changed."
     ]
-    assert done.summary.startswith(
+    assert done.summary == (
         "### The blueprint bot needs the release app of the owner\n\n"
-        f"This repository {missing}. "
-    )
-    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
-    assert done.calls == []
-
-
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-def test_the_blueprint_bot_goes_on_with_its_release_app(tmp_path: Path) -> None:
-    done = workflow_steps.run_step(
-        tmp_path,
-        "blueprint-update.yml",
-        "update",
-        "Check that the release app is set up",
-        env={"CLIENT_ID": "Iv23liOcto", "KEY_SET": "true"},
-    )
-
-    assert done.returncode == 0
-    assert done.stdout == ""
-    assert done.summary == ""
-    # Before the token of the app, which would fail without it.
-    names = [
-        found.get("name")
-        for found in workflow_steps.job("blueprint-update.yml", "update")["steps"]
-    ]
-    assert names.index("Check that the release app is set up") + 1 == names.index(
-        "Create a token of the release app"
+        f"This repository {NO_RELEASE_APP}, which the blueprint bot needs to push an"
+        " update and open its pull request; nothing has changed. The release app is a"
+        " GitHub App of the owner, whose token may do what the token of a job can't:"
+        " start the checks of a pull request, change a workflow and apply the"
+        " settings.\n\n"
+        "`python3 .github/blueprint.py checklist` shows the steps: a link that registers"
+        " the app with its permissions filled in, the update of the answers of the"
+        " blueprint that names it in `.github/repository.toml`, the settings and its"
+        " private key. Once they are done, the blueprint bot can push an update and"
+        " open its pull request in its next run.\n"
     )
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("client", "key", "missing"),
-    [
-        (
-            "",
-            "false",
-            "names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID",
-        ),
-        (
-            "Iv23liOcto",
-            "false",
-            "has no private key of its release app in the secret"
-            " RELEASE_AUTOMATION_PRIVATE_KEY of the environment release",
-        ),
-    ],
-    ids=["no app", "no key"],
+    ("name", "job_id"),
+    [("blueprint-update.yml", "update"), ("update-branches.yml", "update")],
 )
-def test_renovate_says_what_its_release_app_lacks(
-    tmp_path: Path, client: str, key: str, missing: str
+def test_a_bot_goes_on_with_its_release_app(
+    tmp_path: Path, name: str, job_id: str
 ) -> None:
     done = workflow_steps.run_step(
         tmp_path,
-        "renovate.yml",
-        "renovate",
-        "Check that the release app is set up",
-        env={"CLIENT_ID": client, "KEY_SET": key},
-    )
-
-    assert done.returncode == 1
-    assert done.stdout.splitlines() == [
-        f"::error::This repository {missing}, which Renovate runs as; no dependency"
-        " was updated."
-    ]
-    assert done.summary.startswith(
-        "### Renovate needs the release app of the owner\n\n"
-        f"This repository {missing}. "
-    )
-    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
-    assert done.calls == []
-
-
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-def test_renovate_goes_on_with_its_release_app(tmp_path: Path) -> None:
-    done = workflow_steps.run_step(
-        tmp_path,
-        "renovate.yml",
-        "renovate",
-        "Check that the release app is set up",
+        name,
+        job_id,
+        RELEASE_APP_CHECK,
         env={"CLIENT_ID": "Iv23liOcto", "KEY_SET": "true"},
     )
 
     assert done.returncode == 0
     assert done.stdout == ""
     assert done.summary == ""
-    # Before the token of the app, which would fail without it.
-    names = [
-        found.get("name")
-        for found in workflow_steps.job("renovate.yml", "renovate")["steps"]
-    ]
-    assert names.index("Check that the release app is set up") + 1 == names.index(
-        "Create a token of the release app"
-    )
+    assert done.outputs == {"ready": "true"}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -7404,27 +7502,6 @@ def test_renovate_commits_as_the_bot_user_of_its_release_app(tmp_path: Path) -> 
     for key in ("autodiscover", "username", "gitAuthor", "repositories"):
         assert f"{key}:" not in bot, key
     assert not BLUEPRINT_OWNER.search(bot)
-
-
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-def test_the_release_bot_explains_a_missing_release_app(tmp_path: Path) -> None:
-    found = workflow_steps.step(
-        "release.yml", "release-please", "Explain a missing release app"
-    )
-    assert found["if"] == "vars.RELEASE_AUTOMATION_CLIENT_ID == ''"
-    done = workflow_steps.run_step(
-        tmp_path, "release.yml", "release-please", "Explain a missing release app"
-    )
-
-    # A warning: release-please still keeps its pull request.
-    assert done.returncode == 0
-    assert done.stdout.startswith(
-        "::warning::This repository names no release app in the variable"
-        " RELEASE_AUTOMATION_CLIENT_ID"
-    )
-    assert done.summary.startswith("### No release app\n\n")
-    assert "`python3 .github/blueprint.py checklist` shows how" in done.summary
-    assert done.calls == []
 
 
 # Anything that names the blueprint owner as a person or an account, or the release app
@@ -8448,7 +8525,8 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     # request: no value of the event reaches a command.
     assert "persist-credentials: false" in job
     assert "ref:" not in job
-    run = job[job.index("        run: |") :]
+    # The script of the update, after the check of the release app.
+    run = job[job.rindex("        run: |") :]
     assert "${{" not in run
     assert 'next-branch "${only[@]}" | tee -a "$GITHUB_STEP_SUMMARY"' in run
     # A run for auto-merge shows as a check of that pull request, and the bot-health

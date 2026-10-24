@@ -369,7 +369,7 @@ The blueprint works for every account and organization on GitHub, and a reposito
   copier update --defaults --vcs-ref=:current: --data release_app=NAME --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID
   ```
 
-  Commit the update: `.github/repository.toml` names the app, only it may create release tags, and `settings apply` and `checklist` then ask for its private key and its installation on the repository. Until then the blueprint bot and the release bot say in their summary what is missing, rather than fail at a token.
+  Commit the update: `.github/repository.toml` names the app, only it may create release tags, and `settings apply` and `checklist` then ask for its private key and its installation on the repository. Until then every bot that acts as the app checks for it first and says in its summary what is missing, the variable or the private key, rather than fail at a token: a bot whose work is what the app does, such as the blueprint bot, the settings bot or Renovate, fails, and one that only helps a pull request along, such as the fix bot or the branch bot, warns and goes on without it.
 - **Your defaults,** so that every new repository asks only what is new. Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) takes the answers that stay the same, on Windows in `%LOCALAPPDATA%\copier\settings.yml` and on macOS in `~/Library/Application Support/copier/settings.yml`:
 
   ```yaml
@@ -384,7 +384,7 @@ The blueprint works for every account and organization on GitHub, and a reposito
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/how-an-owner-gets-a-release-app.dark.svg">
-  <img src="docs/images/diagrams/how-an-owner-gets-a-release-app.svg" alt="How an owner gets a release app: You copy the blueprint with the question of the release app left empty. The checklist links the registration of the app on your account or organization, with its name and permissions filled in. You create the app and its private key, and name it with copier update and the name, Client ID and App ID of its settings page. After the commit, settings apply sets the variables and the ruleset of the release tags, and the checklist asks for the private key and the installation on the repository. Then the bots run as your app; until then the blueprint bot and the release bot say in their summary what is missing.">
+  <img src="docs/images/diagrams/how-an-owner-gets-a-release-app.svg" alt="How an owner gets a release app: You copy the blueprint with the question of the release app left empty. The checklist links the registration of the app on your account or organization, with its name and permissions filled in. You create the app and its private key, and name it with copier update and the name, Client ID and App ID of its settings page. After the commit, settings apply sets the variables and the ruleset of the release tags, and the checklist asks for the private key and the installation on the repository. Then the bots run as your app; until then each bot that acts as it says in its summary what is missing.">
 </picture>
 
 Two more answers decide what runs for you, and the page [Your own account](https://dennis-otto.github.io/repo-blueprint/own-account.html) walks through every step:
