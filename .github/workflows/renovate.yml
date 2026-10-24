@@ -206,31 +206,47 @@ jobs:
         with:
           persist-credentials: false
       # Renovate runs as the release app of the owner, whose token may change the
-      # workflows and starts the checks of its pull requests. Without it, the run says
-      # what to set up rather than fail at the token.
+      # workflows and starts the checks of its pull requests.
+      # Without the release app of the owner, the run names what is missing rather than
+      # fail at the token; every workflow has this step, the same but for its variables.
       - name: Check that the release app is set up
+        id: release-app
         env:
           CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+          # Who needs the app and for what, what happens without it, and whether the
+          # run fails then.
+          BOT: Renovate
+          TASK: update the dependencies
+          WITHOUT: no dependency was updated
+          REQUIRED: "true"
         run: |
           if [[ -z "$CLIENT_ID" ]]; then
             missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
           elif [[ "$KEY_SET" != true ]]; then
             missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
           else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::This repository $missing, which Renovate runs as; no dependency was updated."
+          level=warning
+          if [[ "$REQUIRED" == true ]]; then
+            level=error
+          fi
+          echo "::$level::This repository $missing, which $BOT needs to $TASK; $WITHOUT."
           {
-            echo "### Renovate needs the release app of the owner"
+            echo "### ${BOT^} needs the release app of the owner"
             echo
-            echo "This repository $missing. Renovate runs as the release app of the owner, a GitHub App whose token may change the workflows that an update touches and starts the checks of its pull requests, which the token of a job can't. No dependency was updated."
+            echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
             echo
-            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. The next run updates the dependencies."
+            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. Once they are done, $BOT can $TASK in its next run."
           } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          if [[ "$REQUIRED" == true ]]; then
+            exit 1
+          fi
       - name: Create a token of the release app
         id: app
+        if: steps.release-app.outputs.ready == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}

@@ -87,6 +87,19 @@ Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copi
 
 Scheitert das Token der App, etwa bei einer App, die im Repository nicht installiert ist, oder einem Schlüssel, der nicht zu ihr gehört, scheitert der Schritt, der das Token anfordert, und der Bot-Health-Bot hält ein Issue offen, bis ein Lauf besteht. Ein Pull Request, dessen Prüfungen aus einem anderen Grund nicht gestartet sind, startet sie, wenn eine Person ihn schließt und wieder öffnet.
 
+## Ein Bot sagt, dass er die Release-App braucht
+
+**Was du siehst:** Ein Lauf eines Bots, etwa Settings, der Blueprint-Bot, der Branch-Bot oder der Fix-Bot, zeigt die Annotation *This repository names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID* oder *has no private key of its release app*, und seine Zusammenfassung beginnt mit *… needs the release app of the owner*.
+
+**Warum:** Jeder Bot, der als Release-App handelt, prüft die App, bevor er nach ihrem Token fragt, in seinem Schritt *Check that the release app is set up*, und nennt, was fehlt, statt am Token mit einem Fehler zu scheitern, der nichts über die Ursache sagt. Ein Bot, dessen Arbeit die der App ist, schlägt fehl: der Blueprint-Bot, der Settings-Bot, der Upstream-Bot einer Nextcloud-App, Renovate in einem Workflow des Repositorys und das Rollout. Ein Bot, der einem Pull Request nur weiterhilft, warnt und macht ohne das Token weiter: der Fix-Bot, der Branch-Bot, der Diagramm- und der Screenshot-Bot, das Mergen der Updates von Dependabot und der Release-Bot.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/the-check-of-the-release-app.de.dark.svg">
+  <img src="images/diagrams/the-check-of-the-release-app.de.svg" alt="Die Prüfung der Release-App: Bevor ein Bot nach einem Token der Release-App fragt, prüft er, dass das Repository die App in der Variablen RELEASE_AUTOMATION_CLIENT_ID nennt und ihren privaten Schlüssel in der Umgebung release hat. Mit beidem fragt er nach dem Token und tut seine Arbeit. Fehlt eines, sagt er in einer Annotation und in seiner Zusammenfassung, was fehlt und dass die Checkliste es einrichtet. Ein Bot, dessen Arbeit die der App ist, wie der Blueprint-Bot, der Settings-Bot oder Renovate, schlägt dann fehl; einer, der einem Pull Request nur weiterhilft, wie der Fix-Bot oder der Branch-Bot, warnt und macht ohne das Token weiter.">
+</picture>
+
+**Was zu tun ist:** Geh die Schritte der Release-App durch, die `python3 .github/blueprint.py checklist` zeigt, wie die Seite [Dein eigenes Konto](own-account.md#3-die-release-app-registrieren) es tut: Registriere die App und nenne sie, sodass die Variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) sie nennt, installiere sie im Repository und setze ihren privaten Schlüssel als Secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) des Environments `release`. Der nächste Lauf jedes Bots tut seine Arbeit.
+
 ## Renovate öffnet keine Updates
 
 **Was du siehst:** kein Pull Request von Renovate, und die Checkliste hakt Renovate nicht ab.
