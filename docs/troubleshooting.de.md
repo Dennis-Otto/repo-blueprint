@@ -157,6 +157,14 @@ git archive HEAD | docker run --rm -i -e LOG_LEVEL=info -e RENOVATE_GITHUB_TOKEN
 
 Der letzte Befehl nimmt die Presets des Blueprints aus den Regeln, da Renovate auf deinem Rechner keine Plattform hat, von der es sie holen könnte; die Regeln des Blueprints kommen als die des Bots hinein. Seine Zeile `Extracted dependencies` listet jede Datei, die Renovate liest, mit den Lock-Dateien jeder Quelle von pip-compile unter `lockFiles`; eine Zeile mit `WARN` oder `ERROR` nennt ein Problem, und nach einem Fehler endet Renovate mit dem Exit-Code 1. Unter Windows führe die Befehle in Git Bash mit `MSYS_NO_PATHCONV=1` vor `docker` aus, damit Git Bash die Pfade im Container in Ruhe lässt.
 
+## Die Website nennt ein Bild, das Git nicht verfolgt
+
+**Was du siehst:** Die Prüfung *docs*, oder `scripts/check.sh` mit den Werkzeugen der Website, scheitert mit einer Warnung wie `index.md shows https://github.com/OWNER/NAME/raw/main/screenshots/settings.png, a file that git doesn't track in the repository, so that the picture would be missing on main`.
+
+**Warum:** Eine README zeigt ihre Bilder von `main` ihres eigenen Repositorys, damit sie überall zu sehen sind, wo die README es ist, etwa auf PyPI oder im Store einer App. Die Website liefert ein solches Bild aus dem Checkout aus, damit der Pull Request, der einen Screenshot hinzufügt, ihn auch auf seiner Website zeigt, bevor `main` ihn hat ([Entscheidung 0062](decisions/0062-the-website-shows-the-pictures-of-its-repository-from-the-checkout.md), englisch). Ein Bild, das Git nicht verfolgt, würde auf `main` fehlen, sobald der Pull Request gemergt ist: ein neuer Screenshot, der noch nicht committet ist, einer, den der Pull Request löscht oder verschiebt, oder ein Tippfehler in seiner Adresse.
+
+**Was zu tun ist:** Committe das Bild, etwa mit `git add screenshots/settings.png`, oder korrigiere seine Adresse in der README. Ohne Git, etwa in einem Ordner ohne seine Historie, lädt die Website das Bild wie bisher von `main` herunter.
+
 ## Ein geplanter Workflow ist nicht gelaufen
 
 GitHub führt Zeitpläne aus, wie es kann, oft Stunden zu spät und manchmal gar nicht; deshalb startet der Blueprint seine Bots durch Ereignisse, etwa einen Merge in `main` oder das Ende einer Prüfung, und behält die Zeitpläne nur als Sicherheitsnetz ([Entscheidung 0033](decisions/0033-schedules-are-only-a-safety-net.md), englisch). Jede Nacht sieht der Bot-Health-Bot den neuesten Lauf jedes Workflows an und startet einen, dessen Zeitplan GitHub verpasst oder abgeschaltet hat. Ein Workflow mit *Run workflow* unter *Actions* startet von Hand sofort.
