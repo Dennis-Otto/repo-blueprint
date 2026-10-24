@@ -229,6 +229,65 @@ def test_the_lock_files_are_those_that_git_knows_and_renovate_finds(
 
 
 @needs_git
+@pytest.mark.parametrize(
+    ("rules", "found"),
+    [
+        # The ignorePaths of the project, as a glob, a part of the path and a glob of
+        # one name, with comments around them.
+        (
+            "// The rules of the project.\n"
+            "{\n"
+            '  /* not ignorePaths: ["requirements-dev.txt"] */\n'
+            "  ignorePaths: [\n"
+            '    "docs/**",  // for Read the Docs\n'
+            "    'tools/requirements.txt',\n"
+            '    "requirements-?ocs.txt",\n'
+            '    "",\n'
+            "  ],\n"
+            "}\n",
+            ["requirements-dev.txt", "stacks/requirements-test.txt"],
+        ),
+        (
+            '{ "ignorePaths": ["**/stacks/**"] }\n',
+            [
+                "docs/requirements.txt",
+                "requirements-dev.txt",
+                "requirements-docs.txt",
+                "tools/requirements.txt",
+            ],
+        ),
+        # Rules without ignorePaths, and no rules of the project.
+        ('{ extends: ["config:recommended"] }\n', None),
+        (None, None),
+    ],
+)
+def test_the_lock_files_leave_out_the_ignore_paths_of_the_project(
+    tmp_path: Path, rules: str | None, found: list[str] | None
+) -> None:
+    files = {
+        "requirements-dev.txt": PIP_COMPILE,
+        "stacks/requirements-test.txt": PIP_COMPILE,
+        "docs/requirements.txt": "mkdocs-material\n",
+        "tools/requirements.txt": "build\n",
+        "requirements-docs.txt": "mkdocs\n",
+    }
+    if rules is not None:
+        files[".github/renovate.json5"] = rules
+    root = repository(tmp_path, files)
+
+    assert lock_files(root) == (
+        found
+        or [
+            "docs/requirements.txt",
+            "requirements-dev.txt",
+            "requirements-docs.txt",
+            "stacks/requirements-test.txt",
+            "tools/requirements.txt",
+        ]
+    )
+
+
+@needs_git
 def test_the_check_says_which_lock_file_renovate_skips_and_fixes_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

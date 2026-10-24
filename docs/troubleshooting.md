@@ -139,6 +139,8 @@ python3 .github/blueprint.py locks --fix
 
 The header then reads `uv pip compile --generate-hashes --python-version=3.12 --output-file=requirements-test.txt requirements-test.in`, and Renovate keeps it so when it compiles the file. An option that Renovate doesn't know, such as `--python-platform`, `--no-header`, another output file or a source file that doesn't exist needs a person: compile the file again in its folder with the options that Renovate knows, as in the example. In a pull request of a branch of the repository, the fix bot runs `locks --fix` itself.
 
+A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
+
 ## A scheduled workflow didn't run
 
 GitHub runs schedules as it can, often hours late and sometimes not at all, so the blueprint starts its bots from events, such as a merge into `main` or the end of a check, and keeps the schedules only as a safety net ([decision 0033](decisions/0033-schedules-are-only-a-safety-net.md)). Every night, the bot-health bot looks at the latest run of every workflow and starts one whose schedule GitHub missed or switched off. A workflow with *Run workflow* under *Actions* starts at once by hand.
