@@ -1,0 +1,3 @@
+### Features
+
+- **The dashboard shows how late GitHub starts the scheduled runs:** a new column of its health table, *Schedule delay*, shows for each repository the median minutes, or hours, by which GitHub started its scheduled runs of the last 7 days after the time at which the cron of their workflow was due, or – where it had none, with an arrow when the delay moved since a week ago. `dashboard.py` reads the cron of every workflow on the default branch in one query, with lists, ranges, steps and the names of months and days, and `repos.json` and `history.json` hold the value as `schedule_minutes`.

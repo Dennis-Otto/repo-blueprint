@@ -33,7 +33,7 @@ import urllib.request
 import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -325,7 +325,19 @@ WINDOW = timedelta(days=90)
 ISSUES = 30
 # The entries of the history: one a day.
 HISTORY = 120
-TREND = ("coverage", "mutation", "releases", "answer_hours", "ci_minutes")
+TREND = (
+    "coverage",
+    "mutation",
+    "releases",
+    "answer_hours",
+    "ci_minutes",
+    "schedule_minutes",
+)
+# How far back the delay of the scheduled runs looks.
+SCHEDULED = timedelta(days=7)
+# The days that the time of a schedule may lie before its run: every cron comes round
+# within a year, but that of a February 29th.
+LOOKBACK = 366
 # The seconds that the download of an artifact may take.
 DOWNLOAD_TIMEOUT = 120
 # What a report that can't be read raises: gh failing to download it, a zip or an XML
@@ -360,6 +372,7 @@ class Health:
     releases: int = 0
     answer_hours: float | None = None
     ci_minutes: float | None = None
+    schedule_minutes: float | None = None
 
 
 def when(text: str) -> datetime:
@@ -526,6 +539,193 @@ def median_minutes(runs: list[dict[str, Any]]) -> float | None:
     return statistics.median(minutes) if minutes else None
 
 
+# One item of the list on.schedule of a workflow, such as - cron: "17 4 * * 3", with
+# or without quotes and with a comment after it; no other key of a workflow is cron.
+CRON = re.compile(r"""^[ \t]*-[ \t]+cron:[ \t]*(["']?)(.+?)\1[ \t\r]*(?:#.*)?$""", re.M)
+MONTHS = (
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+)
+WEEKDAYS = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
+# The five fields of a cron, each with its lowest and highest value and the names of
+# its values from the lowest on: the minute, the hour, the day of the month, the month
+# and the day of the week, in which 0 and 7 are Sunday.
+FIELDS: tuple[tuple[int, int, tuple[str, ...]], ...] = (
+    (0, 59, ()),
+    (0, 23, ()),
+    (1, 31, ()),
+    (1, 12, MONTHS),
+    (0, 7, WEEKDAYS),
+)
+
+
+def field_values(
+    text: str, low: int, high: int, names: Sequence[str]
+) -> frozenset[int]:
+    """The values of one field of a cron, from low to high: a list of values, ranges
+    such as 1-5 and steps such as */15, 10-50/20 or 5/15, from 5 to high, of numbers
+    or of names, such as MON or JAN. ValueError for anything else."""
+
+    def value(item: str) -> int:
+        named = item.upper()
+        return low + names.index(named) if named in names else int(item)
+
+    found: set[int] = set()
+    for part in text.split(","):
+        span, slash, every = part.partition("/")
+        step = int(every) if slash else 1
+        if span == "*":
+            first, last = low, high
+        else:
+            start, dash, end = span.partition("-")
+            first = value(start)
+            last = value(end) if dash else high if slash else first
+        if step < 1 or not low <= first <= last <= high:
+            raise ValueError(f"{part!r} is no value from {low} to {high}")
+        found.update(range(first, last + 1, step))
+    return frozenset(found)
+
+
+@dataclass(frozen=True)
+class Cron:
+    """A schedule of a workflow as GitHub reads its cron, in UTC: the minutes, hours,
+    days of the month, months and days of the week, 0 for Sunday, at which it is due.
+    As in cron, a day is due when both kinds of day match it, or either of them where
+    both fields are limited: a field that starts with * limits nothing."""
+
+    minutes: frozenset[int]
+    hours: frozenset[int]
+    days: frozenset[int]
+    months: frozenset[int]
+    weekdays: frozenset[int]
+    either: bool
+
+    @classmethod
+    def parse(cls, text: str) -> Cron:
+        """The schedule of a cron such as "17 4 * * 3"; ValueError for one that cron
+        can't read."""
+        fields = text.split()
+        if len(fields) != len(FIELDS):
+            raise ValueError(f"{text!r} has no {len(FIELDS)} fields")
+        minutes, hours, days, months, weekdays = (
+            field_values(found, *limits)
+            for found, limits in zip(fields, FIELDS, strict=True)
+        )
+        return cls(
+            minutes,
+            hours,
+            days,
+            months,
+            frozenset(weekday % 7 for weekday in weekdays),
+            not fields[2].startswith("*") and not fields[4].startswith("*"),
+        )
+
+    def due_on(self, day: date) -> bool:
+        if day.month not in self.months:
+            return False
+        of_month = day.day in self.days
+        of_week = day.isoweekday() % 7 in self.weekdays
+        return (of_month or of_week) if self.either else (of_month and of_week)
+
+    def before(self, moment: datetime) -> datetime | None:
+        """The last time at which the schedule was due, at moment or before it, to the
+        minute: None when it wasn't within LOOKBACK days."""
+        for back in range(LOOKBACK + 1):
+            day = moment.date() - timedelta(days=back)
+            if not self.due_on(day):
+                continue
+            for hour in sorted(self.hours, reverse=True):
+                if back == 0 and hour > moment.hour:
+                    continue
+                latest = moment.minute if back == 0 and hour == moment.hour else 59
+                minutes = [minute for minute in self.minutes if minute <= latest]
+                if minutes:
+                    return datetime.combine(day, time(hour, max(minutes)), UTC)
+        return None
+
+
+def schedules(text: str) -> list[Cron]:
+    """The schedules of a workflow, from its on.schedule, without a cron that cron
+    can't read, which GitHub doesn't run either."""
+    found = []
+    for match in CRON.finditer(text):
+        try:
+            found.append(Cron.parse(match[2]))
+        except ValueError:
+            continue
+    return found
+
+
+def workflows_query(repo: str) -> str:
+    """The query of GraphQL for the text of every workflow of repo on its default
+    branch: one request for them all."""
+    owner, name = repo.split("/", 1)
+    return (
+        f"{{ repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ "
+        'object(expression: "HEAD:.github/workflows") { ... on Tree { entries { '
+        "name object { ... on Blob { text } } } } } } }"
+    )
+
+
+def workflow_schedules(api: Api, repo: str) -> dict[str, list[Cron]]:
+    """The schedules of each workflow of repo on its default branch, by file."""
+    found = api.graphql(workflows_query(repo)) or {}
+    tree = (found.get("repository") or {}).get("object") or {}
+    return {
+        str(entry.get("name", "")): schedules(
+            str((entry.get("object") or {}).get("text") or "")
+        )
+        for entry in tree.get("entries") or []
+    }
+
+
+def schedule_minutes(api: Api, repo: str, now: datetime) -> float | None:
+    """The median minutes by which GitHub started the scheduled runs of repo late in
+    the last SCHEDULED days: from the time at which a schedule of its workflow was due
+    last before GitHub created the run, to then. GitHub starts a schedule when it can,
+    often late and sometimes not at all, and the schedules are those of the workflows
+    on the default branch now. A workflow without a schedule now, or one that wasn't
+    due within LOOKBACK days, leaves out its runs."""
+    since = stamp(now - SCHEDULED)
+    runs = api.get_all(
+        f"repos/{repo}/actions/runs?event=schedule&created=%3E%3D{since}&per_page=100"
+    )
+    if not runs:
+        return None
+    try:
+        crons = workflow_schedules(api, repo)
+    except GitHubError as error:
+        # An extra of the page, from GraphQL: a refused query leaves out this one
+        # value, as a report that can't be read leaves out its own.
+        print(
+            f"dashboard.py: the schedules of {repo} are unreadable: {error}",
+            file=sys.stderr,
+        )
+        return None
+    minutes = []
+    for run in runs:
+        created = when(str(run["created_at"]))
+        workflow = str(run.get("path", "")).rsplit("/", 1)[-1]
+        due = [
+            last
+            for cron in crons.get(workflow, [])
+            if (last := cron.before(created)) is not None
+        ]
+        if due:
+            minutes.append((created - max(due)).total_seconds() / 60)
+    return statistics.median(minutes) if minutes else None
+
+
 def health(
     api: Api,
     download: Downloader,
@@ -544,6 +744,7 @@ def health(
         releases=sum(1 for release in found if when(release.published) >= since),
         answer_hours=answer_hours(api, repo, since),
         ci_minutes=median_minutes(main_runs(api, repo, ci)),
+        schedule_minutes=schedule_minutes(api, repo, now),
     )
 
 
@@ -748,6 +949,7 @@ BETTER = {
     "releases": 1,
     "answer_hours": -1,
     "ci_minutes": -1,
+    "schedule_minutes": -1,
 }
 # The workflow whose runs a value of the health comes from.
 SOURCES = {"coverage": "CI", "mutation": "Mutation", "ci_minutes": "CI"}
@@ -760,7 +962,10 @@ def shown(key: str, value: float | None) -> str:
         return f"{value:.1f} %"
     if key == "releases":
         return f"{value:.0f}"
-    if key == "ci_minutes":
+    if key == "schedule_minutes" and value >= 60:
+        # GitHub starts a schedule hours late at times.
+        return f"{value / 60:.1f} h"
+    if key in ("ci_minutes", "schedule_minutes"):
         return "< 1 min" if value < 1 else f"{value:.0f} min"
     if value < 1:
         return "< 1 h"
@@ -795,6 +1000,7 @@ def health_table(rows: list[Row], previous: dict[str, Any]) -> str:
         "Releases in 90 days",
         "First answer by a person",
         "CI on main",
+        "Schedule delay",
     ]
     lines = []
     for row in rows:
@@ -813,7 +1019,9 @@ def health_table(rows: list[Row], previous: dict[str, Any]) -> str:
         "reports of the last successful runs on main, or ✘ where none has one and the "
         "last run failed; the stable releases and the median time to the first answer "
         "by a person, not a bot, to a new issue over 90 days; the median time of the "
-        "CI on main. An arrow shows a change since a week ago.</p>\n"
+        "CI on main; the median delay with which GitHub started the scheduled runs "
+        "over 7 days, after the time of their cron. An arrow shows a change since a "
+        "week ago.</p>\n"
         f'<div class="table"><table>\n<thead><tr>{header}</tr></thead>\n<tbody>\n'
         + "\n".join(lines)
         + "\n</tbody>\n</table></div>\n"

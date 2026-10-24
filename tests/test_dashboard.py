@@ -18,6 +18,8 @@ from typing import Any
 from xml.etree import ElementTree
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from shell import BASH
 from workflow_steps import run_step
 
@@ -201,6 +203,14 @@ def simulated(routes: dict[str, tuple[int, Any]]) -> Api:
                 error = f"gh: {data['message']} (HTTP {status})"
                 return subprocess.CompletedProcess(arguments, 1, "", error)
             return subprocess.CompletedProcess(arguments, 0, json.dumps([data]), "")
+        if arguments[1] == "graphql":
+            # gh api graphql: the data of a query that the routes know, by its text,
+            # or the error of gh, which names no status.
+            query = arguments[3].removeprefix("query=")
+            if query not in routes:
+                return subprocess.CompletedProcess(arguments, 1, "", "gh: refused")
+            answer = json.dumps({"data": routes[query][1]})
+            return subprocess.CompletedProcess(arguments, 0, answer, "")
         status, data = routes.get(arguments[4], (404, {"message": "Not Found"}))
         answer = f"HTTP/2.0 {status} X\n\n{json.dumps(data)}"
         return subprocess.CompletedProcess(arguments, 0, answer, "")
@@ -633,6 +643,61 @@ HEALTH: dict[str, tuple[int, Any]] = {
 }
 
 
+def scheduled(repo: str) -> str:
+    """The scheduled runs of repo in the seven days before NOW."""
+    return (
+        f"repos/Dennis-Otto/{repo}/actions/runs?event=schedule"
+        "&created=%3E%3D2026-10-01T06:05:00Z&per_page=100"
+    )
+
+
+def texts(**found: str | None) -> dict[str, Any]:
+    """What GraphQL answers for the workflows of a repository, by file, with a folder
+    and a file that has no text, such as a picture, among them."""
+    entries: list[dict[str, Any]] = [
+        {"name": f"{name.replace('_', '-')}.yml", "object": {"text": text}}
+        for name, text in found.items()
+    ]
+    entries += [{"name": "images", "object": {}}, {"name": "logo.png", "object": None}]
+    return {"repository": {"object": {"entries": entries}}}
+
+
+def scheduled_run(workflow: str, created: str) -> dict[str, Any]:
+    return {"path": f".github/workflows/{workflow}", "created_at": created}
+
+
+SCHEDULES: dict[str, tuple[int, Any]] = {
+    scheduled("demo"): (
+        200,
+        listed(
+            # Due on Wednesday at 04:17, created 12 minutes later.
+            scheduled_run("ci.yml", "2026-10-07T04:29:00Z"),
+            # Due at 20:05, 18 minutes; due at 22:05 the day before, 119.5 minutes.
+            scheduled_run("dashboard.yml", "2026-10-07T20:23:00Z"),
+            scheduled_run("dashboard.yml", "2026-10-08T00:04:30Z"),
+            # Due on Sunday at 12:30, by the second of its two crons: 10 minutes.
+            scheduled_run("weekdays.yml", "2026-10-04T12:40:00Z"),
+            # A workflow whose schedule is gone, and one whose file is.
+            scheduled_run("manual.yml", "2026-10-05T03:00:00Z"),
+            scheduled_run("gone.yml", "2026-10-05T03:00:00Z"),
+        ),
+    ),
+    dashboard.workflows_query("Dennis-Otto/demo"): (
+        200,
+        texts(
+            ci='on:\n  push:\n  schedule:\n    # - cron: "25 4 * * *"\n'
+            '    - cron: "17 4 * * 3"\n',
+            dashboard="on:\n  schedule:\n    - cron: '5 */2 * * *' # two hours\n",
+            weekdays='on:\n  schedule:\n    - cron: "0 6 * * 1-5"\n'
+            '    - cron: "30 12 * * SAT,SUN"\n',
+            manual="on: workflow_dispatch\n",
+            broken=None,
+        ),
+    ),
+}
+HEALTH.update(SCHEDULES)
+
+
 def downloader(path: str) -> bytes:
     if path.endswith("/3/zip"):
         return zipped({"coverage.xml": '<coverage line-rate="0.5"/>'})
@@ -644,7 +709,12 @@ def test_the_health_of_a_repository() -> None:
     health = dashboard.health(simulated(HEALTH), downloader, "Dennis-Otto/demo", NOW)
 
     assert health == dashboard.Health(
-        coverage=50.0, mutation=75.0, releases=1, answer_hours=4.0, ci_minutes=4.0
+        coverage=50.0,
+        mutation=75.0,
+        releases=1,
+        answer_hours=4.0,
+        ci_minutes=4.0,
+        schedule_minutes=15.0,
     )
 
 
@@ -665,6 +735,232 @@ def test_a_repository_without_reports_has_no_health_values() -> None:
     health = dashboard.health(simulated({}), downloader, "Dennis-Otto/demo", NOW)
 
     assert health == dashboard.Health()
+
+
+@pytest.mark.parametrize(
+    ("text", "low", "high", "names", "values"),
+    [
+        ("*", 0, 59, (), set(range(60))),
+        ("5", 0, 59, (), {5}),
+        # Lists, ranges and steps, also of a range and from a value to the end.
+        ("1,3,5", 0, 59, (), {1, 3, 5}),
+        ("1-5", 0, 23, (), {1, 2, 3, 4, 5}),
+        ("*/15", 0, 59, (), {0, 15, 30, 45}),
+        ("10-50/20", 0, 59, (), {10, 30, 50}),
+        ("5/20", 0, 59, (), {5, 25, 45}),
+        ("1-3,20-23/2", 0, 23, (), {1, 2, 3, 20, 22}),
+        # Names, in any case, among numbers.
+        ("JAN,mar-May,12", 1, 12, dashboard.MONTHS, {1, 3, 4, 5, 12}),
+        ("MON-FRI", 0, 7, dashboard.WEEKDAYS, {1, 2, 3, 4, 5}),
+    ],
+)
+def test_the_values_of_a_field_of_a_cron(
+    text: str, low: int, high: int, names: tuple[str, ...], values: set[int]
+) -> None:
+    assert dashboard.field_values(text, low, high, names) == values
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "60 * * * *",
+        "* 24 * * *",
+        "* * 0 * *",
+        "* * * 13 *",
+        "* * * * 8",
+        "*/0 * * * *",
+        "5-1 * * * *",
+        "1- * * * *",
+        "-1 * * * *",
+        "1,,2 * * * *",
+        "MON * * * *",
+        "? * * * *",
+        "* * * *",
+        "* * * * * *",
+    ],
+)
+def test_a_cron_that_cron_cant_read(text: str) -> None:
+    with pytest.raises(ValueError, match=r"invalid literal|no value from|no 5 fields"):
+        dashboard.Cron.parse(text)
+
+
+def test_sunday_is_0_and_7() -> None:
+    assert dashboard.Cron.parse("0 0 * * 7").weekdays == {0}
+    assert dashboard.Cron.parse("0 0 * * SUN,6-7").weekdays == {0, 6}
+
+
+def day(text: str) -> datetime:
+    return datetime.fromisoformat(text).replace(tzinfo=UTC)
+
+
+def test_the_days_of_a_cron() -> None:
+    # Both kinds of day limited: either matches, as in cron; Friday the 9th and
+    # Tuesday the 13th.
+    either = dashboard.Cron.parse("0 0 13 * FRI")
+    assert either.either
+    assert either.due_on(day("2026-10-09").date())
+    assert either.due_on(day("2026-10-13").date())
+    assert not either.due_on(day("2026-10-12").date())
+    # A field that starts with * limits nothing: both must match, an odd day that is
+    # a Monday, the 5th and the 19th of October 2026, but not Monday the 12th.
+    both = dashboard.Cron.parse("0 0 */2 * 1")
+    assert not both.either
+    assert both.due_on(day("2026-10-05").date())
+    assert both.due_on(day("2026-10-19").date())
+    assert not both.due_on(day("2026-10-12").date())
+    assert not both.due_on(day("2026-10-07").date())
+    # A month that the cron doesn't name has no day of it.
+    assert not dashboard.Cron.parse("0 0 * NOV *").due_on(day("2026-10-08").date())
+
+
+@pytest.mark.parametrize(
+    ("cron", "moment", "due"),
+    [
+        # The same minute, whatever its seconds.
+        ("17 4 * * *", "2026-10-08T04:17:59", "2026-10-08T04:17"),
+        # A minute before: the day before.
+        ("17 4 * * *", "2026-10-08T04:16:00", "2026-10-07T04:17"),
+        # An hour whose minute is still ahead, then an earlier hour of the day.
+        ("30 */6 * * *", "2026-10-08T06:10:00", "2026-10-08T00:30"),
+        ("5,35 * * * *", "2026-10-08T06:20:00", "2026-10-08T06:05"),
+        # Wednesday before Thursday, and the new year before October.
+        ("17 4 * * 3", "2026-10-08T06:05:00", "2026-10-07T04:17"),
+        ("0 0 1 1 *", "2026-10-08T06:05:00", "2026-01-01T00:00"),
+    ],
+)
+def test_the_last_time_a_cron_was_due(cron: str, moment: str, due: str) -> None:
+    assert dashboard.Cron.parse(cron).before(day(moment)) == day(due)
+
+
+def listing_of(values: set[int]) -> str:
+    return ",".join(str(value) for value in sorted(values))
+
+
+@given(
+    st.sets(st.integers(0, 59), min_size=1),
+    st.sets(st.integers(0, 23), min_size=1),
+    st.sets(st.integers(0, 7), min_size=1),
+    st.datetimes(datetime(2026, 1, 1), datetime(2027, 12, 31)),
+)
+def test_a_cron_was_due_last_where_a_search_of_every_minute_finds_it(
+    minutes: set[int], hours: set[int], weekdays: set[int], moment: datetime
+) -> None:
+    cron = dashboard.Cron.parse(
+        f"{listing_of(minutes)} {listing_of(hours)} * * {listing_of(weekdays)}"
+    )
+    moment = moment.replace(tzinfo=UTC)
+    due = moment.replace(second=0, microsecond=0)
+    while not (
+        due.minute in minutes
+        and due.hour in hours
+        and due.isoweekday() % 7 in {weekday % 7 for weekday in weekdays}
+    ):
+        due -= timedelta(minutes=1)
+
+    assert cron.before(moment) == due
+
+
+def test_a_cron_that_wasnt_due_within_a_year() -> None:
+    # February 30th never comes.
+    assert dashboard.Cron.parse("0 0 30 2 *").before(NOW) is None
+
+
+def test_the_schedules_of_a_workflow() -> None:
+    text = (
+        "on:\n"
+        "  schedule:\n"
+        '    - cron: "17 4 * * 3"\n'
+        "    - cron: '5 */2 * * *'  # every two hours\n"
+        "    -   cron:   0 6 * * 1-5\n"
+        '    - cron: "40 4 * * 2"\r\n'
+        "    # - cron: '0 0 * * *'\n"
+        '    - cron: "61 * * * *"\n'
+        "jobs:\n"
+        "  job:\n"
+        "    steps:\n"
+        "      - uses: an/action@v1\n"
+        "        with:\n"
+        '          cron: "0 0 * * *"\n'
+    )
+
+    assert dashboard.schedules(text) == [
+        dashboard.Cron.parse(cron)
+        for cron in ("17 4 * * 3", "5 */2 * * *", "0 6 * * 1-5", "40 4 * * 2")
+    ]
+
+
+def test_the_workflows_of_a_repository_come_in_one_query() -> None:
+    query = dashboard.workflows_query("Dennis-Otto/demo")
+
+    assert query.startswith('{ repository(owner: "Dennis-Otto", name: "demo") { ')
+    assert 'object(expression: "HEAD:.github/workflows")' in query
+    assert query.count("{") == query.count("}")
+
+
+def test_the_delay_of_the_scheduled_runs() -> None:
+    api = simulated(SCHEDULES)
+
+    assert dashboard.schedule_minutes(api, "Dennis-Otto/demo", NOW) == 15.0
+    # The delay of each run, rather than their median.
+    one = dict(SCHEDULES)
+    one[scheduled("demo")] = (
+        200,
+        listed(scheduled_run("dashboard.yml", "2026-10-08T00:04:30Z")),
+    )
+    assert dashboard.schedule_minutes(simulated(one), "Dennis-Otto/demo", NOW) == 119.5
+
+
+def test_a_repository_without_scheduled_runs_has_no_delay() -> None:
+    # Without runs, it doesn't ask for the workflows, which aren't there either.
+    routes: dict[str, tuple[int, Any]] = {scheduled("demo"): (200, listed())}
+
+    assert (
+        dashboard.schedule_minutes(simulated(routes), "Dennis-Otto/demo", NOW) is None
+    )
+
+
+def test_scheduled_runs_without_a_schedule_now_have_no_delay() -> None:
+    routes = {
+        scheduled("demo"): SCHEDULES[scheduled("demo")],
+        # A repository without .github/workflows on its default branch.
+        dashboard.workflows_query("Dennis-Otto/demo"): (
+            200,
+            {"repository": {"object": None}},
+        ),
+    }
+
+    assert (
+        dashboard.schedule_minutes(simulated(routes), "Dennis-Otto/demo", NOW) is None
+    )
+
+
+def test_schedules_that_cant_be_read_leave_out_the_delay_alone(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    routes = {scheduled("demo"): SCHEDULES[scheduled("demo")]}
+
+    assert (
+        dashboard.schedule_minutes(simulated(routes), "Dennis-Otto/demo", NOW) is None
+    )
+    assert (
+        "the schedules of Dennis-Otto/demo are unreadable: GitHub answered 0: gh: refused"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    ("minutes", "text"),
+    [
+        (None, dashboard.DASH),
+        (0.6, "< 1 min"),
+        (15.0, "15 min"),
+        (59.4, "59 min"),
+        (60.0, "1.0 h"),
+        (258.7, "4.3 h"),
+    ],
+)
+def test_the_delay_of_a_schedule(minutes: float | None, text: str) -> None:
+    assert dashboard.shown("schedule_minutes", minutes) == text
 
 
 def broken_zip(path: str) -> bytes:
@@ -698,7 +994,12 @@ def test_a_broken_report_leaves_out_its_value_alone(
     health = dashboard.health(simulated(HEALTH), download, "Dennis-Otto/demo", NOW)
 
     assert health == dashboard.Health(
-        coverage=None, mutation=75.0, releases=1, answer_hours=4.0, ci_minutes=4.0
+        coverage=None,
+        mutation=75.0,
+        releases=1,
+        answer_hours=4.0,
+        ci_minutes=4.0,
+        schedule_minutes=15.0,
     )
     assert (
         "the coverage report of Dennis-Otto/demo is unreadable"
@@ -882,7 +1183,12 @@ def test_the_health_table_shows_where_a_value_moved() -> None:
     row = dashboard.Row(
         "Dennis-Otto/demo",
         health=dashboard.Health(
-            coverage=99.0, mutation=80.0, releases=2, answer_hours=0.5, ci_minutes=12.0
+            coverage=99.0,
+            mutation=80.0,
+            releases=2,
+            answer_hours=0.5,
+            ci_minutes=12.0,
+            schedule_minutes=20.4,
         ),
     )
     previous = {
@@ -892,6 +1198,7 @@ def test_the_health_table_shows_where_a_value_moved() -> None:
             "releases": 1,
             "answer_hours": None,
             "ci_minutes": 10.0,
+            "schedule_minutes": 31.0,
         }
     }
 
@@ -902,6 +1209,9 @@ def test_the_health_table_shows_where_a_value_moved() -> None:
     assert '<td class="ok" title="a week ago 1">2 ↑</td>' in page
     assert "<td>&lt; 1 h</td>" in page
     assert '<td class="bad" title="a week ago 10 min">12 min ↑</td>' in page
+    # GitHub started the scheduled runs sooner than a week ago.
+    assert "<th>Schedule delay</th>" in page
+    assert '<td class="ok" title="a week ago 31 min">20 min ↓</td>' in page
 
 
 def test_the_health_table_shows_a_failed_run_instead_of_no_value() -> None:
@@ -923,6 +1233,8 @@ def test_the_health_table_shows_a_failed_run_instead_of_no_value() -> None:
     assert '<a href="https://mutation">✘ failed</a>' in page
     # A value that a successful run left stays, however short the run.
     assert "<td>&lt; 1 min</td>" in page
+    # A repository without scheduled runs shows no delay of them.
+    assert f'<td>&lt; 1 min</td><td class="muted">{dashboard.DASH}</td></tr>' in page
 
 
 @pytest.mark.parametrize(
@@ -1074,6 +1386,7 @@ def test_the_dashboard_publishes_its_data_and_its_feed(tmp_path: Path) -> None:
     }
     assert demo["scorecard"] == 7.6
     assert (demo["health"]["coverage"], demo["health"]["releases"]) == (50.0, 2)
+    assert demo["health"]["schedule_minutes"] == 15.0
     # null where nothing is known, never an empty text.
     assert [behind[key] for key in ("description", "homepage", "release")] == [
         None,
@@ -1088,6 +1401,7 @@ def test_the_dashboard_publishes_its_data_and_its_feed(tmp_path: Path) -> None:
     assert behind["stars"] == 0
     assert behind["runs"]["CI"] == {"state": "absent", "url": None, "started": None}
     assert behind["health"]["coverage"] is None
+    assert behind["health"]["schedule_minutes"] is None
 
     feed = ElementTree.fromstring((out.parent / "releases.atom").read_bytes())
     entries = feed.findall(f"{ATOM}entry")
