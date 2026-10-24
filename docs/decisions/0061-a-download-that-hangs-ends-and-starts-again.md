@@ -5,13 +5,13 @@
 
 ## Context
 
-Since every step that installs, builds or downloads ends after five minutes ([0021](0021-install-with-uv-and-bound-every-step.md)), a download that hangs no longer holds a pull request for half an hour, but it still fails its job. The flaky-test bot runs such a job once more ([0014](0014-recover-from-a-stalled-check-without-a-person.md)) and writes it into [issue 179](https://github.com/Dennis-Otto/repo-blueprint/issues/179). From 2026-10-14 to 2026-10-23, it wrote down eight such jobs of the Variants, in three kinds:
+Since every step that installs, builds or downloads ends after five minutes ([0021](0021-install-with-uv-and-bound-every-step.md)), a download that hangs no longer holds a pull request for half an hour, but it still fails its job. The flaky-test bot runs such a job once more ([0014](0014-recover-from-a-stalled-check-without-a-person.md)) and writes it into [issue 179](https://github.com/Dennis-Otto/repo-blueprint/issues/179). From 2026-10-14 to 2026-10-23, it wrote down eight such jobs of the Variants, seven of them in three kinds:
 
 - **The build of the website hung** four times until its step ran out of its five minutes, after the last font that the privacy plugin of Material downloaded. The privacy plugin gives each download 5 seconds, but the social plugin downloads the fonts of the preview cards from Google Fonts with no time limit at all. `.github/mkdocs_blueprint.py` already tried a download of both plugins again after an error of the network ([0011](0011-downloads-try-again-and-checks-cache-their-tools.md)), but a server that stops answering raises no error: the attempt waits without end. The Docs workflow of every repository builds its website with the same plugins.
 - **The download of uv hung** in two legs at once, on `releases.astral.sh`, which `astral-sh/setup-uv` downloads uv from, with no time limit of its own; the step usually takes three seconds.
 - **Docker Hub answered the pull of an image with a 502**, and `docker run` exited with 125 before the lint of the workflows ran.
 
-A ninth job hung in the pre-step of harden-runner, before any step of the workflow ran, which no setting of a step bounds.
+The eighth job hung in the pre-step of harden-runner, before any step of the workflow ran, which no setting of a step bounds.
 
 ## Options
 
@@ -34,4 +34,4 @@ Option 3.
 
 ## Consequences
 
-A font server that stops answering costs a build of the website a minute at most instead of its step, and what fails all its attempts still fails the step, with the error of the last one, for the flaky-test bot. A hang of the download of uv costs two minutes instead of the job. A container that Docker couldn't start for another reason, such as a wrong option, also starts three times before its step fails, 30 seconds later. The other workflows that set uv up keep one attempt; they adopt the second one when a hang of uv shows up there as well. The pre-step of harden-runner stays bounded only by the time limit of its job.
+A font server that stops answering costs a build of the website about two minutes at most instead of its step, and what fails all its attempts still fails the step, with the error of the last one, for the flaky-test bot. A hang of the download of uv costs two minutes instead of the job. A container that Docker couldn't start for another reason, such as a wrong option, also starts three times before its step fails, 30 seconds later. The other workflows that set uv up keep one attempt; they adopt the second one when a hang of uv shows up there as well. The pre-step of harden-runner stays bounded only by the time limit of its job.
