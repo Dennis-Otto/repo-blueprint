@@ -11564,6 +11564,8 @@ RENDERED_FROM = {
 UV_VERSION = re.compile(
     r'\n          # renovate: datasource=pypi depName=uv\n          version: "(\d+\.\d+\.\d+)"\n'
 )
+# The condition of the second attempt to set uv up, after the first one, steps.uv.
+SECOND_UV = re.compile(r"^        if: steps\.uv\.outcome == 'failure'\n", re.M)
 
 
 def jobs_of(workflow: str) -> list[str]:
@@ -11643,10 +11645,13 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
                 if not commands:
                     continue
                 assert all("--require-hashes " in command for command in commands)
+                # One setup of uv, and at most its second attempt, which
+                # test_a_hung_download_of_uv_gives_way_to_a_second_attempt checks.
                 setups = [
                     setup
                     for setup in steps[:index]
                     if "uses: astral-sh/setup-uv@" in setup
+                    and not SECOND_UV.search(setup)
                 ]
                 assert len(setups) == 1, f"{name}: {job_name}"
                 setup = setups[0]
@@ -11691,6 +11696,155 @@ def test_the_ci_installs_the_python_tools_with_uv_from_its_cache(
     assert installs
     # One uv, which Renovate keeps current.
     assert len(versions) == 1
+
+
+def test_a_hung_download_of_uv_gives_way_to_a_second_attempt() -> None:
+    # The download of uv from releases.astral.sh hung until the step ran out of its
+    # five minutes, in two legs of the Variants at once (#179). Its first attempt
+    # ends after two minutes without failing the job, and the second one takes uv
+    # from its releases on GitHub, with the same settings otherwise.
+    def settings(setup: str) -> str:
+        return setup[setup.index("        with:\n") :]
+
+    retried = []
+    for name in UV_WORKFLOWS:
+        workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+        for job_name in jobs_of(workflow):
+            steps = steps_of(job_of(workflow, job_name))
+            for index, second in enumerate(steps):
+                if not SECOND_UV.search(second):
+                    continue
+                first = steps[index - 1]
+                # The same action, of the same commit, right before.
+                action = first[first.index("      - uses: ") :].splitlines()[0]
+                assert action.startswith("      - uses: astral-sh/setup-uv@")
+                assert second.splitlines()[0] == action
+                assert "        id: uv\n" in first
+                assert "        continue-on-error: true\n" in first
+                assert setting_of(first, "if") is None
+                assert setting_of(first, "timeout-minutes") == "2"
+                assert setting_of(second, "timeout-minutes") == "5"
+                assert settings(second) == (
+                    settings(first) + "          download-from-astral-mirror: false\n"
+                )
+                retried.append(f"{name}: {job_name}")
+    assert retried == ["variants.yml: variant"]
+
+
+@pytest.fixture
+def retrying_docker(tmp_path: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Runs the step of the Variants that puts a docker in front of the runner's,
+    then gives a function that runs that docker with the exit codes that the
+    runner's docker, a stub, gives in turn, and the arguments for it. The stub and
+    sleep write their calls into the file calls."""
+    docker = workflow_steps.recording(
+        "docker",
+        'read -ra codes < "$STUBS/codes"\n'
+        'echo "${codes[*]:1}" > "$STUBS/codes"\n'
+        'exit "${codes[0]}"',
+    )
+    done = workflow_steps.run_step(
+        tmp_path,
+        "variants.yml",
+        "variant",
+        "Let a container whose image failed to download start again",
+        stubs={"docker": docker, "sleep": workflow_steps.recording("sleep")},
+    )
+    assert done.returncode == 0, done.stderr
+    folder = done.runner_temp / "retrying"
+    path = (tmp_path / "github/path").read_text(encoding="utf-8")
+    assert path == f"{folder.as_posix()}\n"
+    stubs, calls = tmp_path / "stubs", tmp_path / "calls"
+
+    def run(codes: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+        (stubs / "codes").write_text(f"{codes}\n", encoding="utf-8", newline="\n")
+        calls.write_text("", encoding="utf-8")
+        return subprocess.run(
+            in_bash((folder / "docker").as_posix(), *arguments),
+            env={**os.environ, "STUBS": stubs.as_posix(), "STUB_CALLS": str(calls)},
+            capture_output=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+
+    return run
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_container_whose_image_failed_to_download_starts_again(
+    tmp_path: Path, retrying_docker: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
+    # A 502 of Docker Hub failed the lint of the workflows in the Variants (#179):
+    # docker exits with 125 when it can't start a container, and the docker of the
+    # step starts it again, after 10 and then 20 seconds.
+    lint = ("run", "--rm", "rhysd/actionlint:1.7.12")
+    calls = tmp_path / "calls"
+
+    done = retrying_docker("125 125 0", *lint)
+
+    assert done.returncode == 0
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "docker run --rm rhysd/actionlint:1.7.12",
+        "sleep 10",
+        "docker run --rm rhysd/actionlint:1.7.12",
+        "sleep 20",
+        "docker run --rm rhysd/actionlint:1.7.12",
+    ]
+    assert done.stdout.splitlines() == [
+        "::warning::Docker could not start the container (exit code 125), such as"
+        " when the registry failed to give its image; it tries again in"
+        f" {seconds} seconds."
+        for seconds in (10, 20)
+    ]
+    # The third failure is the step's.
+    assert retrying_docker("125 125 125 0", *lint).returncode == 125
+    assert calls.read_text(encoding="utf-8").count("docker run") == 3
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("code", "arguments"),
+    [(1, ("run", "--rm", "rhysd/actionlint:1.7.12")), (125, ("build", "."))],
+    ids=["a check that failed", "not a run"],
+)
+def test_docker_passes_on_every_other_failure_at_once(
+    tmp_path: Path,
+    retrying_docker: Callable[..., subprocess.CompletedProcess[str]],
+    code: int,
+    arguments: tuple[str, ...],
+) -> None:
+    # A check in the container that fails fails the step, as a build does, which
+    # reports a failed download with an exit code of its own.
+    done = retrying_docker(f"{code} 0", *arguments)
+
+    assert done.returncode == code
+    assert done.stdout == ""
+    assert (tmp_path / "calls").read_text(encoding="utf-8").splitlines() == [
+        f"docker {' '.join(arguments)}"
+    ]
+
+
+def test_every_container_of_the_variants_may_start_again() -> None:
+    # Before the first step that runs a container, and scripts/check.sh, whose
+    # checks of a container start it too, in every leg.
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    steps = steps_of(job_of(variants, "variant"))
+    retrying = [
+        index
+        for index, step in enumerate(steps)
+        if "- name: Let a container whose image failed to download start again\n"
+        in step
+    ]
+    assert len(retrying) == 1
+    assert setting_of(steps[retrying[0]], "if") is None
+    running = [
+        index
+        for index, step in enumerate(steps)
+        if "docker run " in step or "bash scripts/check.sh" in step
+    ]
+    assert running
+    assert retrying[0] < min(running)
 
 
 def test_renovate_keeps_uv_and_hadolint_current() -> None:

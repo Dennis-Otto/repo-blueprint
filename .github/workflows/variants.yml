@@ -116,7 +116,25 @@ jobs:
       # only the wheels that it built from source, for each kind under a key of the
       # lock files of the blueprint: pre-built ones download faster than a cache
       # restores them.
+      # It takes seconds, but its download from releases.astral.sh hung until the
+      # step ran out of its five minutes, in two legs at once (#179). So an attempt
+      # that doesn't end within two minutes gives way to a second one, which takes
+      # uv from its releases on GitHub instead; the job passes with either.
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        id: uv
+        continue-on-error: true
+        timeout-minutes: 2
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.13.4"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: |
+            requirements-dev.txt
+            stacks/**/requirements*.txt
+          cache-suffix: ${{ matrix.kind }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        if: steps.uv.outcome == 'failure'
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
@@ -127,6 +145,7 @@ jobs:
             requirements-dev.txt
             stacks/**/requirements*.txt
           cache-suffix: ${{ matrix.kind }}
+          download-from-astral-mirror: false
       - name: Install the hash-pinned Copier
         timeout-minutes: 5
         run: uv pip install --system --require-hashes -r requirements-dev.txt
@@ -347,6 +366,34 @@ jobs:
         working-directory: ${{ env.PROJECT }}
         timeout-minutes: 5
         run: npm ci --ignore-scripts
+
+      # Docker exits with 125 when it can't start a container, as when the registry
+      # answers the pull of its image with an error: a 502 of Docker Hub failed the
+      # lint of the workflows (#179). The docker in front of the runner's on the PATH
+      # starts such a container again, after 10 and then 20 seconds, in every step
+      # below and in scripts/check.sh; any other exit code, such as that of a check
+      # in the container that failed, it passes on at once.
+      - name: Let a container whose image failed to download start again
+        run: |
+          real="$(command -v docker)"
+          mkdir -p "$RUNNER_TEMP/retrying"
+          {
+            echo '#!/usr/bin/env bash'
+            printf 'real=%q\n' "$real"
+            cat <<'SHIM'
+          for attempt in 1 2 3; do
+            status=0
+            "$real" "$@" || status=$?
+            if [[ "$1" != run ]] || ((status != 125 || attempt == 3)); then
+              exit "$status"
+            fi
+            echo "::warning::Docker could not start the container (exit code 125), such as when the registry failed to give its image; it tries again in $((attempt * 10)) seconds."
+            sleep $((attempt * 10))
+          done
+          SHIM
+          } > "$RUNNER_TEMP/retrying/docker"
+          chmod +x "$RUNNER_TEMP/retrying/docker"
+          echo "$RUNNER_TEMP/retrying" >> "$GITHUB_PATH"
 
       # Hadolint as the CI of a container runs it, in its image, which only this
       # step pulls.
