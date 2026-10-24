@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from blueprint.bot_health import CRON, Cron
 from blueprint.coverage_comment import Coverage, percent
 from blueprint.github import Api, GitHubError
 
@@ -325,7 +326,21 @@ WINDOW = timedelta(days=90)
 ISSUES = 30
 # The entries of the history: one a day.
 HISTORY = 120
-TREND = ("coverage", "mutation", "releases", "answer_hours", "ci_minutes")
+TREND = (
+    "coverage",
+    "mutation",
+    "releases",
+    "answer_hours",
+    "ci_minutes",
+    "schedule_minutes",
+)
+# How far back the delay of the scheduled runs looks.
+SCHEDULED = timedelta(days=7)
+# The least time between two times of the schedules of a workflow that a scheduled
+# run of it is measured against: GitHub starts a schedule up to six hours late and
+# drops many runs of one that comes round more often, so that it isn't clear which
+# time a run of such a schedule belongs to.
+AMBIGUOUS = timedelta(hours=12)
 # The seconds that the download of an artifact may take.
 DOWNLOAD_TIMEOUT = 120
 # What a report that can't be read raises: gh failing to download it, a zip or an XML
@@ -360,6 +375,7 @@ class Health:
     releases: int = 0
     answer_hours: float | None = None
     ci_minutes: float | None = None
+    schedule_minutes: float | None = None
 
 
 def when(text: str) -> datetime:
@@ -526,6 +542,81 @@ def median_minutes(runs: list[dict[str, Any]]) -> float | None:
     return statistics.median(minutes) if minutes else None
 
 
+def schedules(text: str) -> list[Cron]:
+    """The schedules of a workflow, from its on.schedule, without a cron that cron
+    can't read, which GitHub doesn't run either."""
+    return [cron for line in CRON.findall(text) if (cron := Cron.parse(line))]
+
+
+def workflows_query(repo: str) -> str:
+    """The query of GraphQL for the text of every workflow of repo on its default
+    branch: one request for them all."""
+    owner, name = repo.split("/", 1)
+    return (
+        f"{{ repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{ "
+        'object(expression: "HEAD:.github/workflows") { ... on Tree { entries { '
+        "name object { ... on Blob { text } } } } } } }"
+    )
+
+
+def workflow_schedules(api: Api, repo: str) -> dict[str, list[Cron]]:
+    """The schedules of each workflow of repo on its default branch, by file."""
+    found = api.graphql(workflows_query(repo)) or {}
+    tree = (found.get("repository") or {}).get("object") or {}
+    return {
+        str(entry.get("name", "")): schedules(
+            str((entry.get("object") or {}).get("text") or "")
+        )
+        for entry in tree.get("entries") or []
+    }
+
+
+def last_time(crons: Sequence[Cron], moment: datetime) -> datetime | None:
+    """The latest time of any of crons at moment or before it, within LOOKBACK days."""
+    times = [last for cron in crons if (last := cron.last(moment)) is not None]
+    return max(times, default=None)
+
+
+def schedule_minutes(api: Api, repo: str, now: datetime) -> float | None:
+    """The median minutes by which GitHub started the scheduled runs of repo late in
+    the last SCHEDULED days: from the time at which a schedule of its workflow was due
+    last before GitHub created the run, to then. GitHub starts a schedule when it can,
+    often late and sometimes not at all, and the schedules are those of the workflows
+    on the default branch now. A workflow without a schedule now, or one that wasn't
+    due within LOOKBACK days, leaves out its runs. So does a time of a schedule that
+    comes less than AMBIGUOUS after the time before it, such as every two hours:
+    GitHub drops most of those runs and starts the others hours late, so a run would
+    count against a later time than its own, and its delay could never exceed the
+    time between the two."""
+    since = stamp(now - SCHEDULED)
+    runs = api.get_all(
+        f"repos/{repo}/actions/runs?event=schedule&created=%3E%3D{since}&per_page=100"
+    )
+    if not runs:
+        return None
+    try:
+        crons = workflow_schedules(api, repo)
+    except GitHubError as error:
+        # An extra of the page, from GraphQL: a refused query leaves out this one
+        # value, as a report that can't be read leaves out its own.
+        print(
+            f"dashboard.py: the schedules of {repo} are unreadable: {error}",
+            file=sys.stderr,
+        )
+        return None
+    minutes = []
+    for run in runs:
+        created = when(str(run["created_at"]))
+        workflow = str(run.get("path", "")).rsplit("/", 1)[-1]
+        due = last_time(crons.get(workflow, []), created)
+        if due is None:
+            continue
+        earlier = last_time(crons[workflow], due - timedelta(minutes=1))
+        if earlier is None or due - earlier >= AMBIGUOUS:
+            minutes.append((created - due).total_seconds() / 60)
+    return statistics.median(minutes) if minutes else None
+
+
 def health(
     api: Api,
     download: Downloader,
@@ -544,6 +635,7 @@ def health(
         releases=sum(1 for release in found if when(release.published) >= since),
         answer_hours=answer_hours(api, repo, since),
         ci_minutes=median_minutes(main_runs(api, repo, ci)),
+        schedule_minutes=schedule_minutes(api, repo, now),
     )
 
 
@@ -748,6 +840,7 @@ BETTER = {
     "releases": 1,
     "answer_hours": -1,
     "ci_minutes": -1,
+    "schedule_minutes": -1,
 }
 # The workflow whose runs a value of the health comes from.
 SOURCES = {"coverage": "CI", "mutation": "Mutation", "ci_minutes": "CI"}
@@ -760,7 +853,10 @@ def shown(key: str, value: float | None) -> str:
         return f"{value:.1f} %"
     if key == "releases":
         return f"{value:.0f}"
-    if key == "ci_minutes":
+    if key == "schedule_minutes" and round(value) >= 60:
+        # GitHub starts a schedule hours late at times.
+        return f"{value / 60:.1f} h"
+    if key in ("ci_minutes", "schedule_minutes"):
         return "< 1 min" if value < 1 else f"{value:.0f} min"
     if value < 1:
         return "< 1 h"
@@ -795,6 +891,7 @@ def health_table(rows: list[Row], previous: dict[str, Any]) -> str:
         "Releases in 90 days",
         "First answer by a person",
         "CI on main",
+        "Schedule delay",
     ]
     lines = []
     for row in rows:
@@ -813,7 +910,10 @@ def health_table(rows: list[Row], previous: dict[str, Any]) -> str:
         "reports of the last successful runs on main, or ✘ where none has one and the "
         "last run failed; the stable releases and the median time to the first answer "
         "by a person, not a bot, to a new issue over 90 days; the median time of the "
-        "CI on main. An arrow shows a change since a week ago.</p>\n"
+        "CI on main; the median delay with which GitHub started the scheduled runs "
+        "over 7 days, after the time of their cron, of the schedules that come round "
+        "12 hours apart or more, whose runs are clear. An arrow shows a change since a "
+        "week ago.</p>\n"
         f'<div class="table"><table>\n<thead><tr>{header}</tr></thead>\n<tbody>\n'
         + "\n".join(lines)
         + "\n</tbody>\n</table></div>\n"
