@@ -154,6 +154,22 @@ The header then reads `uv pip compile --generate-hashes --python-version=3.12 --
 
 A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
 
+## The check renovate rules fails
+
+**What you see:** in a pull request that changes the rules of Renovate or a lock file, the check *renovate rules* of the Renovate workflow fails, in a repository that runs Renovate itself (the answer `renovate_runner` `self`) and in the blueprint. Its annotations name each problem, such as `Invalid configuration option` for a rule, `pip-compile error` for a lock file, or `Renovate doesn't read the lock file requirements-test.txt.`; its summary and the comment of the PR coach say how to fix it.
+
+**Why:** Renovate refuses every rule it doesn't know and then updates nothing in the repository, and it skips a file that it can't read in every run, with no more than a warning in its log. So the check runs the validator of Renovate on `.github/renovate.json5`, `.github/renovate-blueprint.json5`, `.github/renovate-accepted.json5` and the settings of the bot in `.github/renovate-global.json5`, and then Renovate itself, which reads every committed file of the dependencies, without a token and without looking anything up. A warning or a lock file that it doesn't read fails the check.
+
+**What to do:** correct the rule or the file that the annotations name; for a lock file, `python3 .github/blueprint.py locks --fix` writes its header as Renovate reads it, as [Renovate skips a lock file](#renovate-skips-a-lock-file) shows. With Docker, the same checks run on your machine, the last one on the files of your last commit; the check itself runs the Renovate that `.github/workflows/renovate.yml` pins:
+
+```sh
+docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict .github/renovate.json5 .github/renovate-blueprint.json5 .github/renovate-accepted.json5
+docker run --rm -v "$PWD:/usr/src/app" -w /usr/src/app -e RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5 ghcr.io/renovatebot/renovate:latest renovate-config-validator --strict
+git archive HEAD | docker run --rm -i -e LOG_LEVEL=info -e RENOVATE_GITHUB_TOKEN_WARN=false -e RENOVATE_CONFIG_FILE=/tmp/repository/.github/renovate-blueprint.json5 ghcr.io/renovatebot/renovate:latest bash -c 'mkdir /tmp/repository && cd /tmp/repository && tar -xf - && sed -i "s#\"local>[^\"]*\",\{0,1\}##" .github/renovate.json5 .github/renovate-blueprint.json5 && renovate --platform=local --dry-run=extract'
+```
+
+The last command takes the presets of the blueprint out of the rules, since Renovate on your machine has no platform to fetch them from; the rules of the blueprint come in as those of the bot. Its line `Extracted dependencies` lists every file that Renovate reads, with the lock files of each source of pip-compile under `lockFiles`; a line with `WARN` or `ERROR` names a problem, and after an error Renovate ends with exit code 1. On Windows, run the commands in Git Bash with `MSYS_NO_PATHCONV=1` before `docker`, so that Git Bash leaves the paths in the container alone.
+
 ## The website names a picture that git doesn't track
 
 **What you see:** the check *docs*, or `scripts/check.sh` with the tools of the website, fails with a warning such as `index.md shows https://github.com/OWNER/NAME/raw/main/screenshots/settings.png, a file that git doesn't track in the repository, so that the picture would be missing on main`.

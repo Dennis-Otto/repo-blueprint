@@ -359,6 +359,15 @@ def test_the_workflows_are_the_blueprints_own(
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
+        if name in ("after-checks.yml", "update-branches.yml") and (
+            "renovate.yml" not in workflows(projects[kind])
+        ):
+            # The flaky-test bot and the branch bot know the check of the rules of
+            # Renovate, which only a repository with a Renovate workflow of its own
+            # runs.
+            source = source.replace(
+                '"Workflow security", "Renovate"', '"Workflow security"'
+            )
         if name == "bot-health.yml":
             # The bots it watches, without those of the blueprint alone in a project.
             watched = r"    # The bots and the scheduled workflows of every repository.*\n    workflows: \[.*\]\n"
@@ -6089,6 +6098,8 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
     workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
     job = job_of(workflow, "validate")
     step = job[job.index("      - name: Read every file of the dependencies") :]
+    # Up to the next step, the one that explains a failure.
+    step = step[: step.index(EXPLAIN_COMMENT)]
     run = "        run: |\n"
     script = textwrap.dedent(step[step.index(run) + len(run) :])
     # A checkout with two lock files of pip-compile, as GitHub leaves it.
@@ -6189,6 +6200,175 @@ def test_the_renovate_rules_check_that_renovate_reads_every_lock_file(
         "TOKEN=" in argument and "WARN" not in argument for argument in arguments
     )
     assert arguments[-1].strip().endswith("renovate --platform=local --dry-run=extract")
+
+
+WRONG_RULES = {
+    "level": 50,
+    "file": ".github/renovate.json5",
+    "errors": [
+        {
+            "topic": "Configuration Error",
+            "message": "Invalid configuration option: fooBar",
+        },
+        {
+            "topic": "Configuration Error",
+            "message": "Invalid configuration option: packageRules[0].barBaz",
+        },
+    ],
+    "msg": "Found errors in configuration",
+}
+
+
+@pytest.mark.parametrize(
+    ("rules", "rules_status", "bot", "bot_status", "errors"),
+    [
+        ([{"level": 30, "msg": "Validating .github/renovate.json5"}], 0, [], 0, []),
+        (
+            [WRONG_RULES],
+            1,
+            # The run for the bot reads the rules of the repository as well, and
+            # names the file of the bot by its path in the container.
+            [
+                {
+                    "level": 40,
+                    "configType": "/usr/src/app/.github/renovate-global.json5",
+                    "errors": [
+                        {
+                            "topic": "Configuration Error",
+                            "message": "Invalid configuration option: fooQux",
+                        }
+                    ],
+                    "msg": "Config validation errors found",
+                },
+                WRONG_RULES,
+            ],
+            1,
+            [
+                "file=.github/renovate.json5,title=Renovate::Configuration Error:"
+                " Invalid configuration option: fooBar",
+                "file=.github/renovate.json5,title=Renovate::Configuration Error:"
+                " Invalid configuration option: packageRules[0].barBaz",
+                "file=.github/renovate-global.json5,title=Renovate::Configuration"
+                " Error: Invalid configuration option: fooQux",
+            ],
+        ),
+        (
+            # A file that JSON5 can't parse, and a warning.
+            [
+                {
+                    "level": 40,
+                    "file": ".github/renovate-accepted.json5",
+                    "err": {
+                        "lineNumber": 2,
+                        "message": "JSON5: invalid end of input at 2:1",
+                    },
+                    "msg": "File could not be parsed",
+                },
+                {
+                    "level": 40,
+                    "file": ".github/renovate-blueprint.json5",
+                    "warnings": [
+                        {"topic": "Deprecation", "message": "Use matchFileNames."}
+                    ],
+                    "msg": "Found warnings in configuration",
+                },
+            ],
+            1,
+            [],
+            0,
+            [
+                "file=.github/renovate-accepted.json5,line=2,title=Renovate::File could"
+                " not be parsed: JSON5: invalid end of input at 2:1",
+                "file=.github/renovate-blueprint.json5,title=Renovate::Deprecation:"
+                " Use matchFileNames.",
+            ],
+        ),
+        (
+            # docker can't start the validator at all.
+            [],
+            0,
+            [{"level": 60, "msg": "Fatal"}],
+            125,
+            ["title=Renovate::Fatal"],
+        ),
+        (
+            [],
+            125,
+            [],
+            0,
+            ["title=Renovate::The validator of Renovate ended with exit code 125."],
+        ),
+    ],
+)
+def test_the_renovate_rules_check_names_each_wrong_rule_in_an_annotation(
+    tmp_path: Path,
+    rules: list[dict[str, object]],
+    rules_status: int,
+    bot: list[dict[str, object]],
+    bot_status: int,
+    errors: list[str],
+) -> None:
+    workflow = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_of(workflow, "validate")
+    step = job[job.index("      - name: Validate the rules of the repository") :]
+    step = step[: step.index("      - name: Read every file of the dependencies")]
+    run = "        run: |\n"
+    script = textwrap.dedent(step[step.index(run) + len(run) :])
+    (tmp_path / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+    # The validator's log as JSON lines, after a line of its own; docker notes its
+    # arguments and ends as the validator does, python3 is the Python of the tests.
+    for name, log in (("rules", rules), ("bot", bot)):
+        lines = [
+            json.dumps({"name": "renovate", "pid": 9, "v": 0, **entry}) for entry in log
+        ]
+        (tmp_path / name).write_text(
+            "Starting\n" + "".join(f"{line}\n" for line in lines), encoding="utf-8"
+        )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool, body in {
+        "docker": 'printf \'%s\n\' "$@" >> "$CALLS"\n'
+        'case "$*" in *RENOVATE_CONFIG_FILE*) run=bot status=$BOT ;; *) run=rules status=$RULES ;; esac\n'
+        'cat "$run"\nexit "$status"\n',
+        "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+    }.items():
+        (bin_dir / tool).write_text(
+            f"#!/usr/bin/env bash\n{body}", encoding="utf-8", newline="\n"
+        )
+        (bin_dir / tool).chmod(0o755)
+    (tmp_path / "temp").mkdir()
+    calls = tmp_path / "calls"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": (tmp_path / "temp").as_posix(),
+        "IMAGE": "renovate",
+        "CALLS": calls.as_posix(),
+        "RULES": str(rules_status),
+        "BOT": str(bot_status),
+    }
+    # As GitHub runs a step: bash -e.
+    assert BASH
+    result = subprocess.run(
+        [BASH, "-e", "step.sh"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == (1 if errors else 0), result.stderr
+    assert re.findall(r"^::error (.*)$", result.stdout, re.M) == errors
+    # Lines that are no JSON stay in the log of the job.
+    assert result.stdout.startswith("Starting\nStarting\n")
+    # Both runs of the validator, the second one with the rules of the bot, log JSON.
+    arguments = calls.read_text(encoding="utf-8").splitlines()
+    assert arguments.count("LOG_FORMAT=json") == 2
+    assert arguments.count("--strict") == 2
+    assert (
+        "RENOVATE_CONFIG_FILE=/usr/src/app/.github/renovate-global.json5" in arguments
+    )
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -7462,6 +7642,33 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     )
     assert "Renovate" in health[True]["workflow_run"]["workflows"]
+    # A pull request that changes the rules or a lock file gets the check of the
+    # rules, which explains its failure; the PR coach follows it, also on a pull
+    # request from a fork, and the flaky-test bot leaves it alone.
+    assert job_alone(workflow, "validate").endswith(explain_step("renovate rules"))
+    assert Catalog.load(project).check("renovate rules")
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    assert (
+        watched_after_the_checks(after)
+        == {
+            "CI (generic)",
+            "Docker E2E",
+            "Renovate",
+            "Release",
+        }
+        | OTHER_CHECKS
+        | SCANNER_WORKFLOWS
+    )
+    for job in ("rerun", "report"):
+        assert left_alone_by_the_flaky_test_bot(job_of(after, job)) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
+        ), job
+    # Its failure moves the line of the branch bot on at once, as a scanner's does.
+    update = (project / ".github/workflows/update-branches.yml").read_text("utf-8")
+    assert watched_after_the_checks(update) == watched_after_the_checks(after) - {
+        "Release"
+    }
+    assert '"Workflow security", "Renovate"]' in condition_of(job_of(update, "update"))
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -8298,7 +8505,7 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         condition,
     )
     assert listed
-    assert set(json.loads(listed[1])) == OTHER_CHECKS | SCANNER_WORKFLOWS
+    assert set(json.loads(listed[1])) == OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate"}
     # The token reads the checks and the statuses of the line.
     for permission in ("checks: read", "statuses: read", "contents: write"):
         assert f"          permission-{permission}\n" in job, permission
@@ -8421,6 +8628,8 @@ def test_the_bots_after_the_checks_watch_what_runs_in_the_blueprint() -> None:
             "Release",
             "Issue assistant sync",
             "Downstream",
+            # The check of the rules of Renovate, which the Renovate workflow runs here.
+            "Renovate",
         }
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
@@ -8438,7 +8647,6 @@ UNWATCHED = {
     "Issue lifecycle",
     "Welcome",
     "Mutation",
-    "Renovate",
 }
 
 
@@ -8475,7 +8683,13 @@ def test_the_bots_after_the_checks_watch_the_checks_of_the_project(
         assert name, path
         if path.name in ("ci.yml", "action-test.yml"):
             names.add(name[1])
+    # The Renovate workflow of the blueprint checks the rules of these projects, which
+    # have no Renovate workflow of their own.
     assert watched == names | OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+    for job in ("rerun", "report"):
+        assert left_alone_by_the_flaky_test_bot(job_of(after, job)) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+        ), job
     assert "the blueprint sets them" not in after
     assert not (workflows / "flaky.yml").exists()
     assert not (workflows / "coverage.yml").exists()
@@ -8553,17 +8767,22 @@ def test_the_bot_for_cancelled_checks_watches_every_required_check(
     assert providers <= watched
 
 
+def left_alone_by_the_flaky_test_bot(job: str) -> set[str]:
+    """The workflows whose runs a job of the flaky-test bot leaves alone."""
+    listed = re.search(
+        r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)", job
+    )
+    assert listed, job
+    return set(json.loads(listed[1]))
+
+
 def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     # Their checks fail the same way again, or, as the changelog, pass once the pull
-    # request changed: no flaky test either way. The release has a bot of its own.
+    # request changed: no flaky test either way, and neither are the rules of
+    # Renovate. The release has a bot of its own.
     for job in ("rerun", "report"):
-        listed = re.search(
-            r"!contains\(fromJSON\('(\[.+?\])'\), github\.event\.workflow_run\.name\)",
-            after_the_checks_job(job),
-        )
-        assert listed, job
-        assert set(json.loads(listed[1])) == (
-            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Release"}
+        assert left_alone_by_the_flaky_test_bot(after_the_checks_job(job)) == (
+            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
         ), job
 
 
@@ -8704,10 +8923,17 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     )
     assert f"    name: {name}\n" in variant
     assert variant.endswith(explain_step(name))
-    # The scanners of the pull requests, which aren't required, explain theirs too.
-    for workflow, check in (("zizmor", "zizmor"), ("links", "links"), ("fuzz", "fuzz")):
+    # The scanners of the pull requests, which aren't required, explain theirs too, and
+    # so does the check of the rules of Renovate.
+    for workflow, job, check in (
+        ("zizmor", "zizmor", "zizmor"),
+        ("links", "links", "links"),
+        ("fuzz", "fuzz", "fuzz"),
+        ("renovate", "validate", "renovate rules"),
+    ):
         text = (ROOT / f".github/workflows/{workflow}.yml").read_text(encoding="utf-8")
-        assert job_alone(text, check).endswith(explain_step(check)), workflow
+        assert job_alone(text, job).endswith(explain_step(check)), workflow
+        assert Catalog.load(ROOT).check(check), check
     # And the checks on Windows, whose runner has python, not python3.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
     assert job_alone(windows, "check").endswith(

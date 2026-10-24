@@ -1,5 +1,9 @@
 [%- from "includes/replace.jinja" import replaced with context -%]
-[%- set workflows = "    # The workflows of the checks of this repository; the blueprint sets them for each kind of project.\n    # Then those of the other required checks and of the scanners, the same in every repository.\n    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, " -%]
+[%- set others = "    # Then those of the other required checks and of the scanners, the same in every repository, and Renovate for the check of its rules where it runs in the repository.\n" -%]
+[%- set workflows = "    # The workflows of the checks of this repository; the blueprint sets them for each kind of project.\n" ~ others ~ "    workflows: [CI (python), Variants, Windows, Issue assistant sync, Downstream, " -%]
 [%- set tests = test_workflows.split(',') | map('trim') | select | join(', ') -%]
-[%- set project = "    # The checks of this repository, its end-to-end tests if a workflow of its own named Docker E2E runs them,\n    # and the workflows of its other tests that the answer test_workflows of the blueprint names.\n    # Then those of the other required checks and of the scanners, the same in every repository.\n    workflows: [CI (" ~ ci_workflow ~ ")" ~ (", Action test" if project_type == 'github-action' else "") ~ ", Docker E2E, " ~ ((tests ~ ", ") if tests else "") -%]
-{= replaced(".github/workflows/update-branches.yml", [[workflows, project]]) -=}
+[%- set project = "    # The checks of this repository, its end-to-end tests if a workflow of its own named Docker E2E runs them,\n    # and the workflows of its other tests that the answer test_workflows of the blueprint names.\n" ~ others ~ "    workflows: [CI (" ~ ci_workflow ~ ")" ~ (", Action test" if project_type == 'github-action' else "") ~ ", Docker E2E, " ~ ((tests ~ ", ") if tests else "") -%]
+[#- The check of the rules of Renovate runs in the Renovate workflow of a repository
+    that runs Renovate itself; the blueprint's checks the rules of the others. -#]
+[%- set renovate = [] if renovate_runner == 'self' else [[", Workflow security, Renovate]\n", ", Workflow security]\n"], ['"Workflow security", "Renovate"]', '"Workflow security"]']] -%]
+{= replaced(".github/workflows/update-branches.yml", [[workflows, project]] + renovate) -=}
