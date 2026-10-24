@@ -890,6 +890,7 @@ def test_why_no_mutant_ran() -> None:
     assert f"- `tests/test_a.py::test_{MOST_FAILING}`" not in text
     assert "- and 2 more\n" in text
     assert "`@pytest.mark.mutation_unsafe`" in text
+    assert "runs a copy of it in a folder of its own" in text
     assert "`cache_clear()`" in text
     assert text.endswith("```text\nfailed to collect\n```")
     assert no_mutant_ran(part_data()) == (

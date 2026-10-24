@@ -693,7 +693,8 @@ def no_mutant_ran(part: Mapping[str, Any]) -> str:
         lines += [
             "",
             "A test that can't pass in that copy, because it reads the code as text, "
-            "asks Git or starts the tool, gets the marker "
+            "asks Git, starts the tool or runs a copy of it in a folder of its own, "
+            "gets the marker "
             "`@pytest.mark.mutation_unsafe`; a test that runs under a cache of "
             "`functools` clears it with `cache_clear()`, since the stats of mutmut run "
             "every test in one process. mutmut stops at the first test that fails: "
