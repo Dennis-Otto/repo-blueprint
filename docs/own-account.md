@@ -60,6 +60,8 @@ Install the app on the repository, at `https://github.com/apps/NAME/installation
 gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo octo-org/my-project < private-key.pem
 ```
 
+Until the app is named, installed and has its private key, each bot that acts as it says in its summary what is missing, rather than fail at its token: one whose work is what the app does fails, and one that only helps a pull request along warns, as [Troubleshooting](troubleshooting.md#a-bot-says-that-it-needs-the-release-app) shows.
+
 ## 4. Apply the settings
 
 ```sh

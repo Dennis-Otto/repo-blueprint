@@ -63,23 +63,46 @@ jobs:
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: audit
-      # Without the release app of the owner, release-please still keeps its pull
-      # request, but as the token of the job, which starts none of its checks, and no
-      # run can sign a release tag: the run says what to set up.
-      - name: Explain a missing release app
-        if: vars.RELEASE_AUTOMATION_CLIENT_ID == ''
+      # Without the release app of the owner, the run names what is missing rather than
+      # fail at the token; every workflow has this step, the same but for its variables.
+      - name: Check that the release app is set up
+        id: release-app
+        env:
+          CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+          # Who needs the app and for what, what happens without it, and whether the
+          # run fails then.
+          BOT: the release bot
+          TASK: start the checks of the release pull request and sign the release tags
+          WITHOUT: release-please keeps the release pull request with the token of the job, which starts none of its checks, and no release can be published
+          REQUIRED: "false"
         run: |
-          echo "::warning::This repository names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID, so the release pull request starts no checks and no release can be published; python3 .github/blueprint.py checklist shows how to set one up."
+          if [[ -z "$CLIENT_ID" ]]; then
+            missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
+          elif [[ "$KEY_SET" != true ]]; then
+            missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          level=warning
+          if [[ "$REQUIRED" == true ]]; then
+            level=error
+          fi
+          echo "::$level::This repository $missing, which $BOT needs to $TASK; $WITHOUT."
           {
-            echo "### No release app"
+            echo "### ${BOT^} needs the release app of the owner"
             echo
-            echo "This repository names no release app in the variable \`RELEASE_AUTOMATION_CLIENT_ID\`. Release-please keeps the release pull request with the token of the job, which starts none of its checks, and only the release app may create and sign a release tag, so no release can be published."
+            echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
             echo
-            echo "\`python3 .github/blueprint.py checklist\` shows how to register the app of the owner, with a link that fills in its permissions, and how to name it in \`.github/repository.toml\`."
+            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. Once they are done, $BOT can $TASK in its next run."
           } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$REQUIRED" == true ]]; then
+            exit 1
+          fi
       - name: Create a token of the release app
         id: app
-        if: vars.RELEASE_AUTOMATION_CLIENT_ID != ''
+        if: steps.release-app.outputs.ready == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
