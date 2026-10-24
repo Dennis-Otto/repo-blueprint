@@ -21,7 +21,7 @@ import time
 import tomllib
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse, urlsplit
 
 import yaml
 
@@ -82,6 +82,20 @@ SVG_LENGTHS = tuple(
 )
 # The pictures beside a video, NAME.webp or NAME.png, that show until it plays.
 POSTERS = (".webp", ".png")
+# A picture of the repository that a page shows from main, as a README names it so
+# that it shows wherever the README does, such as on PyPI or in the store of an app:
+# github.com/OWNER/NAME/raw/main/PATH, its blob/main/PATH?raw=true, and
+# raw.githubusercontent.com/OWNER/NAME/main/PATH, also from HEAD or refs/heads/main.
+# The website serves it from the checkout, in this folder, so that a pull request
+# that adds a screenshot shows it on the website too: the privacy plugin would
+# download it from main, which doesn't have it before the merge.
+CHECKOUT = "assets/images/repository"
+BRANCHES = ("main", "HEAD")
+# Whether git tracks a file, which main then has once the change is merged: git
+# lists the path that follows, as it is, or nothing.
+TRACKED = ("git", "--literal-pathspecs", "ls-files", "-z", "--")
+# The characters of a path that its address on the website keeps as they are.
+UNQUOTED = "/@+:"
 # The diagrams that a page still draws live, from a ```mermaid block, whose sources
 # the search leaves out: a search for "token" would show "flowchart LR admin([..."
 # as its text.
@@ -711,7 +725,8 @@ def included(
 
 def on_page_content(html_text: str, page: Any, config: Any, files: Any) -> str:
     """Fit a page to the website: the diagrams of its ```mermaid blocks, which the
-    search leaves out, pictures that follow the scheme the reader picks, such as
+    search leaves out, the pictures that it shows from main of its own repository
+    from the checkout, pictures that follow the scheme the reader picks, such as
     those of its diagrams, videos in place of GIFs,
     pictures that load as the reader comes to them, no badges, a description of its
     own, and the language of an untranslated page.
@@ -728,6 +743,7 @@ def on_page_content(html_text: str, page: Any, config: Any, files: Any) -> str:
     )
     html_text = MERMAID_BLOCK.sub(r"\g<0> data-search-exclude", html_text)
     html_text = without_badges(html_text)
+    html_text = from_checkout(html_text, page, config, files, where)
     html_text = PICTURE.sub(lambda m: themed(m, where), html_text)
     html_text = IMAGE.sub(lambda m: video(m[0], where), html_text)
     html_text = lazy(html_text, where)
@@ -786,6 +802,153 @@ def local(
 def relative(target: str, folder: str) -> str:
     """The address of a file of the website from a page in folder."""
     return posixpath.relpath(target, folder or ".")
+
+
+def repository_of(config: Any) -> str:
+    """The repository of the website on GitHub, OWNER/NAME, from repo_url; "" for a
+    repository elsewhere or none."""
+    address = urlsplit(config.repo_url or "")
+    name = address.path.strip("/").removesuffix(".git")
+    if address.scheme in ("http", "https") and address.hostname == "github.com":
+        return name if name.count("/") == 1 else ""
+    return ""
+
+
+def path_on_main(url: str, config: Any) -> str | None:
+    """The path in the repository of the file that url shows from main of the
+    website's own repository on GitHub, such as screenshots/settings.png; None for
+    any other address, and for a path out of the repository. url is as the tag of
+    HTML has it, such as with &amp; for &."""
+    address = urlsplit(html.unescape(url))
+    segments = address.path.split("/")[1:]
+    if address.scheme != "https":
+        return None
+    if address.hostname == "github.com" and segments[2:3] == ["raw"]:
+        rest = segments[3:]
+    elif address.hostname == "github.com" and segments[2:3] == ["blob"]:
+        rest = segments[3:] if "raw=true" in address.query.split("&") else []
+    elif address.hostname == "raw.githubusercontent.com":
+        rest = segments[2:]
+    else:
+        return None
+    repository = repository_of(config)
+    if not repository or "/".join(segments[:2]).lower() != repository.lower():
+        return None
+    if rest[:2] == ["refs", "heads"]:
+        rest = rest[2:]
+    if len(rest) < 2 or rest[0] not in BRANCHES:
+        return None
+    path = posixpath.normpath(unquote("/".join(rest[1:])))
+    return None if path in (".", "..") or path.startswith(("../", "/")) else path
+
+
+def tracked(root: Path, path: str) -> bool | None:
+    """Whether git tracks the file at path in the repository at root, so that main
+    has it once the change is merged; None without git or outside a repository,
+    where nothing can tell."""
+    try:
+        listed = subprocess.run(
+            (*TRACKED, path),
+            cwd=root,
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError:
+        return None
+    return bool(listed.stdout) if listed.returncode == 0 else None
+
+
+def serve(path: str, root: Path, config: Any, files: Any, where: Where) -> None:
+    """Serve the file at path in the repository at root on the website, in CHECKOUT,
+    with the video and the posters beside a GIF that git tracks, which the website
+    shows in its place.
+
+    Each file of the website is named by its path there, so that it takes the
+    place of no file of docs/, whose path in docs/ may be the same.
+    """
+    kind = type(next(iter(files)))
+    names = [path]
+    if path.lower().endswith(".gif"):
+        stem = path[: -len(".gif")]
+        beside = (f"{stem}{ending}" for ending in (".mp4", *POSTERS))
+        names += [name for name in beside if tracked(root, name)]
+    for name in names:
+        file = kind(
+            f"{CHECKOUT}/{name}", str(root), config.site_dir, config.use_directory_urls
+        )
+        file.abs_src_path = str(root / name)
+        files.append(file)
+        where.found[file.dest_uri] = file
+
+
+def checked_out(url: str, page: Any, config: Any, files: Any, where: Where) -> str:
+    """The address from the page of the picture that url shows from main of the
+    website's own repository, as the website serves it from the checkout: a file
+    of docs/ as the website has it, any other one in CHECKOUT, once git tracks it.
+
+    url stays as it is for any other picture, and without git, which the privacy
+    plugin then downloads; one that git doesn't track warns, which fails a strict
+    build, as main would lack it once the change is merged.
+    """
+    path = path_on_main(url, config)
+    if path is None:
+        return url
+    target = where.find(path) if path.startswith(f"{where.docs}/") else None
+    if target is None:
+        target = f"{CHECKOUT}/{path}"
+    if target not in where.found:
+        root = Path(config.config_file_path).parent
+        known = tracked(root, path)
+        if known is None:
+            return url
+        source = (root / path).resolve()
+        inside = source.is_file() and source.is_relative_to(root.resolve())
+        if not known or not inside:
+            log.warning(
+                f"{page.file.src_uri} shows {url}, a file that git doesn't track in "
+                "the repository, so that the picture would be missing on main: add "
+                "it with git add, or correct its address."
+            )
+            return url
+        serve(path, root, config, files, where)
+    fragment = urlsplit(url).fragment
+    address = quote(relative(target, where.folder), safe=UNQUOTED)
+    return address + (f"#{fragment}" if fragment else "")
+
+
+def from_checkout(
+    html_text: str, page: Any, config: Any, files: Any, where: Where
+) -> str:
+    """Show the pictures that the page shows from main of its own repository, in
+    <img> and in each candidate of the srcset of a <source>, from the checkout."""
+
+    def candidates(srcset: str) -> str:
+        shown = []
+        for candidate in srcset.split(","):
+            words = candidate.split()
+            if words:
+                words[0] = checked_out(words[0], page, config, files, where)
+            shown.append(" ".join(words))
+        return ", ".join(shown)
+
+    def tag(match: re.Match[str], name: str, key: str) -> str:
+        attrs = attributes(match[0])
+        value = attrs.get(key)
+        if not value:
+            return match[0]
+        changed = (
+            candidates(value)
+            if key == "srcset"
+            else checked_out(value, page, config, files, where)
+        )
+        if changed == value:
+            return match[0]
+        return element(name, {**attrs, key: changed})
+
+    html_text = IMAGE.sub(lambda m: tag(m, "img", "src"), html_text)
+    return SOURCE.sub(lambda m: tag(m, "source", "srcset"), html_text)
 
 
 class Where(NamedTuple):

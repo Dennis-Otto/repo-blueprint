@@ -66,3 +66,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0058](0058-every-website-shows-the-pictures-of-its-diagrams.md) | Every website shows the pictures of its diagrams, so that a page with a diagram stays within 1.2 MB | accepted |
 | [0059](0059-accept-a-pinned-version-and-tell-renovate.md) | A version that another package pins is accepted with every advisory in `osv-scanner.toml`, and Renovate is told by a rule that `blueprint.py` writes | accepted |
 | [0060](0060-release-please-reads-the-title-of-each-merged-pull-request.md) | release-please reads the title of each merged pull request, and the header of the release pull request survives its own parser | accepted |
+| [0062](0062-the-website-shows-the-pictures-of-its-repository-from-the-checkout.md) | The website shows the pictures that a page shows from `main` of its own repository from the checkout, so that a pull request shows a new screenshot on its website too | accepted |
