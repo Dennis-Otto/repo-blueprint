@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import html
+import importlib.util
 import json
 import logging
 import posixpath
@@ -20,6 +21,7 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+from types import ModuleType
 from typing import Any, NamedTuple
 from urllib.parse import quote, unquote, urljoin, urlparse, urlsplit
 
@@ -580,6 +582,16 @@ def pin(file: Any, cache: Path) -> None:
     file.abs_src_path = str(copy)
 
 
+# The changelog that a page includes, and the folder beside it with the fragments, in
+# which pull requests describe their changes until a release takes them in.
+CHANGELOG = "CHANGELOG.md"
+FRAGMENTS = "changelog.d"
+# The code of blueprint.py that reads the changelog and its fragments, by its path
+# from this file: beside it in a repository made from the blueprint, and at the root
+# of the blueprint itself.
+CHANGELOG_CODE = ("blueprint/changelog.py", "../blueprint/changelog.py")
+
+
 class Built:
     """What the builds of every language found, for the steps after the last one:
     the paths of the pages that a further language shows untranslated, such as
@@ -655,7 +667,7 @@ def on_page_markdown(markdown: str, page: Any, config: Any, files: Any) -> str:
     changed = page.meta.get("git_revision_date_localized_raw_iso_date")
     if changed:
         page.update_date = changed
-    return markdown
+    return with_fragments(markdown, config)
 
 
 # After the plugin git-revision-date-localized.
@@ -677,12 +689,14 @@ def redate(markdown: str, page: Any, config: Any) -> None:
     plugin = config.plugins.get("git-revision-date-localized")
     if plugin is None or "git_revision_date_localized" not in page.meta:
         return
-    root = Path(config.config_file_path).parent
-    bases = config.mdx_configs.get("pymdownx.snippets", {}).get("base_path", ".")
-    paths = included(
-        markdown,
-        [root / base for base in ([bases] if isinstance(bases, str) else bases)],
-    )
+    paths = included(markdown, snippet_bases(config))
+    # The changelog shows the fragments beside it too.
+    paths += [
+        fragment
+        for path in paths
+        if path.name == CHANGELOG
+        for fragment in sorted((path.parent / FRAGMENTS).glob("[!.]*.md"))
+    ]
     own = [Path(page.file.abs_src_path)] if page.file.abs_src_path else []
     if not own and page.file.src_uri in BUILT.pages:
         paths += BUILT.sources
@@ -699,6 +713,80 @@ def redate(markdown: str, page: Any, config: Any) -> None:
     )
     locale = found.current if found and copy else plugin._get_locale(page)
     plugin._render_date(markdown, page, locale, "git_revision_date_localized", *newest)
+
+
+def snippet_bases(config: Any) -> list[Path]:
+    """The folders in which a line --8<-- finds its file, as the extension
+    pymdownx.snippets reads them from its base_path: the root of the repository, unless
+    the configuration names others."""
+    root = Path(config.config_file_path).parent
+    bases = config.mdx_configs.get("pymdownx.snippets", {}).get("base_path", ".")
+    return [root / base for base in ([bases] if isinstance(bases, str) else bases)]
+
+
+def with_fragments(markdown: str, config: Any) -> str:
+    """The markdown with the fragments of the changelog under Unreleased.
+
+    A line --8<-- that includes CHANGELOG.md, whose folder has fragments in
+    changelog.d/, takes in its place the changelog as the next release will have it:
+    the entries of the fragments joined to the text of Unreleased, each kind of change
+    under one heading, as the release bot groups them with blueprint.py. Before, the
+    website showed only the text of Unreleased until a release, which pull requests
+    no longer write. A changelog without fragments stays a line --8<--, and so does a
+    part of one, such as CHANGELOG.md:10:20, and every changelog when no blueprint.py
+    is beside this file.
+    """
+    if CHANGELOG not in markdown:
+        return markdown
+    code = changelog_code()
+    if code is None:
+        return markdown
+    bases = snippet_bases(config)
+    lines = []
+    for line in markdown.splitlines(keepends=True):
+        match = SNIPPET.fullmatch(line.rstrip("\r\n"))
+        name = match["name"] if match else None
+        path = next(
+            (base / name for base in bases if name and (base / name).is_file()), None
+        )
+        text = (
+            path.read_text(encoding="utf-8") if path and path.name == CHANGELOG else ""
+        )
+        folded = (
+            code.with_fragments(text, code.read_fragments(path.parent / FRAGMENTS))
+            if path and text
+            else text
+        )
+        if folded == text:
+            lines.append(line)
+            continue
+        # A line indented in a list includes the file indented as well.
+        indent = line[: len(line) - len(line.lstrip(" \t"))]
+        lines += [
+            indent + part if part.strip() else part
+            for part in folded.splitlines(keepends=True)
+        ]
+    return "".join(lines)
+
+
+def changelog_code() -> ModuleType | None:
+    """blueprint/changelog.py, the code of blueprint.py that reads the changelog and its
+    fragments as the release bot does, loaded from its file, which needs nothing but
+    Python; None without the file."""
+    here = Path(__file__).resolve().parent
+    path = next(
+        (here / name for name in CHANGELOG_CODE if (here / name).is_file()), None
+    )
+    if path is None:
+        return None
+    spec = importlib.util.spec_from_file_location("blueprint_changelog", path)
+    # A file of Python always has a spec, with its loader.
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def included(

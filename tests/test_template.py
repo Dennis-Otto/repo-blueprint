@@ -9414,6 +9414,7 @@ def test_every_project_fixes_what_a_command_can_fix(
     expected = [
         "Text files",
         "Pages in one column",
+        "Changelog fragments",
         "Accepted advisories",
         "Lock files",
         *FIXED_STEPS.get(stack, []),
@@ -14487,14 +14488,52 @@ def test_every_repository_gets_the_folder_of_the_fragments(
         "`python3 .github/blueprint.py fragments`.",
         "The check of the title, *conventional title*, takes only a new fragment as "
         "the entry of a pull request",
+        # The fix bot heals a typo of a heading, and the website shows the fragments.
+        "`python3 .github/blueprint.py fragments --fix` renames, as the fix bot does",
+        "shows the entries of the fragments under Unreleased until the release takes "
+        "them in",
     ):
         assert text in contributing, text
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert "with `--fix`, it renames a heading that surely means a kind" in agents
     template = (project / ".github/pull_request_template.md").read_text(
         encoding="utf-8"
     )
     assert "a new file in `changelog.d/`" in template
     # The blueprint follows its template.
     assert (ROOT / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_shows_the_fragments_under_unreleased(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # The hook and blueprint.py as the project has them, beside a changelog with a
+    # fragment that waits for the release.
+    project = projects[kind]
+    for name in (".github/mkdocs_blueprint.py", ".github/blueprint/changelog.py"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(project / name, tmp_path / name)
+    shutil.copy(project / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
+    (tmp_path / "changelog.d").mkdir()
+    entry = "### Features\n\n- **Dark mode:** the pages follow the system.\n"
+    (tmp_path / "changelog.d/dark-mode.md").write_text(entry, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        f"fragments_of_{kind.replace('-', '_')}",
+        tmp_path / ".github/mkdocs_blueprint.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    config = SimpleNamespace(
+        config_file_path=str(tmp_path / "mkdocs.yml"), mdx_configs={}
+    )
+
+    page = hooks.with_fragments('--8<-- "CHANGELOG.md"\n', config)
+
+    changelog = (project / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert page == changelog.replace("## Unreleased\n", f"## Unreleased\n\n{entry}")
 
 
 def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:

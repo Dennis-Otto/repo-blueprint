@@ -372,6 +372,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Tests, with every line and branch covered",
         "Text files",
         "Pages in one column",
+        "Changelog fragments",
         "Accepted advisories",
         "Lock files",
         "Ruff",
