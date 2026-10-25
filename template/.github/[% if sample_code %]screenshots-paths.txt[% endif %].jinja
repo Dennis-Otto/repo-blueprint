@@ -1,0 +1,31 @@
+# The files whose change can change the pictures of scripts/screenshots.sh: after a
+# change of main that touches one, the screenshot bot renders them anew. One pattern
+# on each line, as the paths of a workflow: * within a folder, ** through folders, and
+# one that starts with ! leaves files out. The script and this list count on their
+# own. The blueprint brought it once; it belongs to this project.
+# The social preview.
+.github/social-preview.html
+.github/social-preview/Dockerfile
+scripts/social-preview.sh
+# The browser that takes the pictures.
+.github/screenshots-browser-requirements.txt
+# The website: its pages and settings, and its theme, which the blueprint keeps
+# current; not the pictures that the script takes.
+mkdocs.yml
+docs/**
+!docs/images/screenshots/**
+.github/mkdocs*
+.github/docs-requirements.txt
+[%- if project_type == 'home-assistant' %]
+# The integration.
+custom_components/**
+[%- elif stack == 'php' %]
+# The app.
+appinfo/**
+lib/**
+img/**
+l10n/**
+templates/**
+css/**
+js/**
+[%- endif %]

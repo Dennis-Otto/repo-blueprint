@@ -4,13 +4,17 @@
 # with copier-copy.mp4, the same as a video that the website plays in its place, and
 # copier-copy.webp, its last screen, which the website shows until the video plays;
 # social-preview.webp, the social preview of .github/ at a seventh of its size, for
-# the home page of the website; and dashboard.png, the dashboard of the repositories
-# as the website publishes it. Run it again after the questions, the output of Copier,
-# the social preview or the dashboard change.
+# the home page of the website; dashboard.png, the dashboard of the repositories as
+# the website publishes it; and pictures of public pages of GitHub, each in the light
+# and the dark theme: github-update-pull-request.png, an update of the blueprint with
+# its checks, github-release.png, the assets of a release with its SBOMs and its
+# provenance, and github-pr-coach.png, the comment of the PR coach with the coverage
+# of the tests. Run it again after the questions, the output of Copier, the social
+# preview, the dashboard or the pages of GitHub change.
 #
 # It needs Docker and the network: VHS records the terminal while Copier clones the
 # blueprint from GitHub, and the headless Chromium of the social preview's image
-# loads the dashboard.
+# loads the dashboard and the pages of GitHub.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -20,8 +24,9 @@ root="$(pwd -W 2>/dev/null || pwd)"
 recording="$(mktemp)"
 png="$(mktemp)"
 page="$(mktemp)"
+github="$(mktemp)"
 log="$(mktemp)"
-trap 'rm -f "$recording" "$png" "$page" "$log"' EXIT
+trap 'rm -f "$recording" "$png" "$page" "$github" "$log"' EXIT
 
 # VHS, git and Copier: the image comes from a Dockerfile, so that Renovate keeps it
 # current. Its build context is the repository, for the requirements of Copier.
@@ -83,5 +88,23 @@ if curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
 else
   cat "$log" >&2
   echo "Rendering $dashboard failed." >&2
+  exit 1
+fi
+
+# The pages of GitHub, as .github/docs-pictures/github_pages.py photographs them with
+# the Playwright of stacks/screenshots/requirements-browser.txt, which drives the
+# browser of the same image. The pictures leave the container as a tar on stdout.
+if docker run --rm --volume "$root:/work:ro" "$browser" sh -c '
+  pip install --quiet --disable-pip-version-check --root-user-action=ignore \
+    --break-system-packages --require-hashes \
+    -r /work/stacks/screenshots/requirements-browser.txt >&2 &&
+    python3 /work/.github/docs-pictures/github_pages.py /tmp/github >&2 &&
+    tar -cf - -C /tmp/github .' >"$github" 2>"$log" &&
+  [[ -s "$github" ]]; then
+  tar -xf "$github" -C docs/images
+  echo "Rendered the pictures of the pages of GitHub in docs/images."
+else
+  cat "$log" >&2
+  echo "Photographing the pages of GitHub failed." >&2
   exit 1
 fi
