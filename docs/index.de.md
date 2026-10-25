@@ -74,7 +74,7 @@ hide:
 
     ---
 
-    Die Bilder des Projekts erneuern sich selbst: Nach einer Änderung dessen, was sie zeigen, nach jedem Release und jede Woche führt der Screenshot-Bot `scripts/screenshots.sh` aus und hält einen Pull Request mit den Bildern, deren Pixel sich geändert haben, der sich selbst merged.
+    Die Bilder des Projekts erneuern sich selbst: Nach einer Änderung dessen, was sie zeigen, nach jedem Release und jede Woche führt der Screenshot-Bot `scripts/screenshots.sh` aus und hält einen Pull Request mit den Bildern, deren Pixel sich geändert haben, der sich selbst merged. Ein neues Repository fotografiert von Anfang an seine Website und, nach seiner Art, seine Integration oder seine App.
 
 - :material-cog-outline:{ .lg .middle } **Einstellungen als Code**
 

@@ -486,17 +486,37 @@ commands = ["python -m pytest tests/test_template.py -k answers"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """An update that conflicts or fails needs a fix of the template."""
 
+[check."pictures (*)"]
+title = "The pictures of a new repository of one kind"
+problem = """The starter `scripts/screenshots.sh` of a new repository of this kind, which its
+screenshot bot runs, took no picture of its website, or of its integration in Home
+Assistant or its app in Nextcloud; the log names the step and what the script waited
+for. When the step that failed downloads an image or a tool, the download failed or
+hung: that usually passes when the job runs again, which the flaky-test bot does once
+by itself."""
+why = """Renovate moves the images of Home Assistant and Nextcloud and the Playwright of
+the browser on its own, and those updates merge themselves: an image whose setup
+changed would break the screenshot bot of every new repository of this kind on its
+first push."""
+fix = """Render a project of this kind, install the tools of its website in `.venv-docs`
+as its CONTRIBUTING.md shows, and run the script there with Docker, then fix the
+template of the script, `template/scripts/`:"""
+commands = ["bash scripts/screenshots.sh"]
+docs = "CONTRIBUTING.md#tests"
+autofix = """A script that takes no picture needs a fix of its template."""
+
 [check.variants]
 title = "Every kind of project"
 problem = """At least one kind of project, new, updated or with the answers of a
-repository that takes the blueprint, fails its checks; the check `variant (…)`,
-`update (…)` or `adopted (…)` that failed says why."""
+repository that takes the blueprint, fails its checks, or a new one takes no
+pictures; the check `variant (…)`, `update (…)`, `adopted (…)` or `pictures (…)`
+that failed says why."""
 why = """The rules of `main` require that every kind of project passes."""
-fix = """Fix the check `variant (…)`, `update (…)` or `adopted (…)` that failed; this one
-passes with it."""
+fix = """Fix the check `variant (…)`, `update (…)`, `adopted (…)` or `pictures (…)` that
+failed; this one passes with it."""
 docs = "CONTRIBUTING.md#tests"
-autofix = """It passes once every `variant (…)`, `update (…)` and `adopted (…)`
-passes."""
+autofix = """It passes once every `variant (…)`, `update (…)`, `adopted (…)` and
+`pictures (…)` passes."""
 
 [check.downstream]
 title = "The update of the repositories that take the blueprint"

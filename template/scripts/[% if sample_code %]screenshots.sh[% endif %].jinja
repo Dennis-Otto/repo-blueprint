@@ -8,14 +8,432 @@
 # looks the same its committed file back and lists the others. It needs Pillow:
 # `python3 -m pip install --require-hashes -r .github/screenshots-requirements.txt`.
 #
-# For now, it renders the social preview, .github/social-preview.png, from
-# .github/social-preview.html. Add the pictures of the project below: a page of its
-# website, or its interface in a demo, each with a fixed clock, size and data, so
-# that the same code renders the same pixels. The bot commits PNG, JPEG, GIF and WebP
-# files, wherever they are; list in .github/screenshots-paths.txt what they show.
+# It renders the social preview, .github/social-preview.png, from
+# .github/social-preview.html, and photographs in docs/images/screenshots/, each as
+# <name>.png in the light theme and <name>.dark.png in the dark one:
 #
-# It needs Docker. The blueprint brought it once; it belongs to this project.
+# - website: the home page of the website, which it builds with the tools in
+#   .venv-docs, as CONTRIBUTING.md sets them up.
+[%- if project_type == 'home-assistant' %]
+# - home-assistant: the page of the integration in Home Assistant, which runs in
+#   Docker with custom_components/ and the integration set up by its config flow.
+[%- elif stack == 'php' %]
+# - nextcloud: the app in the apps of the settings of Nextcloud, which runs in
+#   Docker with the app enabled.
+[%- endif %]
+#
+# Each has a fixed clock, size and data, so that the same code renders the same
+# pixels: the clock of the browser stands at CLOCK, its window is 1280×800, and what
+# it shows comes from this repository, on a network without a way out. Show a
+# picture in the README or on the website with a <picture> whose
+# <source media="(prefers-color-scheme: dark)"> is the dark one, and add the pictures of the project in shoot() below: another page, a dialog
+# or a feature at work. The bot commits PNG, JPEG, GIF and WebP files, wherever they
+# are; list in .github/screenshots-paths.txt the files whose change changes them.
+#
+# It needs Docker: the browser is the Chromium of the social preview's image, which
+# Playwright drives, hash-pinned in .github/screenshots-browser-requirements.txt.
+# The blueprint brought it once; it belongs to this project.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 bash scripts/social-preview.sh
+
+pictures=docs/images/screenshots
+[%- if project_type == 'home-assistant' %]
+# The Home Assistant of the pictures; Renovate keeps it current.
+home_assistant="ghcr.io/home-assistant/home-assistant:2026.10.1@sha256:130241f28d01fa80dfa3b44f7d89781c188d8642ecab9024f079f19f9f82baa0"
+[%- elif stack == 'php' %]
+# The Nextcloud of the pictures, a version that appinfo/info.xml allows: Renovate
+# keeps it current, and a new major version needs the max-version there first.
+nextcloud="docker.io/library/nextcloud:35.0.2-apache@sha256:89af7ee7a96ff5e9668280566209268ae6b2d02327f6ef6d56f6d68228cf9431"
+[%- endif %]
+
+work="$(mktemp -d)"
+# The containers and their network, by a name of this run.
+run="screenshots-$$"
+cleanup() {
+  docker rm --force "$run-browser"[% if project_type == 'home-assistant' %] "$run-home-assistant"[% elif stack == 'php' %] "$run-nextcloud"[% endif %] >/dev/null 2>&1 || true
+  docker network rm "$run" >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
+# The website, built as the Docs workflow builds it, with the tools of its preview.
+mkdocs=""
+for candidate in .venv-docs/bin/mkdocs .venv-docs/Scripts/mkdocs.exe; do
+  if [[ -x "$candidate" ]]; then
+    mkdocs="$candidate"
+    break
+  fi
+done
+if [[ -z "$mkdocs" ]]; then
+  echo "The pictures of the website need its tools in .venv-docs; install them as CONTRIBUTING.md shows." >&2
+  exit 1
+fi
+mkdir "$work/site"
+if ! log="$(NO_MKDOCS_2_WARNING=true "$mkdocs" build --site-dir "$work/site" 2>&1)"; then
+  printf '%s\n' "$log" >&2
+  echo "The website fails to build with $mkdocs; the log above says why." >&2
+  exit 1
+fi
+
+# Git Bash on Windows: keep the container's paths and mount the Windows paths.
+export MSYS_NO_PATHCONV=1
+root="$(pwd -W 2>/dev/null || pwd)"
+site="$(cd "$work/site" && (pwd -W 2>/dev/null || pwd))"
+
+# The browser: the image of the social preview, which Renovate keeps current, with
+# Playwright installed by its hashes. Docker keeps the image until either changes.
+browser={= project_slug =}-screenshots
+if ! log="$(docker build --quiet --tag "$browser" --file - .github 2>&1 <<DOCKERFILE
+FROM $(sed -n 's/^FROM //p' .github/social-preview/Dockerfile)
+COPY screenshots-browser-requirements.txt /tmp/
+RUN pip install --quiet --disable-pip-version-check --root-user-action=ignore \
+  --break-system-packages --require-hashes -r /tmp/screenshots-browser-requirements.txt
+DOCKERFILE
+)"; then
+  printf '%s\n' "$log" >&2
+  echo "Building the browser of the pictures failed." >&2
+  exit 1
+fi
+# A network without a way out: what the pictures show comes from this repository
+# alone, never from a server on the internet that answers differently each time.
+docker network create --internal "$run" >/dev/null
+[%- if project_type == 'home-assistant' %]
+
+# Home Assistant with a configuration of its own, without default_config:, so that no
+# integration reaches the network and no note about an update comes up.
+configuration='homeassistant:
+  name: Home
+  latitude: 52.52
+  longitude: 13.405
+  elevation: 34
+  unit_system: metric
+  currency: EUR
+  country: DE
+  language: en
+  time_zone: Europe/Berlin
+frontend:
+config:'
+docker pull --quiet "$home_assistant" >/dev/null
+docker run --detach --name "$run-home-assistant" --network "$run" --network-alias home-assistant \
+  --env TZ=Europe/Berlin --env "CONFIGURATION=$configuration" \
+  --volume "$root/custom_components:/config/custom_components:ro" \
+  --entrypoint sh "$home_assistant" \
+  -c 'printf "%s\n" "$CONFIGURATION" >/config/configuration.yaml && exec /init' >/dev/null
+[%- elif stack == 'php' %]
+
+# Nextcloud on SQLite, with this repository as its app and an administrator whose
+# password lives as long as this run.
+password="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+docker pull --quiet "$nextcloud" >/dev/null
+docker run --detach --name "$run-nextcloud" --network "$run" --network-alias nextcloud \
+  --env SQLITE_DATABASE=nextcloud --env NEXTCLOUD_ADMIN_USER=admin \
+  --env "NEXTCLOUD_ADMIN_PASSWORD=$password" --env NEXTCLOUD_TRUSTED_DOMAINS=nextcloud \
+  --volume "$root:/var/www/html/custom_apps/{= nextcloud_app_id =}:ro" "$nextcloud" >/dev/null
+occ() {
+  docker exec --user www-data "$run-nextcloud" php occ "$@"
+}
+# The image installs Nextcloud and then names its trusted domains, the last setting
+# that it writes: a setting of this script before that would race it for config.php.
+echo "Waiting for Nextcloud to install itself."
+for ((second = 0; ; second += 5)); do
+  if occ status --output=json 2>/dev/null | grep -q '"installed":true' &&
+    occ config:system:get trusted_domains 2>/dev/null | grep -qx nextcloud; then
+    break
+  fi
+  if ((second >= 600)); then
+    docker logs --tail 50 "$run-nextcloud" >&2
+    echo "Nextcloud did not install itself in ten minutes." >&2
+    exit 1
+  fi
+  sleep 5
+done
+# The folder of the apps that Nextcloud may write to holds this repository, which
+# Docker mounted as root's; the apps of the settings fail while it can't write there.
+docker exec "$run-nextcloud" chown www-data:www-data /var/www/html/custom_apps
+# The same words, and nothing that comes and goes: no app store, no first-run wizard,
+# no announcements and no notes about updates, and no background jobs, which the
+# browser would start, on SQLite, which locks the database for them.
+occ config:system:set appstoreenabled --type=boolean --value=false >/dev/null
+occ config:system:set default_language --value=en >/dev/null
+occ config:system:set default_locale --value=en_US >/dev/null
+occ background:cron >/dev/null
+# A background of one color: the blur of the picture behind the menus came out a
+# little different from run to run.
+occ theming:config background backgroundColor >/dev/null
+for app in firstrunwizard nextcloud_announcements updatenotification survey_client support; do
+  occ app:disable "$app" >/dev/null 2>&1 || true
+done
+occ app:enable {= nextcloud_app_id =} >/dev/null
+[%- endif %]
+
+# The browser runs in a container on the same network, takes the pictures in /tmp/out
+# and hands them over through stdout, so that they belong to whoever runs this.
+if ! docker run --rm --interactive --name "$run-browser" --network "$run" \
+  --volume "$root:/work:ro" --volume "$site:/site:ro" \
+[%- if stack == 'php' %]
+  --env "NEXTCLOUD_PASSWORD=$password" \
+[%- endif %]
+  "$browser" sh -c 'python3 - >&2 && tar -cf - -C /tmp/out .' >"$work/pictures.tar" <<'PYTHON'
+"""Takes the pictures with Playwright, each in the light and the dark theme."""
+[% if project_type == 'home-assistant' %]
+import json
+import secrets
+[%- elif stack == 'php' %]
+import os
+[%- endif %]
+import subprocess
+import sys
+import time
+[%- if project_type == 'home-assistant' %]
+import urllib.parse
+[%- endif %]
+import urllib.request
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+[%- if stack == 'php' %]
+from xml.etree import ElementTree
+[%- endif %]
+
+from playwright.sync_api import Browser, Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+OUT = Path("/tmp/out")
+# The clock of the browser: every picture shows this moment.
+CLOCK = datetime(2026, 1, 15, 10, 0, tzinfo=UTC)
+SIZE = {"width": 1280, "height": 800}
+[%- if project_type == 'home-assistant' %]
+HOME_ASSISTANT = "http://home-assistant:8123"
+DOMAIN = "{= ha_domain =}"
+[%- elif stack == 'php' %]
+NEXTCLOUD = "http://nextcloud"
+APP = "{= nextcloud_app_id =}"
+[%- endif %]
+
+
+def wait_for(url: str, seconds: int = 600) -> None:
+    """Waits until the server at url answers with success."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=10):
+                return
+        except OSError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(2)
+
+
+def photograph(
+    browser: Browser,
+    name: str,
+    url: str,
+    *,
+    ready: Callable[[Page], object] = lambda _: None,
+    prepare: Callable[[Page], object] = lambda _: None,
+    state: dict | None = None,
+) -> None:
+    """Takes url as name.png in the light theme and name.dark.png in the dark one,
+    once ready has seen what the picture shows."""
+    for scheme, suffix in (("light", ""), ("dark", ".dark")):
+        context = browser.new_context(
+            viewport=SIZE,
+            device_scale_factor=1,
+            color_scheme=scheme,
+            locale="en-US",
+            timezone_id="Europe/Berlin",
+            reduced_motion="reduce",
+            storage_state=state,
+        )
+        page = context.new_page()
+        page.clock.set_fixed_time(CLOCK)
+        prepare(page)
+        # A page that a server still builds may need another load.
+        for attempt in range(1, 4):
+            response = page.goto(url, wait_until="networkidle")
+            if response is not None and not response.ok:
+                message = f"{url} answered with the status {response.status}."
+                raise RuntimeError(message)
+            try:
+                ready(page)
+                break
+            except PlaywrightTimeoutError:
+                if attempt == 3:
+                    raise
+                print(f"{url} was not ready; it loads again.")
+        page.wait_for_load_state("networkidle")
+        page.evaluate("document.fonts.ready")
+        page.screenshot(
+            path=OUT / f"{name}{suffix}.png", animations="disabled", caret="hide"
+        )
+        context.close()
+        print(f"Took {name}{suffix}.png of {url}.")
+[%- if project_type == 'home-assistant' %]
+
+
+def call(
+    path: str, data: dict | None = None, token: str = "", form: bool = False
+) -> dict:
+    """Asks the API of Home Assistant, or posts data to it, as JSON or as a form."""
+    request = urllib.request.Request(f"{HOME_ASSISTANT}{path}")
+    if data is not None:
+        body = urllib.parse.urlencode(data) if form else json.dumps(data)
+        request.data = body.encode()
+        request.add_header(
+            "Content-Type",
+            "application/x-www-form-urlencoded" if form else "application/json",
+        )
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read() or b"{}")
+
+
+def home_assistant(browser: Browser) -> None:
+    """The page of the integration, after the onboarding and the config flow."""
+    wait_for(f"{HOME_ASSISTANT}/api/onboarding")
+    client = f"{HOME_ASSISTANT}/"
+    user = call(
+        "/api/onboarding/users",
+        {
+            "client_id": client,
+            "name": "Screenshots",
+            "username": "screenshots",
+            "password": secrets.token_hex(16),
+            "language": "en",
+        },
+    )
+    tokens = call(
+        "/auth/token",
+        {
+            "grant_type": "authorization_code",
+            "code": user["auth_code"],
+            "client_id": client,
+        },
+        form=True,
+    )
+    token = tokens["access_token"]
+    call("/api/onboarding/core_config", {}, token)
+    call("/api/onboarding/analytics", {}, token)
+    call(
+        "/api/onboarding/integration",
+        {"client_id": client, "redirect_uri": f"{client}?auth_callback=1"},
+        token,
+    )
+    flow = call("/api/config/config_entries/flow", {"handler": DOMAIN}, token)
+    call(f"/api/config/config_entries/flow/{flow['flow_id']}", {}, token)
+    # While it starts, Home Assistant notes what it still sets up, and then that it
+    # has started, such as the integrations of the onboarding, which find no internet
+    # here: the pictures wait until it runs.
+    deadline = time.monotonic() + 600
+    while call("/api/config", token=token)["state"] != "RUNNING":
+        if time.monotonic() > deadline:
+            message = "Home Assistant did not finish its start in ten minutes."
+            raise TimeoutError(message)
+        time.sleep(2)
+    # The frontend takes the tokens from the storage of the browser, whose clock
+    # stands at CLOCK.
+    stored = {
+        **tokens,
+        "hassUrl": HOME_ASSISTANT,
+        "clientId": client,
+        "expires": int(CLOCK.timestamp() * 1000) + tokens["expires_in"] * 1000,
+    }
+    script = f"localStorage.setItem('hassTokens', {json.dumps(json.dumps(stored))})"
+    manifest = Path(f"/work/custom_components/{DOMAIN}/manifest.json")
+    name = json.loads(manifest.read_text(encoding="utf-8"))["name"]
+
+    def ready(page: Page) -> None:
+        page.get_by_text(name, exact=True).first.wait_for()
+        # The title shows the domain until the name of the integration has loaded.
+        if name != DOMAIN:
+            page.get_by_text(DOMAIN, exact=True).first.wait_for(state="hidden")
+
+    photograph(
+        browser,
+        "home-assistant",
+        f"{HOME_ASSISTANT}/config/integrations/integration/{DOMAIN}",
+        ready=ready,
+        prepare=lambda page: page.add_init_script(script),
+    )
+[%- elif stack == 'php' %]
+
+
+def nextcloud(browser: Browser) -> None:
+    """The app in the apps of the settings, as the administrator sees it."""
+    wait_for(f"{NEXTCLOUD}/status.php")
+    context = browser.new_context(viewport=SIZE, locale="en-US")
+    page = context.new_page()
+    page.goto(f"{NEXTCLOUD}/index.php/login")
+    page.locator("input[name=user]").fill("admin")
+    page.locator("input[name=password]").fill(os.environ["NEXTCLOUD_PASSWORD"])
+    page.locator("button[type=submit]").click()
+    page.wait_for_url(lambda url: "/login" not in url)
+    state = context.storage_state()
+    context.close()
+    name = ElementTree.parse("/work/appinfo/info.xml").findtext("name", APP)
+
+    def ready(page: Page) -> None:
+        page.get_by_role("heading", name=name).first.wait_for()
+        # On a background of one color, the blur behind the menus shows only at their
+        # edges, which came out a little different from run to run.
+        page.add_style_tag(content="* { backdrop-filter: none !important; }")
+
+    photograph(
+        browser,
+        "nextcloud",
+        f"{NEXTCLOUD}/index.php/settings/apps/enabled/{APP}",
+        ready=ready,
+        state=state,
+    )
+[%- endif %]
+
+
+def shoot(browser: Browser) -> None:
+    """Every picture of the project."""
+    # The website, served from the folder that the script built it in.
+    server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", "--bind", "127.0.0.1", "8000"],
+        cwd="/site",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        wait_for("http://127.0.0.1:8000/", seconds=30)
+        photograph(browser, "website", "http://127.0.0.1:8000/")
+    finally:
+        server.terminate()
+[%- if project_type == 'home-assistant' %]
+    home_assistant(browser)
+[%- elif stack == 'php' %]
+    nextcloud(browser)
+[%- endif %]
+
+
+OUT.mkdir(parents=True, exist_ok=True)
+with sync_playwright() as playwright:
+    # The Chromium of the image, also while Renovate has moved the image a version
+    # ahead of Playwright. Its letters have gray edges: the colored ones of LCD text
+    # come out differently from run to run.
+    found = sorted(Path("/ms-playwright").glob("chromium-*/chrome-linux*/chrome"))
+    browser = playwright.chromium.launch(
+        executable_path=str(found[-1]) if found else None,
+        args=["--disable-lcd-text", "--force-color-profile=srgb"],
+    )
+    shoot(browser)
+    browser.close()
+PYTHON
+then
+[%- if project_type == 'home-assistant' %]
+  docker logs --tail 50 "$run-home-assistant" >&2 || true
+[%- elif stack == 'php' %]
+  docker exec "$run-nextcloud" tail -n 5 /var/www/html/data/nextcloud.log >&2 || true
+[%- endif %]
+  echo "Taking the pictures failed; the lines above say why." >&2
+  exit 1
+fi
+mkdir -p "$pictures"
+tar -xf "$work/pictures.tar" -C "$pictures"
+echo "Rendered the pictures in $pictures."

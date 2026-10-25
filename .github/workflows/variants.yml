@@ -19,11 +19,16 @@ name: Variants
 # the lint of the workflows and of the Markdown. The Downstream workflow updates the
 # repositories themselves.
 #
+# And the screenshot bot of a new repository of the kinds whose starter
+# scripts/screenshots.sh starts a server in Docker, and of one with the website alone
+# (pictures), in a pull request that changes what the pictures depend on, such as an
+# update of an image or of Playwright by Renovate, and every week.
+#
 # Not after a merge: main takes a pull request only when it is up to date, so a merge
 # gives main the tree that the pull request ran here. Nor in the release pull request,
 # which changes only the changelog and the version, files that no project gets. The
-# check variants stands for every variant in the rules of main: it passes when each
-# one passed, or when none had to run.
+# check variants stands for every variant and every leg of the pictures in the rules
+# of main: it passes when each one passed, or when none had to run.
 #
 # The variants run on the runner of the blueprint's jobs, ubuntu-24.04. The Next
 # runner workflow runs them on the next one every week, before the jobs move to it,
@@ -451,12 +456,138 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" coach explain "$CHECK"
 
+  # The screenshot bot of a new repository, which runs its starter
+  # scripts/screenshots.sh: the website of every kind, the integration in a Home
+  # Assistant and the app in a Nextcloud, each in Docker. Renovate moves their images
+  # and the Playwright of the browser on its own, and those updates merge themselves,
+  # so the pictures are taken here in a pull request that changes what they depend
+  # on, and every week; in any other pull request, each leg passes at once.
+  pictures:
+    name: pictures (${{ matrix.kind }})
+    # Not in the release pull request: the branch of the release bot in this repository.
+    if: >-
+      !startsWith(github.head_ref, 'release-please--') ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    # A few times its longest run: the images of the browser and the server download
+    # within minutes, and the server sets itself up in a few more.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The two kinds that photograph a server of their own, and one with the
+        # website alone.
+        kind: [home-assistant, nextcloud-app, generic]
+    env:
+      KIND: ${{ matrix.kind }}
+      PROJECT: variant
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # A pull request compares its merge commit with the main it merges into.
+      - name: Find whether the pull request changes what the pictures depend on
+        id: due
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          due=true
+          if [[ "$EVENT" == pull_request ]] && git diff --quiet HEAD^1 HEAD -- \
+            ':(glob)template/scripts/*screenshots*' ':(glob)template/scripts/*social-preview*' \
+            ':(glob)template/.github/*screenshots*' ':(glob)template/.github/social-preview*' \
+            ':(glob)template/.github/social-preview/**' .github/social-preview/ \
+            stacks/screenshots/ stacks/docs/ ':(glob)template/mkdocs*' .github/mkdocs_project.py \
+            ':(glob)template/*custom_components*/**' ':(glob)template/*appinfo*/**' \
+            .github/workflows/variants.yml; then
+            due=false
+            echo "The pull request changes nothing that the pictures depend on." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.due.outputs.due == 'true'
+        timeout-minutes: 5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        if: steps.due.outputs.due == 'true'
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.13.4"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: |
+            requirements-dev.txt
+            stacks/**/requirements*.txt
+          cache-suffix: pictures-${{ matrix.kind }}
+      - name: Install the hash-pinned Copier
+        if: steps.due.outputs.due == 'true'
+        timeout-minutes: 5
+        run: uv pip install --system --require-hashes -r requirements-dev.txt
+      - name: Render the project from this commit
+        if: steps.due.outputs.due == 'true'
+        timeout-minutes: 5
+        run: |
+          copier copy --defaults --vcs-ref HEAD \
+            --data project_name="Demo Project" \
+            --data "description=A $KIND of the blueprint's tests." \
+            --data project_type="$KIND" \
+            --data owner=Dennis-Otto \
+            . "$PROJECT"
+          git -C "$PROJECT" init --quiet
+          git -C "$PROJECT" add --all
+      # The tools of the website in .venv-docs, as CONTRIBUTING.md of the project sets
+      # them up, with the Python of the blueprint, which they are compiled for.
+      - name: Install the tools of the website of the project
+        if: steps.due.outputs.due == 'true'
+        working-directory: ${{ env.PROJECT }}
+        timeout-minutes: 5
+        run: |
+          uv venv --no-project --python "$(command -v python)" .venv-docs
+          uv pip install --python .venv-docs/bin/python --require-hashes -r .github/docs-requirements.txt
+      - name: Photograph the project as its screenshot bot does
+        if: steps.due.outputs.due == 'true'
+        working-directory: ${{ env.PROJECT }}
+        timeout-minutes: 20
+        run: |
+          bash scripts/screenshots.sh
+          pictures=(website)
+          case "$KIND" in
+            home-assistant) pictures+=(home-assistant) ;;
+            nextcloud-app) pictures+=(nextcloud) ;;
+          esac
+          for name in "${pictures[@]}"; do
+            for picture in "docs/images/screenshots/$name.png" "docs/images/screenshots/$name.dark.png"; do
+              # Each one a PNG, by the first bytes of its file.
+              if [[ "$(head -c 8 "$picture" 2>/dev/null | od -An -tx1 | tr -d ' \n')" != 89504e470d0a1a0a ]]; then
+                echo "::error::scripts/screenshots.sh took no picture $picture."
+                exit 1
+              fi
+              echo "Took $picture." >> "$GITHUB_STEP_SUMMARY"
+            done
+          done
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: pictures (${{ matrix.kind }})
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
+
   # The rules of main require this one check, not each variant: a matrix that its
   # condition skips reports none of its legs.
   variants:
     name: variants
     if: always()
-    needs: variant
+    needs: [variant, pictures]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -466,10 +597,13 @@ jobs:
           egress-policy: audit
       - name: Require every variant to pass, or none to run
         env:
-          RESULT: ${{ needs.variant.result }}
+          RESULT: ${{ needs.variant.result }} ${{ needs.pictures.result }}
         run: |
-          echo "The variants: $RESULT"
-          [[ "$RESULT" == success || "$RESULT" == skipped ]]
+          echo "The variants and their pictures: $RESULT"
+          read -ra results <<<"$RESULT"
+          for result in "${results[@]}"; do
+            [[ "$result" == success || "$result" == skipped ]]
+          done
       # The PR coach needs blueprint.py and .github/checks.toml, nothing else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: failure()
