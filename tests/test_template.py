@@ -8010,12 +8010,20 @@ def test_the_settings_bot_says_what_a_refused_token_lacks(tmp_path: Path) -> Non
     assert done.returncode == 0
     [error] = done.stdout.splitlines()
     assert error.startswith("::error::GitHub refused a token of the release app")
+    assert "most often because the app lacks one of the permissions" in error
     assert done.summary.startswith(
         "### The release app refused the token of the settings bot\n\n"
     )
     assert "No setting has changed." in done.summary
     assert "under *Permissions & events*" in done.summary
     assert "run the workflow *Settings* again" in done.summary
+    # Not every refusal is a missing permission: the other causes have their fixes.
+    assert "Most often the app lacks one of them" in done.summary
+    assert (
+        "RELEASE_AUTOMATION_PRIVATE_KEY that doesn't belong to the app" in done.summary
+    )
+    assert "add the repository to its installation" in done.summary
+    assert "an outage of GitHub (run the workflow again)" in done.summary
     assert done.calls == []
 
 

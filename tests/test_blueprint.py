@@ -38,6 +38,7 @@ from blueprint.settings import (
     Settings,
     actions_that_run,
     allows,
+    apply_environments,
     apply_labels,
     apply_pages,
     check_actions,
@@ -295,6 +296,10 @@ class FakeGitHub:
         self.rulesets: dict[int, dict[str, Any]] = {}
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
         self.environments: dict[str, dict[str, Any]] = {}
+        # The status with which GitHub refuses a write of an environment that names
+        # the bypass of administrators, as a private repository without Enterprise
+        # may answer 422; 0 when it doesn't.
+        self.refuses_bypass = 0
         self.og_image = False
         # The kind of account of the owner: "User" or "Organization".
         self.account = "User"
@@ -561,6 +566,8 @@ class FakeGitHub:
         return 201, None
 
     def environment(self, method: str, body: Any, name: str) -> tuple[int, Any]:
+        if method == "PUT" and self.refuses_bypass and "can_admins_bypass" in body:
+            return self.refuses_bypass, {"message": "Invalid request."}
         if method == "PUT":
             environment = self.environments.setdefault(
                 name, {"branches": [], "secrets": []}
@@ -2298,6 +2305,35 @@ def test_apply_creates_every_environment_without_the_bypass_of_administrators(
     assert github.environments
     for name, environment in github.environments.items():
         assert environment["bypass"] is False, name
+
+
+def test_a_refused_bypass_still_creates_the_environment_for_main_only(
+    github: FakeGitHub,
+) -> None:
+    github.refuses_bypass = 422
+    api = Api(github)
+    drift = [Drift("environment release", "main only", "missing")]
+
+    apply_environments(api, REPO, drift)
+
+    release = github.environments["release"]
+    assert release["policy"] == MAIN_ONLY
+    assert [item["name"] for item in release["branches"]] == ["main"]
+    # GitHub's default stays, and the next check names it.
+    assert check_environments(api, REPO, {"release": {}}) == [
+        Drift("environment release.can_admins_bypass", False, True)
+    ]
+
+
+def test_another_refusal_of_an_environment_stops_the_apply(
+    github: FakeGitHub,
+) -> None:
+    github.refuses_bypass = 403
+
+    with pytest.raises(GitHubError, match="403"):
+        apply_environments(
+            Api(github), REPO, [Drift("environment release", "main only", "missing")]
+        )
 
 
 def test_pages_that_build_from_a_branch_switch_to_the_workflow(

@@ -1040,10 +1040,16 @@ def apply_environments(api: Api, repo: str, drift: list[Drift]) -> None:
         for item in drift
     )
     for name in names:
-        api.put(
-            f"repos/{repo}/environments/{name}",
-            {"deployment_branch_policy": MAIN_ONLY, BYPASS: False},
-        )
+        path = f"repos/{repo}/environments/{name}"
+        try:
+            api.put(path, {"deployment_branch_policy": MAIN_ONLY, BYPASS: False})
+        except GitHubError as error:
+            # A private repository without GitHub Enterprise may refuse the bypass,
+            # which GitHub keeps to its protection rules there: the environment is
+            # still created for main only, and the next check names the bypass.
+            if error.status != 422:
+                raise
+            api.put(path, {"deployment_branch_policy": MAIN_ONLY})
         policies = branch_policies(api, repo, name)
         for policy in policies:
             if (policy.get("type", "branch"), policy["name"]) != ("branch", "main"):

@@ -123,17 +123,20 @@ jobs:
           permission-contents: read
           permission-environments: read
       # GitHub refuses the whole token when the app lacks one of the permissions that
-      # it asks for, as an app registered before the bot asked for it does.
+      # it asks for, as an app registered before the bot asked for it does; a wrong
+      # key, a missing installation or an outage fail the step too.
       - name: Explain a refused token
         if: failure() && steps.app.outcome == 'failure'
         run: |
-          echo "::error::GitHub refused a token of the release app with the permissions of the settings bot; the summary of the run says which permissions the app needs."
+          echo "::error::GitHub refused a token of the release app for the settings bot, most often because the app lacks one of the permissions that the bot asks for; the summary of the run names them and the other causes."
           {
             echo "### The release app refused the token of the settings bot"
             echo
             echo "The settings bot asks the release app for a token with only the permissions that it needs: *Administration*, *Issues*, *Pages* and *Variables* (read and write), and *Actions*, *Contents* and *Environments* (read). GitHub refuses the token when the app lacks one of them, and the log of the step *Create a token of the release app* has its answer. No setting has changed."
             echo
-            echo "Grant the missing permissions on the settings page of the app, under *Permissions & events*, accept them on the installation of the app, and run the workflow *Settings* again."
+            echo "Most often the app lacks one of them: grant the missing permissions on the settings page of the app, under *Permissions & events*, accept them on the installation of the app, and run the workflow *Settings* again."
+            echo
+            echo "Other causes, when the app has every permission: a private key in the secret RELEASE_AUTOMATION_PRIVATE_KEY that doesn't belong to the app named by the variable RELEASE_AUTOMATION_CLIENT_ID (generate a new key of that app and store it), an app that isn't installed on this repository (add the repository to its installation), or an outage of GitHub (run the workflow again)."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Apply the settings as code
         env:
