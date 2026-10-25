@@ -38,6 +38,7 @@ import workflow_steps
 import yaml
 from copier import _main as copier_main
 from copier import run_copy
+from copier._jinja_ext import YieldExtension, get_yield_context
 from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
@@ -182,13 +183,16 @@ def compile_once(
     every template anew, the names of the files among them: 1400 of them, two thirds
     of the time of a render. The same source compiles to the same code in an
     environment with the same settings, and the code runs in each environment apart,
-    with its own values."""
+    with its own values. The preprocess hooks of the environment and its extensions
+    run for each source still, as Copier's yield tag resets its state in one."""
     if raw:
         return compile_anew(environment, source, name, filename, True, defer_init)
     if not isinstance(source, str):
         return compile_anew(environment, source, name, filename, False, defer_init)
     key = (settings_of(environment), source, name, filename, defer_init)
-    if key not in COMPILED:
+    if key in COMPILED:
+        environment.preprocess(source, name, filename)
+    else:
         COMPILED[key] = compile_anew(
             environment, source, name, filename, False, defer_init
         )
@@ -506,6 +510,23 @@ def test_a_template_compiles_apart_for_each_syntax_of_jinja() -> None:
         assert "word" in curly.compile(source, raw=True)
         assert isinstance(curly.compile(curly.parse(source)), CodeType)
         assert len(COMPILED) == 2
+
+
+def test_a_cached_template_runs_the_preprocess_hooks_of_its_extensions() -> None:
+    """Copier's yield tag keeps the name of a yield of the last string that it
+    rendered, and resets it in its preprocess hook before the next string."""
+    with (
+        mock.patch.object(SandboxedEnvironment, "compile", compile_once),
+        mock.patch.dict(COMPILED, clear=True),
+    ):
+        environment = SandboxedEnvironment(extensions=[YieldExtension])
+        environment.from_string("plain").render()
+        loop = "{% yield item from items %}{{ item }}{% endyield %}"
+        environment.from_string(loop).render(items=["a"])
+        assert get_yield_context(environment).yield_name == "item"
+        # From the cache now: the hook still resets the yield of the loop before.
+        assert environment.from_string("plain").render() == "plain"
+        assert get_yield_context(environment).yield_name is None
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -4758,18 +4779,18 @@ AGENT_COMMANDS = {
     "home-assistant": [
         "pip install --require-hashes -r requirements-test.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n logical --cov` runs them on every core",
+        "`pytest -n logical --maxprocesses=8 --cov` runs them on every core",
     ],
     "nextcloud-app": ["composer install", "vendor/bin/phpunit"],
     "github-action": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n logical --cov` runs them on every core",
+        "`pytest -n logical --maxprocesses=8 --cov` runs them on every core",
     ],
     "python-package": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n logical --cov` runs them on every core",
+        "`pytest -n logical --maxprocesses=8 --cov` runs them on every core",
     ],
     "node-package": [
         "npm ci --ignore-scripts",
@@ -4840,7 +4861,7 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     for rule in (
         "bash scripts/check.sh",
-        "`pytest -n logical --cov`",
+        "`pytest -n logical --maxprocesses=8 --cov`",
         "`git commit -s`",
         "a new file `changelog.d/<branch>.md`",
         "`python3 blueprint.py fragments`",

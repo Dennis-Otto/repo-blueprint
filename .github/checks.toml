@@ -788,9 +788,13 @@ fix = """Fix the test that fails, or the code that it catches, and write a test 
 line and branch that the report lists as missing. Make a slow test faster, or let it wait
 for a condition instead of a time; give a test that shares state with another one its own
 files and settings, such as `tmp_path`. `coverage run -m pytest` runs the tests one after
-another; `python -m pytest -n logical --cov` runs them in parallel as CI does, where
-pytest-xdist and pytest-cov are installed:"""
-commands = ["coverage run -m pytest", "coverage report", "python -m pytest -n logical --cov"]
+another; `python -m pytest -n logical --maxprocesses=8 --cov` runs them in parallel as CI
+does, where pytest-xdist and pytest-cov are installed:"""
+commands = [
+  "coverage run -m pytest",
+  "coverage report",
+  "python -m pytest -n logical --maxprocesses=8 --cov",
+]
 docs = "CONTRIBUTING.md#tests"
 autofix = """A test that fails, or code without a test, needs a person, who knows what the code should do."""
 
