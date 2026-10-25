@@ -670,7 +670,7 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
 
 # The jobs that hold a secret or a token that may write, yet record their network
 # traffic instead of blocking it, each with its reason. Every other such job blocks
-# every host that it doesn't need (decision 0078).
+# every host that it doesn't need (decision 0079).
 AUDITED_PRIVILEGED_JOBS = {
     (
         "release.yml",
@@ -1631,6 +1631,9 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
+    # Every copy brings create and its preflight alone, for the folder that copier
+    # copy wrote.
+    assert ",create,doctor," in result.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
     assert not (project / ".github/blueprint/__pycache__").exists()
 
