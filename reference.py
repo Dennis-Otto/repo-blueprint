@@ -67,6 +67,47 @@ ABOUT: dict[str, str] = {
         " release submits the signed package and the workflow *Register app* registers"
         " the id of the app. Only a Nextcloud app needs it."
     ),
+    "CWS_CLIENT_ID": (
+        "The client ID of the OAuth client of a Google Cloud project, with which the"
+        " workflow *Chrome Web Store* of a Chrome extension signs in with the refresh"
+        " token, until the sign-in without a stored secret is set up. A secret of the"
+        " environment `chrome-web-store`; `docs/releases.md` of the extension says how"
+        " to get it."
+    ),
+    "CWS_CLIENT_SECRET": (
+        "The client secret of the same OAuth client, a secret of the environment"
+        " `chrome-web-store` for the sign-in with the refresh token. Delete it once the"
+        " sign-in without a stored secret works."
+    ),
+    "CWS_EXTENSION_ID": (
+        "The ID of the item of a Chrome extension in the Chrome Web Store, from the"
+        " address of the item in the Developer Dashboard, to which the workflow"
+        " *Chrome Web Store* delivers every release."
+    ),
+    "CWS_PUBLISHER_ID": (
+        "The ID of the publisher of a Chrome extension, under *Account* in the"
+        " Developer Dashboard of the Chrome Web Store; the API of the store names the"
+        " item by it and `CWS_EXTENSION_ID`."
+    ),
+    "CWS_REFRESH_TOKEN": (
+        "The refresh token of the developer account, with the scope of the Chrome Web"
+        " Store, a secret of the environment `chrome-web-store` for the sign-in with"
+        " the refresh token. The daily run keeps it in use; delete it once the sign-in"
+        " without a stored secret works."
+    ),
+    "CWS_SERVICE_ACCOUNT": (
+        "The address of the service account of Google, such as"
+        " `chrome-web-store@PROJECT.iam.gserviceaccount.com`, which the Developer"
+        " Dashboard admits to the item and as which the workflow *Chrome Web Store*"
+        " signs in, with the OIDC token of GitHub and no stored secret."
+    ),
+    "CWS_WORKLOAD_IDENTITY_PROVIDER": (
+        "The provider of the workload identity pool of Google that takes the OIDC"
+        " token of GitHub, such as"
+        " `projects/123456789/locations/global/workloadIdentityPools/github/providers/NAME`"
+        " with the number of the project: set with `CWS_SERVICE_ACCOUNT`, the"
+        " workflow *Chrome Web Store* signs in without a stored secret."
+    ),
     "BETA_CHANNEL": (
         "`true` makes every change for users that reaches `main`, a `feat`, `fix` or"
         " `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release"
@@ -144,7 +185,8 @@ ABOUT: dict[str, str] = {
     ),
     "PUBLISH_TO": (
         "Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`,"
-        " `nextcloud-appstore`, `github-action` or `none`, by the kind of project."
+        " `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the"
+        " kind of project."
         " The build, the release and the check of the latest release follow it."
     ),
     "RELEASE_APP": (

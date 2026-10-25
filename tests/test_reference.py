@@ -176,7 +176,7 @@ def test_the_committed_pages_say_what_their_sources_say() -> None:
     kinds = [
         path.relative_to(ROOT) for path in sorted((ROOT / reference.KINDS).glob("*.md"))
     ]
-    assert len(kinds) == 14
+    assert len(kinds) == 16
     assert set(written) == {
         reference.QUESTIONS,
         reference.VARIABLES,

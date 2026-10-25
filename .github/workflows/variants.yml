@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, container, generic]
+        kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, chrome-extension, container, generic]
         start: [new, update]
         # Each file of tests/answers/, with the project_type of its answers.
         include:
@@ -201,6 +201,12 @@ jobs:
           # The commit, not HEAD: Copier would take the rendered project, which isn't
           # part of the blueprint, for a change of the template.
           commit="$(git rev-parse HEAD)"
+          # A new kind of project, which the latest release doesn't offer yet, starts
+          # from this commit until the release that brings it.
+          if ! git show "$latest:copier.yml" | grep -qE "^    .+: $KIND\$"; then
+            echo "::notice::The latest release $latest has no kind $KIND yet; its update starts from the release that brings it."
+            latest="$commit"
+          fi
           copier copy --defaults --vcs-ref "$latest" "${data[@]}" "$GITHUB_WORKSPACE" "$PROJECT"
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all
@@ -370,12 +376,12 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: matrix.start != 'adopted' && matrix.kind == 'node-package'
+        if: matrix.start != 'adopted' && contains(fromJSON('["node-package", "chrome-extension"]'), matrix.kind)
         timeout-minutes: 5
         with:
           node-version-file: ${{ env.PROJECT }}/.nvmrc
       - name: Install the locked packages
-        if: matrix.start != 'adopted' && matrix.kind == 'node-package'
+        if: matrix.start != 'adopted' && contains(fromJSON('["node-package", "chrome-extension"]'), matrix.kind)
         working-directory: ${{ env.PROJECT }}
         timeout-minutes: 5
         run: npm ci --ignore-scripts
@@ -423,6 +429,12 @@ jobs:
         if: matrix.start != 'adopted'
         working-directory: ${{ env.PROJECT }}
         run: bash scripts/check.sh
+      # The sample extension as Chrome for Testing loads it, as the CI of the project does.
+      - name: Load the extension of the project in Chrome for Testing
+        if: matrix.start != 'adopted' && matrix.kind == 'chrome-extension'
+        timeout-minutes: 5
+        working-directory: ${{ env.PROJECT }}
+        run: node scripts/load-extension.mjs "$(bash scripts/chrome-for-testing.sh Stable "$RUNNER_TEMP/chrome-for-testing")"
       - name: Lint the workflows of the project
         timeout-minutes: 5
         run: |

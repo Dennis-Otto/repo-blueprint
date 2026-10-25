@@ -35,7 +35,7 @@ Ein Strich heißt, dass das Werkzeug es nicht tut; *die Vorlage* heißt, dass es
 | Releases | release-please, signierte Tags, SLSA Build Level 3, SBOM, VEX, geprüft | die Vorlage | die Vorlage | die Vorlage | nach npm, und mit jsii nach PyPI, Maven, NuGet und Go |
 | Sicherheitsprüfungen | CodeQL, Scorecard, zizmor, OSV-Scanner, Harden-Runner, ein Secret-Scan, Actions auf Commits festgelegt | die Vorlage | die Vorlage | die Vorlage | die Vorlage |
 | Updates der Abhängigkeiten | Renovate, mit Regeln für den Merge und einem Dashboard | die Vorlage | die Vorlage | die Vorlage | ein Workflow, der sie aktualisiert |
-| Arten von Projekten | sieben, von Home Assistant bis zu Containern | eine je Vorlage | Tausende Vorlagen, je ein Stack | copier-uv: Python; cookie: Python mit vielen Build-Backends | TypeScript, AWS CDK, jsii, Python, Java und mehr |
+| Arten von Projekten | acht, von Home Assistant bis zu Chrome-Erweiterungen und Containern | eine je Vorlage | Tausende Vorlagen, je ein Stack | copier-uv: Python; cookie: Python mit vielen Build-Backends | TypeScript, AWS CDK, jsii, Python, Java und mehr |
 | Systeme in der CI | Linux, auf jedem Kern | die Vorlage | die Vorlage | copier-uv und cookie: Linux, macOS und Windows | die Vorlage |
 | Prüfung beliebiger Repositories | — | — | — | cookie: sp-repo-review | — |
 | Sichtung von Issues | der Issue-Assistent | — | — | — | — |
@@ -51,4 +51,4 @@ Ein Strich heißt, dass das Werkzeug es nicht tut; *die Vorlage* heißt, dass es
 
 ## Eines anlegen
 
-[Der Schnellstart](guide.md#ein-repository-anlegen) legt ein Repository mit drei Befehlen an, und jede Art von Projekt hat eine eigene Seite: [Home-Assistant-Integration](kinds/home-assistant.md), [Nextcloud-App](kinds/nextcloud-app.md), [GitHub Action](kinds/github-action.md), [Python-Paket](kinds/python-package.md), [Node-Paket](kinds/node-package.md), [Container-Image](kinds/container.md) und [Repository ohne Build](kinds/generic.md).
+[Der Schnellstart](guide.md#ein-repository-anlegen) legt ein Repository mit drei Befehlen an, und jede Art von Projekt hat eine eigene Seite: [Home-Assistant-Integration](kinds/home-assistant.md), [Nextcloud-App](kinds/nextcloud-app.md), [GitHub Action](kinds/github-action.md), [Python-Paket](kinds/python-package.md), [Node-Paket](kinds/node-package.md), [Chrome-Erweiterung](kinds/chrome-extension.md), [Container-Image](kinds/container.md) und [Repository ohne Build](kinds/generic.md).

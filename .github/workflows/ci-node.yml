@@ -51,6 +51,11 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Run the checks
         run: bash scripts/check.sh
+      # A Chrome extension: Chrome for Testing loads extension/ as the checks built it,
+      # and its service worker has to start (scripts/load-extension.mjs).
+      - name: Load the extension in Chrome for Testing
+        if: hashFiles('scripts/load-extension.mjs') != ''
+        run: node scripts/load-extension.mjs "$(bash scripts/chrome-for-testing.sh Stable "$RUNNER_TEMP/chrome-for-testing")"
       # The LCOV report of the test runner of Node, which npm test writes as
       # lcov.info, for the coverage in the report of the PR coach.
       - name: Keep the coverage report

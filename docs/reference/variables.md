@@ -13,10 +13,14 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 - [`BETA_CHANNEL`](#beta_channel): `true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases.
 - [`BLUEPRINT_AUTOMERGE`](#blueprint_automerge): `off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way.
 - [`CODE_SCANNING`](#code_scanning): `off` keeps every finding out of code scanning, which GitHub offers a private repository only with GitHub Code Security: CodeQL doesn't analyze, since its terms allow it on private code only with GitHub Code Security or Advanced Security, and its check passes with a notice; zizmor fails on every finding; OSV-Scanner and the Scorecard keep theirs in their checks.
+- [`CWS_EXTENSION_ID`](#cws_extension_id): The ID of the item of a Chrome extension in the Chrome Web Store, from the address of the item in the Developer Dashboard, to which the workflow *Chrome Web Store* delivers every release.
+- [`CWS_PUBLISHER_ID`](#cws_publisher_id): The ID of the publisher of a Chrome extension, under *Account* in the Developer Dashboard of the Chrome Web Store; the API of the store names the item by it and `CWS_EXTENSION_ID`.
+- [`CWS_SERVICE_ACCOUNT`](#cws_service_account): The address of the service account of Google, such as `chrome-web-store@PROJECT.iam.gserviceaccount.com`, which the Developer Dashboard admits to the item and as which the workflow *Chrome Web Store* signs in, with the OIDC token of GitHub and no stored secret.
+- [`CWS_WORKLOAD_IDENTITY_PROVIDER`](#cws_workload_identity_provider): The provider of the workload identity pool of Google that takes the OIDC token of GitHub, such as `projects/123456789/locations/global/workloadIdentityPools/github/providers/NAME` with the number of the project: set with `CWS_SERVICE_ACCOUNT`, the workflow *Chrome Web Store* signs in without a stored secret.
 - [`DEPENDENCY_REVIEW`](#dependency_review): `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security.
 - [`ISSUE_ASSISTANT_AI`](#issue_assistant_ai): `off` makes the issue assistant label the issues and answer the commands of their comments without an AI engine, which then needs no secret; `on` lets the engine analyze each new issue as well.
 - [`MUTATION_PARTS`](#mutation_parts): The number of parts in which the mutation tests run, one job each, in place of the estimate from the number of mutants: more parts for a project whose parts run out of the six hours of a job.
-- [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action` or `none`, by the kind of project.
+- [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project.
 - [`RELEASE_APP`](#release_app): The name of the release app, as its address says: github.com/apps/NAME.
 - [`RELEASE_AUTOMATION_APP_ID`](#release_automation_app_id): The App ID of the release app, the number on its settings page.
 - [`RELEASE_AUTOMATION_CLIENT_ID`](#release_automation_client_id): The Client ID of the release app, with which each bot asks for a token of the app, together with the private key `RELEASE_AUTOMATION_PRIVATE_KEY`.
@@ -56,6 +60,50 @@ What the workflows say of it:
 
 - `codeql.yml`: A private repository without GitHub Code Security has no code scanning: there the settings bot sets the variable `CODE_SCANNING` to off, and the check passes without an analysis, because the terms of CodeQL allow it on private code only with GitHub Code Security or Advanced Security.
 
+### `CWS_EXTENSION_ID`
+
+The ID of the item of a Chrome extension in the Chrome Web Store, from the address of the item in the Developer Dashboard, to which the workflow *Chrome Web Store* delivers every release.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
+
+What the workflows say of it:
+
+- `publish-store.yml`: The IDs of the item and of the publisher are the variables `CWS_EXTENSION_ID` and CWS\_PUBLISHER\_ID; docs/releases.md describes the one-time set-up of either way.
+
+### `CWS_PUBLISHER_ID`
+
+The ID of the publisher of a Chrome extension, under *Account* in the Developer Dashboard of the Chrome Web Store; the API of the store names the item by it and `CWS_EXTENSION_ID`.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
+
+What the workflows say of it:
+
+- `publish-store.yml`: The IDs of the item and of the publisher are the variables CWS\_EXTENSION\_ID and `CWS_PUBLISHER_ID`; docs/releases.md describes the one-time set-up of either way.
+
+### `CWS_SERVICE_ACCOUNT`
+
+The address of the service account of Google, such as `chrome-web-store@PROJECT.iam.gserviceaccount.com`, which the Developer Dashboard admits to the item and as which the workflow *Chrome Web Store* signs in, with the OIDC token of GitHub and no stored secret.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
+
+What the workflows say of it:
+
+- `publish-store.yml`: The two jobs that talk to the store sign in to Google without a stored secret once the variables CWS\_WORKLOAD\_IDENTITY\_PROVIDER and `CWS_SERVICE_ACCOUNT` are set: the OIDC token of GitHub for the job, which Google takes only from this workflow on main, becomes an access token of a service account for 20 minutes, and they alone may ask GitHub for one.
+
+### `CWS_WORKLOAD_IDENTITY_PROVIDER`
+
+The provider of the workload identity pool of Google that takes the OIDC token of GitHub, such as `projects/123456789/locations/global/workloadIdentityPools/github/providers/NAME` with the number of the project: set with `CWS_SERVICE_ACCOUNT`, the workflow *Chrome Web Store* signs in without a stored secret.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
+
+What the workflows say of it:
+
+- `publish-store.yml`: The two jobs that talk to the store sign in to Google without a stored secret once the variables `CWS_WORKLOAD_IDENTITY_PROVIDER` and CWS\_SERVICE\_ACCOUNT are set: the OIDC token of GitHub for the job, which Google takes only from this workflow on main, becomes an access token of a service account for 20 minutes, and they alone may ask GitHub for one.
+
 ### `DEPENDENCY_REVIEW`
 
 `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security. The settings bot sets it to `off` on such a repository and back to `on` once GitHub offers the review; `[variables]` of `.github/repository.project.toml` decides instead where it names it.
@@ -83,14 +131,16 @@ The number of parts in which the mutation tests run, one job each, in place of t
 
 ### `PUBLISH_TO`
 
-Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action` or `none`, by the kind of project. The build, the release and the check of the latest release follow it.
+Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project. The build, the release and the check of the latest release follow it.
 
 - **Set by:** the settings as code: `.github/repository.toml` sets it, from [`publish_to`](questions.md#publish_to), and the settings bot applies it; `.github/repository.project.toml` can set another value
-- **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`verify-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/verify-release.yml) (Release verification, every repository)
+- **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`verify-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/verify-release.yml) (Release verification, every repository)
 
 What the workflows say of it:
 
-- `release.yml`: The jobs below attach the package, its SBOMs (SPDX and CycloneDX), the licenses of its third-party components, the advisories that don't affect it (OpenVEX) and its signed provenance, write the notes, make the release public, announce it in the discussions, and then deliver it where the repository variable `PUBLISH_TO` says: pypi, npm, ghcr, hacs, nextcloud-appstore, github-action or none.
+- `publish-store.yml`: It runs where the repository variable `PUBLISH_TO` is chrome-web-store: in a repository of the kind chrome-extension, never in the blueprint or a fork.
+- `publish-store.yml`: A fork has none of the variables of the repository, so `PUBLISH_TO` keeps it out too.
+- `release.yml`: The jobs below attach the package, its SBOMs (SPDX and CycloneDX), the licenses of its third-party components, the advisories that don't affect it (OpenVEX) and its signed provenance, write the notes, make the release public, announce it in the discussions, and then deliver it where the repository variable `PUBLISH_TO` says: pypi, npm, ghcr, hacs, nextcloud-appstore, github-action, chrome-web-store, which publish-store.yml takes over once this workflow has passed, or none.
 - `verify-release.yml`: It checks a release the way its users can: every asset carries the signed provenance of this repository's release workflow, both in GitHub and in the attached bundle; the SBOMs are attached and describe what the release ships, by its name and version; the release is immutable and its commit signed; and where the repository variable `PUBLISH_TO` delivers it, the same release is there.
 
 ### `RELEASE_APP`
@@ -143,6 +193,9 @@ What the workflows say of it:
 - [`APP_PRIVATE_KEY`](#app_private_key): The private key of the certificate of a Nextcloud app, with which the release signs the package for the App Store and the workflow *Register app* proves the id of the app.
 - [`CLAUDE_CODE_OAUTH_TOKEN`](#claude_code_oauth_token): The token of a Claude subscription, which `claude setup-token` of Claude Code creates, with which the issue assistant analyzes each new issue with Claude.
 - [`COPILOT_GITHUB_TOKEN`](#copilot_github_token): A fine-grained token of GitHub with the permission *Copilot Requests* alone and no access to repositories, with which the issue assistant analyzes each new issue with Copilot, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `copilot`.
+- [`CWS_CLIENT_ID`](#cws_client_id): The client ID of the OAuth client of a Google Cloud project, with which the workflow *Chrome Web Store* of a Chrome extension signs in with the refresh token, until the sign-in without a stored secret is set up.
+- [`CWS_CLIENT_SECRET`](#cws_client_secret): The client secret of the same OAuth client, a secret of the environment `chrome-web-store` for the sign-in with the refresh token.
+- [`CWS_REFRESH_TOKEN`](#cws_refresh_token): The refresh token of the developer account, with the scope of the Chrome Web Store, a secret of the environment `chrome-web-store` for the sign-in with the refresh token.
 - [`GEMINI_API_KEY`](#gemini_api_key): An API key of Google AI Studio, with which the issue assistant analyzes each new issue with Gemini, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `gemini`; free within the daily limits of the free tier of the Gemini API.
 - [`GITHUB_TOKEN`](#github_token): The token that GitHub gives every run of a workflow, for its repository alone and with the permissions that its `permissions:` grant.
 - [`OPENAI_API_KEY`](#openai_api_key): An API key of OpenAI, with which the issue assistant analyzes each new issue with Codex, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `codex`, at the prices of OpenAI's API.
@@ -183,6 +236,27 @@ A fine-grained token of GitHub with the permission *Copilot Requests* alone and 
 
 - **Set by:** you, as a secret of the environment `issue-assistant`, which only `main` may use: `gh secret set COPILOT_GITHUB_TOKEN --env issue-assistant`
 - **Read by:** [`issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/issue-assistant.yml) (Issue assistant, every repository)
+
+### `CWS_CLIENT_ID`
+
+The client ID of the OAuth client of a Google Cloud project, with which the workflow *Chrome Web Store* of a Chrome extension signs in with the refresh token, until the sign-in without a stored secret is set up. A secret of the environment `chrome-web-store`; `docs/releases.md` of the extension says how to get it.
+
+- **Set by:** you, as a secret of the environment `chrome-web-store`, which only `main` may use: `gh secret set CWS_CLIENT_ID --env chrome-web-store`
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
+
+### `CWS_CLIENT_SECRET`
+
+The client secret of the same OAuth client, a secret of the environment `chrome-web-store` for the sign-in with the refresh token. Delete it once the sign-in without a stored secret works.
+
+- **Set by:** you, as a secret of the environment `chrome-web-store`, which only `main` may use: `gh secret set CWS_CLIENT_SECRET --env chrome-web-store`
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
+
+### `CWS_REFRESH_TOKEN`
+
+The refresh token of the developer account, with the scope of the Chrome Web Store, a secret of the environment `chrome-web-store` for the sign-in with the refresh token. The daily run keeps it in use; delete it once the sign-in without a stored secret works.
+
+- **Set by:** you, as a secret of the environment `chrome-web-store`, which only `main` may use: `gh secret set CWS_REFRESH_TOKEN --env chrome-web-store`
+- **Read by:** [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`)
 
 ### `GEMINI_API_KEY`
 

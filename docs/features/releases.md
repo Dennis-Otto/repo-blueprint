@@ -51,3 +51,9 @@ CodeQL, and for the PHP of a Nextcloud app the taint analysis of Psalm, which kn
 For a Nextcloud app: the registration of its id with its certificate, once, by hand.
 
 **How:** `register-app.yml`.
+
+## Chrome Web Store
+
+For a Chrome extension: every release goes to the Chrome Web Store as the zip that the release attests, after a check of its provenance, signed in to Google with the OIDC token of GitHub and no stored secret. A daily run delivers a release whose review had to wait, and reports a rejection or a warning of Google with the fix.
+
+**How:** `publish-store.yml`, `scripts/store-status.mjs`, [the page of the kind](../kinds/chrome-extension.md).

@@ -54,6 +54,10 @@ pip install {= project_slug =}
 ```sh
 npm install {= project_slug =}
 ```
+[% elif project_type == 'chrome-extension' %]
+Install **{= project_name =}** from the Chrome Web Store, which Edge installs from as well, once Google has reviewed its first release; [docs/releases.md](docs/releases.md) says how each release gets there.
+
+To try it unpacked, build it with `npm ci --ignore-scripts && npm run build`, open `chrome://extensions`, switch on the *Developer mode* and choose *Load unpacked* with the folder `extension`.
 [% elif project_type == 'container' %]
 ```sh
 docker run --rm ghcr.io/{= repo | lower =}:latest

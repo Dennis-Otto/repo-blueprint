@@ -1,0 +1,45 @@
+/**
+ * {= project_name =}: {= description =}
+ *
+ * The service worker of the extension, which Chrome starts for its events; the build
+ * compiles it to extension/lib/background.js, which extension/manifest.json names.
+ * Replace it with the real code.
+ */
+
+/** The part of the API of Chrome that this file uses; @types/chrome has all of it. */
+export interface Chrome {
+  readonly runtime: {
+    readonly onInstalled: {
+      addListener(listener: (details: { reason: string }) => unknown): void;
+    };
+  };
+  readonly action: {
+    setBadgeText(details: { text: string }): Promise<void>;
+  };
+  readonly storage: {
+    readonly local: {
+      set(items: Record<string, unknown>): Promise<void>;
+    };
+  };
+}
+
+/** The text of the badge on the button of the extension after an install or an update. */
+export function badgeFor(reason: string): string {
+  return reason === "install" ? "new" : "";
+}
+
+/**
+ * Marks the button of the extension after its install and keeps the reason of the
+ * latest start, for which the manifest asks for the permission storage.
+ */
+export function start(browser: Chrome | undefined): void {
+  if (browser === undefined) {
+    return;
+  }
+  browser.runtime.onInstalled.addListener(async ({ reason }) => {
+    await browser.action.setBadgeText({ text: badgeFor(reason) });
+    await browser.storage.local.set({ installReason: reason });
+  });
+}
+
+start((globalThis as { chrome?: Chrome }).chrome);

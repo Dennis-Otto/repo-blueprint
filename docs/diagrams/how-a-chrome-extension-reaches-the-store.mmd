@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a Chrome extension reaches the Chrome Web Store
+    accDescr: Merging the release pull request publishes the release, whose isolated build zips the extension from the signed tag and attests it. The workflow Chrome Web Store asks the store for the state of the item, takes the zip only with its provenance, signs in to Google with the OIDC token of GitHub and no stored secret, uploads it and submits it for review. Google reviews it and publishes it to the users; the daily run delivers a release whose review had to wait and reports a rejection.
+
+    merge["You merge the release pull request"]
+    build["`The isolated build zips **extension/** from the signed tag and attests it`"]
+    status["`*the state of the store*: no review pending, the store lacks the release`"]
+    package["`*the package of the release*: the zip, only with its provenance`"]
+    signin["Signed in to Google with the OIDC token of GitHub, no stored secret"]
+    store["`*deliver*: upload and submit for review`"]
+    review["Google reviews the version"]
+    users["The users get the new version"]
+    daily["Every day: a review that had to wait, a rejection, a warning"]
+
+    merge --> build --> status --> package --> store --> review --> users
+    signin --> status
+    signin --> store
+    daily --> status
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge you
+    class build,status,package,signin,store,daily bot
+    class review,users done

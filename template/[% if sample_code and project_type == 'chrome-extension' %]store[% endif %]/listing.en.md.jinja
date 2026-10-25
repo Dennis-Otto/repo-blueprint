@@ -1,0 +1,25 @@
+# The listing of {= project_name =} in the Chrome Web Store, in English
+
+The texts of the Developer Dashboard for this language, to paste there by hand: the API of the store uploads the package but sets no listing and no privacy practices. Each heading names its field, and stays in English in the listing of every language. `scripts/check-manifest.mjs` checks that the short description fits and that the justifications name every permission and every host of `extension/manifest.json`; `docs/releases.md` says where each text goes.
+
+## Short description
+
+{= description | truncate(132, False, '…', 0) =}
+
+## Description
+
+{= description =}
+
+Describe what the extension does, for whom, and how to start; the store shows up to 16,000 characters.
+
+## Single purpose
+
+{= description =}
+
+## Permission justifications
+
+- storage: keeps the reason of the latest start of the extension on this computer, and nothing leaves it.
+
+## Data usage
+
+The extension collects no data, and sends none anywhere. Under *Privacy practices*, tick none of the kinds of data, and certify the three statements of the developer program policies.
