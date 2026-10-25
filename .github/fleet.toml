@@ -1,0 +1,97 @@
+# The public repositories that follow the blueprint, the one list of them, in the
+# order of the showcase. `python3 reference.py` writes from it the showcase of
+# README.md and README.de.md, the section "A real repository" of each page of
+# docs/kinds/, the order of the Rollout in .github/workflows/rollout.yml and the legs
+# of the canaries in .github/workflows/variants.yml; tests/test_reference.py fails
+# while one of them differs, and the fix bot runs the command.
+#
+# A new repository takes one entry here and `python3 reference.py`. A canary takes its
+# answers in tests/answers/<name>.yml too, without _commit and _src_path, which
+# `python3 downstream.py --answers` keeps equal to those of the repository.
+
+# The owner of every repository here, on GitHub.
+owner = "Dennis-Otto"
+
+# Each repository has every field:
+#   name     its name on GitHub, under the owner
+#   kind     its project_type, which has a page docs/kinds/<kind>.md
+#   rollout  its place in the Rollout, from 1: the quickest checks first, so that each
+#            update pull request is done soon, and the longest last
+#   canary   true when the Variants workflow updates a copy with its answers in every
+#            pull request of the blueprint, before the change merges
+#   title    its name in a sentence, and what it is and does, which follow its name
+#   what     in the showcase: "HomeDarts for Autodarts, a Home Assistant integration:
+#   pitch    local real-time board control, ..."; the pitch ends with a full stop
+# and each of the last three in German as well, as title_de, what_de and pitch_de.
+
+[[repository]]
+name = "homedarts-for-autodarts"
+kind = "home-assistant"
+rollout = 6
+canary = true
+title = "HomeDarts for Autodarts"
+what = "a Home Assistant integration"
+pitch = "local real-time board control, games, tournaments and statistics, without a cloud account."
+title_de = "HomeDarts for Autodarts"
+what_de = "eine Home-Assistant-Integration"
+pitch_de = "lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, ohne Cloud-Konto."
+
+[[repository]]
+name = "player-switch-for-autodarts"
+kind = "node-package"
+rollout = 3
+canary = true
+title = "Player Switch for Autodarts"
+what = "a Chrome extension in TypeScript"
+pitch = "a shared Autodarts display where everyone plays under their own account and a tap on a tile switches players, without signing in again."
+title_de = "Player Switch for Autodarts"
+what_de = "eine Chrome-Erweiterung in TypeScript"
+pitch_de = "ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung."
+
+[[repository]]
+name = "issue-assistant"
+kind = "github-action"
+rollout = 2
+canary = true
+title = "Issue assistant"
+what = "a GitHub Action"
+pitch = "a first analysis of every new issue by an AI that only reads, checked by a job without AI before it posts."
+title_de = "Issue-Assistent"
+what_de = "eine GitHub Action"
+pitch_de = "eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, geprüft von einem Job ohne KI, bevor sie erscheint."
+
+[[repository]]
+name = "paperless-sync"
+kind = "nextcloud-app"
+rollout = 5
+canary = true
+title = "Paperless Sync"
+what = "a Nextcloud app"
+pitch = "the documents of Paperless-ngx in Nextcloud Files, by correspondent, type and year."
+title_de = "Paperless Sync"
+what_de = "eine Nextcloud-App"
+pitch_de = "die Dokumente von Paperless-ngx in Nextcloud Files, nach Korrespondent, Typ und Jahr."
+
+[[repository]]
+name = "paperless-unified-search"
+kind = "nextcloud-app"
+rollout = 4
+canary = true
+title = "Paperless Unified Search"
+what = "a Nextcloud app"
+pitch = "the full-text search of Paperless-ngx in the unified search of Nextcloud."
+title_de = "Paperless Unified Search"
+what_de = "eine Nextcloud-App"
+pitch_de = "die Volltextsuche von Paperless-ngx in der Suche von Nextcloud."
+
+[[repository]]
+name = "dennis-otto.github.io"
+kind = "generic"
+rollout = 1
+canary = true
+title = "dennis-otto.github.io"
+what = "a repository without a build"
+pitch = "the website with every project of its owner."
+title_de = "dennis-otto.github.io"
+what_de = "ein Repository ohne Build"
+pitch_de = "die Website mit jedem Projekt seines Eigentümers."

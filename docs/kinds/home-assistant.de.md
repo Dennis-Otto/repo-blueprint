@@ -51,6 +51,12 @@ Diese Art bringt diese Schritte dazu:
 
 ## Ein echtes Repository
 
-[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) ist aus dem Blueprint entstanden: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, mit Dashboard-Karten, End-to-End-Tests in einem echten Home Assistant und Screenshots, die sich selbst erneuern.
+<!-- --8<-- [start:real-repository] -->
+
+[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) ist aus dem Blueprint entstanden: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, ohne Cloud-Konto.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von HomeDarts for Autodarts aus, bevor er merged.
+
+<!-- --8<-- [end:real-repository] -->
 
 Wie sich der Blueprint mit anderen Vorlagen vergleicht: [der Vergleich](../compare.md).

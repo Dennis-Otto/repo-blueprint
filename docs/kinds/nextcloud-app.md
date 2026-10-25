@@ -47,6 +47,15 @@ This kind adds these steps:
 
 ## A real repository
 
-[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync) and [Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search) are made from the blueprint: two Nextcloud apps for Paperless-ngx, with end-to-end tests in a real Nextcloud.
+<!-- --8<-- [start:real-repository] -->
+
+These public repositories of this kind are made from the blueprint:
+
+- **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**: the documents of Paperless-ngx in Nextcloud Files, by correspondent, type and year.
+- **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**: the full-text search of Paperless-ngx in the unified search of Nextcloud.
+
+The Variants workflow tries every pull request of the blueprint on the answers of Paperless Sync and Paperless Unified Search, before it merges.
+
+<!-- --8<-- [end:real-repository] -->
 
 How the blueprint compares with other templates: [the comparison](../compare.md).
