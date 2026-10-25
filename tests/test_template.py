@@ -11898,7 +11898,7 @@ def test_the_store_workflow_signs_in_alike_and_only_where_it_talks_to_the_store(
     uses = [step.get("uses", "") for step in jobs["store"]["steps"]]
     assert not any(use.startswith("actions/checkout@") for use in uses)
     hosts = jobs["store"]["steps"][0]["with"]["allowed-endpoints"].split()
-    assert all(host.endswith(".googleapis.com:443") for host in hosts)
+    assert all(re.fullmatch(r"[a-z0-9-]+\.googleapis\.com:443", host) for host in hosts)
     assert jobs["store"]["environment"]["name"] == "chrome-web-store"
     assert jobs["status"]["environment"] == {
         "name": "chrome-web-store",
