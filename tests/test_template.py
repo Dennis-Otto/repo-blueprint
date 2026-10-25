@@ -1348,6 +1348,9 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
+    # Every copy brings create and its preflight alone, for the folder that copier
+    # copy wrote.
+    assert ",create,doctor," in result.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
     assert not (project / ".github/blueprint/__pycache__").exists()
 

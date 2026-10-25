@@ -14,6 +14,7 @@ from email.message import Message
 from pathlib import Path
 from typing import Any
 
+import preflight
 import pytest
 
 import blueprint.bootstrap
@@ -2706,14 +2707,15 @@ def test_a_missing_configuration(
 
 
 class Shell:
-    """git and gh for blueprint.py create, which succeed: each call is written down
-    with the requests that GitHub had answered before it."""
+    """git and gh for blueprint.py create, after a preflight that nothing stops: each
+    command answers as the test planned it, by default with success and no output,
+    and each call is written down with the requests that GitHub had answered before
+    it."""
 
-    def __init__(
-        self, github: FakeGitHub, answers: dict[str, str] | None = None
-    ) -> None:
+    def __init__(self, github: FakeGitHub) -> None:
         self.github = github
-        self.answers = answers or {}
+        self.asked = preflight.answers(REPO)
+        self.answers = dict(self.asked)
         self.calls: list[tuple[str, int]] = []
 
     def __call__(
@@ -2721,9 +2723,15 @@ class Shell:
     ) -> subprocess.CompletedProcess[str]:
         command = " ".join(arguments)
         self.calls.append((command, len(self.github.calls)))
+        code, text = self.answers.get(command, (0, ""))
         return subprocess.CompletedProcess(
-            list(arguments), 0, self.answers.get(command, ""), ""
+            list(arguments), code, "" if code else text, text if code else ""
         )
+
+    @property
+    def steps(self) -> list[tuple[str, int]]:
+        """The calls other than those of the preflight."""
+        return [call for call in self.calls if call[0] not in self.asked]
 
 
 @pytest.fixture
@@ -2752,7 +2760,7 @@ def test_create_makes_the_repository_then_applies_the_settings_and_shows_the_che
     # What only a person sets, such as the secrets, the checklist names.
     assert run(github, copy, "create") == 0
 
-    assert shell.calls == [
+    assert shell.steps == [
         ("git init --initial-branch=main", 0),
         ("git add --all", 0),
         ("git commit --signoff --message chore: start from the blueprint", 0),
@@ -2800,10 +2808,12 @@ def test_create_with_dry_run_changes_nothing(
 ) -> None:
     assert run(github, copy, "create", "--dry-run") == 0
 
-    assert shell.calls == []
+    # The preflight asks gh, which changes nothing.
+    assert shell.steps == []
     assert github.calls == []
     out = capsys.readouterr().out
-    assert out.startswith(f"create would make {REPO} on GitHub, public, with:")
+    assert out.startswith(f"The preflight of {REPO}:\n")
+    assert f"create would make {REPO} on GitHub, public, with:" in out
     assert "  python3 .github/blueprint.py settings apply\n" in out
 
 
@@ -2822,7 +2832,7 @@ def test_create_without_the_answers_names_a_command_that_works(
     assert named == ["--repo", "OWNER/NAME", "create"]
     named[1] = REPO
     assert run(github, copy, *named, "--dry-run") == 0
-    assert capsys.readouterr().out.startswith(f"create would make {REPO} on GitHub")
+    assert f"create would make {REPO} on GitHub" in capsys.readouterr().out
 
 
 def test_create_refuses_a_folder_that_pushes_to_a_remote(
@@ -2832,14 +2842,71 @@ def test_create_refuses_a_folder_that_pushes_to_a_remote(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     (copy / ".git").mkdir()
-    shell.answers["git remote"] = "origin\n"
+    shell.answers["git remote"] = (0, "origin\n")
+    shell.answers["git remote get-url origin"] = (0, f"https://github.com/{REPO}\n")
 
     assert run(github, copy, "--repo", "octo-org/demo", "create") == 2
 
-    assert shell.calls == [("git remote", 0)]
+    assert shell.steps == [("git remote", 0), ("git remote get-url origin", 0)]
     assert github.calls == []
     assert capsys.readouterr().err.startswith(
         "blueprint.py: this folder pushes to origin already"
+    )
+
+
+def test_create_goes_on_with_the_settings_after_a_run_that_stopped_there(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A run of create that made the repository and pushed, and then stopped before
+    # its settings, such as on a dropped connection.
+    (copy / ".git").mkdir()
+    shell.answers.update(
+        {
+            "git remote": (0, "origin\n"),
+            "git remote get-url origin": (0, f"git@github.com:{REPO}.git\n"),
+            "git symbolic-ref --short HEAD": (0, "main\n"),
+            f"gh api repos/{REPO}": (0, json.dumps({"full_name": REPO})),
+            f"gh api repos/{REPO}/branches/main": (0, json.dumps({"name": "main"})),
+        }
+    )
+
+    assert run(github, copy, "create") == 0
+
+    assert not any(command.startswith("gh repo create") for command, _ in shell.calls)
+    assert ("PATCH", f"repos/{REPO}") in github.calls
+    out = capsys.readouterr().out
+    assert out.index(f"Going on with {REPO} on GitHub") < out.index(
+        f"The settings of {REPO} differ"
+    )
+
+
+def test_doctor_runs_the_preflight_of_create_and_nothing_else(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert run(github, copy, "doctor") == 0
+
+    assert shell.steps == []
+    assert github.calls == []
+    assert capsys.readouterr().out.endswith(
+        f"  ✔ {REPO} is free on GitHub\n"
+        "Nothing stops python3 .github/blueprint.py create.\n"
+    )
+
+    shell.answers[f"gh api repos/{REPO}"] = (0, json.dumps({"full_name": REPO}))
+    assert run(github, copy, "doctor") == 1
+    assert f"  ✘ {REPO} is taken on GitHub" in capsys.readouterr().out
+
+    (copy / ".git").mkdir()
+    shell.answers["git remote"] = (0, "upstream\n")
+    assert run(github, copy, "doctor") == 2
+    assert capsys.readouterr().err.startswith(
+        "blueprint.py: this folder pushes to upstream already"
     )
 
 

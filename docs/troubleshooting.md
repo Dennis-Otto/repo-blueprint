@@ -1,10 +1,44 @@
 ---
-description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
+description: "What to do when something in a repository of Repo Blueprint doesn't work: a create that stops at its preflight or midway, an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
 ---
 
 # Troubleshooting
 
 Most problems explain themselves where they happen: a check that fails says in its summary and in the report of the PR coach what it found and how to fix it, a bot says in the summary of its run what is missing, and the bot-health bot keeps one issue open for each bot that fails on `main`. This page covers what needs a person beyond that. The common questions are on the page [Questions and answers](faq.md).
+
+## create stops at its preflight
+
+**What you see:** `python3 .github/blueprint.py create` shows *The preflight of OWNER/NAME* with a line marked ✘ and the command that fixes it below, and ends with *the preflight found 1 problem that would stop create, which made nothing*.
+
+**Why:** before its first step, `create` checks what its steps need, so that a missing tool or right can't leave a repository that is half made. The preflight only asks git and gh, and `create` makes nothing while a finding is marked with ✘. A finding marked with · is one that GitHub didn't answer or that the preflight can't tell, and it stops nothing. `python3 .github/blueprint.py doctor` runs the preflight alone, and `create --dry-run` shows it with the commands.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.dark.svg">
+  <img src="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.svg" alt="How create checks first and goes on where it stopped: python3 .github/blueprint.py create starts with its preflight, which only asks: Python, Git and the identity of the first commit, the GitHub CLI and its sign-in with the scopes repo and workflow, the owner and the name. A finding marked with ✘ stops it before anything is made and names the command that fixes it; python3 .github/blueprint.py doctor shows the same alone. A new copy then gets git init, its first commit and gh repo create with the push. A folder whose origin pushes to the repository on GitHub already, from a run that stopped midway, gets only the push when GitHub has no branch main yet. Both end with settings apply and the checklist.">
+</picture>
+
+**What to do:** run the command below the finding, then `create` again.
+
+- **Python before 3.12:** the tools of the new repository, such as its lock files, need Python 3.12 or later. Install it from [python.org](https://www.python.org/downloads/); on Windows, `py -3` runs it.
+- **Git is not installed:** install it from [git-scm.com](https://git-scm.com/downloads).
+- **Git has no name or no email address to commit with:** `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"`. The sign-off of the first commit names them.
+- **GitHub CLI before 2.48, or none:** install or update it as [its installation](https://github.com/cli/cli#installation) says.
+- **gh is not signed in to github.com:** `gh auth login --hostname github.com --scopes workflow`. With a token in the variable `GH_TOKEN`, gh uses that one: give it the scopes, or remove the variable.
+- **Without the scopes that create needs:** `gh auth refresh --hostname github.com --scopes workflow,read:org`, with the scopes that the finding names. `repo` creates the repository and pushes, `workflow` pushes the files in `.github/workflows/`, which GitHub refuses without it, and `read:org` shows whether you own the organization. A fine-grained token names no scopes, so the preflight can't tell (·): it has to create repositories of the owner, with *Administration*, *Contents* and *Workflows* (read and write).
+- **GitHub has no account or organization of that name:** the owner of the answers is misspelled. Name the repository with `python3 .github/blueprint.py --repo OWNER/NAME create`.
+- **An account of its own, while gh is signed in as another:** only that account creates its repositories. `gh auth switch --user OWNER` switches to it when gh knows it, `gh auth login` signs it in.
+- **No member of the organization, or invited:** an owner of the organization adds you, or you accept the invitation at `https://github.com/orgs/OWNER/invitation`.
+- **A member of the organization, not an owner (·):** `gh repo create` works where the organization lets its members create repositories, and you then administer the repository that you made, which `settings apply` needs. Otherwise an owner runs `create`.
+- **The name is taken:** choose another with `--repo OWNER/NAME`. When it is the repository that an earlier run of `create` made, connect the folder to it with `git remote add origin https://github.com/OWNER/NAME.git` and run `create` again, which goes on from there.
+- **origin pushes to a repository that GitHub doesn't have:** it was deleted, or the address is wrong. `git remote remove origin`, then `create` again.
+
+## create stopped midway
+
+**What you see:** `create` stopped after `gh repo create`, at the push or at `settings apply`, such as on a connection that dropped, and the folder pushes to `origin` now.
+
+**Why:** `gh repo create` makes the repository on GitHub and adds `origin` before it pushes, so a push or settings that failed leave a repository that is there.
+
+**What to do:** run `python3 .github/blueprint.py create` again. When `origin` pushes to the repository of the answers, and GitHub has it, `create` goes on from the first step that is left: `git push --set-upstream origin main` when GitHub has no branch `main` yet, then `settings apply` and the checklist, which change only what differs. A push that git refuses for want of credentials works after `gh auth setup-git`, which lets git sign in as gh does. A folder that pushes to another repository is no new copy, and `create` refuses it.
 
 ## An update of the blueprint conflicts
 

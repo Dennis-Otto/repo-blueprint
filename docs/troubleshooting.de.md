@@ -1,10 +1,44 @@
 ---
-description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
+description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein create, das bei seiner Vorabprüfung oder mittendrin anhält, ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
 ---
 
 # Fehlerbehebung
 
 Die meisten Probleme erklären sich dort, wo sie auftreten: Eine Prüfung, die scheitert, sagt in ihrer Zusammenfassung und im Bericht des PR-Coachs, was sie gefunden hat und wie man es behebt, ein Bot sagt in der Zusammenfassung seines Laufs, was fehlt, und der Bot-Health-Bot hält für jeden Bot, der auf `main` scheitert, ein Issue offen. Diese Seite behandelt, was darüber hinaus eine Person braucht. Die häufigen Fragen stehen auf der Seite [Fragen und Antworten](faq.md).
+
+## create hält bei seiner Vorabprüfung an
+
+**Was du siehst:** `python3 .github/blueprint.py create` zeigt *The preflight of OWNER/NAME* mit einer Zeile mit ✘ und darunter dem Befehl, der sie behebt, und endet mit *the preflight found 1 problem that would stop create, which made nothing*.
+
+**Warum:** Vor seinem ersten Schritt prüft `create`, was seine Schritte brauchen, damit ein fehlendes Werkzeug oder Recht kein halb fertiges Repository hinterlässt. Die Vorabprüfung fragt git und gh nur, und `create` macht nichts, solange ein Befund ein ✘ trägt. Ein Befund mit · ist einer, auf den GitHub nicht geantwortet hat oder den die Vorabprüfung nicht erkennen kann, und er hält nichts an. `python3 .github/blueprint.py doctor` führt die Vorabprüfung allein aus, und `create --dry-run` zeigt sie mit den Befehlen.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.de.dark.svg">
+  <img src="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.de.svg" alt="Wie create zuerst prüft und dort weitermacht, wo es aufgehört hat: python3 .github/blueprint.py create beginnt mit seiner Vorabprüfung, die nur fragt: Python, Git und die Identität des ersten Commits, die GitHub CLI und ihre Anmeldung mit den Scopes repo und workflow, den Eigentümer und den Namen. Ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt; python3 .github/blueprint.py doctor zeigt dasselbe allein. Eine neue Kopie bekommt dann git init, ihren ersten Commit und gh repo create mit dem Push. Ein Ordner, dessen origin schon zum Repository auf GitHub pusht, von einem Lauf, der mittendrin aufgehört hat, bekommt nur den Push, wenn GitHub noch keinen Branch main hat. Beide enden mit settings apply und der Checkliste.">
+</picture>
+
+**Was zu tun ist:** Führe den Befehl unter dem Befund aus, dann noch einmal `create`.
+
+- **Python vor 3.12:** Die Werkzeuge des neuen Repositorys, etwa seine Lock-Dateien, brauchen Python ab 3.12. Installiere es von [python.org](https://www.python.org/downloads/); unter Windows startet `py -3` es.
+- **Git ist nicht installiert:** Installiere es von [git-scm.com](https://git-scm.com/downloads).
+- **Git hat keinen Namen oder keine E-Mail-Adresse für den Commit:** `git config --global user.name "Dein Name"` und `git config --global user.email "du@example.com"`. Der Sign-off des ersten Commits nennt sie.
+- **Die GitHub CLI vor 2.48, oder keine:** Installiere oder aktualisiere sie, wie [ihre Installation](https://github.com/cli/cli#installation) es beschreibt.
+- **gh ist nicht bei github.com angemeldet:** `gh auth login --hostname github.com --scopes workflow`. Mit einem Token in der Variable `GH_TOKEN` nutzt gh dieses: Gib ihm die Scopes, oder entferne die Variable.
+- **Ohne die Scopes, die create braucht:** `gh auth refresh --hostname github.com --scopes workflow,read:org`, mit den Scopes, die der Befund nennt. `repo` legt das Repository an und pusht, `workflow` pusht die Dateien in `.github/workflows/`, die GitHub ohne ihn ablehnt, und `read:org` zeigt, ob dir die Organisation gehört. Ein Fine-grained Token nennt keine Scopes, deshalb kann die Vorabprüfung es nicht erkennen (·): Es muss Repositorys des Eigentümers anlegen dürfen, mit *Administration*, *Contents* und *Workflows* (Lesen und Schreiben).
+- **GitHub hat kein Konto und keine Organisation dieses Namens:** Der Eigentümer in den Antworten ist falsch geschrieben. Nenne das Repository mit `python3 .github/blueprint.py --repo OWNER/NAME create`.
+- **Ein eigenes Konto, während gh als ein anderes angemeldet ist:** Nur dieses Konto legt seine Repositorys an. `gh auth switch --user OWNER` wechselt zu ihm, wenn gh es kennt, `gh auth login` meldet es an.
+- **Kein Mitglied der Organisation, oder eingeladen:** Ein Owner der Organisation nimmt dich auf, oder du nimmst die Einladung unter `https://github.com/orgs/OWNER/invitation` an.
+- **Ein Mitglied der Organisation, kein Owner (·):** `gh repo create` klappt, wo die Organisation ihren Mitgliedern erlaubt, Repositorys anzulegen, und dann bist du Administrator des Repositorys, das du angelegt hast, was `settings apply` braucht. Sonst startet ein Owner `create`.
+- **Der Name ist vergeben:** Wähle einen anderen mit `--repo OWNER/NAME`. Ist es das Repository, das ein früherer Lauf von `create` angelegt hat, verbinde den Ordner mit `git remote add origin https://github.com/OWNER/NAME.git` damit und starte `create` noch einmal, das dort weitermacht.
+- **origin pusht zu einem Repository, das GitHub nicht hat:** Es wurde gelöscht, oder die Adresse ist falsch. `git remote remove origin`, dann noch einmal `create`.
+
+## create hat mittendrin aufgehört
+
+**Was du siehst:** `create` hat nach `gh repo create` aufgehört, beim Push oder bei `settings apply`, etwa bei einer Verbindung, die abbrach, und der Ordner pusht jetzt zu `origin`.
+
+**Warum:** `gh repo create` legt das Repository auf GitHub an und fügt `origin` hinzu, bevor es pusht, deshalb hinterlassen ein Push oder Einstellungen, die scheiterten, ein Repository, das da ist.
+
+**Was zu tun ist:** Starte `python3 .github/blueprint.py create` noch einmal. Pusht `origin` zum Repository der Antworten, und GitHub hat es, macht `create` beim ersten Schritt weiter, der noch fehlt: `git push --set-upstream origin main`, wenn GitHub noch keinen Branch `main` hat, dann `settings apply` und die Checkliste, die nur ändern, was abweicht. Ein Push, den git mangels Zugangsdaten ablehnt, klappt nach `gh auth setup-git`, womit sich git anmeldet wie gh. Ein Ordner, der zu einem anderen Repository pusht, ist keine neue Kopie, und `create` lehnt ihn ab.
 
 ## Ein Update des Blueprints hat Konflikte
 
