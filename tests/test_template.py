@@ -9419,7 +9419,14 @@ def explain_parts_step(check: str, failed: list[tuple[str, str]]) -> dict[str, A
 
 # The checks that the job of each of these checks runs, in the order of its steps.
 PARTS = {
-    "lint": ["workflow-lint", "reuse", "markdown", "issue-assistant", "dco"],
+    "lint": [
+        "workflow-lint",
+        "allowed-actions",
+        "reuse",
+        "markdown",
+        "issue-assistant",
+        "dco",
+    ],
     "conventional title": ["conventional title", "changelog"],
     "home-assistant": ["hacs", "hassfest"],
 }
@@ -9552,6 +9559,7 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
     after = "${{ !cancelled() && steps.checkout.outcome == 'success'"
     for name in (
         "Lint the workflows",
+        "Check that the allowed actions let every action start",
         "Check that every file names its license",
         "Lint the Markdown of every document",
         "Check the issue assistant's set-up",
@@ -9588,6 +9596,40 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
         step.get("with", {}).get("fetch-depth") == 0
         for step in steps_using(lint, "actions/checkout")
     )
+
+
+def test_a_pull_request_fails_that_runs_an_action_that_the_list_lacks() -> None:
+    # The list of the allowed actions lets every action that a workflow runs start,
+    # also those that these run in turn (#275): from the files of the pull request,
+    # with the token of the job, which reads the files of the public actions, and the
+    # blueprint.py of the repository, or that of the blueprint itself.
+    lint = job_in(
+        (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "lint"
+    )
+    step = step_in(lint, "Check that the allowed actions let every action start")
+    assert step["id"] == "allowed-actions"
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert step["run"] == (
+        "script=.github/blueprint.py\n"
+        '[[ -f "$script" ]] || script=blueprint.py\n'
+        'python3 "$script" settings actions\n'
+    )
+    # And so does every kind of project, new or updated from the latest release, and
+    # each repository that takes the blueprint, before a release brings the change.
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    variant = job_in(variants, "variant")
+    name = "Check that the allowed actions of the project let every action start"
+    step = step_in(variant, name)
+    assert "if" not in step
+    assert step["working-directory"] == "${{ env.PROJECT }}"
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert step["run"] == "python3 .github/blueprint.py settings actions"
+    names = names_of(variant)
+    for render in (
+        "Render the project from this commit",
+        "Render the project from the latest release and update it to this commit",
+    ):
+        assert names.index(render) < names.index(name)
 
 
 def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
