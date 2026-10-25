@@ -613,12 +613,14 @@ def sources(
     path of the page: in a folder with both, index.md rather than README.md, which
     MkDocs leaves out then, also in a further language."""
     found: dict[str, Path] = {}
-    for source in sorted(folder.rglob("*.md")):
+    # The files index.md first, on every system in the same order.
+    for source in sorted(
+        folder.rglob("*.md"),
+        key=lambda path: (not path.name.lower().startswith("index."), path.as_posix()),
+    ):
         built = built_from(source.relative_to(folder).as_posix(), languages, pages)
-        if built is None:
-            continue
-        if built not in found or source.name.lower().startswith("index."):
-            found[built] = source
+        if built is not None:
+            found.setdefault(built, source)
     return found
 
 
