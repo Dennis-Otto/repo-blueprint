@@ -21,7 +21,7 @@ bash scripts/check.sh[% else %]bash scripts/check.sh[% endif %]
 [% if stack in ['python', 'home-assistant'] -%]
 On Windows, run them in Git Bash, with `py -3` in place of `python3` and `.venv/Scripts/` in place of `.venv/bin/`. While you work, the quicker steps of the checks:
 
-- `coverage run -m pytest && coverage report`: the tests, with every line and branch covered; `pytest -n auto --cov` runs them on every core, as `scripts/check.sh` does where pytest-xdist and pytest-cov are installed.
+- `coverage run -m pytest && coverage report`: the tests, with every line and branch covered; `pytest -n logical --maxprocesses=8 --cov` runs them on every core, as `scripts/check.sh` does where pytest-xdist and pytest-cov are installed.
 - `pytest tests/test_name.py -k name`: one test.
 - `ruff format . && ruff check --fix .`: the format of the code, and the fixes that Ruff can make.
 - `mypy`: the types, in the strict mode of mypy.
