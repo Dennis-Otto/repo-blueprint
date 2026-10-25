@@ -57,6 +57,7 @@ from workflow_steps import (
 
 import downstream
 import pins
+import reference
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -14635,19 +14636,30 @@ def test_each_leg_of_the_variants_does_only_what_it_alone_can_show() -> None:
     )
 
 
-# The answers of each repository that takes the blueprint, by the name of the
-# repository; the Rollout brings it every release.
+# The answers of each canary of .github/fleet.toml, a repository that takes the
+# blueprint, by the name of the repository; the Rollout brings it every release.
 ANSWERS = {
     path.stem: downstream.read(path)
     for path in sorted((ROOT / "tests/answers").glob("*.yml"))
 }
+# The canaries that the blueprint made new, with its sample code, which their own code
+# replaced since: their answers keep the sample code of their first copy.
+MADE_NEW = {"player-switch-for-autodarts"}
 
 
 def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
+    registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
     rollout = (ROOT / ".github/workflows/rollout.yml").read_text(encoding="utf-8")
     order = re.search(r"^          ORDER: (.+)$", rollout, re.M)
     assert order
-    assert sorted(order[1].split()) == list(ANSWERS)
+    # Every repository of the registry, by its place; and the answers of each canary.
+    assert order[1].split() == [
+        item.name for item in sorted(registry.members, key=lambda item: item.rollout)
+    ]
+    assert list(ANSWERS) == sorted(
+        item.name for item in registry.members if item.canary
+    )
+    assert set(ANSWERS) >= MADE_NEW
     for name, answers in ANSWERS.items():
         assert answers["owner"] == "Dennis-Otto", name
         assert answers["project_slug"] == name
@@ -14679,9 +14691,10 @@ def test_the_answers_of_each_repository_render_every_file(
     # repository answers each question: a new question gets its answer here too.
     stored = downstream.read(project / ".copier-answers.yml")
     assert {k: v for k, v in stored.items() if not k.startswith("_")} == ANSWERS[name]
-    # A repository that takes the blueprint brings its own code and tests.
-    assert not stored["sample_code"]
-    assert not (project / "docs/index.md").exists()
+    # A repository that takes the blueprint brings its own code and tests; one that
+    # the blueprint made new started from the sample, whose website it renders.
+    assert stored["sample_code"] == (name in MADE_NEW)
+    assert (project / "docs/index.md").exists() == (name in MADE_NEW)
 
 
 def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:

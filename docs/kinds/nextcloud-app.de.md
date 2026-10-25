@@ -47,6 +47,15 @@ Diese Art bringt diese Schritte dazu:
 
 ## Ein echtes Repository
 
-[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync) und [Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search) sind aus dem Blueprint entstanden: zwei Nextcloud-Apps für Paperless-ngx, mit End-to-End-Tests in einem echten Nextcloud.
+<!-- --8<-- [start:real-repository] -->
+
+Diese öffentlichen Repositories dieser Art sind aus dem Blueprint entstanden:
+
+- **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**: die Dokumente von Paperless-ngx in Nextcloud Files, nach Korrespondent, Typ und Jahr.
+- **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**: die Volltextsuche von Paperless-ngx in der Suche von Nextcloud.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von Paperless Sync und Paperless Unified Search aus, bevor er merged.
+
+<!-- --8<-- [end:real-repository] -->
 
 Wie sich der Blueprint mit anderen Vorlagen vergleicht: [der Vergleich](../compare.md).
