@@ -14,7 +14,7 @@
 
 **GitHub repositories that test, release, secure and update themselves — from one `copier copy`.**
 
-Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for seven kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python and Node packages, container images and repositories without a build. A new repository starts with more than 30 workflows, and a bot brings it up to every new release of the blueprint.
+Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for eight kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python and Node packages, Chrome extensions, container images and repositories without a build. A new repository starts with more than 30 workflows, and a bot brings it up to every new release of the blueprint.
 
 - **Tested on every change.** `scripts/check.sh` runs the same checks on your machine and in the CI, with full coverage of the code. The PR coach explains every check that fails, and the fix bot commits what a command can fix.
 - **Released and signed by a bot.** Merging the release pull request publishes the release with its SBOM and the signed provenance of SLSA Build Level 3, and then verifies it as its users can.
@@ -91,18 +91,19 @@ Six public repositories follow the blueprint, each with code of its own and the 
 | Kind | Stack | Checks | Delivery |
 | --- | --- | --- | --- |
 | [Home Assistant integration](https://dennis-otto.github.io/repo-blueprint/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, tests, HACS, hassfest | a zip asset for HACS, verified as HACS installs it |
-| [Nextcloud app](https://dennis-otto.github.io/repo-blueprint/kinds/nextcloud-app.html) | PHP 8.2 and newer, the tools on PHP 8.3, Composer | php-cs-fixer, Psalm with its taint analysis, the code and its packages on PHP 8.2, PHPUnit in random order with every line covered | signed package to the App Store |
+| [Nextcloud app](https://dennis-otto.github.io/repo-blueprint/kinds/nextcloud-app.html) | PHP 8.2 and newer, the tools on PHP 8.3, Composer | php-cs-fixer, Psalm with its taint analysis, PHP 8.2 for the code and its packages, PHPUnit in random order with full coverage | signed package to the App Store |
 | [GitHub Action](https://dennis-otto.github.io/repo-blueprint/kinds/github-action.html) | Python 3.12 of the runner, composite action | Ruff, mypy, tests, a run of the action | release tags and a moving major tag |
 | [Python package](https://dennis-otto.github.io/repo-blueprint/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
-| [Node package](https://dennis-otto.github.io/repo-blueprint/kinds/node-package.html) | Node 24, TypeScript | Biome for the lint and the format, tsc, node:test with full coverage and its report in the PR coach, pack; npm installs without the scripts of the packages | npm with provenance |
+| [Node package](https://dennis-otto.github.io/repo-blueprint/kinds/node-package.html) | Node 24, TypeScript | Biome, tsc, node:test with full coverage, pack; npm without install scripts | npm with provenance |
+| [Chrome extension](https://dennis-otto.github.io/repo-blueprint/kinds/chrome-extension.html) | Manifest V3, TypeScript | Node's, the manifest, Chrome for Testing | Chrome Web Store, without a stored secret |
 | [Container image](https://dennis-otto.github.io/repo-blueprint/kinds/container.html) | Alpine by digest | Hadolint, build, self-test | GHCR, multi-arch, with SBOM and provenance |
 | [Repository without a build](https://dennis-otto.github.io/repo-blueprint/kinds/generic.html) | | text files, shell scripts | releases only |
 
-Every kind starts with a small working example and its tests: replace it with the real code. Each kind has a page of its own on the website: what it gets, the checks that its pull requests need, its delivery, the steps of its checklist and the one line that copies it.
+Every kind starts with a small working example and its tests, to replace with the real code, and has a page of its own on the website: what it gets, the checks its pull requests need, its delivery, its checklist and the one line that copies it.
 
 <!-- --8<-- [end:kinds] -->
 
-![Repo Blueprint for GitHub repositories: seven kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](docs/images/social-preview.webp)
+![Repo Blueprint for GitHub repositories: eight kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](docs/images/social-preview.webp)
 
 ## How a repository looks after itself
 

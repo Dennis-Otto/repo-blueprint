@@ -38,6 +38,7 @@ _skip_if_exists:
   - /mkdocs.yml
   - /docs/index.md
   - /docs/security.md
+  - /docs/releases.md
   - .github/issue-assistant/project.md
   - .github/agents.project.md
   - /docs/decisions
@@ -74,6 +75,8 @@ _skip_if_exists:
   - /composer.lock
   - /package.json
   - /package-lock.json
+  - /extension
+  - /store
   - /Dockerfile
   - /action.yml
   - /hacs.json
@@ -146,6 +149,7 @@ project_type:
     GitHub Action (Python, composite): github-action
     Python package (PyPI): python-package
     Node package (TypeScript, npm): node-package
+    Chrome extension (Manifest V3, Chrome Web Store): chrome-extension
     Container image (GHCR): container
     Repository without a build (docs, configuration, scripts): generic
 
@@ -240,7 +244,7 @@ languages:
     Rust: rust
   default: >-
     [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
-    [%- elif project_type in ['node-package', 'nextcloud-app'] -%][javascript-typescript]
+    [%- elif project_type in ['node-package', 'chrome-extension', 'nextcloud-app'] -%][javascript-typescript]
     [%- else -%][][%- endif -%]
 
 discussions:
@@ -274,6 +278,7 @@ topics:
     [%- elif project_type == 'github-action' -%]github-actions, github-action
     [%- elif project_type == 'python-package' -%]python, pypi
     [%- elif project_type == 'node-package' -%]typescript, nodejs, npm
+    [%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
     [%- elif project_type == 'container' -%]docker, container, ghcr
     [%- endif -%]
   validator: >-
@@ -375,7 +380,7 @@ stack:
     [%- if project_type == 'home-assistant' -%]home-assistant
     [%- elif project_type == 'nextcloud-app' -%]php
     [%- elif project_type in ['github-action', 'python-package'] -%]python
-    [%- elif project_type == 'node-package' -%]node
+    [%- elif project_type in ['node-package', 'chrome-extension'] -%]node
     [%- elif project_type == 'container' -%]container
     [%- else -%]generic[%- endif -%]
 
@@ -388,6 +393,7 @@ publish_to:
     [%- elif project_type == 'github-action' -%]github-action
     [%- elif project_type == 'python-package' -%]pypi
     [%- elif project_type == 'node-package' -%]npm
+    [%- elif project_type == 'chrome-extension' -%]chrome-web-store
     [%- elif project_type == 'container' -%]ghcr
     [%- else -%]none[%- endif -%]
 

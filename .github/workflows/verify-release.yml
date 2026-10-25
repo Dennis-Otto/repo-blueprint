@@ -298,6 +298,29 @@ jobs:
                 fail "The latest release is ${latest:-none}, not $TAG, so HACS doesn't offer it."
               fi
               ;;
+            chrome-web-store)
+              # publish-store.yml uploads this zip to the Chrome Web Store, which reads
+              # the manifest.json at its root; a manifest takes only the numbers of a
+              # version, so a beta, such as 1.3.0-beta.2, has 1.3.0.
+              numbers="$(grep -oE '^[0-9]+([.][0-9]+)*' <<<"$version")"
+              zips=(./*.zip)
+              if [[ ${#zips[@]} -ne 1 || ! -f "${zips[0]}" ]]; then
+                if [[ "$WEEKLY" == true ]]; then
+                  echo "::notice::The release is older than the zip of the extension for the Chrome Web Store."
+                else
+                  fail "The release has no single zip of the extension for the Chrome Web Store."
+                fi
+              else
+                manifest="$(python3 -c 'import sys, zipfile; print(zipfile.ZipFile(sys.argv[1]).read("manifest.json").decode())' \
+                  "${zips[0]}" 2>/dev/null || true)"
+                zipped="$(jq -r '"\(.manifest_version) \(.version)"' <<<"$manifest" 2>/dev/null || true)"
+                if [[ "$zipped" == "3 $numbers" ]]; then
+                  pass "${zips[0]} holds the manifest.json of Manifest V3 and the version $numbers at its root, as the Chrome Web Store takes it."
+                else
+                  fail "${zips[0]} has no manifest.json of Manifest V3 and the version $numbers at its root."
+                fi
+              fi
+              ;;
             nextcloud-appstore)
               app_id="$(gh api -H "Accept: application/vnd.github.raw+json" \
                 "repos/$GH_REPO/contents/appinfo/info.xml?ref=$TAG" |

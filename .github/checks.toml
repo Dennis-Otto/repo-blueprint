@@ -1098,6 +1098,25 @@ commands = ["npm test"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """A test that fails, or code without a test, needs a person, who knows what the code should do."""
 
+[step.Extension]
+problem = """The manifest of the extension, `extension/manifest.json`, doesn't fit the
+Chrome Web Store, or its store files don't agree with it: the log lists each problem of
+`scripts/check-manifest.mjs`, such as a permission or host without its reason in
+`store/permissions.json` or its justification in a listing, a language without its
+`store/listing.<language>.md`, a name or a description over the limit of the store, or
+a version other than that of `package.json`. Or the build, or the zip of the store,
+fails."""
+why = """The store takes a version only with a justification of each permission and
+host, and Chrome disables an installed extension after an update that asks for a new
+one until its user accepts it: what the check finds here would stop the release in the
+review of the store, or the users after it."""
+fix = """Do what each line of the log says: give a new permission or host its reason in
+`store/permissions.json` and its justification under `## Permission justifications` of
+every listing, or remove it from the manifest; then check again:"""
+commands = ["node scripts/check-manifest.mjs", "bash scripts/package-extension.sh"]
+docs = "CONTRIBUTING.md#checks"
+autofix = """A permission and its reason need a person, who knows why the extension asks for it."""
+
 [step.Dockerfile]
 problem = """hadolint flags a line of the Dockerfile, such as a package without a pinned
 version or a shell construct that breaks; the log names each line with its rule."""

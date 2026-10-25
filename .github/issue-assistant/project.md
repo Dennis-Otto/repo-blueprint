@@ -1,4 +1,4 @@
-Repo Blueprint is a Copier template for GitHub repositories: a new repository gets its checks, release bot, security checks, issue assistant and settings as code from it, and the blueprint bot keeps every repository made from it current. It serves seven kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python packages, Node packages, container images and repositories without a build.
+Repo Blueprint is a Copier template for GitHub repositories: a new repository gets its checks, release bot, security checks, issue assistant and settings as code from it, and the blueprint bot keeps every repository made from it current. It serves eight kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python packages, Node packages, Chrome extensions, container images and repositories without a build.
 
 Where things are:
 

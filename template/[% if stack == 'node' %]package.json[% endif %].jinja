@@ -3,6 +3,9 @@
 {
   "name": "{= project_slug =}",
   "version": "0.0.0",
+[%- if project_type == 'chrome-extension' %]
+  "private": true,
+[%- endif %]
   "description": {= description | to_json(ensure_ascii=False) =},
   "homepage": "https://github.com/{= owner =}/{= project_slug =}#readme",
   "bugs": {
@@ -15,6 +18,7 @@
   "license": "{= license =}",
   "author": {= author | to_json(ensure_ascii=False) =},
   "type": "module",
+[%- if project_type != 'chrome-extension' %]
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -24,6 +28,7 @@
   "files": [
     "dist"
   ],
+[%- endif %]
   "engines": {
 [%- for name, version in stack_manifest.engines.items() %]
     {= name | to_json(ensure_ascii=False) =}: {= version | to_json(ensure_ascii=False) =}[% if not loop.last %],[% endif %]
@@ -32,7 +37,9 @@
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --project tsconfig.json",
-    "test": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\""
+    "test": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/**/*.test.ts\""[% if project_type == 'chrome-extension' %],
+    "package": "bash scripts/package-extension.sh",
+    "e2e": "node scripts/load-extension.mjs"[% endif %]
   },
   "devDependencies": {
 [%- for name, version in stack_manifest.devDependencies.items() %]

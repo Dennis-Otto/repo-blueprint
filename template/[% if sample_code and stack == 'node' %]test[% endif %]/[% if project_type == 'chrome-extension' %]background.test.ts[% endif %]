@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import fc from "fast-check";
+
+import { badgeFor, type Chrome, start } from "../src/background.ts";
+
+test("a new install shows the badge new", () => {
+  assert.equal(badgeFor("install"), "new");
+});
+
+test("every other start clears the badge", () => {
+  fc.assert(
+    fc.property(
+      fc.string().filter((reason) => reason !== "install"),
+      (reason) => badgeFor(reason) === "",
+    ),
+  );
+});
+
+test("the install marks the button and keeps its reason", async () => {
+  const calls: unknown[] = [];
+  let installed: ((details: { reason: string }) => unknown) | undefined;
+  const browser: Chrome = {
+    runtime: {
+      onInstalled: {
+        addListener: (listener) => {
+          installed = listener;
+        },
+      },
+    },
+    action: {
+      setBadgeText: async (details) => {
+        calls.push(details);
+      },
+    },
+    storage: {
+      local: {
+        set: async (items) => {
+          calls.push(items);
+        },
+      },
+    },
+  };
+  start(browser);
+  await installed?.({ reason: "install" });
+  assert.deepEqual(calls, [{ text: "new" }, { installReason: "install" }]);
+});
+
+test("without the API of Chrome, as in Node, nothing starts", () => {
+  assert.doesNotThrow(() => start(undefined));
+});

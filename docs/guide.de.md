@@ -105,5 +105,6 @@ Die Konfiguration der Prüfungen gehört dem Blueprint und sucht den Code dort, 
 | --- | --- | --- | --- |
 | Nextcloud-App | `lib/` | PHPUnit-Tests in `tests/Unit/` | `psalm.xml` und `phpunit.xml`, mit den `tests/bootstrap.php` und `tests/stubs/`, die sie laden |
 | Node-Paket | `src/`, gebaut nach `dist/` | `test/`, von `tsconfig.json` typgeprüft; das `npm test` eines neuen Projekts führt `test/**/*.test.ts` aus | `tsconfig.json` und `tsconfig.build.json`, die `typescript` und `@types/node` in der `package.json` des Projekts brauchen, und `biome.jsonc`, dessen Schritt *Lint and format* läuft, sobald dort auch `@biomejs/biome` steht |
+| Chrome-Erweiterung | `src/`, gebaut nach `extension/lib/`; `extension/` mit `manifest.json` und `_locales/` | `test/`, wie bei einem Node-Paket | die Dateien eines Node-Pakets, wobei `tsconfig.build.json` nach `extension/lib/` schreibt; der Schritt *Extension* braucht `extension/manifest.json`, `store/permissions.json` und eine `store/listing.<Sprache>.md` für jede Sprache |
 
 Die anderen Arten legen diese Orte in eigenen Dateien fest, etwa in `pyproject.toml`. Was in `tests/` liegt, gehört dem Projekt: Die Kopie und jedes Update ergänzen dort nur die Dateien, die fehlen, und eine App mit eigenem Bootstrap behält ihn.

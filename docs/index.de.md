@@ -12,7 +12,7 @@ hide:
 [Vergleichen](compare.md){ .md-button }
 [Zur Anleitung](guide.md){ .md-button }
 
-![Die Social Preview des Blueprints: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](images/social-preview.webp)
+![Die Social Preview des Blueprints: acht Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](images/social-preview.webp)
 
 ## Wie sich ein Repository selbst pflegt
 
@@ -147,6 +147,14 @@ Die [Anleitung](guide.md#was-ein-neues-repository-bekommt) nennt jeden Bereich, 
     TypeScript, Biome, tsc und node:test mit voller Abdeckung; npm mit Provenance.
 
     [:octicons-arrow-right-24: Node-Paket](kinds/node-package.md)
+
+- :material-google-chrome:{ .lg .middle } **Chrome-Erweiterung**
+
+    ---
+
+    Manifest V3 in TypeScript, das Manifest gegen den Store geprüft und in Chrome for Testing gestartet; jedes Release in den Chrome Web Store, ohne gespeichertes Geheimnis.
+
+    [:octicons-arrow-right-24: Chrome-Erweiterung](kinds/chrome-extension.md)
 
 - :material-docker:{ .lg .middle } **Container-Image**
 

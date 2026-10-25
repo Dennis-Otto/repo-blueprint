@@ -333,6 +333,12 @@ def test_the_census_finds_what_a_step_changes(script: str, acts: list[str]) -> N
 # runs the step. A new step that deletes, starts, merges, publishes or comments needs a
 # test that runs it, here with run_step() or in the tests of its bot.
 TESTED = {
+    (
+        "publish-store.yml",
+        "status",
+        "Check the set-up of the environment",
+    ): "test_template.py",
+    ("publish-store.yml", "store", "Submit the release for review"): "test_template.py",
     ("after-checks.yml", "rerun", "Run the failed jobs once more"): "test_template.py",
     (
         "after-checks.yml",

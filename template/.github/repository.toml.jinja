@@ -163,4 +163,11 @@ secrets = []
 [% elif publish_to == 'npm' %]
 [environments.npm]
 secrets = []
+[% elif publish_to == 'chrome-web-store' %]
+# The Chrome Web Store, to which publish-store.yml delivers every release. Its jobs
+# sign in to Google with the OIDC token of GitHub (decision 0085 of the blueprint), so
+# the environment needs no secret; it keeps the delivery to main. docs/releases.md
+# says how to set the variables of the item and of the sign-in.
+[environments.chrome-web-store]
+secrets = []
 [% endif -%]

@@ -11,7 +11,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 1280px; height: 640px; overflow: hidden; }
 body {
-  --accent: [% if project_type == 'home-assistant' %]#41bdf5[% elif project_type == 'nextcloud-app' %]#7aa2ff[% elif project_type == 'github-action' %]#a78bfa[% elif project_type == 'python-package' %]#facc15[% elif project_type == 'node-package' %]#4ade80[% elif project_type == 'container' %]#22d3ee[% else %]#94a3b8[% endif %];
+  --accent: [% if project_type == 'home-assistant' %]#41bdf5[% elif project_type == 'nextcloud-app' %]#7aa2ff[% elif project_type == 'github-action' %]#a78bfa[% elif project_type == 'python-package' %]#facc15[% elif project_type == 'node-package' %]#4ade80[% elif project_type == 'chrome-extension' %]#fbbf24[% elif project_type == 'container' %]#22d3ee[% else %]#94a3b8[% endif %];
   position: relative;
   font-family: "Inter", "Liberation Sans", "FreeSans", sans-serif;
   color: #f8fafc;
@@ -48,7 +48,7 @@ li::before { content: ""; width: 12px; height: 12px; border-radius: 50%; backgro
 <div class="left">
   <div class="logo"><div class="monogram">{= (project_name.split() | map('first') | join)[:2] | upper | e =}</div></div>
   <h1>{= project_name | e =}</h1>
-[% if project_type != 'generic' %]  <div class="subtitle">[% if project_type == 'home-assistant' %]for Home Assistant[% elif project_type == 'nextcloud-app' %]for Nextcloud[% elif project_type == 'github-action' %]GitHub Action[% elif project_type == 'python-package' %]Python package[% elif project_type == 'node-package' %]Node package[% else %]Container image[% endif %]</div>
+[% if project_type != 'generic' %]  <div class="subtitle">[% if project_type == 'home-assistant' %]for Home Assistant[% elif project_type == 'nextcloud-app' %]for Nextcloud[% elif project_type == 'github-action' %]GitHub Action[% elif project_type == 'python-package' %]Python package[% elif project_type == 'node-package' %]Node package[% elif project_type == 'chrome-extension' %]Chrome extension[% else %]Container image[% endif %]</div>
 [% endif %]  <p class="text">{= description | e =}</p>
 </div>
 <div class="panel">

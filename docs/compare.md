@@ -14,7 +14,7 @@ The tools: [template repositories](https://docs.github.com/en/repositories/creat
 - **No code of the template runs at the copy.** The template has no tasks, migrations or Jinja extensions, so Copier needs no `--trust`, neither at the copy nor at an update.
 - **Settings as code, with a bot against drift.** The rulesets, the security, Actions, the environments, the variables, the labels and GitHub Pages live in `.github/repository.toml`, and the settings bot applies them after every change and every week.
 - **Releases of SLSA Build Level 3, with SBOMs and VEX.** A release has signed tags, the provenance of an isolated build, SBOMs as SPDX and CycloneDX, an OpenVEX document and an immutable release, and its workflow verifies it as its users can, also every week.
-- **Home Assistant, Nextcloud and GitHub Actions in one standard,** beside Python and Node packages, containers and repositories without a build: the same checks, bots and settings for each, with the tools of each kind.
+- **Home Assistant, Nextcloud and GitHub Actions in one standard,** beside Python and Node packages, Chrome extensions, containers and repositories without a build: the same checks, bots and settings for each, with the tools of each kind.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-a-change-of-the-template-meets-the-repositories.dark.svg">
@@ -35,7 +35,7 @@ A dash means that the tool doesn't do it; *the template* means that it depends o
 | Releases | release-please, signed tags, SLSA Build Level 3, SBOM, VEX, verified | the template | the template | the template | to npm, and with jsii to PyPI, Maven, NuGet and Go |
 | Security checks | CodeQL, Scorecard, zizmor, OSV-Scanner, Harden-Runner, a secret scan, actions pinned to commits | the template | the template | the template | the template |
 | Dependency updates | Renovate, with merge rules and a dashboard | the template | the template | the template | a workflow that upgrades them |
-| Kinds of projects | seven, from Home Assistant to containers | one for each template | thousands of templates, one stack each | copier-uv: Python; cookie: Python with many build backends | TypeScript, AWS CDK, jsii, Python, Java and more |
+| Kinds of projects | eight, from Home Assistant to Chrome extensions and containers | one for each template | thousands of templates, one stack each | copier-uv: Python; cookie: Python with many build backends | TypeScript, AWS CDK, jsii, Python, Java and more |
 | Systems in the CI | Linux, on every core | the template | the template | copier-uv and cookie: Linux, macOS and Windows | the template |
 | Review of any repository | — | — | — | cookie: sp-repo-review | — |
 | Triage of issues | the issue assistant | — | — | — | — |
@@ -51,4 +51,4 @@ A dash means that the tool doesn't do it; *the template* means that it depends o
 
 ## Start one
 
-[The quick start](guide.md#start-a-repository) makes a repository in three commands, and each kind of project has a page of its own: [Home Assistant integration](kinds/home-assistant.md), [Nextcloud app](kinds/nextcloud-app.md), [GitHub Action](kinds/github-action.md), [Python package](kinds/python-package.md), [Node package](kinds/node-package.md), [container image](kinds/container.md) and [repository without a build](kinds/generic.md).
+[The quick start](guide.md#start-a-repository) makes a repository in three commands, and each kind of project has a page of its own: [Home Assistant integration](kinds/home-assistant.md), [Nextcloud app](kinds/nextcloud-app.md), [GitHub Action](kinds/github-action.md), [Python package](kinds/python-package.md), [Node package](kinds/node-package.md), [Chrome extension](kinds/chrome-extension.md), [container image](kinds/container.md) and [repository without a build](kinds/generic.md).

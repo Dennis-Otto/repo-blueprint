@@ -13,8 +13,9 @@ name: Release
 # affect it (OpenVEX) and its signed provenance, write the notes, make the
 # release public, announce it in the discussions, and then deliver it where the
 # repository variable PUBLISH_TO says: pypi, npm, ghcr, hacs, nextcloud-appstore,
-# github-action or none. Last, verify-release.yml checks the release as its users
-# can. A release that only updates dependencies merges itself once its checks pass.
+# github-action, chrome-web-store, which publish-store.yml takes over once this
+# workflow has passed, or none. Last, verify-release.yml checks the release as its
+# users can. A release that only updates dependencies merges itself once its checks pass.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:

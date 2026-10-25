@@ -16,7 +16,7 @@
 
 **GitHub-Repositories, die sich selbst testen, veröffentlichen, absichern und aktualisieren — mit einem `copier copy`.**
 
-Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für sieben Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Container-Images und Repositories ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
+Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für acht Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Chrome-Erweiterungen, Container-Images und Repositories ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
 
 - **Getestet bei jeder Änderung.** `scripts/check.sh` führt dieselben Prüfungen auf deinem Rechner und in der CI aus, mit voller Abdeckung des Codes. Der PR-Coach erklärt jede Prüfung, die scheitert, und der Fix-Bot committet, was ein Befehl beheben kann.
 - **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3 und prüft es danach so, wie seine Nutzer es können.
@@ -93,18 +93,19 @@ Sechs öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und
 | Art | Stack | Prüfungen | Auslieferung |
 | --- | --- | --- | --- |
 | [Home-Assistant-Integration](https://dennis-otto.github.io/repo-blueprint/de/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, Tests, HACS, hassfest | ein Zip-Asset für HACS, geprüft, wie HACS es installiert |
-| [Nextcloud-App](https://dennis-otto.github.io/repo-blueprint/de/kinds/nextcloud-app.html) | PHP 8.2 und neuer, die Werkzeuge auf PHP 8.3, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, der Code und seine Pakete auf PHP 8.2, PHPUnit in zufälliger Reihenfolge mit jeder Zeile abgedeckt | signiertes Paket in den App Store |
+| [Nextcloud-App](https://dennis-otto.github.io/repo-blueprint/de/kinds/nextcloud-app.html) | PHP 8.2 und neuer, die Werkzeuge auf PHP 8.3, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, PHP 8.2 für den Code und seine Pakete, PHPUnit in zufälliger Reihenfolge mit voller Abdeckung | signiertes Paket in den App Store |
 | [GitHub Action](https://dennis-otto.github.io/repo-blueprint/de/kinds/github-action.html) | Python 3.12 des Runners, Composite Action | Ruff, mypy, Tests, ein Lauf der Action | Release-Tags und ein mitwandernder Major-Tag |
 | [Python-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, Tests, Build | PyPI, Trusted Publishing |
-| [Node-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/node-package.html) | Node 24, TypeScript | Biome für Lint und Format, tsc, node:test mit voller Abdeckung und ihrem Bericht im PR-Coach, Pack; npm installiert ohne die Skripte der Pakete | npm mit Provenance |
+| [Node-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/node-package.html) | Node 24, TypeScript | Biome, tsc, node:test mit voller Abdeckung, Pack; npm ohne Installationsskripte | npm mit Provenance |
+| [Chrome-Erweiterung](https://dennis-otto.github.io/repo-blueprint/de/kinds/chrome-extension.html) | Manifest V3, TypeScript | die von Node, das Manifest, Chrome for Testing | Chrome Web Store, ohne gespeichertes Geheimnis |
 | [Container-Image](https://dennis-otto.github.io/repo-blueprint/de/kinds/container.html) | Alpine per Digest | Hadolint, Build, Selbsttest | GHCR, Multi-Arch, mit SBOM und Provenance |
 | [Repository ohne Build](https://dennis-otto.github.io/repo-blueprint/de/kinds/generic.html) | | Textdateien, Shell-Skripte | nur Releases |
 
-Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das durch den echten Code ersetzt wird. Jede Art hat eine eigene Seite auf der Website: was sie bekommt, die Prüfungen, die ihre Pull Requests brauchen, ihre Auslieferung, die Schritte ihrer Checkliste und die eine Zeile, die sie kopiert.
+Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das durch den echten Code ersetzt wird, und hat eine eigene Seite auf der Website: was sie bekommt, die Prüfungen, die ihre Pull Requests brauchen, ihre Auslieferung, ihre Checkliste und die eine Zeile, die sie kopiert.
 
 <!-- --8<-- [end:kinds] -->
 
-![Repo Blueprint für GitHub-Repositories: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](docs/images/social-preview.webp)
+![Repo Blueprint für GitHub-Repositories: acht Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](docs/images/social-preview.webp)
 
 ## Wie sich ein Repository selbst pflegt
 

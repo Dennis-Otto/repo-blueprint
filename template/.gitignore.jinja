@@ -65,4 +65,8 @@ __pycache__/
 /coverage/
 /lcov.info
 *.tgz
+[%- if project_type == 'chrome-extension' %]
+# The extension that the build compiles from src/, which the store package zips.
+/extension/lib/
+[%- endif %]
 [% endif -%]
