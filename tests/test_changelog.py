@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -18,13 +19,17 @@ from blueprint.changelog import (
     beta_notes,
     checked,
     fragment_problems,
+    heal,
+    healed,
     known_headings,
+    meant_kind,
     merge_headings,
     read_fragments,
     release_changelog,
     release_notes,
     released_fragments,
     version_heading,
+    with_fragments,
 )
 
 COMPARE = "https://github.com/Dennis-Otto/demo/compare/v1.2.2...v1.3.0"
@@ -514,6 +519,149 @@ def test_a_fragment_takes_the_headings_that_the_changelog_has() -> None:
     assert "is no kind of change" in fragment_problems([project], PREAMBLE)[0]
 
 
+@pytest.mark.parametrize(
+    ("heading", "kind"),
+    [
+        # The closest kind, also when another is close too: Bug fixes, for Fixes.
+        ("Fixes", "Fixed"),
+        ("bug fixes", "Bug fixes"),
+        ("Bugfix", "Bug fixes"),
+        ("FEATURES", "Features"),
+        ("Feature", "Features"),
+        # A heading of the changelog, which a fragment may use too.
+        ("news", "New"),
+        # As close to Changes as to Changed: a person decides.
+        ("Change", None),
+        ("Zebras", None),
+        ("1.4.0", None),
+        ("", None),
+    ],
+)
+def test_a_heading_means_a_kind_of_change_only_when_no_other_is_as_close(
+    heading: str, kind: str | None
+) -> None:
+    assert meant_kind(heading, known_headings(main_changelog())) == kind
+
+
+def test_a_fragment_heals_each_heading_that_surely_means_a_kind_of_change() -> None:
+    known = known_headings(main_changelog())
+    text = (
+        "### Fixes\r\n\r\n- **Token:** stays secret.\r\n"
+        "## Features\n\n- **Cards:** a new card.\n"
+        "   ## bug fixes  \n\n- A fix.\n"
+        "###  Fixed \n\n- Kept as it is.\n"
+        "### Change\n\n- Changes or Changed?\n"
+        "## 1.4.0\n# Release notes\n#\n#### Fixes\n- **Fixes** in a line.\n"
+    )
+
+    result, renamed = healed(text, known)
+
+    # Each line ending stays, and so does every heading that surely means no kind.
+    assert result == (
+        "### Fixed\r\n\r\n- **Token:** stays secret.\r\n"
+        "### Features\n\n- **Cards:** a new card.\n"
+        "### Bug fixes\n\n- A fix.\n"
+        "###  Fixed \n\n- Kept as it is.\n"
+        "### Change\n\n- Changes or Changed?\n"
+        "## 1.4.0\n# Release notes\n#\n#### Fixes\n- **Fixes** in a line.\n"
+    )
+    assert renamed == [
+        ("### Fixes", "### Fixed"),
+        ("## Features", "### Features"),
+        ("## bug fixes", "### Bug fixes"),
+    ]
+    # What the release reads of the fragment, and its problems, which are left for a
+    # person: the heading that means no kind for sure and the headings of sections.
+    problems = fragment_problems([fragment("typo.md", result)], main_changelog())
+    assert [re.findall("`([^`]*)`", problem)[0] for problem in problems] == [
+        "## 1.4.0",
+        "# Release notes",
+        "#",
+        "### Change",
+    ]
+    # Healed once, a fragment stays as it is.
+    assert healed(result, known) == (result, [])
+
+
+def test_the_website_shows_the_fragments_under_unreleased() -> None:
+    fragments = [
+        fragment("a-cards.md", f"{FEATURE}\n{FIX}"),
+        fragment("b-voices.md", "### New\n\n- **Voices:** in German too (#17).\n"),
+    ]
+
+    shown = with_fragments(main_changelog(), fragments)
+
+    # As the release groups them: the headings of Unreleased first, then the kinds of
+    # the fragments in their order, each kind under one heading.
+    assert shown == (
+        f"{PREAMBLE}## Unreleased\n\n"
+        "### New\n\n- **Voices:** start a game by voice (#12).\n"
+        "- **Voices:** in German too (#17).\n\n"
+        f"{FEATURE}\n{FIX}\n{OLDER}"
+    )
+    # A changelog without Unreleased gets it first; one without entries in fragments
+    # stays as it is, byte for byte.
+    assert with_fragments(f"{PREAMBLE}{OLDER}", fragments[:1]) == (
+        f"{PREAMBLE}## Unreleased\n\n{FEATURE}\n{FIX}\n{OLDER}"
+    )
+    odd = "# Changelog\n\n\n\n## Unreleased\n## 1.0.0\n"
+    assert with_fragments(odd, []) == odd
+    assert (
+        with_fragments(odd, [fragment("empty.md", ""), fragment("x.md", "Text")]) == odd
+    )
+
+
+def test_the_command_line_heals_the_headings_of_the_fragments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("CHANGELOG.md").write_text(main_changelog(), encoding="utf-8")
+    folder = tmp_path / "changelog.d"
+    write_fragments(folder, **{"a-typo": "### Fixes\n\n- A fix.\n", "b-fine": FIX})
+    # Written on Windows: a byte order mark and the line endings of Windows stay.
+    (folder / "c-windows.md").write_bytes(
+        b"\xef\xbb\xbf## Features\r\n\r\n- A card.\r\n"
+    )
+    (folder / "d-latin.md").write_bytes("### Fixes\n\n- Caf\xe9.\n".encode("latin-1"))
+    (folder / "e-empty.md").write_text("", encoding="utf-8")
+    (folder / "f-folder").mkdir()
+
+    code = cli.main(["fragments", "--fix"])
+
+    out = capsys.readouterr().out.splitlines()
+    assert code == 1
+    assert out[:2] == [
+        "changelog.d/a-typo.md: renamed `### Fixes` to `### Fixed`.",
+        "changelog.d/c-windows.md: renamed `## Features` to `### Features`.",
+    ]
+    # What a person fixes: the fragment that is no UTF-8, the empty one, the folder.
+    assert [line.split(":")[0] for line in out[2:]] == [
+        "changelog.d/d-latin.md",
+        "changelog.d/e-empty.md",
+        "changelog.d/f-folder",
+    ]
+    assert read(folder / "a-typo.md") == "### Fixed\n\n- A fix.\n"
+    assert read(folder / "b-fine.md") == FIX
+    assert (folder / "c-windows.md").read_bytes() == (
+        b"\xef\xbb\xbf### Features\r\n\r\n- A card.\r\n"
+    )
+    # Without the fragments that need a person, the check passes; without --fix, the
+    # command changes nothing.
+    (folder / "d-latin.md").unlink()
+    (folder / "e-empty.md").unlink()
+    (folder / "f-folder").rmdir()
+    (folder / "g-typo.md").write_text("### Feature\n\n- A card.\n", encoding="utf-8")
+    assert cli.main(["fragments"]) == 1
+    assert read(folder / "g-typo.md") == "### Feature\n\n- A card.\n"
+    capsys.readouterr()
+    assert cli.main(["fragments", "--fix"]) == 0
+    assert capsys.readouterr().out == (
+        "changelog.d/g-typo.md: renamed `### Feature` to `### Features`.\n"
+        "The 4 fragment(s) in changelog.d/ are fine.\n"
+    )
+    assert heal(folder, main_changelog()) == []
+
+
 def test_the_fragments_are_read_by_their_names(tmp_path: Path) -> None:
     folder = tmp_path / "changelog.d"
     folder.mkdir()
@@ -555,6 +703,10 @@ def test_a_fragment_with_a_byte_order_mark_or_not_in_utf8_is_read(
     ]
     with pytest.raises(FragmentError):
         checked(fragments, main_changelog())
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def write_fragments(folder: Path, **fragments: str) -> None:
