@@ -5,16 +5,18 @@ config:
 ---
 flowchart TB
     accTitle: Der Bericht eines Pull Requests
-    accDescr: Ein Push in einen Pull Request einer Person startet die Prüfungen, die die Abdeckung der Tests und die gebaute Website als Artefakte behalten. Nach den Prüfungen liest der PR-Coach die Check-Runs, Titel und Beschreibung, die Dateien, die Abdeckungsberichte des Pull Requests und von main und das Artefakt website über die API, dazu die release-please-Dateien und mkdocs.yml von main, und führt keinen Code des Pull Requests aus. Er hält einen Kommentar aktuell: die gescheiterten Prüfungen, die nächste Version mit dem Eintrag im Changelog, die Abdeckung Datei für Datei und die Website mit den Seiten, die sich ändern. Ein Pull Request, dessen Prüfungen bestehen, bekommt ihn nur, wenn er davon etwas zu sagen hat.
+    accDescr: Ein Push in einen Pull Request einer Person startet die Prüfungen, die die Abdeckung der Tests und die gebaute Website als Artefakte behalten, und die Workflows des Projekts, die ihre Teile als Artefakte pr-report-name behalten. Nach den Prüfungen liest der PR-Coach die Check-Runs, Titel und Beschreibung, die Dateien, die Abdeckungsberichte des Pull Requests und von main, das Artefakt website und die Teile über die API, dazu die release-please-Dateien, mkdocs.yml und die Teile, die .github/checks.project.toml von main nennt, und führt keinen Code des Pull Requests aus. Er hält einen Kommentar aktuell: die gescheiterten Prüfungen, die nächste Version mit dem Eintrag im Changelog, die Abdeckung Datei für Datei, die Website mit den Seiten, die sich ändern, und die Teile der Workflows als Code. Ein Pull Request, dessen Prüfungen bestehen, bekommt ihn nur, wenn er davon etwas zu sagen hat.
 
     push(["Ein Push in einen Pull Request einer Person"])
     checks["Die Prüfungen laufen und behalten<br>die Abdeckung und die Website als Artefakte"]
-    coach["Der PR-Coach liest nach den Prüfungen über die API<br>die Check-Runs, Titel und Beschreibung, die Dateien,<br>die Abdeckung des Pull Requests und von main und die Website<br>und führt keinen Code des Pull Requests aus"]
-    main[(".release-please-manifest.json<br>release-please-config.json<br>mkdocs.yml von main")]
-    comment["Ein Kommentar am Pull Request:<br>die gescheiterten Prüfungen<br>📦 die nächste Version und der Eintrag im Changelog<br>die Abdeckung, Datei für Datei<br>🌐 die Website und die Seiten, die sich ändern"]
+    project["Workflows des Projekts, etwa visuelle Tests,<br>behalten ihre Teile als Artefakte pr-report-name"]
+    coach["Der PR-Coach liest nach den Prüfungen über die API<br>die Check-Runs, Titel und Beschreibung, die Dateien,<br>die Abdeckung des Pull Requests und von main, die Website<br>und die Teile und führt keinen Code des Pull Requests aus"]
+    main[(".release-please-manifest.json<br>release-please-config.json<br>mkdocs.yml, checks.project.toml von main")]
+    comment["Ein Kommentar am Pull Request:<br>die gescheiterten Prüfungen<br>📦 die nächste Version und der Eintrag im Changelog<br>die Abdeckung, Datei für Datei<br>🌐 die Website und die Seiten, die sich ändern<br>die Teile der Workflows, als Code"]
     quiet["Kein Kommentar, solange die Prüfungen bestehen<br>und er davon nichts zu sagen hat"]
 
     push --> checks --> coach --> comment
+    push --> project --> coach
     main -.-> coach
     coach -. "nichts zu sagen" .-> quiet
 
@@ -22,5 +24,5 @@ flowchart TB
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class checks,coach,comment bot
-    class push person
+    class push,project person
     class quiet done

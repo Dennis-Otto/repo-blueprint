@@ -1,6 +1,6 @@
 # One report on each pull request, which says what it makes
 
-- Status: accepted
+- Status: accepted, amended by [0066](0066-the-workflows-of-a-project-add-their-parts-to-the-one-report.md)
 - Date: 2026-10-18
 
 ## Context
@@ -31,7 +31,7 @@ Option 3. `blueprint.py coach report` (`blueprint/coach.py`) takes the parts of 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-report-of-a-pull-request.dark.svg">
-  <img src="../images/diagrams/the-report-of-a-pull-request.svg" alt="The report of a pull request: A push to a pull request of a person runs the checks, which keep the coverage of the tests and the website that they built as artifacts. After the checks, the PR coach reads the check runs, the title and description, the files, the coverage reports of the pull request and of main and the artifact website from the API, with the release-please files and mkdocs.yml of main, and runs no code of the pull request. It keeps one comment: the checks that failed, the next version with the entry of the changelog, the coverage file by file, and the website with the pages that change. A pull request whose checks pass gets it only when it has something of this to say.">
+  <img src="../images/diagrams/the-report-of-a-pull-request.svg" alt="The report of a pull request: A push to a pull request of a person runs the checks, which keep the coverage of the tests and the website that they built as artifacts, and the workflows of the project, which keep their parts as artifacts pr-report-name. After the checks, the PR coach reads the check runs, the title and description, the files, the coverage reports of the pull request and of main, the artifact website and the parts from the API, with the release-please files, mkdocs.yml and the parts that .github/checks.project.toml declares of main, and runs no code of the pull request. It keeps one comment: the checks that failed, the next version with the entry of the changelog, the coverage file by file, the website with the pages that change, and the parts of the workflows as code. A pull request whose checks pass gets it only when it has something of this to say.">
 </picture>
 
 ## Consequences
@@ -40,4 +40,4 @@ A pull request has at most one comment of the bots, which says before the merge 
 
 A run of the coach for a pull request of a person asks the API a few more times: for the files of the pull request, the open pull requests once it releases something, the artifacts once it changes the website, and the runs of its commit with two downloads once the tests ended. The coach runs after every workflow of the checks, so this counts against the 1,000 requests an hour that the token of a repository has; most runs of the coach come before the tests end, when the coverage costs one request.
 
-The project workflows of a repository, such as the visual tests of ha-autodarts, still keep comments of their own; a part that a workflow of the project hands to the coach would need the coach to collect it in every run, which is left for later ([#249](https://github.com/Dennis-Otto/repo-blueprint/issues/249)). The release-please files and `mkdocs.yml` are those of the default branch, so a pull request that changes them shows what the default branch would make of it.
+The project workflows of a repository, such as the visual tests of ha-autodarts, kept comments of their own at first; since [decision 0066](0066-the-workflows-of-a-project-add-their-parts-to-the-one-report.md), each hands its part to the coach as an artifact, which the coach collects in every run. The release-please files and `mkdocs.yml` are those of the default branch, so a pull request that changes them shows what the default branch would make of it.

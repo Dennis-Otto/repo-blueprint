@@ -30,6 +30,7 @@ from blueprint.coach import (
     CatalogError,
     Entry,
     Part,
+    ReportEntry,
     Run,
     annotation,
     check_steps,
@@ -276,6 +277,82 @@ def test_an_incomplete_explanation_is_an_error(
     write(tmp_path, ".github/checks.toml", text)
 
     with pytest.raises(CatalogError, match=re.escape(error)):
+        Catalog.load(tmp_path)
+
+
+def test_the_parts_that_workflows_add_to_the_report(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        ".github/checks.toml",
+        '[report.website-pictures]\ntitle = "Pictures of the website"\n'
+        '[report.card-size]\ntitle = "Not this one"\n',
+    )
+    write(
+        tmp_path,
+        ".github/checks.project.toml",
+        '[report.card-size]\ntitle = """The size\n  of the card"""\nabout = """What '
+        'the card\n  weighs."""\nreplaces = "<!-- card-size -->"\n'
+        '[report.visual]\ntitle = "Visual tests"\n',
+    )
+
+    reports = Catalog.load(tmp_path).reports
+
+    # The project's first, in the order of its catalog, and they win.
+    assert list(reports) == ["card-size", "visual", "website-pictures"]
+    assert reports["card-size"] == ReportEntry(
+        "card-size",
+        "The size of the card",
+        "What the card weighs.",
+        "<!-- card-size -->",
+    )
+    assert reports["visual"] == ReportEntry("visual", "Visual tests")
+    assert Catalog.load(ROOT).reports == {}
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ("report = 1\n", "report is no table of tables"),
+        ("[report]\nsize = 1\n", "[report.'size'] is no table"),
+        ('[report.Size]\ntitle = "T"\n', "needs a name of lowercase letters"),
+        ('[report.size-]\ntitle = "T"\n', "needs a name of lowercase letters"),
+        (f'[report.{"a" * 41}]\ntitle = "T"\n', "needs a name of lowercase letters"),
+        ('[report.size]\ntitle = "T"\ncolor = 1\n', "has unknown keys: color"),
+        ('[report.size]\ntitle = " "\n', "needs the text title"),
+        ("[report.size]\nabout = 'A'\n", "needs the text title"),
+        ('[report.size]\ntitle = "T"\nabout = 1\n', "has an about that is no text"),
+        ('[report.size]\ntitle = "T"\nreplaces = 1\n', "replaces no marker"),
+        ('[report.size]\ntitle = "T"\nreplaces = 0\n', "replaces no marker"),
+        ('[report.size]\ntitle = "T"\nreplaces = "size"\n', "replaces no marker"),
+        (
+            '[report.size]\ntitle = "T"\nreplaces = "<!-- a --> @b <!-- c -->"\n',
+            "replaces no marker",
+        ),
+        ('[report.size]\ntitle = "T"\nreplaces = "<!-- a --> b -->"\n', "no marker"),
+        ('[report.size]\ntitle = "T"\nreplaces = "<!-- -->"\n', "replaces no marker"),
+        ('[report.size]\ntitle = "T"\nreplaces = "<!--  -->"\n', "replaces no marker"),
+        # The coach's own, which would delete its comment once it wrote it.
+        (f'[report.size]\ntitle = "T"\nreplaces = "{MARKER}"\n', "replaces no marker"),
+    ],
+)
+def test_an_incomplete_part_of_the_report_is_an_error(
+    tmp_path: Path, text: str, error: str
+) -> None:
+    write(tmp_path, ".github/checks.project.toml", text)
+
+    with pytest.raises(CatalogError, match=re.escape(error)):
+        Catalog.load(tmp_path)
+
+
+def test_more_parts_of_the_report_than_the_coach_shows_are_an_error(
+    tmp_path: Path,
+) -> None:
+    # Those of the blueprint come last; none goes unseen without a word.
+    write(tmp_path, ".github/checks.toml", '[report.five]\ntitle = "5"\n')
+    tables = "".join(f'[report.p{n}]\ntitle = "{n}"\n' for n in range(4))
+    write(tmp_path, ".github/checks.project.toml", tables)
+
+    with pytest.raises(CatalogError, match=r"declare 5 parts of the report"):
         Catalog.load(tmp_path)
 
 
@@ -866,6 +943,10 @@ class FakeGitHub:
         # The files of the pull request, and the artifacts of the repository.
         self.files: list[dict[str, Any]] = []
         self.artifacts: list[dict[str, Any]] = []
+        # The report.md of each artifact pr-report-* that a workflow kept for the head,
+        # by its name, and the runs of gh that downloaded one.
+        self.reports: dict[str, str] = {}
+        self.downloads: list[str] = []
         # The head of the pull request, a commit of a person.
         self.commit: dict[str, Any] = {
             "commit": {"message": "Add a feature"},
@@ -880,6 +961,8 @@ class FakeGitHub:
     def __call__(
         self, arguments: Sequence[str], body: str | None
     ) -> subprocess.CompletedProcess[str]:
+        if list(arguments[:2]) == ["run", "download"]:
+            return self.download(list(arguments))
         method, path = arguments[3], arguments[4]
         self.calls.append((method, path))
         local = path.removeprefix(f"repos/{REPO}/")
@@ -887,6 +970,14 @@ class FakeGitHub:
         return subprocess.CompletedProcess(
             arguments, 0, f"HTTP/2.0 {status} X\r\nA: b\r\n\r\n{json.dumps(data)}", ""
         )
+
+    def download(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+        """gh run download: the report.md of the artifact into the folder of --dir."""
+        name = arguments[arguments.index("--name") + 1]
+        folder = Path(arguments[arguments.index("--dir") + 1])
+        self.downloads.append(" ".join([*arguments[:5], "--name", name]))
+        (folder / "report.md").write_text(self.reports[name], encoding="utf-8")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
 
     def page(self, items: list[Any], size: str, number: str) -> list[Any]:
         start = (int(number) - 1) * int(size)
@@ -916,6 +1007,13 @@ class FakeGitHub:
             return 200, self.page(self.files, *found.groups())
         if path == "actions/artifacts?name=website&per_page=100":
             return 200, {"artifacts": self.artifacts}
+        if found := re.fullmatch(
+            r"actions/artifacts\?name=(pr-report-[a-z-]+)&.*", path
+        ):
+            kept = found[1] in self.reports
+            run = {"id": 30, "head_sha": SHA}
+            artifact = {"id": 31, "size_in_bytes": 400, "workflow_run": run}
+            return 200, {"artifacts": [artifact] if kept else []}
         if method == "DELETE" and (
             found := re.fullmatch(r"issues/comments/(\d+)", path)
         ):
@@ -1525,6 +1623,29 @@ def test_the_comment_of_the_coverage_bot_goes_without_a_report(author: str) -> N
     assert [comment["id"] for comment in github.comments] == [701]
 
 
+def test_a_part_that_finds_no_room_replaces_no_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The old comment of a workflow stays until the report shows what it said.
+    monkeypatch.setattr(blueprint.coach, "BODY_LENGTH", 3000)
+    github = FakeGitHub()
+    github.finish()
+    old = {"id": 700, "user": {"login": BOT}, "body": "<!-- size -->\nold"}
+    github.comments = [old]
+    parts = [
+        Part("#### Big\n\n" + "x" * 2900, news=True),
+        Part("#### Size\n\nGrows.", news=True, replaces="<!-- size -->"),
+    ]
+
+    run_report(github, 42, lambda pull: parts)
+
+    body = str(github.comments[-1]["body"])
+    assert "#### Big" in body
+    assert "#### Size" not in body
+    assert "… and 1 more part." in body
+    assert github.writes() == [("POST", f"repos/{REPO}/issues/42/comments")]
+
+
 def test_the_parts_keep_their_place_in_a_long_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1647,6 +1768,25 @@ def test_a_long_report_stays_within_what_github_takes(
     assert re.search(r"… and \d more; their logs say what they found\.", body)
 
 
+@pytest.mark.parametrize(("count", "more"), [(3, "1 more part"), (4, "2 more parts")])
+def test_the_parts_that_one_comment_cannot_hold_are_counted(
+    monkeypatch: pytest.MonkeyPatch, count: int, more: str
+) -> None:
+    # However many parts the workflows of a project add, the comment fits.
+    monkeypatch.setattr(blueprint.coach, "BODY_LENGTH", 3000)
+    github = FakeGitHub()
+    github.finish()
+    parts = [Part(f"#### Part {n}\n\n" + "x" * 1200, news=True) for n in range(count)]
+
+    run_report(github, 42, lambda pull: parts)
+
+    body = body_of(github)
+    assert len(body) < 3000
+    assert "#### Part 1\n" in body
+    assert "#### Part 2\n" not in body
+    assert f"\n… and {more}.\n\n<sub>For " in body
+
+
 def test_report_from_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
     api = Api(runner=FakeGitHub())
     command = ["--repo", REPO, "coach", "report", SHA, "--pull"]
@@ -1690,6 +1830,40 @@ def test_report_from_the_command_line_with_its_parts(tmp_path: Path) -> None:
         "- [`docs/guide.md`](https://dennis-otto.github.io/repo-blueprint/guide/)"
         in body
     )
+
+
+def test_report_from_the_command_line_with_the_parts_of_workflows(
+    tmp_path: Path,
+) -> None:
+    # The catalog of the default branch declares the parts; a workflow kept the
+    # artifact of one of them for the head, the other one hasn't run.
+    write(
+        tmp_path,
+        ".github/checks.project.toml",
+        '[report.card-size]\ntitle = "The size of the card"\n'
+        'replaces = "<!-- card-size -->"\n[report.visual]\ntitle = "Visual tests"\n',
+    )
+    github = FakeGitHub()
+    github.finish()
+    github.reports["pr-report-card-size"] = "| File | Size |\n| --- | ---: |\n| a | 9 |"
+    old = {"id": 800, "user": {"login": BOT}, "body": "<!-- card-size -->\nOld"}
+    github.comments.append(old)
+    command = ["--repo", REPO, "coach", "report", SHA, "--pull", "42"]
+
+    assert cli.main(command, api=Api(runner=github), root=tmp_path) == 0
+
+    body = body_of(github)
+    assert (
+        "#### The size of the card\n\n| `File` | `Size` |\n| --- | ---: |\n"
+        "| `a` | `9` |\n\n<sub>From the artifact [`pr-report-card-size`]"
+        f"(https://github.com/{REPO}/actions/runs/30/artifacts/31).</sub>"
+    ) in body
+    assert "Visual tests" not in body
+    assert github.downloads == [
+        f"run download 30 --repo {REPO} --name pr-report-card-size"
+    ]
+    # The old comment of the workflow is gone: the part says what it said.
+    assert ("DELETE", f"repos/{REPO}/issues/comments/800") in github.writes()
 
 
 @pytest.mark.parametrize(
