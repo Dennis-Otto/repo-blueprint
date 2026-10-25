@@ -99,7 +99,7 @@ The Client ID of the settings app, an optional second GitHub App of the owner wi
 
 What the workflows say of it:
 
-- `settings.yml`: Every week, and after each change of the settings as code or of its own code, it brings the settings of the repository on GitHub in line with .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as the settings app, a second GitHub App of the owner that only administers, once the variable `SETTINGS_APP_CLIENT_ID` and the secret SETTINGS\_APP\_PRIVATE\_KEY name it, and as the release app until then, which may write the administration of the repository as well.
+- `settings.yml`: Every week, and after each change of the settings as code or of its own code, it brings the settings of the repository on GitHub in line with .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as the settings app, a second GitHub App of the owner that only administers, once the variable `SETTINGS_APP_CLIENT_ID` and the secret SETTINGS\_APP\_PRIVATE\_KEY name it, and as the release app until then, with a token that may write the administration of the repository but neither its code nor its workflows.
 
 ### `UPSTREAM_AUTOMERGE`
 
@@ -201,4 +201,4 @@ The private key of the settings app, the file that its settings page generates. 
 
 What the workflows say of it:
 
-- `settings.yml`: Every week, and after each change of the settings as code or of its own code, it brings the settings of the repository on GitHub in line with .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as the settings app, a second GitHub App of the owner that only administers, once the variable SETTINGS\_APP\_CLIENT\_ID and the secret `SETTINGS_APP_PRIVATE_KEY` name it, and as the release app until then, which may write the administration of the repository as well.
+- `settings.yml`: Every week, and after each change of the settings as code or of its own code, it brings the settings of the repository on GitHub in line with .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as the settings app, a second GitHub App of the owner that only administers, once the variable SETTINGS\_APP\_CLIENT\_ID and the secret `SETTINGS_APP_PRIVATE_KEY` name it, and as the release app until then, with a token that may write the administration of the repository but neither its code nor its workflows.

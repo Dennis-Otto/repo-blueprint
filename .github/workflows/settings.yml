@@ -5,10 +5,10 @@ name: Settings
 # .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as
 # the settings app, a second GitHub App of the owner that only administers, once the
 # variable SETTINGS_APP_CLIENT_ID and the secret SETTINGS_APP_PRIVATE_KEY name it, and
-# as the release app until then, which may write the administration of the repository
-# as well. What the API can't set, such as the value of a secret, and what GitHub
-# refused fail the run and show in its summary, with the command that sets it or the
-# permission that the app lacks.
+# as the release app until then, with a token that may write the administration of the
+# repository but neither its code nor its workflows. What the API can't set, such as the
+# value of a secret, and what GitHub refused fail the run and show in its summary, with
+# the command that sets it or the permission that the app lacks.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -139,29 +139,66 @@ jobs:
           if [[ "$REQUIRED" == true ]]; then
             exit 1
           fi
-      # The settings app has only the permissions that the settings need, so its token
-      # has all of them, for this repository alone, and zizmor accepts that it asks for
-      # none by name: the token action can't ask for the Variables permission, which
-      # the settings write.
+      # Only what settings apply needs, by GitHub's names: it writes the administration,
+      # the variables, the labels and the website, and reads the environments, the names
+      # of their secrets and the files of the community standards. The token can't
+      # push a commit or change a workflow, and it is for this repository alone. The
+      # settings app, once it is set up, gets the same request as the release app.
       - name: Create a token of the settings app
         id: settings-token
         if: steps.settings-app.outputs.ready == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0 # zizmor: ignore[github-app]
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        env:
+          # The action has no input for Variables, which GitHub calls actions_variables,
+          # and takes every INPUT_PERMISSION-* of its environment, as the runner passes
+          # an input; an input that the action doesn't name would warn in every run.
+          INPUT_PERMISSION-ACTIONS-VARIABLES: write
         with:
           client-id: ${{ vars.SETTINGS_APP_CLIENT_ID }}
           private-key: ${{ secrets.SETTINGS_APP_PRIVATE_KEY }}
-      # The token action can't ask for the Variables permission alone, so this token
-      # has all permissions of the installation; the job only changes the settings.
+          permission-administration: write
+          permission-issues: write
+          permission-pages: write
+          permission-actions: read
+          permission-contents: read
+          permission-environments: read
       - name: Create a token of the release app
         id: app
         if: steps.release-app.outputs.ready == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        env:
+          # The action has no input for Variables, which GitHub calls actions_variables,
+          # and takes every INPUT_PERMISSION-* of its environment, as the runner passes
+          # an input; an input that the action doesn't name would warn in every run.
+          INPUT_PERMISSION-ACTIONS-VARIABLES: write
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          permission-administration: write
+          permission-issues: write
+          permission-pages: write
+          permission-actions: read
+          permission-contents: read
+          permission-environments: read
+      # GitHub refuses the whole token when the app lacks one of the permissions that
+      # it asks for, as an app registered before the bot asked for it does; a wrong
+      # key, a missing installation or an outage fail the step too.
+      - name: Explain a refused token
+        if: failure() && steps.app.outcome == 'failure'
+        run: |
+          echo "::error::GitHub refused a token of the release app for the settings bot, most often because the app lacks one of the permissions that the bot asks for; the summary of the run names them and the other causes."
+          {
+            echo "### The release app refused the token of the settings bot"
+            echo
+            echo "The settings bot asks the release app for a token with only the permissions that it needs: *Administration*, *Issues*, *Pages* and *Variables* (read and write), and *Actions*, *Contents* and *Environments* (read). GitHub refuses the token when the app lacks one of them, and the log of the step *Create a token of the release app* has its answer. No setting has changed."
+            echo
+            echo "Most often the app lacks one of them: grant the missing permissions on the settings page of the app, under *Permissions & events*, accept them on the installation of the app, and run the workflow *Settings* again."
+            echo
+            echo "Other causes, when the app has every permission: a private key in the secret RELEASE_AUTOMATION_PRIVATE_KEY that doesn't belong to the app named by the variable RELEASE_AUTOMATION_CLIENT_ID (generate a new key of that app and store it), an app that isn't installed on this repository (add the repository to its installation), or an outage of GitHub (run the workflow again)."
+          } >> "$GITHUB_STEP_SUMMARY"
       # GitHub refuses the token of an app that is not installed on the repository or
-      # lacks a permission; the bot falls back on nothing, so that a settings app with
-      # too little shows rather than a release app that should have less.
+      # lacks one of the permissions; the bot falls back on nothing, so that a settings
+      # app with too little shows rather than a release app that should have less.
       - name: Explain a refused token of the settings app
         if: failure() && steps.settings-token.outcome == 'failure'
         run: |
@@ -169,9 +206,9 @@ jobs:
           {
             echo "### GitHub refused a token of the settings app"
             echo
-            echo "The variable SETTINGS_APP_CLIENT_ID and the secret SETTINGS_APP_PRIVATE_KEY of the environment release name a settings app, but GitHub refused its token, and the log of the step *Create a token of the settings app* has its answer. No setting has changed."
+            echo "The variable SETTINGS_APP_CLIENT_ID and the secret SETTINGS_APP_PRIVATE_KEY of the environment release name a settings app, but GitHub refused its token, and the log of the step *Create a token of the settings app* has its answer. The bot asks it for the permissions that the settings need: *Administration*, *Issues*, *Pages* and *Variables* (read and write), and *Actions*, *Contents* and *Environments* (read). No setting has changed."
             echo
-            echo "Install the app on this repository, with the permissions that [the settings app](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md#8-the-settings-app-optional) lists, accept new permissions on its installation, and run the workflow *Settings* again. Without the variable SETTINGS_APP_CLIENT_ID, the release app applies the settings again, as long as it still has their permissions."
+            echo "Grant the app the permissions that it lacks, as [the settings app](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md#8-the-settings-app-optional) lists them, accept them on its installation, install it on this repository if it is not, check that the secret holds a key of the app that the variable names, and run the workflow *Settings* again. Without the variable SETTINGS_APP_CLIENT_ID, the release app applies the settings again, as long as it still has their permissions."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Apply the settings as code
         env:

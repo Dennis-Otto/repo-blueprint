@@ -107,7 +107,7 @@ The release app can do everything that the bots need, the administration of each
 
 Without the settings app, everything works as before: the release app applies the settings, and an update that brings a new action waits for `settings apply` from its branch. With only the variable or only the secret set, both bots warn and go on with the release app.
 
-1. **Register the app** on your account, with its permissions filled in and without a webhook, at [this link](https://github.com/settings/apps/new?description=Applies+the+settings+as+code+of+the+repositories+made+from+Repo+Blueprint.&public=false&webhook_active=false&administration=write&issues=write&pages=write&actions=read&contents=read&environments=read&secrets=read), or for an organization at the same address under `https://github.com/organizations/ORG/settings/apps/new`. Name it, such as `octo-org-settings`, and give it these repository permissions, and no others:
+1. **Register the app** on your account, with its permissions filled in and without a webhook, at [this link](https://github.com/settings/apps/new?description=Applies+the+settings+as+code+of+the+repositories+made+from+Repo+Blueprint.&public=false&webhook_active=false&administration=write&issues=write&pages=write&actions=read&contents=read&environments=read), or for an organization at the same address under `https://github.com/organizations/ORG/settings/apps/new`. Name it, such as `octo-org-settings`, and give it these repository permissions, and no others:
 
     | Permission | Access | What for |
     | --- | --- | --- |
@@ -117,8 +117,7 @@ Without the settings app, everything works as before: the release app applies th
     | Variables | Read and write | the variables of `[variables]`; set it by hand, the link can't |
     | Actions | Read-only | the settings of the workflows |
     | Contents | Read-only | the files of the community profile |
-    | Environments | Read-only | the environments and their branch rules |
-    | Secrets | Read-only | the names of the secrets that an environment needs, never their values |
+    | Environments | Read-only | the environments, their branch rules and the names of their secrets, never their values |
     | Metadata | Read-only | which GitHub asks for itself |
 
     Leave *Where can this GitHub App be installed?* at *Only on this account*, and create the app.
