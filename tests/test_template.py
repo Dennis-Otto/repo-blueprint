@@ -10011,6 +10011,54 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
     assert not any("actions/runs/1/" in call for call in calls)
 
 
+@WITH_JQ
+def test_the_flaky_test_bot_compares_with_the_run_before_a_superseded_one(
+    tmp_path: Path,
+) -> None:
+    # A newer push cancelled the run for the commit before, so the run before that
+    # tells whether the failure is a real one: it broke the same job.
+    runs = runs_of_the_branch(2, 1)
+    runs["workflow_runs"][-2]["conclusion"] = "cancelled"  # type: ignore[index]
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs,
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "cancelled"),
+                job_of_a_run(22, "test (3.13)", "cancelled"),
+            ]
+        },
+        "repos/o/r/check-runs/21/annotations": annotations_of_a_job(RACED),
+        "repos/o/r/actions/runs/1/jobs": {
+            "jobs": [
+                job_of_a_run(31, "test (3.12)", "failure"),
+                job_of_a_run(32, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" not in calls
+    assert "broke for the commit before" in summary
+    assert any(call.startswith("api repos/o/r/actions/runs/1/jobs ") for call in calls)
+
+
 def variants_of_a_run(
     jobs: str, leg: str, messages: tuple[str, ...], first: int
 ) -> dict[str, object]:

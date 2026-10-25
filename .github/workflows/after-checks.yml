@@ -163,12 +163,37 @@ jobs:
           fi
           # A failure that the commit before ended with as well is a real one: the same
           # jobs broke in the last attempt of the run for the previous commit of the
-          # branch, after the bot had run them once more. When that can't be read, the
-          # jobs run once more.
-          previous="$(gh api --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
+          # branch, after the bot had run them once more. A run that a newer push
+          # cancelled ran too little to tell, so the run before it counts. When that
+          # can't be read, the jobs run once more.
+          superseded() {
+            local ids id messages
+            ids="$(gh api "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "cancelled") | .id')" || return 1
+            while read -r -u 5 id; do
+              if [[ -z "$id" ]]; then
+                continue
+              fi
+              messages="$(gh api "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
+                return 1
+              if grep -q "higher priority waiting request" <<<"$messages"; then
+                return 0
+              fi
+            done 5<<<"$ids"
+            return 1
+          }
+          candidates="$(gh api --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
             -f branch="$BRANCH" -f event="$EVENT" -f status=completed -f per_page=30 \
-            --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[0] // empty | [.id, .conclusion] | @tsv" ||
+            --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[:5][] | [.id, .conclusion] | @tsv" ||
             true)"
+          previous=""
+          while IFS=$'\t' read -r -u 6 id conclusion; do
+            if [[ -z "$id" ]] || { [[ "$conclusion" == cancelled ]] && superseded "$id"; }; then
+              continue
+            fi
+            previous="$id"$'\t'"$conclusion"
+            break
+          done 6<<<"$candidates"
           if [[ -n "$previous" ]] &&
             [[ "$(broken "${previous%%$'\t'*}" "${previous#*$'\t'}" "$now" | sort)" == "$(sort <<<"$now")" ]]; then
             mapfile -t jobs <<<"$now"
