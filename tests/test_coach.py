@@ -341,6 +341,18 @@ def test_an_incomplete_part_of_the_report_is_an_error(
         Catalog.load(tmp_path)
 
 
+def test_more_parts_of_the_report_than_the_coach_shows_are_an_error(
+    tmp_path: Path,
+) -> None:
+    # Those of the blueprint come last; none goes unseen without a word.
+    write(tmp_path, ".github/checks.toml", '[report.five]\ntitle = "5"\n')
+    tables = "".join(f'[report.p{n}]\ntitle = "{n}"\n' for n in range(4))
+    write(tmp_path, ".github/checks.project.toml", tables)
+
+    with pytest.raises(CatalogError, match=r"declare 5 parts of the report"):
+        Catalog.load(tmp_path)
+
+
 def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
     explained = catalog()
 
@@ -1606,6 +1618,29 @@ def test_the_comment_of_the_coverage_bot_goes_without_a_report(author: str) -> N
 
     assert github.writes() == [("DELETE", f"repos/{REPO}/issues/comments/700")]
     assert [comment["id"] for comment in github.comments] == [701]
+
+
+def test_a_part_that_finds_no_room_replaces_no_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The old comment of a workflow stays until the report shows what it said.
+    monkeypatch.setattr(blueprint.coach, "BODY_LENGTH", 3000)
+    github = FakeGitHub()
+    github.finish()
+    old = {"id": 700, "user": {"login": BOT}, "body": "<!-- size -->\nold"}
+    github.comments = [old]
+    parts = [
+        Part("#### Big\n\n" + "x" * 2900, news=True),
+        Part("#### Size\n\nGrows.", news=True, replaces="<!-- size -->"),
+    ]
+
+    run_report(github, 42, lambda pull: parts)
+
+    body = str(github.comments[-1]["body"])
+    assert "#### Big" in body
+    assert "#### Size" not in body
+    assert "… and 1 more part." in body
+    assert github.writes() == [("POST", f"repos/{REPO}/issues/42/comments")]
 
 
 def test_the_parts_keep_their_place_in_a_long_report(

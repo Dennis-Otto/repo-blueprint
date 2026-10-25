@@ -199,6 +199,12 @@ def parse_autofix(value: Json, where: str) -> tuple[tuple[str, ...], str]:
     )
 
 
+# How many parts of the report the workflows may declare, in both catalogs together:
+# the coach asks for the artifact of each one, and the comment holds so many beside the
+# others.
+MOST_REPORTS = 4
+
+
 @dataclass(frozen=True)
 class ReportEntry:
     """A part of the report that a workflow adds, such as the size of a module or the
@@ -282,6 +288,11 @@ class Catalog:
                     entries.setdefault(key, entry)
             for key, table in tables_of(data, "report", source).items():
                 reports.setdefault(key, ReportEntry.parse(key, table, source))
+        if len(reports) > MOST_REPORTS:
+            raise CatalogError(
+                f"The catalogs declare {len(reports)} parts of the report, more than "
+                f"the {MOST_REPORTS} that the PR coach shows: [report.*]"
+            )
         return cls(checks, steps, reports)
 
     def check(self, name: str) -> Entry | None:
@@ -898,7 +909,8 @@ def report(
     else:
         api.patch(f"repos/{repo}/issues/comments/{comment['id']}", {"body": body})
         said = f"The report of #{number}, updated:\n\n{body}"
-    retire(api, repo, comments, parts)
+    # A part that found no room in the comment replaces no older one yet.
+    retire(api, repo, comments, [part for part in parts if part.text.rstrip() in body])
     return said
 
 

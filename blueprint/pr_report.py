@@ -25,6 +25,7 @@ from typing import Any
 
 from blueprint.coach import (
     CONTROL,
+    MOST_REPORTS,
     PAGE,
     TYPES,
     Part,
@@ -73,12 +74,11 @@ WEBSITE_ARTIFACT = "website"
 REPORT_ARTIFACT = "pr-report-"
 REPORT_FILE = "report.md"
 QUIET = "<!-- quiet -->"
-# What the coach takes of the parts of the workflows at most: so many parts, each
+# What the coach takes of the parts of the workflows at most (MOST_REPORTS parts): each
 # artifact so large as GitHub keeps it zipped, so much of its report.md, so long a
 # part, so many rows and columns of a table, so long a cell, paragraph or line of code,
 # and so many lines of a block of code: the longest table and block of code fit into a
 # part, and the parts into the comment beside the others.
-MOST_REPORTS = 4
 REPORT_BYTES = 256 * 1024
 REPORT_TEXT = 64 * 1024
 REPORT_LENGTH = 8000
@@ -465,6 +465,9 @@ TABLE_ROW = re.compile(r" {0,3}\|.*\|")
 TABLE_DELIMITER = re.compile(r" {0,3}\|(?: *:?-+:? *\|)+")
 LIST_ITEM = re.compile(r"( *)(?:[-*+]|\d{1,9}[.)]) +(\S.*)")
 HEADING = re.compile(r" {0,3}#{1,6} +(.*)")
+# The languages of a block of code that GitHub draws as a diagram, a map, a model or a
+# formula instead of showing it as code; such a block of a part shows without one.
+DRAWN = frozenset({"mermaid", "geojson", "topojson", "stl", "math"})
 
 
 @dataclass
@@ -600,6 +603,7 @@ def table_lines(block: Block) -> list[str]:
 def code_lines(block: Block) -> list[str]:
     """A block of code that none of its lines can close, so many lines at most."""
     language, lines = block.lines[0], block.lines[1:]
+    language = "" if language.lower() in DRAWN else language
     shown_lines = [line[:CODE_WIDTH] for line in lines[:CODE_LINES]]
     more = len(lines) - len(shown_lines)
     return [
@@ -616,7 +620,7 @@ def shown_block(block: Block) -> str:
         return "\n".join(table_lines(block))
     text = code(" ".join(block.lines), PARAGRAPH_LENGTH)
     if block.kind == "item":
-        return "  " * min(block.depth, 2) + "- " + text
+        return "  " * block.depth + "- " + text
     if block.kind == "heading":
         return f"**{text}**"
     return text
@@ -628,7 +632,13 @@ def shown_report(text: str) -> tuple[str, bool]:
     begins no block."""
     shown_text = ""
     previous = ""
+    depth = 0
     for block in blocks_of(text):
+        if block.kind == "item":
+            # At most one deeper than the item before it, and none deep after anything
+            # else, which GitHub would show indented as code instead of as an item.
+            deepest = depth + 1 if previous == "item" else 0
+            depth = block.depth = min(block.depth, deepest, 2)
         rendered = shown_block(block)
         # Items next to each other stay one list.
         gap = "\n" if previous == block.kind == "item" else "\n\n"
@@ -652,7 +662,8 @@ def read_report(api: Api, repo: str, name: str, artifact: Artifact) -> str | Non
             return None
         with path.open("rb") as file:
             data = file.read(REPORT_TEXT)
-    return data.decode("utf-8", errors="replace")
+    # Without the byte order mark that some editors write, so QUIET stays first.
+    return data.decode("utf-8-sig", errors="replace")
 
 
 def workflow_part(
@@ -666,7 +677,8 @@ def workflow_part(
     lines = [f"#### {entry.title}", ""]
     if entry.about:
         lines += [entry.about, ""]
-    news = True
+    # The older comment stays until the part shows what it said.
+    news, replaces = True, ""
     if artifact.size > REPORT_BYTES:
         lines.append(
             f"The artifact {link} is {artifact.size // 1024} kB, more than the "
@@ -687,8 +699,9 @@ def workflow_part(
             return None
         shown_text = shown_text or f"Its `{REPORT_FILE}` begins with too much to show."
         held = ", which holds more" if more else ""
+        replaces = entry.replaces
         lines += [shown_text, "", f"<sub>From the artifact {link}{held}.</sub>"]
-    return Part("\n".join(lines), news=news, replaces=entry.replaces)
+    return Part("\n".join(lines), news=news, replaces=replaces)
 
 
 def workflow_parts(

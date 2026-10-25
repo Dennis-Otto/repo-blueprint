@@ -18,15 +18,15 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blueprint.coach import ReportEntry
+from blueprint.coach import MOST_REPORTS, ReportEntry
 from blueprint.coverage_comment import COVERAGE_MARKER, Coverage
 from blueprint.github import Api
 from blueprint.pr_report import (
     CODE_LINES,
     CODE_WIDTH,
+    DRAWN,
     ENTRY_LINES,
     MOST_PAGES,
-    MOST_REPORTS,
     QUIET,
     REPORT_BYTES,
     REPORT_LENGTH,
@@ -687,6 +687,12 @@ def test_the_markdown_of_a_part_shows_as_data() -> None:
             "# C#\n```a```\n\n~~~ py `x`\ny",
             "**`C#`**\n\n```` ```a``` ````\n\n```py\ny\n```",
         ),
+        # A block that GitHub would draw as a diagram or a map shows as code.
+        ("```mermaid\nflowchart TB\n```", "```\nflowchart TB\n```"),
+        ("~~~ GeoJSON\n{}\n~~~", "```\n{}\n```"),
+        # An item deeper than the one before it, or than none, as GitHub nests it.
+        ("para\n    - deep", "`para`\n\n- `deep`"),
+        ("- a\n      - c\n  - b", "- `a`\n  - `c`\n  - `b`"),
     ],
 )
 def test_the_blocks_of_a_part(text: str, shown: str) -> None:
@@ -767,8 +773,9 @@ def assert_data(text: str) -> None:
     index = 0
     while index < len(lines):
         line = lines[index]
-        opening = re.fullmatch(r"(`{3,})[A-Za-z0-9+-]*", line)
+        opening = re.fullmatch(r"(`{3,})([A-Za-z0-9+-]*)", line)
         if opening:
+            assert opening[2].lower() not in DRAWN, line
             end = lines.index(opening[1], index + 1)
             assert not any(opening[1] in inner for inner in lines[index + 1 : end])
             index = end + 1
@@ -801,6 +808,8 @@ MARKDOWN = st.sampled_from(
         "```",
         "~~~",
         "````py",
+        "```mermaid",
+        "~~~ math",
         "- item",
         "    * deep",
         "# head",
@@ -855,8 +864,10 @@ def test_a_part_that_holds_more_says_so() -> None:
 
 
 def test_a_part_that_the_coach_cannot_read() -> None:
-    large = workflow_part(CARD, REPO, Artifact(12, 3, REPORT_BYTES + 2048), None)
-    unread = workflow_part(CARD, REPO, Artifact(12, 3, 10), None)
+    # Neither says what an older comment of its workflow said, which therefore stays.
+    card = ReportEntry("card-size", "The size of the card", replaces="<!-- size -->")
+    large = workflow_part(card, REPO, Artifact(12, 3, REPORT_BYTES + 2048), None)
+    unread = workflow_part(card, REPO, Artifact(12, 3, 10), None)
 
     assert large is not None
     assert large.news
@@ -868,6 +879,7 @@ def test_a_part_that_the_coach_cannot_read() -> None:
     assert unread is not None
     assert not unread.news
     assert "couldn't read `report.md` of the artifact" in unread.text
+    assert large.replaces == unread.replaces == ""
 
 
 def test_the_report_of_an_artifact() -> None:
@@ -881,6 +893,19 @@ def test_the_report_of_an_artifact() -> None:
     assert text.startswith("Größer\N{REPLACEMENT CHARACTER}x")
     assert len(text.encode()) == REPORT_TEXT + 2
     assert api.asked == [f"run download 12 --repo {REPO} --name {name}"]
+
+
+def test_a_report_after_a_byte_order_mark_is_still_quiet() -> None:
+    # Some editors on Windows begin a file of UTF-8 with one.
+    name = "pr-report-card-size"
+    downloads = {name: {"report.md": f"\ufeff{QUIET}\nThe same.".encode()}}
+
+    text = read_report(Api(runner=FakeApi({}, downloads)), REPO, name, Artifact(12, 3))
+
+    assert text == f"{QUIET}\nThe same."
+    part = workflow_part(CARD, REPO, Artifact(12, 3), text)
+    assert part is not None
+    assert not part.news
 
 
 @pytest.mark.parametrize(
@@ -931,7 +956,7 @@ def test_the_parts_of_the_workflows_of_a_pull_request() -> None:
     parts = workflow_parts(Api(runner=api), REPO, SHA, entries)
 
     # p0 has its report, p1 is too large to download, p2 couldn't be downloaded, p3
-    # says nothing, p4 kept no artifact, and p5 is one part too many.
+    # says nothing, p4 kept no artifact, and p5 is one more than a catalog may declare.
     assert [part.text.split("\n", 1)[0] for part in parts] == [
         "#### Part 0",
         "#### Part 1",
