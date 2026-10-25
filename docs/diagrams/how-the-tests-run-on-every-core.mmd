@@ -5,11 +5,11 @@ config:
 ---
 flowchart TB
     accTitle: How the tests run on every core
-    accDescr: scripts/check.sh asks the Python of the project for pytest-xdist and pytest-cov. With both, pytest starts a process for each core, which share the tests between them, and pytest-cov brings the coverage of every process together. Without them, coverage runs the tests one after the other. Either way, coverage report applies the settings of the project, such as fail_under, and lists every line that no test runs.
+    accDescr: scripts/check.sh asks the Python of the project for pytest-xdist and pytest-cov. With both, pytest starts a process for each logical core, at most eight unless PYTEST_XDIST_AUTO_NUM_WORKERS sets another number, which share the tests between them, and pytest-cov brings the coverage of every process together. Without them, coverage runs the tests one after the other. Either way, coverage report applies the settings of the project, such as fail_under, and lists every line that no test runs.
 
     check["scripts/check.sh<br>step Tests, with every line and branch covered"]
     ask{"pytest-xdist and pytest-cov<br>installed?"}
-    workers["python -m pytest -n auto --cov<br>a process for each core"]
+    workers["python -m pytest -n logical --cov<br>a process for each logical core, at most eight"]
     combine["pytest-cov brings the coverage<br>of every process together"]
     serial["coverage run -m pytest<br>one test after the other"]
     report["coverage report<br>fail_under and the missing lines of the project"]
