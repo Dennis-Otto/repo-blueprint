@@ -13202,6 +13202,334 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     )
 
 
+# What HACS reads of an integration: hacs.json at the tag, which names the zip of the
+# release, and the manifest.json at the root of that zip, by the name of its folder.
+HACS_JSON = {"name": "Demo", "zip_release": True, "filename": "demo.zip"}
+HACS_MANIFEST = {"domain": "demo", "name": "Démo", "version": "1.2.3"}
+# The gitsign that the stand-in for curl downloads: it verifies every tag.
+GITSIGN = b"#!/usr/bin/env bash\nexit 0\n"
+PYTHON3 = f'exec "{Path(sys.executable).as_posix()}" "$@"\n'
+
+
+def verify_a_hacs_release(
+    tmp_path: Path,
+    *,
+    tag: str = "v1.2.3",
+    prerelease: bool = False,
+    latest: str = "v1.2.3",
+    hacs: Mapping[str, object] = HACS_JSON,
+    manifest: Mapping[str, str] | None = None,
+    zipped: dict[str, str] | None = None,
+    zip_name: str = "demo.zip",
+) -> workflow_steps.StepResult:
+    """Runs the verification of a release of the integration demo, delivered to HACS,
+    with gh, git and curl as stand-ins: everything verifies, but for what the test
+    changes, such as the manifest.json in the zip or the files of the zip."""
+    version = tag.removeprefix("v")
+    assets = tmp_path / "runner/assets"
+    assets.mkdir(parents=True)
+    attached = {
+        "r.spdx.json": {
+            "packages": [{"SPDXID": "SPDXRef-r", "name": "r", "versionInfo": version}],
+            "relationships": [
+                {
+                    "spdxElementId": "SPDXRef-DOCUMENT",
+                    "relationshipType": "DESCRIBES",
+                    "relatedSpdxElement": "SPDXRef-r",
+                }
+            ],
+        },
+        "r.cdx.json": {"metadata": {"component": {"name": "r", "version": version}}},
+        "provenance.sigstore.json": {"dsseEnvelope": {}},
+    }
+    for name, content in attached.items():
+        (assets / name).write_text(json.dumps(content), encoding="utf-8")
+    written = json.dumps(HACS_MANIFEST | {"version": version} | dict(manifest or {}))
+    archive(
+        assets / zip_name,
+        {"manifest.json": written, "sensor.py": ""} if zipped is None else zipped,
+    )
+    gitsign = tmp_path / "gitsign"
+    gitsign.write_bytes(GITSIGN)
+    release = {
+        "tag_name": tag,
+        "immutable": True,
+        "prerelease": prerelease,
+        "assets": [{"name": "provenance.sigstore.json"}],
+    }
+    sha = "1" * 40
+    folders = [{"name": "__init__.py", "type": "file"}, {"name": "demo", "type": "dir"}]
+    return workflow_steps.run_step(
+        tmp_path,
+        "verify-release.yml",
+        "verify",
+        "Verify the release as its users can",
+        answers=[
+            exact(f"api repos/o/r/releases/tags/{tag}", json.dumps(release)),
+            exact(f"api repos/o/r/commits/{tag} --jq .sha", f"{sha}\n"),
+            exact(
+                f"api repos/o/r/commits/{sha} --jq .commit.verification.verified",
+                "true\n",
+            ),
+            exact(f"release download {tag}"),
+            Answer(
+                r"attestation verify \S+ --repo o/r --signer-workflow"
+                r" o/r/\.github/workflows/build-release\.yml"
+                r"( --bundle provenance\.sigstore\.json)?"
+            ),
+            exact(
+                "api -H Accept: application/vnd.github.raw+json"
+                f" repos/o/r/contents/hacs.json?ref={tag}",
+                json.dumps(hacs),
+            ),
+            Answer(
+                re.escape(f"api repos/o/r/contents/custom_components?ref={tag} --jq ")
+                + ".*",
+                json=folders,
+            ),
+            Answer(
+                re.escape("api repos/o/r/releases/latest --jq .tag_name"),
+                json={"tag_name": latest},
+            ),
+        ],
+        env={
+            "TAG": tag,
+            "PUBLISH_TO": "hacs",
+            "WEEKLY": "false",
+            "GITSIGN_SHA256": hashlib.sha256(GITSIGN).hexdigest(),
+        },
+        stubs={
+            "curl": workflow_steps.recording(
+                "curl",
+                "while (($#)); do\n"
+                f'  [[ "$1" != --output ]] || cp "{gitsign.as_posix()}" "$2"\n'
+                "  shift\n"
+                "done",
+            ),
+            # The signed tag of the release, in the repository that git init made.
+            "git": workflow_steps.recording(
+                "git",
+                '[[ "$1" != init ]] || mkdir -p "${@: -1}"\n'
+                '[[ "$*" != *" cat-file -t "* ]] || echo tag',
+            ),
+            "python3": PYTHON3,
+        },
+    )
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("tag", "prerelease", "latest", "offered"),
+    [
+        (
+            "v1.2.3",
+            False,
+            "v1.2.3",
+            "HACS offers v1.2.3 to every user, as the latest release.",
+        ),
+        (
+            "v1.3.0-beta.1",
+            True,
+            "v1.2.3",
+            "HACS offers the prerelease v1.3.0-beta.1 only to those who show its betas.",
+        ),
+        # An older release, verified by hand: 1.10.0 is newer than 1.2.3.
+        (
+            "v1.2.3",
+            False,
+            "v1.10.0",
+            "HACS offers the newer release v1.10.0; v1.2.3 stays for those who choose it.",
+        ),
+    ],
+)
+def test_the_zip_that_hacs_installs_is_verified(
+    tmp_path: Path, tag: str, prerelease: bool, latest: str, offered: str
+) -> None:
+    done = verify_a_hacs_release(
+        tmp_path, tag=tag, prerelease=prerelease, latest=latest
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    version = tag.removeprefix("v")
+    for line in (
+        "demo.zip holds the integration demo at its root,"
+        " as HACS unpacks it into custom_components/demo/.",
+        f"Its manifest.json has the version {version}, which Home Assistant shows.",
+        offered,
+    ):
+        assert f"- ✔ {line}\n" in done.summary, done.summary
+    assert "✘" not in done.summary
+    assert f"The release {tag} verifies." in done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        # The integration one folder too deep, as a zip of its folder would hold it.
+        (
+            {"zipped": {"demo/manifest.json": json.dumps(HACS_MANIFEST)}},
+            "demo.zip has no manifest.json at its root,"
+            " so HACS unpacks the integration one folder too deep.",
+        ),
+        (
+            {"zip_name": "other.zip"},
+            "The release has no demo.zip, the zip that hacs.json names for HACS.",
+        ),
+        (
+            {"hacs": {"name": "Demo", "filename": "demo.zip"}},
+            "hacs.json at v1.2.3 names no zip_release and filename, so HACS installs"
+            " the files of the tag, not the asset with the provenance.",
+        ),
+        (
+            {"manifest": {"version": "1.2.2"}},
+            "The manifest.json of demo.zip has the version 1.2.2, not 1.2.3.",
+        ),
+        (
+            {"manifest": {"domain": "other"}},
+            "The manifest.json of demo.zip has the domain other,"
+            " not that of custom_components/demo/ at v1.2.3.",
+        ),
+        (
+            {"prerelease": True},
+            "v1.2.3 is marked as a prerelease,"
+            " so HACS offers it only to those who show its betas.",
+        ),
+        (
+            {"tag": "v1.3.0-beta.1"},
+            "v1.3.0-beta.1 has the version of a prerelease but isn't marked as one,"
+            " so HACS offers it to every user.",
+        ),
+        (
+            {"latest": "v1.2.2"},
+            "The latest release is v1.2.2, not v1.2.3, so HACS doesn't offer it.",
+        ),
+    ],
+)
+def test_a_zip_that_hacs_would_install_wrong_fails_the_verification(
+    tmp_path: Path, change: dict[str, Any], problem: str
+) -> None:
+    done = verify_a_hacs_release(tmp_path, **change)
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert f"::error::{problem}\n" in done.stdout
+    assert f"- ✘ {problem}\n" in done.summary
+    # The one problem of the release: every other check passes.
+    assert done.summary.count("✘") == 1, done.summary
+    assert "has 1 problem(s)." in done.summary
+
+
+def package_for_hacs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    manifest: dict[str, Any],
+) -> tuple[workflow_steps.StepResult, Path]:
+    """Runs *Package the integration for HACS* of build-release.yml for the version, in
+    a checkout of a tag whose custom_components/demo/ has the manifest, and returns its
+    result and the folder of the assets; tmp_path/made.zip is the folder as git archive
+    zips it."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    checkout = tmp_path / "checkout"
+    for name, text in {
+        "hacs.json": json.dumps(HACS_JSON),
+        "custom_components/demo/manifest.json": (
+            f"{json.dumps(manifest, indent=2, ensure_ascii=False)}\n"
+        ),
+        "custom_components/demo/sensor.py": "VALUE = 1\n",
+        "custom_components/demo/translations/en.json": "{}\n",
+    }.items():
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / name).write_text(text, encoding="utf-8", newline="\n")
+    for arguments in (
+        ["init", "--quiet"],
+        ["add", "--all"],
+        ["-c", "user.name=A", "-c", "user.email=a@example.com", "commit", "-qm", "v"],
+        # The zip of the folder as git archive makes it, for the comparison.
+        [
+            "archive",
+            "--format=zip",
+            "--output=../made.zip",
+            "HEAD:custom_components/demo",
+        ],
+    ):
+        subprocess.run(["git", *arguments], cwd=checkout, check=True)
+    assets = tmp_path / "assets"
+    assets.mkdir()
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        "assets",
+        "Package the integration for HACS",
+        env={"VERSION": version, "ASSETS": assets.as_posix()},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        workspace=checkout,
+    )
+    return done, assets
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "version",
+    [
+        # A release, whose version release-please has written into the manifest.json.
+        "1.2.3",
+        # A beta of main, whose manifest.json still has the version of the last release.
+        "1.3.0-beta.1",
+    ],
+)
+def test_the_zip_for_hacs_has_the_version_of_its_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    done, assets = package_for_hacs(tmp_path, monkeypatch, version, HACS_MANIFEST)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    with (
+        zipfile.ZipFile(tmp_path / "made.zip") as made,
+        zipfile.ZipFile(assets / "demo.zip") as zipped,
+    ):
+        # The files of the folder of the integration at the root of the zip, as git
+        # archive zips them, but for the version of the release in manifest.json.
+        # git archive dates the files of a folder at the time it runs.
+        def entries(found: zipfile.ZipFile) -> list[tuple[object, ...]]:
+            return [
+                (info.filename, info.compress_type, info.external_attr)
+                for info in found.infolist()
+            ]
+
+        assert entries(zipped) == entries(made)
+        for name in made.namelist():
+            if name != "manifest.json":
+                assert zipped.read(name) == made.read(name), name
+        # In the order of its keys and with its letters, as the folder has it.
+        stamped = HACS_MANIFEST | {"version": version}
+        assert zipped.read("manifest.json").decode() == (
+            f"{json.dumps(stamped, indent=2, ensure_ascii=False)}\n"
+        )
+    # A release zips the folder of its tag as it is; a beta, a tree of its own.
+    stamps = version != HACS_MANIFEST["version"]
+    assert (done.runner_temp / "index").is_file() is stamps
+
+
+@WITH_JQ
+def test_a_zip_for_hacs_of_another_domain_fails_before_the_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A manifest.json whose domain isn't that of its folder: Home Assistant wouldn't
+    # load the integration, and a public release couldn't be fixed any more.
+    done, _ = package_for_hacs(
+        tmp_path, monkeypatch, "1.2.3", HACS_MANIFEST | {"domain": "other"}
+    )
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        "::error::The zip for HACS has no manifest.json of demo 1.2.3 at its root.\n"
+        in done.stdout
+    )
+
+
 # Fragments of the changelog: the check of a pull request and the release bot.
 FEATURE_FRAGMENT = "### Features\n\n- **Dark mode:** the settings follow the system.\n"
 FIX_FRAGMENT = "### Bug fixes\n\n- **Token:** stays secret.\n"
