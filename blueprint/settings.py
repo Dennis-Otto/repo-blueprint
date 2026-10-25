@@ -392,8 +392,9 @@ def run_by(
         batch = files[start : start + BATCH]
         query, variables = files_query(batch)
         try:
+            # A query only reads: a gateway that timed out is asked once more.
             answer = api.request(
-                "POST", "graphql", {"query": query, "variables": variables}
+                "POST", "graphql", {"query": query, "variables": variables}, retry=True
             ).data
         except GitHubError as error:
             refused.update(dict.fromkeys(batch, str(error)))

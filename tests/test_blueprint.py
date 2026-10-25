@@ -1737,8 +1737,13 @@ def test_the_lint_passes_when_the_list_allows_every_action_that_runs(
 
 
 def test_the_lint_names_an_unlisted_action_and_an_image_that_a_workflow_runs(
-    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Outside a workflow, also when the tests themselves run in one.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with_selected_actions(root, WORKFLOW + "      - uses: other/tool@9\n" + IMAGE)
     # The blueprint lists the actions of every repository in its template.
     (root / "copier.yml").write_text("{}\n", encoding="utf-8")
@@ -1823,18 +1828,22 @@ def test_the_lint_fails_when_github_refuses_the_file_of_an_action(
 
 
 def test_the_lint_fails_when_github_answers_no_query(
-    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
     github.fail[("POST", "graphql")] = 502
 
     assert run(github, root, "settings", "actions") == 1
 
     out = capsys.readouterr().out
-    # Each action of the query, which a gateway timed out: as every POST, it isn't
-    # sent twice.
+    # Each action of the query, which a gateway timed out twice: a query only reads,
+    # so it is asked once more.
     assert out.count("refused its file (GitHub answered 502: simulated failure)") == 3
-    assert github.calls == [("POST", "graphql")]
+    assert github.calls == [("POST", "graphql")] * 2
 
 
 def test_one_query_reads_the_files_of_many_actions_at_once(github: FakeGitHub) -> None:
@@ -1872,7 +1881,13 @@ class Answering(Api):
         self.data = data
 
     def request(
-        self, method: str, path: str, body: Any = None, *, missing_ok: bool = False
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        missing_ok: bool = False,
+        retry: bool | None = None,
     ) -> Response:
         return Response(200, self.data)
 
@@ -2378,6 +2393,19 @@ def test_a_post_that_a_gateway_timed_out_is_not_sent_twice(
         Api(runner).post("repos/x/issues", {"title": "t"})
     assert len(calls) == 1
     assert waits == []
+
+
+def test_a_post_that_only_reads_is_asked_once_more_after_a_gateway(
+    waits: list[float],
+) -> None:
+    # A query of GraphQL changes nothing: sent twice, it does no harm.
+    runner, calls = answers(http(502, {"message": "Bad Gateway"}), http(200, {"a": 1}))
+
+    response = Api(runner).request("POST", "graphql", {"query": "{}"}, retry=True)
+
+    assert response.data == {"a": 1}
+    assert len(calls) == 2
+    assert waits == [5]
 
 
 def test_a_run_stops_waiting_once_its_budget_is_spent(waits: list[float]) -> None:
