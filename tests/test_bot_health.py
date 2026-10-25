@@ -675,7 +675,7 @@ def test_the_names_of_the_workflows_exist() -> None:
     }
     assert names >= ONE_TRY | OWN_ISSUE
     # Each keeps an issue of its own, and a second one would repeat it.
-    assert {"Diagrams", "Newest Python", "Next runner"} <= OWN_ISSUE
+    assert {"Diagrams", "Newest Node", "Newest Python", "Next runner"} <= OWN_ISSUE
 
 
 # ---------------------------------------------------------------- the daily look

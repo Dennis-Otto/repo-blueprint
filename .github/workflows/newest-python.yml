@@ -1,12 +1,15 @@
 name: Newest Python
 
-# The checks of scripts/check.sh with the newest Python, beta included, which warns
-# early of what the next Python of the runners breaks: after every change of main and
-# every week. Not in pull requests: a new Python breaks main and every pull request
-# alike, and no pull request waits for this check. A workflow of its own, so that its
-# warning leaves the CI of main green, whose coverage the report of the PR coach
-# compares every pull request with. Since no pull request shows the warning, a failure keeps one issue
-# open, which the weekly run closes once the checks pass again.
+# The checks of scripts/check.sh with the newest release of Python, which warns early
+# of what the next Python of the runners breaks: after every change of main and every
+# week. check-latest takes it from actions/python-versions as soon as it is out, not
+# the older Python that the image of the runner keeps in its cache. Not in pull
+# requests: a new Python breaks main and every pull request alike, and no pull request
+# waits for this check. A workflow of its own, so that its warning leaves the CI of
+# main green, whose coverage the report of the PR coach compares every pull request
+# with. Since no pull request shows the warning, a failure keeps one issue open, which
+# names the Python that failed and which the weekly run closes once the checks pass
+# again.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -33,6 +36,9 @@ jobs:
     name: check (newest Python)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The version of Python that the run checked, for the issue of the warning.
+    outputs:
+      version: ${{ steps.python.outputs.python-version }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
@@ -42,9 +48,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
         with:
           python-version: "3.x"
-          allow-prereleases: true
+          check-latest: true
+      - name: Name the Python of the run
+        run: echo "The checks run with $(python --version), the newest release of Python." >> "$GITHUB_STEP_SUMMARY"
       - name: Install the hash-pinned tools
         run: pip install --require-hashes -r requirements-dev.txt
       - name: Run the checks
@@ -75,6 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RESULT: ${{ needs.newest-python.result }}
+          VERSION: ${{ needs.newest-python.outputs.version }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           title="The checks fail with the newest Python"
@@ -86,8 +96,13 @@ jobs:
             fi
             exit 0
           fi
+          # The version that the run checked; none when setting up Python failed.
+          python="the newest Python"
+          if [[ -n "$VERSION" ]]; then
+            python="Python $VERSION, the newest release"
+          fi
           body="$(printf '%s\n\n%s\n' \
-            "The checks of scripts/check.sh fail with the newest Python, beta included, which the runners get next. Make them pass with it; the weekly run closes this issue then." \
+            "The checks of scripts/check.sh fail with $python, which the runners get next. Make them pass with it; the weekly run closes this issue then." \
             "The latest failure: $URL")"
           if [[ -n "$number" ]]; then
             gh issue edit "$number" --body "$body"

@@ -22,9 +22,9 @@ The coverage of the tests of a pull request against that of `main`, file by file
 
 ## Fast checks
 
-A check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python checks the `main` of a Python project after every change and every week.
+A check runs only where it can change a result: a scanner in the pull requests that change what it reads, on `main` only what keeps a baseline or publishes, the rest every week, and in the release pull request no scanner at all; the newest Python and the newest Node check the `main` of a Python or a Node project after every change and every week.
 
-**How:** The triggers and path filters of the workflows, `newest-python.yml`.
+**How:** The triggers and path filters of the workflows, `newest-python.yml`, `newest-node.yml`.
 
 ## When the checks run
 
@@ -32,7 +32,7 @@ A check runs only where it can change a result, because an account of GitHub run
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/when-the-checks-run.dark.svg">
-  <img src="../images/diagrams/when-the-checks-run.svg" alt="When the checks run: Every pull request runs the required checks and zizmor, whose analysis the rules of main wait for, and the scanners of what it changes: OSV-Scanner for a lock file, fuzzing for Python code and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks and zizmor without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs the scanners in full, the secret scan of the whole history, the SBOM and the newest Python.">
+  <img src="../images/diagrams/when-the-checks-run.svg" alt="When the checks run: Every pull request runs the required checks and zizmor, whose analysis the rules of main wait for, and the scanners of what it changes: OSV-Scanner for a lock file, fuzzing for Python code and the link check for a document. The release pull request, which changes only the changelog and the version, runs the required checks and zizmor without the scanners. After a merge, main runs only what keeps a baseline or publishes. Every week, main runs the scanners in full, the secret scan of the whole history, the SBOM and the newest Python and Node.">
 </picture>
 
 - **After a merge:** `main` takes a pull request only when it is up to date with it, so the merge gives `main` the files that the checks of the pull request passed. `main` runs only the tests, whose coverage the report of every pull request compares its own with, the analyses that code scanning compares with, and what publishes, such as the website and the release. Lint runs in the pull requests, the secret scan and the fuzzing there and every week, and the SBOM every week; every release has an SBOM of its own.
@@ -44,7 +44,8 @@ A check runs only where it can change a result, because an account of GitHub run
 </picture>
 
 - **The release pull request** changes only the changelog and the version, which can't change what a scanner finds. In the blueprint, the required check *variants* stands for the variants and updates of every kind of project: it passes when each passed, or when none had to run, as in the release pull request.
-- **The newest Python**, beta included, runs the checks of a Python project after every change of `main` and every week, in a workflow of its own that keeps the CI of `main` green. A new Python breaks every pull request alike, and none waits for it. A failure keeps an issue open, which the weekly run closes once the checks pass again.
+- **The newest Python** runs the checks of a Python project after every change of `main` and every week, in a workflow of its own that keeps the CI of `main` green: the newest release, which `check-latest` fetches as soon as it is out, not the older Python that the runner keeps in its cache, and the summary of the run names it. A new Python breaks every pull request alike, and none waits for it. A failure keeps an issue open, which names the Python that failed and which the weekly run closes once the checks pass again.
+- **The newest Node** does the same for a Node package, in `newest-node.yml`: the CI checks the Node of `.nvmrc`, this workflow the newest release of Node, which the users of the package may already run within the range of `engines.node` in `package.json`.
 - **The runners** are named with their version, `ubuntu-24.04`, not `ubuntu-latest`: GitHub moves that label to a new image one job at a time over weeks, as to Ubuntu 26.04 from 19 October 2026, so that the runs of one workflow would land on either image at random, with another Python, ShellCheck and Docker, and fail like a flaky test. In the blueprint, the Next runner workflow runs the variants on the next runner every week, and a failure keeps an issue open; once they pass there, a release of the blueprint moves every job to it. A workflow of your own, which an update leaves alone, keeps the runner it names: with `ubuntu-latest`, it moves with GitHub's label.
 
 ## The PR coach
