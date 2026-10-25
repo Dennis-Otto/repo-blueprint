@@ -18,6 +18,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 - [`RELEASE_APP`](#release_app): The name of the release app, as its address says: github.com/apps/NAME.
 - [`RELEASE_AUTOMATION_APP_ID`](#release_automation_app_id): The App ID of the release app, the number on its settings page.
 - [`RELEASE_AUTOMATION_CLIENT_ID`](#release_automation_client_id): The Client ID of the release app, with which each bot asks for a token of the app, together with the private key `RELEASE_AUTOMATION_PRIVATE_KEY`.
+- [`SETTINGS_APP_CLIENT_ID`](#settings_app_client_id): The Client ID of the settings app, an optional second GitHub App of the owner with only the permissions that the settings need.
 - [`UPSTREAM_AUTOMERGE`](#upstream_automerge): `off` makes the pull request of the upstream bot of a Nextcloud app, which raises `max-version` to a new major version of Nextcloud, wait for the maintainer, where it would merge itself once every check passes.
 
 ### `BETA_CHANNEL`
@@ -89,6 +90,17 @@ The Client ID of the release app, with which each bot asks for a token of the ap
 - **Set by:** the settings as code: `.github/repository.toml` sets it, from [`release_app_client_id`](questions.md#release_app_client_id), and the settings bot applies it; `.github/repository.project.toml` can set another value
 - **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository); [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`dependabot-automerge.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependabot-automerge.yml) (Dependabot maintenance, every repository); [`diagrams.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/diagrams.yml) (Diagrams, every repository); [`docs-pictures.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/docs-pictures.yml) (Docs pictures, the blueprint alone); [`lint.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/lint.yml) (Lint, every repository); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`renovate.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/renovate.yml) (Renovate, where `renovate_runner == 'self'`); [`rollout.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/rollout.yml) (Rollout, the blueprint alone); [`screenshot-bot.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/screenshot-bot.yml) (Screenshots, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository); [`sync-issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/sync-issue-assistant.yml) (Issue assistant sync, the blueprint alone); [`update-branches.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/update-branches.yml) (Update branches, every repository); [`upstream.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/upstream.yml) (Upstream, where `project_type == 'nextcloud-app'`)
 
+### `SETTINGS_APP_CLIENT_ID`
+
+The Client ID of the settings app, an optional second GitHub App of the owner with only the permissions that the settings need. With it and the private key `SETTINGS_APP_PRIVATE_KEY`, the settings bot applies the settings as this app, and the blueprint bot lets the actions of an update start before it pushes the update, so that the release app needs no *Administration*. Without them, the release app applies the settings, as before.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository)
+
+What the workflows say of it:
+
+- `settings.yml`: Every week, and after each change of the settings as code or of its own code, it brings the settings of the repository on GitHub in line with .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as the settings app, a second GitHub App of the owner that only administers, once the variable `SETTINGS_APP_CLIENT_ID` and the secret SETTINGS\_APP\_PRIVATE\_KEY name it, and as the release app until then, with a token that may write the administration of the repository but neither its code nor its workflows.
+
 ### `UPSTREAM_AUTOMERGE`
 
 `off` makes the pull request of the upstream bot of a Nextcloud app, which raises `max-version` to a new major version of Nextcloud, wait for the maintainer, where it would merge itself once every check passes.
@@ -111,6 +123,7 @@ What the workflows say of it:
 - [`GITHUB_TOKEN`](#github_token): The token that GitHub gives every run of a workflow, for its repository alone and with the permissions that its `permissions:` grant.
 - [`OPENAI_API_KEY`](#openai_api_key): An API key of OpenAI, with which the issue assistant analyzes each new issue with Codex, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `codex`, at the prices of OpenAI's API.
 - [`RELEASE_AUTOMATION_PRIVATE_KEY`](#release_automation_private_key): The private key of the release app, the file that its settings page generates.
+- [`SETTINGS_APP_PRIVATE_KEY`](#settings_app_private_key): The private key of the settings app, the file that its settings page generates.
 
 ### `ANTHROPIC_API_KEY`
 
@@ -178,3 +191,14 @@ The private key of the release app, the file that its settings page generates. W
 
 - **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release`, as the checklist shows
 - **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository); [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`dependabot-automerge.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependabot-automerge.yml) (Dependabot maintenance, every repository); [`diagrams.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/diagrams.yml) (Diagrams, every repository); [`docs-pictures.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/docs-pictures.yml) (Docs pictures, the blueprint alone); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`renovate.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/renovate.yml) (Renovate, where `renovate_runner == 'self'`); [`rollout.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/rollout.yml) (Rollout, the blueprint alone); [`screenshot-bot.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/screenshot-bot.yml) (Screenshots, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository); [`sync-issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/sync-issue-assistant.yml) (Issue assistant sync, the blueprint alone); [`update-branches.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/update-branches.yml) (Update branches, every repository); [`upstream.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/upstream.yml) (Upstream, where `project_type == 'nextcloud-app'`)
+
+### `SETTINGS_APP_PRIVATE_KEY`
+
+The private key of the settings app, the file that its settings page generates. With it and `SETTINGS_APP_CLIENT_ID`, the settings bot and the blueprint bot act as the settings app, the only app that writes the administration of the repository. The file goes in with `< key.pem` after the command below.
+
+- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set SETTINGS_APP_PRIVATE_KEY --env release`
+- **Read by:** [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository)
+
+What the workflows say of it:
+
+- `settings.yml`: Every week, and after each change of the settings as code or of its own code, it brings the settings of the repository on GitHub in line with .github/repository.toml, .github/repository.project.toml and .github/labels.toml, as the settings app, a second GitHub App of the owner that only administers, once the variable SETTINGS\_APP\_CLIENT\_ID and the secret `SETTINGS_APP_PRIVATE_KEY` name it, and as the release app until then, with a token that may write the administration of the repository but neither its code nor its workflows.

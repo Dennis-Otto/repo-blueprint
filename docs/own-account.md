@@ -11,6 +11,7 @@ The blueprint works for every account and organization on GitHub. A repository m
 - **A release app,** once for all of your repositories, which the bots act as: its token starts the checks of the release and update pull requests, may change workflows and creates the release tags, which the token of a job can't. Only the owner of an app has its private key, so the blueprint can't lend its own.
 - **Renovate,** which keeps the dependencies current: in a workflow of each repository, as your release app, or as the Mend Renovate app, which you install. The Renovate workflow of the blueprint runs only for the repositories of the blueprint's owner.
 - **The AI of the issue assistant** is optional. Without it, the issue assistant still labels new issues, reminds and closes, and carries out the commands of the maintainer, and no secret is needed.
+- **The settings app** is optional: a second app with only the permissions of the settings, which then applies them in place of the release app, so that the release app needs no *Administration*. [Step 8](#8-the-settings-app-optional) sets it up.
 - **The Rollout** is optional: the blueprint bot of each repository runs every week and brings the latest release of the blueprint on its own. The Rollout of the blueprint only starts the bots of its owner's repositories right after a release.
 
 ## 1. Copy the blueprint
@@ -95,3 +96,46 @@ python3 ../repo-blueprint/blueprint.py checklist
 ```
 
 It shows what is left for a person and which steps are done: the release app, the settings, the secrets, the installation, Renovate, the community profile, the social preview and the badges. Once every step has its tick, the repository looks after itself.
+
+## 8. The settings app (optional)
+
+The release app can do everything that the bots need, the administration of each repository included: its rulesets, environments, variables and the actions that may run. A second app, the **settings app**, can take the administration over, so that the release app, which most workflows use, can give it up: a stolen key of the release app then can't change a ruleset or let a new action run.
+
+- **The settings bot** applies the settings as the settings app, every week and after each change of them.
+- **The blueprint bot** lets the actions of a new release of the blueprint start before it pushes the update: it adds the patterns of the release's `[actions.selected]` to the list of the allowed actions on GitHub, and takes none away, so the checks of the update's pull request start without a `settings apply` from its branch. The settings bot narrows the list to the settings after the merge.
+- **The release app** then needs no *Administration*, *Pages*, *Variables*, *Environments* and *Secrets* any more.
+
+Without the settings app, everything works as before: the release app applies the settings, and an update that brings a new action waits for `settings apply` from its branch. With only the variable or only the secret set, both bots warn and go on with the release app.
+
+1. **Register the app** on your account, with its permissions filled in and without a webhook, at [this link](https://github.com/settings/apps/new?description=Applies+the+settings+as+code+of+the+repositories+made+from+Repo+Blueprint.&public=false&webhook_active=false&administration=write&issues=write&pages=write&actions=read&contents=read&environments=read), or for an organization at the same address under `https://github.com/organizations/ORG/settings/apps/new`. Name it, such as `octo-org-settings`, and give it these repository permissions, and no others:
+
+    | Permission | Access | What for |
+    | --- | --- | --- |
+    | Administration | Read and write | rulesets, the switches of security, the actions that may run, environments |
+    | Issues | Read and write | the labels |
+    | Pages | Read and write | the website's settings |
+    | Variables | Read and write | the variables of `[variables]`; set it by hand, the link can't |
+    | Actions | Read-only | the settings of the workflows |
+    | Contents | Read-only | the files of the community profile |
+    | Environments | Read-only | the environments, their branch rules and the names of their secrets, never their values |
+    | Metadata | Read-only | which GitHub asks for itself |
+
+    Leave *Where can this GitHub App be installed?* at *Only on this account*, and create the app.
+
+2. **Note its Client ID** on the settings page of the app, and press *Generate a private key*; your browser saves the key as a file, such as `octo-org-settings.2026-10-25.private-key.pem`, which the commands below call `settings-private-key.pem`.
+3. **Install the app** on every repository made from the blueprint, the same ones as the release app: *Install App* on the settings page of the app, then *Only select repositories*.
+4. **Name it in each repository,** with its Client ID as a variable and its key as a secret of the environment `release`, which only `main` may use. The GitHub CLI reads the file and shows the key nowhere; delete the file afterwards.
+
+    ```sh
+    for repo in octo-org/my-project octo-org/another; do
+      gh variable set SETTINGS_APP_CLIENT_ID --repo "$repo" --body CLIENT_ID
+      gh secret set SETTINGS_APP_PRIVATE_KEY --env release --repo "$repo" < settings-private-key.pem
+    done
+    ```
+
+    The variable can also live in the settings as code, as `SETTINGS_APP_CLIENT_ID = "CLIENT_ID"` under `[variables]` of `.github/repository.project.toml`, which the settings bot applies with the release app first.
+
+5. **Check it:** *Actions → Settings → Run workflow*. The run takes the step *Create a token of the settings app* and skips *Check that the release app is set up*. When GitHub refuses the token, of an app that is not installed on the repository or lacks a permission, the summary of the run says so, and no setting changes.
+6. **Take the permissions from the release app** once the settings bot has run as the settings app in every repository: on the settings page of the release app, under *Permissions & events*, set *Administration*, *Pages*, *Variables*, *Environments* and *Secrets* to *No access*. Its other permissions stay, for the release bot, Renovate, the blueprint bot and the others.
+
+`gh variable delete SETTINGS_APP_CLIENT_ID` hands the settings back to the release app, which needs its permissions again then.

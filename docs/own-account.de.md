@@ -11,6 +11,7 @@ Der Blueprint funktioniert für jedes Konto und jede Organisation auf GitHub. Ei
 - **Eine Release-App,** einmal für alle deine Repositorys, als die die Bots handeln: Ihr Token startet die Checks der Release- und Update-Pull-Requests, darf Workflows ändern und legt die Release-Tags an, was das Token eines Jobs nicht kann. Nur der Eigentümer einer App hat ihren privaten Schlüssel, darum kann der Blueprint seine eigene nicht verleihen.
 - **Renovate,** das die Abhängigkeiten aktuell hält: in einem Workflow jedes Repositorys, als deine Release-App, oder als Mend-Renovate-App, die du installierst. Der Renovate-Workflow des Blueprints läuft nur für die Repositorys des Eigentümers des Blueprints.
 - **Die KI des Issue-Assistenten** ist optional. Ohne sie labelt der Issue-Assistent neue Issues weiter, erinnert und schließt und führt die Befehle des Maintainers aus, und es braucht kein Secret.
+- **Die Settings-App** ist optional: eine zweite App mit nur den Berechtigungen der Einstellungen, die sie dann anstelle der Release-App anwendet, damit die Release-App kein *Administration* braucht. [Schritt 8](#8-die-settings-app-optional) richtet sie ein.
 - **Der Rollout** ist optional: Der Blueprint-Bot jedes Repositorys läuft jede Woche und bringt das neueste Release des Blueprints von selbst. Der Rollout des Blueprints startet nur die Bots der Repositorys seines Eigentümers gleich nach einem Release.
 
 ## 1. Den Blueprint kopieren
@@ -95,3 +96,46 @@ python3 ../repo-blueprint/blueprint.py checklist
 ```
 
 Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview und die Badges. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
+
+## 8. Die Settings-App (optional)
+
+Die Release-App kann alles, was die Bots brauchen, auch die Verwaltung jedes Repositorys: seine Rulesets, Environments, Variablen und die Actions, die laufen dürfen. Eine zweite App, die **Settings-App**, kann die Verwaltung übernehmen, damit die Release-App, die die meisten Workflows nutzen, sie abgeben kann: Ein gestohlener Schlüssel der Release-App kann dann kein Ruleset mehr ändern und keine neue Action zulassen.
+
+- **Der Settings-Bot** wendet die Einstellungen als Settings-App an, jede Woche und nach jeder Änderung an ihnen.
+- **Der Blueprint-Bot** lässt die Actions eines neuen Releases des Blueprints starten, bevor er das Update pusht: Er ergänzt die Liste der erlaubten Actions auf GitHub um die Muster aus `[actions.selected]` des Releases und nimmt keines weg, sodass die Checks des Update-Pull-Requests ohne ein `settings apply` von seinem Branch starten. Der Settings-Bot verengt die Liste nach dem Merge auf die Einstellungen.
+- **Die Release-App** braucht dann kein *Administration*, *Pages*, *Variables*, *Environments* und *Secrets* mehr.
+
+Ohne Settings-App funktioniert alles wie bisher: Die Release-App wendet die Einstellungen an, und ein Update, das eine neue Action bringt, wartet auf `settings apply` von seinem Branch. Ist nur die Variable oder nur das Secret gesetzt, warnen beide Bots und machen mit der Release-App weiter.
+
+1. **Registriere die App** auf deinem Konto, mit ausgefüllten Berechtigungen und ohne Webhook, über [diesen Link](https://github.com/settings/apps/new?description=Applies+the+settings+as+code+of+the+repositories+made+from+Repo+Blueprint.&public=false&webhook_active=false&administration=write&issues=write&pages=write&actions=read&contents=read&environments=read), oder für eine Organisation unter derselben Adresse mit `https://github.com/organizations/ORG/settings/apps/new`. Gib ihr einen Namen, etwa `octo-org-settings`, und diese Repository-Berechtigungen, keine anderen:
+
+    | Berechtigung | Zugriff | Wofür |
+    | --- | --- | --- |
+    | Administration | Read and write | Rulesets, die Schalter der Sicherheit, die erlaubten Actions, Environments |
+    | Issues | Read and write | die Labels |
+    | Pages | Read and write | die Einstellungen der Website |
+    | Variables | Read and write | die Variablen aus `[variables]`; von Hand setzen, der Link kann es nicht |
+    | Actions | Read-only | die Einstellungen der Workflows |
+    | Contents | Read-only | die Dateien des Community-Profils |
+    | Environments | Read-only | die Environments, ihre Branch-Regeln und die Namen ihrer Secrets, nie ihre Werte |
+    | Metadata | Read-only | das GitHub selbst verlangt |
+
+    Lass *Where can this GitHub App be installed?* auf *Only on this account* und lege die App an.
+
+2. **Notiere ihre Client ID** auf der Einstellungsseite der App und drück *Generate a private key*; dein Browser speichert den Schlüssel als Datei, etwa `octo-org-settings.2026-10-25.private-key.pem`, die die Befehle unten `settings-private-key.pem` nennen.
+3. **Installiere die App** auf jedem Repository aus dem Blueprint, denselben wie die Release-App: *Install App* auf der Einstellungsseite der App, dann *Only select repositories*.
+4. **Nenne sie in jedem Repository,** mit ihrer Client ID als Variable und ihrem Schlüssel als Secret des Environments `release`, das nur `main` nutzen darf. Die GitHub CLI liest die Datei und zeigt den Schlüssel nirgends; lösch die Datei danach.
+
+    ```sh
+    for repo in octo-org/my-project octo-org/another; do
+      gh variable set SETTINGS_APP_CLIENT_ID --repo "$repo" --body CLIENT_ID
+      gh secret set SETTINGS_APP_PRIVATE_KEY --env release --repo "$repo" < settings-private-key.pem
+    done
+    ```
+
+    Die Variable kann auch in den Einstellungen als Code stehen, als `SETTINGS_APP_CLIENT_ID = "CLIENT_ID"` unter `[variables]` in `.github/repository.project.toml`, die der Settings-Bot zuerst noch mit der Release-App anwendet.
+
+5. **Prüf es:** *Actions → Settings → Run workflow*. Der Lauf nimmt den Schritt *Create a token of the settings app* und überspringt *Check that the release app is set up*. Verweigert GitHub das Token, einer App, die nicht auf dem Repository installiert ist oder der eine Berechtigung fehlt, sagt es die Zusammenfassung des Laufs, und keine Einstellung ändert sich.
+6. **Nimm der Release-App die Berechtigungen,** sobald der Settings-Bot in jedem Repository als Settings-App gelaufen ist: auf der Einstellungsseite der Release-App unter *Permissions & events* *Administration*, *Pages*, *Variables*, *Environments* und *Secrets* auf *No access*. Ihre übrigen Berechtigungen bleiben, für den Release-Bot, Renovate, den Blueprint-Bot und die anderen.
+
+`gh variable delete SETTINGS_APP_CLIENT_ID` gibt die Einstellungen an die Release-App zurück, die dann ihre Berechtigungen wieder braucht.
