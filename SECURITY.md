@@ -25,7 +25,7 @@ If a fix needs longer, for example because the cause lies in an upstream project
 
 ## How the project keeps itself secure
 
-- Every pull request runs CodeQL, a Gitleaks secret scan of its commits and, for changed dependencies, a review against known vulnerabilities, and one that adds an alert of CodeQL of high or critical severity can't merge. CodeQL runs after every change of `main` as well, Gitleaks every week over the whole history, and GitHub's secret scanning with push protection stops a known kind of secret before it lands and reports generic ones, such as private keys, connection strings and passwords. OpenSSF Scorecard checks the practices of the repository every week.
+- Every pull request runs CodeQL, a Gitleaks secret scan of its commits and, for changed dependencies, a review against known vulnerabilities, and one that adds an alert of CodeQL of high or critical severity can't merge. zizmor audits the workflows of every pull request, and one that adds an alert of zizmor can't merge either. CodeQL and zizmor run after every change of `main` as well, Gitleaks every week over the whole history, and GitHub's secret scanning with push protection stops a known kind of secret before it lands and reports generic ones, such as private keys, connection strings and passwords. OpenSSF Scorecard checks the practices of the repository every week.
 - Actions are pinned to commit hashes, only those of GitHub and of a list in the settings as code may run, tokens get the least permissions they need, and Renovate keeps actions, dependencies and images current, with the updates that fix a vulnerability at once.
 - OSV-Scanner checks every lock file against the OSV database of known vulnerabilities: in every pull request that changes a lock file, after every change of `main` and every week.
 - Harden-Runner records the network traffic of every job of the workflows, so that a connection that doesn't belong there shows.
@@ -33,7 +33,7 @@ If a fix needs longer, for example because the cause lies in an upstream project
 
 ## Findings of code scanning
 
-CodeQL and OpenSSF Scorecard report their findings in the repository's Security tab. A new alert of CodeQL of high or critical severity, or a new error, stops the merge of the pull request that adds it, which shows the alert at its lines. The Findings workflow of the [issue assistant](https://github.com/Dennis-Otto/issue-assistant#findings) dismisses the findings that `.github/findings.toml` accepts, each with its reason, and fails while any other finding is open. It names an open finding only by the number and link of its alert, which only maintainers can open; nothing about a possible vulnerability becomes a public issue.
+CodeQL and OpenSSF Scorecard report their findings in the repository's Security tab. A new alert of CodeQL of high or critical severity, or a new error, stops the merge of the pull request that adds it, which shows the alert at its lines, and so does every new alert of zizmor, the audit of the workflows. The Findings workflow of the [issue assistant](https://github.com/Dennis-Otto/issue-assistant#findings) dismisses the findings that `.github/findings.toml` accepts, each with its reason, and fails while any other finding is open. It names an open finding only by the number and link of its alert, which only maintainers can open; nothing about a possible vulnerability becomes a public issue.
 
 ## Verify a release
 
@@ -107,7 +107,7 @@ How the [OWASP Top 10 CI/CD security risks](https://owasp.org/www-project-top-10
 
 | Risk | Countermeasure |
 | --- | --- |
-| Insufficient flow control mechanisms | pull requests only, every required check, no new alert of CodeQL of high severity, a linear history, release tags that never move and that only the release app creates |
+| Insufficient flow control mechanisms | pull requests only, every required check, no new alert of CodeQL of high severity and none of zizmor, a linear history, release tags that never move and that only the release app creates |
 | Inadequate identity and access management | administrator access only for the maintainers; bots act as GitHub Apps or with the token of their workflow |
 | Dependency chain abuse | lock files with hashes, pins by commit hash and digest, updates only a week after their release, a weekly refresh of the lock files that waits for the maintainer, the dependency review and OSV-Scanner |
 | Poisoned pipeline execution | no code of a pull request runs with a secret; actionlint and zizmor audit every workflow |
