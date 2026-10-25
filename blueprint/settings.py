@@ -620,13 +620,14 @@ def check_selected_actions(
     return drift + refused_images(found)
 
 
-def widen_selected_actions(api: Api, repo: str, selected: dict[str, Json]) -> None:
+def widen_selected_actions(api: Api, repo: str, selected: dict[str, Json]) -> list[str]:
     """While a workflow runs an action that the list lacks, a list that GitHub already
     uses only grows by the configured patterns: that never stops a workflow, and the
-    actions of a newer release of the blueprint can still start."""
+    actions of a newer release of the blueprint can still start. The patterns that it
+    added, none when GitHub lets every action run."""
     permissions = api.get(f"repos/{repo}/actions/permissions") or {}
     if permissions.get("allowed_actions") != "selected":
-        return
+        return []
     path = f"repos/{repo}/actions/permissions/selected-actions"
     current = dict(api.get(path) or {})
     have = [str(pattern) for pattern in current.get("patterns_allowed") or []]
@@ -638,6 +639,7 @@ def widen_selected_actions(api: Api, repo: str, selected: dict[str, Json]) -> No
     ]
     if added:
         api.put(path, {**current, "patterns_allowed": have + added})
+    return added
 
 
 def apply_actions(
