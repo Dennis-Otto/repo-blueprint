@@ -537,6 +537,7 @@ jobs:
             --data project_name="Demo Project" \
             --data "description=A $KIND of the blueprint's tests." \
             --data project_type="$KIND" \
+            --data owner=Dennis-Otto \
             . "$PROJECT"
           git -C "$PROJECT" init --quiet
           git -C "$PROJECT" add --all
