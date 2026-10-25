@@ -33,6 +33,7 @@ from blueprint.mutation import (
     collect,
     comparison,
     configuration,
+    configure,
     default_paths,
     diff_of,
     dropped,
@@ -50,9 +51,14 @@ from blueprint.mutation import (
     plan,
     read_parts,
     read_previous,
+    read_stats,
+    sampled,
     split,
+    stats_summary,
+    stopped,
     summary,
     survivors_text,
+    traceback_tests,
 )
 
 REPO = "Dennis-Otto/demo"
@@ -662,6 +668,154 @@ def test_the_parts_are_a_number(
     assert "a number or auto" in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------- the sample of a pull request
+
+SAMPLE = [
+    Module("a", {"x_f": 3, "x_g": 5, "x_h": 0}),
+    Module("b", {"x_k": 4, "xǁC.m": 2}),
+    # Code that doesn't parse here, which a part runs whole.
+    Module("c", {}, lines=9),
+]
+
+
+def test_a_sample_takes_functions_up_to_its_size() -> None:
+    chosen = sampled(SAMPLE, 8)
+
+    assert chosen
+    assert sum(unit.mutants for unit in chosen) <= 8
+    # The same code gives the same sample, whatever the order of its modules.
+    assert sampled(SAMPLE[::-1], 8) == chosen
+    # A function without a mutant that the estimate sees takes no place of it.
+    assert "a.x_h" not in [unit.name for unit in chosen]
+    every = {unit.name for module in SAMPLE for unit in module.split()}
+    assert {unit.name for unit in chosen} <= every
+
+
+def test_a_sample_of_all_the_code_is_none() -> None:
+    # The part then runs every mutant, without names.
+    assert sampled(SAMPLE, 23) == []
+    assert sampled(SAMPLE, 100) == []
+
+
+def test_a_sample_smaller_than_every_function_takes_the_smallest() -> None:
+    assert sampled(SAMPLE, 1) == [Unit("b.xǁC.m", ("b.xǁC.m*",), 2)]
+
+
+def test_a_pull_request_tries_a_sample_in_one_part(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    python = files(
+        tmp_path,
+        {
+            ".python-version": "3.12\n",
+            ".github/mutation-requirements.txt": "",
+            "a.py": "def f(x):\n    return x + 1\n",
+            "b.py": "def g(x):\n    return x - 1\n",
+        },
+    )
+
+    # Code with no more mutants than the sample runs whole, also with parts asked for.
+    assert plan(python, 2, sample=True) == (
+        "python",
+        [{"part": 1, "parts": 1, "patterns": "", "mutants": 4}],
+    )
+    monkeypatch.setattr(mutation, "SAMPLE_MUTANTS", 2)
+    kind, parts = plan(python, None, sample=True)
+    assert kind == "python"
+    assert len(parts) == 1
+    assert parts[0]["mutants"] == 2
+    assert parts[0]["patterns"] in ("a.x_f*", "b.x_g*")
+    # Infection has no sample.
+    php = files(tmp_path / "php", {"appinfo/info.xml": "<info/>"})
+    assert plan(php, None, sample=True)[1][0]["patterns"] == ""
+
+
+def test_the_sample_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = files(
+        tmp_path,
+        {
+            ".python-version": "3.12\n",
+            ".github/mutation-requirements.txt": "",
+            "a.py": "def f(x):\n    return x + 1\n",
+            "b.py": "def g(x):\n    return x - 1\n",
+        },
+    )
+
+    assert cli.main(["mutation", "plan", "--parts", "2", "--sample"], root=root) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(json.loads(lines[1].removeprefix("parts="))) == 1
+
+
+# ---------------------------------------------------------------- the configuration
+
+
+def test_without_a_configuration_mutmut_gets_one(tmp_path: Path) -> None:
+    root = files(
+        tmp_path,
+        {
+            "demo.py": "",
+            "tests/test_demo.py": "",
+            ".git/HEAD": "",
+            "mutants/mutmut-stats.json": "{}",
+            "docs/index.md": "",
+        },
+    )
+
+    assert configure(root) == (
+        "[mutmut]\n"
+        "source_paths=\n"
+        "    demo.py\n"
+        # The tests may read any file of the repository; Git stays the checkout's
+        # own, and mutants/ is mutmut's copy.
+        "also_copy=\n"
+        "    demo.py\n"
+        "    docs\n"
+        "    tests\n"
+        "pytest_add_cli_args=\n"
+        "    -m\n"
+        "    not mutation_unsafe\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("setup.cfg", "[mutmut]\nsource_paths=lib\n"),
+        ("pyproject.toml", '[tool.mutmut]\nsource_paths = ["lib"]\n'),
+    ],
+)
+def test_the_configuration_of_a_project_stays(
+    tmp_path: Path, name: str, text: str
+) -> None:
+    root = files(tmp_path, {name: text})
+
+    assert configure(root) is None
+
+
+def test_the_configuration_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A setup.cfg of the project, without a newline at its end.
+    root = files(tmp_path, {"demo.py": "", "setup.cfg": "[flake8]\nmax-line-length=88"})
+
+    assert cli.main(["mutation", "configure"], root=root) == 0
+
+    text = (root / "setup.cfg").read_text(encoding="utf-8")
+    assert text.startswith("[flake8]\nmax-line-length=88\n[mutmut]\nsource_paths=\n")
+    assert capsys.readouterr().out.startswith("[mutmut]\n")
+    # The next time, the configuration is there.
+    assert cli.main(["mutation", "configure"], root=root) == 0
+    assert (root / "setup.cfg").read_text(encoding="utf-8") == text
+    assert "configures mutmut itself" in capsys.readouterr().out
+    # Without a setup.cfg, it writes one.
+    other = files(tmp_path / "other", {"demo.py": ""})
+    assert cli.main(["mutation", "configure"], root=other) == 0
+    assert (other / "setup.cfg").read_text(encoding="utf-8").startswith("[mutmut]\n")
+
+
 # ---------------------------------------------------------------- the kinds of survivors
 
 
@@ -873,6 +1027,41 @@ def test_the_last_words_and_the_failing_tests_of_mutmut() -> None:
     ]
 
 
+# The output of the stats when pytest prints no short summary, as with -q twice: only
+# the tracebacks of --tb=native name the test.
+TRACEBACK = (
+    "⠋ Running stats\r⠹ Running stats\n"
+    "Traceback (most recent call last):\n"
+    '  File "/home/runner/work/demo/demo/mutants/tests/test_templates.py", line 456, '
+    "in test_the_tool_checkout\n"
+    "    assert found == expected\n"
+    '  File "/usr/lib/python3.12/site-packages/x.py", line 3, in helper\n'
+    "AssertionError: assert {'/XXissue_assistant.pyXX'} == set()\n"
+    '  File "D:\\a\\demo\\demo\\mutants\\tests\\test_b.py", line 9, in test_two\n'
+    '  File "tests/test_c.py", line 1, in test_three\n'
+    '  File "/home/runner/work/demo/demo/mutants/tests/test_templates.py", line 460, '
+    "in test_the_tool_checkout\n"
+    "1 failed, 1574 passed in 900.00s\n"
+    "failed to collect stats. runner returned 1\n"
+)
+
+
+def test_the_tracebacks_name_the_failing_tests_without_a_summary() -> None:
+    expected = [
+        "tests/test_templates.py::test_the_tool_checkout",
+        "tests/test_b.py::test_two",
+        "tests/test_c.py::test_three",
+    ]
+
+    assert traceback_tests(TRACEBACK) == expected
+    assert failing_tests(TRACEBACK) == expected
+    # The short summary of pytest wins.
+    assert failing_tests(TRACEBACK + "FAILED tests/test_d.py::test_four - x\n") == [
+        "tests/test_d.py::test_four"
+    ]
+    assert traceback_tests("all passed\n") == []
+
+
 def test_the_change_without_the_headers_of_mutmut_show() -> None:
     assert diff_of(SHOWN["a.x_f__mutmut_2"]) == "-    return a + b\n+    return a - b"
     assert diff_of("-a\n+b") == "-a\n+b"
@@ -928,6 +1117,80 @@ def test_the_annotation_of_a_part_without_a_mutant_names_the_failing_test() -> N
         "::error title=No mutant ran::No mutant ran; the summary of the job has the "
         "end of the output of mutmut."
     )
+
+
+# ---------------------------------------------------------------- the stats
+
+STATS = {
+    "tests_by_mangled_function_name": {"demo.x_add": ["tests/test_demo.py::test_add"]},
+    "duration_by_test": {
+        "tests/test_demo.py::test_add": 0.1,
+        "tests/test_demo.py::test_other": 0.2,
+    },
+    "stats_time": 0.5,
+}
+
+
+def test_the_stats_that_mutmut_saved(tmp_path: Path) -> None:
+    path = tmp_path / "mutmut-stats.json"
+    assert read_stats(path) is None
+    path.write_text("{", encoding="utf-8")
+    assert read_stats(path) is None
+    path.write_text("[]", encoding="utf-8")
+    assert read_stats(path) is None
+    path.write_text(json.dumps(STATS), encoding="utf-8")
+    assert read_stats(path) == STATS
+
+
+def test_the_summary_of_the_stats() -> None:
+    text = stats_summary(STATS, f"AssertionError: {NOTHING_MATCHES}\n")
+
+    assert text.startswith("### The stats of mutmut\n\n")
+    assert "2 tests reach 1 functions" in text
+    assert "Every part loads these stats" in text
+
+
+def test_stats_that_fail_name_the_test_and_start_no_part() -> None:
+    text = stats_summary(None, TRACEBACK)
+
+    assert "No part runs." in text
+    assert "**The tests fail without any mutant.**" in text
+    assert "- `tests/test_templates.py::test_the_tool_checkout`\n" in text
+    assert "looked for its mutants" not in text
+    assert stopped(TRACEBACK)["last_words"][-1] == (
+        "failed to collect stats. runner returned 1"
+    )
+
+
+def test_a_mutmut_that_looks_for_its_mutants_first_saves_no_stats() -> None:
+    text = stats_summary(
+        None, f"⠋ Generating mutants\nAssertionError: {NOTHING_MATCHES}\n"
+    )
+
+    assert "**mutmut looked for its mutants before it saved its stats.**" in text
+    assert "No mutant ran." in text
+
+
+def test_the_stats_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output = tmp_path / "stats.txt"
+    output.write_text(TRACEBACK, encoding="utf-8", newline="")
+
+    assert cli.main(["mutation", "stats", str(output)], root=tmp_path) == 1
+
+    captured = capsys.readouterr()
+    assert "- `tests/test_templates.py::test_the_tool_checkout`" in captured.out
+    # The annotation, which the bot-health bot quotes, names the test.
+    assert captured.err.startswith(
+        "::error title=No mutant ran::The tests fail without any mutant: "
+        "tests/test_templates.py::test_the_tool_checkout and 2 more."
+    )
+    files(tmp_path, {"mutants/mutmut-stats.json": json.dumps(STATS)})
+    assert cli.main(["mutation", "stats", str(output)], root=tmp_path) == 0
+    captured = capsys.readouterr()
+    assert "2 tests reach 1 functions" in captured.out
+    assert captured.err == ""
 
 
 # ---------------------------------------------------------------- the whole run

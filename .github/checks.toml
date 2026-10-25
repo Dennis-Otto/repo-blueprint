@@ -602,6 +602,25 @@ docs = "CONTRIBUTING.md#tests"
 autofix = """A configuration of mutmut or a variable of the repository is the decision
 of a person."""
 
+[check."mutation stats"]
+title = "The stats of the mutation tests"
+problem = """mutmut ran the whole suite once in its copy of the repository, `mutants/`,
+to record which tests reach each function, and saved no stats: a test failed there
+without any mutant, which the summary of the check and its annotation name, or the
+stats ran out of their time. No part of the run started."""
+why = """Every part loads these stats and runs only its mutants; without them no mutant
+runs, and the weekly score, which shows the lines that the tests run but don't
+check, is missing."""
+fix = """A test that reads the code as text, asks Git, starts the tool or runs a copy of
+it in a folder of its own can't pass in mutmut's copy: mark it with
+`@pytest.mark.mutation_unsafe`. A test that runs under a cache of `functools` clears
+it with `cache_clear()`, since the stats run every test in one process. After
+`mutmut run` on your machine, `python -m pytest -m "not mutation_unsafe"` in
+`mutants/` lists every test that fails there."""
+docs = "CONTRIBUTING.md#tests"
+autofix = """Whether a test reads the code as text, and so belongs out of the mutation
+tests, is the decision of a person."""
+
 [check."mutation */*"]
 title = "A part of the mutation tests"
 problem = """One part of the mutation tests measured nothing: no mutant ran, mostly
