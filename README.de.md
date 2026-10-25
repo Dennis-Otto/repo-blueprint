@@ -21,7 +21,7 @@ Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für si
 - **Getestet bei jeder Änderung.** `scripts/check.sh` führt dieselben Prüfungen auf deinem Rechner und in der CI aus, mit voller Abdeckung des Codes. Der PR-Coach erklärt jede Prüfung, die scheitert, und der Fix-Bot committet, was ein Befehl beheben kann.
 - **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3 und prüft es danach so, wie seine Nutzer es können.
 - **Sicher ab dem ersten Commit.** CodeQL, OpenSSF Scorecard, ein Secret-Scan und eine Prüfung der Workflows laufen von Anfang an, jede Action ist auf einen Commit-Hash festgelegt, und etwa 90 bis 100 Antworten von OpenSSF Best Practices sind ausgefüllt.
-- **Von selbst aktuell.** Renovate aktualisiert die Abhängigkeiten, der Einstellungs-Bot hält die Einstellungen als Code, und der Blueprint-Bot bringt jede Version des Blueprints als Pull Request, den seine Prüfungen testen, bevor er merged. Fünf öffentliche Repositories folgen ihm heute.
+- **Von selbst aktuell.** Renovate aktualisiert die Abhängigkeiten, der Einstellungs-Bot hält die Einstellungen als Code, und der Blueprint-Bot bringt jede Version des Blueprints als Pull Request, den seine Prüfungen testen, bevor er merged; jedes öffentliche Repository, das [mit dem Blueprint gebaut](#mit-dem-blueprint-gebaut) ist, bekommt so jede Version.
 
 <!-- --8<-- [end:pitch] -->
 
@@ -65,9 +65,10 @@ Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, 
 
 <!-- --8<-- [start:made-with] -->
 
-Fünf öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und den Prüfungen und Bots des Blueprints; jede Version des Blueprints erreicht sie als Pull Request:
+Sechs öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und den Prüfungen und Bots des Blueprints; jede Version des Blueprints erreicht sie als Pull Request:
 
 - **[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts)**, eine Home-Assistant-Integration: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, ohne Cloud-Konto. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/homedarts-for-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/homedarts-for-autodarts)
+- **[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts)**, eine Chrome-Erweiterung in TypeScript: ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/player-switch-for-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/player-switch-for-autodarts)
 - **[Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant)**, eine GitHub Action: eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, geprüft von einem Job ohne KI, bevor sie erscheint. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/issue-assistant/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/issue-assistant)
 - **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**, eine Nextcloud-App: die Dokumente von Paperless-ngx in Nextcloud Files, nach Korrespondent, Typ und Jahr. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-sync/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-sync)
 - **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**, eine Nextcloud-App: die Volltextsuche von Paperless-ngx in der Suche von Nextcloud. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-unified-search/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-unified-search)

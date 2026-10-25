@@ -87,11 +87,14 @@ jobs:
           # but a Renovate workflow of its own; and without the AI of the issue
           # assistant, whose check then asks no file to name an engine.
           - { kind: generic, start: new, owner: octo-org, ai: "false" }
+          # [start:canaries] reference.py writes these from .github/fleet.toml.
           - { kind: generic, start: adopted, answers: dennis-otto.github.io }
           - { kind: home-assistant, start: adopted, answers: homedarts-for-autodarts }
           - { kind: github-action, start: adopted, answers: issue-assistant }
           - { kind: nextcloud-app, start: adopted, answers: paperless-sync }
           - { kind: nextcloud-app, start: adopted, answers: paperless-unified-search }
+          - { kind: node-package, start: adopted, answers: player-switch-for-autodarts }
+          # [end:canaries]
     env:
       KIND: ${{ matrix.kind }}
       ANSWERS: ${{ matrix.answers }}

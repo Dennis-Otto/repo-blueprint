@@ -171,8 +171,9 @@ jobs:
           # The repositories by the time that their checks take, the quickest first, so
           # that each update pull request is done soon. The longest go last, as no
           # repository waits for the last one. A repository that isn't named here goes
-          # first: a new one has few checks yet.
-          ORDER: dennis-otto.github.io issue-assistant paperless-unified-search paperless-sync homedarts-for-autodarts
+          # first: a new one has few checks yet. reference.py writes the line from the
+          # places in .github/fleet.toml.
+          ORDER: dennis-otto.github.io issue-assistant player-switch-for-autodarts paperless-unified-search paperless-sync homedarts-for-autodarts
         run: |
           set -euo pipefail
           # GitHub fails for a moment now and then, so it asks three times.

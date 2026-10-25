@@ -41,6 +41,12 @@ Diese Art bringt keinen eigenen Schritt dazu.
 
 ## Ein echtes Repository
 
+<!-- --8<-- [start:real-repository] -->
+
 [dennis-otto.github.io](https://github.com/Dennis-Otto/dennis-otto.github.io) ist aus dem Blueprint entstanden: die Website mit jedem Projekt seines Eigentümers.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von dennis-otto.github.io aus, bevor er merged.
+
+<!-- --8<-- [end:real-repository] -->
 
 Wie sich der Blueprint mit anderen Vorlagen vergleicht: [der Vergleich](../compare.md).

@@ -19,7 +19,7 @@ Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for seven 
 - **Tested on every change.** `scripts/check.sh` runs the same checks on your machine and in the CI, with full coverage of the code. The PR coach explains every check that fails, and the fix bot commits what a command can fix.
 - **Released and signed by a bot.** Merging the release pull request publishes the release with its SBOM and the signed provenance of SLSA Build Level 3, and then verifies it as its users can.
 - **Secure from the first commit.** CodeQL, OpenSSF Scorecard, a secret scan and an audit of the workflows run from the start, every action is pinned to a commit hash, and about 90 to 100 answers of OpenSSF Best Practices are filled in.
-- **Up to date by itself.** Renovate updates the dependencies, the settings bot keeps the settings as code, and the blueprint bot brings every release of the blueprint as a pull request that its checks test before it merges. Five public repositories follow it today.
+- **Up to date by itself.** Renovate updates the dependencies, the settings bot keeps the settings as code, and the blueprint bot brings every release of the blueprint as a pull request that its checks test before it merges; each public repository [made with the blueprint](#made-with-the-blueprint) takes every release this way.
 
 <!-- --8<-- [end:pitch] -->
 
@@ -63,9 +63,10 @@ Copier asks for the name, a one-sentence description, the kind of project, the G
 
 <!-- --8<-- [start:made-with] -->
 
-Five public repositories follow the blueprint, each with code of its own and the checks and bots of the blueprint; every release of the blueprint reaches them as a pull request:
+Six public repositories follow the blueprint, each with code of its own and the checks and bots of the blueprint; every release of the blueprint reaches them as a pull request:
 
 - **[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts)**, a Home Assistant integration: local real-time board control, games, tournaments and statistics, without a cloud account. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/homedarts-for-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/homedarts-for-autodarts)
+- **[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts)**, a Chrome extension in TypeScript: a shared Autodarts display where everyone plays under their own account and a tap on a tile switches players, without signing in again. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/player-switch-for-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/player-switch-for-autodarts)
 - **[Issue assistant](https://github.com/Dennis-Otto/issue-assistant)**, a GitHub Action: a first analysis of every new issue by an AI that only reads, checked by a job without AI before it posts. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/issue-assistant/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/issue-assistant)
 - **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**, a Nextcloud app: the documents of Paperless-ngx in Nextcloud Files, by correspondent, type and year. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-sync/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-sync)
 - **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**, a Nextcloud app: the full-text search of Paperless-ngx in the unified search of Nextcloud. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-unified-search/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-unified-search)

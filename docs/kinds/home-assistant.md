@@ -51,6 +51,12 @@ This kind adds these steps:
 
 ## A real repository
 
-[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) is made from the blueprint: local real-time board control, games, tournaments and statistics, with dashboard cards, end-to-end tests in a real Home Assistant and screenshots that renew themselves.
+<!-- --8<-- [start:real-repository] -->
+
+[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) is made from the blueprint: local real-time board control, games, tournaments and statistics, without a cloud account.
+
+The Variants workflow tries every pull request of the blueprint on the answers of HomeDarts for Autodarts, before it merges.
+
+<!-- --8<-- [end:real-repository] -->
 
 How the blueprint compares with other templates: [the comparison](../compare.md).
