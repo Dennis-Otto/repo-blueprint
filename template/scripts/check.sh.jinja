@@ -462,6 +462,14 @@ fi
 [%- endif %]
 [%- if stack == 'node' %]
 
+step "Package lock"
+# npm ci --ignore-scripts installs exactly what package-lock.json locks, and stops at
+# a lock file that no longer locks what package.json asks for, as after a change of
+# package.json by hand; npm install --package-lock-only locks it again. The dry run
+# changes nothing, not even node_modules, and names each package that differs.
+npm ci --dry-run --ignore-scripts --no-audit --no-fund >/dev/null
+echo "package-lock.json locks what package.json asks for."
+
 step "Lint and format"
 # Biome, with the rules and the format of biome.jsonc; a warning fails as well, and
 # in the CI each finding is an annotation at its line too. package.json belongs to

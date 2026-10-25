@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a lock file and a version fix themselves
+    accDescr: A pull request changes composer.json, package.json or a version by hand, and a check fails. The job of the check runs the autofix of every step. Where Composer or npm refuses the lock file, composer validate or the dry run of npm ci fails, and the lock file is locked again with the least change, every other package at its version; a lock file that the tool takes stays as Renovate wrote it. Where a file has another version than the manifest of the release bot, fix version writes the version of the manifest back at the place of the step Version, and nothing else of the file. The fix bot commits what changed, and the checks pass.
+
+    change(["A pull request changes composer.json,<br>package.json or a version by hand"])
+    failed["A check fails, and its job runs<br>the autofix of every step"]
+    refused{"Does Composer or npm<br>refuse the lock file?"}
+    relock["Lock it again with the least change:<br>composer update --minimal-changes,<br>npm install --package-lock-only"]
+    kept["The lock file stays<br>as Renovate wrote it"]
+    differs{"Has a file another version<br>than the manifest?"}
+    version["fix version writes the version of the manifest<br>at the place of the step Version"]
+    bot["The fix bot commits what changed,<br>and the checks run again"]
+    green(["Every check passes"])
+
+    change --> failed --> refused
+    refused -- "yes" --> relock --> differs
+    refused -- "no" --> kept --> differs
+    differs -- "yes" --> version --> bot
+    differs -- "no" --> bot
+    bot --> green
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class failed,refused,relock,kept,differs,version,bot bot
+    class change person
+    class green done

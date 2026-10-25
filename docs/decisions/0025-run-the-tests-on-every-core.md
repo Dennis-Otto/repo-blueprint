@@ -1,6 +1,6 @@
 # Run the tests of Python projects on every core, with the same coverage gate
 
-- Status: accepted, amended by [0069](0069-the-tests-run-on-every-logical-core-at-most-eight.md), with which the tests run on every logical core, at most eight
+- Status: accepted, amended by [0070](0070-the-tests-run-on-every-logical-core-at-most-eight.md), with which the tests run on every logical core, at most eight
 - Date: 2026-10-14
 
 ## Context
