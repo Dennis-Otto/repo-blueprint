@@ -328,6 +328,9 @@ def test_the_parts_that_workflows_add_to_the_report(tmp_path: Path) -> None:
             '[report.size]\ntitle = "T"\nreplaces = "<!-- a --> @b <!-- c -->"\n',
             "replaces no marker",
         ),
+        ('[report.size]\ntitle = "T"\nreplaces = "<!-- a --> b -->"\n', "no marker"),
+        ('[report.size]\ntitle = "T"\nreplaces = "<!-- -->"\n', "replaces no marker"),
+        ('[report.size]\ntitle = "T"\nreplaces = "<!--  -->"\n', "replaces no marker"),
         # The coach's own, which would delete its comment once it wrote it.
         (f'[report.size]\ntitle = "T"\nreplaces = "{MARKER}"\n', "replaces no marker"),
     ],

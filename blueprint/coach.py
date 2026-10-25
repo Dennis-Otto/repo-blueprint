@@ -111,9 +111,23 @@ CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 GITHUB_PAGE = re.compile(r"https://github\.com/[A-Za-z0-9._~%/-]+")
 # The name of a part of the report that a workflow adds, as [report.<name>] declares it
 # and the artifact pr-report-<name> brings it, and the marker of an older comment of a
-# bot that the part takes the place of.
+# bot that the part takes the place of: its words between the marks of a comment of
+# HTML, which the coach finds at the start of the comment.
 REPORT_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?")
-REPORT_MARKER = re.compile(r"<!-- [A-Za-z0-9._:-]+(?: [A-Za-z0-9._:-]+)* -->")
+MARKER_WORDS = re.compile(r"[A-Za-z0-9._:-]+(?: [A-Za-z0-9._:-]+)*")
+
+
+def is_marker(text: str) -> bool:
+    """Whether text is the marker of a comment, such as <!-- visual-check -->: words
+    between the marks, none of which can end the comment early."""
+    words = text[5:-4]
+    return (
+        text.startswith("<!-- ")
+        and text.endswith(" -->")
+        and len(text) > 9
+        and "--" not in words
+        and MARKER_WORDS.fullmatch(words) is not None
+    )
 
 
 class CatalogError(ValueError):
@@ -239,7 +253,7 @@ class ReportEntry:
         replaces = table.get("replaces", "")
         # The coach's own marker would make it delete its own comment.
         if not isinstance(replaces, str) or (
-            replaces and (not REPORT_MARKER.fullmatch(replaces) or replaces == MARKER)
+            replaces and (not is_marker(replaces) or replaces == MARKER)
         ):
             raise CatalogError(
                 f"{where} replaces no marker of a comment such as <!-- visual-check -->"
