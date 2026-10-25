@@ -284,10 +284,14 @@ step "Tests, with every line and branch covered"
 # On every core with pytest-xdist, whose processes pytest-cov measures and brings
 # together, or one after the other without them. coverage report then applies the
 # settings of [tool.coverage] either way, such as fail_under, and lists what no test
-# runs. PYTEST_XDIST_AUTO_NUM_WORKERS sets the number of processes, -n auto one for
-# each core.
+# runs. -n logical starts a process for each logical core, where -n auto counts only
+# the physical ones once psutil is installed, as the tools of Home Assistant install
+# it: two of the four cores of a runner of GitHub. At most eight, because each process
+# collects every test once more and takes its memory, which parallel runs on a large
+# machine ran out of. PYTEST_XDIST_AUTO_NUM_WORKERS sets the number, also above eight.
 if python -c 'import pytest, pytest_cov, xdist' 2>/dev/null; then
-  python -m pytest -n auto --cov --cov-report= --cov-fail-under=0
+  python -m pytest -n logical --maxprocesses="${PYTEST_XDIST_AUTO_NUM_WORKERS:-8}" \
+    --cov --cov-report= --cov-fail-under=0
 else
   coverage run -m pytest
 fi
