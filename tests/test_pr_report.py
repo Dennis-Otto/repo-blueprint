@@ -1,11 +1,14 @@
 """The parts of the report of the PR coach about the pull request itself: the release
-that it makes and its entry of the changelog, its coverage and its website."""
+that it makes and its entry of the changelog, its coverage, its website and the parts
+that its workflows add."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import time
 import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
@@ -15,21 +18,37 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from blueprint.coach import MOST_REPORTS, ReportEntry
 from blueprint.coverage_comment import COVERAGE_MARKER, Coverage
 from blueprint.github import Api
 from blueprint.pr_report import (
+    CODE_LINES,
+    CODE_WIDTH,
+    DRAWN,
     ENTRY_LINES,
     MOST_PAGES,
+    QUIET,
+    REPORT_BYTES,
+    REPORT_LENGTH,
+    REPORT_TEXT,
+    TABLE_COLUMNS,
+    TABLE_ROWS,
+    Artifact,
     Releases,
     Website,
     about,
     bump,
     coverage_part,
+    newest_artifact,
     pending_release,
+    read_report,
     release_part,
+    shown_report,
     version_of,
     website_artifact,
     website_part,
+    workflow_part,
+    workflow_parts,
     wrapped,
 )
 
@@ -41,21 +60,39 @@ BLUEPRINT = Releases((0, 12, 0), frozenset({"feat", "fix", "perf", "revert"}), T
 
 
 class FakeApi:
-    """GitHub with answers by path, and the paths it was asked for."""
+    """GitHub with answers by path, and the paths it was asked for; gh run download
+    writes the files of downloads for the name of the artifact into its folder."""
 
-    def __init__(self, answers: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        answers: dict[str, Any],
+        downloads: dict[str, dict[str, bytes]] | None = None,
+    ) -> None:
         self.answers = answers
+        self.downloads = downloads or {}
         self.asked: list[str] = []
 
     def __call__(
         self, arguments: Sequence[str], body: str | None
     ) -> subprocess.CompletedProcess[str]:
+        if arguments[0] == "run":
+            return self.download(list(arguments))
         path = arguments[4].removeprefix(f"repos/{REPO}/")
         self.asked.append(path)
         status, data = (200, self.answers[path]) if path in self.answers else (404, {})
         return subprocess.CompletedProcess(
             arguments, 0, f"HTTP/2.0 {status} X\r\n\r\n{json.dumps(data)}", ""
         )
+
+    def download(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+        name = arguments[arguments.index("--name") + 1]
+        self.asked.append(" ".join(arguments[: arguments.index("--dir")]))
+        if name not in self.downloads:
+            return subprocess.CompletedProcess(arguments, 1, "", "no artifact")
+        folder = Path(arguments[arguments.index("--dir") + 1])
+        for file, data in self.downloads[name].items():
+            (folder / file).write_bytes(data)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
 
 
 def pull(title: str, body: str = "", number: int = 42) -> dict[str, Any]:
@@ -546,6 +583,395 @@ def test_the_artifact_of_the_website() -> None:
     assert website_artifact(Api(runner=FakeApi({path: {}})), REPO, SHA) is None
 
 
+# ---------------------------------------------------------------- the parts of workflows
+
+CARD = ReportEntry("card-size", "The size of the card")
+LISTED = "actions/artifacts?name=pr-report-card-size&per_page=100"
+LINK = f"https://github.com/{REPO}/actions/runs/12/artifacts/3"
+
+
+def kept(*artifacts: tuple[int, int, str, int]) -> dict[str, Any]:
+    """The artifacts that the API lists, newest first: each run, id, commit and size."""
+    return {
+        "artifacts": [
+            {
+                "id": id_,
+                "size_in_bytes": size,
+                "workflow_run": {"id": run, "head_sha": sha},
+            }
+            for run, id_, sha, size in artifacts
+        ]
+    }
+
+
+def test_the_newest_artifact_of_the_head() -> None:
+    listed = kept((10, 1, "b" * 40, 1), (12, 3, SHA, 512), (11, 2, SHA, 9))
+    listed["artifacts"].insert(
+        1, {"id": 4, "expired": True, "workflow_run": {"id": 13, "head_sha": SHA}}
+    )
+    api = Api(runner=FakeApi({LISTED: listed}))
+
+    found = newest_artifact(api, REPO, SHA, "pr-report-card-size")
+
+    assert found == Artifact(12, 3, 512)
+    assert found.link(REPO) == LINK
+    assert newest_artifact(api, REPO, SHA, "pr-report-visual") is None
+
+
+# A part with every kind of block, and text that would be Markdown, links, mentions
+# and HTML, which all show as code.
+PART = """# Card size
+
+The card grows by **2 kB**: see [the log](https://evil.example) @someone.
+It is still small.
+
+| Module | main | this PR |
+| :--- | ---: | :---: |
+| `card.js` | 120 kB | 122 kB |
+| a \\| b | 1 |
+| x | y | z | more |
+
+- one
+  - nested
+continued
+* two
+1. three
+
+```js
+const fence = "```";
+```
+
+<img src="https://evil.example/x.png">
+"""
+
+SHOWN = """**`Card size`**
+
+`The card grows by **2 kB**: see [the log](https://evil.example) @someone. It is still small.`
+
+| `Module` | `main` | `this PR` |
+| :--- | ---: | :---: |
+| `` `card.js` `` | `120 kB` | `122 kB` |
+| `a \\| b` | `1` |  |
+| `x` | `y` | `z` |
+
+- `one`
+  - `nested continued`
+- `two`
+- `three`
+
+````js
+const fence = "```";
+````
+
+`<img src="https://evil.example/x.png">`"""
+
+
+def test_the_markdown_of_a_part_shows_as_data() -> None:
+    assert shown_report(PART) == (SHOWN, False)
+
+
+@pytest.mark.parametrize(
+    ("text", "shown"),
+    [
+        # A row like that of a table, without the row below its head.
+        ("| a | b |\nnext", "`| a | b | next`"),
+        ("| a |\n| - |", "| `a` |\n| --- |"),
+        # A heading closed by its marks, a block of code that never closes, and lines
+        # of nothing but control characters.
+        ("## Size ##\n\n\n~~~\nx", "**`Size`**\n\n```\nx\n```"),
+        ("\x00\t\n\N{LINE SEPARATOR}", ""),
+        ("1) a\n   b\n\nc", "- `a b`\n\n`c`"),
+        # A mark that ends no heading, code inside a paragraph, which no fence opens,
+        # and a fence of tildes, whose language may have backticks after it.
+        (
+            "# C#\n```a```\n\n~~~ py `x`\ny",
+            "**`C#`**\n\n```` ```a``` ````\n\n```py\ny\n```",
+        ),
+        # A block that GitHub would draw as a diagram or a map shows as code.
+        ("```mermaid\nflowchart TB\n```", "```\nflowchart TB\n```"),
+        ("~~~ GeoJSON\n{}\n~~~", "```\n{}\n```"),
+        # An item deeper than the one before it, or than none, as GitHub nests it.
+        ("para\n    - deep", "`para`\n\n- `deep`"),
+        ("- a\n      - c\n  - b", "- `a`\n  - `c`\n  - `b`"),
+    ],
+)
+def test_the_blocks_of_a_part(text: str, shown: str) -> None:
+    assert shown_report(text) == (shown, False)
+
+
+LONG_LINES = {
+    "fence": "```" + "a" * 60000 + "`",
+    "heading": "# a" + " " * 60000 + "b",
+    "row": "|" + "-" * 60000,
+    "delimiter": "| " + "- " * 30000,
+    "item": " " * 60000 + "x",
+    "table": "|" + " |" * 30000 + "\n|" + "-|" * 30000,
+}
+
+
+@pytest.mark.parametrize("kind", LONG_LINES)
+def test_a_long_line_of_a_fork_takes_no_long_time(kind: str) -> None:
+    # Each pattern reads a line in one pass; one that tried again at every place
+    # would take minutes for a line of the 64 kB of a report.md.
+    started = time.perf_counter()
+
+    shown_report(LONG_LINES[kind])
+
+    assert time.perf_counter() - started < 5
+
+
+def test_a_part_shows_so_much_of_its_tables_and_code() -> None:
+    columns = "|" + "|".join(f"c{n}" for n in range(TABLE_COLUMNS + 2)) + "|"
+    rows = "\n".join(f"| {n} |" for n in range(TABLE_ROWS + 3))
+    lines = "\n".join(["x" * (CODE_WIDTH + 5)] * (CODE_LINES + 2))
+    text, more = shown_report(f"{columns}\n|---|\n{rows}\n\n```\n{lines}\n```")
+
+    assert not more
+    head = text.split("\n", 1)[0]
+    assert head.count("`c") == TABLE_COLUMNS
+    assert text.count("\n| `") == TABLE_ROWS
+    assert "\n\n… and 3 more rows.\n\n```\n" in text
+    assert f"\n{'x' * CODE_WIDTH}\n" in text
+    assert text.count("x" * CODE_WIDTH) == CODE_LINES
+    assert text.endswith("\n```\n… and 2 more lines.")
+
+
+def test_a_long_part_shows_what_fits() -> None:
+    text, more = shown_report("\n\n".join(["word " * 150] * 20))
+
+    assert more
+    assert len(text) <= REPORT_LENGTH
+    paragraph = "`" + ("word " * 150).strip() + "`"
+    assert text.count(paragraph) == (REPORT_LENGTH + 2) // (len(paragraph) + 2)
+
+
+# The lines that the report may show of a part: code on a line of its own, as an item
+# of a list or bold, rows of a table whose cells are code, and the notes of a cut.
+SPAN = r"(?P<m>`+)( ?)(?P<t>[^\n]*?)\2(?P=m)"
+
+
+def is_code(text: str) -> bool:
+    found = re.fullmatch(SPAN, text)
+    return found is not None and len(found["m"]) not in {
+        len(run) for run in re.findall(r"`+", found["t"])
+    }
+
+
+def is_row(line: str) -> bool:
+    if not (line.startswith("| ") and line.endswith(" |")):
+        return False
+    values = re.split(r"(?<!\\) \| ", line[2:-2])
+    return all(
+        not value
+        or (is_code(value.replace("\\|", "|")) and "|" not in value.replace("\\|", ""))
+        for value in values
+    )
+
+
+def assert_data(text: str) -> None:
+    lines = text.split("\n") if text else []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        opening = re.fullmatch(r"(`{3,})([A-Za-z0-9+-]*)", line)
+        if opening:
+            assert opening[2].lower() not in DRAWN, line
+            end = lines.index(opening[1], index + 1)
+            assert not any(opening[1] in inner for inner in lines[index + 1 : end])
+            index = end + 1
+            continue
+        assert (
+            not line
+            or is_code(line)
+            or (line.startswith("**") and line.endswith("**") and is_code(line[2:-2]))
+            or (
+                bool(re.fullmatch(r"(?: {2}){0,2}- (.+)", line))
+                and is_code(line.lstrip(" ")[2:])
+            )
+            or is_row(line)
+            or bool(re.fullmatch(r"\| (?::?---:? \| )*:?---:? \|", line))
+            or bool(re.fullmatch(r"… and \d+ more (?:rows|lines)\.", line))
+        ), line
+        index += 1
+    assert not any(
+        (unicodedata.category(char) == "Cc" and char != "\n")
+        or char in "\N{LINE SEPARATOR}\N{PARAGRAPH SEPARATOR}"
+        for char in text
+    )
+
+
+MARKDOWN = st.sampled_from(
+    [
+        "| a | b |",
+        "| --- | :-: |",
+        "|x\\|`|`y|",
+        "```",
+        "~~~",
+        "````py",
+        "```mermaid",
+        "~~~ math",
+        "- item",
+        "    * deep",
+        "# head",
+        "",
+        "1. x",
+        "<!-- quiet -->",
+        "[a](https://evil.example) @me",
+    ]
+)
+
+
+@given(st.lists(st.one_of(st.text(), MARKDOWN)))
+def test_no_text_of_a_part_leaves_its_code(lines: list[str]) -> None:
+    text, _ = shown_report("\n".join(lines))
+
+    assert_data(text)
+
+
+def test_the_part_of_a_workflow() -> None:
+    entry = ReportEntry(
+        "card-size", "Card size", "What the card weighs.", "<!-- size -->"
+    )
+    part = workflow_part(entry, REPO, Artifact(12, 3), "Grows.")
+
+    assert part is not None
+    assert part.text == (
+        "#### Card size\n\nWhat the card weighs.\n\n`Grows.`\n\n"
+        f"<sub>From the artifact [`pr-report-card-size`]({LINK}).</sub>"
+    )
+    assert part.news
+    assert part.replaces == "<!-- size -->"
+
+
+def test_a_quiet_part_is_no_news() -> None:
+    part = workflow_part(CARD, REPO, Artifact(12, 3), f"{QUIET}\r\nThe same size.")
+
+    assert part is not None
+    assert not part.news
+    assert "\n\n`The same size.`\n\n" in part.text
+    # A part that says nothing, quiet or not, is none.
+    assert workflow_part(CARD, REPO, Artifact(12, 3), QUIET) is None
+    assert workflow_part(CARD, REPO, Artifact(12, 3), " \n") is None
+
+
+def test_a_part_that_holds_more_says_so() -> None:
+    part = workflow_part(CARD, REPO, Artifact(12, 3), "word\n\n" * 2000)
+
+    assert part is not None
+    assert part.text.endswith(
+        f"[`pr-report-card-size`]({LINK}), which holds more.</sub>"
+    )
+
+
+def test_a_part_that_the_coach_cannot_read() -> None:
+    # Neither says what an older comment of its workflow said, which therefore stays.
+    card = ReportEntry("card-size", "The size of the card", replaces="<!-- size -->")
+    large = workflow_part(card, REPO, Artifact(12, 3, REPORT_BYTES + 2048), None)
+    unread = workflow_part(card, REPO, Artifact(12, 3, 10), None)
+
+    assert large is not None
+    assert large.news
+    assert large.text == (
+        f"#### The size of the card\n\nThe artifact [`pr-report-card-size`]({LINK}) "
+        f"is {REPORT_BYTES // 1024 + 2} kB, more than the {REPORT_BYTES // 1024} kB "
+        "that the PR coach reads; let its workflow keep `report.md` alone in it."
+    )
+    assert unread is not None
+    assert not unread.news
+    assert "couldn't read `report.md` of the artifact" in unread.text
+    assert large.replaces == unread.replaces == ""
+
+
+def test_the_report_of_an_artifact() -> None:
+    name = "pr-report-card-size"
+    downloads = {name: {"report.md": "Größer".encode() + b"\xff" + b"x" * REPORT_TEXT}}
+    api = FakeApi({}, downloads)
+
+    text = read_report(Api(runner=api), REPO, name, Artifact(12, 3))
+
+    assert text is not None
+    assert text.startswith("Größer\N{REPLACEMENT CHARACTER}x")
+    assert len(text.encode()) == REPORT_TEXT + 2
+    assert api.asked == [f"run download 12 --repo {REPO} --name {name}"]
+
+
+def test_a_report_after_a_byte_order_mark_is_still_quiet() -> None:
+    # Some editors on Windows begin a file of UTF-8 with one.
+    name = "pr-report-card-size"
+    downloads = {name: {"report.md": f"\ufeff{QUIET}\nThe same.".encode()}}
+
+    text = read_report(Api(runner=FakeApi({}, downloads)), REPO, name, Artifact(12, 3))
+
+    assert text == f"{QUIET}\nThe same."
+    part = workflow_part(CARD, REPO, Artifact(12, 3), text)
+    assert part is not None
+    assert not part.news
+
+
+@pytest.mark.parametrize(
+    "downloads",
+    [
+        # gh can't download it, or it holds no report.md, or a folder by that name.
+        {},
+        {"pr-report-card-size": {"other.md": b"x"}},
+    ],
+)
+def test_an_artifact_without_a_report(downloads: dict[str, dict[str, bytes]]) -> None:
+    api = Api(runner=FakeApi({}, downloads))
+
+    assert read_report(api, REPO, "pr-report-card-size", Artifact(12, 3)) is None
+
+
+def test_a_report_that_is_a_link_is_none(tmp_path: Path) -> None:
+    target = tmp_path / "secret"
+    target.write_text("secret", encoding="utf-8")
+
+    def link(
+        arguments: Sequence[str], body: str | None
+    ) -> subprocess.CompletedProcess[str]:
+        folder = Path(arguments[list(arguments).index("--dir") + 1])
+        try:
+            os.symlink(target, folder / "report.md")
+        except OSError:  # pragma: no cover - Windows without the right to make links
+            pytest.skip("no symbolic links here")
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    assert read_report(Api(runner=link), REPO, "pr-report-x", Artifact(12, 3)) is None
+
+
+def test_the_parts_of_the_workflows_of_a_pull_request() -> None:
+    entries = [ReportEntry(f"p{n}", f"Part {n}") for n in range(MOST_REPORTS + 1)]
+    listed = {
+        f"actions/artifacts?name=pr-report-p{n}&per_page=100": kept(
+            (20 + n, 30 + n, SHA, size)
+        )
+        for n, size in [(0, 10), (1, REPORT_BYTES + 1), (2, 10), (3, 10), (5, 10)]
+    }
+    downloads = {
+        "pr-report-p0": {"report.md": b"First."},
+        "pr-report-p3": {"report.md": b""},
+    }
+    api = FakeApi(listed, downloads)
+
+    parts = workflow_parts(Api(runner=api), REPO, SHA, entries)
+
+    # p0 has its report, p1 is too large to download, p2 couldn't be downloaded, p3
+    # says nothing, p4 kept no artifact, and p5 is one more than a catalog may declare.
+    assert [part.text.split("\n", 1)[0] for part in parts] == [
+        "#### Part 0",
+        "#### Part 1",
+        "#### Part 2",
+    ]
+    assert [part.news for part in parts] == [True, True, False]
+    downloaded = [asked for asked in api.asked if asked.startswith("run download")]
+    assert downloaded == [
+        f"run download 20 --repo {REPO} --name pr-report-p0",
+        f"run download 22 --repo {REPO} --name pr-report-p2",
+        f"run download 23 --repo {REPO} --name pr-report-p3",
+    ]
+    assert not any("pr-report-p5" in asked for asked in api.asked)
+
+
 # ---------------------------------------------------------------- the parts
 
 
@@ -556,15 +982,21 @@ def test_the_parts_of_a_pull_request() -> None:
             "pulls/42/files?per_page=100&page=1": files,
             "pulls?state=open&per_page=100&page=1": [],
             "actions/artifacts?name=website&per_page=100": {"artifacts": []},
-        }
+            LISTED: kept((12, 3, SHA, 10)),
+        },
+        {"pr-report-card-size": {"report.md": b"Grows."}},
     )
     coverage = (Coverage({"a.py": (1, 1)}), None)
 
-    parts = about(Api(runner=api), REPO, pull("feat: dark mode"), ROOT, coverage)
+    parts = about(
+        Api(runner=api), REPO, pull("feat: dark mode"), ROOT, coverage, [CARD]
+    )
 
+    # The parts of the workflows follow those of the coach.
     assert [part.text.split("\n", 1)[0] for part in parts] == [
         "#### Release",
         "#### Coverage",
         "#### Website",
+        "#### The size of the card",
     ]
     assert about(Api(runner=api), REPO, pull("Dark mode"), ROOT) == [parts[2]]

@@ -1515,7 +1515,8 @@ def main(
             client = api
 
             def parts(pull: Json) -> list[Part]:
-                return pr_parts(client, repo, pull, root, coverage)
+                reports = catalog.reports.values()
+                return pr_parts(client, repo, pull, root, coverage, reports)
 
             sys.stdout.write(
                 coach_report(api, repo, arguments.sha, number, catalog, about=parts)

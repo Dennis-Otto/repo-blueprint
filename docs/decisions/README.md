@@ -35,7 +35,7 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0027](0027-few-jobs-that-each-run-several-checks.md) | Few jobs that each run several checks, so that a pull request waits for fewer runners, in two releases | accepted |
 | [0028](0028-bring-one-pull-request-at-a-time-up-to-date.md) | Bring one pull request at a time up to date, in the order of its auto-merge | accepted |
 | [0029](0029-a-dependency-dashboard-the-whole-monday-and-pins-with-their-checksum.md) | A dependency dashboard, the whole Monday, fix(deps) for what the users run, and pinned downloads that move with their checksum | accepted, amended by [0057](0057-renovate-keeps-no-dependency-dashboard.md) |
-| [0030](0030-one-report-on-each-pull-request.md) | One report on each pull request, which says what it makes | accepted |
+| [0030](0030-one-report-on-each-pull-request.md) | One report on each pull request, which says what it makes | accepted, amended by [0066](0066-the-workflows-of-a-project-add-their-parts-to-the-one-report.md) |
 | [0031](0031-mutation-tests-in-parts-with-the-logic-first-and-an-issue-on-a-drop.md) | The mutation tests run in parts, list the survivors that change the logic first and open an issue when the score drops | accepted |
 | [0032](0032-the-taint-analysis-knows-nextcloud-and-proves-that-it-still-sees.md) | The taint analysis of a Nextcloud app knows Nextcloud, and proves in every run that it still sees | accepted |
 | [0033](0033-schedules-are-only-a-safety-net.md) | Bots start from events, and their schedules are only a safety net | accepted |
@@ -71,3 +71,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0063](0063-every-bot-checks-for-the-release-app-before-its-token.md) | Every bot checks for the release app before its token, and fails without it only when its work is the app's; one that helps a pull request along warns | accepted |
 | [0064](0064-an-image-of-docker-runs-with-docker-run.md) | An image of Docker runs with `docker run`, and `settings check` names every step that runs one with `docker://`, which GitHub refuses unless every action may run | accepted |
 | [0065](0065-the-release-verification-checks-the-zip-that-hacs-installs.md) | The release verification checks the zip that HACS installs, and the zip of a beta has the version of the beta in its `manifest.json` | accepted |
+| [0066](0066-the-workflows-of-a-project-add-their-parts-to-the-one-report.md) | The workflows of a project add their parts to the one report of the PR coach: an artifact `pr-report-<name>` with `report.md` for the head, which `[report.<name>]` of the catalog names and the coach shows only as code | accepted |

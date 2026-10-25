@@ -47,7 +47,10 @@ name: After the checks
 # of main, and the entry that it adds to the changelog; the coverage of its tests
 # against that of main, file by file, from the coverage reports that the checks keep
 # as the artifact "coverage", which a pull request from a fork writes as it likes;
-# and the website that the check docs built, with the pages that it changes. A pull
+# the website that the check docs built, with the pages that it changes; and the part
+# that a workflow of the project adds, such as one of visual tests: the report.md of
+# its artifact pr-report-<name> for the head, under the title that [report.<name>] of
+# .github/checks.project.toml of main gives it, with its text only as code. A pull
 # request whose checks never failed gets the comment only when it has something of
 # this to say, and one of a bot never.
 #
@@ -430,7 +433,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      actions: read # the coverage reports and the website that the checks kept
+      actions: read # the coverage reports, the website and the parts that the workflows kept
       checks: read
       contents: read
       pull-requests: write
@@ -482,6 +485,9 @@ jobs:
             echo "head=$RUNNER_TEMP/head/$report"
             echo "base=$RUNNER_TEMP/base/$report"
           } >> "$GITHUB_OUTPUT"
+      # The coach also downloads the artifact pr-report-<name> of each part that the
+      # catalog of main declares, into a folder of its own, and reads its report.md
+      # as data; a workflow that ends after this run shows its part in the next one.
       - name: Keep the one report of the PR coach up to date
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
