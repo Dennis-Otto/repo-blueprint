@@ -1,3 +1,0 @@
-### Features
-
-- **One list of the repositories that follow the blueprint:** `.github/fleet.toml` names each one with its kind, its place in the Rollout and whether the Variants try every pull request on its answers, and `python3 reference.py` writes from it the showcase of both READMEs, the section *A real repository* of each kind on the website, the order of the Rollout and the canaries of the Variants; a test fails while one of them differs (decision 0081). Player Switch for Autodarts, the first Node package that follows the blueprint, is in all of them now: in the showcase and on the page of the Node kind, third in the Rollout, and a canary that tries every change of the blueprint on its answers before the merge.
