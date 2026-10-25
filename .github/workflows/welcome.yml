@@ -48,3 +48,13 @@ jobs:
             "- \`bash scripts/check.sh\` runs the checks of the CI on your computer." \
             "" \
             "[CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) explains the rest. The checks start once the maintainer approves them for this first pull request.")"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

@@ -377,6 +377,16 @@ jobs:
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
           echo "The beta v$version of $next is on its way." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   # The build runs in a reusable workflow of its own, so that the provenance of the
   # assets names it alone, as SLSA Build Level 3 asks.
@@ -436,6 +446,16 @@ jobs:
             echo "The release is announced in the discussions." >> "$GITHUB_STEP_SUMMARY"
           fi
           gh release edit "$TAG" --draft=false --latest "${announce[@]}" --repo "$GITHUB_REPOSITORY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   pypi:
     name: deliver to PyPI
@@ -600,6 +620,16 @@ jobs:
             --connect-timeout 15 --max-time 180 --request POST \
             --header "Authorization: Token $APPSTORE_TOKEN" --header 'Content-Type: application/json' \
             --data-binary "@$RUNNER_TEMP/request.json" https://apps.nextcloud.com/api/v1/apps/releases
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   github-action:
     name: move the major tag
@@ -633,6 +663,16 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -fa "$MAJOR" -m "$TAG" "$TAG^{commit}"
           git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "refs/tags/$MAJOR"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   verify:
     name: verify

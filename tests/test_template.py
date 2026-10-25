@@ -670,7 +670,7 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
 
 # The jobs that hold a secret or a token that may write, yet record their network
 # traffic instead of blocking it, each with its reason. Every other such job blocks
-# every host that it doesn't need (decision 0076).
+# every host that it doesn't need (decision 0077).
 AUDITED_PRIVILEGED_JOBS = {
     (
         "release.yml",
@@ -813,6 +813,82 @@ def test_every_privileged_job_blocks_the_hosts_that_it_doesnt_need(
     # No reason stays for a job that blocks, or that is gone.
     if project == "blueprint":
         assert audited == {key for key in AUDITED_PRIVILEGED_JOBS if key[0] in flows}
+
+
+WAIT_FOR_DOCKER = "Wait until Harden-Runner has removed Docker"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_without_docker_waits_until_harden_runner_has_removed_it(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Harden-Runner removes Docker with apt-get in the background, and a job that
+    # ends before it finishes hangs in "Cleaning up orphan processes" until its
+    # timeout, which a short bot or the check of the title would reach.
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            hardening = steps_using(job, "step-security/harden-runner")
+            sudo = (
+                hardening[0]["with"].get("disable-sudo-and-containers")
+                if hardening
+                else None
+            )
+            where = f"{name}: {job_id}"
+            names = [step.get("name") for step in job.get("steps") or []]
+            if sudo is None:
+                assert WAIT_FOR_DOCKER not in names, where
+                continue
+            assert names.count(WAIT_FOR_DOCKER) == 1, where
+            index = names.index(WAIT_FOR_DOCKER)
+            wait = job["steps"][index]
+            # Where Docker stays, as in the build of a Nextcloud app, nothing waits.
+            assert wait["if"] == (
+                "always()"
+                if sudo is True
+                else "always() && vars.PUBLISH_TO != 'nextcloud-appstore'"
+            ), where
+            # Only the steps that explain a failure come after it.
+            for step in job["steps"][index + 1 :]:
+                assert step.get("if") == "failure()", f"{where}: {step.get('name')}"
+            scripts.add(wait["run"])
+    assert len(scripts) <= 1, scripts
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(("busy", "sleeps"), [(0, 0), (3, 3), (200, 120)])
+def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
+    tmp_path: Path, busy: int, sleeps: int
+) -> None:
+    script = step_named(
+        job_in(workflows(ROOT)["welcome.yml"], "welcome"), WAIT_FOR_DOCKER
+    )["run"]
+    # pgrep finds apt-get the first times it is asked.
+    counter = tmp_path / "count"
+    counter.write_text("0", encoding="utf-8")
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "pgrep": (
+                f'n=$(( $(cat "{counter.as_posix()}") + 1 ))\n'
+                f'echo "$n" > "{counter.as_posix()}"\n'
+                f"(( n <= {busy} ))\n"
+            ),
+            "sleep": "",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count("sleep 1") == sleeps
+    assert all(call in {"pgrep -x apt-get|dpkg", "sleep 1"} for call in calls), calls
+    assert ("::warning::Harden-Runner still removes Docker" in result.stdout) == (
+        busy > 120
+    )
 
 
 def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
@@ -1659,25 +1735,24 @@ def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
     # to a commit of their branches falls behind with every commit to them.
     assert "uses: hacs/action" not in ci
     assert "uses: home-assistant/actions" not in ci
-    hacs = job_in(ci, "hacs")
-    validation = step_in(hacs, "Validate the HACS metadata")
+    # One job runs both, and neither has a job of its own any more (#447).
+    names = {job.get("name") for job in parse(ci)["jobs"].values()}
+    assert "home-assistant" in names
+    assert not {"hacs", "hassfest"} & names
+    job = job_in(ci, "home-assistant")
+    validation = step_in(job, "Validate the HACS metadata")
     assert validation["run"].endswith("\n  ghcr.io/hacs/action:main\n")
-    # HACS reads the repository through the API, so the job checks nothing out but
-    # what the PR coach needs when it failed.
-    checkouts = [
-        found
-        for found in hacs["steps"]
-        if found.get("uses", "").startswith("actions/checkout@")
-    ]
-    assert len(checkouts) == 1
-    assert condition_of(checkouts[0]) == "failure()"
-    assert hacs["steps"].index(checkouts[0]) > hacs["steps"].index(validation)
+    # HACS reads the repository through the API, so it runs also without the
+    # checkout, which only hassfest needs.
+    assert condition_of(validation) == "${{ !cancelled() }}"
+    [checkout] = steps_using(job, "actions/checkout")
+    assert job["steps"].index(checkout) < job["steps"].index(validation)
     # hassfest checks the checkout, read-only, exactly as the Variants workflow does.
     command = (
         'docker run --rm --volume "$PWD:/github/workspace:ro"'
         " ghcr.io/home-assistant/hassfest:latest\n"
     )
-    assert command in step_in(job_in(ci, "hassfest"), "Validate the integration")["run"]
+    assert command in step_in(job, "Validate the integration")["run"]
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     assert command.replace("$PWD", "$PWD/$PROJECT") in variants
 
@@ -1741,7 +1816,7 @@ def test_hacs_gets_the_inputs_of_its_action(
     ci = (projects["home-assistant"] / ".github/workflows/ci.yml").read_text(
         encoding="utf-8"
     )
-    hacs = step_in(job_in(ci, "hacs"), "Validate the HACS metadata")
+    hacs = step_in(job_in(ci, "home-assistant"), "Validate the HACS metadata")
     # The inputs of the action reach its image as INPUT_ variables, as GitHub passes
     # them, and the event as a file, from which it reads the branch to validate.
     inputs = {
@@ -1780,7 +1855,7 @@ def test_hassfest_shows_its_errors_as_annotations(
 
     output, calls = run_the_step_with_docker(
         tmp_path,
-        step_in(job_in(ci, "hassfest"), "Validate the integration"),
+        step_in(job_in(ci, "home-assistant"), "Validate the integration"),
         {"RUNNER_TEMP": runner_temp.as_posix()},
     )
 
@@ -3929,7 +4004,7 @@ def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
     # fetches with the whole history, is current.
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
-    for workflow, name in ((lint, "lint"), (lint, "dco"), (links, "links")):
+    for workflow, name in ((lint, "lint"), (links, "links")):
         job = job_in(workflow, name)
         assert "base.sha" not in values_of(job), name
         assert any(
@@ -6268,8 +6343,17 @@ def test_dependabot_merges_as_the_release_app(
     assert len(parse(text)["jobs"]) == 1
     assert not steps_using(job, "actions/checkout")
     # The check of the release app, the explanation of a token that failed and the
-    # merge.
-    assert len([step for step in job["steps"] if "run" in step]) == 3
+    # merge, besides the wait until Harden-Runner has removed Docker.
+    assert (
+        len(
+            [
+                step
+                for step in job["steps"]
+                if "run" in step and step["name"] != WAIT_FOR_DOCKER
+            ]
+        )
+        == 3
+    )
     app = step_in(job, "Create a token of the release app")
     # A token that fails still lets the job's token turn auto-merge on, and says so.
     assert app["continue-on-error"] is True
@@ -9415,7 +9499,11 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     assert checkout["with"]["persist-credentials"] is False
     assert "ref" not in checkout["with"]
     # The script of the update, after the check of the release app.
-    run = [step["run"] for step in job["steps"] if "run" in step][-1]
+    run = [
+        step["run"]
+        for step in job["steps"]
+        if "run" in step and step["name"] != WAIT_FOR_DOCKER
+    ][-1]
     assert "${{" not in run
     assert 'next-branch "${only[@]}" | tee -a "$GITHUB_STEP_SUMMARY"' in run
     # A run for auto-merge shows as a check of that pull request, and the bot-health
@@ -9853,9 +9941,9 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     explained_under_their_comments(windows)
 
 
-# The checks that a job of several checks replaces. Their own jobs stay for one
-# release, so that a pull request passes the rulesets of every repository until the
-# settings bot applies the required checks of this release; the next one removes them.
+# The checks that a job of several checks replaced. Their own jobs ran for one more
+# release, until the settings bot of every repository required the new job instead;
+# the release after it removed them (#447).
 REPLACED = {
     "lint": ["workflow-lint", "reuse", "markdown", "issue-assistant", "dco"],
     "conventional title": ["changelog"],
@@ -9877,13 +9965,14 @@ def test_a_job_of_several_checks_replaces_their_jobs_in_the_required_checks(
         names |= {job.get("name") for job in parse(workflow)["jobs"].values()}
     home_assistant = project == "home-assistant"
     for check, replaced in REPLACED.items():
+        # No job of a replaced check is left to wait for a runner, in no kind of
+        # project, and the blueprint itself, which has the workflows of every kind.
+        assert not set(replaced) & names, check
         if check == "home-assistant" and not home_assistant:
             assert check not in required
             continue
         assert check in required, check
         assert not set(replaced) & set(required), check
-        # Until the next release, the old jobs report as well.
-        assert set(replaced) <= names, check
     assert "prose" not in names
 
 
@@ -9977,13 +10066,8 @@ def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
     assert condition_of(step_in(title, "fragments")).startswith("${{ !cancelled() &&")
     # It reads the files of the pull request through the API and sets its labels.
     assert title["permissions"]["pull-requests"] == "write"
-    # The job changelog only reports for the rulesets that still require it: it
-    # checks nothing out and runs nothing of the pull request.
-    changelog = job_in(workflow, "changelog")
-    assert not steps_using(changelog, "actions/checkout")
-    assert "GH_TOKEN" not in values_of(changelog)
-    assert len(changelog["steps"]) == 2
-    assert all("name" in step for step in changelog["steps"])
+    # One job, which no runner of a job changelog waits beside any more (#447).
+    assert list(parse(workflow)["jobs"]) == ["title"]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10154,8 +10238,8 @@ def test_every_project_fixes_what_a_command_can_fix(
     # fixes of both, with the CI of this kind among the workflows that it follows.
     lint = (github / "workflows/lint.yml").read_text(encoding="utf-8")
     assert any(
-        step.get("with", {}).get("name") == "fixes-markdown"
-        for step in job_in(lint, "markdown")["steps"]
+        step.get("with", {}).get("name") == "fixes-lint"
+        for step in job_in(lint, "lint")["steps"]
     )
     after = (github / "workflows/after-checks.yml").read_text(encoding="utf-8")
     assert {name.replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
@@ -10230,13 +10314,22 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     assert "github.event.workflow_run.conclusion == 'cancelled'" in cancelled["if"]
     events = """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
     assert events in cancelled["if"]
+    # The runs of a push to main cancel each other too, but only those of main, never
+    # those of a push to another branch or of a fork.
+    main = (
+        "(github.event.workflow_run.event == 'push' &&"
+        " github.event.workflow_run.head_branch == github.event.repository.default_branch &&"
+        " github.event.workflow_run.head_repository.full_name == github.repository)"
+    )
+    assert f"({events} || {main})" in cancelled["if"]
     # Twice at most, whatever cancels the run again.
     assert "github.event.workflow_run.run_attempt < 3" in cancelled["if"]
-    # It reads the runs, their checks and pull requests and starts a run again; it
-    # checks out nothing.
+    # It reads the runs, their checks, pull requests and the head of main and starts a
+    # run again; it checks out nothing.
     assert cancelled["permissions"] == {
         "actions": "write",
         "checks": "read",
+        "contents": "read",
         "pull-requests": "read",
     }
     steps = cancelled["steps"]
@@ -10249,13 +10342,14 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     assert not any("${{" in found.get("run", "") for found in steps)
 
 
-CANCELLED_STEP = "Run the checks of the head of the pull request again"
+CANCELLED_STEP = "Run the checks of the head of a pull request or of main again"
 
 
 def run_the_bot_for_cancelled_checks(
-    tmp_path: Path, pull: str, newer: str, message: str
+    tmp_path: Path, pull: str, newer: str, message: str, head: str | None = None
 ) -> tuple[list[str], str]:
-    # gh answers as the API does, after the filters of jq.
+    # gh answers as the API does, after the filters of jq. With the head of main, the
+    # run is one of a push to main.
     done = workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -10263,6 +10357,7 @@ def run_the_bot_for_cancelled_checks(
         CANCELLED_STEP,
         answers=[
             Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", f"{pull}\n"),
+            Answer(r"api repos/o/r/git/ref/heads/main --jq \.object\.sha", f"{head}\n"),
             Answer(
                 r"api repos/o/r/actions/workflows/3/runs\?head_sha=abc1234def"
                 r" --paginate --jq .+",
@@ -10285,6 +10380,8 @@ def run_the_bot_for_cancelled_checks(
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
+            "EVENT": "pull_request" if head is None else "push",
+            "BRANCH": "feature" if head is None else "main",
         },
     )
     assert done.returncode == 0, done.stderr
@@ -10315,6 +10412,68 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5" in calls) == summary.endswith("it runs again")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("head", "newer", "message", "summary"),
+    [
+        # A newer push cancelled the run of the commit before, as it should.
+        ("fed4321cba", "", RACED, "abc1234 is no longer the head of main"),
+        # A run by hand of the same commit tells the state of main.
+        ("abc1234def", "7", RACED, "A newer run of CodeQL for abc1234 reports"),
+        # A person cancelled it.
+        ("abc1234def", "", "The operation was canceled.", "it stays cancelled"),
+        # A late run for the commit before cancelled the run for the head of main,
+        # whose coverage, alerts of code scanning and fixes would be missing.
+        ("abc1234def", "", RACED, "the head of main; it runs again"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_starts_the_run_of_the_head_of_main_again(
+    tmp_path: Path, head: str, newer: str, message: str, summary: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "", newer, message, head=head
+    )
+
+    assert summary in written
+    assert ("run rerun 5" in calls) == summary.endswith("it runs again")
+    # The head of main comes from its branch, not from a pull request.
+    assert not any("/pulls" in call for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
+    tmp_path: Path,
+) -> None:
+    # A head that GitHub didn't tell is no head that a newer push replaced: the step
+    # fails with the error of gh instead of saying that the run stays cancelled.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "cancelled",
+        CANCELLED_STEP,
+        answers=[
+            Answer(
+                r"api repos/o/r/git/ref/heads/main --jq \.object\.sha",
+                err="HTTP 502: Bad Gateway",
+                code=1,
+            ),
+        ],
+        env={
+            "RUN": "5",
+            "ATTEMPT": "1",
+            "WORKFLOW": "3",
+            "NAME": "CodeQL",
+            "SHA": "abc1234def",
+            "EVENT": "push",
+            "BRANCH": "main",
+        },
+    )
+
+    assert done.returncode != 0
+    assert "stays cancelled" not in done.summary
+    assert not any(call.startswith("run rerun") for call in done.commands)
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
@@ -10818,6 +10977,54 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
     )
     # Only the latest run before counts.
     assert not any("actions/runs/1/" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_compares_with_the_run_before_a_superseded_one(
+    tmp_path: Path,
+) -> None:
+    # A newer push cancelled the run for the commit before, so the run before that
+    # tells whether the failure is a real one: it broke the same job.
+    runs = runs_of_the_branch(2, 1)
+    runs["workflow_runs"][-2]["conclusion"] = "cancelled"  # type: ignore[index]
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs,
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "cancelled"),
+                job_of_a_run(22, "test (3.13)", "cancelled"),
+            ]
+        },
+        "repos/o/r/check-runs/21/annotations": annotations_of_a_job(RACED),
+        "repos/o/r/actions/runs/1/jobs": {
+            "jobs": [
+                job_of_a_run(31, "test (3.12)", "failure"),
+                job_of_a_run(32, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" not in calls
+    assert "broke for the commit before" in summary
+    assert any(call.startswith("api repos/o/r/actions/runs/1/jobs ") for call in calls)
 
 
 def variants_of_a_run(
@@ -11751,6 +11958,109 @@ def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
     # Their runners are worth more than the race, which the bot for cancelled checks
     # repairs.
     assert "head.sha" not in concurrency_of(name)
+
+
+# What a newer push to main does to the run of the commit before, for each workflow
+# that a push to main starts (decision 0076); a new one takes a side here.
+ON_PUSH_TO_MAIN = {
+    # The checks and the scanners: a run of main only tells the state of main, which
+    # the run of the newer commit tells as well, so it cancels the older run, as the
+    # runs of a pull request do. The coverage of main and the fix bot take only runs
+    # that ended, and the bot for cancelled checks starts the run of the head again
+    # when a late run for an older commit cancelled it.
+    "cancels": {
+        "action-test.yml",
+        "ci.yml",
+        "codeql.yml",
+        "links.yml",
+        "osv-scanner.yml",
+        "zizmor.yml",
+    },
+    # The bots whose newest run does all the work of an older one, in one group.
+    "replaces": {"dashboard.yml", "newest-python.yml", "settings.yml"},
+    # They publish, commit or change GitHub, the website and the release among them:
+    # a run that started ends, and only the newest of those that wait for it runs.
+    "waits": {"diagrams.yml", "docs.yml", "labels.yml", "release.yml"},
+    # A push of a few files starts them, or their jobs wait for each other on their
+    # own; OpenSSF Scorecard publishes its results, in one short job.
+    "runs": {
+        "findings.yml",
+        "renovate.yml",
+        "scorecard.yml",
+        "screenshot-bot.yml",
+        "update-branches.yml",
+    },
+}
+# The runs of a pull request and those of the pushes to main cancel their older runs;
+# a run on a schedule or by hand is in a group of its own, which no push cancels.
+SUPERSEDED = {
+    "group": "${{ github.workflow }}-${{ github.event.pull_request.number"
+    " || (github.event_name == 'push' && github.ref) || github.run_id }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request'"
+    " || github.event_name == 'push' }}",
+}
+
+
+def cancels_a_push(value: bool | str) -> bool:
+    """Whether a cancel-in-progress cancels the run of a push: its value, or that of
+    its expression, which compares only the name of the event."""
+    if isinstance(value, bool):
+        return value
+    found = re.fullmatch(r"\$\{\{ (.+) \}\}", value)
+    assert found, value
+    events = re.findall(r"github\.event_name == '(\w+)'", found[1])
+    assert (
+        " || ".join(f"github.event_name == '{event}'" for event in events) == found[1]
+    )
+    return "push" in events
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_push_to_main_cancels_only_the_checks_of_the_commit_before(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # A push to main started the checks again while those of the commit before still
+    # ran, and both held runners to the end, of the 20 that the free plan has for all
+    # repositories of the owner.
+    root = ROOT if project == "blueprint" else projects[project]
+    sides = {name: side for side, names in ON_PUSH_TO_MAIN.items() for name in names}
+    found = set()
+    for path, text in sorted(workflows(root).items()):
+        parsed = parse(text)
+        if "push" not in (parsed["on"] or {}):
+            continue
+        name = "ci.yml" if path.startswith("ci-") else path
+        assert name in sides, f"{path}: what does a newer push do to its run?"
+        found.add(sides[name])
+        concurrency = parsed.get("concurrency")
+        if sides[name] == "cancels":
+            assert concurrency == SUPERSEDED, path
+            assert cancels_a_push(concurrency["cancel-in-progress"])
+        elif sides[name] == "runs":
+            assert concurrency is None, path
+        else:
+            # Every push to main is in the same group, whose newest run replaces the
+            # older one or waits for it.
+            assert concurrency is not None, path
+            assert "run_id" not in concurrency["group"], path
+            replaces = sides[name] == "replaces"
+            assert cancels_a_push(concurrency["cancel-in-progress"]) is replaces, path
+    assert found >= {"cancels", "waits", "runs"}
+
+
+@pytest.mark.parametrize(
+    ("value", "cancels"),
+    [
+        (True, True),
+        (False, False),
+        ("${{ github.event_name == 'pull_request' }}", False),
+        (SUPERSEDED["cancel-in-progress"], True),
+    ],
+)
+def test_a_cancel_in_progress_is_read_for_a_push(
+    value: bool | str, cancels: bool
+) -> None:
+    assert cancels_a_push(value) is cancels
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:

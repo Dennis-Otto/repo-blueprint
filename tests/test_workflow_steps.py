@@ -347,7 +347,7 @@ TESTED = {
     (
         "after-checks.yml",
         "cancelled",
-        "Run the checks of the head of the pull request again",
+        "Run the checks of the head of a pull request or of main again",
     ): "test_template.py",
     (
         "after-checks.yml",

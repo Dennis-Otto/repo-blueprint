@@ -19,11 +19,13 @@ name: After the checks
 # branch of a fork not at all.
 #
 # The bot for cancelled checks: a newer run of a workflow cancels the one still running
-# for the same pull request. GitHub doesn't always create the runs in the order of the
-# commits, so a late run for an older commit can cancel the run for the head of the
-# pull request; its required checks then stay cancelled and block the merge. When a
-# run for the head of an open pull request was cancelled that way and no newer run of
-# its workflow for the same commit exists, the bot starts it again. A run that a
+# for the same pull request, and that of a check or a scanner for the push to main
+# before. GitHub doesn't always create the runs in the order of the commits, so a late
+# run for an older commit can cancel the run for the head of the pull request, whose
+# required checks then stay cancelled and block the merge, or that for the head of
+# main, whose coverage, alerts of code scanning and fixes the bots read. When a run for
+# the head of an open pull request or of main was cancelled that way and no newer run
+# of its workflow for the same commit exists, the bot starts it again. A run that a
 # person cancelled, or one whose commit a newer push replaced, stays cancelled. The
 # quick checks avoid the race: their runs for different commits never cancel each
 # other.
@@ -175,12 +177,37 @@ jobs:
           fi
           # A failure that the commit before ended with as well is a real one: the same
           # jobs broke in the last attempt of the run for the previous commit of the
-          # branch, after the bot had run them once more. When that can't be read, the
-          # jobs run once more.
-          previous="$(gh api --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
+          # branch, after the bot had run them once more. A run that a newer push
+          # cancelled ran too little to tell, so the run before it counts. When that
+          # can't be read, the jobs run once more.
+          superseded() {
+            local ids id messages
+            ids="$(gh api "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
+              --jq '.jobs[] | select(.conclusion == "cancelled") | .id')" || return 1
+            while read -r -u 5 id; do
+              if [[ -z "$id" ]]; then
+                continue
+              fi
+              messages="$(gh api "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
+                return 1
+              if grep -q "higher priority waiting request" <<<"$messages"; then
+                return 0
+              fi
+            done 5<<<"$ids"
+            return 1
+          }
+          candidates="$(gh api --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
             -f branch="$BRANCH" -f event="$EVENT" -f status=completed -f per_page=30 \
-            --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[0] // empty | [.id, .conclusion] | @tsv" ||
+            --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[:5][] | [.id, .conclusion] | @tsv" ||
             true)"
+          previous=""
+          while IFS=$'\t' read -r -u 6 id conclusion; do
+            if [[ -z "$id" ]] || { [[ "$conclusion" == cancelled ]] && superseded "$id"; }; then
+              continue
+            fi
+            previous="$id"$'\t'"$conclusion"
+            break
+          done 6<<<"$candidates"
           if [[ -n "$previous" ]] &&
             [[ "$(broken "${previous%%$'\t'*}" "${previous#*$'\t'}" "$now" | sort)" == "$(sort <<<"$now")" ]]; then
             mapfile -t jobs <<<"$now"
@@ -192,6 +219,16 @@ jobs:
           fi
           gh run rerun "$RUN" --failed
           echo "The failed jobs of $NAME run once more: a flaky test passes now." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   report:
     name: report the flaky tests
@@ -444,6 +481,16 @@ jobs:
             echo "| --- | --- | --- | --- |"
             printf '%s' "$rows"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   release:
     name: run the failed release again
@@ -500,13 +547,26 @@ jobs:
           fi
           printf '%s\n' "$output"
           echo "The failed jobs of the release of ${SHA:0:7} run once more, where they stopped." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   cancelled:
     name: run the cancelled checks again
     if: >-
       !github.event.repository.fork &&
       github.event.workflow_run.conclusion == 'cancelled' &&
-      contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) &&
+      (contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) ||
+      (github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository)) &&
       github.event.workflow_run.run_attempt < 3
     concurrency:
       group: ${{ github.workflow }}-cancelled-${{ github.event.workflow_run.id }}
@@ -516,6 +576,7 @@ jobs:
     permissions:
       actions: write
       checks: read
+      contents: read # the head of main
       pull-requests: read
     steps:
       - name: Block every host that the job doesn't need
@@ -525,7 +586,7 @@ jobs:
           disable-sudo-and-containers: true
           allowed-endpoints: >-
             api.github.com:443
-      - name: Run the checks of the head of the pull request again
+      - name: Run the checks of the head of a pull request or of main again
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -534,19 +595,32 @@ jobs:
           WORKFLOW: ${{ github.event.workflow_run.workflow_id }}
           NAME: ${{ github.event.workflow_run.name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          # Only the runs for the head of a pull request report its checks.
-          number="$(gh api "repos/$GH_REPO/commits/$SHA/pulls" \
-            --jq "map(select(.state == \"open\" and .head.sha == \"$SHA\")) | .[0].number // empty")"
-          if [[ -z "$number" ]]; then
-            echo "${SHA:0:7} is not the head of an open pull request; its run of $NAME stays cancelled." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          # Only the runs for the head of a pull request report its checks, and only
+          # those for the head of main tell the state of main.
+          if [[ "$EVENT" == push ]]; then
+            tip="$(gh api "repos/$GH_REPO/git/ref/heads/$BRANCH" --jq .object.sha)"
+            if [[ "$tip" != "$SHA" ]]; then
+              echo "${SHA:0:7} is no longer the head of $BRANCH; its run of $NAME stays cancelled." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            head="$BRANCH"
+          else
+            number="$(gh api "repos/$GH_REPO/commits/$SHA/pulls" \
+              --jq "map(select(.state == \"open\" and .head.sha == \"$SHA\")) | .[0].number // empty")"
+            if [[ -z "$number" ]]; then
+              echo "${SHA:0:7} is not the head of an open pull request; its run of $NAME stays cancelled." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            head="#$number"
           fi
           # A newer run of the same commit reports the checks itself.
           newer="$(gh api "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs?head_sha=$SHA" --paginate \
             --jq ".workflow_runs[] | select(.id > $RUN) | .id")"
           if [[ -n "$newer" ]]; then
-            echo "A newer run of $NAME for ${SHA:0:7} reports the checks of #$number." >> "$GITHUB_STEP_SUMMARY"
+            echo "A newer run of $NAME for ${SHA:0:7} reports the checks of $head." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           # Cancelled by the concurrency of the workflow, which says so on the job.
@@ -565,7 +639,17 @@ jobs:
             exit 0
           fi
           gh run rerun "$RUN"
-          echo "A run for an older commit cancelled $NAME for the head of #$number; it runs again." >> "$GITHUB_STEP_SUMMARY"
+          echo "A run for an older commit cancelled $NAME for the head of $head; it runs again." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   coach:
     name: PR coach
@@ -656,6 +740,16 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" --repo "$GH_REPO" coach report "$SHA" --pull "$NUMBER" \
             --coverage "$COVERAGE" --coverage-base "$COVERAGE_BASE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   fixes:
     name: the fix bot
@@ -864,6 +958,16 @@ jobs:
           else
             gh issue create --title "$title" --label maintenance --body "$body"
           fi
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   diagrams:
     name: commit the diagrams
@@ -1008,6 +1112,16 @@ jobs:
           if [[ -s "$RUNNER_TEMP/comment.md" ]]; then
             gh pr comment "${NUMBER:-$BRANCH}" --body-file "$RUNNER_TEMP/comment.md"
           fi
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
       # The failed check of the pull request promises the bot's commit; when the bot
       # can't make it, the pull request learns so, with the command that fixes it.
       - name: Say on the pull request that the bot failed

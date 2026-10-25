@@ -1850,17 +1850,24 @@ def test_the_check_of_each_kind_of_project_keeps_its_fixes(path: Path) -> None:
 
 
 def test_the_markdown_fixes_itself_on_the_head_of_the_pull_request() -> None:
-    markdown = workflow_steps.job("lint.yml", "markdown")
-    steps = markdown["steps"]
+    # In the job lint, which runs every linter, since its own job markdown is gone.
+    lint = workflow_steps.job("lint.yml", "lint")
+    steps = lint["steps"]
 
+    # The whole history, with the head of the pull request as the second parent of
+    # its merge, onto which the fix bot commits.
     assert any(
-        step.get("with", {}).get("fetch-depth") == 2
+        step.get("with", {}).get("fetch-depth") == 0
         for step in steps
         if step.get("uses", "").startswith("actions/checkout@")
     )
-    head = step_in(markdown, "Check out the head of the pull request for the fixes")
-    assert condition_of(head) == "failure() && github.event_name == 'pull_request'"
-    fix = step_in(markdown, "Fix what markdownlint can fix")
+    head = step_in(lint, "Check out the head of the pull request for the fixes")
+    assert condition_of(head) == (
+        "${{ !cancelled() && steps.markdown.outcome == 'failure'"
+        " && github.event_name == 'pull_request' }}"
+    )
+    assert head["run"] == "git checkout --quiet --force --detach HEAD^2"
+    fix = step_in(lint, "Fix what markdownlint can fix")
     assert fix["continue-on-error"] is True
     assert fix["with"]["fix"] is True
     # The same action as the check, so that both have one version.
@@ -1871,14 +1878,13 @@ def test_the_markdown_fixes_itself_on_the_head_of_the_pull_request() -> None:
     ]
     assert len(action) == 2
     assert len(set(action)) == 1
-    keep_step = step_in(markdown, "Keep the fixes for the fix bot")
-    assert keep_step["with"]["name"] == "fixes-markdown"
-    assert steps.index(keep_step) < steps.index(
-        step_in(markdown, "Explain the failure")
-    )
+    keep_step = step_in(lint, "Keep the fixes for the fix bot")
+    assert keep_step["with"]["name"] == "fixes-lint"
+    assert steps.index(head) < steps.index(fix) < steps.index(keep_step)
+    assert steps.index(keep_step) < steps.index(step_in(lint, "Explain the failure"))
     assert (
         'fix keep "$RUNNER_TEMP/fixes"'
-        in (step_in(markdown, "Keep the files that markdownlint fixed")["run"])
+        in (step_in(lint, "Keep the files that markdownlint fixed")["run"])
     )
 
 
