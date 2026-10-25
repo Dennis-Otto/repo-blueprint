@@ -5,13 +5,13 @@ config:
 ---
 flowchart TB
     accTitle: What a pull request passes before it merges
-    accDescr: A pull request changes code or a workflow. Each workflow starts only when every action that it runs, and every action that these run in turn, is one of GitHub or matches a pattern of the list in the settings as code; a workflow that names another fails to start. The required checks then pass, and CodeQL uploads its analysis of the pull request. GitHub compares it with that of main, and a new alert of high or critical severity, or a new error, stops the merge; an alert that main has already doesn't. Otherwise the pull request merges.
+    accDescr: A pull request changes code or a workflow. Each workflow starts only when every action that it runs, and every action that these run in turn, is one of GitHub or matches a pattern of the list in the settings as code; a workflow that names another fails to start. The required checks then pass, and CodeQL and zizmor upload their analyses of the pull request. GitHub compares each with that of main: a new alert of CodeQL of high or critical severity, or a new error, stops the merge, and so does every new alert of zizmor; an alert that main has already doesn't. Otherwise the pull request merges.
 
     change(["A pull request changes code or a workflow"])
     start["Each workflow starts only when every action<br>that it runs is GitHub's or on the list<br>of the settings as code"]
     blocked["An action that isn't on the list:<br>the workflow fails to start"]
-    checks["Every required check passes, and CodeQL<br>uploads its analysis of the pull request"]
-    alert["A new alert of high or critical severity,<br>or a new error: the merge stops;<br>an alert that main has already doesn't"]
+    checks["Every required check passes, and CodeQL<br>and zizmor upload their analyses<br>of the pull request"]
+    alert["A new alert of CodeQL of high or critical<br>severity or a new error, any new alert<br>of zizmor: the merge stops; an alert<br>that main has already doesn't"]
     merge(["The pull request merges"])
 
     change --> start

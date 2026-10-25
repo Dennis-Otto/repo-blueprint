@@ -847,31 +847,71 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
     assert patterns == sorted(patterns, key=str.casefold)
 
 
+# The workflow and the job that send the analysis of each tool of code scanning.
+CODE_SCANNING_JOBS = {
+    "CodeQL": ("codeql.yml", "codeql"),
+    "zizmor": ("zizmor.yml", "zizmor"),
+}
+
+
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_a_new_alert_of_codeql_stops_the_merge(
+def test_a_new_alert_of_codeql_or_zizmor_stops_the_merge(
     projects: dict[str, Path], project: str
 ) -> None:
     root = ROOT if project == "blueprint" else projects[project]
     settings = Settings.load(root / ".github/repository.toml")
     main = next(item for item in settings.rulesets if item["name"] == "Protect main")
+    tools = [
+        {
+            "tool": "CodeQL",
+            "alerts_threshold": "errors",
+            "security_alerts_threshold": "high_or_higher",
+        },
+        # zizmor writes its findings as errors, warnings and notes, without a security
+        # severity yet, and the Findings workflow fails main on each one: every new one
+        # stops the merge, with a security severity as well.
+        {
+            "tool": "zizmor",
+            "alerts_threshold": "all",
+            "security_alerts_threshold": "all",
+        },
+    ]
     assert main["rules"][-1] == {
         "type": "code_scanning",
-        "parameters": {
-            "code_scanning_tools": [
-                {
-                    "tool": "CodeQL",
-                    "alerts_threshold": "errors",
-                    "security_alerts_threshold": "high_or_higher",
-                }
-            ]
-        },
+        "parameters": {"code_scanning_tools": tools},
     }
-    # A missing analysis stops a merge too, so CodeQL analyzes every pull request.
-    codeql = (root / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
-    analysis = parse(codeql)
-    assert "paths" not in analysis["on"]["pull_request"]
-    assert "if" not in job_in(analysis, "codeql")
+    # A missing analysis stops a merge too, so each tool analyzes every pull request
+    # into main, whatever it changes, also the release pull request.
+    for tool in tools:
+        name, job = CODE_SCANNING_JOBS[tool["tool"]]
+        analysis = parse(
+            (root / ".github/workflows" / name).read_text(encoding="utf-8")
+        )
+        assert analysis["on"]["pull_request"] == {"branches": ["main"]}, name
+        assert "if" not in job_in(analysis, job), name
+        # main after every merge, for the analysis that code scanning compares with.
+        assert analysis["on"]["push"] == {"branches": ["main"]}, name
     assert settings.security["secret_scanning_non_provider_patterns"] is True
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_zizmor_audits_a_pull_request_as_it_audits_main(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Code scanning compares the analysis of a pull request with that of main, so both
+    # come from the same zizmor: the version that its action pins to a commit. Newer
+    # audits come only with an update of the action, whose pull request shows what they
+    # find, and never as alerts of a pull request that changes no workflow.
+    root = ROOT if project == "blueprint" else projects[project]
+    zizmor = (root / ".github/workflows/zizmor.yml").read_text(encoding="utf-8")
+    step = step_in(job_in(zizmor, "zizmor"), "Check the workflows")
+    assert re.fullmatch(r"zizmorcore/zizmor-action@[0-9a-f]{40}", step["uses"])
+    options = step.get("with", {})
+    assert "version" not in options
+    # With the advisories of the actions, as on main, or the alerts of main that come
+    # from an advisory would look fixed in every pull request.
+    assert options.get("online-audits", True) is True
+    assert options.get("advanced-security", True) is True
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -9159,8 +9199,8 @@ OTHER_CHECKS = {
     "Pull request title",
     "Secret scan",
 }
-# The workflows of the scanners of the pull requests that change what they read; the PR
-# coach reports them too.
+# The workflows of the scanners of the pull requests that change what they read, and of
+# zizmor, whose analysis the rules of main wait for; the PR coach reports them too.
 SCANNER_WORKFLOWS = {"Fuzzing", "Links", "OSV-Scanner", "Workflow security"}
 
 
@@ -9491,8 +9531,8 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     assert variant["name"] == name
     assert variant["steps"][-1] == explain_step(name)
     explained_under_their_comments(variants)
-    # The scanners of the pull requests, which aren't required, explain theirs too, and
-    # so does the check of the rules of Renovate.
+    # zizmor and the scanners of the pull requests, which aren't required checks,
+    # explain theirs too, and so does the check of the rules of Renovate.
     for workflow, job, check in (
         ("zizmor", "zizmor", "zizmor"),
         ("links", "links", "links"),
@@ -10955,9 +10995,9 @@ RELEASE_PULL_REQUEST = (
     "github.event.pull_request.head.repo.full_name != github.repository"
 )
 # The scanners of pull requests, by workflow and job, each for the files it reads.
+# zizmor is none of them: the rules of main wait for its analysis of every pull request.
 SCANNERS = {
     "fuzz.yml": "fuzz",
-    "zizmor.yml": "zizmor",
     "osv-scanner.yml": "pull-request",
     "links.yml": "links",
 }
@@ -10970,6 +11010,9 @@ def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> 
     skipped = {"variants.yml": "variant", **SCANNERS}
     for name, job in skipped.items():
         assert RELEASE_PULL_REQUEST in condition_of(job_in(flows[name], job)), name
+    # Every tool of the rule of code scanning analyzes it, or its merge would wait.
+    for name, job in CODE_SCANNING_JOBS.values():
+        assert "if" not in job_in(flows[name], job), name
     # The hints at the prose, steps of lint, which start with the changed documents.
     documents = step_in(job_in(flows["lint.yml"], "lint"), "Find the changed documents")
     assert RELEASE_PULL_REQUEST in condition_of(documents)
@@ -11098,12 +11141,6 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
         name = path.rsplit("/", 1)[-1]
         if scanner == "fuzz.yml":
             return path.endswith(".py") or path.startswith("fuzz/")
-        if scanner == "zizmor.yml":
-            return path.startswith(".github/workflows/") or path in (
-                "action.yml",
-                ".github/dependabot.yml",
-                ".github/zizmor.yml",
-            )
         if scanner == "osv-scanner.yml":
             return bool(re.search(r"requirements[^/]*\.txt$", name)) or name in (
                 "package-lock.json",
