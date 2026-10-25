@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="5" time="4.194" timestamp="2026-10-25T04:48:55.021684+00:00" hostname="runner"><testcase classname="tests.test_demo" name="test_raises" file="tests\test_demo.py" line="15" time="0.001"><failure message="ValueError: bad value 3">def test_raises():
+&gt;       helper(3)
+
+tests\test_demo.py:17:&#32;
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 3
+
+    def helper(value):
+&gt;       raise ValueError(f"bad value {value}")
+E       ValueError: bad value 3
+
+tests\test_demo.py:5: ValueError</failure></testcase><testcase classname="tests.test_demo" name="test_passes" file="tests\test_demo.py" line="7" time="0.001" /><testcase classname="tests.test_demo" name="test_fails" file="tests\test_demo.py" line="11" time="0.032"><failure message="assert [1, 2] == [1, 3]&#10;  &#10;  At index 1 diff: #x1B[0m#x1B[94m2#x1B[39;49;00m#x1B[90m#x1B[39;49;00m != #x1B[0m#x1B[94m3#x1B[39;49;00m#x1B[90m#x1B[39;49;00m&#10;  Use -v to get more diff">def test_fails():
+&gt;       assert [1, 2] == [1, 3]
+E       assert [1, 2] == [1, 3]
+E&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;
+E         At index 1 diff: #x1B[0m#x1B[94m2#x1B[39;49;00m#x1B[90m#x1B[39;49;00m != #x1B[0m#x1B[94m3#x1B[39;49;00m#x1B[90m#x1B[39;49;00m
+E         Use -v to get more diff
+
+tests\test_demo.py:13: AssertionError</failure></testcase><testcase classname="tests.test_demo" name="test_param[1]" file="tests\test_demo.py" line="19" time="0.001" /><testcase classname="tests.test_demo" name="test_param[2]" file="tests\test_demo.py" line="19" time="0.001"><failure message="AssertionError: n is not one&#10;assert 2 == 1">n = 2
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param(n):
+&gt;       assert n == 1, "n is not one"
+E       AssertionError: n is not one
+E       assert 2 == 1
+
+tests\test_demo.py:22: AssertionError</failure></testcase></testsuite></testsuites>
