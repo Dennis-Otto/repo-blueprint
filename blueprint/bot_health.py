@@ -43,7 +43,7 @@ PASSED = "success"
 # fuzzing failed on an input that they found.
 ONE_TRY = frozenset({"Findings", "Mutation", "Property tests", "Fuzzing"})
 # Workflows that keep an issue of their own about their failures.
-OWN_ISSUE = frozenset({"Diagrams", "Newest Python", "Next runner"})
+OWN_ISSUE = frozenset({"Diagrams", "Newest Node", "Newest Python", "Next runner"})
 # A failure that ended this recently may still get its second try from the run that
 # its end started; the daily look leaves it to that run.
 SECOND_TRY_TIME = timedelta(hours=1)

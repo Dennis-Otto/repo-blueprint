@@ -415,6 +415,11 @@ TESTED = {
         "Keep the issue of broken links current",
     ): "test_workflow_steps.py",
     (
+        "newest-node.yml",
+        "report",
+        "Keep the issue of the newest Node current",
+    ): "test_template.py",
+    (
         "newest-python.yml",
         "report",
         "Keep the issue of the newest Python current",

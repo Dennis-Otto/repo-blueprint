@@ -20,6 +20,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 
 - **The example:** `src/index.ts`, built into `dist/`, the tests in `test/`, `tsconfig.json` and `tsconfig.build.json`, `biome.jsonc`, and `package.json` with its lock file. Replace it with the real code; its tests show how.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: the lock file, which must agree with `package.json`, Biome for the lint and the format, tsc for the types, node:test with every line, branch and function covered and its report in the PR coach, and `npm pack`; npm installs without the scripts of the packages.
+- **Workflows of this kind:** the newest Node on `main` (`newest-node.yml`), after every change and every week, while the CI checks the Node of `.nvmrc`.
 - **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 
