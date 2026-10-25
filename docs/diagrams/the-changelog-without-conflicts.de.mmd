@@ -5,16 +5,20 @@ config:
 ---
 flowchart TB
     accTitle: Der Changelog ohne Konflikte
-    accDescr: Zwei Pull Requests fügen je eine eigene Datei zu changelog.d hinzu, also mergen sie nacheinander ohne Konflikt in main. Der Release-Bot schreibt den Abschnitt des nächsten Releases aus den Fragmenten und dem Text von Unreleased in CHANGELOG.md des Release-Pull-Requests und löscht die Fragmente im selben Commit. Sein Merge macht diesen Abschnitt zu den Notes des Releases.
+    accDescr: Zwei Pull Requests fügen je eine eigene Datei zu changelog.d hinzu, also mergen sie nacheinander ohne Konflikt in main. Der Release-Bot schreibt den Abschnitt des nächsten Releases aus den Fragmenten und dem Text von Unreleased in CHANGELOG.md des Release-Pull-Requests und löscht die Fragmente im selben Commit. Sein Merge macht diesen Abschnitt zu den Notes des Releases. Bis dahin zeigt die Website die Einträge der Fragmente unter Unreleased, und der Fix-Bot benennt eine Überschrift eines Fragments um, die sicher eine Art von Änderung meint.
 
     a["Pull Request<br>changelog.d/dark-mode.md"]
     b["Pull Request<br>changelog.d/token-secret.md"]
     main["main<br>eine Datei je Änderung"]
     rpr["Release-Pull-Request<br>der Abschnitt von x.y.z in CHANGELOG.md<br>die Fragmente gelöscht"]
+    fix["Fix-Bot<br>### Fixes umbenannt in ### Fixed"]
+    site["Website<br>die Fragmente unter Unreleased"]
     notes["Release-Notes<br>jede Art von Änderung unter einer Überschrift"]
 
+    fix -. "auf dem Branch" .-> a
     a -- "gemergt" --> main
     b -- "gemergt, ohne Konflikt" --> main
+    main -- "vor dem Release" --> site
     main -- "Release-Bot" --> rpr
     rpr -- "gemergt" --> notes
 
@@ -22,5 +26,5 @@ flowchart TB
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class a,b person
-    class rpr bot
-    class notes done
+    class rpr,fix bot
+    class notes,site done

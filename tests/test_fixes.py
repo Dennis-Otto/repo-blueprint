@@ -131,6 +131,7 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
     assert found == [
         ("Text files", "{blueprint} fix text"),
         ("Pages in one column", "{blueprint} pages --fix"),
+        ("Changelog fragments", "{blueprint} fragments --fix"),
         ("Accepted advisories", "{blueprint} advisories --fix"),
         ("Lock files", "{blueprint} locks --fix"),
         ("Ruff", "ruff check --fix ."),
@@ -495,6 +496,56 @@ def test_a_pull_request_with_mistakes_passes_after_its_fixes(
     fixes = load([tmp_path / "fixes"])
     assert sorted(fixes.files) == ["README.md", "app.py"]
     assert fixes.files["app.py"] == b"x = 1\nprint(x)\n"
+
+
+# The tool that the test copies into the repository is the code with the mutants in
+# the copy of the mutation tests.
+@pytest.mark.mutation_unsafe
+@needs_bash
+def test_a_fragment_with_a_typo_in_its_heading_heals_itself(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    changelog = "# Changelog\n\n## Unreleased\n\n## 1.0.0\n\n- First.\n"
+    root = repository(
+        tmp_path / "repo",
+        {
+            "CHANGELOG.md": changelog,
+            "changelog.d/.gitkeep": "",
+            "scripts/check.sh": 'step "Changelog fragments"\n',
+        },
+    )
+    (root / ".github").mkdir()
+    shutil.copy(ROOT / ".github/checks.toml", root / ".github/checks.toml")
+    shutil.copy(ROOT / "blueprint.py", root / ".github/blueprint.py")
+    shutil.copytree(
+        ROOT / "blueprint",
+        root / ".github/blueprint",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    git(root, "add", "--all")
+    git(root, "commit", "--quiet", "-m", "tools")
+    # The pull request of a branch of the repository, with the fragment of its change.
+    write(root, "changelog.d/dark-mode.md", "### Fixes\n\n- **Dark mode:** works.\n")
+    git(root, "add", "--all")
+    git(root, "commit", "--quiet", "-m", "the change")
+
+    code = cli.main(
+        ["fix", "run", "check (python)", "--keep", str(tmp_path / "fixes")], root=root
+    )
+
+    assert code == 0
+    summary = capsys.readouterr().out
+    assert (
+        "- Changelog fragments: `python3 .github/blueprint.py fragments --fix`"
+        in summary
+    )
+    assert "- `changelog.d/dark-mode.md`" in summary
+    # What the fix bot commits onto the branch, or suggests on a pull request from a
+    # fork: the heading that the release reads.
+    fixes = load([tmp_path / "fixes"])
+    assert fixes.files == {
+        "changelog.d/dark-mode.md": b"### Fixed\n\n- **Dark mode:** works.\n"
+    }
 
 
 # ---------------------------------------------------------------- what the checks kept
