@@ -4,7 +4,8 @@
     render stops when the file no longer holds one of the old texts, such as after a
     change of the comment or the step that the template looks for: without the check,
     the template left the file as it was, and every repository got the blueprint's
-    own text. Import it with context, so that the file sees the answers:
+    own text. Each schedule of the file moves into the slot of the project, as moved()
+    says. Import it with context, so that the file sees the answers:
 
         [%- from "includes/replace.jinja" import replaced with context -%]
         {= replaced(".github/workflows/docs.yml", [["old", "new"]]) -=}
@@ -18,5 +19,29 @@
 [%- endif -%]
 [%- set result.text = result.text | replace(pair[0], pair[1], pair[2] if pair | length > 2 else none) -%]
 [%- endfor -%]
-{= result.text =}
+[%- set lines = [] -%]
+[%- for line in result.text.split('\n') -%]
+[%- set _ = lines.append(moved(path, line) if line | regex_search('^ +- cron: "') else line) -%]
+[%- endfor -%]
+{= lines | join('\n') =}
+[%- endmacro -%]
+
+[#- A line of on.schedule of a workflow of the blueprint, such as
+    - cron: "17 4 * * 3", in the slot of the project, schedule_slot of copier.yml
+    (decision 0082): a weekly schedule as many days later, so that each repository of
+    the Rollout has a day of its own for each heavy weekly job, and every schedule 8
+    minutes later for each, within its hour, so that the heavy jobs of two slots never
+    share an hour of a day. The minutes go round from :59 to :01: GitHub drops runs on
+    the full hour. A cron of another form stops the render, for a template that learns
+    it.
+-#]
+[%- macro moved(path, line) -%]
+[%- set part = line.split('"') -%]
+[%- set field = part[1].split(' ') -%]
+[%- if not (field | length == 5 and field[0].isdigit() and field[2] == '*' and field[3] == '*' and (field[4] == '*' or field[4].isdigit())) -%]
+{= the_moved_schedule | mandatory(path ~ " has a schedule that includes/replace.jinja can't move, " ~ (part[1] | to_json) ~ ": one minute, and every day or one day of the week.") =}
+[%- endif -%]
+[%- set minute = ((field[0] | int) - 1 + 8 * schedule_slot) % 59 + 1 -%]
+[%- set weekday = '*' if field[4] == '*' else ((field[4] | int) + schedule_slot) % 7 -%]
+{= part[0] =}"{= [minute, field[1], '*', '*', weekday] | join(' ') =}"{= part[2:] | join('"') =}
 [%- endmacro -%]

@@ -8,11 +8,11 @@ Every week, thousands of small changes of the code run against the tests, a larg
 
 **How:** `mutation.yml`: mutmut, Infection.
 
-The mutation tests show the lines that the tests run but don't check: every Saturday they change the code in thousands of small ways, the mutants, and run the tests that cover each one. A mutant that no test notices survives.
+The mutation tests show the lines that the tests run but don't check: once a week they change the code in thousands of small ways, the mutants, and run the tests that cover each one. A mutant that no test notices survives.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-mutation-tests-run.dark.svg">
-  <img src="../images/diagrams/how-the-mutation-tests-run.svg" alt="How the mutation tests run: Every Saturday, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. For Python, the plan splits the code into parts of about the same number of mutants, and mutmut runs each part in a job of its own, in a copy of the repository and without the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. The summary shows one score and first the survivors that change the logic, with their changes, the artifact keeps them and the dashboard shows the score. When the score of the default branch drops below that of the run before, one issue opens, which closes once a run is back. A run that measured nothing fails and names the tests that failed without any mutant.">
+  <img src="../images/diagrams/how-the-mutation-tests-run.svg" alt="How the mutation tests run: Once a week, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. For Python, the plan splits the code into parts of about the same number of mutants, and mutmut runs each part in a job of its own, in a copy of the repository and without the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. The summary shows one score and first the survivors that change the logic, with their changes, the artifact keeps them and the dashboard shows the score. When the score of the default branch drops below that of the run before, one issue opens, which closes once a run is back. A run that measured nothing fails and names the tests that failed without any mutant.">
 </picture>
 
 - **The score is the share of the mutants that a test noticed,** among those of the code that the tests run: for mutmut the killed among the killed and the survived, for Infection its *Covered Code MSI*. The dashboard shows it as *mutants caught*.

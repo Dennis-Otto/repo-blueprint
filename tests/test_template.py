@@ -593,6 +593,9 @@ def test_the_workflows_are_the_blueprints_own(
             source = source.replace(
                 '"Workflow security", "Renovate"', '"Workflow security"'
             )
+        if name not in ISSUE_ASSISTANT_WORKFLOWS:
+            # Each schedule in the slot of the project (decision 0082).
+            source = in_slot(source, project_slot(projects[kind]))
         if name == "bot-health.yml":
             # The bots it watches, without those of the blueprint alone in a project.
             watched = r"    # The bots and the scheduled workflows of every repository.*\n    workflows: \[.*\]\n"
@@ -6334,6 +6337,91 @@ def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
             assert not promise.search(comment), (name, comment)
 
 
+# The heavy weekly jobs, whose runs take runners of the account for an hour or longer.
+HEAVY_WEEKLY = {
+    "codeql.yml",
+    "links.yml",
+    "mutation.yml",
+    "osv-scanner.yml",
+    "sbom.yml",
+    "scorecard.yml",
+}
+
+
+def schedules(root: Path) -> dict[str, list[str]]:
+    """The crons of each workflow of a repository that has a schedule."""
+    return {
+        name: found
+        for name, text in workflows(root).items()
+        if (found := CRON.findall(text))
+    }
+
+
+def test_each_repository_of_the_rollout_runs_its_schedules_at_times_of_its_own(
+    tmp_path: Path,
+) -> None:
+    # The repositories of an owner share the 20 runners of GitHub Free: with the times
+    # of the blueprint in each, the weekly jobs of all of them started within minutes,
+    # and the pull requests of every repository waited for an hour behind the mutation
+    # tests (decision 0082).
+    registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
+    place = {item.name: item.rollout for item in registry.members}
+    own = schedules(ROOT)
+    crons = {"repo-blueprint": own}
+    days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    for name, answers in ANSWERS.items():
+        project = render(tmp_path / name, **answers)
+        crons[name] = schedules(project)
+        # The guide of a project in Python names the day of its mutation tests.
+        contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        python = answers["project_type"] in (
+            "home-assistant",
+            "github-action",
+            "python-package",
+        )
+        for line in crons[name]["mutation.yml"] if python else []:
+            day = [*days, "Saturday"][int(line.split(" ")[4])]
+            assert f"Every {day} the mutation tests" in contributing, name
+        for workflow, lines in crons[name].items():
+            if workflow in ISSUE_ASSISTANT_WORKFLOWS:
+                # The issue assistant's templates, which its check keeps equal to the
+                # action's: they move in the issue assistant.
+                assert lines == own[workflow], (name, workflow)
+            elif workflow in own:
+                expected = [moved(line, place[name]) for line in own[workflow]]
+                assert lines == expected, (name, workflow)
+    # No two repositories share the cron of a workflow of the blueprint, and none starts
+    # on the full hour.
+    for workflow in set().union(*crons.values()) - ISSUE_ASSISTANT_WORKFLOWS:
+        found = [theirs[workflow] for theirs in crons.values() if workflow in theirs]
+        assert len(found) == len({tuple(each) for each in found}), workflow
+    for name, theirs in crons.items():
+        for workflow, lines in theirs.items():
+            for line in lines:
+                cron = Cron.parse(line)
+                assert cron, (name, workflow, line)
+                assert 0 not in cron.minutes, (name, workflow, line)
+    # The heavy weekly jobs of two repositories never run in the same hour of a day.
+    taken: dict[tuple[str, str], str] = {}
+    for name, theirs in crons.items():
+        hours = {
+            (line.split(" ")[4], line.split(" ")[1])
+            for workflow in HEAVY_WEEKLY & set(theirs)
+            for line in theirs[workflow]
+        }
+        assert hours, name
+        for hour in hours:
+            assert taken.setdefault(hour, name) == name, (hour, taken[hour], name)
+    # The weekly run of the mutation tests takes two runners, a pull request four.
+    mutation = yaml.safe_load(
+        (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    )
+    strategy = mutation["jobs"]["mutation"]["strategy"]
+    assert strategy["max-parallel"] == (
+        "${{ github.event_name == 'schedule' && 2 || 4 }}"
+    )
+
+
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
 def test_dependabot_merges_as_the_release_app(
     projects: dict[str, Path], project: str
@@ -8885,11 +8973,12 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
     # The workflow of the blueprint, for this repository alone: the job without the
     # name of the blueprint, a token of the release app for this repository, and this
     # repository in place of every repository of the owner. The rest is the same, the
-    # Renovate that it pins by digest and its schedule too.
+    # Renovate that it pins by digest too, and its schedule in the slot of the project.
+    slot = project_slot(project)
     changed = [
         line
         for line in difflib.unified_diff(
-            hub.splitlines(), workflow.splitlines(), lineterm="", n=0
+            in_slot(hub, slot).splitlines(), workflow.splitlines(), lineterm="", n=0
         )
         if line[:1] in "+-" and not line.startswith(("+++", "---"))
     ]
@@ -8910,7 +8999,7 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
     ]
     parsed = yaml.safe_load(workflow)
-    assert parsed[True]["schedule"] == [{"cron": "17 */2 * * *"}]
+    assert parsed[True]["schedule"] == [{"cron": moved("17 */2 * * *", slot)}]
     steps = {step.get("name"): step for step in parsed["jobs"]["renovate"]["steps"]}
     assert "owner" not in steps["Create a token of the release app"]["with"]
     run = steps["Run Renovate"]
@@ -9488,7 +9577,7 @@ def test_a_template_stops_when_the_text_that_it_replaces_is_gone(
         template = environment.get_template(
             "template/.github/workflows/codeql.yml.jinja"
         )
-        return template.render(codeql_languages="[go, actions]")
+        return template.render(codeql_languages="[go, actions]", schedule_slot=0)
 
     assert rendered(workflow) == workflow.replace(
         "          # The languages of this repository; the blueprint sets them for each"
@@ -9507,6 +9596,124 @@ def test_a_template_stops_when_the_text_that_it_replaces_is_gone(
     )
     with pytest.raises(FilterArgumentError, match=re.escape(message)):
         rendered(reworded)
+
+
+def blueprint_environment(*folders: Path) -> SandboxedEnvironment:
+    """Jinja as Copier renders the template, with the delimiters and the filters of the
+    blueprint, from the folders and then the blueprint's files."""
+    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    return SandboxedEnvironment(
+        loader=ChoiceLoader([*map(FileSystemLoader, folders), FileSystemLoader(ROOT)]),
+        extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"],
+        **questions["_envops"],
+    )
+
+
+def moved(cron: str, slot: int) -> str:
+    """A cron of the blueprint in a slot of schedules: a weekly one as many days later,
+    and every one 8 minutes later for each, within its hour and never on the full one."""
+    minute, hour, day, month, weekday = cron.split(" ")
+    minute = str((int(minute) - 1 + 8 * slot) % 59 + 1)
+    if weekday != "*":
+        weekday = str((int(weekday) + slot) % 7)
+    return " ".join([minute, hour, day, month, weekday])
+
+
+def slot_of(owner: str, name: str) -> int:
+    """The slot of the schedules of the repository owner/name, as copier.yml computes
+    it."""
+    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    template = blueprint_environment().from_string(
+        questions["schedule_slot"]["default"]
+    )
+    blueprint_owner = questions["blueprint_owner"]["default"]
+    text = template.render(
+        owner=owner, project_slug=name, blueprint_owner=blueprint_owner
+    )
+    return int(text)
+
+
+def project_slot(project: Path) -> int:
+    """The slot of the schedules of a rendered project, from its answers."""
+    answers = downstream.read(project / ".copier-answers.yml")
+    return slot_of(str(answers["owner"]), str(answers["project_slug"]))
+
+
+def in_slot(workflow: str, slot: int) -> str:
+    """A workflow of the blueprint as the template renders it in a slot of schedules."""
+    return re.sub(
+        r'^( +- cron: ")([^"]+)(")$',
+        lambda found: found[1] + moved(found[2], slot) + found[3],
+        workflow,
+        flags=re.M,
+    )
+
+
+def test_a_template_moves_each_schedule_of_a_workflow_into_the_slot_of_the_project(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    workflow = (ROOT / ".github/workflows/sbom.yml").read_text(encoding="utf-8")
+    assert '    - cron: "47 4 * * 3"\n' in workflow
+
+    def rendered(workflow: str, slot: int) -> str:
+        (tmp_path / ".github/workflows/sbom.yml").write_text(
+            workflow, encoding="utf-8", newline="\n"
+        )
+        template = blueprint_environment(tmp_path).get_template(
+            "template/.github/workflows/sbom.yml.jinja"
+        )
+        return template.render(schedule_slot=slot)
+
+    assert rendered(workflow, 0) == workflow
+    # Three days and 24 minutes later; at slot 2 the minutes go round within the
+    # hour, from 4:47 to 4:04, and never onto the full hour, where GitHub drops runs.
+    assert rendered(workflow, 3) == workflow.replace('"47 4 * * 3"', '"12 4 * * 6"')
+    assert rendered(workflow, 2) == workflow.replace('"47 4 * * 3"', '"4 4 * * 5"')
+    assert moved("44 4 * * 3", 2) == "1 4 * * 5"
+    # A schedule of each day, and one of a step of hours, keep their days and hours.
+    daily = workflow.replace('"47 4 * * 3"', '"25 5 * * *"\n    - cron: "10 */6 * * *"')
+    assert rendered(daily, 5) == daily.replace('"25 5', '"6 5').replace(
+        '"10 */6', '"50 */6'
+    )
+    # A cron that the template can't move stops the render, rather than leaving the
+    # times of the blueprint in a repository.
+    message = (
+        ".github/workflows/sbom.yml has a schedule that includes/replace.jinja can't"
+        ' move, "47 4 1 * *"'
+    )
+    with pytest.raises(FilterArgumentError, match=re.escape(message)):
+        rendered(workflow.replace('"47 4 * * 3"', '"47 4 1 * *"'), 1)
+
+
+def test_the_slot_of_the_schedules_is_the_place_of_a_repository_in_the_rollout() -> (
+    None
+):
+    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    question = questions["schedule_slot"]
+    assert question["type"] == "int"
+    assert question["when"] is False
+    registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
+    slot = slot_of
+
+    def hashed(owner: str, name: str) -> int:
+        return int(hashlib.md5(f"{owner}/{name}".encode()).hexdigest()[:8], 16) % 28
+
+    # The blueprint keeps its own times, and each repository of the registry has a
+    # place of its own, from 1: a day of its own for each weekly job, for 6 of them.
+    assert slot(OWNER, "repo-blueprint") == 0
+    places = {item.name: slot(OWNER, item.name) for item in registry.members}
+    assert places == {item.name: item.rollout for item in registry.members}
+    assert sorted(places.values()) == list(range(1, len(places) + 1))
+    # Any other repository, also one of another owner with a name of the registry, or
+    # the blueprint's fork, takes the slot of the hash of its name.
+    for owner, name in [
+        (OWNER, "demo-project"),
+        ("someone-else", "issue-assistant"),
+        ("someone-else", "repo-blueprint"),
+    ]:
+        assert slot(owner, name) == hashed(owner, name), (owner, name)
+    assert len({hashed("someone-else", f"project-{n}") for n in range(200)}) == 28
 
 
 def test_every_template_checks_the_texts_that_it_replaces_in_a_file_of_the_blueprint() -> (
@@ -13381,8 +13588,14 @@ def test_every_website_shows_the_automation_of_its_repository(
         assert first[1].split("`")[0].replace("&", "&amp;") in page, path.name
         source = f"{address}/blob/HEAD/.github/workflows/{path.name}"
         assert f"- **Source:** [`.github/workflows/{path.name}`]({source})" in page
+    release = re.search(
+        r'- cron: "(\d+) (\d+) \* \* \*"',
+        (folder / "release.yml").read_text(encoding="utf-8"),
+    )
+    assert release
+    at = f"{int(release[2]):02}:{int(release[1]):02}"
     assert (
-        "- **When:** every push to <code>main</code>, every day at 05:25 UTC, by hand"
+        f"- **When:** every push to <code>main</code>, every day at {at} UTC, by hand"
         in page
     )
     # Every check that main requires, with the workflow that makes it.
@@ -13697,9 +13910,8 @@ def test_the_screenshot_bot_is_in_every_repository_and_waits_for_its_script(
     project = projects[kind]
     found = workflows(project)
     bot = found["screenshot-bot.yml"]
-    assert bot == (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
-        encoding="utf-8"
-    )
+    own = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(encoding="utf-8")
+    assert bot == in_slot(own, project_slot(project))
     # Under a name of its own: a project's own screenshots.yml, as
     # homedarts-for-autodarts has, stays the project's, and the picture bot of the
     # blueprint's documentation stays in the blueprint.

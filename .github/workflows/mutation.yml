@@ -78,8 +78,9 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      # The runners of the account serve the other repositories as well.
-      max-parallel: 4
+      # The runners of the account serve the other repositories as well: the weekly
+      # run, which nobody waits for, takes two of them, a pull request four.
+      max-parallel: ${{ github.event_name == 'schedule' && 2 || 4 }}
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.parts) }}
     env:

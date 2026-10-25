@@ -62,12 +62,19 @@ Jeder Bot startet von einem Ereignis, etwa einem Merge in `main`, einem Pull Req
 
 | Workflow | Zeitplan, in UTC | Läufe pro Woche |
 | --- | --- | --- |
-| Update branches | alle sechs Stunden, um zehn nach | 28, vorher 336 |
-| Release | jeden Tag um 05:25 | 7, vorher 168 |
+| Update branches | alle sechs Stunden | 28, vorher 336 |
+| Release | jeden Tag, zwischen 05:00 und 06:00 | 7, vorher 168 |
 | Bot health, Findings, Issue lifecycle | jeden Tag | 21 |
 | Property tests, in Python- und Home-Assistant-Projekten | jeden Tag | 7 |
 | Die Scanner, die SBOM, die Mutationstests, die Prüfung des neuesten Releases, das Aufräumen, die Einstellungen, der Blueprint-Bot und die anderen wöchentlichen Bots | je einmal pro Woche | 12 bis 15 |
 | Zusammen | | 68 bis 78, vorher etwa 540 |
+
+- **Eigene Zeiten:** Die Repositorys eines Eigentümers teilen sich die Runner des Kontos, 20 auf einmal mit GitHub Free. Mit den Zeiten des Blueprints in jedem kamen die wöchentlichen Jobs aller zusammen an: Am 24. Oktober 2026 starteten die Mutationstests von fünf Repositorys innerhalb von sieben Minuten, und die Pull Requests jedes Repositorys warteten bis zu 41 Minuten auf einen Runner. Also hat jedes Repository einen eigenen Platz: der Blueprint 0, jedes Repository [des Verzeichnisses](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/fleet.toml) seinen Platz im Rollout und jedes andere einen Platz aus dem Hash seines Namens. Das Template verschiebt jeden wöchentlichen Zeitplan der Workflows des Blueprints um so viele Tage und jeden Zeitplan um 8 Minuten für jeden, innerhalb seiner Stunde, sodass die schweren wöchentlichen Jobs zweier Repositorys, CodeQL, die SBOM, die Mutationstests, die Links, OSV-Scanner und die Scorecard, nie in derselben Stunde eines Tages laufen und jeder Job seine Stunde behält, sodass die Scanner weiter vor der täglichen Durchsicht der Befunde fertig sind. Der wöchentliche Lauf der Mutationstests nimmt zwei Runner auf einmal, ein Pull Request vier. Die Templates des Issue-Assistenten behalten ihre Zeiten, die sich im Issue-Assistenten ändern (Entscheidung 0082).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/when-the-schedules-of-a-repository-run.de.dark.svg">
+  <img src="../images/diagrams/when-the-schedules-of-a-repository-run.de.svg" alt="Wann die Zeitpläne eines Repositorys laufen: Der Blueprint hat Platz 0, ein Repository des Verzeichnisses seinen Platz im Rollout, jedes andere Repository einen Platz aus dem Hash seines Eigentümers und Namens. Jeder wöchentliche Zeitplan verschiebt sich um so viele Tage, jeder Zeitplan um 8 Minuten für jeden innerhalb seiner Stunde, sodass die schweren wöchentlichen Jobs zweier Repositorys nie eine Stunde eines Tages teilen.">
+</picture>
 
 - **Der Blueprint:** Seine eigenen Zeitpläne kommen auf 259 Läufe pro Woche, mit Renovate für jedes Repository (84) und dem Dashboard (84), die in einem öffentlichen Repository nichts kosten.
 - **Private Repositorys:** Öffentliche Repositorys nutzen Actions kostenlos. Ein privates mit GitHub Free hat 2.000 Minuten im Monat, und GitHub rundet jeden Job auf eine ganze Minute auf. Jeder Lauf eines Bots startet danach einen kurzen Lauf des Bots für den Zustand der Bots, und jeder Lauf des Release-Bots einen von Issue lifecycle, der die geplanten jetzt überspringt, also kamen die Zeitpläne jede Stunde und jede halbe Stunde auf fast 200 Läufe am Tag, etwa 6.000 im Monat, hätte GitHub sie alle ausgeführt, das Dreifache der freien Minuten. Alle Zeitpläne eines Projekts und die Läufe, die sie starten, kommen jetzt auf etwa 20 am Tag, etwa 600 im Monat. Die Prüfungen der Pull Requests kosten mehr; die Entscheidungen 0009 und 0027 halten ihre Jobs gering.

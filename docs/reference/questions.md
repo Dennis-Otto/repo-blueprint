@@ -485,6 +485,27 @@ How the release bot finds the version: Python and Node in their manifests, the o
 [%- endif -%]
 ```
 
+### `schedule_slot`
+
+The slot of the schedules of this repository, so that the scheduled workflows of the repositories of one owner don't all start in the same minute and wait for the same runners (decision 0082): includes/replace.jinja moves each weekly schedule of a workflow of the blueprint by as many days, and every one by 8 minutes for each. The blueprint keeps its own times, slot 0; a repository of .github/fleet.toml takes its place in the Rollout, so that each has a day of its own; any other one a slot from the hash of its name.
+
+- **Type:** a number
+- **Default:** a template of Copier, from the answers before it:
+
+```text
+[%- set fleet -%]
+[% include ".github/fleet.toml" %]
+[%- endset -%]
+[%- set slot = namespace(value=((owner ~ '/' ~ project_slug) | hash('md5'))[:8] | int(base=16) % 28) -%]
+[%- if owner == blueprint_owner.account and project_slug == 'repo-blueprint' -%]
+[%- set slot.value = 0 -%]
+[%- elif ('\nowner = "' ~ owner ~ '"\n') in fleet -%]
+[%- for entry in fleet.split('[[repository]]')[1:] if ('\nname = "' ~ project_slug ~ '"\n') in entry -%]
+[%- set slot.value = entry | regex_search('\nrollout = [0-9]+\n') | trim | replace('rollout = ', '') | int -%]
+[%- endfor -%]
+[%- endif -%] {= slot.value =}
+```
+
 ## The files of a project
 
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.

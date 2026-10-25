@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When the schedules of a repository run
+    accDescr: The blueprint has slot 0, a repository of the registry its place in the Rollout, any other repository a slot from the hash of its owner and name. Each weekly schedule moves by as many days, every schedule by 8 minutes for each within its hour, so the heavy weekly jobs of two repositories never share an hour of a day.
+
+    blueprint["The blueprint<br>slot 0, its own times"]
+    fleet["A repository of .github/fleet.toml<br>slot = its place in the Rollout, 1 to 6"]
+    other["Any other repository<br>slot = hash of owner/name, 0 to 27"]
+    move["includes/replace.jinja moves each schedule<br>weekly: slot days later<br>every one: 8 × slot minutes later, within its hour"]
+    result["The heavy weekly jobs of two repositories<br>never share an hour of a day"]
+
+    blueprint --> move
+    fleet --> move
+    other --> move
+    move --> result
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class blueprint,move bot
+    class fleet,other person
+    class result done
