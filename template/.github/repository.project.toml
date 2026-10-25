@@ -1,7 +1,7 @@
 # The settings of this repository on top of .github/repository.toml, which the
 # blueprint keeps current. blueprint.py and the settings bot add them: tables merge,
 # lists gain their new items, and values replace those of repository.toml.
-# https://github.com/Dennis-Otto/repo-blueprint#settings-as-code
+# https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/settings.md#settings-as-code
 
 # Checks that only this project runs, such as its end-to-end tests:
 # [branch]

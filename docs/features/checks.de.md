@@ -1,0 +1,80 @@
+# Prüfungen und der PR-Coach
+
+Was in jedem Pull Request und auf `main` läuft, wie lange es dauert und wie sich eine Prüfung erklärt, die scheitert.
+
+## Prüfungen
+
+`scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, in Python-Projekten auf jedem Kern, Typen, Lint, Paketbau; die Textdateien in einem Durchgang, in etwa einer Sekunde für Hunderte Dateien auch unter Windows, mit den Konfliktmarkern, die ein Merge zurückließ; ShellCheck, das die CI nie überspringt; ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern, weil jeder Download der Workflows es erneut versucht; die CI installiert die Python-Werkzeuge mit uv in Sekunden und hält die Pakete von Composer und npm, krankerl und was mypy über den Code weiß in ihrem Cache, php-cs-fixer prüft nur die geänderten Dateien, Psalm liest den Code einer Nextcloud-App und was er nutzt, nicht ganz `vendor/`, und ein Schritt, der installiert, baut oder herunterlädt, endet nach fünf Minuten, statt einen Pull Request aufzuhalten.
+
+**Womit:** Die Werkzeuge der jeweiligen Projektart, per Hash gepinnt.
+
+## Lint
+
+Workflows (actionlint), Lizenz jeder Datei (REUSE), das Markdown jedes Dokuments (markdownlint), Hinweise zur Rechtschreibung auf Englisch und Deutsch (cspell) und zum Stil des Englischen (Vale) der geänderten Dokumente, Sign-off jedes Commits (DCO), die Liste der erlaubten Actions, die jede Action starten lassen muss, die ein Workflow ausführt, auch die, die diese ihrerseits ausführen, Titel jedes Pull Requests (Conventional Commits), ein Eintrag im Changelog für jede Änderung für Nutzer, ein Fragment in `changelog.d/` oder eine Zeile unter *Unreleased*, geprüft so, wie das Release ihn übernimmt; jeder Linter in einem Job, *lint*, und Titel und Changelog in einem, *conventional title*, die jeden Fund auf einmal melden.
+
+**Womit:** `lint.yml`, `pull-request-title.yml`.
+
+## Abdeckung
+
+Die Abdeckung der Tests eines Pull Requests im Vergleich zu `main`, Datei für Datei, für seinen neuesten Commit, im Bericht des PR-Coachs, und kein Kommentar dafür, wenn keine Datei ihre Abdeckung ändert; der Name jeder Datei steht als reiner Code da, sodass ein Bericht aus einem Fork damit weder Markdown noch Links noch Erwähnungen posten kann.
+
+**Womit:** `after-checks.yml`.
+
+## Schnelle Prüfungen
+
+Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python prüft `main` eines Python-Projekts nach jeder Änderung und jede Woche.
+
+**Womit:** Die Auslöser und Pfadfilter der Workflows, `newest-python.yml`.
+
+## Wann die Prüfungen laufen
+
+Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann, denn ein Konto bei GitHub führt etwa 20 Jobs gleichzeitig aus, und jeder Job, der nicht fehlschlagen kann, lässt einen Pull Request auf einen Runner warten:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/when-the-checks-run.de.dark.svg">
+  <img src="../images/diagrams/when-the-checks-run.de.svg" alt="Wann die Prüfungen laufen: Jeder Pull Request führt die vorgeschriebenen Prüfungen und zizmor aus, auf dessen Analyse die Regeln von main warten, und die Scanner dessen, was er ändert: OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen und zizmor ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.">
+</picture>
+
+- **Nach einem Merge:** `main` nimmt einen Pull Request nur auf, wenn er auf dem neuesten Stand ist, also bekommt `main` durch den Merge die Dateien, mit denen die Prüfungen des Pull Requests bestanden haben. `main` führt nur die Tests aus, mit deren Abdeckung der Bericht jedes Pull Requests seine eigene vergleicht, die Analysen, mit denen Code Scanning vergleicht, und was veröffentlicht, etwa die Website und das Release. Lint läuft in den Pull Requests, Secret Scan und Fuzzing dort und jede Woche, und die SBOM jede Woche; jedes Release hat eine eigene SBOM.
+- **Wenige Jobs mit mehreren Prüfungen:** Jeder Job eines Pushes wartet auf einen eigenen Runner, und die schnellen Prüfungen warteten viel länger, als sie arbeiteten. Darum führt ein Job, *lint*, jeden Linter aus: die Workflows, die Lizenzen (REUSE, aus seinem Image), das Markdown, den Issue-Assistenten, das Sign-off jedes Commits und die Hinweise zur Sprache; *conventional title* prüft Titel und Eintrag im Changelog; *codeql* analysiert jede Sprache nacheinander, jede unter der Kategorie ihrer Warnungen; und *home-assistant* führt HACS und hassfest aus. Jeder Schritt läuft auch, wenn einer davor fehlschlug, damit eine Prüfung alles auf einmal meldet, und der PR-Coach erklärt jede Prüfung eines Jobs, die fehlschlug, mit ihrer eigenen Lösung. Ein Pull Request des Blueprints startet acht Jobs weniger, einer einer anderen Projektart sieben bis neun (Entscheidung 0027 der [Entscheidungen](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)), und kein Job einer dieser Prüfungen allein wartet mehr auf einen Runner, denn die Regeln jedes Repositorys verlangen die Jobs, die mehrere ausführen.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-jobs-of-a-pull-request.de.dark.svg">
+  <img src="../images/diagrams/the-jobs-of-a-pull-request.de.svg" alt="Die Jobs eines Pull Requests: Jeder Job eines Pushes wartet auf einen eigenen Runner, und das Konto führt etwa 20 Jobs gleichzeitig aus. Darum teilen sich die schnellen Prüfungen ihre Jobs: lint führt jeden Linter aus, der Job des Titels prüft Titel und Eintrag im Changelog, codeql analysiert jede Sprache unter der Kategorie ihrer Warnungen, und home-assistant führt HACS und hassfest aus. Jeder Schritt läuft auch, wenn einer davor fehlschlug, und der PR-Coach erklärt jede Prüfung eines Jobs, die fehlschlug.">
+</picture>
+
+- **Der Release-Pull-Request** ändert nur den Changelog und die Version, die nichts an dem ändern, was ein Scanner findet. Im Blueprint steht die vorgeschriebene Prüfung *variants* für die Varianten und Updates jeder Projektart: Sie besteht, wenn jede bestanden hat oder keine laufen musste, wie im Release-Pull-Request.
+- **Das neueste Python**, Betas eingeschlossen, führt die Prüfungen eines Python-Projekts nach jeder Änderung an `main` und jede Woche aus, in einem eigenen Workflow, der die CI von `main` grün lässt. Ein neues Python bricht jeden Pull Request gleichermaßen, und keiner wartet darauf. Ein Fehlschlag hält ein Issue offen, das der wöchentliche Lauf schließt, sobald die Prüfungen wieder bestehen.
+- **Die Runner** sind mit ihrer Version benannt, `ubuntu-24.04`, nicht `ubuntu-latest`: GitHub zieht dieses Label über Wochen Job für Job auf ein neues Image um, wie ab dem 19. Oktober 2026 auf Ubuntu 26.04, sodass die Läufe eines Workflows zufällig auf dem einen oder dem anderen Image landen würden, mit einem anderen Python, ShellCheck und Docker, und wie ein flaky Test fehlschlügen. Im Blueprint führt der Workflow Next runner die Varianten jede Woche auf dem nächsten Runner aus, und ein Fehlschlag hält ein Issue offen; sobald sie dort bestehen, zieht ein Release des Blueprints jeden Job dorthin um. Ein eigener Workflow, den ein Update nicht anfasst, behält den Runner, den er nennt: Mit `ubuntu-latest` zieht er mit GitHubs Label um.
+
+## Der PR-Coach
+
+Jede Prüfung, die scheitert, sagt, was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür: in der Zusammenfassung der Prüfung, als ihre Annotation und in einem Kommentar am Pull Request, der jedem Push folgt, auch an einem Pull Request aus einem Fork; ein Titel, der kein Conventional Commit ist, bekommt einen, der besteht, und `scripts/check.sh` erklärt den Schritt, an dem es scheitert, auch auf deinem Rechner. Derselbe Kommentar sagt, was ein Pull Request einer Person bewirkt: die nächste Version und den Eintrag im Changelog, die Abdeckung, die Website, die er gebaut hat, mit den Seiten, die er ändert, und die Teile, die die Workflows des Projekts hinzufügen.
+
+**Womit:** `.github/checks.toml`, `.github/checks.project.toml`, `after-checks.yml`, `docs.yml`.
+
+Eine Prüfung, die scheitert, erklärt sich selbst, dir und allen, die einen Pull Request schicken, auch aus einem Fork: was sie gefunden hat, warum das wichtig ist und wie man es behebt, mit den Befehlen dafür.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-pr-coach.de.dark.svg">
+  <img src="../images/diagrams/the-pr-coach.de.svg" alt="Der PR-Coach: Ein Push in einen Pull Request, auch in einen aus einem Fork, startet die Prüfungen. Eine Prüfung, die scheitert, erklärt sich in ihrer Zusammenfassung und als ihre Annotation, aus den Erklärungen von .github/checks.toml und .github/checks.project.toml. Nach den Prüfungen liest der PR-Coach die Check-Runs und ihre Annotationen über die API, ohne Code des Pull Requests auszuführen, und hält einen Kommentar am Pull Request aktuell: einen Abschnitt für jede gescheiterte Prüfung, mit dem Problem, warum es wichtig ist, der Behebung und ihren Befehlen. Du pushst die Behebung, und sobald jede Prüfung besteht, sagt der Kommentar das.">
+</picture>
+
+- **In der Prüfung:** Ein Job, der scheitert, endet mit einem Schritt, der die Erklärung seiner Prüfung in die Zusammenfassung und als Annotation schreibt, die die Liste der Prüfungen zeigt. `scripts/check.sh` macht dasselbe für den Schritt, an dem es scheitert, auch auf deinem Rechner, und in der CI zeigen die Dateien des Pull Requests jeden Fund eines Werkzeugs an seiner Zeile, den auch der Kommentar auflistet: die der Textdateien, von Ruff, ShellCheck, mypy, pytest und actionlint, von PHP CS Fixer, Psalm und PHPUnit und von Biome, dem TypeScript-Compiler und den Tests von Node. `blueprint.py annotate` macht die Annotationen aus dem, was ein Werkzeug schreibt, oder aus dem JUnit-Bericht der Tests, und gibt das Protokoll unverändert weiter (Entscheidung 0071).
+- **Ein Kommentar, auch für einen Fork:** Die Läufe eines Pull Requests aus einem Fork können nicht in ihn schreiben, deshalb läuft der Coach nach den Prüfungen, im Repository selbst. Er hält einen Kommentar mit einem Abschnitt für jede gescheiterte Prüfung, den Funden ihrer Annotationen und einem Link zu ihrem Log, und einem Vorschlag für den Titel, wenn der Titel kein Conventional Commit ist. Sobald jede Prüfung besteht, wird ein Kommentar, der Fehler gezeigt hat, zu einer kurzen Entwarnung.
+- **Sicher mit jedem Pull Request:** Der Coach liest die Check-Runs und ihre Annotationen über die API und checkt nur die Erklärungen des Standard-Branches aus; er führt keinen Code des Pull Requests aus. Text, den ein Pull Request bestimmt, etwa ein Dateiname, eine Meldung oder ein Titel, erscheint nur als Code, auf eine kurze Länge gekürzt, sodass er niemanden erwähnen, nirgendwohin verlinken und den Kommentar nicht kaputt machen kann.
+- **Jede Prüfung erklärt sich:** Die Erklärungen stehen in `.github/checks.toml`, die der Blueprint aktuell hält, und die der eigenen Prüfungen eines Projekts in `.github/checks.project.toml`, die dem Projekt gehört und Vorrang hat. Der Schritt *Explanations of the checks* von `scripts/check.sh` scheitert an einer vorgeschriebenen Prüfung oder einem Schritt ohne Erklärung, im Blueprint und in jedem Repository, das aus ihm entsteht, und `python3 .github/blueprint.py coach verify` listet sie auf.
+- **Was der Pull Request bewirkt:** An einem Pull Request einer Person sagt derselbe Kommentar nach den gescheiterten Prüfungen, was der Merge mit dem nächsten Release macht, etwa *macht das nächste Release zu 0.13.0, einem Minor-Release nach 0.12.0*, aus dem Titel, einer Zeile `BREAKING CHANGE:` oder `Release-As:` der Beschreibung und den release-please-Dateien von `main`; den Eintrag, den er dem Changelog hinzufügt, so wie das Release ihn übernimmt; die Abdeckung seiner Tests im Vergleich zu `main`, Datei für Datei; und, wenn er die Website ändert, einen Link zu der Website, die die Prüfung *docs* gebaut hat, eine Woche lang als Artefakt `website` aufbewahrt, mit der Adresse jeder Seite, die er ändert. Ein Pull Request, dessen Prüfungen bestehen, bekommt den Kommentar nur, wenn er davon etwas zu sagen hat, und einer eines Bots nur für eine gescheiterte Prüfung (Entscheidung 0030 der [Entscheidungen](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
+- **Die Teile der Workflows des Projekts:** Ein Workflow des Projekts, etwa die visuellen Tests einer Karte oder die Größe eines Moduls, fügt demselben Kommentar einen eigenen Teil hinzu statt eines eigenen Kommentars. Er behält das Artefakt `pr-report-<name>` mit der Datei `report.md` für den Head des Pull Requests, und `[report.<name>]` in `.github/checks.project.toml` des Standard-Branches gibt dem Teil seinen Titel, einen Text und in `replaces` die Markierung des alten Kommentars, den der Coach dann löscht. Der Coach lädt ein Artefakt von höchstens 256 kB in einen eigenen Ordner und führt nichts davon aus: Er zeigt das Markdown von `report.md` nur als Code, eine Tabelle mit Code in jeder Zelle und einen Codeblock in einem Zaun, den keine seiner Zeilen schließen kann, höchstens 8.000 Zeichen davon, mit einem Link zum Artefakt. Ein Teil, dessen erste Zeile `<!-- quiet -->` ist, etwa eine Größe, die gleich bleibt, bringt keinen Kommentar, solange die Prüfungen bestehen (Entscheidung 0066).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-report-of-a-pull-request.de.dark.svg">
+  <img src="../images/diagrams/the-report-of-a-pull-request.de.svg" alt="Der Bericht eines Pull Requests: Ein Push in einen Pull Request einer Person startet die Prüfungen, die die Abdeckung der Tests und die gebaute Website als Artefakte behalten, und die Workflows des Projekts, die ihre Teile als Artefakte pr-report-name behalten. Nach den Prüfungen liest der PR-Coach die Check-Runs, Titel und Beschreibung, die Dateien, die Abdeckungsberichte des Pull Requests und von main, das Artefakt website und die Teile über die API, dazu die release-please-Dateien, mkdocs.yml und die Teile, die .github/checks.project.toml von main nennt, und führt keinen Code des Pull Requests aus. Er hält einen Kommentar aktuell: die gescheiterten Prüfungen, die nächste Version mit dem Eintrag im Changelog, die Abdeckung Datei für Datei, die Website mit den Seiten, die sich ändern, und die Teile der Workflows als Code. Ein Pull Request, dessen Prüfungen bestehen, bekommt ihn nur, wenn er davon etwas zu sagen hat.">
+</picture>
+
+Der Kommentar des PR-Coachs an einem Pull Request von issue-assistant, während zwei Prüfungen noch liefen: was der Merge mit dem nächsten Release macht, die Abdeckung der Tests gegenüber `main` mit der Datei, die er hinzufügt, und die Seiten der Website, die er ändert:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/github-pr-coach.dark.png">
+  <img src="../images/github-pr-coach.png" alt="Der Kommentar des PR-Coachs an einem Pull Request von issue-assistant: bisher ist keine Prüfung fehlgeschlagen; der Pull Request veröffentlicht nichts von sich aus, als Änderung der Art ci; die Abdeckung von 4.702 Zeilen mit 100,00 % gegenüber 4.483 Zeilen von main mit 100,00 %, mit images/pages.py neu mit 100,00 %; und die Seite docs/security.md der Website, die er ändert">
+</picture>

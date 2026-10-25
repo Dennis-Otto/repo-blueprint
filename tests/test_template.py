@@ -75,7 +75,7 @@ from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
 from blueprint.locks import why_renovate_skips
 from blueprint.mutation import default_paths
-from blueprint.pages import layouts, shown
+from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import PERMISSIONS, Settings, allows
 from blueprint.versions import CONFIG, MANIFEST
@@ -2849,7 +2849,8 @@ def test_every_repository_checks_that_its_pages_have_one_column(
     assert pages_step(check) == pages_step(generic) == pages_step(own)
     assert '"$python" "$tool" pages\n' in pages_step(check)
     assert "docker" not in pages_step(check)
-    # The pages that a new repository starts with have one column.
+    # The pages that a new repository starts with have one column, and no cell of
+    # their tables holds a paragraph.
     checked = [
         page
         for page in project.rglob("*.md")
@@ -2859,9 +2860,14 @@ def test_every_repository_checks_that_its_pages_have_one_column(
     assert project / "CONTRIBUTING.md" in checked
     for page in checked:
         assert layouts(page.read_text(encoding="utf-8")) == [], page
+        assert long_cells(page.read_text(encoding="utf-8")) == [], page
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "## Pages in one column" in contributing
     assert "`python3 .github/blueprint.py pages --fix`" in contributing
+    assert f"one of more than {CELL_WORDS} words is a paragraph" in contributing
+    assert f"warns of a cell of a Markdown table with more than {CELL_WORDS}" in (
+        contributing
+    )
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the
@@ -3494,7 +3500,7 @@ def test_every_link_to_a_heading_of_the_blueprint_finds_it() -> None:
             continue
         for link in BLUEPRINT_ANCHOR.finditer(data.decode("utf-8")):
             links.setdefault((link["path"] or "README.md", link["anchor"]), name)
-    assert ("README.md", "settings-as-code") in links
+    assert ("docs/features/settings.md", "settings-as-code") in links
     assert ("SECURITY.md", "verify-a-release") in links
     # GitHub draws #readme with a script, at the top of the README.
     broken = {
@@ -13738,11 +13744,16 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
         "github-release",
         "github-pr-coach",
     ]
-    for readme in ("README.md", "README.de.md"):
-        text = (ROOT / readme).read_text(encoding="utf-8")
+    # The pages of docs/features/ show them, in English and in German.
+    for suffix in (".md", ".de.md"):
+        text = "".join(
+            page.read_text(encoding="utf-8")
+            for page in sorted((ROOT / "docs/features").glob(f"*{suffix}"))
+            if page.name.endswith(".de.md") == (suffix == ".de.md")
+        )
         for name in names:
-            assert f'srcset="docs/images/{name}.dark.png"' in text, (readme, name)
-            assert f'<img src="docs/images/{name}.png"' in text, (readme, name)
+            assert f'srcset="../images/{name}.dark.png"' in text, (suffix, name)
+            assert f'<img src="../images/{name}.png"' in text, (suffix, name)
     for name in names:
         for suffix in ("", ".dark"):
             taken = ROOT / f"docs/images/{name}{suffix}.png"
