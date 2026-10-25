@@ -1,5 +1,5 @@
 ---
-description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
+description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
 ---
 
 # Fehlerbehebung
@@ -60,6 +60,18 @@ Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copi
 - **Lass den Einstellungs-Bot sie anwenden:** Er läuft als die Release-App, die die Berechtigung *Administration* hat, nach jeder Änderung der Einstellungen als Code auf `main`, jede Woche und auf Wunsch unter *Actions → Settings → Run workflow*. Ändere `.github/repository.project.toml` in einem Pull Request, und die Einstellungen folgen seinem Merge.
 - **Bitte einen Administrator,** `settings apply` einmal auszuführen, für ein neues Repository, dessen Release-App noch nicht eingerichtet ist.
 - **Sieh nach, was abweicht,** mit `python3 .github/blueprint.py settings check`, das nichts ändert; manche Teile, etwa wer ein Ruleset umgehen darf, sieht nur ein Administrator.
+
+## Der Settings-Bot scheitert an seinem Token
+
+**Was du siehst:** Der Settings-Workflow scheitert am Schritt *Create a token of the release app*, und seine Zusammenfassung sagt *The release app refused the token of the settings bot*.
+
+**Warum:** Der Settings-Bot bittet die Release-App um ein Token mit nur den Berechtigungen, die `settings apply` braucht: *Administration*, *Issues*, *Pages* und *Variables* (Lesen und Schreiben) sowie *Actions*, *Contents* und *Environments* (Lesen). GitHub verweigert das ganze Token, wenn der App eine davon fehlt, wie einer App, die registriert wurde, bevor der Bot darum bat, oder ohne *Variables*, das der Link der Checkliste nicht ausfüllen kann. Keine Einstellung hat sich geändert.
+
+**Was zu tun ist:**
+
+- **Erteile die fehlenden Berechtigungen** auf der Einstellungsseite der App, unter *Permissions & events*; das Log des Schritts nennt die Antwort von GitHub.
+- **Nimm sie auf der Installation an:** GitHub bittet den Eigentümer jeder Installation, neue Berechtigungen anzunehmen, unter *Settings → Applications → Installed GitHub Apps*.
+- **Starte den Workflow erneut** unter *Actions → Settings → Run workflow*.
 
 ## Die Einstellungen nennen einen Schalter, den GitHub nicht umsetzt
 

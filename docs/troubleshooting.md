@@ -1,5 +1,5 @@
 ---
-description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
+description: "What to do when something in a repository of Repo Blueprint doesn't work: an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
 ---
 
 # Troubleshooting
@@ -60,6 +60,18 @@ On Windows, create the environment with `py -3 -m venv %USERPROFILE%\.venvs\copi
 - **Let the settings bot apply them:** it runs as the release app, which has the permission *Administration*, after every change of the settings as code on `main`, every week and on demand under *Actions → Settings → Run workflow*. Change `.github/repository.project.toml` in a pull request, and the settings follow its merge.
 - **Ask an administrator** to run `settings apply` once, for a new repository whose release app is not set up yet.
 - **See what differs** with `python3 .github/blueprint.py settings check`, which changes nothing; some parts, such as who may bypass a ruleset, show only to an administrator.
+
+## The settings bot fails at its token
+
+**What you see:** the Settings workflow fails at the step *Create a token of the release app*, and its summary says *The release app refused the token of the settings bot*.
+
+**Why:** the settings bot asks the release app for a token with only the permissions that `settings apply` needs: *Administration*, *Issues*, *Pages* and *Variables* (read and write), and *Actions*, *Contents* and *Environments* (read). GitHub refuses the whole token when the app lacks one of them, as an app does that was registered before the bot asked for it, or without *Variables*, which the link of the checklist can't fill in. No setting has changed.
+
+**What to do:**
+
+- **Grant the missing permissions** on the settings page of the app, under *Permissions & events*; the log of the step names what GitHub answered.
+- **Accept them on the installation:** GitHub asks the owner of each installation to accept new permissions, under *Settings → Applications → Installed GitHub Apps*.
+- **Run the workflow again** under *Actions → Settings → Run workflow*.
 
 ## The settings name a switch that GitHub doesn't do
 
