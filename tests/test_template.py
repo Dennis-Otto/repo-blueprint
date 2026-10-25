@@ -2315,6 +2315,14 @@ TOOL_ANNOTATIONS = {
     "node-package": ["  npm test 2>&1 | annotate node-test\n"],
 }
 
+# The tools whose findings CONTRIBUTING.md names, besides the text files and
+# ShellCheck, and the kinds that have them.
+TOOLS_IN_CONTRIBUTING = {
+    "Ruff, mypy and pytest": ["home-assistant", "github-action", "python-package"],
+    "PHP CS Fixer, Psalm and PHPUnit": ["nextcloud-app"],
+    "Biome, the TypeScript compiler and the tests of Node": ["node-package"],
+}
+
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_repository_shows_the_findings_of_its_tools_at_their_lines(
@@ -2340,6 +2348,13 @@ def test_every_repository_shows_the_findings_of_its_tools_at_their_lines(
     for line in PYTHON_ANNOTATIONS:
         assert line in own
         assert (line in check) == (TOOL_ANNOTATIONS.get(kind) == PYTHON_ANNOTATIONS)
+    # CONTRIBUTING.md names the tools of this kind alone.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "the comment lists them: those of the text files and of ShellCheck" in (
+        contributing
+    )
+    for tools, kinds in TOOLS_IN_CONTRIBUTING.items():
+        assert (tools in contributing) == (kind in kinds), (kind, tools)
     if kind == "node-package":
         # The problem matcher of tsc comes with actions/setup-node.
         ci = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")

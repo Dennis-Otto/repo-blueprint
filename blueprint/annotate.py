@@ -99,6 +99,7 @@ def located(raw: str, root: Path) -> str:
     """The path of a file of the repository from root, as GitHub names it, or "" for
     one that is no file of the repository, or one of a folder of packages."""
     try:
+        raw = raw.replace("\\", "/")
         path = Path(raw) if Path(raw).is_absolute() else root / raw
         found = path.resolve()
         inside = found.relative_to(root.resolve())
