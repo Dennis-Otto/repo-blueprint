@@ -5433,6 +5433,7 @@ def test_updates_reach_every_file_of_the_blueprint() -> None:
         ".github/checks.project.toml",
         "docs/security.md",
         ".github/agents.project.md",
+        "scripts/release-assets.sh",
     ):
         assert matcher.match_file(owned), owned
     for updated in (
@@ -15404,6 +15405,206 @@ def test_a_release_is_built_in_isolation() -> None:
     assert job_in(build, "assets")["environment"]["name"] == "release"
 
 
+HOOK = "hashFiles('scripts/release-assets.sh') != ''"
+
+
+def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> None:
+    # The code of the project and its npm packages run in a job with a token that
+    # may only read, no secret and no OIDC token, not in the job that attests and
+    # writes the release (decision 0084).
+    parsed = parse(workflows(ROOT)["build-release.yml"])
+    job = parsed["jobs"]["project-assets"]
+    assert job["permissions"] == {"contents": "read"}
+    assert "environment" not in job
+    assert "secrets." not in json.dumps(job)
+    assert not privileged(job, parsed.get("permissions"))
+    # It blocks every host but those of GitHub, Node.js and npm.
+    policy = job["steps"][0]["with"]
+    assert policy["egress-policy"] == "block"
+    assert policy["disable-sudo-and-containers"] is True
+    hosts = allowed_hosts(policy["allowed-endpoints"], "none")
+    assert {"github.com", "nodejs.org", "registry.npmjs.org"} <= hosts
+    # The commit of the release, whose signed tag the job assets checks before it
+    # attests anything.
+    (checkout,) = steps_using(job, "actions/checkout")
+    assert checkout["with"] == {
+        "ref": "${{ inputs.sha }}",
+        "persist-credentials": False,
+    }
+    (node,) = steps_using(job, "actions/setup-node")
+    assert node["with"]["package-manager-cache"] is False
+    assert node["if"] == f"{HOOK} && hashFiles('package.json') != ''"
+    # Without the hook, the job only checks out.
+    for step in job["steps"][2:-1]:
+        assert HOOK in step["if"], step
+    (upload,) = steps_using(job, "actions/upload-artifact")
+    assert upload["with"]["if-no-files-found"] == "error"
+
+    # The job of the release takes what it built, after it checked the tag, and adds
+    # it after its own assets, before it attests them all.
+    assets = parsed["jobs"]["assets"]
+    assert assets["needs"] == "project-assets"
+    (download,) = steps_using(assets, "actions/download-artifact")
+    assert download["if"] == HOOK
+    assert download["with"] == {name: upload["with"][name] for name in ("name", "path")}
+    assert step_named(assets, "Add the assets of the project")["if"] == HOOK
+    order = [
+        "Verify the tag before building",
+        "Take the assets of the project",
+        "Unpack what the release ships",
+        "Write the licenses of the third-party components",
+        "Add the assets of the project",
+        "Attest the provenance of every asset",
+    ]
+    names = names_of(assets)
+    assert [names.index(name) for name in order] == sorted(
+        names.index(name) for name in order
+    )
+    # The job that attests reaches no host of npm for them.
+    endpoints = assets["steps"][0]["with"]["allowed-endpoints"]
+    assert allowed_hosts(endpoints, "none").isdisjoint(
+        {"nodejs.org", "registry.npmjs.org"}
+    )
+
+
+def build_the_assets_of_the_project(
+    tmp_path: Path,
+    hook: str,
+    files: Mapping[str, str] | None = None,
+    root: Path = ROOT,
+    workspace: Path | None = None,
+) -> workflow_steps.StepResult:
+    """Runs *Build the assets of the project* of build-release.yml for the version
+    1.2.3, with hook as scripts/release-assets.sh and npm as a stand-in."""
+    return workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        "project-assets",
+        "Build the assets of the project",
+        env={"VERSION": "1.2.3"},
+        stubs={"npm": workflow_steps.recording("npm")},
+        files={"scripts/release-assets.sh": hook, **(files or {})},
+        root=root,
+        workspace=workspace,
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("node", [True, False])
+def test_the_hook_of_a_project_builds_its_assets(tmp_path: Path, node: bool) -> None:
+    hook = (
+        'printf "%s\\n" "$2" > "$1/demo-extension-$2.zip"\n'
+        'printf "x" > "$1/demo-extension-$2.crx"\n'
+    )
+    files = {"package.json": "{}\n"} if node else {}
+
+    step = build_the_assets_of_the_project(tmp_path, hook, files)
+
+    assert step.returncode == 0, step.stdout + step.stderr
+    built = step.runner_temp / "project-assets"
+    assert sorted(path.name for path in built.iterdir()) == [
+        "demo-extension-1.2.3.crx",
+        "demo-extension-1.2.3.zip",
+    ]
+    assert (built / "demo-extension-1.2.3.zip").read_text(encoding="utf-8") == "1.2.3\n"
+    # The packages of the lock file without their scripts, where the project has them.
+    assert step.stubbed == (["npm ci --ignore-scripts"] if node else [])
+    assert "- demo-extension-1.2.3.zip\n" in step.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("hook", "error"),
+    [
+        ("true\n", "scripts/release-assets.sh wrote no asset into the folder"),
+        ('mkdir "$1/folder"\n', "folder is no file; scripts/release-assets.sh writes"),
+        (
+            'touch "$1/demo extension.zip"\n',
+            "GitHub would rename the asset demo extension.zip:",
+        ),
+        ('touch "$1/.demo.zip"\n', "GitHub would rename the asset .demo.zip:"),
+        ('touch "$1/demo.zip"\nexit 3\n', None),
+    ],
+)
+def test_the_build_stops_at_assets_that_the_release_cannot_ship(
+    tmp_path: Path, hook: str, error: str | None
+) -> None:
+    step = build_the_assets_of_the_project(tmp_path, hook)
+
+    assert step.returncode != 0
+    if error:
+        assert f"::error::{error}" in step.stdout, step.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("name", "added"),
+    [
+        ("demo-extension-1.2.3.zip", True),
+        # An asset of the release, and the provenance that the release attaches after.
+        ("r.spdx.json", False),
+        ("provenance.sigstore.json", False),
+    ],
+)
+def test_the_assets_of_the_project_replace_none_of_the_release(
+    tmp_path: Path, name: str, added: bool
+) -> None:
+    assets = tmp_path / "runner/assets"
+
+    step = workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        "assets",
+        "Add the assets of the project",
+        env={"ASSETS": assets.as_posix()},
+        files={
+            "$RUNNER_TEMP/assets/r.spdx.json": "{}\n",
+            f"$RUNNER_TEMP/project-assets/{name}": "built\n",
+        },
+    )
+
+    assert (step.returncode == 0) is added, step.stdout + step.stderr
+    assert (assets / "r.spdx.json").read_text(encoding="utf-8") == "{}\n"
+    if added:
+        assert (assets / name).read_text(encoding="utf-8") == "built\n"
+    else:
+        assert f"::error::The asset {name} of scripts/release-assets.sh" in step.stdout
+        assert not (assets / "provenance.sigstore.json").exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_node_package_ships_the_assets_of_its_own_hook(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # A node package, such as a browser extension that a store delivers, with a hook
+    # of its own: its build-release.yml is the blueprint's, and builds the assets
+    # after the packages of its lock file.
+    rendered = projects["node-package"]
+    workspace = tmp_path / "checkout"
+    shutil.copytree(rendered, workspace, ignore=shutil.ignore_patterns(".git"))
+    build = ".github/workflows/build-release.yml"
+    assert (rendered / build).read_bytes() == (ROOT / build).read_bytes()
+    hook = 'tar --create --gzip --file - package.json > "$1/demo-$2.tar.gz"\n'
+
+    step = build_the_assets_of_the_project(
+        tmp_path, hook, root=rendered, workspace=workspace
+    )
+
+    assert step.returncode == 0, step.stdout + step.stderr
+    assert step.stubbed == ["npm ci --ignore-scripts"]
+    with tarfile.open(step.runner_temp / "project-assets/demo-1.2.3.tar.gz") as built:
+        assert built.getnames() == ["package.json"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_contributing_explains_the_assets_that_a_project_builds_itself(
+    projects: dict[str, Path], kind: str
+) -> None:
+    text = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`bash scripts/release-assets.sh FOLDER VERSION`" in text
+    assert "the verification of the release fails for an asset without" in text
+
+
 def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "release-please")
@@ -15480,11 +15681,16 @@ def archive(path: Path, files: dict[str, str] | None) -> None:
                 tarred.addfile(info, io.BytesIO(data))
 
 
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-@pytest.mark.parametrize("publish_to", [*PACKAGES, "github-action", "ghcr", "none", ""])
-def test_the_sboms_describe_what_a_release_ships(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publish_to: str
-) -> None:
+def unpack_what_the_release_ships(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    publish_to: str,
+    project: Mapping[str, dict[str, str] | None] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Runs *Unpack what the release ships* of build-release.yml in the checkout of a
+    tag of SOURCES, with the package of PUBLISH_TO among the assets and the archives
+    of project as those that scripts/release-assets.sh built; the folder of the
+    package is tmp_path/temp/package."""
     build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
     # The checkout of the tag, with a file that the tag doesn't have.
     checkout = tmp_path / "checkout"
@@ -15505,6 +15711,10 @@ def test_the_sboms_describe_what_a_release_ships(
     assets.mkdir()
     for name, files in PACKAGES.get(publish_to, {}).items():
         archive(assets / name, files)
+    built = tmp_path / "temp/project-assets"
+    built.mkdir(parents=True)
+    for name, files in (project or {}).items():
+        archive(built / name, files)
 
     # The paths relative to the checkout, which the tar of Git for Windows takes, where
     # it reads the C: of an absolute path as the name of a host.
@@ -15517,6 +15727,15 @@ def test_the_sboms_describe_what_a_release_ships(
         ASSETS="../assets",
         PUBLISH_TO=publish_to,
     )
+    return result
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("publish_to", [*PACKAGES, "github-action", "ghcr", "none", ""])
+def test_the_sboms_describe_what_a_release_ships(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publish_to: str
+) -> None:
+    result = unpack_what_the_release_ships(tmp_path, monkeypatch, publish_to)
 
     assert result.returncode == 0, result.stdout + result.stderr
     package = tmp_path / "temp/package"
@@ -15526,6 +15745,37 @@ def test_the_sboms_describe_what_a_release_ships(
     assert sorted(files_of(package)) == SHIPPED.get(
         publish_to, ["action.yml", "demo.py", "requirements.txt"]
     )
+
+
+# The archives that a scripts/release-assets.sh built: the zip of a browser extension
+# and a tarball, beside a file that is no archive.
+PROJECT_ARCHIVES: dict[str, dict[str, str] | None] = {
+    "demo-extension-1.2.3.zip": {"manifest.json": "{}\n", "popup.js": ""},
+    "demo-cli-1.2.3.tar.gz": {"cli/run.js": ""},
+    "demo-extension-1.2.3.crx": None,
+}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("publish_to", "shipped"),
+    [
+        # What the script built is the package of a project that no registry delivers.
+        ("none", ["cli/run.js", "manifest.json", "popup.js"]),
+        # Beside a package, or for an action, the SBOMs describe what they did before.
+        ("github-action", ["action.yml", "demo.py", "requirements.txt"]),
+        ("npm", SHIPPED["npm"]),
+    ],
+)
+def test_the_sboms_describe_the_archives_of_the_project_where_no_registry_delivers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publish_to: str, shipped: list[str]
+) -> None:
+    result = unpack_what_the_release_ships(
+        tmp_path, monkeypatch, publish_to, PROJECT_ARCHIVES
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(files_of(tmp_path / "temp/package")) == shipped
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -15582,10 +15832,14 @@ done
 
 
 def describe_the_release(
-    tmp_path: Path, publish_to: str, **variables: str
+    tmp_path: Path,
+    publish_to: str,
+    project: tuple[str, ...] = (),
+    **variables: str,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Runs the step that writes the SBOMs, with the stand-in for syft in the archive
-    of its release, which curl downloads and the step checks by its sha256."""
+    of its release, which curl downloads and the step checks by its sha256, and with
+    the files of project as those that scripts/release-assets.sh built."""
     build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
     pin = dict(re.findall(r"(SBOM_SYFT_(?:VERSION|SHA256)): (\S+)", build))
     release = tmp_path / "release.tar.gz"
@@ -15595,8 +15849,10 @@ def describe_the_release(
         info.size = len(data)
         info.mode = 0o755
         tarred.addfile(info, io.BytesIO(data))
-    for folder in ("temp", "assets"):
-        (tmp_path / folder).mkdir()
+    for folder in ("temp/project-assets", "assets"):
+        (tmp_path / folder).mkdir(parents=True)
+    for name in project:
+        (tmp_path / "temp/project-assets" / name).write_bytes(b"an asset\n")
     return run_workflow_step(
         tmp_path,
         script_of(build, "Describe it in the SBOMs, as SPDX and as CycloneDX"),
@@ -15656,6 +15912,29 @@ def test_the_sboms_name_the_release_by_its_version(
     )
     for name in ("demo.spdx.json", "demo.cdx.json"):
         assert (tmp_path / "assets" / name).is_file(), name
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("publish_to", "project", "catalogers"),
+    [
+        # The zips and tarballs of scripts/release-assets.sh are a package.
+        ("none", ("demo-extension-1.2.3.zip",), "image"),
+        ("none", ("demo-cli-1.2.3.tar.gz", "demo.crx"), "image"),
+        # Another file is no package: the sources of the tag are what ships.
+        ("none", ("demo.crx",), "directory"),
+        # Beside an action, the sources stay what the SBOMs describe.
+        ("github-action", ("demo-extension-1.2.3.zip",), "directory"),
+    ],
+)
+def test_the_sboms_list_what_the_archives_of_the_project_install(
+    tmp_path: Path, publish_to: str, project: tuple[str, ...], catalogers: str
+) -> None:
+    result, calls = describe_the_release(tmp_path, publish_to, project)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    (scan,) = [call for call in calls if call.startswith("syft ")]
+    assert f" --override-default-catalogers {catalogers} " in scan
 
 
 @WITH_JQ
@@ -15759,10 +16038,14 @@ def verify_a_hacs_release(
     manifest: Mapping[str, str] | None = None,
     zipped: dict[str, str] | None = None,
     zip_name: str = "demo.zip",
+    extra: Mapping[str, str] | None = None,
+    unattested: str | None = None,
 ) -> workflow_steps.StepResult:
     """Runs the verification of a release of the integration demo, delivered to HACS,
     with gh, git and curl as stand-ins: everything verifies, but for what the test
-    changes, such as the manifest.json in the zip or the files of the zip."""
+    changes, such as the manifest.json in the zip or the files of the zip, with the
+    extra assets of a scripts/release-assets.sh, and without the provenance of the
+    asset unattested."""
     version = tag.removeprefix("v")
     assets = tmp_path / "runner/assets"
     assets.mkdir(parents=True)
@@ -15787,6 +16070,14 @@ def verify_a_hacs_release(
         assets / zip_name,
         {"manifest.json": written, "sensor.py": ""} if zipped is None else zipped,
     )
+    for name, text in (extra or {}).items():
+        (assets / name).write_text(text, encoding="utf-8")
+    # gh attestation verify fails for an asset without its signed provenance.
+    missing = (
+        [Answer(rf"attestation verify {re.escape(unattested)} .*", code=1)]
+        if unattested
+        else []
+    )
     gitsign = tmp_path / "gitsign"
     gitsign.write_bytes(GITSIGN)
     release = {
@@ -15810,6 +16101,7 @@ def verify_a_hacs_release(
                 "true\n",
             ),
             exact(f"release download {tag}"),
+            *missing,
             Answer(
                 r"attestation verify \S+ --repo o/r --signer-workflow"
                 r" o/r/\.github/workflows/build-release\.yml"
@@ -15898,6 +16190,29 @@ def test_the_zip_that_hacs_installs_is_verified(
         assert f"- ✔ {line}\n" in done.summary, done.summary
     assert "✘" not in done.summary
     assert f"The release {tag} verifies." in done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("unattested", [None, "demo-extension-1.2.3.zip"])
+def test_the_verification_fails_for_an_asset_of_the_project_without_its_provenance(
+    tmp_path: Path, unattested: str | None
+) -> None:
+    # Every asset, those of a scripts/release-assets.sh too, carries the signed
+    # provenance of the isolated build, or the release doesn't verify.
+    done = verify_a_hacs_release(
+        tmp_path, extra={"demo-extension-1.2.3.zip": "built\n"}, unattested=unattested
+    )
+
+    attested = (
+        "- ✔ demo-extension-1.2.3.zip carries the signed provenance of the isolated"
+        " build.\n"
+    )
+    missing = (
+        "- ✘ demo-extension-1.2.3.zip has no valid provenance of the isolated build.\n"
+    )
+    assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
+    assert (attested in done.summary) is (unattested is None), done.summary
+    assert (missing in done.summary) is (unattested is not None), done.summary
 
 
 @WITH_JQ

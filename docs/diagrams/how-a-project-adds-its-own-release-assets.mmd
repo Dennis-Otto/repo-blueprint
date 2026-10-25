@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a project adds its own release assets
+    accDescr: The project's scripts/release-assets.sh builds its own assets, such as the zip of a browser extension, at the commit of the release, in a job that may write nothing, holds no secret and reaches only GitHub and npm. The job checks that each asset is a file with a name that GitHub keeps and hands the files on as an artifact. The job of the release takes them, after it checked the signed tag, refuses a name that one of its own assets has, and attests them with the package, the SBOMs and the notices. All of them go to the draft before it is published, and the verification of the release fails for an asset without its signed provenance.
+
+    hook(["scripts/release-assets.sh<br>FOLDER VERSION"])
+    build["The job assets of the project<br>reads only · no secret · GitHub and npm"]
+    checked{"A file each, by a name<br>that GitHub keeps"}
+    release["The job release assets<br>checks the signed tag, takes the files"]
+    attest["Attested with the package,<br>the SBOMs and the notices"]
+    draft["Attached to the draft<br>before it is published"]
+    verify["verify-release.yml:<br>every asset has its provenance"]
+
+    hook --> build --> checked
+    checked -- "artifact" --> release --> attest --> draft --> verify
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class hook you
+    class build,checked,release,attest bot
+    class draft,verify done
