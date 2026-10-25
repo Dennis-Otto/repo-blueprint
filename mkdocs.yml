@@ -50,6 +50,16 @@ plugins:
         nav_translations:
           Home: Start
           Guide: Anleitung
+          Features: Funktionen
+          Checks and the PR coach: Prüfungen und der PR-Coach
+          Fix bot and self-healing: Fix-Bot und Selbstheilung
+          Mutation tests, fuzzing and property tests: Mutationstests, Fuzzing und Property-Tests
+          Releases and security: Releases und Sicherheit
+          Dependencies and updates: Abhängigkeiten und Updates
+          Bots, their cost and the dashboard: Bots, ihre Kosten und das Dashboard
+          Website, diagrams and screenshots: Website, Diagramme und Screenshots
+          Settings as code: Einstellungen als Code
+          Community and development: Community und Entwicklung
           Comparison: Vergleich
           Kinds of projects: Arten von Projekten
           Home Assistant integration: Home-Assistant-Integration
@@ -81,6 +91,16 @@ hooks:
 nav:
   - Home: index.md
   - Guide: guide.md
+  - Features:
+      - Checks and the PR coach: features/checks.md
+      - Fix bot and self-healing: features/self-healing.md
+      - Mutation tests, fuzzing and property tests: features/tests.md
+      - Releases and security: features/releases.md
+      - Dependencies and updates: features/updates.md
+      - Bots, their cost and the dashboard: features/bots.md
+      - Website, diagrams and screenshots: features/website.md
+      - Settings as code: features/settings.md
+      - Community and development: features/development.md
   - Comparison: compare.md
   - Kinds of projects:
       - Home Assistant integration: kinds/home-assistant.md

@@ -6,7 +6,7 @@
 # of .github/repository.project.toml, so that the next person sees how to fix it. The
 # comment follows a workflow of this project alone, such as one of visual tests, once
 # the answer test_workflows of .copier-answers.yml names it.
-# https://github.com/Dennis-Otto/repo-blueprint#the-pr-coach
+# https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/checks.md#the-pr-coach
 
 # A check by the name that GitHub shows, where a * stands for any text. Each has a
 # title, problem, why and fix, and may have commands, one per line, and docs, a link or

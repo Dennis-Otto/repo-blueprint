@@ -3162,14 +3162,17 @@ def automation_picture(src: str, dark: str, alt: str) -> str:
 def test_the_automation_page_shows_the_diagrams_of_the_readme(
     language: str, suffix: str
 ) -> None:
-    # The blueprint's README shows them, drawn from their sources.
+    # The blueprint's README shows the first, its page of the releases the second,
+    # drawn from their sources.
     readme = (ROOT / f"README{suffix}.md").read_text(encoding="utf-8")
-    for name in hooks().DIAGRAMS:
+    releases = (ROOT / f"docs/features/releases{suffix}.md").read_text(encoding="utf-8")
+    shown = (readme, releases)
+    for name, page in zip(hooks().DIAGRAMS, shown, strict=True):
         assert (ROOT / f"docs/diagrams/{name}{suffix}.mmd").is_file(), name
         for scheme in ("", ".dark"):
-            picture = f"docs/images/diagrams/{name}{suffix}{scheme}.svg"
-            assert (ROOT / picture).is_file(), picture
-            assert f'"{picture}"' in readme, picture
+            picture = f"images/diagrams/{name}{suffix}{scheme}.svg"
+            assert (ROOT / "docs" / picture).is_file(), picture
+            assert f'/{picture}"' in page, picture
 
 
 @pytest.mark.parametrize("language", ["en", "de"])

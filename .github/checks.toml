@@ -657,7 +657,7 @@ fix = """Read the summary of the run. A refused release changes nothing: tell th
 maintainers of the issue assistant, or wait for its next release. When GitHub was only
 unreachable, run the dry run again:"""
 commands = ["gh workflow run sync-issue-assistant.yml -f dry_run=true"]
-docs = "https://github.com/Dennis-Otto/repo-blueprint#the-issue-assistant"
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/updates.md#the-issue-assistant"
 autofix = """Whether a release of the issue assistant may reach the blueprint is decided
 by its verification, never by a command of the pull request."""
 
@@ -700,11 +700,13 @@ of its own."""
 [step."Pages in one column"]
 problem = """A README, a CONTRIBUTING file or a page of `docs/` sets columns side by
 side: a `<table>` that puts a picture beside text, or a cell with a width; the log names
-each file and line."""
+each file and line. A cell of a Markdown table with more than 30 words, a paragraph, is
+a warning in the same log, which fails nothing yet."""
 why = """The GitHub app and phones keep such columns side by side and squeeze them until
 the text is a few words wide and the pictures are tiny."""
 fix = """Put the cells one below the other, the text before its picture, and leave out
-the widths; a table holds tabular data only. The command that the log names does this
+the widths; a table holds tabular data only. Make the rows of a table with paragraphs a
+list, or move the detail to a page of its own and link it. The command that the log names does this
 for you, then commit what changed (in the blueprint itself, the tool is `blueprint.py`
 without `.github/`):"""
 commands = ["python3 .github/blueprint.py pages --fix"]

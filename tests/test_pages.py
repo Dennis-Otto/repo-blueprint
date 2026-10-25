@@ -13,15 +13,20 @@ import pytest
 from blueprint.cli import main
 from blueprint.pages import (
     CELL_WIDTH,
+    CELL_WORDS,
+    LONG_CELL,
     PICTURE_BESIDE_TEXT,
     Layout,
     annotation,
+    cells,
     command,
     fixed,
     layouts,
+    long_cells,
     masked,
     pages,
     shown,
+    table_rows,
 )
 
 ROOT = Path(__file__).parents[1]
@@ -453,6 +458,86 @@ def test_an_annotation_names_the_file_and_the_line() -> None:
     )
 
 
+def words(count: int) -> str:
+    return " ".join(["word"] * count)
+
+
+def test_a_cell_of_a_markdown_table_with_a_paragraph_is_a_warning() -> None:
+    page = f"""\
+# Areas
+
+| Area | What runs |
+| --- | :-: |
+| **Checks** | {words(CELL_WORDS)} |
+| **Lint** | {words(CELL_WORDS + 1)} |
+"""
+
+    assert long_cells(page) == [
+        Layout(
+            6,
+            LONG_CELL.format(words=CELL_WORDS + 1, limit=CELL_WORDS),
+            level="warning",
+        )
+    ]
+    assert CELL_WORDS == 30
+    assert "{words} words, more than {limit}" in LONG_CELL
+    # The HTML tables of a page are no Markdown tables, and no layout either.
+    assert layouts(page) == []
+
+
+def test_the_rows_and_cells_of_a_markdown_table() -> None:
+    long = words(31)
+    page = f"""\
+A | B
+-|-
+{long} | short
+`{long} | {long}` | two cells, the code of one
+a \\| {long} | the escaped pipe
+end of the table, {long}
+
+Text.
+---
+{long}
+
+```markdown
+| A | B |
+| --- | --- |
+| {long} | B |
+```
+
+| Header {long} |
+| --- |
+"""
+
+    found = [(cell.line, cell.message.split(" words")[0]) for cell in long_cells(page)]
+    assert found == [
+        (3, "a cell of a Markdown table with 31"),
+        # The code of a cell counts, and so does the pipe in it.
+        (4, "a cell of a Markdown table with 63"),
+        (5, "a cell of a Markdown table with 33"),
+        (18, "a cell of a Markdown table with 32"),
+    ]
+    assert cells("| a | b |") == [(1, 4), (5, 8)]
+    assert cells("a | b") == [(0, 2), (3, 5)]
+    assert cells("|a\\|b|") == [(1, 5)]
+    # Code at the start of a row is no pipe at its start.
+    assert cells("`a | b` | c", "        | c") == [(0, 8), (9, 11)]
+    assert list(table_rows(["| A |", "| --- |", "| B |", "C", "| D |"])) == [0, 2]
+    # A line of dashes under a line with a pipe sets no columns without a pipe of its
+    # own, and a pipe alone sets none either.
+    assert list(table_rows(["A | B", "---", "| C |"])) == []
+    assert list(table_rows(["A | B", "| x |"])) == []
+    assert list(table_rows(["A | B"])) == []
+
+
+def test_a_warning_is_an_annotation_of_its_own_level() -> None:
+    cell = Layout(3, "long", level="warning")
+
+    assert annotation(Path("README.md"), cell) == (
+        "::warning file=README.md,line=3,title=Pages in one column::long"
+    )
+
+
 def test_the_command_is_that_of_the_repository(tmp_path: Path) -> None:
     assert command(tmp_path) == "python3 blueprint.py"
     (tmp_path / ".github").mkdir()
@@ -512,6 +597,53 @@ def test_the_ci_shows_each_layout_at_its_line(
     )
     # Nothing that the fix can do.
     assert "--fix" not in output[-1]
+
+
+@pytest.mark.skipif(GIT is None, reason="the pages are the files that git knows")
+@pytest.mark.parametrize("ci", [True, False])
+def test_the_check_warns_of_the_cells_with_a_paragraph(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    ci: bool,
+) -> None:
+    if ci:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    else:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    table = f"| Area | What runs |\n| --- | --- |\n| Checks | {words(40)} |\n"
+    root = repository(tmp_path, {"README.md": "# Demo\n\n" + table})
+    message = LONG_CELL.format(words=40, limit=CELL_WORDS)
+    summary = (
+        "1 cell(s) of Markdown tables hold more than 30 words, a paragraph that the "
+        "GitHub app and phones squeeze: make the rows a list, or move the detail to a "
+        "page of its own, as CONTRIBUTING.md describes. They are warnings for now."
+    )
+
+    # A warning fails nothing.
+    assert main(["pages"], root=root) == 0
+    annotations = (
+        [f"::warning file=README.md,line=5,title=Pages in one column::{message}"]
+        if ci
+        else []
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        f"README.md:5: {message}",
+        *annotations,
+        summary,
+        "The 1 page(s) that GitHub shows have one column.",
+    ]
+
+    # Next to a layout, the layout fails the check, and the warning comes first.
+    repository(root, {"docs/cards.md": "<td width='1'>A</td>\n"})
+    assert main(["pages"], root=root) == 1
+    output = capsys.readouterr().out.splitlines()
+    assert output[: len(annotations) + 3] == [
+        f"README.md:5: {message}",
+        *annotations,
+        summary,
+        f"docs/cards.md:1: {CELL_WIDTH}",
+    ]
 
 
 @pytest.mark.skipif(GIT is None, reason="the pages are the files that git knows")
@@ -593,3 +725,19 @@ def test_the_pages_of_the_blueprint_have_one_column() -> None:
     assert "README.md" in found
     assert "template/CHANGELOG.md" not in found
     assert {page: layout for page, layout in found.items() if layout} == {}
+
+
+# The most words of each README of the blueprint, as wc -w counts them: about twelve
+# minutes of reading, with the details on the pages of docs/features/.
+README_WORDS = 3000
+
+
+@pytest.mark.parametrize("name", ["README.md", "README.de.md"])
+def test_the_readmes_of_the_blueprint_read_on_a_phone(name: str) -> None:
+    text = (ROOT / name).read_text(encoding="utf-8")
+
+    assert len(text.split()) <= README_WORDS, (
+        f"{name} has {len(text.split())} words: move the detail to a page of "
+        "docs/features/ and link it"
+    )
+    assert long_cells(text) == []
