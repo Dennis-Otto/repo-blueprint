@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import io
 import json
 import re
@@ -30,12 +29,14 @@ from blueprint.checklist import (
     renovate,
     reuse_compliant,
 )
-from blueprint.github import Api, GitHubError
+from blueprint.github import Api, GitHubError, Response
 from blueprint.settings import (
+    BATCH,
     MAIN_ONLY,
     ConfigError,
     Drift,
     Settings,
+    actions_that_run,
     allows,
     apply_labels,
     apply_pages,
@@ -46,11 +47,13 @@ from blueprint.settings import (
     check_pages,
     check_security,
     code_scanning_tools,
+    line_of,
     load_labels,
     main_ruleset,
     merge,
     references,
     ruleset_differences,
+    run_by,
     tag_creation_ruleset,
     tag_ruleset,
 )
@@ -283,6 +286,11 @@ class FakeGitHub:
         }
         # The files of other repositories, such as actions: by owner/repo/path@ref.
         self.contents: dict[str, str] = {}
+        # The repositories whose files GraphQL refuses, with the type of its error;
+        # "" refuses the whole query, as for its rate limit.
+        self.refused_files: dict[str, str] = {}
+        # The queries of GraphQL of the files of actions, by their variables.
+        self.file_queries: list[dict[str, str]] = []
         self.fork_approval = "first_time_contributors"
         self.rulesets: dict[int, dict[str, Any]] = {}
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
@@ -355,11 +363,8 @@ class FakeGitHub:
                 else (failure, "simulated failure")
             )
             return status, {"message": message}
-        content = re.fullmatch(
-            r"repos/([\w.-]+/[\w.-]+)/contents/([^?]+)\?ref=(.*)", path
-        )
-        if content and content[1] != REPO:
-            return self.content(*content.groups())
+        if (method, path) == ("POST", "graphql"):
+            return self.files_of_actions(payload["query"], payload["variables"])
         if path == f"users/{REPO.split('/')[0]}":
             return 200, {"login": REPO.split("/")[0], "type": self.account}
         if bot := re.fullmatch(r"users/([\w-]+)%5Bbot%5D", path):
@@ -490,13 +495,41 @@ class FakeGitHub:
             return 204, None
         return 200, self.selected
 
-    def content(self, repo: str, path: str, ref: str) -> tuple[int, Any]:
-        """A file of another repository, as the contents API answers it."""
-        key = f"{repo}/{urllib.parse.unquote(path)}@{urllib.parse.unquote(ref)}"
-        if key not in self.contents:
-            return 404, {"message": "Not Found"}
-        text = base64.b64encode(self.contents[key].encode()).decode()
-        return 200, {"type": "file", "encoding": "base64", "content": text}
+    def files_of_actions(
+        self, query: str, variables: dict[str, str]
+    ) -> tuple[int, Any]:
+        """The files of other repositories, such as actions, that a query of GraphQL
+        asks for by its variables, as GitHub answers it: a repository that it doesn't
+        know is null, with an error of the type NOT_FOUND, and so is a file."""
+        self.file_queries.append(variables)
+        if "" in self.refused_files:
+            error = {"type": self.refused_files[""], "message": "API rate limit"}
+            return 200, {"data": None, "errors": [error]}
+        data: dict[str, Any] = {}
+        errors = []
+        for key, owner in variables.items():
+            if not (index := re.fullmatch(r"o(\d+)", key)):
+                continue
+            alias = f"r{index[1]}"
+            # Every name of the query comes as a variable.
+            assert f"{alias}: repository(owner: ${key}, name: $n{index[1]})" in query
+            repo = f"{owner}/{variables[f'n{index[1]}']}"
+            known = any(name.startswith(f"{repo}/") for name in self.contents)
+            kind = self.refused_files.get(repo) or ("" if known else "NOT_FOUND")
+            if kind:
+                data[alias] = None
+                message = f"{kind} for {repo}"
+                errors.append({"type": kind, "path": [alias], "message": message})
+                continue
+            data[alias] = {}
+            for name, place in variables.items():
+                if file := re.fullmatch(rf"e{index[1]}_(\d+)", name):
+                    ref, _, path = place.partition(":")
+                    text = self.contents.get(f"{repo}/{path}@{ref}")
+                    data[alias][f"f{file[1]}"] = (
+                        None if text is None else {"text": text}
+                    )
+        return 200, {"data": data, **({"errors": errors} if errors else {})}
 
     def ruleset(self, method: str, body: Any, number: str | None) -> tuple[int, Any]:
         if method == "GET" and number is None:
@@ -1669,16 +1702,265 @@ def test_an_action_whose_file_github_refuses_keeps_the_list_as_it_is(
 ) -> None:
     with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
     github.permissions["allowed_actions"] = "all"
-    github.fail[("GET", "repos/vendor/composite/contents/action.yml?ref=abc")] = 403
+    github.refused_files["vendor/composite"] = "FORBIDDEN"
 
     assert run(github, root, "settings", "apply") == 1
 
     out = capsys.readouterr().out
     assert "actions.selected.patterns_allowed unknown for vendor/composite@abc" in out
-    assert "GitHub refused the file of vendor/composite@abc: GitHub answered 403" in out
+    assert (
+        "GitHub refused the file of vendor/composite@abc: GitHub answered FORBIDDEN"
+        in out
+    )
     assert github.permissions["allowed_actions"] == "all"
     # The other settings are applied all the same.
     assert github.permissions["sha_pinning_required"] is True
+
+
+# A composite action whose update runs an action that the list lacks, in turn.
+COMPOSITE = {
+    "vendor/composite/action.yml@abc": (
+        "runs:\n  using: composite\n  steps:\n    - uses: helper/setup/sub@1\n"
+        "    - uses: actions/cache@2\n"
+    ),
+}
+
+
+def test_the_lint_finds_an_action_that_an_action_runs_in_turn_and_the_list_lacks(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.contents = dict(COMPOSITE)
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    message = (
+        "helper/setup/sub@1: vendor/composite runs it in turn, from"
+        " vendor/composite@abc that .github/workflows/ci.yml names; add"
+        ' "helper/setup/sub@*" to patterns_allowed of [actions.selected] in'
+        " .github/repository.project.toml"
+    )
+    assert f"- {message}\n" in out
+    # At the line of the workflow that names what runs it, for the PR coach.
+    assert (
+        "::error file=.github/workflows/ci.yml,line=9,title=Allowed actions::"
+        "helper/setup/sub@1: vendor/composite runs it in turn"
+    ) in out
+    # Those of GitHub and the listed ones are allowed.
+    assert "actions/cache" not in out
+    assert "- vendor/composite" not in out
+    # From the files alone, with one query for each level, none of the settings.
+    assert github.calls == [("POST", "graphql")] * 2
+
+
+def test_the_lint_passes_when_the_list_allows_every_action_that_runs(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.contents = dict(COMPOSITE)
+    project = '[actions.selected]\npatterns_allowed = ["helper/setup/sub@*"]\n'
+    (root / ".github/repository.project.toml").write_text(project, encoding="utf-8")
+
+    assert run(github, root, "settings", "actions") == 0
+
+    assert capsys.readouterr().out == (
+        "GitHub starts every action that the workflows run, also those that these"
+        " run in turn, by [actions] of .github/repository.toml.\n"
+    )
+
+
+def test_the_lint_names_an_unlisted_action_and_an_image_that_a_workflow_runs(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Outside a workflow, also when the tests themselves run in one.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with_selected_actions(root, WORKFLOW + "      - uses: other/tool@9\n" + IMAGE)
+    # The blueprint lists the actions of every repository in its template.
+    (root / "copier.yml").write_text("{}\n", encoding="utf-8")
+    (root / "template").mkdir()
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    assert (
+        "- other/tool@9: .github/workflows/ci.yml names it; add"
+        ' "other/tool@*" to patterns_allowed of [actions.selected] in'
+        " template/.github/repository.toml.jinja and .github/repository.toml\n"
+    ) in out
+    assert (
+        "- docker://alpine:3@sha256:00: .github/workflows/ci.yml names it; run the"
+        " image in a run: step instead, as docker run --rm"
+    ) in out
+    # Annotations only in a workflow.
+    assert "::error" not in out
+
+
+def test_the_lint_asks_for_the_list_where_only_local_actions_may_run(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root)
+    config = root / ".github/repository.toml"
+    text = config.read_text(encoding="utf-8")
+    config.write_text(
+        text.replace('allowed_actions = "selected"', 'allowed_actions = "local_only"'),
+        encoding="utf-8",
+    )
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    # Not even the actions of GitHub may run then.
+    assert (
+        "- actions/checkout@4567: .github/workflows/ci.yml names it; set"
+        ' allowed_actions = "selected" in [actions] and add "actions/checkout@*"'
+    ) in out
+
+
+def test_the_lint_reads_nothing_when_every_action_may_run(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (root / ".github/workflows").mkdir()
+    (root / ".github/workflows/ci.yml").write_text(WORKFLOW + IMAGE, encoding="utf-8")
+
+    assert run(github, root, "settings", "actions") == 0
+
+    assert "GitHub starts every action" in capsys.readouterr().out
+    assert github.calls == []
+
+
+@pytest.mark.parametrize(
+    ("refuse", "answer"),
+    [
+        # GitHub refuses the repository of the action.
+        ({"vendor/composite": "FORBIDDEN"}, "GitHub answered FORBIDDEN"),
+        # Or the whole query, for its rate limit.
+        ({"": "RATE_LIMITED"}, "GitHub answered RATE_LIMITED: API rate limit"),
+    ],
+    ids=["repository", "query"],
+)
+def test_the_lint_fails_when_github_refuses_the_file_of_an_action(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    refuse: dict[str, str],
+    answer: str,
+) -> None:
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.contents = dict(COMPOSITE)
+    github.refused_files = refuse
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    assert "- vendor/composite@abc: .github/workflows/ci.yml names it; GitHub" in out
+    assert f"refused its file ({answer}" in out
+    assert "so what it runs in turn is unknown: run the check again\n" in out
+
+
+def test_the_lint_fails_when_github_answers_no_query(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with_selected_actions(root, WORKFLOW + "      - uses: vendor/composite@abc\n")
+    github.fail[("POST", "graphql")] = 502
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    # Each action of the query, which a gateway timed out twice: a query only reads,
+    # so it is asked once more.
+    assert out.count("refused its file (GitHub answered 502: simulated failure)") == 3
+    assert github.calls == [("POST", "graphql")] * 2
+
+
+def test_one_query_reads_the_files_of_many_actions_at_once(github: FakeGitHub) -> None:
+    named = {f"vendor/action-{index}@{index}": "ci.yml" for index in range(BATCH + 1)}
+    named["vendor/flows/.github/workflows/scan.yml@def"] = "ci.yml"
+    github.contents = {
+        "vendor/action-0/action.yaml@0": "runs:\n  steps:\n    - uses: x/y@1\n",
+        "vendor/flows/.github/workflows/scan.yml@def": "jobs: {}\n",
+    }
+
+    runs = actions_that_run(Api(github), named)
+
+    assert runs.found["x/y@1"] == "vendor/action-0"
+    assert runs.via["x/y@1"] == "vendor/action-0@0"
+    assert runs.refused == {}
+    # Two for the actions that the workflows name, one for those that they run.
+    assert [len(query) for query in github.file_queries] == [
+        BATCH * 4,
+        (len(named) - BATCH) * 4 - 1,
+        4,
+    ]
+    # The file of an action may be action.yml or action.yaml, that of a reusable
+    # workflow is its path.
+    first = github.file_queries[0]
+    assert (first["o0"], first["n0"]) == ("vendor", "action-0")
+    assert (first["e0_0"], first["e0_1"]) == ("0:action.yml", "0:action.yaml")
+    assert github.file_queries[1]["e1_0"] == "def:.github/workflows/scan.yml"
+
+
+class Answering(Api):
+    """An Api that answers every request with the same data."""
+
+    def __init__(self, data: Any) -> None:
+        super().__init__()
+        self.data = data
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        missing_ok: bool = False,
+        retry: bool | None = None,
+    ) -> Response:
+        return Response(200, self.data)
+
+
+@pytest.mark.parametrize(
+    ("data", "inner", "refused"),
+    [
+        # An answer that isn't an object, or has no data.
+        ([], {"a/b@1": []}, {}),
+        ({"data": None}, {"a/b@1": []}, {}),
+        # Errors that GraphQL answers in a list, each an object.
+        ({"data": {}, "errors": "boom"}, {"a/b@1": []}, {}),
+        ({"data": {}, "errors": ["boom"]}, {"a/b@1": []}, {}),
+        # An error without a type or a place refuses every part without data.
+        ({"data": {}, "errors": [{"message": "m"}]}, {}, {"a/b@1": "an error: m"}),
+        # A file that is no text, such as a picture, runs nothing.
+        ({"data": {"r0": {"f0": {"text": None}}}}, {"a/b@1": []}, {}),
+        ({"data": {"r0": {"f1": {"text": "- uses: c/d@2"}}}}, {"a/b@1": ["c/d@2"]}, {}),
+    ],
+    ids=["list", "no data", "errors", "error", "untyped", "binary", "yaml"],
+)
+def test_an_answer_of_graphql_in_any_shape_is_read(
+    data: Any, inner: dict[str, list[str]], refused: dict[str, str]
+) -> None:
+    found, unread = run_by(Answering(data), ["a/b@1"])
+
+    assert found == inner
+    assert {
+        key: value.removeprefix("GitHub answered ") for key, value in unread.items()
+    } == refused
+
+
+def test_the_line_of_an_action_that_no_step_names_is_none() -> None:
+    assert line_of("steps:\n  - uses: a/b@1\n  - uses: c/d@2\n", "c/d@2") == 3
+    assert line_of("steps:\n  - run: echo a/b@1\n", "a/b@1") == 0
 
 
 @pytest.mark.parametrize(
@@ -2199,6 +2481,19 @@ def test_a_post_that_a_gateway_timed_out_is_not_sent_twice(
         Api(runner).post("repos/x/issues", {"title": "t"})
     assert len(calls) == 1
     assert waits == []
+
+
+def test_a_post_that_only_reads_is_asked_once_more_after_a_gateway(
+    waits: list[float],
+) -> None:
+    # A query of GraphQL changes nothing: sent twice, it does no harm.
+    runner, calls = answers(http(502, {"message": "Bad Gateway"}), http(200, {"a": 1}))
+
+    response = Api(runner).request("POST", "graphql", {"query": "{}"}, retry=True)
+
+    assert response.data == {"a": 1}
+    assert len(calls) == 2
+    assert waits == [5]
 
 
 def test_a_run_stops_waiting_once_its_budget_is_spent(waits: list[float]) -> None:

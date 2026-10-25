@@ -58,6 +58,23 @@ jobs:
         env:
           ACTIONLINT: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         run: docker run --rm --volume "$PWD:/repo" --workdir /repo "$ACTIONLINT"
+      # GitHub starts a workflow only when [actions.selected] of .github/repository.toml
+      # allows every action and reusable workflow that it runs, also those that these
+      # run in turn at the commit of their pin. The step follows each of them, so that
+      # a pull request that makes a workflow run one that the list lacks, such as an
+      # update of an action by Renovate, fails here and not every workflow after the
+      # merge. It reads the files of the public actions with the token of the job, a
+      # few queries of GraphQL, and none of the settings on GitHub.
+      - name: Check that the allowed actions let every action start
+        id: allowed-actions
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" settings actions
       # The image of the REUSE tool as it is, without the action, which builds an image
       # of its own in every run. Git, which the tool asks for the ignored files, works
       # in the folder of another user only when it is named safe.
@@ -223,6 +240,7 @@ jobs:
           CHECK: lint
           FAILED: |
             ${{ steps.workflow-lint.outcome == 'failure' && 'workflow-lint' || '' }}
+            ${{ steps.allowed-actions.outcome == 'failure' && 'allowed-actions' || '' }}
             ${{ steps.reuse.outcome == 'failure' && 'reuse' || '' }}
             ${{ steps.markdown.outcome == 'failure' && 'markdown' || '' }}
             ${{ steps.issue-assistant.outcome == 'failure' && 'issue-assistant' || '' }}

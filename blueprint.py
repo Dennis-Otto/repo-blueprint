@@ -4,6 +4,7 @@ each task is a module of the package blueprint/ next to this file.
 
     python3 blueprint.py settings check     compare .github/repository.toml with GitHub
     python3 blueprint.py settings apply     make GitHub match .github/repository.toml
+    python3 blueprint.py settings actions   whether each action of the workflows may run
     python3 blueprint.py checklist          the steps outside the API, and which are done
     python3 blueprint.py create [--private] the repository on GitHub of a new copy, set up
     python3 blueprint.py changelog ...      the changelog of a release (the release bot)
