@@ -23,6 +23,8 @@ CLOCK = datetime(2027, 1, 1, 12, 0, tzinfo=UTC)
 SIZE = {"width": 1280, "height": 900}
 # The space around the part of the page that a picture shows.
 MARGIN = 16
+# Where the image keeps the browsers of its Playwright.
+BROWSERS = Path("/ms-playwright")
 
 
 @dataclass(frozen=True)
@@ -130,7 +132,7 @@ def main() -> None:
     with sync_playwright() as playwright:
         # The Chromium of the image, with letters whose edges are gray: the colored
         # ones of LCD text come out differently from run to run.
-        found = sorted(Path("/ms-playwright").glob("chromium-*/chrome-linux*/chrome"))
+        found = sorted(BROWSERS.glob("chromium-*/chrome-linux*/chrome"))
         browser = playwright.chromium.launch(
             executable_path=str(found[-1]) if found else None,
             args=["--disable-lcd-text", "--force-color-profile=srgb"],

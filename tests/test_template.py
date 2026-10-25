@@ -4879,6 +4879,10 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         ".github/screenshots-paths.txt",
     ):
         assert not (project / sample).exists(), sample
+    # Nor does its guide describe the starter script that it lacks.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`scripts/screenshots.sh` renders the social preview" not in contributing
+    assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
     assert sorted(files_of(project / "tests")) == (
@@ -10474,7 +10478,7 @@ def test_one_check_stands_for_every_variant() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     gate = job_in(variants, "variants")
     assert gate["name"] == "variants"
-    assert gate["needs"] == "variant"
+    assert gate["needs"] == ["variant", "pictures"]
     # Also after a variant failed, so that the check reports the failure.
     assert condition_of(gate) == "always()"
     settings = tomllib.loads(
@@ -11766,6 +11770,8 @@ def test_a_new_repository_photographs_its_website_and_what_its_kind_shows(
     for pattern in ("docs/**", "!docs/images/screenshots/**", "mkdocs.yml"):
         assert f"\n{pattern}\n" in paths, pattern
     assert "\n.github/screenshots-browser-requirements.txt\n" in paths
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "\n- `scripts/screenshots.sh` renders the social preview" in contributing
     for other, (name, image, sources) in STARTER_PICTURES.items():
         assert (f'"{name}",' in script) == (other == kind), name
         assert (image in script) == (other == kind), image
@@ -11855,6 +11861,21 @@ def test_renovate_keeps_the_servers_of_the_starter_pictures_current(
     assert allowed
     major = int(images[1][1].split(".")[0])
     assert int(allowed[1]) <= major <= int(allowed[2])
+    # Neither Renovate moves it to a major version beyond that max-version.
+    nextcloud = (
+        projects["nextcloud-app"] / ".github/renovate-blueprint.json5"
+    ).read_text(encoding="utf-8")
+    held = {
+        "matchDepNames": ["docker.io/library/nextcloud"],
+        "matchUpdateTypes": ["major"],
+        "enabled": False,
+    }
+    for rules, files in (
+        (own, ["template/scripts/**"]),
+        (nextcloud, ["scripts/screenshots.sh"]),
+    ):
+        found = renovate_rules(rules)["packageRules"]
+        assert {"matchFileNames": files, **held} in found
 
 
 def test_the_browser_of_the_pictures_and_its_playwright_move_together() -> None:

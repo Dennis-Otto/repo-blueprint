@@ -258,7 +258,7 @@ Eine Prüfung, die scheitert, erklärt sich selbst, dir und allen, die einen Pul
   <img src="docs/images/diagrams/the-report-of-a-pull-request.de.svg" alt="Der Bericht eines Pull Requests: Ein Push in einen Pull Request einer Person startet die Prüfungen, die die Abdeckung der Tests und die gebaute Website als Artefakte behalten. Nach den Prüfungen liest der PR-Coach die Check-Runs, Titel und Beschreibung, die Dateien, die Abdeckungsberichte des Pull Requests und von main und das Artefakt website über die API, dazu die release-please-Dateien und mkdocs.yml von main, und führt keinen Code des Pull Requests aus. Er hält einen Kommentar aktuell: die gescheiterten Prüfungen, die nächste Version mit dem Eintrag im Changelog, die Abdeckung Datei für Datei und die Website mit den Seiten, die sich ändern. Ein Pull Request, dessen Prüfungen bestehen, bekommt ihn nur, wenn er davon etwas zu sagen hat.">
 </picture>
 
-Der Kommentar des PR-Coachs an einem Pull Request von issue-assistant, nachdem jede Prüfung bestanden hat: was der Merge mit dem nächsten Release macht, die Abdeckung der Tests gegenüber `main` mit der Datei, die er hinzufügt, und die Seiten der Website, die er ändert:
+Der Kommentar des PR-Coachs an einem Pull Request von issue-assistant, während zwei Prüfungen noch liefen: was der Merge mit dem nächsten Release macht, die Abdeckung der Tests gegenüber `main` mit der Datei, die er hinzufügt, und die Seiten der Website, die er ändert:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/github-pr-coach.dark.png">

@@ -11,8 +11,9 @@ name: Screenshots
 # repository photographs the website and, by its kind, the integration in Home
 # Assistant or the app in Nextcloud, each in Docker. It compares each picture that
 # changed with the one of main by its pixels: a picture whose pixels stayed the same
-# keeps its file, so that a new encoder, browser or runner changes nothing. When pixels changed, it keeps one
-# pull request from the branch bot/screenshots, as the release app, which merges
+# keeps its file, so that a new encoder, browser or runner changes nothing. When
+# pixels changed, it keeps one pull request from the branch bot/screenshots, as the
+# release app, which merges
 # itself once every check passes, and closes it when main looks as rendered without
 # it. The bot commits only pictures, by plain paths, outside .git and the workflows;
 # without the release app, the run warns and keeps the pictures as an artifact. A

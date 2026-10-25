@@ -95,7 +95,9 @@ fi
 # the Playwright of stacks/screenshots/requirements-browser.txt, which drives the
 # browser of the same image. The pictures leave the container as a tar on stdout.
 if docker run --rm --volume "$root:/work:ro" "$browser" sh -c '
-  pip install --quiet --disable-pip-version-check --root-user-action=ignore     --break-system-packages --require-hashes     -r /work/stacks/screenshots/requirements-browser.txt >&2 &&
+  pip install --quiet --disable-pip-version-check --root-user-action=ignore \
+    --break-system-packages --require-hashes \
+    -r /work/stacks/screenshots/requirements-browser.txt >&2 &&
     python3 /work/.github/docs-pictures/github_pages.py /tmp/github >&2 &&
     tar -cf - -C /tmp/github .' >"$github" 2>"$log" &&
   [[ -s "$github" ]]; then

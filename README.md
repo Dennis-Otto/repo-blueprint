@@ -256,7 +256,7 @@ A check that fails explains itself, to you and to everyone who sends a pull requ
   <img src="docs/images/diagrams/the-report-of-a-pull-request.svg" alt="The report of a pull request: A push to a pull request of a person runs the checks, which keep the coverage of the tests and the website that they built as artifacts. After the checks, the PR coach reads the check runs, the title and description, the files, the coverage reports of the pull request and of main and the artifact website from the API, with the release-please files and mkdocs.yml of main, and runs no code of the pull request. It keeps one comment: the checks that failed, the next version with the entry of the changelog, the coverage file by file, and the website with the pages that change. A pull request whose checks pass gets it only when it has something of this to say.">
 </picture>
 
-The comment of the PR coach on a pull request of issue-assistant, after every check passed: what the merge does to the next release, the coverage of the tests against `main` with the file it added, and the pages of the website that it changes:
+The comment of the PR coach on a pull request of issue-assistant, while two checks were still running: what the merge does to the next release, the coverage of the tests against `main` with the file it added, and the pages of the website that it changes:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/github-pr-coach.dark.png">
