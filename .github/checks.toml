@@ -370,10 +370,16 @@ problem = """zizmor found a security problem in a workflow, such as an expressio
 event in a script, the credentials that a checkout keeps or an action that isn't pinned
 to a commit."""
 why = """A workflow runs with the token of the repository; a weakness in it can give a
-pull request, a branch name or an issue the power to change the repository."""
+pull request, a branch name or an issue the power to change the repository. The rules
+of `main` stop the merge while the pull request adds an alert of zizmor, of any
+severity; an alert that `main` has already doesn't."""
 fix = """Open the finding from the details of the check; the documentation of each audit
 of zizmor shows the fix. A finding that the project accepts on purpose goes into
-`.github/zizmor.yml` with the reason. zizmor runs on your machine as well:"""
+`.github/zizmor.yml` with the reason. In a pull request that changes no workflow, no
+action and not `.github/zizmor.yml`, an alert comes from an advisory of an action
+published since the last analysis of `main`: a maintainer starts the workflow
+*Workflow security* on `main`, which gives `main` the alert, and runs the checks
+again. zizmor runs on your machine as well:"""
 commands = ["pipx run zizmor .github/workflows"]
 docs = "https://docs.zizmor.sh/audits/"
 autofix = """A weakness of a workflow needs a person, and the bot never writes a

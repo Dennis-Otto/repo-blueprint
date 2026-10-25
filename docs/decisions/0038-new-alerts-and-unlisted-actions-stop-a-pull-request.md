@@ -1,6 +1,6 @@
 # New alerts of code scanning and unlisted actions stop a pull request, and secret scanning looks for generic secrets
 
-- Status: accepted, amended by [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md), with which a switch that GitHub doesn't offer or keeps off fails no run, and by [0064](0064-an-image-of-docker-runs-with-docker-run.md), with which `settings check` names every step that runs an image with `docker://`
+- Status: accepted, amended by [0055](0055-what-github-does-not-do-for-a-repository-fails-no-settings-run.md), with which a switch that GitHub doesn't offer or keeps off fails no run, by [0064](0064-an-image-of-docker-runs-with-docker-run.md), with which `settings check` names every step that runs an image with `docker://`, and by [0073](0073-zizmor-analyzes-every-pull-request-and-each-new-alert-stops-the-merge.md), with which zizmor analyzes every pull request and each new alert of it stops the merge
 - Date: 2026-10-18
 
 ## Context
@@ -27,7 +27,7 @@ Option 2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-a-pull-request-passes-before-it-merges.dark.svg">
-  <img src="../images/diagrams/what-a-pull-request-passes-before-it-merges.svg" alt="What a pull request passes before it merges: A pull request changes code or a workflow. Each workflow starts only when every action that it runs, and every action that these run in turn, is one of GitHub or matches a pattern of the list in the settings as code; a workflow that names another fails to start. The required checks then pass, and CodeQL uploads its analysis of the pull request. GitHub compares it with that of main, and a new alert of high or critical severity, or a new error, stops the merge; an alert that main has already doesn't. Otherwise the pull request merges.">
+  <img src="../images/diagrams/what-a-pull-request-passes-before-it-merges.svg" alt="What a pull request passes before it merges: A pull request changes code or a workflow. Each workflow starts only when every action that it runs, and every action that these run in turn, is one of GitHub or matches a pattern of the list in the settings as code; a workflow that names another fails to start. The required checks then pass, and CodeQL and zizmor upload their analyses of the pull request. GitHub compares each with that of main: a new alert of CodeQL of high or critical severity, or a new error, stops the merge, and so does every new alert of zizmor; an alert that main has already doesn't. Otherwise the pull request merges.">
 </picture>
 
 ## Consequences
