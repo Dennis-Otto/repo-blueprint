@@ -1,0 +1,36 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: What a newer push to main cancels
+    accDescr: A merge pushes to main while the runs of the push before may still go. The tests, CodeQL and the scanners of the push before only tell what the run of the newer commit tells as well, so the newer push cancels them, as a newer push to a pull request does. When a late run for an older commit cancelled the run for the head of main instead, the bot for cancelled checks starts it again. The website, the release and the bots that commit or change GitHub end the run that they started, and only the newest run that waits comes next. No push cancels a run on a schedule or by hand.
+
+    push(["A newer push to main"])
+    checks["The tests, CodeQL and the scanners<br>of the push before"]
+    publish["The website, the release<br>and the bots that commit"]
+    timed["A run on a schedule<br>or by hand"]
+    cancel["Cancelled, as in a pull request"]
+    head{"Was it the run<br>for the head of main?"}
+    again["The bot for cancelled checks<br>starts it again"]
+    stays["`Stays cancelled:<br>the newer run tells the same`"]
+    finish["Ends what it started;<br>the newest waiting run comes next"]
+    alone["Runs to its end"]
+
+    push --> checks
+    push --> publish
+    push --> timed
+    checks --> cancel
+    cancel --> head
+    head -- "yes, a late run<br>for an older commit" --> again
+    head -- "no" --> stays
+    publish --> finish
+    timed --> alone
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class push person
+    class cancel,again bot
+    class stays,finish,alone done

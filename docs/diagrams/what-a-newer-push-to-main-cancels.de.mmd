@@ -1,0 +1,36 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Was ein neuerer Push auf main abbricht
+    accDescr: Ein Merge pusht auf main, während die Läufe des Pushes davor noch laufen können. Die Tests, CodeQL und die Scanner des Pushes davor sagen nur, was der Lauf des neueren Commits auch sagt, also bricht der neuere Push sie ab, so wie ein neuerer Push auf einen Pull Request. Hat stattdessen ein verspäteter Lauf für einen älteren Commit den Lauf für den neuesten Commit von main abgebrochen, startet ihn der Bot für abgebrochene Prüfungen neu. Die Website, das Release und die Bots, die committen oder GitHub ändern, beenden den Lauf, den sie begonnen haben, und nur der neueste wartende Lauf kommt danach. Einen Lauf nach Zeitplan oder von Hand bricht kein Push ab.
+
+    push(["Ein neuerer Push auf main"])
+    checks["Die Tests, CodeQL und die Scanner<br>des Pushes davor"]
+    publish["Die Website, das Release<br>und die Bots, die committen"]
+    timed["Ein Lauf nach Zeitplan<br>oder von Hand"]
+    cancel["Abgebrochen, wie in einem Pull Request"]
+    head{"War es der Lauf für den<br>neuesten Commit von main?"}
+    again["Der Bot für abgebrochene Prüfungen<br>startet ihn neu"]
+    stays["`Bleibt abgebrochen:<br>der neuere Lauf sagt dasselbe`"]
+    finish["Beendet, was er begonnen hat;<br>der neueste wartende Lauf kommt danach"]
+    alone["Läuft bis zu seinem Ende"]
+
+    push --> checks
+    push --> publish
+    push --> timed
+    checks --> cancel
+    cancel --> head
+    head -- "ja, ein verspäteter Lauf<br>für einen älteren Commit" --> again
+    head -- "nein" --> stays
+    publish --> finish
+    timed --> alone
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class push person
+    class cancel,again bot
+    class stays,finish,alone done
