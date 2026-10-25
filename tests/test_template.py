@@ -668,6 +668,213 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
             assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
 
 
+# The jobs that hold a secret or a token that may write, yet record their network
+# traffic instead of blocking it, each with its reason. Every other such job blocks
+# every host that it doesn't need (decision 0076).
+AUDITED_PRIVILEGED_JOBS = {
+    (
+        "release.yml",
+        "pypi",
+    ): "no repository delivers to PyPI yet: no run measured its hosts",
+    (
+        "release.yml",
+        "npm",
+    ): "no repository delivers to npm yet: no run measured its hosts",
+    (
+        "release.yml",
+        "ghcr",
+    ): "Docker builds the image and reaches the registries of its base images",
+    (
+        "renovate.yml",
+        "renovate",
+    ): "Renovate reaches the registry of every package manager",
+    (
+        "docs.yml",
+        "deploy",
+    ): "it asks the published website, on a domain of the repository's own",
+    (
+        "dashboard.yml",
+        "deploy",
+    ): "it asks the published website, on a domain of the repository's own",
+    ("links.yml", "links"): "it checks the links to every host that the pages name",
+    (
+        "codeql.yml",
+        "codeql",
+    ): "CodeQL downloads its packs, and the job only uploads findings",
+    (
+        "zizmor.yml",
+        "zizmor",
+    ): "zizmor asks GitHub and the advisories, and the job only uploads findings",
+    (
+        "scorecard.yml",
+        "analysis",
+    ): "Scorecard asks a dozen services, and the job only uploads findings",
+    (
+        "ci-php.yml",
+        "taint-report",
+    ): "Psalm runs after Composer, and the job only uploads findings",
+    (
+        "ci.yml",
+        "taint-report",
+    ): "Psalm runs after Composer, and the job only uploads findings",
+}
+# Where PUBLISH_TO delivers a release, as copier.yml derives it from the kind.
+PUBLISH_TARGETS = (
+    "hacs",
+    "nextcloud-appstore",
+    "github-action",
+    "pypi",
+    "npm",
+    "ghcr",
+    "none",
+)
+# A host that a blocking job may reach, and the hosts for one PUBLISH_TO.
+ENDPOINT = re.compile(r"(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+:443")
+PER_TARGET = re.compile(
+    r"\$\{\{ vars\.PUBLISH_TO == '([a-z-]+)' && '([^']+)' \|\| '' \}\}"
+)
+
+
+def privileged(job: Mapping[str, Any], top: Any) -> bool:
+    """Whether a job holds a secret, an OIDC token or a token that may write."""
+    permissions = job.get("permissions", top)
+    if permissions == "write-all" or (
+        isinstance(permissions, dict) and "write" in permissions.values()
+    ):
+        return True
+    secrets = set(re.findall(r"secrets\.(\w+)", json.dumps(job))) - {"GITHUB_TOKEN"}
+    return "environment" in job or bool(secrets)
+
+
+def allowed_hosts(endpoints: str, target: str) -> set[str]:
+    """The hosts that harden-runner allows for a PUBLISH_TO, without their port."""
+    chosen = PER_TARGET.sub(
+        lambda found: found[2] if found[1] == target else "", endpoints
+    )
+    return {endpoint.removesuffix(":443") for endpoint in chosen.split()}
+
+
+def reaches(hosts: set[str], host: str) -> bool:
+    return host in hosts or any(
+        allowed.startswith("*.") and host.endswith(allowed[1:]) for allowed in hosts
+    )
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_privileged_job_blocks_the_hosts_that_it_doesnt_need(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A compromised action or tool in a job with the private key of the release app,
+    # the signing key of a Nextcloud app, an OIDC token or a token that may write
+    # could send them anywhere; audit mode only records it.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    audited = set()
+    for name, text in flows.items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        parsed = parse(text)
+        for job_id, job in parsed["jobs"].items():
+            # A job that calls a workflow: its jobs block, here or in their repository.
+            if "uses" in job or not privileged(job, parsed.get("permissions")):
+                continue
+            where = f"{name}: {job_id}"
+            hardening = steps_using(job, "step-security/harden-runner")
+            assert hardening == [job["steps"][0]], f"{where}: harden-runner first"
+            policy = hardening[0]["with"]
+            if (name, job_id) in AUDITED_PRIVILEGED_JOBS:
+                audited.add((name, job_id))
+                assert policy == {"egress-policy": "audit"}, where
+                continue
+            assert policy["egress-policy"] == "block", where
+            assert hardening[0]["name"] == "Block every host that the job doesn't need"
+            # No sudo and no Docker, but where the Nextcloud app installs krankerl.
+            sudo = policy["disable-sudo-and-containers"]
+            assert sudo is True or (
+                name == "build-release.yml"
+                and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
+            ), where
+            endpoints = policy["allowed-endpoints"]
+            for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
+                assert ENDPOINT.fullmatch(endpoint), f"{where}: {endpoint}"
+            # Every host that a step downloads from with curl, for the PUBLISH_TO that
+            # the step runs for, or for one of them where it runs for every one.
+            for step in job["steps"]:
+                condition = re.search(
+                    r"env\.PUBLISH_TO == '([a-z-]+)'", str(step.get("if", ""))
+                )
+                targets = [condition[1]] if condition else PUBLISH_TARGETS
+                for call in CURL.findall(step.get("run", "")):
+                    for host in re.findall(r"https://([a-z0-9.-]+)/", call):
+                        assert any(
+                            reaches(allowed_hosts(endpoints, target), host)
+                            for target in targets
+                        ), f"{where}: {host}"
+    # No reason stays for a job that blocks, or that is gone.
+    if project == "blueprint":
+        assert audited == {key for key in AUDITED_PRIVILEGED_JOBS if key[0] in flows}
+
+
+def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
+    flows = workflows(ROOT)
+    build = job_in(flows["build-release.yml"], "assets")
+    endpoints = build["steps"][0]["with"]["allowed-endpoints"]
+    signing = {
+        "api.github.com",
+        "github.com",
+        "uploads.github.com",
+        "fulcio.sigstore.dev",
+        "rekor.sigstore.dev",
+    }
+    for target in PUBLISH_TARGETS:
+        assert signing <= allowed_hosts(endpoints, target), target
+    assert "pypi.org" not in allowed_hosts(endpoints, "hacs")
+    assert {"pypi.org", "files.pythonhosted.org"} <= allowed_hosts(endpoints, "pypi")
+    assert "registry.npmjs.org" in allowed_hosts(endpoints, "npm")
+    assert "download.nextcloud.com" in allowed_hosts(endpoints, "nextcloud-appstore")
+    verify = job_in(flows["verify-release.yml"], "verify")
+    endpoints = verify["steps"][0]["with"]["allowed-endpoints"]
+    assert "apps.nextcloud.com" in allowed_hosts(endpoints, "nextcloud-appstore")
+    assert "apps.nextcloud.com" not in allowed_hosts(endpoints, "pypi")
+    assert "ghcr.io" in allowed_hosts(endpoints, "ghcr")
+    # The OIDC token of the keyless signatures comes from a host of the region of the
+    # runner, such as run-actions-3-azure-eastus.actions.githubusercontent.com.
+    release = job_in(flows["release.yml"], "release-please")
+    hosts = allowed_hosts(release["steps"][0]["with"]["allowed-endpoints"], "none")
+    assert reaches(hosts, "run-actions-3-azure-eastus.actions.githubusercontent.com")
+
+
+def test_the_signing_key_of_a_nextcloud_app_is_only_in_the_step_that_signs() -> None:
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    job = job_with(build, "Sign the Nextcloud app")
+    holding = [
+        step["name"]
+        for step in job["steps"]
+        if "secrets.APP_PRIVATE_KEY" in json.dumps(step)
+    ]
+    assert holding == ["Sign the Nextcloud app"]
+    sign = script_of(build, "Sign the Nextcloud app")
+    # The key goes, also when a command of the signature fails.
+    trap = """trap 'rm -f "$RUNNER_TEMP/app.key"' EXIT"""
+    assert sign.index(trap) < sign.index('> "$RUNNER_TEMP/app.key"')
+    # Nothing of the project runs and nothing is downloaded while the key is on disk.
+    for command in ("scripts/check-package.sh", "krankerl", "curl"):
+        assert command not in sign, command
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_github_cli_sends_no_telemetry(
+    projects: dict[str, Path], project: str
+) -> None:
+    # gh sends its telemetry to cafe.github.com, a host that no job needs.
+    root = ROOT if project == "blueprint" else projects[project]
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        if re.search(r"GH_TOKEN|blueprint\.py", text):
+            assert parse(text).get("env", {}).get("GH_TELEMETRY") == "false", name
+
+
 def test_the_next_runner_runs_the_variants_every_week(
     projects: dict[str, Path],
 ) -> None:
@@ -4041,8 +4248,8 @@ def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> No
         f"Nextcloud {major} runs on PHP {oldest} to {newest}, not on {php[1]}"
     )
     # The last PHP that setup-php sets up is the one that occ runs on.
-    job = job_with(build, "Build and sign the Nextcloud app")
-    sign = names_of(job).index("Build and sign the Nextcloud app")
+    job = job_with(build, "Sign the Nextcloud app")
+    sign = names_of(job).index("Sign the Nextcloud app")
     assert job["steps"].index(setup) < sign
     assert not steps_using({"steps": job["steps"][sign:]}, "shivammathur/setup-php")
 
@@ -14573,7 +14780,9 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     assert "sha256sum --check --strict" in write
     # After the package is built and before the assets are attested.
     order = [
-        "Build and sign the Nextcloud app",
+        "Build the Nextcloud app",
+        "Sign the Nextcloud app",
+        "Check the signed Nextcloud app",
         "Unpack what the release ships",
         describe,
         "Write the advisories that don't affect the release",

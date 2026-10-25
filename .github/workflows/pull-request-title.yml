@@ -23,6 +23,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: true
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   title:
     name: conventional title
@@ -37,10 +41,14 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
       # Never check out or run pull request code in this privileged workflow; the
       # title only reaches the script through an environment variable.
       - name: Check the title and set the label
@@ -267,9 +275,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
       - name: Name the check that checks the changelog
         run: echo "The check *conventional title* checks the entry in the changelog." >> "$GITHUB_STEP_SUMMARY"

@@ -21,6 +21,10 @@ concurrency:
   group: blueprint-update
   cancel-in-progress: false
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   update:
     name: blueprint update
@@ -35,10 +39,20 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
       # The release app of the owner pushes the update, whose workflows the token of a
       # job may not change, and opens its pull request, whose checks only then run.
       # Without the release app of the owner, the run names what is missing rather than

@@ -93,6 +93,10 @@ on:
 
 permissions: {}
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   rerun:
     name: run the failed jobs again
@@ -112,10 +116,13 @@ jobs:
       actions: write
       checks: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       - name: Run the failed jobs once more
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -203,10 +210,13 @@ jobs:
       checks: read
       issues: write
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       - name: Add the jobs that failed at first to the issue of flaky tests
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -453,10 +463,13 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       - name: Run the failed jobs of the release once more
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -505,10 +518,13 @@ jobs:
       checks: read
       pull-requests: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       - name: Run the checks of the head of the pull request again
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -572,10 +588,14 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
       # The default branch, for blueprint.py, the explanations and the versions of
       # release-please; nothing of the pull request is checked out or run, its checks
       # only come from the API.
@@ -667,10 +687,14 @@ jobs:
       issues: write # the issue of the fix bot of main, when it fails
       pull-requests: write # the suggestions on a pull request from a fork, and the comment when the bot fails
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
       # The tool of main, never the code of the pull request; the fixes are data.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -866,10 +890,14 @@ jobs:
       # The first line of the bot's commits.
       HEADLINE: "docs: draw the diagrams anew"
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
       - name: Fetch the diagrams that the check drew
         id: drawn
         env:

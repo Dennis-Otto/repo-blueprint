@@ -43,6 +43,10 @@ on:
 
 permissions: {}
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   update:
     name: update branches
@@ -79,10 +83,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
       # Without the release app of the owner, the run names what is missing rather than
       # fail at the token; every workflow has this step, the same but for its variables.
       - name: Check that the release app is set up
