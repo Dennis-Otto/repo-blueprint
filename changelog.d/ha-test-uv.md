@@ -1,0 +1,3 @@
+### Bug fixes
+
+- **The tests of a Home Assistant integration install a uv without its critical advisory:** the test plugin, pytest-homeassistant-custom-component, moves from 0.13.372 to 0.13.375, which brings Home Assistant 2026.10.4 and with it uv 0.13.5 instead of uv 0.12.23, whose advisory GHSA-hq85-5cpj-mr62 is fixed in uv 0.13.4. `osv-scanner.toml` no longer accepts the advisories of uv 0.12.23, and Renovate gets no rule for it any more; Pillow stays at 12.3.0, which Home Assistant still pins, and accepted until 2026-11-22. An integration made before this release gets the new `requirements-test.txt` with the next update of the blueprint.

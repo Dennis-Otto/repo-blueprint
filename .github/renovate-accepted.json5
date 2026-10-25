@@ -20,20 +20,6 @@
       ],
       "matchCurrentVersion": "/^12\\.3\\.0$/",
       "enabled": false
-    },
-    {
-      "description": "stacks/home-assistant/osv-scanner.toml accepts every advisory of uv 0.12.23 until 2026-11-22: Home Assistant 2026.10 pins uv 0.12.23, which only its test plugin installs here, for the tests of the integration; the next update of pytest-homeassistant-custom-component that brings uv 0.13.4 ends this.",
-      "matchFileNames": [
-        "/^stacks/home-assistant/[^/]+$/"
-      ],
-      "matchDatasources": [
-        "pypi"
-      ],
-      "matchPackageNames": [
-        "uv"
-      ],
-      "matchCurrentVersion": "/^0\\.12\\.23$/",
-      "enabled": false
     }
   ]
 }

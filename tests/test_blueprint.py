@@ -3504,7 +3504,7 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 11
+        assert len(texts) == 12
     else:
         assert any(text in step for step in texts)
 
@@ -3631,14 +3631,14 @@ def test_the_checklist_registers_a_release_app_of_the_owner(
         "pages": "write",
         "pull_requests": "write",
         "workflows": "write",
-        "vulnerability_alerts": "read",
+        "vulnerability_alerts": "write",
         "environments": "read",
         "secrets": "read",
     }
     assert lines[2] == (
         "It needs read and write access to Actions, Administration, Checks, Commit"
-        " statuses, Contents, Issues, Pages, Pull requests, Variables and Workflows,"
-        " and read access to Dependabot alerts, Environments and Secrets; set"
+        " statuses, Contents, Dependabot alerts, Issues, Pages, Pull requests,"
+        " Variables and Workflows, and read access to Environments and Secrets; set"
         " Variables by hand, which the link can't fill in."
     )
     assert lines[-1] == (
@@ -3706,6 +3706,14 @@ def test_the_checklist_of_a_named_release_app_links_its_installation(
     assert lines[installed + 1] == (
         "      https://github.com/apps/demo-release-automation/installations/new"
     )
+    # Which app the OSV-Scanner workflow closes the accepted Dependabot alerts as, and
+    # the permission that it needs, which no API tells.
+    assert lines[installed + 2] == (
+        "  · The settings app, or the release app without one, may write the Dependabot"
+        " alerts, so that the OSV-Scanner workflow closes those that osv-scanner.toml"
+        " accepts"
+    )
+    assert "set Dependabot alerts to Read and write" in lines[installed + 3]
     # Its owner is no question once it is named.
     assert ("GET", "users/Dennis-Otto") not in github.calls
 
