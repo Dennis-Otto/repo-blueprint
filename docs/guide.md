@@ -11,6 +11,15 @@ How to start a repository, the kinds of projects, what every repository gets, an
   <img src="images/diagrams/how-a-new-repository-starts.svg" alt="How a new repository starts: copier copy writes the files of the project and runs no code of the blueprint. python3 .github/blueprint.py create, which every copy brings, makes the first commit on the branch main with a sign-off, creates the repository with gh repo create and pushes to it, applies the settings as code and shows the checklist. You take the steps that only a person can take, such as the release app and the secrets, and then the checks and the bots run.">
 </picture>
 
+### What create checks first
+
+`create` checks first what its steps need, in its preflight, which only asks: Python 3.12 or later, Git and the name and email address of the first commit, GitHub CLI 2.48 or later, signed in with the scopes `repo` and `workflow`, and `read:org` for an organization, an owner where that account may create the repository, and a name that GitHub doesn't have yet. A finding marked with ✘ stops it before anything is made and names the command that fixes it, such as `gh auth refresh --hostname github.com --scopes workflow`; `python3 .github/blueprint.py doctor` runs the preflight alone. When a run stops midway, at the push or at the settings, run `create` again: in a folder whose `origin` pushes to the repository on GitHub, it goes on from the first step that is left, the push when GitHub has no branch `main` yet, then the settings and the checklist.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.dark.svg">
+  <img src="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.svg" alt="How create checks first and goes on where it stopped: python3 .github/blueprint.py create starts with its preflight, which only asks: Python, Git and the identity of the first commit, the GitHub CLI and its sign-in with the scopes repo and workflow, the owner and the name. A finding marked with ✘ stops it before anything is made and names the command that fixes it; python3 .github/blueprint.py doctor shows the same alone. A new copy then gets git init, its first commit and gh repo create with the push. A folder whose origin pushes to the repository on GitHub already, from a run that stopped midway, gets only the push when GitHub has no branch main yet. Both end with settings apply and the checklist.">
+</picture>
+
 ## Kinds of projects
 
 --8<-- "README.md:kinds"

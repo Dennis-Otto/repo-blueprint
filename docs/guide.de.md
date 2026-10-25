@@ -11,6 +11,15 @@ Wie man ein Repository anlegt, die Arten von Projekten, was jedes Repository bek
   <img src="images/diagrams/how-a-new-repository-starts.de.svg" alt="Wie ein neues Repository beginnt: copier copy schreibt die Dateien des Projekts und führt keinen Code des Blueprints aus. python3 .github/blueprint.py create, das jede Kopie mitbringt, macht den ersten Commit auf dem Branch main mit Sign-off, legt das Repository mit gh repo create an und pusht dorthin, wendet die Einstellungen als Code an und zeigt die Checkliste. Du erledigst die Schritte, die nur eine Person erledigen kann, etwa die Release-App und die Secrets, und dann laufen die Prüfungen und die Bots.">
 </picture>
 
+### Was create zuerst prüft
+
+`create` prüft zuerst, was seine Schritte brauchen, in seiner Vorabprüfung (*preflight*), die nur fragt: Python ab 3.12, Git und den Namen und die E-Mail-Adresse des ersten Commits, die GitHub CLI ab 2.48, angemeldet mit den Scopes `repo` und `workflow`, und `read:org` für eine Organisation, einen Eigentümer, bei dem dieses Konto das Repository anlegen darf, und einen Namen, den GitHub noch nicht hat. Ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt, etwa `gh auth refresh --hostname github.com --scopes workflow`; `python3 .github/blueprint.py doctor` führt die Vorabprüfung allein aus. Hört ein Lauf mittendrin auf, beim Push oder bei den Einstellungen, starte `create` noch einmal: In einem Ordner, dessen `origin` zum Repository auf GitHub pusht, macht es beim ersten Schritt weiter, der noch fehlt, dem Push, wenn GitHub noch keinen Branch `main` hat, dann den Einstellungen und der Checkliste.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.de.dark.svg">
+  <img src="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.de.svg" alt="Wie create zuerst prüft und dort weitermacht, wo es aufgehört hat: python3 .github/blueprint.py create beginnt mit seiner Vorabprüfung, die nur fragt: Python, Git und die Identität des ersten Commits, die GitHub CLI und ihre Anmeldung mit den Scopes repo und workflow, den Eigentümer und den Namen. Ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt; python3 .github/blueprint.py doctor zeigt dasselbe allein. Eine neue Kopie bekommt dann git init, ihren ersten Commit und gh repo create mit dem Push. Ein Ordner, dessen origin schon zum Repository auf GitHub pusht, von einem Lauf, der mittendrin aufgehört hat, bekommt nur den Push, wenn GitHub noch keinen Branch main hat. Beide enden mit settings apply und der Checkliste.">
+</picture>
+
 ## Arten von Projekten
 
 --8<-- "README.de.md:kinds"

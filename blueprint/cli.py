@@ -16,7 +16,7 @@ from xml.etree import ElementTree
 
 import blueprint
 from blueprint import advisories, annotate, locks, mutation, screenshots, versions
-from blueprint.bootstrap import CreateError, create
+from blueprint.bootstrap import CreateError, create, doctor
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
 from blueprint.changelog import (
@@ -902,7 +902,9 @@ def checklist_command(api: Api, repo: str, settings: Settings, root: Path) -> in
 def create_command(api: Api, arguments: argparse.Namespace, root: Path) -> int:
     """blueprint.py create: the repository on GitHub of a new copy, then its settings
     and its checklist. The settings load first, so that a configuration that can't be
-    right stops it before anything is made. What only a person can do, such as the
+    right stops it before anything is made, as the preflight of create does for the
+    rest; a run that goes on where an earlier one stopped applies the settings again,
+    which changes only what differs. What only a person can do, such as the
     secrets, the checklist names, so only a part of the settings that GitHub refused
     fails it."""
     settings = Settings.load(root / arguments.config, root)
@@ -957,7 +959,14 @@ def add_settings_parsers(
         "--private", action="store_true", help="a private repository; public by default"
     )
     create_parser.add_argument(
-        "--dry-run", action="store_true", help="print the commands and run none"
+        "--dry-run",
+        action="store_true",
+        help="print the preflight and the commands, and run none",
+    )
+    commands.add_parser(
+        "doctor",
+        help="the preflight of create alone: whether Python, Git, the GitHub CLI, "
+        "its sign-in, the owner and the name let create run, with what fixes each",
     )
 
 
@@ -1593,6 +1602,13 @@ def standalone_command(
             return 2
     if arguments.command == "annotate":
         return annotate_command(arguments, root)
+    if arguments.command == "doctor":
+        # Git and gh only answer, and the settings play no part in it.
+        try:
+            return 0 if doctor(root, repo=arguments.repo) else 1
+        except CreateError as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
     if arguments.command == "coach" and arguments.action != "report":
         try:
             return explain_command(arguments, root)

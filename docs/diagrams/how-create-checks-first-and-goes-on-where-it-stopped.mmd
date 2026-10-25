@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How create checks first and goes on where it stopped
+    accDescr: python3 .github/blueprint.py create starts with its preflight, which only asks: Python, Git and the identity of the first commit, the GitHub CLI and its sign-in with the scopes repo and workflow, the owner and the name. A finding marked with ✘ stops it before anything is made and names the command that fixes it; python3 .github/blueprint.py doctor shows the same alone. A new copy then gets git init, its first commit and gh repo create with the push. A folder whose origin pushes to the repository on GitHub already, from a run that stopped midway, gets only the push when GitHub has no branch main yet. Both end with settings apply and the checklist.
+
+    start(["`**blueprint.py create**`"])
+    preflight["`**The preflight only asks**<br>Python, Git and its identity, gh and its scopes,<br>the owner and the name`"]
+    fix(["You: the command<br>that each ✘ names"])
+    new["`**A new copy**<br>git init on main, the first commit,<br>gh repo create and the push`"]
+    resume["`**A run that stopped midway**<br>origin pushes to the repository:<br>the push, if GitHub has no main yet`"]
+    settings["`**settings apply**<br>and the checklist`"]
+
+    start --> preflight
+    preflight -.->|✘ stops it before anything is made| fix
+    fix -.->|run it again| start
+    preflight -->|nothing stops it| new
+    preflight -->|origin is there| resume
+    new --> settings
+    resume --> settings
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class preflight,new,resume bot
+    class start,fix person
+    class settings done

@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie create zuerst prüft und dort weitermacht, wo es aufgehört hat
+    accDescr: python3 .github/blueprint.py create beginnt mit seiner Vorabprüfung, die nur fragt: Python, Git und die Identität des ersten Commits, die GitHub CLI und ihre Anmeldung mit den Scopes repo und workflow, den Eigentümer und den Namen. Ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt; python3 .github/blueprint.py doctor zeigt dasselbe allein. Eine neue Kopie bekommt dann git init, ihren ersten Commit und gh repo create mit dem Push. Ein Ordner, dessen origin schon zum Repository auf GitHub pusht, von einem Lauf, der mittendrin aufgehört hat, bekommt nur den Push, wenn GitHub noch keinen Branch main hat. Beide enden mit settings apply und der Checkliste.
+
+    start(["`**blueprint.py create**`"])
+    preflight["`**Die Vorabprüfung fragt nur**<br>Python, Git und seine Identität, gh und seine Scopes,<br>der Eigentümer und der Name`"]
+    fix(["Du: der Befehl,<br>den jedes ✘ nennt"])
+    new["`**Eine neue Kopie**<br>git init auf main, der erste Commit,<br>gh repo create und der Push`"]
+    resume["`**Ein Lauf, der mittendrin aufhörte**<br>origin pusht zum Repository:<br>der Push, wenn GitHub noch kein main hat`"]
+    settings["`**settings apply**<br>und die Checkliste`"]
+
+    start --> preflight
+    preflight -.->|✘ hält es an, bevor etwas entsteht| fix
+    fix -.->|noch einmal starten| start
+    preflight -->|nichts hält es an| new
+    preflight -->|origin ist da| resume
+    new --> settings
+    resume --> settings
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class preflight,new,resume bot
+    class start,fix person
+    class settings done
