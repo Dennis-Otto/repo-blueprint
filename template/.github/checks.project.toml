@@ -33,3 +33,17 @@
 # why = """..."""
 # fix = """..."""
 # autofix = ["npm run lint -- --fix"]
+
+# A part that a workflow of this project adds to the report of the PR coach, such as
+# the size of a module or the result of visual tests, in place of a comment of its own.
+# The workflow keeps the artifact pr-report-<name>, here pr-report-card-size, for the
+# head of the pull request, with the file report.md in it: Markdown whose text the
+# coach shows only as code, a table with code in each cell, and a first line
+# <!-- quiet --> when the part is no news by itself. The coach shows it after its own
+# parts, under the title and the text of about from here, and deletes the old comment
+# of the token of the workflows whose body begins with the marker of replaces. Name the
+# workflow in test_workflows of .copier-answers.yml, so that the coach runs after it:
+# [report.card-size]
+# title = "The size of the card"
+# about = """The size of `dist/card.js` against that of main."""
+# replaces = "<!-- card-size -->"

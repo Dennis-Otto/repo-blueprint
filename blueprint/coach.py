@@ -20,7 +20,7 @@ import textwrap
 import time
 import tomllib
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +109,11 @@ FIELDS = ("title", "problem", "why", "fix")
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 # A link to a page of GitHub, without a character that could end it in Markdown.
 GITHUB_PAGE = re.compile(r"https://github\.com/[A-Za-z0-9._~%/-]+")
+# The name of a part of the report that a workflow adds, as [report.<name>] declares it
+# and the artifact pr-report-<name> brings it, and the marker of an older comment of a
+# bot that the part takes the place of.
+REPORT_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?")
+REPORT_MARKER = re.compile(r"<!-- [A-Za-z0-9._:-]+(?: [A-Za-z0-9._:-]+)* -->")
 
 
 class CatalogError(ValueError):
@@ -195,17 +200,70 @@ def parse_autofix(value: Json, where: str) -> tuple[tuple[str, ...], str]:
 
 
 @dataclass(frozen=True)
+class ReportEntry:
+    """A part of the report that a workflow adds, such as the size of a module or the
+    pictures of visual tests: the workflow keeps it as the artifact pr-report-<key> for
+    the head of the pull request, and the coach shows it under its title, after the
+    text of about, both from the catalog of the default branch. replaces is the marker
+    of an older comment of the bot whose place the part takes."""
+
+    key: str
+    title: str
+    about: str = ""
+    replaces: str = ""
+
+    @classmethod
+    def parse(cls, key: str, table: Json, source: str) -> ReportEntry:
+        where = f"{source}: [report.{key!r}]"
+        if not isinstance(table, dict):
+            raise CatalogError(f"{where} is no table")
+        if not REPORT_NAME.fullmatch(key):
+            raise CatalogError(
+                f"{where} needs a name of lowercase letters, digits and hyphens, at "
+                "most 40, which begins and ends with a letter or a digit"
+            )
+        unknown = sorted(set(table) - {"title", "about", "replaces"})
+        if unknown:
+            raise CatalogError(f"{where} has unknown keys: {', '.join(unknown)}")
+        title, about = table.get("title"), table.get("about", "")
+        if not isinstance(title, str) or not title.strip():
+            raise CatalogError(f"{where} needs the text title")
+        if not isinstance(about, str):
+            raise CatalogError(f"{where} has an about that is no text")
+        replaces = table.get("replaces", "")
+        # The coach's own marker would make it delete its own comment.
+        if not isinstance(replaces, str) or (
+            replaces and (not REPORT_MARKER.fullmatch(replaces) or replaces == MARKER)
+        ):
+            raise CatalogError(
+                f"{where} replaces no marker of a comment such as <!-- visual-check -->"
+            )
+        return cls(key, " ".join(title.split()), " ".join(about.split()), replaces)
+
+
+def tables_of(data: Json, kind: str, source: str) -> dict[str, Json]:
+    """The tables of a kind of a catalog, such as [check.docs] of check."""
+    tables = data.get(kind, {})
+    if not isinstance(tables, dict):
+        raise CatalogError(f"{source}: {kind} is no table of tables")
+    return tables
+
+
+@dataclass(frozen=True)
 class Catalog:
     """The explanations of the checks, by their names, and of the steps of
-    scripts/check.sh; those of the project win over those of the blueprint."""
+    scripts/check.sh, and the parts of the report that workflows add; those of the
+    project win over those of the blueprint."""
 
     checks: dict[str, Entry]
     steps: dict[str, Entry]
+    reports: dict[str, ReportEntry] = field(default_factory=dict)
 
     @classmethod
     def load(cls, root: Path) -> Catalog:
         checks: dict[str, Entry] = {}
         steps: dict[str, Entry] = {}
+        reports: dict[str, ReportEntry] = {}
         # The project's first, so that its patterns match before the blueprint's.
         for path in (root / PROJECT_CATALOG, root / CATALOG):
             if not path.is_file():
@@ -215,17 +273,16 @@ class Catalog:
                 data = tomllib.loads(path.read_text(encoding="utf-8"))
             except tomllib.TOMLDecodeError as error:
                 raise CatalogError(f"{source}: {error}") from None
-            unknown = sorted(set(data) - {"check", "step"})
+            unknown = sorted(set(data) - {"check", "step", "report"})
             if unknown:
                 raise CatalogError(f"{source} has unknown tables: {', '.join(unknown)}")
             for kind, entries in (("check", checks), ("step", steps)):
-                tables = data.get(kind, {})
-                if not isinstance(tables, dict):
-                    raise CatalogError(f"{source}: {kind} is no table of tables")
-                for key, table in tables.items():
+                for key, table in tables_of(data, kind, source).items():
                     entry = Entry.parse(kind, key, table, source)
                     entries.setdefault(key, entry)
-        return cls(checks, steps)
+            for key, table in tables_of(data, "report", source).items():
+                reports.setdefault(key, ReportEntry.parse(key, table, source))
+        return cls(checks, steps, reports)
 
     def check(self, name: str) -> Entry | None:
         """The explanation of a check, by its name; a key with a * stands for every
@@ -688,6 +745,19 @@ def footer(repo: str, sha: str) -> str:
     )
 
 
+def parts_text(parts: Sequence[Part], room: int) -> str:
+    """The parts about the pull request, in their order, as many as fit into room, so
+    that the comment always fits, however many parts its workflows add."""
+    text = ""
+    for count, part in enumerate(parts):
+        shown = f"{part.text.rstrip()}\n\n"
+        if len(text) + len(shown) > room:
+            more = len(parts) - count
+            return text + f"… and {more} more part{'s' if more > 1 else ''}.\n\n"
+        text += shown
+    return text
+
+
 def render(
     repo: str,
     sha: str,
@@ -727,7 +797,7 @@ def render(
     if fixed is not None:
         lines += [fix_note(sha, fixed), ""]
     body = "\n".join([*lines, ""])
-    about = "".join(f"{part.text.rstrip()}\n\n" for part in parts)
+    about = parts_text(parts, BODY_LENGTH - len(body))
     shown = 0
     for run in failed[:SECTIONS]:
         part = section(
