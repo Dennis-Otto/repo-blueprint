@@ -487,7 +487,7 @@ How the release bot finds the version: Python and Node in their manifests, the o
 
 ### `schedule_slot`
 
-The slot of the schedules of this repository, so that the scheduled workflows of the repositories of one owner don't all start in the same minute and wait for the same runners (decision 0082): includes/replace.jinja moves each weekly schedule of a workflow of the blueprint by as many days, and every one by 8 minutes for each. The blueprint keeps its own times, slot 0; a repository of .github/fleet.toml takes its place in the Rollout, so that each has a day of its own; any other one a slot from the hash of its name.
+The slot of the schedules of this repository, so that the scheduled workflows of the repositories of one owner don't all start in the same minute and wait for the same runners (decision 0083): includes/replace.jinja moves each weekly schedule of a workflow of the blueprint by as many days, and every one by 8 minutes for each. The blueprint keeps its own times, slot 0; a repository of .github/fleet.toml takes its place in the Rollout, so that each has a day of its own; any other one a slot from the hash of its name.
 
 - **Type:** a number
 - **Default:** a template of Copier, from the answers before it:

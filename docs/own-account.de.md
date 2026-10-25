@@ -69,7 +69,7 @@ Bis die App genannt ist und ihren privaten Schlüssel hat, sagt jeder Bot, der a
 python3 ../repo-blueprint/blueprint.py settings apply
 ```
 
-Es setzt alles, was die API setzen kann: die Rulesets, die Variablen, die die App nennen, die Environments, die Sicherheitsfunktionen und die Actions, die laufen dürfen.
+Es setzt alles, was die API setzen kann: die Rulesets, die Variablen, die die App nennen, die Environments, die Sicherheitsfunktionen und die Actions, die laufen dürfen. Ein privates Repository geht auch, mit `--private` für `gh repo create`: Was GitHub ihm in seinem Plan nicht bietet, etwa Code Scanning oder die Rulesets bei GitHub Free, nennen die Einstellungen als Hinweis und überlassen es den Workflows, über die Variablen `CODE_SCANNING` und `DEPENDENCY_REVIEW`. Die [FAQ](faq.md#kann-ein-repository-privat-sein-und-was-kostet-es) zeigt, was mit welchem Plan geht.
 
 ## 5. Renovate
 
@@ -95,7 +95,7 @@ Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Cla
 python3 ../repo-blueprint/blueprint.py checklist
 ```
 
-Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview und die Badges. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
+Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview und die Badges. Ein privates Repository bekommt dazu den Schritt *GitHub Code Security on*, neutral ohne sie, da der Plan seines Besitzers sie vielleicht nicht bietet. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
 
 ## 8. Die Settings-App (optional)
 

@@ -259,7 +259,9 @@ Dennis-Otto/repo-blueprint#429; the words for users stay the author's."""
 title = "The CodeQL analysis"
 problem = """CodeQL couldn't analyze the code, or couldn't upload what it found. Its
 findings are a check of their own, CodeQL; this one fails when the analysis itself
-breaks."""
+breaks. A private repository without code scanning, where `CODE_SCANNING` is `off`,
+doesn't run CodeQL, whose terms allow it on private code only with GitHub Code
+Security or Advanced Security: there this check passes with a notice."""
 why = """The rules of `main` require that every language is analyzed, so that no security
 problem goes unseen."""
 fix = """Read the log of the check. A failure of the analysis is rarely caused by the
@@ -403,7 +405,9 @@ severity; an alert that `main` has already doesn't."""
 fix = """Open the finding from the details of the check; the documentation of each audit
 of zizmor shows the fix. A finding in a workflow of the project that it accepts on
 purpose is ignored at its line with `# zizmor: ignore[<audit>]` and the reason;
-`.github/zizmor.yml` belongs to the blueprint and holds only what it accepts. Only an
+`.github/zizmor.yml` belongs to the blueprint and holds only what it accepts. On a
+private repository without code scanning, where `CODE_SCANNING` is `off`, every
+finding fails the check *zizmor*, with an annotation at its line. Otherwise only an
 error fails the check *zizmor*: a warning or a note stops the merge while the check is
 green, and shows in the merge box and as an annotation at its line. If the job *zizmor*
 of *Workflow security* failed, rather than the check of code scanning, the analysis
