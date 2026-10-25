@@ -70,6 +70,29 @@ docs = "CONTRIBUTING.md#coding-standards"
 autofix = """A mistake of a workflow needs a person, who knows what the workflow should
 do, and the bot never writes a workflow."""
 
+[check.allowed-actions]
+title = "The allowed actions"
+problem = """A workflow runs an action or a reusable workflow that the list of the allowed
+actions, `[actions.selected]` of `.github/repository.toml`, lacks: one that the workflow
+names, or one that such an action runs in turn at the commit of its pin, often since an
+update of the action. Or a step runs an image of Docker with `docker://`, or GitHub
+refused the file of an action, so what it runs in turn is unknown."""
+why = """GitHub starts a workflow only when the list allows every action that it runs, also
+in turn. One that the list lacks stops the whole workflow with a startup failure, on
+`main` after the merge or in every repository after a release of the blueprint, and no
+check of the workflow reports it."""
+fix = """Add the pattern that each annotation names, such as `owner/repo@*`, to
+`patterns_allowed` of `[actions.selected]` in `.github/repository.project.toml` (in the
+blueprint itself, in `template/.github/repository.toml.jinja` and
+`.github/repository.toml`). Run an image in a `run:` step with `docker run` instead of
+`docker://`. When GitHub refused a file, run the check again. The check runs on your
+machine with the GitHub CLI (in the blueprint itself, the tool is `blueprint.py` without
+`.github/`):"""
+commands = ["python3 .github/blueprint.py settings actions"]
+docs = "CONTRIBUTING.md#coding-standards"
+autofix = """Whether an action may run is a decision of trust that a person makes for the
+project, and the bot never widens the list of the allowed actions."""
+
 [check.reuse]
 title = "The license of every file"
 problem = """A file doesn't say clearly under which license it stands: its SPDX header

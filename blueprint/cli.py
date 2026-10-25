@@ -86,6 +86,8 @@ from blueprint.settings import (
     check,
     describe,
     kept,
+    line_of,
+    unlisted_actions,
 )
 from blueprint.site_check import annotation as site_annotation
 from blueprint.site_check import check as check_site
@@ -793,6 +795,50 @@ def settings_command(
     return 2 if refused else 1
 
 
+def actions_command(api: Api, root: Path, path: Path) -> int:
+    """settings actions: 0 when the list of the allowed actions in the settings as code
+    lets every action and reusable workflow that the workflows run start, also those
+    that these run in turn; 1 when it lacks one, or GitHub refused the file of one.
+    The check of the Lint workflow: it reads the public files of the actions and none
+    of the settings on GitHub, which the token of a pull request may not read."""
+    settings = Settings.load(root / path, root)
+    # The blueprint renders the list of every repository from its template.
+    listed_in = (
+        "template/.github/repository.toml.jinja and .github/repository.toml"
+        if (root / "copier.yml").is_file() and (root / "template").is_dir()
+        else ".github/repository.project.toml"
+    )
+    found = unlisted_actions(api, settings.actions, settings.workflows, listed_in)
+    # The path as the documentation writes it, with slashes on Windows too.
+    config = path.as_posix()
+    if not found:
+        print(
+            "GitHub starts every action that the workflows run, also those that"
+            f" these run in turn, by [actions] of {config}."
+        )
+        return 0
+    print(f"GitHub won't start a workflow that runs these, by [actions] of {config}:")
+    annotations = []
+    for item in found:
+        file = settings.workflows[item.via]
+        how = (
+            f"{file} names it"
+            if item.reference == item.via
+            else f"{item.where} runs it in turn, from {item.via} that {file} names"
+        )
+        message = f"{item.reference}: {how}; {item.fix}"
+        print(f"- {message}")
+        text = (root / file).read_text(encoding="utf-8")
+        annotations.append(
+            annotate.Annotation(
+                "Allowed actions", message, file, line_of(text, item.via)
+            )
+        )
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("\n".join(annotate.commands(annotations)))
+    return 1
+
+
 def checklist_command(api: Api, repo: str, settings: Settings, root: Path) -> int:
     print(f"The set-up of {repo}:")
     steps = checklist(api, repo, settings, root)
@@ -837,7 +883,13 @@ def add_settings_parsers(
     settings_parser = commands.add_parser(
         "settings", help="compare or apply the settings as code"
     )
-    settings_parser.add_argument("action", choices=["check", "apply"])
+    settings_parser.add_argument(
+        "action",
+        choices=["check", "apply", "actions"],
+        help="check: compare with GitHub; apply: make GitHub match; actions: whether "
+        "the list of the allowed actions lets every action that the workflows run "
+        "start, also in turn, from the files alone (the check of the Lint workflow)",
+    )
     commands.add_parser(
         "checklist", help="the steps outside the API, and which are done"
     )
@@ -1600,6 +1652,8 @@ def main(
     try:
         if arguments.command == "create":
             return create_command(api, arguments, root)
+        if arguments.command == "settings" and arguments.action == "actions":
+            return actions_command(api, root, arguments.config)
         repo = arguments.repo or current_repo(api)
         if arguments.command == "coach":
             number = int(arguments.pull) if arguments.pull else None

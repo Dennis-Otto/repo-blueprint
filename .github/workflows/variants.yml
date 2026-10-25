@@ -420,6 +420,17 @@ jobs:
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/repo" --workdir /repo \
             rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      # The list of the allowed actions of the project, as its Lint workflow checks
+      # it: every action that its workflows run, also in turn, may start. A change of
+      # the blueprint that makes a workflow of a kind run one that the list of that
+      # kind lacks, such as an update of an action by Renovate, fails here, not in
+      # every repository of that kind after the release.
+      - name: Check that the allowed actions of the project let every action start
+        timeout-minutes: 5
+        working-directory: ${{ env.PROJECT }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/blueprint.py settings actions
       # The markdownlint-cli2 of the action of the Lint workflow, in its image.
       - name: Lint the Markdown of the project
         timeout-minutes: 5
