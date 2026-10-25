@@ -1261,15 +1261,16 @@ def test_a_strict_build_fails_when_a_plugin_takes_pictures_out_of_a_page(
     config = SimpleNamespace(docs_dir=str(tmp_path / "docs"), plugins={}, site_url="")
     module.on_page_content(html, page=page, config=config, files=[page.file])
     wrapped = '<p><a class="glightbox" href="images/a.png"><img src="images/a.png"></a>'
-    assert module.BUILT.images == {"guide.html": 2}
+    assert module.BUILT.images == {"guide.html": ["a.png", "b.png"]}
 
     with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
         module.on_post_page(f"<html><body>{wrapped}</p></body></html>", page, config)
 
     assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    # It names the picture that is gone.
     assert (
-        "guide.md: a plugin took 1 of its 2 picture(s) out of the page, such as "
-        "mkdocs-glightbox" in caplog.text
+        "guide.md: a plugin took 1 of its 2 picture(s) out of the page (b.png), such "
+        "as mkdocs-glightbox" in caplog.text
     )
     assert module.BUILT.images == {}
     # A page that keeps them, and one that the hook saw no content of.
@@ -1289,7 +1290,22 @@ def test_a_strict_build_fails_when_a_plugin_takes_pictures_out_of_a_page(
     module.on_page_content(html, page=page, config=config, files=[page.file])
     with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
         module.on_post_page(themed, page, config)
-    assert "a plugin took 1 of its 2 picture(s)" in caplog.text
+    assert "a plugin took 1 of its 2 picture(s) out of the page (b.png)" in caplog.text
+    # A picture that a plugin renamed, as the privacy plugin downloads one of another
+    # server, is one of those that may be gone.
+    caplog.clear()
+    external = (
+        '<p><img src="https://example.org/a.png?v=1" alt="A">'
+        '<img src="https://example.org/b.png" alt="B"></p>'
+    )
+    downloaded = '<p><img src="assets/external/example.org/a.1a2b3c4d.png" alt="A">'
+    module.on_page_content(external, page=page, config=config, files=[page.file])
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module.on_post_page(f"<html><body>{downloaded}</p></body></html>", page, config)
+    assert (
+        "a plugin took 1 of its 2 picture(s) out of the page (among a.png, b.png), "
+        "such as" in caplog.text
+    )
 
 
 def test_the_lightbox_wraps_each_picture_and_keeps_it() -> None:
@@ -1390,6 +1406,12 @@ def test_the_website_shows_no_badges() -> None:
         '<p><img alt="REUSE" src="https://api.reuse.software/badge/github.com/o/r">'
         '<img alt="Coverage" src="https://codecov.io/gh/o/r/graph/badge.svg?t=1">'
         "</p>\n"
+        # A row of badges in a block of HTML, as many READMEs on GitHub center them.
+        '<p align="center">\n  <a href="https://github.com/o/r/actions"><img alt="CI" '
+        'src="https://github.com/o/r/actions/workflows/ci.yml/badge.svg"></a>\n  '
+        '<img alt="License" src="https://img.shields.io/badge/license-MIT-blue">\n'
+        "</p>\n"
+        '<p align="center"><img alt="Hero" src="images/hero.png"></p>\n'
     )
     # A button of My Home Assistant shows no status: it stays, with its link.
     button = (
@@ -1402,7 +1424,8 @@ def test_the_website_shows_no_badges() -> None:
         "<h1>Demo</h1>\n"
         "<p>Text with  in it.</p>\n"
         '<p><a href="https://example.org/"><img alt="Logo" src="https://example.org/'
-        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n' + button
+        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n'
+        '<p align="center"><img alt="Hero" src="images/hero.png"></p>\n' + button
     )
 
 

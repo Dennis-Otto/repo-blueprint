@@ -4,17 +4,34 @@ site-check of blueprint.py, which the check docs runs after the build."""
 
 from __future__ import annotations
 
+import importlib.util
 import random
 import re
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from shell import BASH
 from workflow_steps import SHA, run_step
 
 from blueprint.cli import main
-from blueprint.site_check import Finding, Page, annotation, check
+from blueprint.site_check import (
+    BADGE,
+    SNIPPET,
+    Finding,
+    Page,
+    Picture,
+    annotation,
+    built_from,
+    check,
+    layout,
+    name_of,
+    pictures_in,
+    resolved,
+    sources,
+)
 
+ROOT = Path(__file__).resolve().parents[1]
 BASE = "https://owner.github.io/demo/"
 GENERATOR = '<meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">'
 NOINDEX = '<meta name="robots" content="noindex, follow">'
@@ -97,6 +114,18 @@ def two_languages() -> dict[str, str]:
         "de/sitemap.xml": SITEMAP,
         "dashboard/sitemap.xml": SITEMAP,
     }
+
+
+def hooks() -> ModuleType:
+    """The hooks of the website, .github/mkdocs_blueprint.py."""
+    spec = importlib.util.spec_from_file_location(
+        "mkdocs_blueprint", ROOT / ".github/mkdocs_blueprint.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def built(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -648,3 +677,499 @@ def test_the_address_of_the_website_leads_to_its_files(
     assert result.returncode == 0, result.stderr
     style = result.runner_temp / "address" / inside / "assets/style.css"
     assert style.read_text(encoding="utf-8") == "body {}\n"
+
+
+# The pictures of a page: its Markdown, the parts of the README that it includes, and
+# what the plugins and the hooks of the website make of them.
+
+# The README of a project, with a part that a page of the website includes: a hero, a
+# picture for each scheme from main of the repository, one in an item of a list and
+# one of Markdown, and what shows no picture: a badge, a comment and code.
+README = """# Demo
+
+[![CI](https://github.com/owner/demo/actions/workflows/ci.yml/badge.svg)](https://github.com/owner/demo/actions)
+
+<!-- --8<-- [start:how] -->
+<p align="center"><img src="docs/assets/logo.png" alt="Logo"></p>
+
+A first analysis looks like this:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/owner/demo/main/docs/images/analysis-dark.webp">
+  <img src="https://raw.githubusercontent.com/owner/demo/main/docs/images/analysis-light.webp" alt="A first analysis">
+</picture>
+
+1. Run it once:
+
+   <img src="docs/images/dry-run.png" alt="The dry run">
+
+![The settings](docs/images/settings.png "Settings")
+
+<!-- <img src="docs/images/old.png" alt="Old"> -->
+
+```html
+<img src="docs/images/example.png" alt="Example">
+```
+
+Write `![text](docs/images/inline.png)` for a picture.
+<!-- --8<-- [end:how] -->
+
+![Outside the part](docs/images/outside.png)
+"""
+
+
+def article(content: str) -> str:
+    """A page of Material with its content in its article, and the logo of the theme
+    in the header."""
+    return page(
+        "en",
+        body='<header><img src="assets/logo.png" alt="Logo"></header>'
+        f'<article class="md-content__inner md-typeset">{content}</article>',
+    )
+
+
+# The page that includes the part of the README, as the plugins and the hooks leave
+# it: the picture for each scheme from the checkout, each in the link of the
+# lightbox.
+HEADING = (
+    '<h1 id="how">How it works<a class="headerlink" href="#how">'
+    "\N{PILCROW SIGN}</a></h1>"
+)
+KEPT = (
+    HEADING
+    + '<p align="center"><img src="assets/logo.png" alt="Logo" fetchpriority="high">'
+    "</p><p>A first analysis looks like this:</p>\n"
+    '<p><a class="glightbox" data-gallery="light"><img src="images/analysis-light.webp'
+    '#only-light" alt="A first analysis"></a><a class="glightbox" data-gallery="dark">'
+    '<img src="images/analysis-dark.webp#only-dark" alt="A first analysis"></a></p>\n'
+    '<ol><li><p>Run it once:</p><p><a class="glightbox"><img src="images/dry-run.png"'
+    ' alt="The dry run" loading="lazy"></a></p></li></ol>\n'
+    '<p><img src="images/settings.png" alt="The settings" title="Settings"></p>'
+)
+# The same page from a lightbox that took every picture out with its link, as
+# mkdocs-glightbox did with selectolax 1.0.0 and 1.0.1.
+EMPTIED = (
+    HEADING + "<p></p>"
+    "<p>A first analysis looks like this:</p>\n<p></p>\n"
+    "<ol><li><p>Run it once:</p><p> </p></li></ol>\n"
+    '<p><img src="images/settings.png" alt="The settings" title="Settings"></p>'
+)
+
+
+def project(tmp_path: Path, content: str) -> Path:
+    """A repository whose page how.md includes the part how of its README, and the
+    website that MkDocs built of it, with content in the article of the page."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "README.md").write_text(README, encoding="utf-8")
+    (tmp_path / "docs/how.md").write_text(
+        '# How it works\n\n--8<-- "README.md:how"\n', encoding="utf-8"
+    )
+    return built(tmp_path, {"index.html": page("en"), "how.html": article(content)})
+
+
+def test_a_page_that_keeps_every_picture_of_its_markdown_passes(
+    tmp_path: Path,
+) -> None:
+    site = project(tmp_path, KEPT)
+
+    assert check(site, tmp_path).findings == ()
+
+
+def test_a_page_that_lost_pictures_of_its_markdown_names_each(tmp_path: Path) -> None:
+    # The live websites of issue-assistant and homedarts-for-autodarts showed an
+    # empty paragraph in place of each screenshot of the README, and the check of
+    # the website passed.
+    site = project(tmp_path, EMPTIED)
+
+    assert check(site).findings == tuple(
+        Finding("how.html", message)
+        for message in (
+            'has an empty paragraph after "How it works": a plugin or a hook took out '
+            "what it held, such as a picture",
+            'has an empty paragraph after "A first analysis looks like this:": a '
+            "plugin or a hook took out what it held, such as a picture",
+            'has an empty paragraph after "Run it once:": a plugin or a hook took out '
+            "what it held, such as a picture",
+        )
+    )
+    lost = [
+        f"{finding.path}: {finding.message}"
+        for finding in check(site, tmp_path).findings
+        if "lacks" in finding.message
+    ]
+    # The logo of the theme in the header makes up for no picture of the content.
+    assert lost == [
+        f"how.html: lacks the picture {address} that README.md shows: a plugin or a "
+        "hook took it out of the page, as mkdocs-glightbox did with selectolax 1.0.0 "
+        "and 1.0.1"
+        for address in (
+            "docs/assets/logo.png",
+            "https://raw.githubusercontent.com/owner/demo/main/docs/images/"
+            "analysis-light.webp",
+            "docs/images/dry-run.png",
+        )
+    ]
+
+
+def test_a_picture_may_show_as_the_website_has_it(tmp_path: Path) -> None:
+    # A GIF as its video, a picture of another server as the privacy plugin
+    # downloads it, one in a further language, one by its text alone, and the picture
+    # of a diagram on a page that a hook of the project has draw it live.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/shown.md").write_text(
+        "![The recording](images/copier-copy.gif)\n"
+        '<img src="https://example.org/shot.png?size=2" alt="">\n'
+        "![The screen](images/screen.png)\n"
+        '<img src="https://example.org/chart" alt="A   chart">\n'
+        '<img src="images/diagrams/flow.svg" alt="Flow">\n'
+        '<img src="data:image/png;base64,AAAA" alt="">\n'
+        "![CI](https://img.shields.io/badge/ci-passing-green)\n"
+        "<picture><source srcset=''></picture>\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs/drawn.md").write_text(
+        '<img src="images/diagrams/flow.svg" alt="Flow">\n', encoding="utf-8"
+    )
+    shown = (
+        '<video class="blueprint-video" src="images/copier-copy.mp4" '
+        'poster="images/copier-copy.webp" aria-label="The recording"></video>'
+        '<p><img src="assets/external/example.org/shot.3f2a9c1b.png"></p>'
+        '<p><img src="images/screen.de.png" alt="Der Bildschirm"></p>'
+        '<p><img src="assets/external/example.org/other.png" alt="A chart"></p>'
+        '<pre class="mermaid"><code>flowchart TB</code></pre>'
+    )
+    site = built(
+        tmp_path,
+        {
+            "index.html": page("en"),
+            "shown.html": article(shown),
+            "drawn.html": article("<p>The flow:</p>"),
+        },
+    )
+
+    assert messages(site) == []
+    assert [finding.message for finding in check(site, tmp_path).findings] == [
+        "lacks the picture images/diagrams/flow.svg that docs/drawn.md shows: a "
+        "plugin or a hook took it out of the page, as mkdocs-glightbox did with "
+        "selectolax 1.0.0 and 1.0.1"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "languages", "page_of"),
+    [
+        ("guide.md", ("en",), "guide.html"),
+        ("guide.md", ("en",), "guide/index.html"),
+        ("index.md", ("en",), "index.html"),
+        ("sub/README.md", ("en",), "sub/index.html"),
+        ("guide.de.md", ("en", "de"), "de/guide.html"),
+        ("sub/guide.de.md", ("en", "de"), "de/sub/guide.html"),
+        ("guide.en.md", ("en", "de"), "guide.html"),
+        ("guide.de.md", ("en",), "guide.de.html"),
+    ],
+)
+def test_each_file_of_markdown_leads_to_the_page_built_from_it(
+    source: str, languages: tuple[str, ...], page_of: str
+) -> None:
+    built_page = Page()
+    built_page.feed(page("en"))
+    copied = Page()
+    copied.feed("<p>Copied</p>")
+    pages = {page_of: built_page, "other.html": built_page, "copy.html": copied}
+
+    assert built_from(source, languages, pages) == page_of
+    # A file of which MkDocs built no page, and a page of HTML that it only copied.
+    assert built_from("missing.md", languages, pages) is None
+    assert built_from("copy.md", languages, pages) is None
+
+
+def test_a_folder_with_an_index_builds_its_page_from_it(tmp_path: Path) -> None:
+    # MkDocs leaves README.md out of a folder with index.md, in every language.
+    docs = tmp_path / "docs"
+    (docs / "sub").mkdir(parents=True)
+    names = ("README.md", "index.md", "README.de.md", "index.de.md", "zz.md")
+    for name in (*names, "sub/README.md", "unbuilt.md"):
+        (docs / name).write_text(name, encoding="utf-8")
+    built_page = Page()
+    built_page.feed(page("en"))
+    built_pages = ("index.html", "de/index.html", "sub/index.html", "zz.html")
+    pages = dict.fromkeys(built_pages, built_page)
+
+    found = sources(docs, ("en", "de"), pages)
+
+    assert {
+        name: path.relative_to(docs).as_posix() for name, path in found.items()
+    } == {
+        "de/index.html": "index.de.md",
+        "index.html": "index.md",
+        "sub/index.html": "sub/README.md",
+        "zz.html": "zz.md",
+    }
+
+
+def test_a_page_includes_the_files_of_its_lines_as_the_snippets_do(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    (root / "docs").mkdir(parents=True)
+    files = {
+        "README.md": (
+            "Top\n<!-- --8<-- [start:part] -->\nIn part\n<!-- --8<-- [start:other] -->"
+            "\nIn other\n<!-- --8<-- [end:other] -->\n<!-- --8<-- [end:part] -->\n"
+            "<!-- --8<-- [end:late] -->\n<!-- --8<-- [start:late] -->\nLate\n"
+            "<!-- --8<-- [start:open] -->\nBottom\n"
+        ),
+        "LICENSE.md": "License\n",
+        "lines.md": "one\ntwo\nthree\nfour\n",
+        "docs/page.md": (
+            "Intro\n"
+            '--8<-- "README.md:part"\n'
+            ';--8<-- "README.md"\n'
+            "--8<--\n"
+            "LICENSE.md\n"
+            ";README.md\n"
+            "\n"
+            "lines.md:2:3\n"
+            '--8<-- "README.md"\n'
+            "--8<--\n"
+            '--8<-- "missing.md"\n'
+            '--8<-- "../outside.md"\n'
+            '--8<-- "docs/page.md"\n'
+            '--8<-- "lines.md:3"\n'
+            '--8<-- "lines.md::1"\n'
+            '--8<-- "README.md:late"\n'
+            '--8<-- "README.md:open"\n'
+            '--8<-- "https://example.org/remote.md"\n'
+            '--8<-- "README.md"\n'
+        ),
+    }
+    for name, text in files.items():
+        (root / name).write_text(text, encoding="utf-8")
+    (tmp_path / "outside.md").write_text("Outside\n", encoding="utf-8")
+    page_md = (root / "docs/page.md").resolve()
+    readme = (root / "README.md").resolve()
+    license_md = (root / "LICENSE.md").resolve()
+    lines_md = (root / "lines.md").resolve()
+
+    assert resolved(root / "docs/page.md", root) == [
+        ("Intro", page_md),
+        ("In part", readme),
+        ("In other", readme),
+        (';--8<-- "README.md"', page_md),
+        ("License", license_md),
+        ("two", lines_md),
+        ("three", lines_md),
+        ("three", lines_md),
+        ("four", lines_md),
+        ("one", lines_md),
+        # A part without its end goes on to the end of the file.
+        ("Bottom", readme),
+        ("Top", readme),
+        ("In part", readme),
+        ("In other", readme),
+        ("Late", readme),
+        ("Bottom", readme),
+    ]
+
+
+def test_a_page_includes_its_files_from_the_base_path_of_the_snippets(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    (root / "docs/snippets").mkdir(parents=True)
+    (root / "note.md").write_text("Root note\n", encoding="utf-8")
+    (root / "LICENSE.md").write_text("License\n", encoding="utf-8")
+    (root / "docs/snippets/note.md").write_text("Snippet note\n", encoding="utf-8")
+    (tmp_path / "outside.md").write_text("Outside\n", encoding="utf-8")
+    (root / "docs/page.md").write_text(
+        '--8<-- "note.md"\n--8<-- "LICENSE.md"\n--8<-- "outside.md"\n',
+        encoding="utf-8",
+    )
+
+    assert resolved(root / "docs/page.md", root, ("docs/snippets", ".", "..")) == [
+        ("Snippet note", (root / "docs/snippets/note.md").resolve()),
+        ("License", (root / "LICENSE.md").resolve()),
+    ]
+
+
+def test_the_layout_of_the_pages_is_that_of_mkdocs_yml(tmp_path: Path) -> None:
+    # Without mkdocs.yml, as MkDocs does.
+    assert layout(tmp_path) == ("docs", (".",))
+    (tmp_path / "base.yml").write_text(
+        "INHERIT: mkdocs.yml\n"
+        "markdown_extensions:\n"
+        "  pymdownx.b64:\n"
+        "    base_path: images\n"
+        "  pymdownx.snippets:\n"
+        "    check_paths: true\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "mkdocs.yml"
+    config.write_text("INHERIT: base.yml\n", encoding="utf-8")
+    # base_path of another extension is not that of the snippets.
+    assert layout(tmp_path) == ("docs", (".",))
+    config.write_text(
+        "INHERIT: 'base.yml'\n"
+        'docs_dir: "pages"  # the Markdown\n'
+        "markdown_extensions:\n"
+        "  - pymdownx.snippets:\n"
+        "      base_path:\n"
+        "        - docs/snippets  # first\n"
+        '        - "."\n'
+        "  - toc\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("pages", ("docs/snippets", "."))
+    config.write_text(
+        "markdown_extensions:\n  pymdownx.snippets:\n    base_path: [a, 'b', ]\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("docs", ("a", "b"))
+    config.write_text(
+        "markdown_extensions:\n  pymdownx.snippets:\n    base_path: one\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("docs", ("one",))
+    config.write_text(
+        "markdown_extensions:\n  pymdownx.snippets:\n    base_path:\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("docs", (".",))
+
+
+def test_the_pictures_of_markdown_are_those_outside_of_comments_and_code(
+    tmp_path: Path,
+) -> None:
+    page_md, readme = tmp_path / "page.md", tmp_path / "README.md"
+    lines = [
+        ("~~~", page_md),
+        ("```", page_md),
+        ("![In code](images/code.png)", page_md),
+        ("~~~~", page_md),
+        ("![After the code](images/after.png)", page_md),
+        ("```python", page_md),
+        ("```python", page_md),
+        ("<img src='images/still-code.png'>", page_md),
+        ("```", page_md),
+        # The video of a page is no picture of it.
+        ('<video><source src="images/clip.mp4"></video>', page_md),
+        ("Use ``![a `b`](images/span.png)`` to show one.", readme),
+        (r"![A \[draft\]](<images/draft.png> 'The draft')", readme),
+        ("<picture><source srcset='images/a.dark.png 1x, images/b.png 2x'>", readme),
+        ('<img src="images/a.png" alt="A &amp; B"></picture>', readme),
+    ]
+
+    assert pictures_in(lines) == [
+        Picture("images/after.png", "After the code", frozenset({"after"}), page_md),
+        Picture("images/draft.png", "A [draft]", frozenset({"draft"}), readme),
+        Picture("images/a.png", "A & B", frozenset({"a", "a.dark", "b"}), readme),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("address", "name"),
+    [
+        ("images/guide.png", "guide"),
+        ("images/guide.de.png#only-dark", "guide"),
+        ("https://example.org/Guide.PNG?raw=true", "guide"),
+        ("assets/external/example.org/guide.1a2b3c4d.png", "guide"),
+        ("assets/external/example.org/guide.de.1a2b3c4d.png", "guide"),
+        ("images/diagram.dark.svg", "diagram.dark"),
+        ("images/a%20b.webp", "a b"),
+        ("https://github.com/user-attachments/assets/0f1e", "0f1e"),
+        ("images/.de.png", ".de"),
+    ],
+)
+def test_a_picture_has_one_name_in_the_markdown_and_on_the_website(
+    address: str, name: str
+) -> None:
+    assert name_of(address) == name
+
+
+def test_the_content_of_a_page_is_its_article() -> None:
+    found = Page()
+    found.feed(
+        '<html><body><header><img src="logo.png" alt="Logo"></header><p></p>'
+        '<article class="md-content__inner md-typeset"><p>Before</p><p>\n</p>'
+        # A spacer of a README, &nbsp;, is no empty paragraph.
+        "<article><p>Nested</p></article><p><br></p><p>&nbsp;</p>"
+        '<script>var a = "<p></p>";</script><p></p>'
+        "<p><video><source src='clip.mp4'></video>"
+        "<img srcset='a.png 1x, , b.png 2x' alt='Two'></p></article>"
+        '<img src="footer.png"></body></html>'
+    )
+
+    assert found.content.names == {"clip", "a", "b"}
+    assert found.content.texts == {"Two"}
+    assert found.content.empty == ["Before", "Nested"]
+    # The whole page, for one without an article of Material.
+    assert found.whole.names == {"logo", "clip", "a", "b", "footer"}
+    assert found.whole.empty == ["the start of the page", "Before", "Nested"]
+    plain = Page()
+    plain.feed('<p><img src="a.png"></p>')
+    assert plain.content is plain.whole
+
+
+def test_a_centered_row_of_badges_leaves_no_empty_paragraph() -> None:
+    # The hooks take the paragraph out with its badges, before any plugin.
+    readme = (
+        '<p align="center"><a href="https://github.com/o/r/actions"><img alt="CI" '
+        'src="https://github.com/o/r/actions/workflows/ci.yml/badge.svg"></a> '
+        '<img alt="License" src="https://img.shields.io/badge/license-MIT-blue"></p>'
+        "<p>Demo</p>"
+    )
+    found = Page()
+    found.feed(article(hooks().without_badges(readme)))
+
+    assert found.content.empty == []
+
+
+def test_the_check_reads_the_markdown_as_the_hooks_do() -> None:
+    # The badges that the hooks take out, and the lines that include files.
+    module = hooks()
+
+    assert BADGE.pattern == module.BADGE.pattern
+    assert BADGE.flags == module.BADGE.flags
+    assert SNIPPET.pattern == module.SNIPPET.pattern
+
+
+def test_the_command_names_a_picture_that_a_page_lost(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project(tmp_path, EMPTIED)
+    # The Markdown of the pages in a folder of another name.
+    (tmp_path / "docs").rename(tmp_path / "pages")
+
+    assert main(["site-check", "site", "--docs", "pages"], root=tmp_path) == 1
+
+    out = capsys.readouterr().out
+    assert (
+        "site/how.html: lacks the picture docs/images/dry-run.png that README.md shows"
+        in out
+    )
+    assert "A page that lacks a picture of its Markdown, or has an empty" in out
+
+
+def test_the_command_reads_the_folder_of_the_pages_from_mkdocs_yml(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project(tmp_path, EMPTIED)
+    (tmp_path / "docs").rename(tmp_path / "pages")
+    (tmp_path / "mkdocs.yml").write_text("docs_dir: pages\n", encoding="utf-8")
+
+    assert main(["site-check", "site"], root=tmp_path) == 1
+
+    assert "site/how.html: lacks the picture" in capsys.readouterr().out
+
+
+def test_an_empty_paragraph_quotes_the_start_of_the_block_before_it(
+    tmp_path: Path,
+) -> None:
+    text = "Every comment keeps the questions for the reporter in view and says what"
+    site = built(tmp_path, {"index.html": article(f"<p>{text} it is:</p><p></p>")})
+
+    assert messages(site) == [
+        'index.html: has an empty paragraph after "Every comment keeps the questions '
+        'for the reporter in view…": a plugin or a hook took out what it held, '
+        "such as a picture"
+    ]

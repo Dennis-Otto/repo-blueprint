@@ -150,10 +150,11 @@ from `main` of the repository that git doesn't track. After the build, lychee
 checks every link and anchor of the built pages, also those written in HTML, such as
 `<a href="…">` in a card, and `blueprint.py site-check` what the hooks of the website
 promise, such as a sitemap in every folder of pages and the 404 page in the default
-language, and that no page loads more than 1,200 KB at once, as it names a page that
-does with what it loads the most; `scripts/check-site.sh` adds the checks of the
-project. When the log names a
-font or a script that Material couldn't download, its server had a hiccup: that
+language, that no page loads more than 1,200 KB at once, as it names a page that
+does with what it loads the most, and that every page shows each picture of its
+Markdown, the parts of the README included, with no empty paragraph where a plugin
+took one out; `scripts/check-site.sh` adds the checks of the project. When the log
+names a font or a script that Material couldn't download, its server had a hiccup: that
 usually passes when the job runs again, and a build that finds them in the cache of
 the week, which a push to `main` saves, downloads nothing."""
 why = """A strict build keeps every link of the documentation working; a warning
@@ -167,7 +168,10 @@ shows from `main`, which the website serves from the checkout, needs its file
 committed with `git add`, or its address corrected. A page that loads too
 much shows a smaller picture, or the pictures of a diagram in place of its ```mermaid
 block, which loads Mermaid, about 1 MB: `bash scripts/diagrams.sh --extract` makes
-them. Install the tools of the
+them. A page that lacks a picture of its Markdown, or has an empty paragraph,
+lost it in the build: build the website with the lock of its tools and look for the
+plugin or the hook that takes it out, as mkdocs-glightbox did with selectolax 1.0.0
+and 1.0.1. Install the tools of the
 website as the section Website of CONTRIBUTING.md shows, and build and check it as the
 check does (in the blueprint itself, the tool is `blueprint.py` without `.github/`);
 with them, `bash scripts/check.sh` builds it as well:"""

@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import tomllib
+from collections import Counter
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
@@ -117,7 +118,7 @@ BADGE = re.compile(
     re.I,
 )
 LINKED_IMAGE = re.compile(rf"<a\b{TAG}>\s*(?P<image><img\b{TAG}>)\s*</a>", re.I)
-EMPTY = re.compile(r"<p>\s*</p>\n?")
+EMPTY = re.compile(rf"<p\b{TAG}>\s*</p>\n?")
 # The first paragraph of a page, from which a page without a description in its
 # front matter takes the description that search engines and preview cards show, of
 # DESCRIPTION characters at most. A paragraph of links alone, such as the line that
@@ -598,10 +599,10 @@ class Built:
     de/roadmap.html, and the addresses of the pages that no search engine lists;
     the pages that the hooks write, such as the page of the automation, with
     the text of each by its path in docs/, the files that they are made of and the
-    pictures beside this file that they show; the number of pictures of each page
-    that on_page_content left, by its path on the website; the links in the footer
-    that the hooks gave the build before, None until they did; and the version of
-    the latest release, which the header shows.
+    pictures beside this file that they show; the pictures of each page that
+    on_page_content left, by its path on the website, each by the name of its file;
+    the links in the footer that the hooks gave the build before, None until they
+    did; and the version of the latest release, which the header shows.
 
     The i18n plugin builds every further language within the build of the default
     one, and MkDocs loads the hooks anew for each build of mkdocs serve.
@@ -613,7 +614,7 @@ class Built:
         self.pages: dict[str, str] = {}
         self.sources: list[Path] = []
         self.pictures: list[Path] = []
-        self.images: dict[str, int] = {}
+        self.images: dict[str, list[str]] = {}
         self.social: list[dict[str, str]] | None = None
         self.version = ""
 
@@ -848,7 +849,7 @@ def on_page_content(html_text: str, page: Any, config: Any, files: Any) -> str:
         # The text is in the default language, the menu and the header in that of
         # the page; a screen reader reads each in its own (WCAG 3.1.2).
         html_text = f'<div lang="{found.default}">\n{html_text}\n</div>'
-    BUILT.images[page.file.dest_uri] = len(IMAGE.findall(html_text))
+    BUILT.images[page.file.dest_uri] = picture_files(html_text)
     return html_text
 
 
@@ -1314,16 +1315,32 @@ def kept(output: str, page: Any) -> None:
     """Warn, which fails a strict build, when a plugin took pictures out of the page
     that on_page_content left in it, as glightbox did with selectolax 1.0.0 and
     1.0.1: it moved each picture into the link that opens it enlarged and then
-    replaced the picture with that link, which took both out of every page."""
-    shown = BUILT.images.pop(page.file.dest_uri, 0)
-    left = len(IMAGE.findall(article(output)))
-    if left < shown:
+    replaced the picture with that link, which took both out of every page. The
+    warning names the files of the pictures that are gone; when a plugin renamed
+    one that stayed, as the privacy plugin does with a picture of another server,
+    the files among which they are."""
+    shown = BUILT.images.pop(page.file.dest_uri, [])
+    left = picture_files(article(output))
+    if len(left) < len(shown):
+        gone = sorted((Counter(shown) - Counter(left)).elements())
+        among = "among " if len(gone) > len(shown) - len(left) else ""
         log.warning(
-            f"{page.file.src_uri}: a plugin took {shown - left} of its {shown} "
-            "picture(s) out of the page, such as mkdocs-glightbox with a release of "
-            "selectolax that it doesn't work with; the lock of the tools of the "
-            "website needs another release of it."
+            f"{page.file.src_uri}: a plugin took {len(shown) - len(left)} of its "
+            f"{len(shown)} picture(s) out of the page ({among}{', '.join(gone)}), "
+            "such as mkdocs-glightbox with a release of selectolax that it doesn't "
+            "work with; the lock of the tools of the website needs another release "
+            "of it."
         )
+
+
+def picture_files(html_text: str) -> list[str]:
+    """The pictures of html_text, each by the name of its file, such as
+    analysis-light.webp for images/analysis-light.webp#only-light."""
+    names = []
+    for match in IMAGE.finditer(html_text):
+        src = attributes(match[0]).get("src") or ""
+        names.append(posixpath.basename(re.split(r"[?#]", src, maxsplit=1)[0]))
+    return names
 
 
 on_post_page.mkdocs_priority = -60  # type: ignore[attr-defined]

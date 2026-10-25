@@ -13971,6 +13971,9 @@ if [[ -n "${BROKEN:-}" ]]; then
   echo '<html lang="en"><link rel="canonical" href="https://x.org/">' > "$4/index.html"
   echo '<html lang="en"><meta name="generator" content="mkdocs-1.6.1">' > "$4/guide.html"
 fi
+if [[ -n "${LOST:-}" ]]; then
+  echo '<html lang="en"><meta name="generator" content="mkdocs-1.6.1"><p></p>' > "$4/index.html"
+fi
 echo "INFO    -  Building documentation to directory: $4"
 if [[ -n "${FAIL:-}" ]]; then
   echo "WARNING -  Doc file 'index.md' contains a link 'nowhere.md', but the target is not found."
@@ -13988,10 +13991,12 @@ def run_the_website_step(
     fail: bool = False,
     tool: bool = False,
     broken: bool = False,
+    lost: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """The step Website of scripts/check.sh, in a repository with these pages and a
     fake MkDocs at this place: in .venv-docs, in an activated environment (VIRTUAL_ENV
-    and its folder), alone on the PATH, or nowhere ("")."""
+    and its folder), alone on the PATH, or nowhere (""); with lost, its home page
+    shows a picture that the built page lacks."""
     check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
     repository = tmp_path / "repository"
     (repository / "scripts").mkdir(parents=True)
@@ -14010,6 +14015,10 @@ def run_the_website_step(
     for page in pages:
         (repository / page).parent.mkdir(parents=True, exist_ok=True)
         (repository / page).write_text("# Demo\n", encoding="utf-8", newline="\n")
+    if lost:
+        (repository / "docs/index.md").write_text(
+            "# Demo\n\n![The screen](images/screen.png)\n", encoding="utf-8"
+        )
     # The PATH without a MkDocs of this computer.
     path = [
         entry
@@ -14045,6 +14054,8 @@ def run_the_website_step(
         environment["FAIL"] = "1"
     if broken:
         environment["BROKEN"] = "1"
+    if lost:
+        environment["LOST"] = "1"
     assert BASH
     result = subprocess.run(
         [BASH, "scripts/website.sh"],
@@ -14111,6 +14122,26 @@ def test_the_website_step_checks_what_the_hooks_promise(
         assert result.returncode == 0, result.stdout + result.stderr
         assert "keeps what its hooks promise (one language).\n" in result.stdout
     assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_website_step_names_a_picture_that_a_page_lost(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The step reads the Markdown of the pages in docs/ of the repository, although
+    # MkDocs built the website into a temporary folder: a lightbox that takes the
+    # pictures out of the pages fails it, with the page and the picture.
+    result, _, _ = run_the_website_step(
+        projects, tmp_path, ".venv-docs/bin/mkdocs", tool=True, lost=True
+    )
+
+    assert result.returncode == 1
+    assert "/index.html: has an empty paragraph after" in result.stdout
+    assert (
+        "/index.html: lacks the picture images/screen.png that docs/index.md shows"
+        in result.stdout
+    )
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
