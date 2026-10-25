@@ -26,6 +26,10 @@ on:
 
 permissions: {}
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   verify:
     name: verify the release
@@ -36,10 +40,23 @@ jobs:
       attestations: read
       contents: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
+            tmaproduction.blob.core.windows.net:443
+            ${{ vars.PUBLISH_TO == 'pypi' && 'pypi.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'npm' && 'registry.npmjs.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'ghcr' && 'ghcr.io:443 pkg-containers.githubusercontent.com:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'nextcloud-appstore' && 'apps.nextcloud.com:443' || '' }}
       - name: Verify the release as its users can
         env:
           GH_TOKEN: ${{ github.token }}
@@ -326,3 +343,13 @@ jobs:
             exit 1
           fi
           echo "The release $TAG verifies." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

@@ -26,6 +26,10 @@ on:
 
 permissions: {}
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   assets:
     name: release assets
@@ -53,10 +57,23 @@ jobs:
       SBOM_SYFT_VERSION: 1.54.1
       SBOM_SYFT_SHA256: c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: ${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            uploads.github.com:443
+            release-assets.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            *.actions.githubusercontent.com:443
+            ${{ vars.PUBLISH_TO == 'nextcloud-appstore' && 'raw.githubusercontent.com:443 download.nextcloud.com:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'pypi' && 'raw.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'npm' && 'raw.githubusercontent.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }}
       # Anybody with a token that may push could create the tag of a coming release
       # first, at a commit of their own. Only a tag that the release workflow signed, at
       # the commit of the release, is built and signed here. The check is the script of
@@ -152,17 +169,16 @@ jobs:
           php-version: "8.4"
           extensions: dom, libxml, mbstring, xml, zip
           coverage: none
-      - name: Build and sign the Nextcloud app
+      # The private key is only in the step that signs, which runs nothing of the
+      # project and removes the key also when it fails: the build, the downloads and
+      # the project's own checks of its package run without it.
+      - name: Build the Nextcloud app
+        id: nextcloud
         if: env.PUBLISH_TO == 'nextcloud-appstore'
-        env:
-          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          if [[ -z "$APP_PRIVATE_KEY" ]]; then
-            echo "::error::The secret APP_PRIVATE_KEY of the environment release is missing."
-            exit 1
-          fi
           app_id="$(python3 -c 'import xml.etree.ElementTree as t; print(t.parse("appinfo/info.xml").getroot().findtext("id"))')"
+          echo "app-id=$app_id" >> "$GITHUB_OUTPUT"
           # Each download tries again after a passing error of the network or of its
           # server, which would otherwise leave the release a draft. A release builds
           # without the cache of the checks.
@@ -176,8 +192,6 @@ jobs:
           if [[ -f scripts/check-package.sh ]]; then
             bash scripts/check-package.sh "build/artifacts/$app_id.tar.gz" unsigned
           fi
-          umask 077
-          printf '%s' "$APP_PRIVATE_KEY" > "$RUNNER_TEMP/app.key"
           curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
             --connect-timeout 15 --max-time 300 --output "$RUNNER_TEMP/app.crt" \
             "https://raw.githubusercontent.com/nextcloud/app-certificate-requests/master/$app_id/$app_id.crt"
@@ -188,18 +202,33 @@ jobs:
           unzip -q "$RUNNER_TEMP/nextcloud.zip" -d "$RUNNER_TEMP/server"
           mkdir -p "$RUNNER_TEMP/signing"
           tar --extract --gzip --file "build/artifacts/$app_id.tar.gz" --directory "$RUNNER_TEMP/signing"
+      - name: Sign the Nextcloud app
+        if: env.PUBLISH_TO == 'nextcloud-appstore'
+        env:
+          APP_ID: ${{ steps.nextcloud.outputs.app-id }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$APP_PRIVATE_KEY" ]]; then
+            echo "::error::The secret APP_PRIVATE_KEY of the environment release is missing."
+            exit 1
+          fi
+          trap 'rm -f "$RUNNER_TEMP/app.key"' EXIT
+          umask 077
+          printf '%s' "$APP_PRIVATE_KEY" > "$RUNNER_TEMP/app.key"
           php "$RUNNER_TEMP/server/nextcloud/occ" integrity:sign-app \
             --privateKey="$RUNNER_TEMP/app.key" --certificate="$RUNNER_TEMP/app.crt" \
-            --path="$RUNNER_TEMP/signing/$app_id"
-          test -s "$RUNNER_TEMP/signing/$app_id/appinfo/signature.json"
-          tar --create --gzip --file "$ASSETS/$app_id.tar.gz" --directory "$RUNNER_TEMP/signing" "$app_id"
-          if [[ -f scripts/check-package.sh ]]; then
-            bash scripts/check-package.sh "$ASSETS/$app_id.tar.gz" signed
-          fi
-          openssl dgst -sha512 -sign "$RUNNER_TEMP/app.key" -out "$ASSETS/$app_id.tar.gz.sig" "$ASSETS/$app_id.tar.gz"
+            --path="$RUNNER_TEMP/signing/$APP_ID"
+          test -s "$RUNNER_TEMP/signing/$APP_ID/appinfo/signature.json"
+          tar --create --gzip --file "$ASSETS/$APP_ID.tar.gz" --directory "$RUNNER_TEMP/signing" "$APP_ID"
+          openssl dgst -sha512 -sign "$RUNNER_TEMP/app.key" -out "$ASSETS/$APP_ID.tar.gz.sig" "$ASSETS/$APP_ID.tar.gz"
           openssl x509 -in "$RUNNER_TEMP/app.crt" -pubkey -noout > "$RUNNER_TEMP/app.pub"
-          openssl dgst -sha512 -verify "$RUNNER_TEMP/app.pub" -signature "$ASSETS/$app_id.tar.gz.sig" "$ASSETS/$app_id.tar.gz"
-          rm -f "$RUNNER_TEMP/app.key"
+          openssl dgst -sha512 -verify "$RUNNER_TEMP/app.pub" -signature "$ASSETS/$APP_ID.tar.gz.sig" "$ASSETS/$APP_ID.tar.gz"
+      - name: Check the signed Nextcloud app
+        if: env.PUBLISH_TO == 'nextcloud-appstore' && hashFiles('scripts/check-package.sh') != ''
+        env:
+          APP_ID: ${{ steps.nextcloud.outputs.app-id }}
+        run: bash scripts/check-package.sh "$ASSETS/$APP_ID.tar.gz" signed
 
       # The SBOMs describe what the release ships, which its users install and their
       # scanners match every advisory against: not the repository with the tools of
@@ -336,3 +365,13 @@ jobs:
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/pull-requests.md"
           python3 "$script" changelog notes "$VERSION" CHANGELOG.md "$RUNNER_TEMP/pull-requests.md" > "$RUNNER_TEMP/notes.md"
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always() && vars.PUBLISH_TO != 'nextcloud-appstore'
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

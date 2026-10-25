@@ -40,6 +40,10 @@ defaults:
     # the launcher of WSL in System32, which the runner has as well.
     shell: bash
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   check:
     name: check (Windows)
