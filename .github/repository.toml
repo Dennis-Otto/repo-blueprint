@@ -68,9 +68,10 @@ fork_pr_approval = "all_external_contributors"
 allowed_actions = "selected"
 
 # The actions and reusable workflows that the workflows name, and those that these run
-# in turn. `blueprint.py settings check` names each one that a workflow runs and this
-# list lacks, and the settings bot only adds to the list on GitHub until it's added;
-# add those of this project alone in .github/repository.project.toml.
+# in turn. The check lint of every pull request (`blueprint.py settings actions`) and
+# `blueprint.py settings check` name each one that a workflow runs and this list lacks,
+# and the settings bot only adds to the list on GitHub until it's added; add those of
+# this project alone in .github/repository.project.toml.
 [actions.selected]
 github_owned_allowed = true
 verified_allowed = false
