@@ -904,15 +904,15 @@ def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
     }
     for target in PUBLISH_TARGETS:
         assert signing <= allowed_hosts(endpoints, target), target
-    assert "pypi.org" not in allowed_hosts(endpoints, "hacs")
+    assert allowed_hosts(endpoints, "hacs").isdisjoint({"pypi.org"})
     assert {"pypi.org", "files.pythonhosted.org"} <= allowed_hosts(endpoints, "pypi")
-    assert "registry.npmjs.org" in allowed_hosts(endpoints, "npm")
-    assert "download.nextcloud.com" in allowed_hosts(endpoints, "nextcloud-appstore")
+    assert {"registry.npmjs.org"} <= allowed_hosts(endpoints, "npm")
+    assert {"download.nextcloud.com"} <= allowed_hosts(endpoints, "nextcloud-appstore")
     verify = job_in(flows["verify-release.yml"], "verify")
     endpoints = verify["steps"][0]["with"]["allowed-endpoints"]
-    assert "apps.nextcloud.com" in allowed_hosts(endpoints, "nextcloud-appstore")
-    assert "apps.nextcloud.com" not in allowed_hosts(endpoints, "pypi")
-    assert "ghcr.io" in allowed_hosts(endpoints, "ghcr")
+    assert {"apps.nextcloud.com"} <= allowed_hosts(endpoints, "nextcloud-appstore")
+    assert allowed_hosts(endpoints, "pypi").isdisjoint({"apps.nextcloud.com"})
+    assert {"ghcr.io"} <= allowed_hosts(endpoints, "ghcr")
     # The OIDC token of the keyless signatures comes from a host of the region of the
     # runner, such as run-actions-3-azure-eastus.actions.githubusercontent.com.
     release = job_in(flows["release.yml"], "release-please")
