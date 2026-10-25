@@ -38,6 +38,7 @@ from blueprint.settings import (
     Settings,
     actions_that_run,
     allows,
+    apply_environments,
     apply_labels,
     apply_pages,
     check_actions,
@@ -295,6 +296,10 @@ class FakeGitHub:
         self.rulesets: dict[int, dict[str, Any]] = {}
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
         self.environments: dict[str, dict[str, Any]] = {}
+        # The status with which GitHub refuses a write of an environment that names
+        # the bypass of administrators, as a private repository without Enterprise
+        # may answer 422; 0 when it doesn't.
+        self.refuses_bypass = 0
         self.og_image = False
         # The kind of account of the owner: "User" or "Organization".
         self.account = "User"
@@ -561,17 +566,24 @@ class FakeGitHub:
         return 201, None
 
     def environment(self, method: str, body: Any, name: str) -> tuple[int, Any]:
+        if method == "PUT" and self.refuses_bypass and "can_admins_bypass" in body:
+            return self.refuses_bypass, {"message": "Invalid request."}
         if method == "PUT":
             environment = self.environments.setdefault(
                 name, {"branches": [], "secrets": []}
             )
             environment["policy"] = body["deployment_branch_policy"]
+            # GitHub lets administrators bypass the rules unless the write says no.
+            environment["bypass"] = body.get("can_admins_bypass", True)
         if name not in self.environments:
             return 404, {"message": "Not Found"}
-        return 200, {
+        answer = {
             "name": name,
             "deployment_branch_policy": self.environments[name]["policy"],
         }
+        if "bypass" in self.environments[name]:
+            answer["can_admins_bypass"] = self.environments[name]["bypass"]
+        return 200, answer
 
     def branch_policy(
         self, method: str, body: Any, name: str, number: str | None
@@ -866,6 +878,32 @@ def test_a_write_that_github_answers_with_404_is_refused_with_the_hint(
     err = capsys.readouterr().err
     assert "the variables could not be applied: GitHub answered 404" in err
     assert "the permission Variables (read and write)" in err
+
+
+@pytest.mark.parametrize(
+    ("path", "part", "permissions"),
+    [
+        # GitHub writes an environment with Administration, not with Environments.
+        ("environments/release", "environments", "permission Administration"),
+        ("pages", "pages", "permissions Administration and Pages"),
+    ],
+)
+def test_the_hint_names_each_permission_that_the_write_needs(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    path: str,
+    part: str,
+    permissions: str,
+) -> None:
+    github.fail[("PUT", f"repos/{REPO}/{path}")] = 403
+    github.fail[("POST", f"repos/{REPO}/{path}")] = 403
+
+    assert run(github, root, "settings", "apply") == 2
+
+    err = capsys.readouterr().err
+    assert f"the {part} could not be applied: GitHub answered 403" in err
+    assert f"the token may lack the {permissions} (read and write)" in err
 
 
 def test_a_rate_limit_is_no_missing_permission(
@@ -2201,6 +2239,7 @@ def test_an_environment_without_main_drifts(github: FakeGitHub) -> None:
         "policy": MAIN_ONLY,
         "branches": [{"id": 5, "name": "main"}],
         "secrets": [],
+        "bypass": False,
     }
     api = Api(github)
 
@@ -2217,6 +2256,84 @@ def test_an_environment_without_main_drifts(github: FakeGitHub) -> None:
             {"protected_branches": True, "custom_branch_policies": False},
         )
     ]
+
+
+@pytest.mark.parametrize("answer", [{"bypass": True}, {}])
+def test_an_environment_that_administrators_may_bypass_drifts(
+    github: FakeGitHub, answer: dict[str, bool]
+) -> None:
+    # GitHub's default, also for an answer that doesn't name it.
+    github.environments["release"] = {
+        "policy": MAIN_ONLY,
+        "branches": [{"id": 5, "name": "main"}],
+        "secrets": [],
+        **answer,
+    }
+
+    assert check_environments(Api(github), REPO, {"release": {}}) == [
+        Drift("environment release.can_admins_bypass", False, True)
+    ]
+
+
+def test_apply_turns_off_the_bypass_of_administrators_with_one_write(
+    github: FakeGitHub, root: Path
+) -> None:
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    # An environment that a person changed by hand: both its branches and its bypass.
+    github.environments["release"]["bypass"] = True
+    github.environments["release"]["branches"].append(
+        {"id": 99, "name": "v*", "type": "tag"}
+    )
+    github.calls.clear()
+
+    assert run(github, root, "settings", "check") == 1
+    assert run(github, root, "settings", "apply") == 0
+    assert github.environments["release"]["bypass"] is False
+    assert [item["name"] for item in github.environments["release"]["branches"]] == [
+        "main"
+    ]
+    path = f"repos/{REPO}/environments/release"
+    assert github.calls.count(("PUT", path)) == 1
+
+
+def test_apply_creates_every_environment_without_the_bypass_of_administrators(
+    github: FakeGitHub, root: Path
+) -> None:
+    run(github, root, "settings", "apply")
+
+    assert github.environments
+    for name, environment in github.environments.items():
+        assert environment["bypass"] is False, name
+
+
+def test_a_refused_bypass_still_creates_the_environment_for_main_only(
+    github: FakeGitHub,
+) -> None:
+    github.refuses_bypass = 422
+    api = Api(github)
+    drift = [Drift("environment release", "main only", "missing")]
+
+    apply_environments(api, REPO, drift)
+
+    release = github.environments["release"]
+    assert release["policy"] == MAIN_ONLY
+    assert [item["name"] for item in release["branches"]] == ["main"]
+    # GitHub's default stays, and the next check names it.
+    assert check_environments(api, REPO, {"release": {}}) == [
+        Drift("environment release.can_admins_bypass", False, True)
+    ]
+
+
+def test_another_refusal_of_an_environment_stops_the_apply(
+    github: FakeGitHub,
+) -> None:
+    github.refuses_bypass = 403
+
+    with pytest.raises(GitHubError, match="403"):
+        apply_environments(
+            Api(github), REPO, [Drift("environment release", "main only", "missing")]
+        )
 
 
 def test_pages_that_build_from_a_branch_switch_to_the_workflow(
@@ -3254,11 +3371,20 @@ def test_the_checklist_links_the_mend_app_and_the_author_it_takes_for_its_own(
 
 def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:
     granted = {key: access for _, key, access in RELEASE_APP_PERMISSIONS if key}
+    # The link that registers the app has no name for Variables; GitHub's token has.
+    granted["actions_variables"] = next(
+        access for name, _, access in RELEASE_APP_PERMISSIONS if name == "Variables"
+    )
     rank = {"read": 1, "write": 2}
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         text = path.read_text(encoding="utf-8")
-        for name, access in re.findall(r"permission-([a-z-]+): (read|write)", text):
-            key = name.replace("-", "_")
+        # An input of the token action, or the variable that the action reads alike
+        # for a permission that it has no input for.
+        asked = re.findall(
+            r"(?:permission|INPUT_PERMISSION)-([A-Za-z-]+): (read|write)", text
+        )
+        for name, access in asked:
+            key = name.lower().replace("-", "_")
             # Every app may read the metadata.
             if key == "metadata":
                 continue

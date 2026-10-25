@@ -983,6 +983,11 @@ def apply_variables(api: Api, repo: str, drift: list[Drift]) -> None:
 # --------------------------------------------------------------------------- environments
 
 MAIN_ONLY = {"protected_branches": False, "custom_branch_policies": True}
+# Whether an administrator may deploy past the rules of an environment, which GitHub
+# allows by default. The rules of every environment of the settings bind the
+# administrators too, so that a person who may administer the repository, or a token
+# of theirs, reaches its secrets only as a workflow on main does.
+BYPASS = "can_admins_bypass"
 
 
 def check_environments(
@@ -1001,6 +1006,10 @@ def check_environments(
             )
             if policy != MAIN_ONLY or names != ["branch:main"]:
                 drift.append(Drift(f"environment {name}", "main only", names or policy))
+            # An answer without the field has GitHub's default.
+            bypass = environment.get(BYPASS, True)
+            if bypass is not False:
+                drift.append(Drift(f"environment {name}.{BYPASS}", False, bypass))
         present = {
             item["name"]
             for item in api.get_all(f"repos/{repo}/environments/{name}/secrets")
@@ -1024,11 +1033,23 @@ def branch_policies(api: Api, repo: str, environment: str) -> list[Json]:
 
 
 def apply_environments(api: Api, repo: str, drift: list[Drift]) -> None:
-    for item in drift:
-        name = item.setting.removeprefix("environment ")
-        api.put(
-            f"repos/{repo}/environments/{name}", {"deployment_branch_policy": MAIN_ONLY}
-        )
+    # An environment may differ in its branches and in its bypass at once, and one
+    # write sets both.
+    names = dict.fromkeys(
+        item.setting.removeprefix("environment ").removesuffix(f".{BYPASS}")
+        for item in drift
+    )
+    for name in names:
+        path = f"repos/{repo}/environments/{name}"
+        try:
+            api.put(path, {"deployment_branch_policy": MAIN_ONLY, BYPASS: False})
+        except GitHubError as error:
+            # A private repository without GitHub Enterprise may refuse the bypass,
+            # which GitHub keeps to its protection rules there: the environment is
+            # still created for main only, and the next check names the bypass.
+            if error.status != 422:
+                raise
+            api.put(path, {"deployment_branch_policy": MAIN_ONLY})
         policies = branch_policies(api, repo, name)
         for policy in policies:
             if (policy.get("type", "branch"), policy["name"]) != ("branch", "main"):
@@ -1254,16 +1275,19 @@ def check(api: Api, repo: str, settings: Settings) -> list[Drift]:
     )
 
 
-# The permission of the release app that each part of the settings needs.
+# The permissions of the release app that each part of the settings needs to write,
+# as the settings page of the app names them. GitHub writes an environment and the
+# branches that may use it with Administration, and a website with Administration and
+# Pages; Environments only reads the names of the secrets of an environment.
 PERMISSIONS = {
-    "repository": "Administration",
-    "security": "Administration",
-    "actions": "Administration",
-    "rulesets": "Administration",
-    "variables": "Variables",
-    "environments": "Environments",
-    "pages": "Pages",
-    "labels": "Issues",
+    "repository": ("Administration",),
+    "security": ("Administration",),
+    "actions": ("Administration",),
+    "rulesets": ("Administration",),
+    "variables": ("Variables",),
+    "environments": ("Administration",),
+    "pages": ("Administration", "Pages"),
+    "labels": ("Issues",),
 }
 
 
@@ -1313,9 +1337,9 @@ def hint(part: str, error: GitHubError) -> str:
     if error.rate_limited:
         return "; that is the rate limit of GitHub; the next run tries again"
     if error.status in (403, 404):
-        return (
-            f"; the token may lack the permission {PERMISSIONS[part]} (read and write)"
-        )
+        names = PERMISSIONS[part]
+        noun = "permission" if len(names) == 1 else "permissions"
+        return f"; the token may lack the {noun} {' and '.join(names)} (read and write)"
     return ""
 
 

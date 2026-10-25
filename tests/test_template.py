@@ -70,13 +70,14 @@ from blueprint.bot_health import (
     after_pull_requests,
 )
 from blueprint.changelog import Fragment, release_changelog
+from blueprint.checklist import RELEASE_APP_PERMISSIONS
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
 from blueprint.locks import why_renovate_skips
 from blueprint.mutation import default_paths
 from blueprint.pages import layouts, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
-from blueprint.settings import Settings, allows
+from blueprint.settings import PERMISSIONS, Settings, allows
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
 from blueprint.versions import fix as fix_versions
@@ -424,13 +425,18 @@ def names_of_jobs(found: str | Mapping[str, Any]) -> list[str]:
 
 def app_permissions(settings: Mapping[str, Any]) -> dict[str, str]:
     """The permissions that the steps of a parsed job ask a token of an app for, by
-    the inputs permission-* of actions/create-github-app-token."""
-    return {
-        key.removeprefix("permission-"): value
-        for step in steps_using(settings, "actions/create-github-app-token")
-        for key, value in step.get("with", {}).items()
-        if key.startswith("permission-")
-    }
+    the inputs permission-* of actions/create-github-app-token, and by the variables
+    INPUT_PERMISSION-* of their environment, which the action reads alike, for a
+    permission that it has no input for."""
+    found = {}
+    for step in steps_using(settings, "actions/create-github-app-token"):
+        for key, value in step.get("with", {}).items():
+            if key.startswith("permission-"):
+                found[key.removeprefix("permission-")] = value
+        for key, value in (step.get("env") or {}).items():
+            if key.startswith("INPUT_PERMISSION-"):
+                found[key.removeprefix("INPUT_PERMISSION-").lower()] = value
+    return found
 
 
 def scripts_of(settings: Mapping[str, Any]) -> str:
@@ -7937,6 +7943,88 @@ def test_every_token_of_the_release_app_comes_after_its_check(
         if project == "nextcloud-app":
             handed_on.add(("upstream.yml", "nextcloud"))
         assert checked == handed_on
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_no_token_of_the_release_app_has_every_permission_of_the_app(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    """A token that asks for no permission gets every permission of the installation,
+    the administration and the workflows too."""
+    root = ROOT if project == "blueprint" else projects[project]
+    for name, job_id, index in tokens_of_the_release_app(root):
+        job = workflow_steps.job(name, job_id, root)
+        token = {"steps": [job["steps"][index]]}
+        assert app_permissions(token), f"{name}/{job_id}/{job['steps'][index]['name']}"
+
+
+# The permissions of the token of the settings bot, by the names of the inputs of the
+# token action: what settings apply writes, and what it only reads.
+SETTINGS_TOKEN = {
+    "administration": "write",
+    "actions-variables": "write",
+    "issues": "write",
+    "pages": "write",
+    # The environments and the branches that may use them.
+    "actions": "read",
+    # The files of the community standards.
+    "contents": "read",
+    # The names of the secrets of the environments.
+    "environments": "read",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_settings_bot_asks_for_a_token_with_only_what_it_needs(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    job = workflow_steps.job("settings.yml", "check", root)
+
+    assert app_permissions(job) == SETTINGS_TOKEN
+    [token] = steps_using(job, "actions/create-github-app-token")
+    # For this repository alone.
+    assert not {"owner", "repositories"} & set(token["with"])
+    # The token may write what each part of the settings writes with.
+    names = {name: key for name, key, _ in RELEASE_APP_PERMISSIONS}
+    names["Variables"] = "actions_variables"
+    for part, needed in PERMISSIONS.items():
+        for name in needed:
+            key = names[name].replace("_", "-")
+            assert SETTINGS_TOKEN[key] == "write", (part, name)
+    # Its explanation names every permission that it asks for, as the settings page of
+    # the app does.
+    explanation = workflow_steps.step_in(job, "Explain a refused token")
+    assert explanation["if"] == "failure() && steps.app.outcome == 'failure'"
+    keys = {key.replace("_", "-"): name for name, key in names.items()}
+    for key in SETTINGS_TOKEN:
+        assert f"*{keys[key]}*" in explanation["run"], key
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_settings_bot_says_what_a_refused_token_lacks(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path, "settings.yml", "check", "Explain a refused token"
+    )
+
+    assert done.returncode == 0
+    [error] = done.stdout.splitlines()
+    assert error.startswith("::error::GitHub refused a token of the release app")
+    assert "most often because the app lacks one of the permissions" in error
+    assert done.summary.startswith(
+        "### The release app refused the token of the settings bot\n\n"
+    )
+    assert "No setting has changed." in done.summary
+    assert "under *Permissions & events*" in done.summary
+    assert "run the workflow *Settings* again" in done.summary
+    # Not every refusal is a missing permission: the other causes have their fixes.
+    assert "Most often the app lacks one of them" in done.summary
+    assert (
+        "RELEASE_AUTOMATION_PRIVATE_KEY that doesn't belong to the app" in done.summary
+    )
+    assert "add the repository to its installation" in done.summary
+    assert "an outage of GitHub (run the workflow again)" in done.summary
+    assert done.calls == []
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
