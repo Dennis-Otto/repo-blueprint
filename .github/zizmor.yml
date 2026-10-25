@@ -67,9 +67,3 @@ rules:
       # self-repository syntax $/ yet.
       - release.yml
       - next-runner.yml
-  github-app:
-    ignore:
-      # The token action has no input for the Variables permission that the settings
-      # need, so its token has all permissions of the installation; the job runs only
-      # blueprint.py settings apply.
-      - settings.yml
