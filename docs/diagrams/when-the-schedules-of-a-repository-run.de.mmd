@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wann die Zeitpläne eines Repositorys laufen
+    accDescr: Der Blueprint hat Platz 0, ein Repository des Verzeichnisses seinen Platz im Rollout, jedes andere Repository einen Platz aus dem Hash seines Eigentümers und Namens. Jeder wöchentliche Zeitplan verschiebt sich um so viele Tage, jeder Zeitplan um 8 Minuten für jeden innerhalb seiner Stunde, sodass die schweren wöchentlichen Jobs zweier Repositorys auf den Plätzen 0 bis 6 nie eine Stunde eines Tages teilen.
+
+    blueprint["Der Blueprint<br>Platz 0, seine eigenen Zeiten"]
+    fleet["Ein Repository aus .github/fleet.toml<br>Platz = sein Platz im Rollout, 1 bis 6"]
+    other["Jedes andere Repository<br>Platz = Hash von Eigentümer/Name, 0 bis 27"]
+    move["includes/replace.jinja verschiebt jeden Zeitplan<br>wöchentlich: Platz Tage später<br>jeder: 8 × Platz Minuten später, in seiner Stunde"]
+    result["Die schweren wöchentlichen Jobs zweier Repositorys<br>auf den Plätzen 0 bis 6 teilen nie eine Stunde eines Tages"]
+
+    blueprint --> move
+    fleet --> move
+    other --> move
+    move --> result
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class blueprint,move bot
+    class fleet,other person
+    class result done

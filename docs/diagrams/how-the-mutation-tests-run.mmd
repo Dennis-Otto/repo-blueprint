@@ -5,9 +5,9 @@ config:
 ---
 flowchart TB
     accTitle: How the mutation tests run
-    accDescr: Every Saturday, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. For Python, the plan splits the code into parts of about the same number of mutants, and mutmut runs each part in a job of its own, in a copy of the repository and without the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. The summary shows one score and first the survivors that change the logic, with their changes, the artifact keeps them and the dashboard shows the score. When the score of the default branch drops below that of the run before, one issue opens, which closes once a run is back. A run that measured nothing fails and names the tests that failed without any mutant.
+    accDescr: Once a week, on demand, and for a pull request that changes how they run, the Mutation workflow runs the mutants. For Python, the plan splits the code into parts of about the same number of mutants, and mutmut runs each part in a job of its own, in a copy of the repository and without the tests marked mutation_unsafe; Infection changes the PHP of a Nextcloud app, with the bootstrap of its tests. The summary shows one score and first the survivors that change the logic, with their changes, the artifact keeps them and the dashboard shows the score. When the score of the default branch drops below that of the run before, one issue opens, which closes once a run is back. A run that measured nothing fails and names the tests that failed without any mutant.
 
-    start["Every Saturday · on demand<br>a pull request that changes<br>mutation.yml or mutmut"]
+    start["Once a week · on demand<br>a pull request that changes<br>mutation.yml or mutmut"]
     plan["The plan<br>the Python in parts of<br>about the same number of mutants"]
     python["mutmut, a job for each part<br>in a copy in mutants/<br>without the tests marked mutation_unsafe"]
     php["Infection<br>the PHP of a Nextcloud app<br>with tests/bootstrap.php"]
