@@ -1,0 +1,126 @@
+name: Newest Node
+
+# The checks of scripts/check.sh with the newest release of Node, which warns early of
+# what the next Node breaks, while the CI checks the Node of .nvmrc: after every change
+# of main and every week. check-latest takes it from the releases of Node as soon as it
+# is out, not the older Node that the image of the runner keeps in its cache. Not in
+# pull requests: a new Node breaks main and every pull request alike, and no pull
+# request waits for this check. A workflow of its own, so that its warning leaves the
+# CI of main green, whose coverage the report of the PR coach compares every pull
+# request with. Since no pull request shows the warning, a failure keeps one issue
+# open, which names the Node that failed and which the weekly run closes once the
+# checks pass again.
+# https://github.com/Dennis-Otto/repo-blueprint
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "40 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer commit of main makes the run for an older one moot.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
+jobs:
+  newest-node:
+    name: check (newest Node)
+    # Not in the blueprint itself; generated repositories don't have this line.
+    if: github.repository != 'Dennis-Otto/repo-blueprint'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The version of Node that the run checked, for the issue of the warning.
+    outputs:
+      version: ${{ steps.node.outputs.node-version }}
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: node
+        with:
+          node-version: latest
+          check-latest: true
+          cache: npm
+      - name: Name the Node of the run
+        run: echo "The checks run with Node $(node --version), the newest release of Node." >> "$GITHUB_STEP_SUMMARY"
+      - name: Install the locked packages
+        run: npm ci --ignore-scripts
+      - name: Run the checks
+        run: bash scripts/check.sh
+
+  # The issue of the warning: a failed run on main opens it or brings it up to date,
+  # and the weekly run closes it once the checks pass with the newest Node again. A
+  # check that didn't run, as in the blueprint itself, changes nothing.
+  report:
+    name: report
+    needs: newest-node
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      (needs.newest-node.result == 'failure' ||
+      (needs.newest-node.result == 'success' && github.event_name == 'schedule'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Block every host that the job doesn't need
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+      - name: Keep the issue of the newest Node current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.newest-node.result }}
+          VERSION: ${{ needs.newest-node.outputs.version }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="The checks fail with the newest Node"
+          number="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          if [[ "$RESULT" == success ]]; then
+            if [[ -n "$number" ]]; then
+              gh issue close "$number" --comment "The checks pass with the newest Node again."
+            fi
+            exit 0
+          fi
+          # The version that the run checked; none when setting up Node failed.
+          node="the newest Node"
+          if [[ -n "$VERSION" ]]; then
+            node="Node $VERSION, the newest release"
+          fi
+          body="$(printf '%s\n\n%s\n' \
+            "The checks of scripts/check.sh fail with $node, which the users of the package and the runners get next. Make them pass with it, or keep the range of engines.node in package.json below it; the weekly run closes this issue then." \
+            "The latest failure: $URL")"
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body "$body"
+          else
+            gh issue create --title "$title" --label maintenance --body "$body"
+          fi
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

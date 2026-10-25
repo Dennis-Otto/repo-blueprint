@@ -22,9 +22,9 @@ Die Abdeckung der Tests eines Pull Requests im Vergleich zu `main`, Datei für D
 
 ## Schnelle Prüfungen
 
-Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python prüft `main` eines Python-Projekts nach jeder Änderung und jede Woche.
+Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann: ein Scanner in den Pull Requests, die ändern, was er liest, auf `main` nur, was eine Vergleichsbasis hält oder veröffentlicht, der Rest jede Woche, und im Release-Pull-Request gar kein Scanner; das neueste Python und das neueste Node prüfen `main` eines Python- oder Node-Projekts nach jeder Änderung und jede Woche.
 
-**Womit:** Die Auslöser und Pfadfilter der Workflows, `newest-python.yml`.
+**Womit:** Die Auslöser und Pfadfilter der Workflows, `newest-python.yml`, `newest-node.yml`.
 
 ## Wann die Prüfungen laufen
 
@@ -32,7 +32,7 @@ Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann, denn ein Konto bei G
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/when-the-checks-run.de.dark.svg">
-  <img src="../images/diagrams/when-the-checks-run.de.svg" alt="Wann die Prüfungen laufen: Jeder Pull Request führt die vorgeschriebenen Prüfungen und zizmor aus, auf dessen Analyse die Regeln von main warten, und die Scanner dessen, was er ändert: OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen und zizmor ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.">
+  <img src="../images/diagrams/when-the-checks-run.de.svg" alt="Wann die Prüfungen laufen: Jeder Pull Request führt die vorgeschriebenen Prüfungen und zizmor aus, auf dessen Analyse die Regeln von main warten, und die Scanner dessen, was er ändert: OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen und zizmor ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python und Node.">
 </picture>
 
 - **Nach einem Merge:** `main` nimmt einen Pull Request nur auf, wenn er auf dem neuesten Stand ist, also bekommt `main` durch den Merge die Dateien, mit denen die Prüfungen des Pull Requests bestanden haben. `main` führt nur die Tests aus, mit deren Abdeckung der Bericht jedes Pull Requests seine eigene vergleicht, die Analysen, mit denen Code Scanning vergleicht, und was veröffentlicht, etwa die Website und das Release. Lint läuft in den Pull Requests, Secret Scan und Fuzzing dort und jede Woche, und die SBOM jede Woche; jedes Release hat eine eigene SBOM.
@@ -44,7 +44,8 @@ Eine Prüfung läuft nur, wo sie ein Ergebnis ändern kann, denn ein Konto bei G
 </picture>
 
 - **Der Release-Pull-Request** ändert nur den Changelog und die Version, die nichts an dem ändern, was ein Scanner findet. Im Blueprint steht die vorgeschriebene Prüfung *variants* für die Varianten und Updates jeder Projektart: Sie besteht, wenn jede bestanden hat oder keine laufen musste, wie im Release-Pull-Request.
-- **Das neueste Python**, Betas eingeschlossen, führt die Prüfungen eines Python-Projekts nach jeder Änderung an `main` und jede Woche aus, in einem eigenen Workflow, der die CI von `main` grün lässt. Ein neues Python bricht jeden Pull Request gleichermaßen, und keiner wartet darauf. Ein Fehlschlag hält ein Issue offen, das der wöchentliche Lauf schließt, sobald die Prüfungen wieder bestehen.
+- **Das neueste Python** führt die Prüfungen eines Python-Projekts nach jeder Änderung an `main` und jede Woche aus, in einem eigenen Workflow, der die CI von `main` grün lässt: das neueste Release, das `check-latest` holt, sobald es erschienen ist, nicht das ältere Python, das der Runner in seinem Cache hält, und die Zusammenfassung des Laufs nennt es. Ein neues Python bricht jeden Pull Request gleichermaßen, und keiner wartet darauf. Ein Fehlschlag hält ein Issue offen, das das Python nennt, mit dem er fehlschlug, und das der wöchentliche Lauf schließt, sobald die Prüfungen wieder bestehen.
+- **Das neueste Node** tut dasselbe für ein Node-Paket, in `newest-node.yml`: Die CI prüft das Node aus `.nvmrc`, dieser Workflow das neueste Release von Node, das die Nutzer des Pakets im Bereich von `engines.node` in `package.json` schon verwenden können.
 - **Die Runner** sind mit ihrer Version benannt, `ubuntu-24.04`, nicht `ubuntu-latest`: GitHub zieht dieses Label über Wochen Job für Job auf ein neues Image um, wie ab dem 19. Oktober 2026 auf Ubuntu 26.04, sodass die Läufe eines Workflows zufällig auf dem einen oder dem anderen Image landen würden, mit einem anderen Python, ShellCheck und Docker, und wie ein flaky Test fehlschlügen. Im Blueprint führt der Workflow Next runner die Varianten jede Woche auf dem nächsten Runner aus, und ein Fehlschlag hält ein Issue offen; sobald sie dort bestehen, zieht ein Release des Blueprints jeden Job dorthin um. Ein eigener Workflow, den ein Update nicht anfasst, behält den Runner, den er nennt: Mit `ubuntu-latest` zieht er mit GitHubs Label um.
 
 ## Der PR-Coach

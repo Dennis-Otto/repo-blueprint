@@ -10861,8 +10861,8 @@ def test_the_bot_health_bot_watches_every_bot(
     else:
         assert not watched & BLUEPRINT_BOTS
     # Every workflow on a schedule that pull requests don't run, whose every run is
-    # one of the default branch; Diagrams, Newest Python and the Next runner keep an
-    # issue of their own.
+    # one of the default branch; Diagrams, Newest Python, Newest Node and the Next
+    # runner keep an issue of their own.
     for name, text in names_of_workflows(root).items():
         events = set(triggers(text))
         if "schedule" in events and not events & {
@@ -12320,7 +12320,12 @@ ON_PUSH_TO_MAIN = {
         "zizmor.yml",
     },
     # The bots whose newest run does all the work of an older one, in one group.
-    "replaces": {"dashboard.yml", "newest-python.yml", "settings.yml"},
+    "replaces": {
+        "dashboard.yml",
+        "newest-node.yml",
+        "newest-python.yml",
+        "settings.yml",
+    },
     # They publish, commit or change GitHub, the website and the release among them:
     # a run that started ends, and only the newest of those that wait for it runs.
     "waits": {"diagrams.yml", "docs.yml", "labels.yml", "release.yml"},
@@ -12578,11 +12583,13 @@ def test_a_merge_runs_only_what_keeps_a_baseline_of_main() -> None:
         assert "schedule" in triggers(flows[name]), name
     # Every release carries an SBOM of its own; the weekly one is the repository's.
     assert set(triggers(flows["sbom.yml"])) == {"schedule", "workflow_dispatch"}
-    # After every merge: the coverage of main, the newest Python, the analyses that code
-    # scanning compares pull requests with, the website, the release and the branch bot.
+    # After every merge: the coverage of main, the newest Python and Node, the analyses
+    # that code scanning compares pull requests with, the website, the release and the
+    # branch bot.
     for name in (
         "ci-python.yml",
         "newest-python.yml",
+        "newest-node.yml",
         "codeql.yml",
         "zizmor.yml",
         "osv-scanner.yml",
@@ -12682,8 +12689,48 @@ def test_the_newest_python_checks_main_and_every_week(
         # this check. A workflow of its own, so that it leaves the CI of main green.
         assert set(triggers(newest)) == {"push", "schedule", "workflow_dispatch"}
         assert "\n    name: check (newest Python)\n" in newest
-        assert 'python-version: "3.x"\n          allow-prereleases: true\n' in newest
+        # The newest release, not the older Python in the cache of the runner, which
+        # setup-python takes without check-latest.
+        assert 'python-version: "3.x"\n          check-latest: true\n' in newest
+        assert "allow-prereleases" not in newest
         assert "run: bash scripts/check.sh\n" in newest
+        # The summary of the run names the Python that it checked.
+        run = step_named(newest, "Name the Python of the run")["run"]
+        assert "$(python --version)" in run
+        assert '>> "$GITHUB_STEP_SUMMARY"' in run
+    job = workflow_steps.job("newest-python.yml", "newest-python")
+    assert job["outputs"] == {"version": "${{ steps.python.outputs.python-version }}"}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_newest_node_checks_main_and_every_week(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    # The blueprint keeps the source of the workflow, whose check it skips, as it
+    # skips that of the CI of Node.
+    node = project in ("blueprint", "node-package")
+    assert ("newest-node.yml" in flows) == node
+    for name, text in flows.items():
+        if name != "newest-node.yml":
+            assert "check (newest Node)" not in text, name
+    if not node:
+        return
+    newest = flows["newest-node.yml"]
+    # Not in pull requests, as the newest Python: a new Node breaks them all alike.
+    assert set(triggers(newest)) == {"push", "schedule", "workflow_dispatch"}
+    assert "\n    name: check (newest Node)\n" in newest
+    # The newest release of Node, where the CI takes the Node of .nvmrc.
+    assert "node-version: latest\n          check-latest: true\n" in newest
+    assert "node-version-file" not in newest
+    assert "run: npm ci --ignore-scripts\n" in newest
+    assert "run: bash scripts/check.sh\n" in newest
+    assert "$(node --version)" in step_named(newest, "Name the Node of the run")["run"]
+    # A new repository runs the check, which the blueprint itself skips.
+    assert (GUARD in newest) == (project == "blueprint")
+    job = workflow_steps.job("newest-node.yml", "newest-node")
+    assert job["outputs"] == {"version": "${{ steps.node.outputs.node-version }}"}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -12715,6 +12762,7 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
         "Keep the issue of the newest Python current",
         open_issue,
         RESULT=result,
+        VERSION="3.15.1",
     )
 
     if not call:
@@ -12722,6 +12770,77 @@ def test_a_failure_with_the_newest_python_keeps_an_issue_open(
         return
     assert calls.startswith(call), calls
     assert (f"The latest failure: {RUN_URL}" in calls) == (result == "failure")
+    # The issue names the Python that failed.
+    assert ("fail with Python 3.15.1, the newest release," in calls) == (
+        result == "failure"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_issue_of_the_newest_python_without_a_version(tmp_path: Path) -> None:
+    # Setting up Python failed, so the run knows no version.
+    calls = keep_the_issue_of_a_bot(
+        tmp_path,
+        "newest-python.yml",
+        "Keep the issue of the newest Python current",
+        "",
+        RESULT="failure",
+        VERSION="",
+    )
+
+    assert "fail with the newest Python, which the runners get next." in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("result", "version", "open_issue", "call"),
+    [
+        # A failure opens the issue, or brings the open one up to date.
+        (
+            "failure",
+            "v26.1.0",
+            "",
+            "issue create --title The checks fail with the newest Node",
+        ),
+        ("failure", "", "7", "issue edit 7 --body"),
+        # The weekly run closes it once the checks pass again.
+        ("success", "v26.1.0", "7", "issue close 7"),
+        ("success", "v26.1.0", "", ""),
+    ],
+)
+def test_a_failure_with_the_newest_node_keeps_an_issue_open(
+    tmp_path: Path, result: str, version: str, open_issue: str, call: str
+) -> None:
+    # Only a check that ran changes the issue: a run of the blueprint, which skips the
+    # check, or one that was cancelled, neither opens nor closes it.
+    report = workflow_steps.job("newest-node.yml", "report")
+    assert report["if"] == (
+        "!cancelled() && github.ref == 'refs/heads/main' && "
+        "(needs.newest-node.result == 'failure' || "
+        "(needs.newest-node.result == 'success' && github.event_name == 'schedule'))"
+    )
+    # Only the job without the code of the project may write issues.
+    only_the_report_writes_issues("newest-node.yml")
+    calls = keep_the_issue_of_a_bot(
+        tmp_path,
+        "newest-node.yml",
+        "Keep the issue of the newest Node current",
+        open_issue,
+        RESULT=result,
+        VERSION=version,
+    )
+
+    if not call:
+        assert calls == ""
+        return
+    assert calls.startswith(call), calls
+    if result == "success":
+        assert calls.endswith("The checks pass with the newest Node again."), calls
+        return
+    assert f"The latest failure: {RUN_URL}" in calls
+    node = f"Node {version}, the newest release" if version else "the newest Node"
+    assert f"fail with {node}, which the users" in calls, calls
+    assert "engines.node in package.json" in calls
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])

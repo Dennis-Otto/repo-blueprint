@@ -391,7 +391,11 @@ def test_a_folder_without_git_stops_the_check(
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
 
     assert main(["locks"], root=tmp_path) == 2
-    assert capsys.readouterr().err.startswith("blueprint.py: Command '['git'")
+    # The words of the failed command, which Python 3.15 no longer puts in quotes.
+    err = capsys.readouterr().err
+    assert err.startswith("blueprint.py: Command "), err
+    assert "['git', 'ls-files', " in err, err
+    assert err.endswith(" returned non-zero exit status 128.\n"), err
 
 
 def test_a_skipped_lock_file_reads_as_one_sentence() -> None:
