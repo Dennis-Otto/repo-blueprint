@@ -9154,8 +9154,8 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     }
     after = (ROOT / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
     assert (
-        "      actions: read # the coverage reports and the website that the checks kept\n"
-        in after
+        "      actions: read # the coverage reports, the website and the parts that the "
+        "workflows kept\n" in after
     )
     # The default branch, which the run is of, and only blueprint.py with the
     # explanations; nothing of the pull request.
