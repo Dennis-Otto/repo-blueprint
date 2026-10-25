@@ -257,19 +257,3 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           mapfile -t parts < <(grep . <<<"$FAILED" || true)
           python3 "$script" coach explain "$CHECK" --parts "${parts[@]}"
-
-  # The entry in the changelog is a step of the check of the title since this release.
-  # The rulesets of the repositories require the check changelog until the settings
-  # bot applies the required checks of this release; the next release removes it.
-  changelog:
-    name: changelog
-    if: ${{ !github.event.repository.fork }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Record the network traffic of the job
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-      - name: Name the check that checks the changelog
-        run: echo "The check *conventional title* checks the entry in the changelog." >> "$GITHUB_STEP_SUMMARY"

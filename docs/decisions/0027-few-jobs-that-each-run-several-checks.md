@@ -30,7 +30,7 @@ Option 2. One job, *lint*, runs every linter: actionlint, REUSE from its pinned 
 The new jobs replace the old ones in the required checks of `.github/repository.toml` in two releases, so that no pull request waits for a check that no longer runs:
 
 1. **This release** adds the jobs that run several checks and requires them instead of the old ones; the old jobs still run, without the hints at the prose, which no rule required. The settings bot of each repository applies the new required checks after the update merged, and until then the old jobs satisfy the old ones.
-2. **The next release** removes the old jobs, once every repository runs this one.
+2. **The next release** removes the old jobs, once every repository runs this one. It followed once the rulesets of all seven repositories required the new jobs and none of the old ones (#447).
 
 ## Consequences
 

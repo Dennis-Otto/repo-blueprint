@@ -1446,25 +1446,24 @@ def test_an_integration_is_validated_by_the_current_images_of_hacs_and_hassfest(
     # to a commit of their branches falls behind with every commit to them.
     assert "uses: hacs/action" not in ci
     assert "uses: home-assistant/actions" not in ci
-    hacs = job_in(ci, "hacs")
-    validation = step_in(hacs, "Validate the HACS metadata")
+    # One job runs both, and neither has a job of its own any more (#447).
+    names = {job.get("name") for job in parse(ci)["jobs"].values()}
+    assert "home-assistant" in names
+    assert not {"hacs", "hassfest"} & names
+    job = job_in(ci, "home-assistant")
+    validation = step_in(job, "Validate the HACS metadata")
     assert validation["run"].endswith("\n  ghcr.io/hacs/action:main\n")
-    # HACS reads the repository through the API, so the job checks nothing out but
-    # what the PR coach needs when it failed.
-    checkouts = [
-        found
-        for found in hacs["steps"]
-        if found.get("uses", "").startswith("actions/checkout@")
-    ]
-    assert len(checkouts) == 1
-    assert condition_of(checkouts[0]) == "failure()"
-    assert hacs["steps"].index(checkouts[0]) > hacs["steps"].index(validation)
+    # HACS reads the repository through the API, so it runs also without the
+    # checkout, which only hassfest needs.
+    assert condition_of(validation) == "${{ !cancelled() }}"
+    [checkout] = steps_using(job, "actions/checkout")
+    assert job["steps"].index(checkout) < job["steps"].index(validation)
     # hassfest checks the checkout, read-only, exactly as the Variants workflow does.
     command = (
         'docker run --rm --volume "$PWD:/github/workspace:ro"'
         " ghcr.io/home-assistant/hassfest:latest\n"
     )
-    assert command in step_in(job_in(ci, "hassfest"), "Validate the integration")["run"]
+    assert command in step_in(job, "Validate the integration")["run"]
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     assert command.replace("$PWD", "$PWD/$PROJECT") in variants
 
@@ -1528,7 +1527,7 @@ def test_hacs_gets_the_inputs_of_its_action(
     ci = (projects["home-assistant"] / ".github/workflows/ci.yml").read_text(
         encoding="utf-8"
     )
-    hacs = step_in(job_in(ci, "hacs"), "Validate the HACS metadata")
+    hacs = step_in(job_in(ci, "home-assistant"), "Validate the HACS metadata")
     # The inputs of the action reach its image as INPUT_ variables, as GitHub passes
     # them, and the event as a file, from which it reads the branch to validate.
     inputs = {
@@ -1567,7 +1566,7 @@ def test_hassfest_shows_its_errors_as_annotations(
 
     output, calls = run_the_step_with_docker(
         tmp_path,
-        step_in(job_in(ci, "hassfest"), "Validate the integration"),
+        step_in(job_in(ci, "home-assistant"), "Validate the integration"),
         {"RUNNER_TEMP": runner_temp.as_posix()},
     )
 
@@ -3716,7 +3715,7 @@ def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
     # fetches with the whole history, is current.
     lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
-    for workflow, name in ((lint, "lint"), (lint, "dco"), (links, "links")):
+    for workflow, name in ((lint, "lint"), (links, "links")):
         job = job_in(workflow, name)
         assert "base.sha" not in values_of(job), name
         assert any(
@@ -9558,9 +9557,9 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     explained_under_their_comments(windows)
 
 
-# The checks that a job of several checks replaces. Their own jobs stay for one
-# release, so that a pull request passes the rulesets of every repository until the
-# settings bot applies the required checks of this release; the next one removes them.
+# The checks that a job of several checks replaced. Their own jobs ran for one more
+# release, until the settings bot of every repository required the new job instead;
+# the release after it removed them (#447).
 REPLACED = {
     "lint": ["workflow-lint", "reuse", "markdown", "issue-assistant", "dco"],
     "conventional title": ["changelog"],
@@ -9582,13 +9581,14 @@ def test_a_job_of_several_checks_replaces_their_jobs_in_the_required_checks(
         names |= {job.get("name") for job in parse(workflow)["jobs"].values()}
     home_assistant = project == "home-assistant"
     for check, replaced in REPLACED.items():
+        # No job of a replaced check is left to wait for a runner, in no kind of
+        # project, and the blueprint itself, which has the workflows of every kind.
+        assert not set(replaced) & names, check
         if check == "home-assistant" and not home_assistant:
             assert check not in required
             continue
         assert check in required, check
         assert not set(replaced) & set(required), check
-        # Until the next release, the old jobs report as well.
-        assert set(replaced) <= names, check
     assert "prose" not in names
 
 
@@ -9682,13 +9682,8 @@ def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
     assert condition_of(step_in(title, "fragments")).startswith("${{ !cancelled() &&")
     # It reads the files of the pull request through the API and sets its labels.
     assert title["permissions"]["pull-requests"] == "write"
-    # The job changelog only reports for the rulesets that still require it: it
-    # checks nothing out and runs nothing of the pull request.
-    changelog = job_in(workflow, "changelog")
-    assert not steps_using(changelog, "actions/checkout")
-    assert "GH_TOKEN" not in values_of(changelog)
-    assert len(changelog["steps"]) == 2
-    assert all("name" in step for step in changelog["steps"])
+    # One job, which no runner of a job changelog waits beside any more (#447).
+    assert list(parse(workflow)["jobs"]) == ["title"]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -9859,8 +9854,8 @@ def test_every_project_fixes_what_a_command_can_fix(
     # fixes of both, with the CI of this kind among the workflows that it follows.
     lint = (github / "workflows/lint.yml").read_text(encoding="utf-8")
     assert any(
-        step.get("with", {}).get("name") == "fixes-markdown"
-        for step in job_in(lint, "markdown")["steps"]
+        step.get("with", {}).get("name") == "fixes-lint"
+        for step in job_in(lint, "lint")["steps"]
     )
     after = (github / "workflows/after-checks.yml").read_text(encoding="utf-8")
     assert {name.replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
