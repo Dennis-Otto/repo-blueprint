@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import json
 import re
+import runpy
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -2960,6 +2962,29 @@ def test_create_goes_on_with_the_settings_after_a_run_that_stopped_there(
     out = capsys.readouterr().out
     assert out.index(f"Going on with {REPO} on GitHub") < out.index(
         f"The settings of {REPO} differ"
+    )
+
+
+def test_a_python_without_tomllib_is_named_before_the_import(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The import of the package would stop with a traceback on Python 3.10: the
+    # script says so first, in words that every Python can write.
+    monkeypatch.setattr("sys.version_info", (3, 10, 14, "final", 0))
+    monkeypatch.setattr("sys.argv", ["blueprint.py", "doctor"])
+    # The script sets it; the setattr puts it back after the test.
+    monkeypatch.setattr("sys.dont_write_bytecode", sys.dont_write_bytecode)
+
+    with pytest.raises(SystemExit) as stop:
+        runpy.run_path(
+            str(Path(__file__).parents[1] / "blueprint.py"), run_name="__main__"
+        )
+
+    assert stop.value.code == 1
+    assert capsys.readouterr().err == (
+        "Python 3.10: the tools of the new repository need Python 3.12 or later\n"
+        "    install Python 3.12 or later: https://www.python.org/downloads/"
+        " (on Windows, py -3 runs it)\n"
     )
 
 

@@ -27,7 +27,10 @@ INIT = "git init --initial-branch=main"
 ADD = "git add --all"
 COMMIT = "git commit --signoff --message 'chore: start from the blueprint'"
 GH = "gh repo create octo-org/demo --public --description 'A demo' --source . --remote origin --push"
-PUSH = "git push --set-upstream origin main"
+PUSH = (
+    "git -c credential.helper= -c 'credential.helper=!gh auth git-credential' "
+    "push --set-upstream origin main"
+)
 PYTHON = (3, 13)
 # The preflight of a new copy, in the order in which it asks, and what it shows.
 ASKED = [
@@ -36,6 +39,7 @@ ASKED = [
     "git var GIT_COMMITTER_IDENT",
     "gh --version",
     "gh api --include user",
+    "gh config get git_protocol --host github.com",
     "gh api users/octo-org",
     "gh api user/memberships/orgs/octo-org",
     "gh api repos/octo-org/demo",
@@ -188,7 +192,7 @@ def test_a_dry_run_shows_the_preflight_and_the_commands(
             {
                 "git var GIT_COMMITTER_IDENT": (
                     128,
-                    "fatal: empty ident name (for <me@example.com>) not allowed",
+                    "fatal: empty ident name (for <me@email.example>) not allowed",
                 )
             },
             [
@@ -219,6 +223,14 @@ def test_a_dry_run_shows_the_preflight_and_the_commands(
                 "      gh auth login --hostname github.com --scopes workflow",
             ],
             id="a sign-in that says nothing",
+        ),
+        pytest.param(
+            {"gh api --include user": (1, "gh: Bad credentials (HTTP 401)")},
+            [
+                "  ✘ gh is not signed in to github.com: gh: Bad credentials (HTTP 401)",
+                "      gh auth login --hostname github.com --scopes workflow",
+            ],
+            id="a sign-in that GitHub refuses",
         ),
         pytest.param(
             {
@@ -379,6 +391,31 @@ def test_a_tool_that_fails_at_its_version_counts_as_not_installed(
             "no scopes, such as a fine-grained one: it has to create the "
             "repository, push workflows and administer it",
             id="a fine-grained token",
+        ),
+        pytest.param(
+            {
+                "gh api --include user": (
+                    1,
+                    "error connecting to api.github.com\ncheck your internet connection",
+                )
+            },
+            "  · GitHub didn't say who gh is signed in as: error connecting to "
+            "api.github.com",
+            id="no answer about the sign-in",
+        ),
+        pytest.param(
+            {
+                "gh config get git_protocol --host github.com": (0, "ssh\n"),
+                "gh api --include user": (
+                    0,
+                    preflight.SIGNED_IN.replace(
+                        "gist, read:org, repo, workflow", "gist, read:org, repo"
+                    ),
+                ),
+            },
+            "  ✔ gh is signed in to github.com as octocat, with the scopes gist, "
+            "read:org, repo",
+            id="no scope workflow over SSH",
         ),
         pytest.param(
             {"gh api users/octo-org": (1, "error connecting to api.github.com")},

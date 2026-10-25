@@ -33,6 +33,7 @@ def answers(repo: str) -> dict[str, tuple[int, str]]:
             "https://github.com/cli/cli/releases/tag/v2.62.0\n",
         ),
         "gh api --include user": (0, SIGNED_IN),
+        "gh config get git_protocol --host github.com": (0, "https\n"),
         f"gh api users/{owner}": (
             0,
             json.dumps({"login": owner, "type": "Organization"}),

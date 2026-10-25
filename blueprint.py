@@ -26,6 +26,17 @@ if __name__ == "__main__":
     # Before the import: like the single file it was, the tool leaves no __pycache__
     # in the repository.
     sys.dont_write_bytecode = True
+    # Before the import too: the package needs tomllib of Python 3.11, and an older
+    # Python would stop with a traceback before the preflight of create could say so.
+    if sys.version_info < (3, 11):  # noqa: UP036 - it runs before the requirement
+        major, minor = sys.version_info[:2]
+        sys.stderr.write(
+            # Only ASCII: an old Python may write to a console that has no other.
+            f"Python {major}.{minor}: the tools of the new repository need Python "
+            "3.12 or later\n    install Python 3.12 or later: "
+            "https://www.python.org/downloads/ (on Windows, py -3 runs it)\n"
+        )
+        sys.exit(1)
     # import blueprint finds the package next to this file: a package wins over a module.
     from blueprint.cli import main
 

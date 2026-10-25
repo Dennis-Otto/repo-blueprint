@@ -55,7 +55,16 @@ MINIMUM_PYTHON = (3, 12)
 # The scopes of the token of gh that the steps need: repo creates the repository and
 # pushes, workflow pushes .github/workflows/, and read:org reads the membership in an
 # organization that owns it, which write:org and admin:org include.
-SCOPES = ("repo", "workflow")
+# git as gh repo create --push runs it: signed in by gh, without a change of config.
+PUSH_AS_GH = (
+    "git",
+    "-c",
+    "credential.helper=",
+    "-c",
+    "credential.helper=!gh auth git-credential",
+)
+WORKFLOW_SCOPE = "workflow"
+SCOPES = ("repo", WORKFLOW_SCOPE)
 ORGANIZATION_SCOPE = "read:org"
 WIDER_SCOPES = {ORGANIZATION_SCOPE: {"write:org", "admin:org"}}
 # Where origin pushes to, in each form of address that gh and git give it.
@@ -67,6 +76,8 @@ VERSION = re.compile(r"(\d+)\.(\d+)(?:\.\d+)?")
 # What gh api says when GitHub has nothing at a path: 404, or 409 for a branch of an
 # empty repository.
 NOTHING = re.compile(r"\(HTTP 40[49]\)")
+# What gh says without a valid sign-in: its hint to sign in, or a 401 of GitHub.
+SIGNED_OUT = re.compile(r"gh auth login|\(HTTP 401\)")
 SCOPE_HEADER = re.compile(r"^x-oauth-scopes:(.*)$", re.IGNORECASE | re.MULTILINE)
 # The time and the zone that git var adds to an identity.
 STAMP = re.compile(r" \d+ [+-]\d{4}$")
@@ -260,16 +271,17 @@ def identity_finding(run: Runner, root: Path) -> Finding:
         if result.returncode != 0:
             # Git ends with what it lacks, such as "fatal: unable to auto-detect
             # email address" or "fatal: empty ident name".
-            if "email" in problem(result).rpartition("fatal:")[2]:
+            # The name's message names the address, which may contain "email".
+            if "ident name" in problem(result).rpartition("fatal:")[2]:
                 return Finding(
                     False,
-                    "Git has no email address to commit with",
-                    'git config --global user.email "you@example.com"',
+                    "Git has no name to commit with",
+                    'git config --global user.name "Your Name"',
                 )
             return Finding(
                 False,
-                "Git has no name to commit with",
-                'git config --global user.name "Your Name"',
+                "Git has no email address to commit with",
+                'git config --global user.email "you@example.com"',
             )
         shown = shown or STAMP.sub("", result.stdout.strip())
     return Finding(True, f"Git commits as {shown}")
@@ -414,6 +426,12 @@ def github_findings(run: Runner, root: Path, repo: str, resume: bool) -> list[Fi
     user = ask(run, root, "--include", "user")
     if user.found is not True:
         said = user.text.splitlines()[0] if user.text else "gh said nothing"
+        if user.text and not SIGNED_OUT.search(user.text):
+            # Such as no network or an error of GitHub: signing in again won't help.
+            return [
+                *findings,
+                Finding(None, f"GitHub didn't say who gh is signed in as: {said}"),
+            ]
         return [
             *findings,
             Finding(
@@ -429,10 +447,18 @@ def github_findings(run: Runner, root: Path, repo: str, resume: bool) -> list[Fi
         if header is None
         else {scope.strip() for scope in header[1].split(",") if scope.strip()}
     )
+    # Over SSH, git pushes the workflows with the key, which needs no scope workflow.
+    protocol = run(
+        ["gh", "config", "get", "git_protocol", "--host", "github.com"], root
+    )
+    ssh = protocol.returncode == 0 and protocol.stdout.strip() == "ssh"
     owner = repo.split("/")[0]
     account = ask(run, root, f"users/{owner}")
     organization = account.found is True and body(account).get("type") == "Organization"
-    needed = [*SCOPES, *([ORGANIZATION_SCOPE] if organization else [])]
+    needed = [
+        *(scope for scope in SCOPES if not (ssh and scope == WORKFLOW_SCOPE)),
+        *([ORGANIZATION_SCOPE] if organization else []),
+    ]
     read_org = scopes is None or has_scope(scopes, ORGANIZATION_SCOPE)
     return [
         *findings,
@@ -503,7 +529,13 @@ def remote_steps(
         raise CreateError(
             f"GitHub didn't say whether {repo} has the branch {BRANCH}: {branch.text}"
         )
-    return [] if branch.found else [["git", "push", "--set-upstream", "origin", BRANCH]]
+    # gh repo create --push signs git in with gh's own credential helper; the push
+    # that is left does the same, so that it needs no gh auth setup-git.
+    return (
+        []
+        if branch.found
+        else [[*PUSH_AS_GH, "push", "--set-upstream", "origin", BRANCH]]
+    )
 
 
 def doctor(
