@@ -42,6 +42,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # The GitHub CLI of the jobs sends no telemetry to GitHub.
+  GH_TELEMETRY: "false"
   # The issue assistant, and the branch of the pull request.
   SOURCE: Dennis-Otto/issue-assistant
   BRANCH: bot/issue-assistant
@@ -280,10 +282,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            results-receiver.actions.githubusercontent.com:443
       # sync_issue_assistant.py, which checks what the job adopt kept, and the workflows
       # of main, which its description compares with them.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -427,3 +434,13 @@ jobs:
           fi
           gh pr merge "$BRANCH" --auto --squash
           echo "The pull request of the issue assistant $TAG from $BRANCH has the commit $commit, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

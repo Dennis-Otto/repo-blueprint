@@ -34,6 +34,10 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   release-please:
     name: release pull request
@@ -59,10 +63,19 @@ jobs:
       version: ${{ steps.release.outputs.version || steps.beta.outputs.version || steps.resume.outputs.version }}
       major: ${{ steps.release.outputs.major || steps.resume.outputs.major }}
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            *.actions.githubusercontent.com:443
       # Without the release app of the owner, the run names what is missing rather than
       # fail at the token; every workflow has this step, the same but for its variables.
       - name: Check that the release app is set up
@@ -364,6 +377,16 @@ jobs:
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
           echo "The beta v$version of $next is on its way." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   # The build runs in a reusable workflow of its own, so that the provenance of the
   # assets names it alone, as SLSA Build Level 3 asks.
@@ -394,10 +417,13 @@ jobs:
       contents: write
       discussions: write
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       - name: Make the complete release public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -420,6 +446,16 @@ jobs:
             echo "The release is announced in the discussions." >> "$GITHUB_STEP_SUMMARY"
           fi
           gh release edit "$TAG" --draft=false --latest "${announce[@]}" --repo "$GITHUB_REPOSITORY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   pypi:
     name: deliver to PyPI
@@ -547,10 +583,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+            apps.nextcloud.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.tag }}
@@ -578,6 +620,16 @@ jobs:
             --connect-timeout 15 --max-time 180 --request POST \
             --header "Authorization: Token $APPSTORE_TOKEN" --header 'Content-Type: application/json' \
             --data-binary "@$RUNNER_TEMP/request.json" https://apps.nextcloud.com/api/v1/apps/releases
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   github-action:
     name: move the major tag
@@ -589,10 +641,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.tag }}
@@ -607,6 +663,16 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -fa "$MAJOR" -m "$TAG" "$TAG^{commit}"
           git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "refs/tags/$MAJOR"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   verify:
     name: verify

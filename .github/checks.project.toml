@@ -1,12 +1,13 @@
 # The explanations of the checks of the blueprint alone, on top of .github/checks.toml,
 # which every repository shares. Every repository gets the starter of
 # template/.github/checks.project.toml instead of this file.
-# https://github.com/Dennis-Otto/repo-blueprint#the-pr-coach
+# https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/checks.md#the-pr-coach
 
 # The tests of the blueprint check the reference pages of the website as well, which
 # reference.py writes from copier.yml, the workflows and the settings as code
-# (decision 0054) and from the registry .github/fleet.toml (decision 0079), and the sha256 of each pinned download, which pins.py writes beside
-# its version and into .github/pins.toml (decision 0029): the fix bot runs both, a
+# (decision 0054) and from the registry .github/fleet.toml (decision 0081), and
+# the sha256 of each pinned download, which pins.py writes beside its version and
+# into .github/pins.toml (decision 0029): the fix bot runs both, a
 # failing test of the code still needs a person. The step of the tests fails before
 # the step Checks of this project runs, and the fix bot runs the autofix of every step
 # of a failed check (python), so the commands belong here.

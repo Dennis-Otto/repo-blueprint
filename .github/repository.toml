@@ -1,6 +1,6 @@
 # The settings of the repository as code. `blueprint.py settings check` compares them
 # with GitHub, and `blueprint.py settings apply` sets them:
-# https://github.com/Dennis-Otto/repo-blueprint#settings-as-code
+# https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/settings.md#settings-as-code
 
 [repository]
 description = "Copier template for self-maintaining GitHub repos (Python, Home Assistant/HACS, Nextcloud apps, GitHub Actions, Node/TypeScript, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update."

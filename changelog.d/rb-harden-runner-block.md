@@ -1,0 +1,5 @@
+### Security
+
+- **The jobs with secrets or tokens that write now block every host they don't need:** Harden-Runner no longer only records the network traffic of the bots, the release, its build and its verification, but blocks it, so a compromised action in a job with the private key of the release app, the signing key of a Nextcloud app or an OIDC token can't send them to a host of its own. Each job names the hosts that its runs reach, a release also those of where `PUBLISH_TO` delivers it, and runs without `sudo` and Docker where it needs neither; its last step waits until Harden-Runner has removed Docker, so that a short job doesn't hang until its timeout. A job that needs a new host fails with the blocked call in the summary of Harden-Runner; add the host to its step *Block every host that the job doesn't need* (decision 0080).
+- **The signing key of a Nextcloud app is only in the step that signs:** krankerl, the downloads and the project's `scripts/check-package.sh` run before and after it, in steps without the key, which the signing step removes also when it fails.
+- **The GitHub CLI sends no telemetry from the workflows.**

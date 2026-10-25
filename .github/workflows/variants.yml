@@ -13,7 +13,8 @@ name: Variants
 # still pass the checks of this commit.
 #
 # And the same update with the answers of each repository that takes the blueprint,
-# from tests/answers/ (adopted): without the sample code, with their licenses, their
+# from tests/answers/ (adopted): without the sample code (except a repository that the
+# blueprint made new, MADE_NEW in tests/test_template.py), with their licenses, their
 # languages and their discussions. Such a repository brings its own code and tests,
 # so these legs check what the blueprint gives it alone: the update, the website and
 # the lint of the workflows and of the Markdown. The Downstream workflow updates the
@@ -59,6 +60,10 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
 
 jobs:
   variant:

@@ -36,6 +36,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # The GitHub CLI of the jobs sends no telemetry to GitHub.
+  GH_TELEMETRY: "false"
   # The Material theme warns about MkDocs 2.0 in every run; it keeps MkDocs below 2.0
   # itself, so the warning says nothing about this website.
   NO_MKDOCS_2_WARNING: "true"

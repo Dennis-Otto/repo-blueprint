@@ -63,7 +63,7 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 | A name of the device runs as script in the browser | Entities and events carry text, which the frontend escapes |[% elif stack == 'php' %]
 | Another site uses the session of an administrator | Nextcloud's CSRF check on every request of the app |
 | A secret reaches the browser or a log | The credentials manager keeps it; no response of the app contains it |
-| A crafted parameter reaches a file path or a query | Every parameter is checked against what it may be; files only through Nextcloud's file API; the taint analysis of `scripts/check.sh` fails on every path from a parameter or an answer of another service to a file, a query, a request or a redirection that no check of the app escapes |
+| A crafted parameter reaches a file path or a query | Parameters are checked, files go only through Nextcloud's file API, and the taint analysis fails on unchecked paths from input or another service to a file, query, request or redirect |
 | A crafted parameter makes the server request another address | The app requests only the addresses that it checked or that the administrator configured |
 | The answer of another service runs as script in the browser | The templates escape every value |[% elif project_type == 'github-action' %]
 | The text of an issue or a pull request runs as a command | Inputs reach the code through environment variables, never through the `run:` script |

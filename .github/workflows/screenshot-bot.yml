@@ -34,6 +34,8 @@ on:
 permissions: {}
 
 env:
+  # The GitHub CLI of the jobs sends no telemetry to GitHub.
+  GH_TELEMETRY: "false"
   # The branch of the pull request, and the first line of its commits and its title.
   BRANCH: bot/screenshots
   HEADLINE: "docs: update the screenshots"
@@ -205,10 +207,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            results-receiver.actions.githubusercontent.com:443
       # blueprint.py, which checks what the job render kept.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -346,3 +353,13 @@ jobs:
           fi
           gh pr merge "$open" --auto --squash
           echo "The pull request of the screenshots, #$open from $BRANCH, has the commit $head, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
