@@ -23,5 +23,6 @@ renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true
+test_marker: ''
 test_workflows: ''
 topics: documentation, github-pages, home-assistant, nextcloud, paperless-ngx, portfolio

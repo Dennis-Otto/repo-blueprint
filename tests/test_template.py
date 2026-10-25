@@ -10311,7 +10311,8 @@ def run_after_the_checks(
     """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
     answers as gh_answers() says, these stubs of other commands, and these files of
     the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python) for the commit
-    abc1234def of the branch feature of o/r, unless the variables say otherwise."""
+    abc1234def of the branch feature of o/r, which ended on 12 October 2026, unless the
+    variables say otherwise."""
     return workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -10321,6 +10322,7 @@ def run_after_the_checks(
         env={
             "RUN": "5",
             "NAME": "CI (python)",
+            "WHEN": "2026-10-12T09:20:00Z",
             "BRANCH": "feature",
             "HEAD_REPO": "o/r",
             "SHA": "abc1234def",
@@ -10697,6 +10699,62 @@ FLAKY_ROWS = [
     "| [`docs`](https://github.com/o/r/actions/runs/5/job/16)"
     f" | `Build the website` | {NOTHING} | `{EXITED}` |",
 ]
+# The report of the run, as its comment on the issue of flaky tests has it.
+FLAKY_REPORT = "\n".join(
+    [
+        "**CI (python)** failed at first and passed when it ran again, on `feature`"
+        " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
+        "",
+        "| Job | Step | Test | Error |",
+        "| --- | --- | --- | --- |",
+        *FLAKY_ROWS,
+    ]
+)
+# The run in the counts of the issue: when it ended, and its link.
+LAST_RUN = "[2026-10-12](https://github.com/o/r/actions/runs/5)"
+# The counts of the run: each job with each test that pytest names, the first time.
+FLAKY_COUNTS = [
+    "| `CI (python) / test (3.12)` | `tests/test_cards.py::test_board[dark]`"
+    f" | 1 | {LAST_RUN} |",
+    f"| `CI (python) / test (3.12)` | `tests/test_cards.py::test_score` | 1 | {LAST_RUN} |",
+    f"| `CI (python) / e2e (Safari)` | {NOTHING} | 1 | {LAST_RUN} |",
+    f"| `CI (python) / build` | {NOTHING} | 1 | {LAST_RUN} |",
+    f"| `CI (python) / docs` | {NOTHING} | 1 | {LAST_RUN} |",
+]
+FLAKY_INTRO = (
+    "The flaky-test bot counts here every job and test that failed at first and then"
+    " passed without a change of the code, and describes each run in a comment, with"
+    " the step, the test and the error that failed. Fix the test, then close this issue."
+)
+COUNTS_FROM = (
+    "<!-- The flaky-test bot rewrites the counts from here to the next comment. -->"
+)
+COUNTS_UNTIL = "<!-- The end of the counts. -->"
+
+
+def flaky_counts(*rows: str) -> list[str]:
+    """The lines of the counts in the body of the issue of flaky tests, with these rows
+    of the table, between the comments of the bot."""
+    return [
+        COUNTS_FROM,
+        "",
+        "**How often each job and test flaked**, the latest first:",
+        "",
+        "| Job | Test | Times | Last run |",
+        "| --- | --- | --- | --- |",
+        *rows,
+        "",
+        COUNTS_UNTIL,
+    ]
+
+
+def count_of(job: str, test: str, times: int, run: int, day: int) -> str:
+    """A row of the counts: a job and test of CI (python), how often it flaked, and the
+    run on that day of October 2026 that it last flaked in."""
+    return (
+        f"| `CI (python) / {job}` | {f'`{test}`' if test else NOTHING} | {times}"
+        f" | [2026-10-{day:02}](https://github.com/o/r/actions/runs/{run}) |"
+    )
 
 
 @WITH_JQ
@@ -10707,27 +10765,26 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
         tmp_path,
         "report",
         "Add the jobs that failed at first to the issue of flaky tests",
-        {**FIRST_ATTEMPT, "issue list": []},
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
         URL="https://github.com/o/r/actions/runs/5",
     )
 
+    # The body counts the jobs and tests, and the run gets a comment, as every later
+    # one does.
     assert written["issue-create"] == "\n".join(
-        [
-            "The flaky-test bot lists here every job that failed and then passed without"
-            " a change of the code, with the step, the test and the error that failed."
-            " Fix its test, then close this issue.",
-            "",
-            "**CI (python)** failed at first and passed when it ran again, on `feature`"
-            " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
-            "",
-            "| Job | Step | Test | Error |",
-            "| --- | --- | --- | --- |",
-            *FLAKY_ROWS,
-            "",
-        ]
+        [FLAKY_INTRO, "", *flaky_counts(*FLAKY_COUNTS), ""]
     )
     assert any(
         call.startswith("issue create --title Flaky tests --label maintenance ")
+        for call in calls
+    )
+    assert written["issue-comment"] == FLAKY_REPORT
+    assert any(
+        call.startswith("issue comment https://github.com/o/r/issues/9 --body ")
         for call in calls
     )
     assert "\n".join(FLAKY_ROWS) in summary
@@ -10735,6 +10792,20 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
 
 @WITH_JQ
 def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
+    # A person edited the issue in the browser, which ends its lines with CRLF.
+    before = [
+        FLAKY_INTRO,
+        "",
+        "A note of the maintainer.",
+        "",
+        *flaky_counts(
+            count_of("lint", "tests/test_x.py::test_y", 4, 2, 1),
+            count_of("docs", "", 2, 3, 2),
+            count_of("test (3.12)", "tests/test_cards.py::test_score", 1, 4, 3),
+        ),
+        "",
+        "And one below.",
+    ]
     calls, _, written = run_a_bot_after_the_checks(
         tmp_path,
         "report",
@@ -10745,13 +10816,130 @@ def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
                 {"number": 8, "title": "Flaky tests of the website"},
                 {"number": 7, "title": "Flaky tests"},
             ],
+            "issue view 7": {"body": "\r\n".join(before)},
+            "issue edit 7": "",
         },
         URL="https://github.com/o/r/actions/runs/5",
     )
 
     assert "issue-create" not in written
     assert any(call.startswith("issue comment 7 --body ") for call in calls)
-    assert written["issue-comment"].endswith("\n".join(FLAKY_ROWS))
+    assert written["issue-comment"] == FLAKY_REPORT
+    assert any(call.startswith("issue view 7 --json body --jq .body") for call in calls)
+    # The jobs and tests of this run count once more and come first, the others keep
+    # their counts below them, and the rest of the body stays as it was.
+    assert written["issue-edit"] == "\n".join(
+        [
+            *before[:4],
+            *flaky_counts(
+                FLAKY_COUNTS[0],
+                FLAKY_COUNTS[1].replace(" | 1 | ", " | 2 | "),
+                *FLAKY_COUNTS[2:4],
+                FLAKY_COUNTS[4].replace(" | 1 | ", " | 3 | "),
+                count_of("lint", "tests/test_x.py::test_y", 4, 2, 1),
+            ),
+            "",
+            "And one below.",
+            "",
+        ]
+    )
+    # The comment comes first: a body that GitHub refused would lose no run.
+    edits = [index for index, call in enumerate(calls) if call.startswith("issue ")]
+    assert [calls[index].split()[1] for index in edits] == [
+        "list",
+        "comment",
+        "view",
+        "edit",
+    ]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_adds_the_counts_to_an_issue_that_has_none(
+    tmp_path: Path,
+) -> None:
+    # An issue that the bot opened before it counted: the counts start with this run.
+    before = (
+        "The flaky-test bot lists here every job that failed and then passed without a"
+        " change of the code.\n\n| Job | Step | Test | Error |\n| --- | --- | --- | --- |"
+        "\n| [`lint`](https://github.com/o/r/actions/runs/2/job/3) | `Run`"
+        f" | {NOTHING} | {NOTHING} |"
+    )
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {"body": before},
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [before, "", *flaky_counts(*FLAKY_COUNTS), ""]
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_the_text_of_a_body_without_the_end_of_the_counts(
+    tmp_path: Path,
+) -> None:
+    # A person deleted the end comment: their text below the table stays.
+    lint = count_of("lint", "tests/test_x.py::test_y", 4, 2, 1)
+    before = [
+        FLAKY_INTRO,
+        "",
+        *flaky_counts(lint)[:-1],
+        "A note of the maintainer, where the end was.",
+    ]
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {"body": "\n".join(before)},
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [
+            FLAKY_INTRO,
+            "",
+            *flaky_counts(*FLAKY_COUNTS, lint),
+            "A note of the maintainer, where the end was.",
+            "",
+        ]
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_the_hundred_latest_counts(tmp_path: Path) -> None:
+    # A body of an issue holds 65,536 characters at most.
+    older = [count_of(f"job {number}", "", 1, number, 1) for number in range(100)]
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {
+                "body": "\n".join([FLAKY_INTRO, "", *flaky_counts(*older)])
+            },
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [FLAKY_INTRO, "", *flaky_counts(*FLAKY_COUNTS, *older[:95]), ""]
+    )
 
 
 @WITH_JQ
@@ -10841,11 +11029,15 @@ def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_t
 
     # Not the job that waits for the legs.
     assert [
-        line for line in written["issue-create"].splitlines() if line.startswith("| [")
+        line for line in written["issue-comment"].splitlines() if line.startswith("| [")
     ] == [
         "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
         f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
     ]
+    assert (
+        f"| `Variants / update (generic)` | {NOTHING} | 1 | {LAST_RUN} |"
+        in written["issue-create"].splitlines()
+    )
 
 
 @WITH_JQ
@@ -10882,7 +11074,7 @@ def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
         BRANCH="`@team`\n# x",
     )
 
-    body = written["issue-create"]
+    body = written["issue-comment"]
     assert "on `@team # x` at abc1234" in body
     rows = body.splitlines()
     assert (
@@ -10896,6 +11088,13 @@ def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
     ) in rows
     # The code of the branch and of the cells.
     assert body.count("`") == 2 * 8
+    counts = written["issue-create"]
+    assert (
+        "| `CI (python) / x \\| @team\\n[a](https://e.vil)` | `tests/x.py::@team`"
+        f" | 1 | {LAST_RUN} |"
+    ) in counts.splitlines()
+    # The code of the cells of the jobs and of the one test.
+    assert counts.count("`") == 2 * 3
 
 
 @WITH_JQ
@@ -10911,13 +11110,293 @@ def test_the_flaky_test_bot_names_no_branch_of_a_fork(tmp_path: Path) -> None:
         HEAD_REPO="fork/r",
     )
 
-    body = written["issue-create"]
+    assert "@team" not in written["issue-create"]
+    body = written["issue-comment"]
     assert (
         "**CI (python)** failed at first and passed when it ran again, on a branch of"
         " a fork at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):"
     ) in body.splitlines()
     assert "@team" not in body
     assert "e.vil" not in body
+
+
+# The log of the browser tests of a Docker E2E, as ha-autodarts' tests/e2e/browser.sh
+# writes it: each step names itself as it starts and once more when it passed, one of
+# them through Docker Compose, which puts the name of the container first. The steps
+# after the first error ran after the failure.
+BROWSER_LOG = "".join(
+    f"2026-10-12T09:16:{second:02}.0000000Z {line}\n"
+    for second, line in enumerate(
+        [
+            "##[group]Run bash tests/e2e/browser.sh",
+            "Browser step: Open the board",
+            "Browser step: Open the board (1.2 s)",
+            "browser-1  | Browser step:  Show the score ",
+            "browser-1  | Traceback (most recent call last):",
+            'browser-1  |   File "/tests/e2e/browser.py", line 3720, in <module>',
+            "browser-1  |     step.run()",
+            "browser-1  | \x1b[31mplaywright._impl._errors.TimeoutError\x1b[0m: Page.goto:"
+            " Timeout 30000ms exceeded.",
+            "browser-1  | During handling of the above exception, another exception"
+            " occurred:",
+            "browser-1  | BrowserFailure: the board took too long",
+            "browser-1  | Call log:",
+            'browser-1  |   - navigating to "http://homeassistant:8123/", waiting until'
+            ' "load"',
+            "##[error]Process completed with exit code 1.",
+            "Browser step: Stop the board",
+            "ValueError: after the failure",
+        ]
+    )
+)
+
+
+@WITH_JQ
+@pytest.mark.parametrize("marker", ["Browser step:", ""], ids=["marker", "none"])
+def test_the_flaky_test_bot_names_the_step_that_other_tests_name_last(
+    tmp_path: Path, marker: str
+) -> None:
+    # ha-autodarts#223: Safari timed out in Page.goto, and only the exit code of the
+    # browser tests named the failure.
+    _, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        21,
+                        "e2e (Safari)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        22,
+                        "e2e (Chrome)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        23,
+                        "e2e (Firefox)",
+                        "failure",
+                        ("Start the demo", "failure"),
+                    ),
+                    job_of_a_run(24, "test (3.12)", "failure", ("Run", "failure")),
+                ]
+            },
+            "repos/o/r/check-runs/21/annotations": annotations_of_a_job(EXITED),
+            # browser.sh explains a failed step in an annotation of its own.
+            "repos/o/r/check-runs/22/annotations": annotations_of_a_job(
+                "The browser tests failed at the step Show the score", EXITED
+            ),
+            "repos/o/r/check-runs/23/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/24/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/21/logs": BROWSER_LOG,
+            "repos/o/r/actions/jobs/22/logs": BROWSER_LOG,
+            # No step started: the demo failed before the tests.
+            "repos/o/r/actions/jobs/23/logs": (
+                "Error: the demo did not start\n"
+                "##[error]Process completed with exit code 1.\n"
+            ),
+            # pytest names its own tests, also after a line with the marker.
+            "repos/o/r/actions/jobs/24/logs": (
+                "Browser step: Open the board\n"
+                "FAILED tests/test_a.py::test_b - AssertionError: no\n"
+            ),
+            "issue list": [],
+        },
+        NAME="Docker E2E",
+        URL="https://github.com/o/r/actions/runs/5",
+        MARKER=marker,
+    )
+
+    step = "`Show the score`" if marker else NOTHING
+    rows = [
+        "| [`e2e (Safari)`](https://github.com/o/r/actions/runs/5/job/21)"
+        f" | `Run the browser tests` | {step} | `"
+        + (
+            "playwright._impl._errors.TimeoutError: Page.goto: Timeout 30000ms exceeded."
+            if marker
+            else EXITED
+        )
+        + "` |",
+        "| [`e2e (Chrome)`](https://github.com/o/r/actions/runs/5/job/22)"
+        f" | `Run the browser tests` | {step}"
+        " | `The browser tests failed at the step Show the score` |",
+        "| [`e2e (Firefox)`](https://github.com/o/r/actions/runs/5/job/23)"
+        f" | `Start the demo` | {NOTHING} | `{EXITED}` |",
+        "| [`test (3.12)`](https://github.com/o/r/actions/runs/5/job/24)"
+        " | `Run` | `tests/test_a.py::test_b` | `AssertionError: no` |",
+    ]
+    assert "\n".join(rows) in written["issue-comment"]
+    assert "\n".join(rows) in summary
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| `")
+    ] == [
+        f"| `Docker E2E / e2e (Safari)` | {step} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / e2e (Chrome)` | {step} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / e2e (Firefox)` | {NOTHING} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / test (3.12)` | `tests/test_a.py::test_b` | 1 | {LAST_RUN} |",
+    ]
+
+
+def a_log_of(*lines: str) -> str:
+    """The log of a job with these lines, each after its time, as GitHub keeps it."""
+    return "".join(
+        f"2026-10-12T09:16:{second:02}.0000000Z {line}\n"
+        for second, line in enumerate(lines)
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_step_of_the_worker_that_failed(
+    tmp_path: Path,
+) -> None:
+    # homedarts-for-autodarts runs two workers of browser tests side by side, each line
+    # after its shard. The one that failed stops, the other goes on and passes, and the
+    # error of the job comes only at the end, after the logs of Home Assistant.
+    workers = a_log_of(
+        "##[group]Run bash tests/e2e/screenshots.sh",
+        "Browser step: Take the screenshots",
+        "##[group]Run bash tests/e2e/browser.sh",
+        "[1/4] Browser step: Open the board",
+        "[2/4] Browser step: Open the board",
+        "[1/4] Browser step: Open the board (1.0 s)",
+        "[1/4] Browser step: Show the score",
+        "[2/4] Browser step: Open the board (1.1 s)",
+        "[2/4] Browser step: Pick a game",
+        "[1/4] Traceback (most recent call last):",
+        '[1/4]   File "/repo/tests/e2e/browser.py", line 3629, in main',
+        "[2/4] Browser step: Pick a game (2.2 s)",
+        "[1/4] playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms"
+        " exceeded.",
+        "[2/4] Browser check of shard 2/4 passed, 2 steps in 3 s: Open the board, Pick a"
+        " game.",
+        "homeassistant-1  | homeassistant.exceptions.HomeAssistantError: the board left",
+        'The browser check failed in shard 1/4 at the step "Show the score".',
+        "##[error]Process completed with exit code 1.",
+    )
+    # The browser tests passed, and a later step of the job failed.
+    later = a_log_of(
+        "##[group]Run bash tests/e2e/browser.sh",
+        "Browser step: Open the board",
+        "Browser step: Open the board (1.2 s)",
+        "##[group]Run actions/upload-artifact",
+        "Error: no files were found",
+        "##[error]Process completed with exit code 1.",
+    )
+    # The tests failed after their last step had passed.
+    after = a_log_of(
+        "##[group]Run bash tests/e2e/browser.sh",
+        "Browser step: Open the board",
+        "Browser step: Open the board (1.2 s)",
+        "ValueError: after the steps",
+        "##[error]Process completed with exit code 1.",
+    )
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        31,
+                        "browser (cards)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        32,
+                        "browser (upload)",
+                        "failure",
+                        ("Upload the artifacts", "failure"),
+                    ),
+                    job_of_a_run(
+                        33,
+                        "browser (after)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/31/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/32/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/33/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/31/logs": workers,
+            "repos/o/r/actions/jobs/32/logs": later,
+            "repos/o/r/actions/jobs/33/logs": after,
+            "issue list": [],
+        },
+        NAME="Docker E2E",
+        URL="https://github.com/o/r/actions/runs/5",
+        MARKER="Browser step:",
+    )
+
+    assert (
+        "\n".join(
+            [
+                "| [`browser (cards)`](https://github.com/o/r/actions/runs/5/job/31)"
+                " | `Run the browser tests` | `Show the score`"
+                " | `playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms"
+                " exceeded.` |",
+                "| [`browser (upload)`](https://github.com/o/r/actions/runs/5/job/32)"
+                f" | `Upload the artifacts` | {NOTHING} | `{EXITED}` |",
+                "| [`browser (after)`](https://github.com/o/r/actions/runs/5/job/33)"
+                " | `Run the browser tests` | `Open the board`"
+                " | `ValueError: after the steps` |",
+            ]
+        )
+        in written["issue-comment"]
+    )
+    # The same step counts the same, whatever its seconds.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| `")
+    ] == [
+        f"| `Docker E2E / browser (cards)` | `Show the score` | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / browser (upload)` | {NOTHING} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / browser (after)` | `Open the board` | 1 | {LAST_RUN} |",
+    ]
+
+
+def test_the_flaky_test_bot_of_a_project_takes_the_marker_of_its_tests(
+    tmp_path: Path,
+) -> None:
+    report = "Add the jobs that failed at first to the issue of flaky tests"
+    assert (
+        workflow_steps.step("after-checks.yml", "report", report)["env"]["MARKER"] == ""
+    )
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="home-assistant",
+        test_marker="Browser step: ",
+    )
+
+    found = workflow_steps.step("after-checks.yml", "report", report, project)
+    assert found["env"]["MARKER"] == "Browser step: "
+
+
+@pytest.mark.parametrize(
+    "marker", ['Say "step"', "Step\\", "`step`", "${{ github.token }}", "   "]
+)
+def test_the_marker_of_the_tests_of_a_project_stays_text(
+    tmp_path: Path, marker: str
+) -> None:
+    # The marker goes into a string of YAML in the workflow.
+    with pytest.raises(ValueError, match="test_marker"):
+        render(
+            tmp_path,
+            project_name="Demo",
+            description="A demo.",
+            project_type="generic",
+            test_marker=marker,
+        )
 
 
 def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
