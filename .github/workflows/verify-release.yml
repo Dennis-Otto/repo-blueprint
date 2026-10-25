@@ -232,6 +232,55 @@ jobs:
                 fail "$image has no valid provenance."
               fi
               ;;
+            hacs)
+              # HACS installs the zip that hacs.json at the tag names, unpacked into
+              # custom_components/<domain>/, where Home Assistant reads the domain and
+              # the version of its manifest.json. It offers the latest release to every
+              # user, and a prerelease only to those who show its betas.
+              hacs="$(gh api -H "Accept: application/vnd.github.raw+json" \
+                "repos/$GH_REPO/contents/hacs.json?ref=$TAG" 2>/dev/null || true)"
+              zip="$(jq -r 'if .zip_release == true then .filename // "" else "" end' \
+                <<<"$hacs" 2>/dev/null || true)"
+              domain="$(gh api "repos/$GH_REPO/contents/custom_components?ref=$TAG" \
+                --jq '[.[] | select(.type == "dir") | .name] | join(" ")' 2>/dev/null || true)"
+              if [[ -z "$zip" ]]; then
+                fail "hacs.json at $TAG names no zip_release and filename, so HACS installs the files of the tag, not the asset with the provenance."
+              elif [[ ! -f "$zip" ]]; then
+                fail "The release has no $zip, the zip that hacs.json names for HACS."
+              else
+                manifest="$(python3 -c 'import sys, zipfile; print(zipfile.ZipFile(sys.argv[1]).read("manifest.json").decode())' \
+                  "$zip" 2>/dev/null || true)"
+                zipped_domain="$(jq -r '.domain // ""' <<<"$manifest" 2>/dev/null || true)"
+                zipped_version="$(jq -r '.version // ""' <<<"$manifest" 2>/dev/null || true)"
+                if [[ -z "$manifest" ]]; then
+                  fail "$zip has no manifest.json at its root, so HACS unpacks the integration one folder too deep."
+                elif [[ -n "$domain" && "$zipped_domain" == "$domain" ]]; then
+                  pass "$zip holds the integration $domain at its root, as HACS unpacks it into custom_components/$domain/."
+                else
+                  fail "The manifest.json of $zip has the domain ${zipped_domain:-none}, not that of custom_components/${domain:-?}/ at $TAG."
+                fi
+                if [[ -n "$manifest" && "$zipped_version" == "$version" ]]; then
+                  pass "Its manifest.json has the version $version, which Home Assistant shows."
+                elif [[ -n "$manifest" ]]; then
+                  fail "The manifest.json of $zip has the version ${zipped_version:-none}, not $version."
+                fi
+              fi
+              latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>/dev/null || true)"
+              prerelease="$(jq -r .prerelease <<<"$release")"
+              if [[ "$version" == *-* && "$prerelease" == true ]]; then
+                pass "HACS offers the prerelease $TAG only to those who show its betas."
+              elif [[ "$version" == *-* ]]; then
+                fail "$TAG has the version of a prerelease but isn't marked as one, so HACS offers it to every user."
+              elif [[ "$prerelease" == true ]]; then
+                fail "$TAG is marked as a prerelease, so HACS offers it only to those who show its betas."
+              elif [[ "$latest" == "$TAG" ]]; then
+                pass "HACS offers $TAG to every user, as the latest release."
+              elif [[ -n "$latest" && "$(printf '%s\n' "$version" "${latest#v}" | sort -V | tail -n 1)" != "$version" ]]; then
+                pass "HACS offers the newer release $latest; $TAG stays for those who choose it."
+              else
+                fail "The latest release is ${latest:-none}, not $TAG, so HACS doesn't offer it."
+              fi
+              ;;
             nextcloud-appstore)
               app_id="$(gh api -H "Accept: application/vnd.github.raw+json" \
                 "repos/$GH_REPO/contents/appinfo/info.xml?ref=$TAG" |

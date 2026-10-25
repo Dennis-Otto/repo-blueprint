@@ -38,6 +38,8 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request publishes a release with the zip of the integration, which `hacs.json` names, so HACS installs that zip. The release has its SBOM and the signed provenance of SLSA Build Level 3.
 
+After every release, and every week for the latest one, `verify-release.yml` checks the zip as HACS installs it: the release has the zip that `hacs.json` names, its `manifest.json` lies at the root of the zip, with the domain of the folder in `custom_components/` and the version of the release, and HACS offers it as it should, a release to every user and a beta only to those who show betas. A beta of the beta channel has its own version in the `manifest.json` of its zip, such as 1.3.0-beta.1, which Home Assistant shows to its testers ([decision 0065](../decisions/0065-the-release-verification-checks-the-zip-that-hacs-installs.md)).
+
 ## Once by hand
 
 `python3 .github/blueprint.py checklist` ticks off each step that it can see and names the rest, each with its link: the release app of the owner with its private key, as [your own account](../own-account.md) shows, the token of the issue assistant unless its AI is off, OpenSSF Best Practices, the REUSE API and the social preview.

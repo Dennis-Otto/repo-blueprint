@@ -89,7 +89,7 @@ Fünf öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und
 
 | Art | Stack | Prüfungen | Auslieferung |
 | --- | --- | --- | --- |
-| [Home-Assistant-Integration](https://dennis-otto.github.io/repo-blueprint/de/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, Tests, HACS, hassfest | ein Zip-Asset für HACS |
+| [Home-Assistant-Integration](https://dennis-otto.github.io/repo-blueprint/de/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, Tests, HACS, hassfest | ein Zip-Asset für HACS, geprüft, wie HACS es installiert |
 | [Nextcloud-App](https://dennis-otto.github.io/repo-blueprint/de/kinds/nextcloud-app.html) | PHP 8.2 und neuer, die Werkzeuge auf PHP 8.3, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, der Code und seine Pakete auf PHP 8.2, PHPUnit in zufälliger Reihenfolge mit jeder Zeile abgedeckt | signiertes Paket in den App Store |
 | [GitHub Action](https://dennis-otto.github.io/repo-blueprint/de/kinds/github-action.html) | Python 3.12 des Runners, Composite Action | Ruff, mypy, Tests, ein Lauf der Action | Release-Tags und ein mitwandernder Major-Tag |
 | [Python-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, Tests, Build | PyPI, Trusted Publishing |
