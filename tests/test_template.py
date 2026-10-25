@@ -6366,6 +6366,7 @@ def test_each_repository_of_the_rollout_runs_its_schedules_at_times_of_its_own(
     # tests (decision 0082).
     registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
     place = {item.name: item.rollout for item in registry.members}
+    place["repo-blueprint"] = 0
     own = schedules(ROOT)
     crons = {"repo-blueprint": own}
     days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -6401,7 +6402,10 @@ def test_each_repository_of_the_rollout_runs_its_schedules_at_times_of_its_own(
                 cron = Cron.parse(line)
                 assert cron, (name, workflow, line)
                 assert 0 not in cron.minutes, (name, workflow, line)
-    # The heavy weekly jobs of two repositories never run in the same hour of a day.
+    # The heavy weekly jobs of two repositories never run in the same hour of a day,
+    # as long as their slots differ by less than a week: slots 0 to 6, the blueprint
+    # and the first six repositories of the registry. From slot 7 on the days repeat
+    # 56 minutes later in the same hour (decision 0082).
     taken: dict[tuple[str, str], str] = {}
     for name, theirs in crons.items():
         hours = {
@@ -6411,7 +6415,11 @@ def test_each_repository_of_the_rollout_runs_its_schedules_at_times_of_its_own(
         }
         assert hours, name
         for hour in hours:
-            assert taken.setdefault(hour, name) == name, (hour, taken[hour], name)
+            first = taken.setdefault(hour, name)
+            assert first == name or place[first] % 7 == place[name] % 7, (
+                f"{name} (slot {place[name]}) runs a heavy weekly job in the hour"
+                f" {hour} of {first} (slot {place[first]}); see decision 0082"
+            )
     # The weekly run of the mutation tests takes two runners, a pull request four.
     mutation = yaml.safe_load(
         (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
