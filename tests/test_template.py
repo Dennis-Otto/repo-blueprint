@@ -5005,6 +5005,10 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         ".github/screenshots-paths.txt",
     ):
         assert not (project / sample).exists(), sample
+    # Nor does its guide describe the starter script that it lacks.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`scripts/screenshots.sh` renders the social preview" not in contributing
+    assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
     assert sorted(files_of(project / "tests")) == (
@@ -10600,7 +10604,7 @@ def test_one_check_stands_for_every_variant() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     gate = job_in(variants, "variants")
     assert gate["name"] == "variants"
-    assert gate["needs"] == "variant"
+    assert gate["needs"] == ["variant", "pictures"]
     # Also after a variant failed, so that the check reports the failure.
     assert condition_of(gate) == "always()"
     settings = tomllib.loads(
@@ -11851,6 +11855,188 @@ def test_the_screenshot_bot_is_in_every_repository_and_waits_for_its_script(
     assert "`scripts/screenshots.sh`" in decided.stdout
 
 
+# What the starter script of each kind photographs besides the website, by the server
+# that it starts in Docker, and the files of the project that the pictures show.
+STARTER_PICTURES: dict[str, tuple[str, str, str]] = {
+    "home-assistant": (
+        "home-assistant",
+        "ghcr.io/home-assistant/home-assistant:",
+        "custom_components/**",
+    ),
+    "nextcloud-app": ("nextcloud", "docker.io/library/nextcloud:", "appinfo/**"),
+}
+
+
+def starter_python(script: str) -> str:
+    """The Python that the starter script runs in the browser's container."""
+    return script.split("<<'PYTHON'\n", 1)[1].split("\nPYTHON\n", 1)[0]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_new_repository_photographs_its_website_and_what_its_kind_shows(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The starter script photographs the website of every kind, and by its kind the
+    # integration in a Home Assistant or the app in a Nextcloud, each in Docker and
+    # in both themes, with the Playwright that the blueprint pins and keeps current.
+    project = projects[kind]
+    script = (project / "scripts/screenshots.sh").read_text(encoding="utf-8")
+    assert "\npictures=docs/images/screenshots\n" in script
+    assert '"website", "http://127.0.0.1:8000/"' in script
+    assert '(("light", ""), ("dark", ".dark"))' in script
+    assert "page.clock.set_fixed_time(CLOCK)" in script
+    assert "-r /tmp/screenshots-browser-requirements.txt" in script
+    assert 'docker network create --internal "$run"' in script
+    assert (project / ".github/screenshots-browser-requirements.txt").read_text(
+        encoding="utf-8"
+    ) == (ROOT / "stacks/screenshots/requirements-browser.txt").read_text(
+        encoding="utf-8"
+    )
+    paths = (project / ".github/screenshots-paths.txt").read_text(encoding="utf-8")
+    for pattern in ("docs/**", "!docs/images/screenshots/**", "mkdocs.yml"):
+        assert f"\n{pattern}\n" in paths, pattern
+    assert "\n.github/screenshots-browser-requirements.txt\n" in paths
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "\n- `scripts/screenshots.sh` renders the social preview" in contributing
+    for other, (name, image, sources) in STARTER_PICTURES.items():
+        assert (f'"{name}",' in script) == (other == kind), name
+        assert (image in script) == (other == kind), image
+        assert (f"\n{sources}\n" in paths) == (other == kind), sources
+    if kind == "home-assistant":
+        assert '"/api/config/config_entries/flow", {"handler": DOMAIN}' in script
+        assert 'while call("/api/config", token=token)["state"] != "RUNNING":' in script
+        assert 'DOMAIN = "demo_project"' in script
+        assert '"$root/custom_components:/config/custom_components:ro"' in script
+    if kind == "nextcloud-app":
+        assert "occ app:enable demo_project >/dev/null" in script
+        assert '"$root:/var/www/html/custom_apps/demo_project:ro"' in script
+        # Only for this run, never in the repository.
+        assert 'password="$(od -An -N16 -tx1 /dev/urandom' in script
+    # The script passes ShellCheck, and its Python compiles and has nothing unused,
+    # in every kind.
+    # ShellCheck of shellcheck-py, beside the Python of the tests.
+    tools = os.pathsep.join([str(Path(sys.executable).parent), os.environ["PATH"]])
+    checked = subprocess.run(
+        [
+            shutil.which("shellcheck", path=tools) or "shellcheck",
+            str(project / "scripts/screenshots.sh"),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert checked.returncode == 0, checked.stdout.decode(errors="replace")
+    python = starter_python(script)
+    compile(python, "screenshots.sh", "exec")
+    linted = subprocess.run(
+        [
+            *(sys.executable, "-m", "ruff", "check", "--isolated", "--no-cache"),
+            *("--select", "F,E9,B", "--stdin-filename", "shoot.py", "-"),
+        ],
+        input=python.encode(),
+        capture_output=True,
+        check=False,
+    )
+    assert linted.returncode == 0, linted.stdout.decode(errors="replace")
+
+
+def images_that_renovate_finds(
+    config: str, path: str, text: str
+) -> list[tuple[str, str, str]]:
+    """The images that the custom managers of a configuration of Renovate find in
+    the file at path, by name, tag and digest."""
+    found = []
+    for manager in renovate_rules(config)["customManagers"]:
+        files = [re.compile(name.strip("/")) for name in manager["managerFilePatterns"]]
+        if not any(name.search(path) for name in files):
+            continue
+        for pattern in manager["matchStrings"]:
+            for match in re.finditer(pattern.replace("(?<", "(?P<"), text):
+                found.append(
+                    (match["depName"], match["currentValue"], match["currentDigest"])
+                )
+    return found
+
+
+def test_renovate_keeps_the_servers_of_the_starter_pictures_current(
+    projects: Mapping[str, Path],
+) -> None:
+    # Renovate finds the image of Home Assistant and of Nextcloud by tag and digest,
+    # in the template of the starter script for the blueprint, and in the script of
+    # a new repository for that repository.
+    name = "template/scripts/[% if sample_code %]screenshots.sh[% endif %].jinja"
+    template = (ROOT / name).read_text(encoding="utf-8")
+    images = re.findall(
+        r'^\w+="([^:"]+):([^@"]+)@(sha256:[0-9a-f]{64})"$', template, re.M
+    )
+    assert [name for name, _, _ in images] == [
+        "ghcr.io/home-assistant/home-assistant",
+        "docker.io/library/nextcloud",
+    ]
+    own = (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    assert images_that_renovate_finds(own, name, template) == images
+    shared = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    for kind, image in zip(STARTER_PICTURES, images, strict=True):
+        script = (projects[kind] / "scripts/screenshots.sh").read_text(encoding="utf-8")
+        found = images_that_renovate_finds(shared, "scripts/screenshots.sh", script)
+        assert found == [image], kind
+    # A version of Nextcloud that the app allows.
+    info = (
+        ROOT / "template/[% if stack == 'php' %]appinfo[% endif %]/info.xml.jinja"
+    ).read_text(encoding="utf-8")
+    allowed = re.search(r'<nextcloud min-version="(\d+)" max-version="(\d+)"/>', info)
+    assert allowed
+    major = int(images[1][1].split(".")[0])
+    assert int(allowed[1]) <= major <= int(allowed[2])
+    # Neither Renovate moves it to a major version beyond that max-version.
+    nextcloud = (
+        projects["nextcloud-app"] / ".github/renovate-blueprint.json5"
+    ).read_text(encoding="utf-8")
+    held = {
+        "matchDepNames": ["docker.io/library/nextcloud"],
+        "matchUpdateTypes": ["major"],
+        "enabled": False,
+    }
+    for rules, files in (
+        (own, ["template/scripts/**"]),
+        (nextcloud, ["scripts/screenshots.sh"]),
+    ):
+        found = renovate_rules(rules)["packageRules"]
+        assert {"matchFileNames": files, **held} in found
+
+
+def test_the_browser_of_the_pictures_and_its_playwright_move_together() -> None:
+    # The image of the social preview holds the browsers of one version of
+    # Playwright, which only the package of the same version starts; Renovate moves
+    # both in one pull request.
+    dockerfile = (ROOT / ".github/social-preview/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    image = re.search(
+        r"^FROM mcr\.microsoft\.com/playwright/python:v([\d.]+)-", dockerfile, re.M
+    )
+    assert image
+    lock = (ROOT / "stacks/screenshots/requirements-browser.txt").read_text(
+        encoding="utf-8"
+    )
+    assert f"\nplaywright=={image[1]} \\\n" in lock
+    assert "--hash=sha256:" in lock
+    rules = renovate_rules(
+        (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    )
+    grouped = [
+        rule for rule in rules["packageRules"] if rule.get("groupName") == "Playwright"
+    ]
+    assert grouped == [
+        {
+            "matchDepNames": ["mcr.microsoft.com/playwright/python", "playwright"],
+            "groupName": "Playwright",
+        }
+    ]
+    # And it comes last, so that no rule for the images or the Python tools takes
+    # either of them into a group of its own.
+    assert rules["packageRules"][-1] == grouped[0]
+
+
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
@@ -11959,6 +12145,32 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
         assert f" {picture}" in script, picture
     for picture in ("copier-copy.gif", "dashboard.png"):
         assert f"docs/images/{picture}" in script, picture
+    # Public pages of GitHub, in both themes, by the Playwright of the starter
+    # scripts, from pages that no longer change and with a clock that stands still.
+    assert "python3 /work/.github/docs-pictures/github_pages.py /tmp/github" in script
+    assert "-r /work/stacks/screenshots/requirements-browser.txt" in script
+    for pattern in (
+        ".github/social-preview/Dockerfile",
+        "stacks/screenshots/requirements-browser.txt",
+    ):
+        assert f"\n{pattern}\n" in listed, pattern
+    pages = (ROOT / ".github/docs-pictures/github_pages.py").read_text(encoding="utf-8")
+    assert "page.clock.set_fixed_time(CLOCK)" in pages
+    names = re.findall(r'^        "(github-[a-z-]+)",$', pages, re.M)
+    assert names == [
+        "github-update-pull-request",
+        "github-release",
+        "github-pr-coach",
+    ]
+    for readme in ("README.md", "README.de.md"):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        for name in names:
+            assert f'srcset="docs/images/{name}.dark.png"' in text, (readme, name)
+            assert f'<img src="docs/images/{name}.png"' in text, (readme, name)
+    for name in names:
+        for suffix in ("", ".dark"):
+            taken = ROOT / f"docs/images/{name}{suffix}.png"
+            assert taken.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), taken
 
 
 def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> None:

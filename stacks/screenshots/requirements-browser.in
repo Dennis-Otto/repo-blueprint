@@ -1,0 +1,7 @@
+# Playwright, which drives the browser of the screenshots in the image of
+# .github/social-preview/Dockerfile, whose Python is 3.12 and whose browsers belong to
+# the same version of Playwright: Renovate moves the two together. scripts/screenshots.sh
+# and scripts/docs-pictures.sh install it in that container, never on the runner.
+# Renovate compiles it again with the command in the header of requirements-browser.txt.
+# https://github.com/Dennis-Otto/repo-blueprint
+playwright==1.63.0
