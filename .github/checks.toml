@@ -214,13 +214,18 @@ the release can't take in; an annotation names each problem."""
 why = """The entries become the notes of the next release, where users read what changed
 for them, and the release stops at a fragment that it can't take in."""
 fix = """Describe the change in the words of a user in a new file of `changelog.d/`, named
-after your branch, such as `changelog.d/dark-mode.md`, below a heading such as
-`### Features` or `### Bug fixes`, and push; a fragment that fails says what to change.
-A fragment that `main` has already is the entry of another pull request and doesn't
-count; give yours a name of its own. A change that users don't notice takes another
-type in the title, such as `refactor:`, `docs:` or `test:`."""
-docs = "CONTRIBUTING.md#workflow"
-autofix = """Not yet: a draft entry from the title of the pull request follows in
+after your branch without its type, such as `changelog.d/dark-mode.md` for the branch
+`feat/dark-mode`, below a heading such as `### Features` or `### Bug fixes`, and push; a
+fragment that fails says what to change. A fragment that `main` has already is the
+entry of another pull request and doesn't count; give yours a name of its own. An
+entry under `## Unreleased` in `CHANGELOG.md` counts as well, but conflicts with every
+pull request that adds one at the same place. A change that users don't notice takes
+another type in the title, such as `refactor:`, `docs:` or `test:`."""
+docs = "CONTRIBUTING.md#the-changelog"
+autofix = """A heading of a fragment that surely means a kind of change, such as `### Fixes`
+for `### Fixed`, the fix bot renames, since the step *Changelog fragments* of
+`scripts/check.sh` checks every fragment as well. Not yet: a draft fragment from the
+title, a new file of `changelog.d/` and never an entry under `## Unreleased`, follows in
 Dennis-Otto/repo-blueprint#429; the words for users stay the author's."""
 
 [check.codeql]
@@ -675,13 +680,13 @@ step checks every fragment, also those that other pull requests left on `main` f
 next release."""
 why = """The release bot takes in every fragment and stops at one that it can't, so no
 release comes until the fragment is fixed."""
-fix = """Change the fragment as the log says, for example `### Fixes` to `### Fixed`, and
-check it again (in the blueprint itself, the tool is `blueprint.py` without
-`.github/`):"""
-commands = ["python3 .github/blueprint.py fragments"]
+fix = """Change the fragment as the log says. The command renames each heading that
+surely means a kind of change, such as `### Fixes` to `### Fixed` or `## Features` to
+`### Features`, and names what is left for you; then commit what changed (in the
+blueprint itself, the tool is `blueprint.py` without `.github/`):"""
+commands = ["python3 .github/blueprint.py fragments --fix"]
 docs = "CONTRIBUTING.md#the-changelog"
-autofix = """Which kind of change an entry is and how a user reads it is the decision of
-a person; the log names the fragment and its problem."""
+autofix = ["{blueprint} fragments --fix"]
 
 [step."Accepted advisories"]
 problem = """`.github/renovate-accepted.json5` has other rules of Renovate than the versions

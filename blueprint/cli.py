@@ -24,6 +24,7 @@ from blueprint.changelog import (
     FragmentError,
     beta_notes,
     fragment_problems,
+    heal,
     read_fragments,
     release_changelog,
     release_notes,
@@ -130,10 +131,14 @@ def changelog_command(arguments: argparse.Namespace) -> int:
 
 def fragments_command(arguments: argparse.Namespace) -> int:
     """Checks the fragments as the release takes them in: the problems on stdout, one
-    on each line, for the check of a pull request to show."""
+    on each line, for the check of a pull request to show. With --fix, it renames each
+    heading that surely means a kind of change first, and names each renaming."""
     folder = Path(arguments.folder)
     changelog = Path(arguments.file)
     text = changelog.read_text(encoding="utf-8") if changelog.is_file() else ""
+    if arguments.fix:
+        for said in heal(folder, text):
+            print(said)
     fragments = read_fragments(folder)
     problems = fragment_problems(fragments, text)
     for problem in problems:
@@ -886,6 +891,12 @@ def add_changelog_parsers(
         "--file",
         default="CHANGELOG.md",
         help="the changelog, whose headings a fragment may use too",
+    )
+    fragments_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="first rename each heading that surely means a kind of change, such as "
+        "### Fixes to ### Fixed, as the fix bot does",
     )
     coverage_parser = commands.add_parser(
         "coverage",
