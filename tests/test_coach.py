@@ -374,8 +374,11 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Pages in one column",
         "Accepted advisories",
         "Lock files",
+        "Version",
         "Ruff",
+        "Composer",
         "Coding standard",
+        "Package lock",
         "Lint and format",
     ]
     markdown = explained.check("markdown")

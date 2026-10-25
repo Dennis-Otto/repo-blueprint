@@ -76,6 +76,9 @@ from blueprint.mutation import default_paths
 from blueprint.pages import layouts, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import Settings, allows
+from blueprint.versions import CONFIG, MANIFEST
+from blueprint.versions import files as versioned_files
+from blueprint.versions import fix as fix_versions
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -755,6 +758,55 @@ def test_the_versions_agree(projects: dict[str, Path], kind: str) -> None:
         ]
     if config["release-type"] == "simple":
         assert (project / "version.txt").read_text(encoding="utf-8") == "0.0.0\n"
+
+
+def version_step(check: str) -> str:
+    """The set-up of scripts/check.sh and its step Version."""
+    start = check.index('step "Version"')
+    return (
+        check[: check.index('step "Text files"')]
+        + check[start : check.index('step "Git hooks"', start)]
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_fix_bot_writes_the_version_of_the_release_bot_back(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    project = projects[kind]
+    script = version_step((project / "scripts/check.sh").read_text(encoding="utf-8"))
+    # The fix writes the version into the files whose version the step reads, all of
+    # them, in the order of the step.
+    checked = re.findall(r"^version_in (\S+) ", script, re.M)
+    assert checked
+    assert versioned_files(project) == checked
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    for name in [MANIFEST, CONFIG, *checked]:
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(project / name, repository / name)
+    assert run_the_steps(repository, script).returncode == 0
+    # A version changed by hand in each file, the last first, so that each fails the
+    # step, which stops at the first file with another version.
+    for name in reversed(checked):
+        data = (project / name).read_bytes()
+        (repository / name).write_bytes(data.replace(b"0.0.0", b"0.4.2", 1))
+        failed = run_the_steps(repository, script)
+        assert failed.returncode == 1, name
+        assert (
+            f"{name} has version 0.4.2; the manifest of the release bot has 0.0.0."
+            in failed.stdout
+        )
+
+    fixed = fix_versions(repository)
+
+    assert [file.path for file in fixed.fixed] == checked
+    assert fixed.left == []
+    for name in checked:
+        assert (repository / name).read_bytes() == (project / name).read_bytes(), name
+    passed = run_the_steps(repository, script)
+    assert passed.returncode == 0, passed.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -1603,6 +1655,55 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/lcov.info" in ignored
     assert manifest["files"] == ["dist"]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("locked", [True, False])
+def test_the_lock_file_of_a_node_package_locks_what_its_package_json_asks_for(
+    projects: dict[str, Path], tmp_path: Path, locked: bool
+) -> None:
+    # The first step of a node package, before its tools run: npm ci stops at a lock
+    # file that package.json no longer agrees with, and its dry run changes nothing.
+    check = (projects["node-package"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Package lock"')
+    end = check.index('step "Lint and format"', start)
+    assert check.index('step "Git hooks"') < start
+    assert re.findall(r'^step "(.+)"$', check[start:end], re.M) == ["Package lock"]
+    script = check[: check.index('step "Text files"')] + check[start:end]
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    refusal = (
+        ""
+        if locked
+        else "echo 'npm error Missing: x@1.0.0 from lock file' >&2\nexit 1\n"
+    )
+    (stubs / "npm").write_text(
+        f"#!/usr/bin/env bash\necho \"$*\" >> '{calls.as_posix()}'\n"
+        f"echo 'up to date'\n{refusal}",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "npm").chmod(0o755)
+
+    result = run_the_steps(
+        repository, script, path=f"{stubs}{os.pathsep}{os.environ['PATH']}", ci=True
+    )
+
+    assert calls.read_text(encoding="utf-8") == (
+        "ci --dry-run --ignore-scripts --no-audit --no-fund\n"
+    )
+    if locked:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == (
+            "\n== Package lock\npackage-lock.json locks what package.json asks for.\n"
+        )
+    else:
+        assert result.returncode == 1
+        assert "Missing: x@1.0.0 from lock file" in result.stderr
+        assert "locks what" not in result.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -9218,13 +9319,14 @@ def test_every_project_gets_the_pr_coach(projects: dict[str, Path], kind: str) -
 
 
 # What each kind of project fixes by a command when its checks fail, besides the text
-# files and the pages of every kind.
+# files, the pages, the lock files of pip-compile and the versions of every kind: the
+# format and the lint, and the lock files of Composer and npm.
 FIXED_STEPS = {
     "python": ["Ruff"],
     "github-action": ["Ruff"],
     "home-assistant": ["Ruff"],
-    "php": ["Coding standard"],
-    "node": ["Lint and format"],
+    "php": ["Composer", "Coding standard"],
+    "node": ["Package lock", "Lint and format"],
     "container": [],
     "generic": [],
 }
@@ -9265,6 +9367,7 @@ def test_every_project_fixes_what_a_command_can_fix(
         "Pages in one column",
         "Accepted advisories",
         "Lock files",
+        "Version",
         *FIXED_STEPS.get(stack, []),
     ]
     assert list(dict.fromkeys(steps)) == expected, stack

@@ -72,16 +72,22 @@ do, and the bot never writes a workflow."""
 
 [check.reuse]
 title = "The license of every file"
-problem = """A file doesn't say under which license it stands: no entry of `REUSE.toml`
-covers it, and it has no SPDX header of its own."""
+problem = """A file doesn't say clearly under which license it stands: its SPDX header
+names a license whose text `LICENSES/` lacks, or one that is no identifier of SPDX, a
+text in `LICENSES/` is one that no file names, or no entry of `REUSE.toml` covers the
+file."""
 why = """Everyone who uses the project must be able to tell the license and the
 copyright of each file, as the REUSE specification of the FSFE describes."""
-fix = """Add the path of the file to an entry of `REUSE.toml`, or give the file an SPDX
-header. The REUSE tool lists every file that lacks one:"""
-commands = ["pipx run reuse lint"]
+fix = """Add the text of a license that a header names, write the identifier as SPDX
+has it, or remove the text that no file names; `REUSE.toml` gives every other file
+its license with `path = "**"`. The REUSE tool lists each problem and downloads the
+text of each license that a file names:"""
+commands = ["pipx run reuse lint", "pipx run reuse download --all"]
 docs = "https://reuse.software/tutorial/"
-autofix = """Not yet: `reuse annotate` with the defaults of `REUSE.toml` follows in
-Dennis-Otto/repo-blueprint#225; until then, a person adds the header or the entry."""
+autofix = """No command can: `REUSE.toml` gives every file the license and the copyright
+of the project, so what the check finds is a header of a file's own, and under which
+license a file stands is the decision of a person. Its fix is a text added to
+`LICENSES/` or deleted from it, and the bot never adds or deletes a file."""
 
 [check.markdown]
 title = "The Markdown of the documents"
@@ -198,7 +204,7 @@ refactor, test, ci, build, chore, style or revert, a scope in parentheses if you
 itself."""
 docs = "CONTRIBUTING.md#workflow"
 autofix = """Not yet: on a branch of this repository, the bot setting the title that
-the PR coach suggests follows in Dennis-Otto/repo-blueprint#225; until then, the PR coach suggests it."""
+the PR coach suggests follows in Dennis-Otto/repo-blueprint#429; until then, the PR coach suggests it."""
 
 [check.changelog]
 title = "The entry in the changelog"
@@ -215,7 +221,7 @@ count; give yours a name of its own. A change that users don't notice takes anot
 type in the title, such as `refactor:`, `docs:` or `test:`."""
 docs = "CONTRIBUTING.md#workflow"
 autofix = """Not yet: a draft entry from the title of the pull request follows in
-Dennis-Otto/repo-blueprint#225; the words for users stay the author's."""
+Dennis-Otto/repo-blueprint#429; the words for users stay the author's."""
 
 [check.codeql]
 title = "The CodeQL analysis"
@@ -698,10 +704,11 @@ version the release bot writes into every file that has one."""
 why = """A version changed by hand would ship a package with the wrong number; the
 release bot decides the version from the titles of the pull requests."""
 fix = """Set the version that the log names back to that of the manifest. The release bot
-changes the version, a pull request doesn't."""
+changes the version, a pull request doesn't; the command writes the version of the
+manifest into each file:"""
+commands = ["python3 .github/blueprint.py fix version"]
 docs = "CONTRIBUTING.md#workflow"
-autofix = """Not yet: writing the version of the manifest back into the file follows
-in Dennis-Otto/repo-blueprint#225."""
+autofix = ["{blueprint} fix version"]
 
 [step."Git hooks"]
 problem = """A hook in `.githooks/` is a plain file in Git, not an executable one, as Git
@@ -786,20 +793,26 @@ autofix = """A package that doesn't build needs a person, who knows what it shou
 hold."""
 
 [step.Composer]
-problem = """`composer.json` isn't valid in the strict mode of Composer, or a locked
-package has a known vulnerability."""
-why = """A broken `composer.json` breaks every install, and a vulnerable package ships
-its vulnerability with the app."""
-fix = """Fix what `composer validate` names, update `composer.lock` when it no longer
-matches `composer.json`, and update a vulnerable package:"""
+problem = """`composer.json` isn't valid in the strict mode of Composer, `composer.lock`
+no longer locks what `composer.json` asks for, as after a change of it by hand, or a
+locked package has a known vulnerability."""
+why = """A broken `composer.json` breaks every install, `composer install` stops at a lock
+file that lacks a package, and a vulnerable package ships its vulnerability with the
+app."""
+fix = """Fix what `composer validate` names, lock the packages of `composer.json` again
+with the least change, which keeps every other package at its version, and update a
+vulnerable package:"""
 commands = [
   "composer validate --strict",
-  "composer update --lock",
+  "composer update --minimal-changes",
   "composer audit",
 ]
 docs = "CONTRIBUTING.md#checks"
-autofix = """Not yet: `composer update --lock`, which only refreshes the hash of the
-lock file, follows in Dennis-Otto/repo-blueprint#225; another version of a package stays a person's decision."""
+# Only for a lock file that Composer finds out of date, which composer validate fails
+# without --strict: a lock file of another version of Composer stays as it is.
+autofix = [
+  "composer validate --no-check-publish --quiet || composer update --minimal-changes --no-install --no-scripts --no-plugins --no-interaction",
+]
 
 [step."App metadata"]
 problem = """`appinfo/info.xml` doesn't follow the schema of the Nextcloud App Store; the
@@ -907,6 +920,24 @@ line that the report lists as missing:"""
 commands = ["XDEBUG_MODE=coverage vendor/bin/phpunit --coverage-text"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """A test that fails, or code without a test, needs a person, who knows what the code should do."""
+
+[step."Package lock"]
+problem = """`package-lock.json` no longer locks what `package.json` asks for, as after a
+change of `package.json` by hand: it lacks a package, or locks one in a version
+outside the range of `package.json`. `npm ci --ignore-scripts` stops at such a lock
+file, and the log names each package."""
+why = """The CI, the release and every machine install exactly what the lock file locks,
+so that every install is the same; npm can't install from a lock file that
+`package.json` no longer agrees with."""
+fix = """Lock the packages of `package.json` again, which keeps every other package at
+its version, and commit `package-lock.json`:"""
+commands = ["npm install --package-lock-only --ignore-scripts"]
+docs = "CONTRIBUTING.md#checks"
+# Only for a lock file that npm refuses, which the dry run of its clean install finds
+# without a change: a lock file of another version of npm stays as it is.
+autofix = [
+  "npm ci --dry-run --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 || npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
+]
 
 [step.Types]
 problem = """The TypeScript compiler, in its strict mode, finds a type that doesn't fit;
