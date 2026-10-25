@@ -260,16 +260,12 @@ title = "The CodeQL analysis"
 problem = """CodeQL couldn't analyze the code, or couldn't upload what it found. Its
 findings are a check of their own, CodeQL; this one fails when the analysis itself
 breaks. A private repository without code scanning, where `CODE_SCANNING` is `off`,
-has no check CodeQL: there this one fails on a finding that code scanning would stop,
-an error or a security alert of high or critical severity, which its summary lists
-and an annotation shows at its line."""
+doesn't run CodeQL, whose terms allow it on private code only with GitHub Code
+Security or Advanced Security: there this check passes with a notice."""
 why = """The rules of `main` require that every language is analyzed, so that no security
 problem goes unseen."""
 fix = """Read the log of the check. A failure of the analysis is rarely caused by the
-change: run the check again, and if it fails again, open an issue with the log. A
-finding without code scanning: fix the code at the line of the annotation and push;
-the SARIF files are the artifact `codeql-sarif` of the run. Only code scanning can
-dismiss a wrong finding, with GitHub Code Security or in a public repository."""
+change: run the check again, and if it fails again, open an issue with the log."""
 docs = "https://docs.github.com/en/code-security/code-scanning"
 autofix = """An analysis that breaks needs a look at its log; the change rarely causes
 it."""

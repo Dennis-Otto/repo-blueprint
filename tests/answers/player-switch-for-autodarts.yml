@@ -1,0 +1,31 @@
+# The answers of https://github.com/Dennis-Otto/player-switch-for-autodarts,
+# as its .copier-answers.yml has them, without _commit and _src_path. The Variants
+# workflow makes a repository with them and updates one from the latest release,
+# and the Downstream workflow warns when they differ from those of the repository:
+# change them with the repository.
+author: Dennis Otto
+copyright: 2026 Dennis Otto
+description: 'Chrome extension for a shared Autodarts display: everyone plays under
+  their own account and a tap on a tile switches players. Sessions are parked and
+  kept fresh, so nobody signs in again; an optional remembered password signs an account
+  back in by itself. Everything stays on the computer.'
+discussions: true
+homepage: https://dennis-otto.github.io/player-switch-for-autodarts/
+issue_assistant_ai: true
+languages:
+- javascript-typescript
+license: MIT
+owner: Dennis-Otto
+project_name: Player Switch for Autodarts
+project_slug: player-switch-for-autodarts
+project_type: node-package
+release_app: dennis-otto-release-automation
+release_app_client_id: Iv23liP9PIEHOV74AiIA
+release_app_id: '4739928'
+renovate_runner: hub
+sample_code: true
+sponsor: Dennis-Otto
+successor: true
+test_marker: ''
+test_workflows: E2E
+topics: autodarts,darts,dartboard,chrome-extension,browser-extension,chrome,google-chrome,manifest-v3,account-switcher,account-switching,multi-account,shared-display,kiosk,touchscreen,session-management,typescript

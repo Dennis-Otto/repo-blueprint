@@ -8,13 +8,17 @@ a project. docs/reference/variables.md shows every variable and secret that a
 workflow of .github/workflows/ reads or that the settings as code of the template
 set: what it does, who sets it, the workflows that read it and what their comments
 say of it. ABOUT below says what each one is for, since many have no comment.
+.github/fleet.toml names the repositories that follow the blueprint, and from it come
+the showcase of README.md and README.de.md, the section "A real repository" of each
+page of docs/kinds/, the order of the Rollout and the canaries of the Variants.
 
-    python3 reference.py           writes both pages
-    python3 reference.py --check   names each page that differs from its sources;
+    python3 reference.py           writes the pages and the parts of the files
+    python3 reference.py --check   names each one that differs from its sources;
                                    tests/test_reference.py fails on it as well
 
-So a change of copier.yml, of a workflow or of template/.github/repository.toml.jinja
-runs the first and commits the pages with it, and the website can't drift from them.
+So a change of copier.yml, of a workflow, of template/.github/repository.toml.jinja or
+of .github/fleet.toml runs the first and commits the files with it, and neither the
+website nor a workflow can drift from them.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -23,6 +27,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,9 +89,9 @@ ABOUT: dict[str, str] = {
     ),
     "CODE_SCANNING": (
         "`off` keeps every finding out of code scanning, which GitHub offers a private"
-        " repository only with GitHub Code Security: CodeQL keeps its results as the"
-        " artifact `codeql-sarif`, lists them in its summary and fails on an error or a"
-        " security alert of high or critical severity; zizmor fails on every finding;"
+        " repository only with GitHub Code Security: CodeQL doesn't analyze, since its"
+        " terms allow it on private code only with GitHub Code Security or Advanced"
+        " Security, and its check passes with a notice; zizmor fails on every finding;"
         " OSV-Scanner and the Scorecard keep theirs in their checks. The settings bot"
         " sets it to `off` on such a repository and back to `on` once GitHub offers"
         " code scanning; `[variables]` of `.github/repository.project.toml` decides"
@@ -830,6 +835,380 @@ def variables_page(
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+# ---------------------------------------------------------------- the fleet
+
+FLEET = Path(".github/fleet.toml")
+READMES = {"en": Path("README.md"), "de": Path("README.de.md")}
+KINDS = Path("docs/kinds")
+ROLLOUT = WORKFLOWS / "rollout.yml"
+VARIANTS = WORKFLOWS / "variants.yml"
+# Each field of a repository of the registry, with its type.
+FIELDS: dict[str, type] = {
+    "name": str,
+    "kind": str,
+    "rollout": int,
+    "canary": bool,
+    "title": str,
+    "what": str,
+    "pitch": str,
+    "title_de": str,
+    "what_de": str,
+    "pitch_de": str,
+}
+NAME = re.compile(r"[A-Za-z0-9._-]+")
+# The line of the Rollout that names the repositories in the order of their checks.
+ORDER = re.compile(r"^(          ORDER: ).*$", re.M)
+# The marks around the legs of the canaries in the Variants workflow.
+CANARIES = (
+    "          # [start:canaries] reference.py writes these from .github/fleet.toml.\n",
+    "          # [end:canaries]\n",
+)
+# The texts that name the repositories, in each language of the website.
+WORDS: dict[str, dict[str, str]] = {
+    "en": {
+        "one": (
+            "One public repository follows the blueprint, with code of its own and the"
+            " checks and bots of the blueprint; every release of the blueprint reaches"
+            " it as a pull request:"
+        ),
+        "many": (
+            "{count} public repositories follow the blueprint, each with code of its"
+            " own and the checks and bots of the blueprint; every release of the"
+            " blueprint reaches them as a pull request:"
+        ),
+        "item": "- **[{title}]({url})**, {what}: {pitch} {badge}",
+        "dashboard": (
+            "[The dashboard]({url}) shows {which} at a glance: the release of the"
+            " blueprint it is on, its checks, its releases and its Scorecard."
+        ),
+        "it": "it",
+        "them": "each of them",
+        "none": (
+            "No public repository of this kind follows the blueprint yet. The Variants"
+            " workflow of the blueprint makes one from every change and runs its checks"
+            " with their real tools, and updates one from the latest release as its"
+            " blueprint bot would."
+        ),
+        "kind one": "[{title}]({url}) is made from the blueprint: {pitch}",
+        "kind many": "These public repositories of this kind are made from the blueprint:",
+        "kind item": "- **[{title}]({url})**: {pitch}",
+        "canary": (
+            "The Variants workflow tries every pull request of the blueprint on the"
+            " answers of {titles}, before it merges."
+        ),
+        "and": "and",
+    },
+    "de": {
+        "one": (
+            "Ein öffentliches Repository folgt dem Blueprint, mit eigenem Code und den"
+            " Prüfungen und Bots des Blueprints; jede Version des Blueprints erreicht es"
+            " als Pull Request:"
+        ),
+        "many": (
+            "{count} öffentliche Repositories folgen dem Blueprint, jedes mit eigenem"
+            " Code und den Prüfungen und Bots des Blueprints; jede Version des"
+            " Blueprints erreicht sie als Pull Request:"
+        ),
+        "item": "- **[{title}]({url})**, {what}: {pitch} {badge}",
+        "dashboard": (
+            "[Das Dashboard]({url}) zeigt {which} auf einen Blick: die Version des"
+            " Blueprints, auf der es ist, seine Prüfungen, seine Releases und seine"
+            " Scorecard."
+        ),
+        "it": "es",
+        "them": "jedes davon",
+        "none": (
+            "Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der"
+            " Workflow Variants des Blueprints macht bei jeder Änderung eines daraus und"
+            " führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert"
+            " eines von der neuesten Version, wie sein Blueprint-Bot es täte."
+        ),
+        "kind one": "[{title}]({url}) ist aus dem Blueprint entstanden: {pitch}",
+        "kind many": (
+            "Diese öffentlichen Repositories dieser Art sind aus dem Blueprint"
+            " entstanden:"
+        ),
+        "kind item": "- **[{title}]({url})**: {pitch}",
+        "canary": (
+            "Der Workflow Variants probiert jeden Pull Request des Blueprints mit den"
+            " Antworten von {titles} aus, bevor er merged."
+        ),
+        "and": "und",
+    },
+}
+# A number of repositories from two on as a word, up to twelve.
+NUMBERS = {
+    "en": (
+        "Two",
+        "Three",
+        "Four",
+        "Five",
+        "Six",
+        "Seven",
+        "Eight",
+        "Nine",
+        "Ten",
+        "Eleven",
+        "Twelve",
+    ),
+    "de": (
+        "Zwei",
+        "Drei",
+        "Vier",
+        "Fünf",
+        "Sechs",
+        "Sieben",
+        "Acht",
+        "Neun",
+        "Zehn",
+        "Elf",
+        "Zwölf",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Member:
+    """A repository that follows the blueprint, as the registry names it."""
+
+    name: str
+    kind: str
+    rollout: int
+    canary: bool
+    # By language: what the showcase and the pages of the kinds say of it.
+    title: Mapping[str, str]
+    what: Mapping[str, str]
+    pitch: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class Fleet:
+    """The repositories of .github/fleet.toml, in the order of the showcase."""
+
+    owner: str
+    members: tuple[Member, ...]
+
+    def url(self, member: Member) -> str:
+        return f"https://github.com/{self.owner}/{member.name}"
+
+    def badge(self, member: Member) -> str:
+        project = f"github.com/{self.owner}/{member.name}"
+        return (
+            f"[![OpenSSF Scorecard](https://api.scorecard.dev/projects/{project}/badge)]"
+            f"(https://scorecard.dev/viewer/?uri={project})"
+        )
+
+    @property
+    def dashboard(self) -> str:
+        return f"https://{self.owner.lower()}.github.io/repo-blueprint/dashboard/"
+
+
+def by_language(entry: Mapping[str, Any], key: str) -> dict[str, str]:
+    return {"en": entry[key], "de": entry[f"{key}_de"]}
+
+
+def member(entry: Any, where: str) -> Member:
+    """One [[repository]] of the registry, with every field and none other."""
+    if not isinstance(entry, dict):
+        raise PageError(f"{where} is no table of a repository")
+    missing = sorted(FIELDS.keys() - entry.keys())
+    unknown = sorted(entry.keys() - FIELDS.keys())
+    if missing or unknown:
+        raise PageError(
+            f"{where} has the fields {', '.join(FIELDS)}:"
+            f" missing {missing}, unknown {unknown}"
+        )
+    for key, kind in FIELDS.items():
+        # By type(), since True is an int as well; and never an empty text or 0.
+        value = entry[key]
+        if type(value) is not kind or (kind is not bool and not value):
+            raise PageError(f"{where}: {key} is no {kind.__name__} of its own")
+    if not NAME.fullmatch(entry["name"]):
+        raise PageError(f"{where}: {entry['name']!r} is no name of a repository")
+    if not (entry["pitch"].endswith(".") and entry["pitch_de"].endswith(".")):
+        raise PageError(f"{where}: pitch and pitch_de end with a full stop")
+    return Member(
+        name=entry["name"],
+        kind=entry["kind"],
+        rollout=entry["rollout"],
+        canary=entry["canary"],
+        title=by_language(entry, "title"),
+        what=by_language(entry, "what"),
+        pitch=by_language(entry, "pitch"),
+    )
+
+
+def fleet(text: str) -> Fleet:
+    """The registry: an owner, and each of its repositories once in the Rollout."""
+    where = FLEET.as_posix()
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise PageError(f"{where}: {error}") from error
+    owner = data.get("owner")
+    entries = data.get("repository")
+    if not isinstance(owner, str) or not NAME.fullmatch(owner):
+        raise PageError(f"{where} names no owner")
+    if not isinstance(entries, list) or not entries:
+        raise PageError(f"{where} names no [[repository]]")
+    members = tuple(
+        member(entry, f"{where}: repository {index}")
+        for index, entry in enumerate(entries, start=1)
+    )
+    names = [item.name for item in members]
+    if len(set(names)) != len(names):
+        raise PageError(f"{where} names a repository twice")
+    if sorted(item.rollout for item in members) != list(range(1, len(members) + 1)):
+        raise PageError(
+            f"{where}: the places in the Rollout are 1 to {len(members)}, each once"
+        )
+    return Fleet(owner, members)
+
+
+def count(number: int, language: str) -> str:
+    """A number from two on, as a word up to twelve."""
+    words = NUMBERS[language]
+    return words[number - 2] if number - 2 < len(words) else str(number)
+
+
+def joined(items: Sequence[str], language: str) -> str:
+    """Items in a sentence of the language: a, b and c."""
+    if len(items) == 1:
+        return items[0]
+    return f"{', '.join(items[:-1])} {WORDS[language]['and']} {items[-1]}"
+
+
+def showcase(registry: Fleet, language: str) -> str:
+    """The part made-with of a README: every repository, with its Scorecard."""
+    words = WORDS[language]
+    number = len(registry.members)
+    one = number == 1
+    lead = words["one"] if one else words["many"].format(count=count(number, language))
+    items = [
+        words["item"].format(
+            title=item.title[language],
+            url=registry.url(item),
+            what=item.what[language],
+            pitch=item.pitch[language],
+            badge=registry.badge(item),
+        )
+        for item in registry.members
+    ]
+    dashboard = words["dashboard"].format(
+        url=registry.dashboard, which=words["it" if one else "them"]
+    )
+    return f"{lead}\n\n" + "\n".join(items) + f"\n\n{dashboard}\n"
+
+
+def real_repositories(registry: Fleet, kind: str, language: str) -> str:
+    """The part real-repository of the page of a kind: its repositories, if any."""
+    words = WORDS[language]
+    members = [item for item in registry.members if item.kind == kind]
+    if not members:
+        return words["none"] + "\n"
+    texts = [
+        {
+            "title": item.title[language],
+            "url": registry.url(item),
+            "pitch": item.pitch[language],
+        }
+        for item in members
+    ]
+    if len(texts) == 1:
+        paragraphs = [words["kind one"].format(**texts[0])]
+    else:
+        items = "\n".join(words["kind item"].format(**text) for text in texts)
+        paragraphs = [words["kind many"], items]
+    canaries = [item.title[language] for item in members if item.canary]
+    if canaries:
+        paragraphs.append(words["canary"].format(titles=joined(canaries, language)))
+    return "\n\n".join(paragraphs) + "\n"
+
+
+def with_part(text: str, marks: tuple[str, str], part: str, where: Path) -> str:
+    """The text with part between the two lines that mark it."""
+    head, start, rest = text.partition(marks[0])
+    _, end, tail = rest.partition(marks[1])
+    if not (start and end):
+        raise PageError(
+            f"{where.as_posix()} has no part between {marks[0].strip()}"
+            f" and {marks[1].strip()}"
+        )
+    return f"{head}{marks[0]}{part}{marks[1]}{tail}"
+
+
+def snippet(name: str) -> tuple[str, str]:
+    """The marks of a part of a page, as the snippets of the website mark it."""
+    return f"<!-- --8<-- [start:{name}] -->\n", f"<!-- --8<-- [end:{name}] -->\n"
+
+
+def rollout_order(text: str, registry: Fleet) -> str:
+    """The Rollout, with the repositories in the order of their places."""
+    order = " ".join(
+        item.name for item in sorted(registry.members, key=lambda item: item.rollout)
+    )
+    written, found = ORDER.subn(lambda match: match[1] + order, text)
+    if found != 1:
+        raise PageError(f"{ROLLOUT.as_posix()} has no one line ORDER: of the Rollout")
+    return written
+
+
+def canary_legs(registry: Fleet) -> str:
+    """A leg of the Variants for each canary, by name, with its kind."""
+    return "".join(
+        f"          - {{ kind: {item.kind}, start: adopted, answers: {item.name} }}\n"
+        for item in sorted(registry.members, key=lambda item: item.name)
+        if item.canary
+    )
+
+
+def kinds_of(root: Path, registry: Fleet) -> list[str]:
+    """The kinds that have a page, which the kind of each repository must be."""
+    kinds = sorted(
+        path.name.removesuffix(".md")
+        for path in (root / KINDS).glob("*.md")
+        if not path.name.endswith(".de.md")
+    )
+    for item in registry.members:
+        if item.kind not in kinds:
+            raise PageError(
+                f"{FLEET.as_posix()}: the kind {item.kind} of {item.name} has no page"
+                f" {(KINDS / item.kind).as_posix()}.md"
+            )
+    return kinds
+
+
+def fleet_pages(root: Path) -> dict[Path, str]:
+    """Each file that names the repositories of the registry, as the registry makes
+    it; none in a copy of the blueprint without a registry, such as a fork that no
+    repository follows yet."""
+    if not (root / FLEET).is_file():
+        return {}
+    registry = fleet((root / FLEET).read_text(encoding="utf-8"))
+
+    def read(path: Path) -> str:
+        return (root / path).read_text(encoding="utf-8")
+
+    written = {
+        path: with_part(
+            read(path), snippet("made-with"), f"\n{showcase(registry, lang)}\n", path
+        )
+        for lang, path in READMES.items()
+    }
+    for kind in kinds_of(root, registry):
+        for lang, suffix in (("en", ".md"), ("de", ".de.md")):
+            path = KINDS / f"{kind}{suffix}"
+            part = f"\n{real_repositories(registry, kind, lang)}\n"
+            written[path] = with_part(
+                read(path), snippet("real-repository"), part, path
+            )
+    written[ROLLOUT] = rollout_order(read(ROLLOUT), registry)
+    written[VARIANTS] = with_part(
+        read(VARIANTS), CANARIES, canary_legs(registry), VARIANTS
+    )
+    return written
+
+
 # ---------------------------------------------------------------- the files
 
 
@@ -846,6 +1225,7 @@ def pages(root: Path) -> dict[Path, str]:
     return {
         QUESTIONS: questions_page(copier),
         VARIABLES: variables_page(flows, settings, template_files, answers),
+        **fleet_pages(root),
     }
 
 

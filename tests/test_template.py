@@ -57,6 +57,7 @@ from workflow_steps import (
 
 import downstream
 import pins
+import reference
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -668,6 +669,289 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
             assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
 
 
+# The jobs that hold a secret or a token that may write, yet record their network
+# traffic instead of blocking it, each with its reason. Every other such job blocks
+# every host that it doesn't need (decision 0080).
+AUDITED_PRIVILEGED_JOBS = {
+    (
+        "release.yml",
+        "pypi",
+    ): "no repository delivers to PyPI yet: no run measured its hosts",
+    (
+        "release.yml",
+        "npm",
+    ): "no repository delivers to npm yet: no run measured its hosts",
+    (
+        "release.yml",
+        "ghcr",
+    ): "Docker builds the image and reaches the registries of its base images",
+    (
+        "renovate.yml",
+        "renovate",
+    ): "Renovate reaches the registry of every package manager",
+    (
+        "docs.yml",
+        "deploy",
+    ): "it asks the published website, on a domain of the repository's own",
+    (
+        "dashboard.yml",
+        "deploy",
+    ): "it asks the published website, on a domain of the repository's own",
+    ("links.yml", "links"): "it checks the links to every host that the pages name",
+    (
+        "codeql.yml",
+        "codeql",
+    ): "CodeQL downloads its packs, and the job only uploads findings",
+    (
+        "zizmor.yml",
+        "zizmor",
+    ): "zizmor asks GitHub and the advisories, and the job only uploads findings",
+    (
+        "scorecard.yml",
+        "analysis",
+    ): "Scorecard asks a dozen services, and the job only uploads findings",
+    (
+        "ci-php.yml",
+        "taint-report",
+    ): "Psalm runs after Composer, and the job only uploads findings",
+    (
+        "ci.yml",
+        "taint-report",
+    ): "Psalm runs after Composer, and the job only uploads findings",
+}
+# Where PUBLISH_TO delivers a release, as copier.yml derives it from the kind.
+PUBLISH_TARGETS = (
+    "hacs",
+    "nextcloud-appstore",
+    "github-action",
+    "pypi",
+    "npm",
+    "ghcr",
+    "none",
+)
+# A host that a blocking job may reach, and the hosts for one PUBLISH_TO.
+ENDPOINT = re.compile(r"(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+:443")
+PER_TARGET = re.compile(
+    r"\$\{\{ vars\.PUBLISH_TO == '([a-z-]+)' && '([^']+)' \|\| '' \}\}"
+)
+
+
+def privileged(job: Mapping[str, Any], top: Any) -> bool:
+    """Whether a job holds a secret, an OIDC token or a token that may write."""
+    permissions = job.get("permissions", top)
+    if permissions == "write-all" or (
+        isinstance(permissions, dict) and "write" in permissions.values()
+    ):
+        return True
+    secrets = set(re.findall(r"secrets\.(\w+)", json.dumps(job))) - {"GITHUB_TOKEN"}
+    return "environment" in job or bool(secrets)
+
+
+def allowed_hosts(endpoints: str, target: str) -> set[str]:
+    """The hosts that harden-runner allows for a PUBLISH_TO, without their port."""
+    chosen = PER_TARGET.sub(
+        lambda found: found[2] if found[1] == target else "", endpoints
+    )
+    return {endpoint.removesuffix(":443") for endpoint in chosen.split()}
+
+
+def reaches(hosts: set[str], host: str) -> bool:
+    return host in hosts or any(
+        allowed.startswith("*.") and host.endswith(allowed[1:]) for allowed in hosts
+    )
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_privileged_job_blocks_the_hosts_that_it_doesnt_need(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A compromised action or tool in a job with the private key of the release app,
+    # the signing key of a Nextcloud app, an OIDC token or a token that may write
+    # could send them anywhere; audit mode only records it.
+    root = ROOT if project == "blueprint" else projects[project]
+    flows = workflows(root)
+    audited = set()
+    for name, text in flows.items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        parsed = parse(text)
+        for job_id, job in parsed["jobs"].items():
+            # A job that calls a workflow: its jobs block, here or in their repository.
+            if "uses" in job or not privileged(job, parsed.get("permissions")):
+                continue
+            where = f"{name}: {job_id}"
+            hardening = steps_using(job, "step-security/harden-runner")
+            assert hardening == [job["steps"][0]], f"{where}: harden-runner first"
+            policy = hardening[0]["with"]
+            if (name, job_id) in AUDITED_PRIVILEGED_JOBS:
+                audited.add((name, job_id))
+                assert policy == {"egress-policy": "audit"}, where
+                continue
+            assert policy["egress-policy"] == "block", where
+            assert hardening[0]["name"] == "Block every host that the job doesn't need"
+            # No sudo and no Docker, but where the Nextcloud app installs krankerl.
+            sudo = policy["disable-sudo-and-containers"]
+            assert sudo is True or (
+                name == "build-release.yml"
+                and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
+            ), where
+            endpoints = policy["allowed-endpoints"]
+            for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
+                assert ENDPOINT.fullmatch(endpoint), f"{where}: {endpoint}"
+            # Every host that a step downloads from with curl, for the PUBLISH_TO that
+            # the step runs for, or for one of them where it runs for every one.
+            for step in job["steps"]:
+                condition = re.search(
+                    r"env\.PUBLISH_TO == '([a-z-]+)'", str(step.get("if", ""))
+                )
+                targets = [condition[1]] if condition else PUBLISH_TARGETS
+                for call in CURL.findall(step.get("run", "")):
+                    for host in re.findall(r"https://([a-z0-9.-]+)/", call):
+                        assert any(
+                            reaches(allowed_hosts(endpoints, target), host)
+                            for target in targets
+                        ), f"{where}: {host}"
+    # No reason stays for a job that blocks, or that is gone.
+    if project == "blueprint":
+        assert audited == {key for key in AUDITED_PRIVILEGED_JOBS if key[0] in flows}
+
+
+WAIT_FOR_DOCKER = "Wait until Harden-Runner has removed Docker"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_without_docker_waits_until_harden_runner_has_removed_it(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Harden-Runner removes Docker with apt-get in the background, and a job that
+    # ends before it finishes hangs in "Cleaning up orphan processes" until its
+    # timeout, which a short bot or the check of the title would reach.
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            hardening = steps_using(job, "step-security/harden-runner")
+            sudo = (
+                hardening[0]["with"].get("disable-sudo-and-containers")
+                if hardening
+                else None
+            )
+            where = f"{name}: {job_id}"
+            names = [step.get("name") for step in job.get("steps") or []]
+            if sudo is None:
+                assert WAIT_FOR_DOCKER not in names, where
+                continue
+            assert names.count(WAIT_FOR_DOCKER) == 1, where
+            index = names.index(WAIT_FOR_DOCKER)
+            wait = job["steps"][index]
+            # Where Docker stays, as in the build of a Nextcloud app, nothing waits.
+            assert wait["if"] == (
+                "always()"
+                if sudo is True
+                else "always() && vars.PUBLISH_TO != 'nextcloud-appstore'"
+            ), where
+            # Only the steps that explain a failure come after it.
+            for step in job["steps"][index + 1 :]:
+                assert step.get("if") == "failure()", f"{where}: {step.get('name')}"
+            scripts.add(wait["run"])
+    assert len(scripts) <= 1, scripts
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(("busy", "sleeps"), [(0, 0), (3, 3), (200, 120)])
+def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
+    tmp_path: Path, busy: int, sleeps: int
+) -> None:
+    script = step_named(
+        job_in(workflows(ROOT)["welcome.yml"], "welcome"), WAIT_FOR_DOCKER
+    )["run"]
+    # pgrep finds apt-get the first times it is asked.
+    counter = tmp_path / "count"
+    counter.write_text("0", encoding="utf-8")
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "pgrep": (
+                f'n=$(( $(cat "{counter.as_posix()}") + 1 ))\n'
+                f'echo "$n" > "{counter.as_posix()}"\n'
+                f"(( n <= {busy} ))\n"
+            ),
+            "sleep": "",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count("sleep 1") == sleeps
+    assert all(call in {"pgrep -x apt-get|dpkg", "sleep 1"} for call in calls), calls
+    assert ("::warning::Harden-Runner still removes Docker" in result.stdout) == (
+        busy > 120
+    )
+
+
+def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
+    flows = workflows(ROOT)
+    build = job_in(flows["build-release.yml"], "assets")
+    endpoints = build["steps"][0]["with"]["allowed-endpoints"]
+    signing = {
+        "api.github.com",
+        "github.com",
+        "uploads.github.com",
+        "fulcio.sigstore.dev",
+        "rekor.sigstore.dev",
+    }
+    for target in PUBLISH_TARGETS:
+        assert signing <= allowed_hosts(endpoints, target), target
+    assert allowed_hosts(endpoints, "hacs").isdisjoint({"pypi.org"})
+    assert {"pypi.org", "files.pythonhosted.org"} <= allowed_hosts(endpoints, "pypi")
+    assert {"registry.npmjs.org"} <= allowed_hosts(endpoints, "npm")
+    assert {"download.nextcloud.com"} <= allowed_hosts(endpoints, "nextcloud-appstore")
+    verify = job_in(flows["verify-release.yml"], "verify")
+    endpoints = verify["steps"][0]["with"]["allowed-endpoints"]
+    assert {"apps.nextcloud.com"} <= allowed_hosts(endpoints, "nextcloud-appstore")
+    assert allowed_hosts(endpoints, "pypi").isdisjoint({"apps.nextcloud.com"})
+    assert {"ghcr.io"} <= allowed_hosts(endpoints, "ghcr")
+    # The OIDC token of the keyless signatures comes from a host of the region of the
+    # runner, such as run-actions-3-azure-eastus.actions.githubusercontent.com.
+    release = job_in(flows["release.yml"], "release-please")
+    hosts = allowed_hosts(release["steps"][0]["with"]["allowed-endpoints"], "none")
+    assert reaches(hosts, "run-actions-3-azure-eastus.actions.githubusercontent.com")
+
+
+def test_the_signing_key_of_a_nextcloud_app_is_only_in_the_step_that_signs() -> None:
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    job = job_with(build, "Sign the Nextcloud app")
+    holding = [
+        step["name"]
+        for step in job["steps"]
+        if "secrets.APP_PRIVATE_KEY" in json.dumps(step)
+    ]
+    assert holding == ["Sign the Nextcloud app"]
+    sign = script_of(build, "Sign the Nextcloud app")
+    # The key goes, also when a command of the signature fails.
+    trap = """trap 'rm -f "$RUNNER_TEMP/app.key"' EXIT"""
+    assert sign.index(trap) < sign.index('> "$RUNNER_TEMP/app.key"')
+    # Nothing of the project runs and nothing is downloaded while the key is on disk.
+    for command in ("scripts/check-package.sh", "krankerl", "curl"):
+        assert command not in sign, command
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_github_cli_sends_no_telemetry(
+    projects: dict[str, Path], project: str
+) -> None:
+    # gh sends its telemetry to cafe.github.com, a host that no job needs.
+    root = ROOT if project == "blueprint" else projects[project]
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        if re.search(r"GH_TOKEN|blueprint\.py", text):
+            assert parse(text).get("env", {}).get("GH_TELEMETRY") == "false", name
+
+
 def test_the_next_runner_runs_the_variants_every_week(
     projects: dict[str, Path],
 ) -> None:
@@ -918,7 +1202,7 @@ def test_zizmor_audits_a_pull_request_as_it_audits_main(
     # from an advisory would look fixed in every pull request.
     assert options.get("online-audits", True) is True
     # To code scanning wherever GitHub offers it; a private repository without GitHub
-    # Code Security fails the check on the findings instead (decision 0081).
+    # Code Security fails the check on the findings instead (decision 0082).
     assert options["advanced-security"] == "${{ vars.CODE_SCANNING != 'off' }}"
 
 
@@ -4051,8 +4335,8 @@ def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> No
         f"Nextcloud {major} runs on PHP {oldest} to {newest}, not on {php[1]}"
     )
     # The last PHP that setup-php sets up is the one that occ runs on.
-    job = job_with(build, "Build and sign the Nextcloud app")
-    sign = names_of(job).index("Build and sign the Nextcloud app")
+    job = job_with(build, "Sign the Nextcloud app")
+    sign = names_of(job).index("Sign the Nextcloud app")
     assert job["steps"].index(setup) < sign
     assert not steps_using({"steps": job["steps"][sign:]}, "shivammathur/setup-php")
 
@@ -6071,8 +6355,17 @@ def test_dependabot_merges_as_the_release_app(
     assert len(parse(text)["jobs"]) == 1
     assert not steps_using(job, "actions/checkout")
     # The check of the release app, the explanation of a token that failed and the
-    # merge.
-    assert len([step for step in job["steps"] if "run" in step]) == 3
+    # merge, besides the wait until Harden-Runner has removed Docker.
+    assert (
+        len(
+            [
+                step
+                for step in job["steps"]
+                if "run" in step and step["name"] != WAIT_FOR_DOCKER
+            ]
+        )
+        == 3
+    )
     app = step_in(job, "Create a token of the release app")
     # A token that fails still lets the job's token turn auto-merge on, and says so.
     assert app["continue-on-error"] is True
@@ -9549,7 +9842,11 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     assert checkout["with"]["persist-credentials"] is False
     assert "ref" not in checkout["with"]
     # The script of the update, after the check of the release app.
-    run = [step["run"] for step in job["steps"] if "run" in step][-1]
+    run = [
+        step["run"]
+        for step in job["steps"]
+        if "run" in step and step["name"] != WAIT_FOR_DOCKER
+    ][-1]
     assert "${{" not in run
     assert 'next-branch "${only[@]}" | tee -a "$GITHUB_STEP_SUMMARY"' in run
     # A run for auto-merge shows as a check of that pull request, and the bot-health
@@ -12560,7 +12857,7 @@ def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
 
 
 # The variables that the settings bot sets to off where a private repository lacks
-# GitHub Code Security (decision 0081).
+# GitHub Code Security (decision 0082).
 WITH_CODE_SCANNING = "vars.CODE_SCANNING != 'off'"
 WITHOUT_CODE_SCANNING = "vars.CODE_SCANNING == 'off'"
 
@@ -12615,77 +12912,42 @@ def test_without_code_scanning_no_workflow_sends_its_findings_there(
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
-def test_without_code_scanning_codeql_keeps_its_results_with_the_run(
+def test_without_code_scanning_codeql_does_not_analyze(
     projects: Mapping[str, Path], kind: str
 ) -> None:
+    # The terms of CodeQL allow it on private code only with GitHub Code Security or
+    # Advanced Security: without it, the job passes and analyzes nothing.
     root = ROOT if kind == "blueprint" else projects[kind]
     job = job_in((root / ".github/workflows/codeql.yml").read_text("utf-8"), "codeql")
     names = names_of(job)
-    upload = names.index("Upload the results")
-    assert names[upload + 1 : upload + 3] == [
-        "Keep the results with the run",
-        "Show the results",
+    skip = names.index("Skip the analysis without GitHub Code Security")
+    assert names[skip + 1] == "Initialize the analysis"
+    assert condition_of(job["steps"][skip]) == WITHOUT_CODE_SCANNING
+    analysis = [
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("github/codeql-action/")
+        or step.get("name")
+        == "File the results of each language under its own category"
     ]
-    kept = step_in(job, "Keep the results with the run")
-    assert condition_of(kept) == WITHOUT_CODE_SCANNING
-    assert re.fullmatch(r"actions/upload-artifact@[0-9a-f]{40}", kept["uses"])
-    assert kept["with"] == {
-        "name": "codeql-sarif",
-        "path": "${{ runner.temp }}/codeql",
-        "retention-days": 14,
-    }
-    assert condition_of(step_in(job, "Show the results")) == WITHOUT_CODE_SCANNING
+    assert len(analysis) == 4
+    for step in analysis:
+        assert condition_of(step) == WITH_CODE_SCANNING, step
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-@pytest.mark.parametrize(
-    ("level", "code", "fails"), [("error", 1, "yes"), ("note", 0, "no")]
-)
-def test_without_code_scanning_codeql_fails_on_what_code_scanning_would_stop(
-    tmp_path: Path, level: str, code: int, fails: str
-) -> None:
-    sarif = {
-        "runs": [
-            {
-                "tool": {"driver": {"name": "CodeQL"}},
-                "results": [
-                    {
-                        "ruleId": "py/sql-injection",
-                        "level": level,
-                        "message": {"text": "A query from user input."},
-                        "locations": [
-                            {
-                                "physicalLocation": {
-                                    "artifactLocation": {"uri": "src/db.py"},
-                                    "region": {"startLine": 12},
-                                }
-                            }
-                        ],
-                    }
-                ],
-            }
-        ]
-    }
-
+def test_without_code_scanning_codeql_passes_with_a_notice(tmp_path: Path) -> None:
     done = workflow_steps.run_step(
         tmp_path,
         "codeql.yml",
         "codeql",
-        "Show the results",
-        files={"$RUNNER_TEMP/codeql/python.sarif": json.dumps(sarif)},
-        # The Python of the tests, not one that the PATH of Windows names.
-        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        "Skip the analysis without GitHub Code Security",
         workspace=ROOT,
     )
 
-    assert done.returncode == code, done.stderr
-    assert "the artifact `codeql-sarif` of this run" in done.summary
-    assert (
-        f"| {fails} | A query from user input. | `py/sql-injection` ({level})"
-        " | `src/db.py:12` |"
-    ) in done.summary
-    annotation = "::error file=src/db.py,line=12,title=CodeQL%3A py/sql-injection::"
-    assert (annotation in done.stdout) == (code == 1)
+    assert done.returncode == 0, done.stderr
+    assert "::notice::CodeQL doesn't analyze this repository" in done.stdout
+    assert "GitHub Code Security or Advanced Security" in done.summary
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -14522,19 +14784,30 @@ def test_each_leg_of_the_variants_does_only_what_it_alone_can_show() -> None:
     )
 
 
-# The answers of each repository that takes the blueprint, by the name of the
-# repository; the Rollout brings it every release.
+# The answers of each canary of .github/fleet.toml, a repository that takes the
+# blueprint, by the name of the repository; the Rollout brings it every release.
 ANSWERS = {
     path.stem: downstream.read(path)
     for path in sorted((ROOT / "tests/answers").glob("*.yml"))
 }
+# The canaries that the blueprint made new, with its sample code, which their own code
+# replaced since: their answers keep the sample code of their first copy.
+MADE_NEW = {"player-switch-for-autodarts"}
 
 
 def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
+    registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
     rollout = (ROOT / ".github/workflows/rollout.yml").read_text(encoding="utf-8")
     order = re.search(r"^          ORDER: (.+)$", rollout, re.M)
     assert order
-    assert sorted(order[1].split()) == list(ANSWERS)
+    # Every repository of the registry, by its place; and the answers of each canary.
+    assert order[1].split() == [
+        item.name for item in sorted(registry.members, key=lambda item: item.rollout)
+    ]
+    assert list(ANSWERS) == sorted(
+        item.name for item in registry.members if item.canary
+    )
+    assert set(ANSWERS) >= MADE_NEW
     for name, answers in ANSWERS.items():
         assert answers["owner"] == "Dennis-Otto", name
         assert answers["project_slug"] == name
@@ -14566,9 +14839,10 @@ def test_the_answers_of_each_repository_render_every_file(
     # repository answers each question: a new question gets its answer here too.
     stored = downstream.read(project / ".copier-answers.yml")
     assert {k: v for k, v in stored.items() if not k.startswith("_")} == ANSWERS[name]
-    # A repository that takes the blueprint brings its own code and tests.
-    assert not stored["sample_code"]
-    assert not (project / "docs/index.md").exists()
+    # A repository that takes the blueprint brings its own code and tests; one that
+    # the blueprint made new started from the sample, whose website it renders.
+    assert stored["sample_code"] == (name in MADE_NEW)
+    assert (project / "docs/index.md").exists() == (name in MADE_NEW)
 
 
 def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
@@ -15322,7 +15596,9 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     assert "sha256sum --check --strict" in write
     # After the package is built and before the assets are attested.
     order = [
-        "Build and sign the Nextcloud app",
+        "Build the Nextcloud app",
+        "Sign the Nextcloud app",
+        "Check the signed Nextcloud app",
         "Unpack what the release ships",
         describe,
         "Write the advisories that don't affect the release",

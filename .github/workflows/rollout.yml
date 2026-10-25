@@ -27,6 +27,10 @@ permissions: {}
 # the next one, even by one that rolls nothing out. Each repository has a group of its
 # own instead, on the job that brings the release there.
 
+# The GitHub CLI of the jobs sends no telemetry to GitHub.
+env:
+  GH_TELEMETRY: "false"
+
 jobs:
   plan:
     name: plan the rollout
@@ -61,10 +65,13 @@ jobs:
       repositories: ${{ steps.repositories.outputs.repositories }}
       last: ${{ steps.repositories.outputs.last }}
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       - name: Find the release that the run of the Release workflow published
         id: release
         env:
@@ -171,8 +178,9 @@ jobs:
           # The repositories by the time that their checks take, the quickest first, so
           # that each update pull request is done soon. The longest go last, as no
           # repository waits for the last one. A repository that isn't named here goes
-          # first: a new one has few checks yet.
-          ORDER: dennis-otto.github.io issue-assistant paperless-unified-search paperless-sync homedarts-for-autodarts
+          # first: a new one has few checks yet. reference.py writes the line from the
+          # places in .github/fleet.toml.
+          ORDER: dennis-otto.github.io issue-assistant player-switch-for-autodarts paperless-unified-search paperless-sync homedarts-for-autodarts
         run: |
           set -euo pipefail
           # GitHub fails for a moment now and then, so it asks three times.
@@ -220,6 +228,16 @@ jobs:
             echo "repositories=[${matrix%,}]"
             echo "last=${repositories[-1]}"
           } >> "$GITHUB_OUTPUT"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   rollout:
     name: ${{ matrix.repository }}
@@ -249,10 +267,13 @@ jobs:
       deployment: false
     permissions: {}
     steps:
-      - name: Record the network traffic of the job
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
       # Without the release app of the owner, the run names what is missing rather than
       # fail at the token; every workflow has this step, the same but for its variables.
       - name: Check that the release app is set up
@@ -441,3 +462,13 @@ jobs:
             *) result="The checks of its update pull request still ran after 15 minutes; the rollout goes on." ;;
           esac
           echo "$result" >> "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

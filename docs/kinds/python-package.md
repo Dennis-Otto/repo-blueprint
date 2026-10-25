@@ -45,6 +45,10 @@ This kind adds these steps:
 
 ## A real repository
 
+<!-- --8<-- [start:real-repository] -->
+
 No public repository of this kind follows the blueprint yet. The Variants workflow of the blueprint makes one from every change and runs its checks with their real tools, and updates one from the latest release as its blueprint bot would.
+
+<!-- --8<-- [end:real-repository] -->
 
 How the blueprint compares with other templates: [the comparison](../compare.md).

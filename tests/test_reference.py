@@ -4,6 +4,7 @@ blueprint itself and against repositories of a few files."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -172,10 +173,50 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_the_committed_pages_say_what_their_sources_say() -> None:
     written = reference.pages(ROOT)
-    assert set(written) == {reference.QUESTIONS, reference.VARIABLES}
+    kinds = [
+        path.relative_to(ROOT) for path in sorted((ROOT / reference.KINDS).glob("*.md"))
+    ]
+    assert len(kinds) == 14
+    assert set(written) == {
+        reference.QUESTIONS,
+        reference.VARIABLES,
+        *reference.READMES.values(),
+        *kinds,
+        reference.ROLLOUT,
+        reference.VARIANTS,
+    }
     assert reference.stale(ROOT, written) == [], (
         "python3 reference.py writes the reference pages anew"
     )
+
+
+def test_the_registry_names_every_repository_that_follows_the_blueprint() -> None:
+    registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
+    assert registry.owner == "Dennis-Otto"
+    names = {item.name: item for item in registry.members}
+    # player-switch-for-autodarts, the node package that follows it since 0.8.8.
+    assert names["player-switch-for-autodarts"].kind == "node-package"
+    assert names["player-switch-for-autodarts"].canary
+    # Each canary with the answers of its repository, of its kind; and only these.
+    answers = sorted(path.stem for path in (ROOT / "tests/answers").glob("*.yml"))
+    assert answers == sorted(name for name, item in names.items() if item.canary)
+    for name in answers:
+        text = (ROOT / f"tests/answers/{name}.yml").read_text(encoding="utf-8")
+        assert f"\nproject_type: {names[name].kind}\n" in text, name
+        assert f"\nowner: {registry.owner}\n" in text, name
+    # The kinds are those of copier.yml.
+    choices = next(
+        question.spec["choices"]
+        for question in reference.questions(
+            (ROOT / reference.COPIER).read_text(encoding="utf-8")
+        )
+        if question.name == "project_type"
+    )
+    assert reference.kinds_of(ROOT, registry) == sorted(choices.values())
+    # The website shows the showcase of the README.
+    for page, readme in (("index.md", "README.md"), ("index.de.md", "README.de.md")):
+        text = (ROOT / "docs" / page).read_text(encoding="utf-8")
+        assert f'--8<-- "{readme}:made-with"' in text
 
 
 def test_every_variable_and_secret_of_the_blueprint_has_a_description() -> None:
@@ -715,3 +756,347 @@ def test_the_command_names_what_keeps_it_from_writing(
     (repository / "copier.yml").unlink()
     assert reference.main(["--check"], repository) == 2
     assert "copier.yml" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- the fleet
+
+REGISTRY = """\
+owner = "Octo-Org"
+
+[[repository]]
+name = "alpha"
+kind = "generic"
+rollout = 2
+canary = true
+title = "Alpha"
+what = "a website"
+pitch = "the pages of Alpha."
+title_de = "Alpha"
+what_de = "eine Website"
+pitch_de = "die Seiten von Alpha."
+
+[[repository]]
+name = "beta.io"
+kind = "node-package"
+rollout = 1
+canary = false
+title = "Beta"
+what = "a package"
+pitch = "the code of Beta."
+title_de = "Beta"
+what_de = "ein Paket"
+pitch_de = "der Code von Beta."
+"""
+
+ENTRY = {
+    "name": "alpha",
+    "kind": "generic",
+    "rollout": 1,
+    "canary": True,
+    "title": "Alpha",
+    "what": "a website",
+    "pitch": "the pages of Alpha.",
+    "title_de": "Alpha",
+    "what_de": "eine Website",
+    "pitch_de": "die Seiten von Alpha.",
+}
+
+
+def one(name: str, kind: str = "generic", canary: bool = True) -> reference.Member:
+    return reference.member({**ENTRY, "name": name, "kind": kind, "canary": canary}, "")
+
+
+def fleet_of(*members: reference.Member) -> reference.Fleet:
+    return reference.Fleet("Octo-Org", members)
+
+
+def test_the_registry_with_each_repository_in_its_order() -> None:
+    registry = reference.fleet(REGISTRY)
+    assert registry.owner == "Octo-Org"
+    alpha, beta = registry.members
+    assert alpha == reference.Member(
+        name="alpha",
+        kind="generic",
+        rollout=2,
+        canary=True,
+        title={"en": "Alpha", "de": "Alpha"},
+        what={"en": "a website", "de": "eine Website"},
+        pitch={"en": "the pages of Alpha.", "de": "die Seiten von Alpha."},
+    )
+    assert (beta.name, beta.rollout, beta.canary) == ("beta.io", 1, False)
+    assert registry.url(beta) == "https://github.com/Octo-Org/beta.io"
+    assert registry.badge(alpha) == (
+        "[![OpenSSF Scorecard]"
+        "(https://api.scorecard.dev/projects/github.com/Octo-Org/alpha/badge)]"
+        "(https://scorecard.dev/viewer/?uri=github.com/Octo-Org/alpha)"
+    )
+    assert registry.dashboard == "https://octo-org.github.io/repo-blueprint/dashboard/"
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ("owner = [", "Invalid"),
+        ("[[repository]]\nname = 'a'\n", "names no owner"),
+        ("owner = 'a b'\n", "names no owner"),
+        ("owner = 'o'\n", "names no [[repository]]"),
+        ("owner = 'o'\nrepository = []\n", "names no [[repository]]"),
+        ("owner = 'o'\nrepository = 'a'\n", "names no [[repository]]"),
+        ("owner = 'o'\nrepository = [1]\n", "repository 1 is no table"),
+        (
+            REGISTRY.replace('name = "beta.io"', 'name = "alpha"'),
+            "names a repository twice",
+        ),
+        (
+            REGISTRY.replace("rollout = 1", "rollout = 2"),
+            "the places in the Rollout are 1 to 2, each once",
+        ),
+        (
+            REGISTRY.replace("rollout = 1", "rollout = 3"),
+            "the places in the Rollout are 1 to 2, each once",
+        ),
+    ],
+)
+def test_a_registry_that_names_no_fleet(text: str, error: str) -> None:
+    with pytest.raises(reference.PageError, match=re.escape(error)) as raised:
+        reference.fleet(text)
+    assert str(raised.value).startswith(".github/fleet.toml")
+
+
+@pytest.mark.parametrize(
+    ("change", "error"),
+    [
+        ({"title": None}, "missing ['title'], unknown []"),
+        ({"stars": 1}, "missing [], unknown ['stars']"),
+        ({"rollout": True}, "rollout is no int of its own"),
+        ({"rollout": 0}, "rollout is no int of its own"),
+        ({"canary": 1}, "canary is no bool of its own"),
+        ({"pitch_de": ""}, "pitch_de is no str of its own"),
+        ({"name": "a/b"}, "'a/b' is no name of a repository"),
+        ({"pitch": "the pages"}, "pitch and pitch_de end with a full stop"),
+        ({"pitch_de": "die Seiten"}, "pitch and pitch_de end with a full stop"),
+    ],
+)
+def test_a_repository_of_the_registry_with_every_field(
+    change: dict[str, Any], error: str
+) -> None:
+    entry = {**ENTRY, **change}
+    entry = {key: value for key, value in entry.items() if value is not None}
+    with pytest.raises(reference.PageError, match=re.escape(error)) as raised:
+        reference.member(entry, "here")
+    assert str(raised.value).startswith("here")
+    # A false canary is a canary of its own.
+    assert not reference.member({**ENTRY, "canary": False}, "here").canary
+
+
+def test_a_number_and_a_list_in_a_sentence() -> None:
+    assert reference.count(2, "en") == "Two"
+    assert reference.count(12, "en") == "Twelve"
+    assert reference.count(6, "de") == "Sechs"
+    assert reference.count(13, "de") == "13"
+    assert reference.joined(["a"], "de") == "a"
+    assert reference.joined(["a", "b"], "de") == "a und b"
+    assert reference.joined(["a", "b", "c"], "en") == "a, b and c"
+
+
+def test_the_showcase_of_the_readme() -> None:
+    registry = reference.fleet(REGISTRY)
+    assert reference.showcase(registry, "en") == (
+        "Two public repositories follow the blueprint, each with code of its own and"
+        " the checks and bots of the blueprint; every release of the blueprint"
+        " reaches them as a pull request:\n"
+        "\n"
+        "- **[Alpha](https://github.com/Octo-Org/alpha)**, a website: the pages of"
+        f" Alpha. {registry.badge(registry.members[0])}\n"
+        "- **[Beta](https://github.com/Octo-Org/beta.io)**, a package: the code of"
+        f" Beta. {registry.badge(registry.members[1])}\n"
+        "\n"
+        "[The dashboard](https://octo-org.github.io/repo-blueprint/dashboard/) shows"
+        " each of them at a glance: the release of the blueprint it is on, its checks,"
+        " its releases and its Scorecard.\n"
+    )
+    german = reference.showcase(registry, "de")
+    assert german.startswith("Zwei öffentliche Repositories folgen dem Blueprint,")
+    assert "\n- **[Beta](https://github.com/Octo-Org/beta.io)**, ein Paket: der" in (
+        german
+    )
+    assert "zeigt jedes davon auf einen Blick" in german
+    # One repository, in the singular.
+    alone = fleet_of(one("alpha"))
+    assert reference.showcase(alone, "en").startswith(
+        "One public repository follows the blueprint, with code of its own"
+    )
+    assert "reaches it as a pull request:\n" in reference.showcase(alone, "en")
+    assert "shows it at a glance" in reference.showcase(alone, "en")
+    assert reference.showcase(alone, "de").startswith(
+        "Ein öffentliches Repository folgt dem Blueprint,"
+    )
+    assert "zeigt es auf einen Blick" in reference.showcase(alone, "de")
+    # Many, by their number.
+    many = fleet_of(*(one(f"r{index}") for index in range(13)))
+    assert reference.showcase(many, "en").startswith("13 public repositories")
+    assert reference.showcase(many, "en").count("\n- **[Alpha](") == 13
+
+
+def test_the_real_repositories_of_a_kind() -> None:
+    registry = fleet_of(
+        one("alpha"),
+        one("beta", "node-package", canary=False),
+        one("gamma"),
+        one("delta", "node-package"),
+        one("epsilon", "container", canary=False),
+    )
+    # None of the kind: the Variants make one.
+    assert reference.real_repositories(registry, "python-package", "en") == (
+        reference.WORDS["en"]["none"] + "\n"
+    )
+    assert reference.real_repositories(registry, "python-package", "de").startswith(
+        "Noch folgt kein öffentliches Repository dieser Art dem Blueprint."
+    )
+    # One, which no canary tries.
+    assert reference.real_repositories(registry, "container", "en") == (
+        "[Alpha](https://github.com/Octo-Org/epsilon) is made from the blueprint:"
+        " the pages of Alpha.\n"
+    )
+    assert reference.real_repositories(registry, "container", "de") == (
+        "[Alpha](https://github.com/Octo-Org/epsilon) ist aus dem Blueprint"
+        " entstanden: die Seiten von Alpha.\n"
+    )
+    # Many, and the canaries among them.
+    assert reference.real_repositories(registry, "generic", "en") == (
+        "These public repositories of this kind are made from the blueprint:\n"
+        "\n"
+        "- **[Alpha](https://github.com/Octo-Org/alpha)**: the pages of Alpha.\n"
+        "- **[Alpha](https://github.com/Octo-Org/gamma)**: the pages of Alpha.\n"
+        "\n"
+        "The Variants workflow tries every pull request of the blueprint on the"
+        " answers of Alpha and Alpha, before it merges.\n"
+    )
+    german = reference.real_repositories(registry, "node-package", "de")
+    assert german.startswith(
+        "Diese öffentlichen Repositories dieser Art sind aus dem Blueprint"
+        " entstanden:\n\n- **[Alpha](https://github.com/Octo-Org/beta)**: die Seiten"
+    )
+    assert german.endswith(
+        "\n\nDer Workflow Variants probiert jeden Pull Request des Blueprints mit den"
+        " Antworten von Alpha aus, bevor er merged.\n"
+    )
+
+
+def test_a_part_between_its_marks() -> None:
+    marks = reference.snippet("made-with")
+    assert marks == (
+        "<!-- --8<-- [start:made-with] -->\n",
+        "<!-- --8<-- [end:made-with] -->\n",
+    )
+    text = f"# A\n\n{marks[0]}\nold\n\n{marks[1]}\nend\n"
+    assert reference.with_part(text, marks, "\nnew\n\n", Path("README.md")) == (
+        f"# A\n\n{marks[0]}\nnew\n\n{marks[1]}\nend\n"
+    )
+    for broken in (f"# A\n{marks[0]}old\n", f"# A\n{marks[1]}old\n", "# A\n"):
+        with pytest.raises(reference.PageError) as raised:
+            reference.with_part(broken, marks, "new\n", Path("docs/a.md"))
+        assert str(raised.value) == (
+            "docs/a.md has no part between <!-- --8<-- [start:made-with] -->"
+            " and <!-- --8<-- [end:made-with] -->"
+        )
+
+
+def test_the_order_of_the_rollout_and_the_legs_of_the_canaries() -> None:
+    registry = reference.fleet(REGISTRY)
+    text = "env:\n          ORDER: old names\n          TAG: v1\n"
+    assert reference.rollout_order(text, registry) == (
+        "env:\n          ORDER: beta.io alpha\n          TAG: v1\n"
+    )
+    for broken in ("env:\n", text + text, "  ORDER: old\n"):
+        with pytest.raises(reference.PageError, match="no one line ORDER:"):
+            reference.rollout_order(broken, registry)
+    # Only the canaries, by name.
+    assert reference.canary_legs(
+        fleet_of(one("zeta", "node-package"), one("beta", canary=False), one("alpha"))
+    ) == (
+        "          - { kind: generic, start: adopted, answers: alpha }\n"
+        "          - { kind: node-package, start: adopted, answers: zeta }\n"
+    )
+    assert reference.canary_legs(fleet_of(one("beta", canary=False))) == ""
+
+
+def fleet_repository(root: Path) -> None:
+    """A blueprint with a registry and every file that names its repositories."""
+    readme = "# R\n\n{}\nold\n\n{}\n## More\n"
+    page = "## A\n\n{}\nold\n{}\nHow\n"
+    files = {
+        ".github/fleet.toml": REGISTRY,
+        "README.md": readme.format(*reference.snippet("made-with")),
+        "README.de.md": readme.format(*reference.snippet("made-with")),
+        ".github/workflows/rollout.yml": "env:\n          ORDER: old\n",
+        ".github/workflows/variants.yml": (
+            "include:\n          - { kind: generic, start: new }\n"
+            + "".join(reference.CANARIES)
+        ),
+    }
+    for kind in ("generic", "node-package", "python-package"):
+        for suffix in (".md", ".de.md"):
+            text = page.format(*reference.snippet("real-repository"))
+            files[f"docs/kinds/{kind}{suffix}"] = text
+    write(root, files)
+
+
+def test_the_files_that_name_the_repositories_of_the_registry(tmp_path: Path) -> None:
+    # A copy of the blueprint without a registry has none.
+    assert reference.fleet_pages(tmp_path) == {}
+    fleet_repository(tmp_path)
+    written = reference.fleet_pages(tmp_path)
+    registry = reference.fleet(REGISTRY)
+    assert written[Path("README.md")] == (
+        "# R\n\n<!-- --8<-- [start:made-with] -->\n\n"
+        + reference.showcase(registry, "en")
+        + "\n<!-- --8<-- [end:made-with] -->\n\n## More\n"
+    )
+    assert reference.showcase(registry, "de") in written[Path("README.de.md")]
+    assert written[Path("docs/kinds/node-package.md")] == (
+        "## A\n\n<!-- --8<-- [start:real-repository] -->\n\n"
+        + reference.real_repositories(registry, "node-package", "en")
+        + "\n<!-- --8<-- [end:real-repository] -->\n\nHow\n"
+    )
+    assert "Noch folgt kein" in written[Path("docs/kinds/python-package.de.md")]
+    assert written[reference.ROLLOUT] == "env:\n          ORDER: beta.io alpha\n"
+    assert written[reference.VARIANTS] == (
+        "include:\n          - { kind: generic, start: new }\n"
+        + reference.CANARIES[0]
+        + "          - { kind: generic, start: adopted, answers: alpha }\n"
+        + reference.CANARIES[1]
+    )
+    assert len(written) == 10
+    # Written once, they say what the registry says.
+    for path, text in written.items():
+        (tmp_path / path).write_text(text, encoding="utf-8")
+    assert reference.stale(tmp_path, reference.fleet_pages(tmp_path)) == []
+
+
+def test_a_repository_of_a_kind_without_a_page(tmp_path: Path) -> None:
+    fleet_repository(tmp_path)
+    (tmp_path / "docs/kinds/node-package.md").unlink()
+    with pytest.raises(reference.PageError) as raised:
+        reference.fleet_pages(tmp_path)
+    assert str(raised.value) == (
+        ".github/fleet.toml: the kind node-package of beta.io has no page"
+        " docs/kinds/node-package.md"
+    )
+
+
+def test_the_command_writes_the_files_of_the_registry(
+    repository: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fleet_repository(repository)
+    assert reference.main([], repository) == 0
+    out = capsys.readouterr().out
+    assert "reference.py: wrote README.md\n" in out
+    assert "reference.py: wrote .github/workflows/variants.yml\n" in out
+    assert reference.main(["--check"], repository) == 0
+    # A registry that names no fleet stops it, as a page that it can't write.
+    (repository / ".github/fleet.toml").write_text("owner = 'o'\n", encoding="utf-8")
+    assert reference.main(["--check"], repository) == 2
+    assert capsys.readouterr().err == (
+        "reference.py: .github/fleet.toml names no [[repository]]\n"
+    )

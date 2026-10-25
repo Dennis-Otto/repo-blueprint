@@ -44,6 +44,12 @@ Diese Art bringt keinen eigenen Schritt dazu.
 
 ## Ein echtes Repository
 
-Der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) ist aus dem Blueprint entstanden: eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, und jedes Repository des Blueprints nutzt ihn.
+<!-- --8<-- [start:real-repository] -->
+
+[Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) ist aus dem Blueprint entstanden: eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, geprüft von einem Job ohne KI, bevor sie erscheint.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von Issue-Assistent aus, bevor er merged.
+
+<!-- --8<-- [end:real-repository] -->
 
 Wie sich der Blueprint mit anderen Vorlagen vergleicht: [der Vergleich](../compare.md).

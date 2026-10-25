@@ -1451,6 +1451,20 @@ def test_a_refusal_of_the_rulesets_that_is_not_the_plan_still_fails(
     assert "GitHub answered 403: simulated failure" in capsys.readouterr().err
 
 
+def test_a_public_repository_fails_on_a_refusal_that_names_advanced_security(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Such as a policy of an organization: a public repository has every part.
+    refusal = "Advanced Security is disabled by a policy of the enterprise."
+    github.fail[("POST", f"repos/{REPO}/rulesets")] = (422, refusal)
+    github.fail[("GET", f"repos/{REPO}/rulesets?per_page=100")] = (403, refusal)
+
+    assert run(github, root, "settings", "check") == 2
+    assert run(github, root, "settings", "apply") == 2
+
+    assert refusal in capsys.readouterr().err
+
+
 def test_the_checklist_of_a_private_repository_on_github_free(
     github: FakeGitHub,
     root: Path,

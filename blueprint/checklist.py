@@ -302,7 +302,7 @@ def applied_step(drift: list[Drift], private: bool = False) -> Step:
 def code_security_step(repo: str, plan: Plan) -> Step:
     """On a private repository: whether it has GitHub Code Security, without which the
     settings switch the workflows to what they do without code scanning (decision
-    0081); neutral without it, since the plan of the owner may not offer it."""
+    0082); neutral without it, since the plan of the owner may not offer it."""
     return Step(
         "Private repository: GitHub Code Security on, for code scanning and the"
         " dependency review",
@@ -333,7 +333,7 @@ def checklist(
     )
     plan = read_plan(api, repo)
     settings = fitted(api, repo, settings, plan)
-    drift = check(api, repo, settings)
+    drift = check(api, repo, settings, plan.private)
     # What a person sets, which the API can't: the secrets and the files that the
     # community profile counts, each a step of its own.
     secrets_missing = [item for item in drift if item.setting.startswith("secret ")]

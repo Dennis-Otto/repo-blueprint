@@ -45,6 +45,10 @@ Diese Art bringt diese Schritte dazu:
 
 ## Ein echtes Repository
 
+<!-- --8<-- [start:real-repository] -->
+
 Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der Workflow Variants des Blueprints macht bei jeder Änderung eines daraus und führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert eines von der neuesten Version, wie sein Blueprint-Bot es täte.
+
+<!-- --8<-- [end:real-repository] -->
 
 Wie sich der Blueprint mit anderen Vorlagen vergleicht: [der Vergleich](../compare.md).

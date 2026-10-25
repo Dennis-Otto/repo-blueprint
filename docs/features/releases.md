@@ -42,7 +42,7 @@ A release of paperless-sync, as GitHub shows its assets: the signed app, its sig
 
 ## Security
 
-CodeQL, and for the PHP of a Nextcloud app the taint analysis of Psalm, which knows the controllers, files and HTTP client of Nextcloud and proves with a canary in every run that it still sees, OpenSSF Scorecard, dependency review, secret scan, SBOMs of what a release ships as SPDX and CycloneDX, by its name and version, OpenVEX, release tags signed without a key (gitsign) and checked before every build, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner), the answers of OpenSSF Best Practices and of the OSPS Baseline that the blueprint guarantees (`.bestpractices.json`).
+CodeQL, and for the PHP of a Nextcloud app the taint analysis of Psalm, which knows the controllers, files and HTTP client of Nextcloud and proves with a canary in every run that it still sees, OpenSSF Scorecard, dependency review, secret scan, SBOMs of what a release ships as SPDX and CycloneDX, by its name and version, OpenVEX, release tags signed without a key (gitsign) and checked before every build, findings watcher, the security audit of the workflows (zizmor), every lock file against the OSV database (OSV-Scanner), the network traffic of every job (Harden-Runner), blocked in each job that holds a secret or may write but for the hosts it needs, the answers of OpenSSF Best Practices and of the OSPS Baseline that the blueprint guarantees (`.bestpractices.json`).
 
 **How:** Every action pinned to a commit hash.
 

@@ -15,15 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import (
-    advisories,
-    annotate,
-    locks,
-    mutation,
-    sarif,
-    screenshots,
-    versions,
-)
+from blueprint import advisories, annotate, locks, mutation, screenshots, versions
 from blueprint.bootstrap import CreateError, create, doctor
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -195,29 +187,6 @@ def annotate_command(arguments: argparse.Namespace, root: Path) -> int:
     for line in found:
         print(line)
     return 0
-
-
-def sarif_command(arguments: argparse.Namespace) -> int:
-    """The findings of SARIF files in the summary of the check and as annotations,
-    where code scanning can't keep them: 1 when one would stop a pull request, 2 when
-    a file can't be read."""
-    found = []
-    try:
-        for name in arguments.files:
-            found += sarif.findings(json.loads(Path(name).read_text(encoding="utf-8")))
-    except (OSError, ValueError) as error:
-        print(f"blueprint.py: {error}", file=sys.stderr)
-        return 2
-    with Path(arguments.summary).open("a", encoding="utf-8") as summary:
-        summary.write(sarif.summary(found, arguments.artifact))
-    stopping = [item for item in found if item.stops]
-    for line in annotate.commands(item.annotation() for item in stopping):
-        print(line)
-    print(
-        f"{len(found)} findings, {len(stopping)} of them an error or a security"
-        " alert of high or critical severity."
-    )
-    return 1 if stopping else 0
 
 
 def read_coverage(head: str, base: str) -> tuple[Coverage, Coverage | None] | None:
@@ -831,11 +800,11 @@ def settings_command(
     by the variables of PLAN_VARIABLES."""
     plan = read_plan(api, repo)
     settings = fitted(api, repo, settings, plan)
-    drift = check(api, repo, settings)
+    drift = check(api, repo, settings, plan.private)
     refused: dict[str, str] = {}
     if action == "apply" and drift:
-        refused, unoffered = apply(api, repo, settings, drift)
-        after = check(api, repo, settings)
+        refused, unoffered = apply(api, repo, settings, drift, plan.private)
+        after = check(api, repo, settings, plan.private)
         # A refused write shows nothing about what GitHub keeps.
         if "security" not in {*refused, *unoffered}:
             after = kept(repo, drift, after, plan.private)
@@ -1209,19 +1178,6 @@ def add_coach_parsers(
     )
     annotate_parser.add_argument(
         "report", nargs="?", default="", help="the report of JUnit of the tests"
-    )
-    sarif_parser = commands.add_parser(
-        "sarif",
-        help="the findings of SARIF files where code scanning can't keep them, in the "
-        "summary of the check and as annotations; 1 when one of them would stop a pull "
-        "request",
-    )
-    sarif_parser.add_argument("files", nargs="+", help="the SARIF files")
-    sarif_parser.add_argument(
-        "--summary", required=True, help="the file of the summary, appended to"
-    )
-    sarif_parser.add_argument(
-        "--artifact", required=True, help="the artifact of the run with the files"
     )
 
 
@@ -1655,8 +1611,6 @@ def standalone_command(
             return 2
     if arguments.command == "annotate":
         return annotate_command(arguments, root)
-    if arguments.command == "sarif":
-        return sarif_command(arguments)
     if arguments.command == "doctor":
         # Git and gh only answer, and the settings play no part in it.
         try:

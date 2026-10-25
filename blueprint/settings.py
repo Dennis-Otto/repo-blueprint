@@ -178,7 +178,7 @@ def apply_security(api: Api, repo: str, drift: list[Drift]) -> None:
 def gated(private: bool) -> tuple[str, ...]:
     """The switches of security_and_analysis that the plan of a repository decides:
     on a private one every switch of secret scanning, which GitHub offers it only with
-    GitHub Secret Protection (decision 0081)."""
+    GitHub Secret Protection (decision 0082)."""
     return ANALYSIS if private else PLAN_GATED
 
 
@@ -920,11 +920,13 @@ def rulesets(api: Api, repo: str) -> dict[str, Json]:
     return {item["name"]: item["id"] for item in api.get_all(f"repos/{repo}/rulesets")}
 
 
-def check_rulesets(api: Api, repo: str, wanted: list[dict[str, Json]]) -> list[Drift]:
+def check_rulesets(
+    api: Api, repo: str, wanted: list[dict[str, Json]], private: bool = False
+) -> list[Drift]:
     try:
         existing = rulesets(api, repo)
     except GitHubError as error:
-        if not refused_by_plan(error):
+        if not (private and refused_by_plan(error)):
             raise
         # A private repository on GitHub Free may have no rulesets to read.
         return [lacking(repo, Drift("rulesets", "present", "not offered"), error)]
@@ -1278,12 +1280,16 @@ class Settings:
         )
 
 
-def check(api: Api, repo: str, settings: Settings) -> list[Drift]:
+def check(
+    api: Api, repo: str, settings: Settings, private: bool = False
+) -> list[Drift]:
+    """The differences of GitHub from the settings; private says whether a refusal
+    that names the plan is one of what the plan of a private repository lacks."""
     return (
         check_repository(api, repo, settings.repository)
         + check_security(api, repo, settings.security)
         + check_actions(api, repo, settings.actions, settings.workflows)
-        + check_rulesets(api, repo, settings.rulesets)
+        + check_rulesets(api, repo, settings.rulesets, private)
         + check_variables(api, repo, settings.variables)
         + check_environments(api, repo, settings.environments)
         + check_pages(api, repo, settings.pages)
@@ -1297,7 +1303,7 @@ def check(api: Api, repo: str, settings: Settings) -> list[Drift]:
 # The variables that switch the workflows to what they do without a part of GitHub
 # that a private repository lacks on its plan, with the part. GitHub offers code
 # scanning and the dependency review to a private repository only with GitHub Code
-# Security, or with GitHub Advanced Security, which includes it (decision 0081):
+# Security, or with GitHub Advanced Security, which includes it (decision 0082):
 # without it, CodeQL, zizmor, OSV-Scanner and the Scorecard keep their findings out
 # of code scanning, and the dependency review leaves the vulnerabilities of the lock
 # files to OSV-Scanner.
@@ -1360,8 +1366,9 @@ def read_plan(api: Api, repo: str) -> Plan:
 
 
 def refused_by_plan(error: GitHubError) -> bool:
-    """Whether GitHub refused a part of the settings because the plan of a private
-    repository lacks it, which a public repository never hears."""
+    """Whether GitHub refused a part of the settings with an answer that names the
+    plan; the callers ask only for a private repository, since a public one has every
+    part, and such an answer there, as from a policy of an organization, still fails."""
     return error.status in (403, 422) and bool(PLAN_REFUSAL.search(error.message))
 
 
@@ -1442,7 +1449,7 @@ PERMISSIONS = {
 
 
 def apply(
-    api: Api, repo: str, settings: Settings, drift: list[Drift]
+    api: Api, repo: str, settings: Settings, drift: list[Drift], private: bool = False
 ) -> tuple[dict[str, str], dict[str, GitHubError]]:
     """Apply every part of the drift and return the parts that GitHub refused, each
     with the reason, and those that it refused because the plan of a private
@@ -1478,7 +1485,7 @@ def apply(
         try:
             step()
         except GitHubError as error:
-            if refused_by_plan(error):
+            if private and refused_by_plan(error):
                 unoffered[name] = error
                 continue
             refused[name] = (
