@@ -88,6 +88,7 @@ from blueprint.settings import (
     kept,
     line_of,
     unlisted_actions,
+    widen_selected_actions,
 )
 from blueprint.site_check import annotation as site_annotation
 from blueprint.site_check import check as check_site
@@ -839,6 +840,33 @@ def actions_command(api: Api, root: Path, path: Path) -> int:
     return 1
 
 
+def widen_command(api: Api, repo: str, settings: Settings, path: Path) -> int:
+    """settings widen: the list of the allowed actions on GitHub gets every pattern of
+    [actions.selected] that it lacks, and loses none, where GitHub uses the list. The
+    blueprint bot runs it with the settings of an update before it pushes the update,
+    so that the checks of its pull request can start the actions that the release
+    adds; the settings bot narrows the list to the settings after the merge. A list
+    that only grows stops no workflow, so the command changes nothing else."""
+    # The path as the documentation writes it, with slashes on Windows too.
+    config = path.as_posix()
+    selected = settings.actions.get("selected")
+    if settings.actions.get("allowed_actions") != "selected" or not isinstance(
+        selected, dict
+    ):
+        print(f"[actions] of {config} lists no selected actions to add to GitHub's.")
+        return 0
+    added = widen_selected_actions(api, repo, selected)
+    if not added:
+        print(
+            f"GitHub lets {repo} start every pattern of [actions.selected] of {config}."
+        )
+        return 0
+    print(f"GitHub now lets {repo} start these patterns of {config} as well:")
+    for pattern in added:
+        print(f"- {pattern}")
+    return 0
+
+
 def checklist_command(api: Api, repo: str, settings: Settings, root: Path) -> int:
     print(f"The set-up of {repo}:")
     steps = checklist(api, repo, settings, root)
@@ -887,10 +915,12 @@ def add_settings_parsers(
     )
     settings_parser.add_argument(
         "action",
-        choices=["check", "apply", "actions"],
+        choices=["check", "apply", "actions", "widen"],
         help="check: compare with GitHub; apply: make GitHub match; actions: whether "
         "the list of the allowed actions lets every action that the workflows run "
-        "start, also in turn, from the files alone (the check of the Lint workflow)",
+        "start, also in turn, from the files alone (the check of the Lint workflow); "
+        "widen: only add the patterns of the selected actions that GitHub's list "
+        "lacks (the blueprint bot, before it pushes an update)",
     )
     commands.add_parser(
         "checklist", help="the steps outside the API, and which are done"
@@ -1718,6 +1748,8 @@ def main(
         settings = Settings.load(root / arguments.config, root)
         if arguments.command == "checklist":
             return checklist_command(api, repo, settings, root)
+        if arguments.action == "widen":
+            return widen_command(api, repo, settings, arguments.config)
         return settings_command(api, repo, settings, arguments.action, arguments.config)
     except (
         GitHubError,

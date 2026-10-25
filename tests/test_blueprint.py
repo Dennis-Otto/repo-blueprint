@@ -1563,6 +1563,86 @@ def test_an_action_that_the_list_lacks_still_lets_the_active_list_grow(
     )
 
 
+def test_widen_adds_only_the_patterns_that_the_list_lacks(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The blueprint bot, before it pushes an update that brings a new action: the
+    # list grows by its patterns, and none that GitHub had goes away.
+    with_selected_actions(root, WORKFLOW + "      - uses: Rogue/Action@89ab\n")
+    github.selected = {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": ["Old/Action@*", "STEP-SECURITY/harden-runner@*"],
+    }
+
+    assert run(github, root, "settings", "widen") == 0
+
+    assert github.selected == {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": [
+            "Old/Action@*",
+            "STEP-SECURITY/harden-runner@*",
+            "vendor/composite@*",
+        ],
+    }
+    assert capsys.readouterr().out == (
+        f"GitHub now lets {REPO} start these patterns of .github/repository.toml as"
+        " well:\n- vendor/composite@*\n"
+    )
+    # Only the list of the actions: no other setting, and no switch of the actions.
+    writes = [(method, path) for method, path in github.calls if method != "GET"]
+    assert writes == [("PUT", f"repos/{REPO}/actions/permissions/selected-actions")]
+
+    # Nothing left to add: no write.
+    github.calls.clear()
+    assert run(github, root, "settings", "widen") == 0
+    assert [method for method, _ in github.calls] == ["GET", "GET"]
+    assert capsys.readouterr().out == (
+        f"GitHub lets {REPO} start every pattern of [actions.selected] of"
+        " .github/repository.toml.\n"
+    )
+
+
+def test_widen_leaves_a_repository_alone_that_lets_every_action_run(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_selected_actions(root)
+    github.permissions["allowed_actions"] = "all"
+
+    assert run(github, root, "settings", "widen") == 0
+
+    assert github.calls == [("GET", f"repos/{REPO}/actions/permissions")]
+    assert "start every pattern of [actions.selected]" in capsys.readouterr().out
+
+
+def test_widen_without_selected_actions_asks_github_nothing(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(github, root, "settings", "widen") == 0
+
+    assert github.calls == []
+    assert capsys.readouterr().out == (
+        "[actions] of .github/repository.toml lists no selected actions to add to"
+        " GitHub's.\n"
+    )
+
+
+def test_widen_fails_on_settings_that_conflict(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An update whose settings have the markers of a conflict: the bot pushes the
+    # update without a wider list, as it did before.
+    (root / ".github/repository.toml").write_text(
+        "<<<<<<< before updating\n" + CONFIG, encoding="utf-8"
+    )
+
+    assert run(github, root, "settings", "widen") == 2
+
+    assert github.calls == []
+    assert capsys.readouterr().err.startswith("blueprint.py: ")
+
+
 def test_an_action_that_an_action_runs_in_turn_needs_its_pattern(
     github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

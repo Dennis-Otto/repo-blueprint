@@ -146,6 +146,21 @@ ABOUT: dict[str, str] = {
         " checks run, create the release tags and apply the settings. The file goes in"
         " with `< key.pem` after the command below."
     ),
+    "SETTINGS_APP_CLIENT_ID": (
+        "The Client ID of the settings app, an optional second GitHub App of the owner"
+        " with only the permissions that the settings need. With it and the private key"
+        " `SETTINGS_APP_PRIVATE_KEY`, the settings bot applies the settings as this"
+        " app, and the blueprint bot lets the actions of an update start before it"
+        " pushes the update, so that the release app needs no *Administration*."
+        " Without them, the release app applies the settings, as before."
+    ),
+    "SETTINGS_APP_PRIVATE_KEY": (
+        "The private key of the settings app, the file that its settings page"
+        " generates. With it and `SETTINGS_APP_CLIENT_ID`, the settings bot and the"
+        " blueprint bot act as the settings app, the only app that writes the"
+        " administration of the repository. The file goes in with `< key.pem` after"
+        " the command below."
+    ),
     "UPSTREAM_AUTOMERGE": (
         "`off` makes the pull request of the upstream bot of a Nextcloud app, which"
         " raises `max-version` to a new major version of Nextcloud, wait for the"
