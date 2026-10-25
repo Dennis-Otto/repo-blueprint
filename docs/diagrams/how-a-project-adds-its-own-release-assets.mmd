@@ -5,10 +5,10 @@ config:
 ---
 flowchart TB
     accTitle: How a project adds its own release assets
-    accDescr: The project's scripts/release-assets.sh builds its own assets, such as the zip of a browser extension, at the commit of the release, in a job that may write nothing, holds no secret and reaches only GitHub and npm. The job checks that each asset is a file with a name that GitHub keeps and hands the files on as an artifact. The job of the release takes them, after it checked the signed tag, refuses a name that one of its own assets has, and attests them with the package, the SBOMs and the notices. All of them go to the draft before it is published, and the verification of the release fails for an asset without its signed provenance.
+    accDescr: The project's scripts/release-assets.sh builds its own assets, such as the zip of a browser extension, at the commit of the release, in a job that may write nothing, holds no secret and reaches only GitHub, Node.js and npm. The job checks that each asset is a file with a name that GitHub keeps and hands the files on as an artifact. The job of the release takes them, after it checked the signed tag, refuses a name that one of its own assets has, and attests them with the package, the SBOMs and the notices. All of them go to the draft before it is published, and the verification of the release fails for an asset without its signed provenance.
 
     hook(["scripts/release-assets.sh<br>FOLDER VERSION"])
-    build["The job assets of the project<br>reads only · no secret · GitHub and npm"]
+    build["The job assets of the project<br>reads only · no secret · GitHub, Node.js and npm"]
     checked{"A file each, by a name<br>that GitHub keeps"}
     release["The job release assets<br>checks the signed tag, takes the files"]
     attest["Attested with the package,<br>the SBOMs and the notices"]

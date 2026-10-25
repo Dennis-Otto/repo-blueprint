@@ -5656,6 +5656,14 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
+    # A project that no registry delivers verifies each asset, those of its own
+    # scripts/release-assets.sh too, such as the zip of a browser extension.
+    generic = security("generic")
+    assert "gh attestation verify <asset>" in generic
+    assert "those that the project builds itself with `scripts/release-assets.sh`" in (
+        generic
+    )
+    assert "the zips and tarballs of that script" in generic
     # Each attestation only of the workflow that builds the release: the isolated
     # build of build-release.yml, and the release workflow for the image that it
     # pushes, so that one of another workflow of the repository fails.
@@ -5666,7 +5674,7 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
             # Not that of the website, which the Docs workflow signs.
             if line.startswith("gh attestation verify ") and "artifact.tar" not in line
         ]
-        assert len(verify) == (0 if kind in ("generic", "github-action") else 1), kind
+        assert len(verify) == 1, kind
         workflow = "release.yml" if kind == "container" else "build-release.yml"
         for line in verify:
             assert line.endswith(
@@ -15654,11 +15662,17 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     (node,) = steps_using(job, "actions/setup-node")
     assert node["with"]["package-manager-cache"] is False
     assert node["if"] == f"{HOOK} && hashFiles('package.json') != ''"
+    # The Node of .nvmrc, which only the node stack renders, or that of the runner.
+    assert node["with"]["node-version-file"] == (
+        "${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}"
+    )
     # Without the hook, the job only checks out.
     for step in job["steps"][2:-1]:
         assert HOOK in step["if"], step
     (upload,) = steps_using(job, "actions/upload-artifact")
     assert upload["with"]["if-no-files-found"] == "error"
+    # Long enough to re-run only the failed job assets after a weekend.
+    assert upload["with"]["retention-days"] == 7
 
     # The job of the release takes what it built, after it checked the tag, and adds
     # it after its own assets, before it attests them all.
@@ -15743,6 +15757,7 @@ def test_the_hook_of_a_project_builds_its_assets(tmp_path: Path, node: bool) -> 
             "GitHub would rename the asset demo extension.zip:",
         ),
         ('touch "$1/.demo.zip"\n', "GitHub would rename the asset .demo.zip:"),
+        ('touch "$1/demo.zip."\n', "GitHub would rename the asset demo.zip.:"),
         ('touch "$1/demo.zip"\nexit 3\n', None),
     ],
 )
@@ -15758,16 +15773,29 @@ def test_the_build_stops_at_assets_that_the_release_cannot_ship(
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("name", "added"),
+    ("publish_to", "name", "added"),
     [
-        ("demo-extension-1.2.3.zip", True),
+        ("none", "demo-extension-1.2.3.zip", True),
+        ("", "docs-1.2.3.tar.gz", True),
+        ("pypi", "demo-extension-1.2.3.zip", True),
         # An asset of the release, and the provenance that the release attaches after.
-        ("r.spdx.json", False),
-        ("provenance.sigstore.json", False),
+        ("none", "r.spdx.json", False),
+        ("none", "provenance.sigstore.json", False),
+        # Names that verify-release reads as files of the release itself.
+        ("none", "demo.intoto.jsonl", False),
+        ("none", "demo.spdx.json", False),
+        ("none", "demo.cdx.json", False),
+        ("none", "demo.openvex.json", False),
+        ("none", "THIRD_PARTY_NOTICES.md", False),
+        # Names that the registry jobs of release.yml download by pattern and publish.
+        ("pypi", "docs-1.2.3.tar.gz", False),
+        ("pypi", "extra-1.2.3-py3-none-any.whl", False),
+        ("npm", "extra-1.2.3.tgz", False),
+        ("nextcloud-appstore", "demo.tar.gz", False),
     ],
 )
 def test_the_assets_of_the_project_replace_none_of_the_release(
-    tmp_path: Path, name: str, added: bool
+    tmp_path: Path, publish_to: str, name: str, added: bool
 ) -> None:
     assets = tmp_path / "runner/assets"
 
@@ -15776,7 +15804,7 @@ def test_the_assets_of_the_project_replace_none_of_the_release(
         "build-release.yml",
         "assets",
         "Add the assets of the project",
-        env={"ASSETS": assets.as_posix()},
+        env={"ASSETS": assets.as_posix(), "PUBLISH_TO": publish_to},
         files={
             "$RUNNER_TEMP/assets/r.spdx.json": "{}\n",
             f"$RUNNER_TEMP/project-assets/{name}": "built\n",
@@ -15982,6 +16010,8 @@ PROJECT_ARCHIVES: dict[str, dict[str, str] | None] = {
     [
         # What the script built is the package of a project that no registry delivers.
         ("none", ["cli/run.js", "manifest.json", "popup.js"]),
+        # A repository without the variable publishes nowhere, as for none.
+        ("", ["cli/run.js", "manifest.json", "popup.js"]),
         # Beside a package, or for an action, the SBOMs describe what they did before.
         ("github-action", ["action.yml", "demo.py", "requirements.txt"]),
         ("npm", SHIPPED["npm"]),
@@ -16140,6 +16170,7 @@ def test_the_sboms_name_the_release_by_its_version(
     [
         # The zips and tarballs of scripts/release-assets.sh are a package.
         ("none", ("demo-extension-1.2.3.zip",), "image"),
+        ("", ("demo-extension-1.2.3.zip",), "image"),
         ("none", ("demo-cli-1.2.3.tar.gz", "demo.crx"), "image"),
         # Another file is no package: the sources of the tag are what ships.
         ("none", ("demo.crx",), "directory"),
