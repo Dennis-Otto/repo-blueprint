@@ -171,17 +171,26 @@ def last_run(api: Api, repo: str, workflow: str) -> Run:
     """The last run of workflow for main. A run that GitHub skipped says nothing about
     main, such as one of Findings that the CodeQL of a pull request started, and
     neither does a pull request from the main of a fork, whose branch has that name
-    too."""
+    too. Of the others, the one that started last counts: GitHub lists the runs by
+    when it created them, but a run that it ran again starts anew, such as the run for
+    the head of main that a late run for an older commit cancelled, and that cancels
+    the late one in turn."""
     runs = api.get(
         f"repos/{repo}/actions/workflows/{workflow}/runs"
         f"?branch=main&per_page={LAST_RUNS}&exclude_pull_requests=true"
     )
-    for run in (runs or {}).get("workflow_runs") or []:
-        skipped = run.get("conclusion") == "skipped"
-        if skipped or str(run.get("event", "")).startswith("pull_request"):
-            continue
-        return Run(state_of(run), run.get("html_url", ""), run.get("created_at") or "")
-    return Run("none")
+    found = [
+        run
+        for run in (runs or {}).get("workflow_runs") or []
+        if run.get("conclusion") != "skipped"
+        and not str(run.get("event", "")).startswith("pull_request")
+    ]
+    if not found:
+        return Run("none")
+    run = max(
+        found, key=lambda run: run.get("run_started_at") or run.get("created_at") or ""
+    )
+    return Run(state_of(run), run.get("html_url", ""), run.get("created_at") or "")
 
 
 def verification(api: Api, repo: str, tag: str, standalone: Run) -> Run:
