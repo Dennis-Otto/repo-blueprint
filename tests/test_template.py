@@ -11373,6 +11373,12 @@ def check_manifest(folder: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def release_as(root: Path, version: str) -> None:
+    """The versions that a release PR with `Release-As: <version>` writes."""
+    for name in ("extension/manifest.json", "package.json"):
+        edit_json(root / name, lambda data: data.update(version=version))
+
+
 def listing_without(text: str, line: str) -> str:
     assert line in text
     return text.replace(line, "")
@@ -11427,13 +11433,7 @@ MANIFEST_PROBLEMS: list[tuple[str, Callable[[Path], object], str]] = [
     ),
     (
         "a prerelease of a release PR with Release-As",
-        lambda root: [
-            edit_json(
-                root / name,
-                lambda data: data.update(version="2.0.0-beta.1"),
-            )
-            for name in ("extension/manifest.json", "package.json")
-        ],
+        lambda root: release_as(root, "2.0.0-beta.1"),
         "a Chrome extension makes its prereleases only on the beta channel",
     ),
     (
