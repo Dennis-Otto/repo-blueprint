@@ -1987,11 +1987,16 @@ def path_without(folder: Path, *commands: str) -> str:
 
 
 def run_the_steps(
-    repository: Path, script: str, *, path: str | None = None, ci: bool = False
+    repository: Path,
+    script: str,
+    *,
+    path: str | None = None,
+    ci: bool = False,
+    variables: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """The set-up of scripts/check.sh and steps after it, as script, in the repository:
     from a file that git leaves out, without the variables of a run of the CI or with
-    those of GitHub Actions, and with this PATH."""
+    those of GitHub Actions, and these variables, and with this PATH."""
     (repository / "scripts").mkdir(exist_ok=True)
     (repository / "scripts/steps.sh").write_text(script, encoding="utf-8", newline="\n")
     (repository / ".git/info").mkdir(exist_ok=True)
@@ -2005,6 +2010,7 @@ def run_the_steps(
     }
     if ci:
         environment |= {"CI": "true", "GITHUB_ACTIONS": "true"}
+    environment |= variables or {}
     if path is not None:
         environment["PATH"] = path
     assert BASH
@@ -2284,6 +2290,229 @@ def test_the_ci_never_skips_shellcheck(
     assert calls.read_text(encoding="utf-8") == "tool.sh\n"
 
 
+def annotate_function(check: str) -> str:
+    start = check.index("\nannotate() {\n")
+    return check[start : check.index("\n}\n", start) + 3]
+
+
+PYTHON_ANNOTATIONS = [
+    "  mypy --no-pretty --show-error-end 2>&1 | annotate mypy\n",
+    '  junit=("--junitxml=$report" -o junit_family=xunit1)\n',
+    '    annotate pytest "$report"\n',
+]
+# What each kind writes as annotations through blueprint.py annotate, besides
+# ShellCheck; Ruff, Psalm and Biome write their own, and tsc through the problem
+# matcher of actions/setup-node.
+TOOL_ANNOTATIONS = {
+    "home-assistant": PYTHON_ANNOTATIONS,
+    "github-action": PYTHON_ANNOTATIONS,
+    "python-package": PYTHON_ANNOTATIONS,
+    "nextcloud-app": [
+        "  vendor/bin/php-cs-fixer fix --dry-run --diff 2>&1 | annotate php-cs-fixer\n",
+        "vendor/bin/phpunit --log-junit build/phpunit.xml \\\n",
+        "    annotate phpunit build/phpunit.xml\n",
+    ],
+    "node-package": ["  npm test 2>&1 | annotate node-test\n"],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_shows_the_findings_of_its_tools_at_their_lines(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # The same function in every kind and in the blueprint, before the first step,
+    # with the module of the blueprint.
+    assert annotate_function(check) == annotate_function(own)
+    assert check.index("\nannotate() {\n") < check.index('\nstep "Text files"\n')
+    assert (project / ".github/blueprint/annotate.py").read_bytes() == (
+        ROOT / "blueprint/annotate.py"
+    ).read_bytes()
+    shellcheck = (
+        '    shellcheck --format=gcc "${scripts[@]}" 2>&1 | annotate shellcheck\n'
+    )
+    assert shellcheck in shell_step(check)
+    for line in TOOL_ANNOTATIONS.get(kind, []):
+        assert line in check, (kind, line)
+    for line in PYTHON_ANNOTATIONS:
+        assert line in own
+        assert (line in check) == (TOOL_ANNOTATIONS.get(kind) == PYTHON_ANNOTATIONS)
+    if kind == "node-package":
+        # The problem matcher of tsc comes with actions/setup-node.
+        ci = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "uses: actions/setup-node@" in ci
+
+
+def the_ci_steps(project: Path, *steps: Callable[[str], str]) -> str:
+    """The set-up of scripts/check.sh of a project, the Python and blueprint.py that
+    the step Pages in one column finds, and the steps that each function cuts out."""
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    tool = (project / ".github/blueprint.py").as_posix()
+    python = Path(sys.executable).as_posix()
+    return "".join(
+        [check[: check.index('step "Text files"')], f"python={python}\ntool={tool}\n"]
+        + [step(check) for step in steps]
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_ci_shows_each_finding_of_shellcheck_at_its_line(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "tool.sh").write_text("echo $1\n", encoding="utf-8", newline="\n")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    # What ShellCheck writes in the format of gcc, and how it ends.
+    (stubs / "shellcheck").write_text(
+        "#!/usr/bin/env bash\n"
+        '[[ "$1" == --format=gcc ]] || exit 3\n'
+        'echo "$2:1:6: note: Double quote to prevent globbing and word splitting.'
+        ' [SC2086]"\n'
+        "exit 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "shellcheck").chmod(0o755)
+    script = the_ci_steps(projects["generic"], shell_step)
+
+    ci = run_the_steps(
+        repository, script, path=f"{stubs}{os.pathsep}{os.environ['PATH']}", ci=True
+    )
+
+    assert ci.returncode == 1, ci.stderr
+    assert ci.stdout == (
+        "\n== Shell scripts\n"
+        "tool.sh:1:6: note: Double quote to prevent globbing and word splitting."
+        " [SC2086]\n"
+        "::group::Annotations\n"
+        "::error file=tool.sh,line=1,col=6,title=ShellCheck SC2086::Double quote to "
+        "prevent globbing and word splitting. https://www.shellcheck.net/wiki/SC2086\n"
+        "::endgroup::\n"
+    )
+
+
+def python_tests_step(check: str) -> str:
+    start = check.index('step "Tests, with every line and branch covered"')
+    return check[start : check.index("\ncoverage report\n", start) + 17]
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("ci", [False, True])
+def test_the_ci_shows_each_test_of_pytest_that_fails_at_its_line(
+    projects: dict[str, Path], tmp_path: Path, ci: bool
+) -> None:
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "tests").mkdir()
+    (repository / "tests/test_a.py").write_text(
+        "def test_passes():\n    assert True\n\n\ndef test_fails():\n    assert 1 == 2\n",
+        encoding="utf-8",
+    )
+    (repository / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    script = the_ci_steps(projects["python-package"], python_tests_step)
+    # The Python of the tests, with pytest, pytest-cov and pytest-xdist.
+    path = os.pathsep.join([str(Path(sys.executable).parent), os.environ["PATH"]])
+
+    result = run_the_steps(
+        repository,
+        script,
+        path=path,
+        ci=ci,
+        variables={"PYTEST_XDIST_AUTO_NUM_WORKERS": "2"},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    annotation = (
+        "::error file=tests/test_a.py,line=6,title=pytest%3A "
+        "tests/test_a.py%3A%3Atest_fails::assert 1 == 2\n"
+    )
+    assert (annotation in result.stdout) == ci
+    assert "1 failed, 1 passed" in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_path_of_the_taint_analysis_fails_the_ci_too(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Psalm taint analysis"')
+    step = check[start : check.index('step "Tests, with every line covered"', start)]
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    psalm = repository / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    # As Psalm 6 ends a taint analysis that writes a report: with 0 in a workflow of
+    # GitHub, which it tells by GITHUB_WORKFLOW, whatever it found.
+    psalm.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "::error file=lib/A.php,line=3,title=TaintedHtml::lib/A.php:3:1"\n'
+        '[[ -n "${GITHUB_WORKFLOW+set}" ]] && exit 0\n'
+        "exit 2\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    psalm.chmod(0o755)
+    script = check[: check.index('step "Text files"')] + step
+    result = run_the_steps(
+        repository, script, ci=True, variables={"GITHUB_WORKFLOW": "CI (PHP)"}
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "::error file=lib/A.php,line=3,title=TaintedHtml::" in result.stdout
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_each_check_explains_itself(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the lock files, with their Python and blueprint.py, the same in every kind
+    # of project and in the blueprint.
+    assert check.index('\nstep "Lock files"\n') < check.index(
+        '\nstep "Explanations of the checks"\n'
+    )
+    assert explanations_step(check) == explanations_step(own)
+    assert '  "$python" "$tool" coach verify\n' in explanations_step(check)
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_a_step_without_its_explanation(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    script = the_ci_steps(project, explanations_step)
+    path = os.environ["PATH"]
+
+    explained = run_the_steps(project, script, path=path)
+    with (project / "scripts/check.sh").open(
+        "a", encoding="utf-8", newline="\n"
+    ) as file:
+        file.write('step "Unexplained"\n')
+    unexplained = run_the_steps(project, script, path=path, ci=True)
+
+    assert (explained.returncode, explained.stdout) == (
+        0,
+        "\n== Explanations of the checks\nEvery required check and every step of "
+        "scripts/check.sh is explained, and every explanation says how it fixes "
+        "itself or why it can't.\n",
+    )
+    assert unexplained.returncode == 1
+    assert unexplained.stderr == (
+        "blueprint.py: the step Unexplained of scripts/check.sh has no explanation; "
+        "add it to .github/checks.project.toml\n"
+    )
+
+
 def pages_step(check: str) -> str:
     start = check.index('step "Pages in one column"')
     return check[start : check.index('step "Changelog fragments"', start)]
@@ -2301,6 +2530,11 @@ def advisories_step(check: str) -> str:
 
 def locks_step(check: str) -> str:
     start = check.index('step "Lock files"')
+    return check[start : check.index('step "Explanations of the checks"', start)]
+
+
+def explanations_step(check: str) -> str:
+    start = check.index('step "Explanations of the checks"')
     return check[start : check.index('step "Version"', start)]
 
 
@@ -3690,8 +3924,8 @@ def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> N
     steps = re.findall(r'^step "(Psalm[^"]*)"$', check, re.M)
     assert steps == ["Psalm", "Psalm taint canary", "Psalm taint analysis"]
     assert (
-        "\nvendor/bin/psalm --taint-analysis --threads=1 --no-cache"
-        " --report=build/psalm-taint.sarif\n" in check
+        "\nenv -u GITHUB_WORKFLOW vendor/bin/psalm --taint-analysis --threads=1"
+        " --no-cache --report=build/psalm-taint.sarif\n" in check
     )
     # Only a Nextcloud app has PHP.
     for kind in KINDS:
@@ -4392,7 +4626,7 @@ def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
         encoding="utf-8"
     )
     check = (project / "scripts/check.sh").read_text(encoding="utf-8")
-    assert "\nvendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
+    assert "\n  vendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -12545,7 +12779,9 @@ def test_mypy_starts_from_the_cache_of_the_last_run_that_passed(
     folder = ROOT if kind == "blueprint" else projects[kind]
     name = "ci-python.yml" if kind == "blueprint" else "ci.yml"
     ci = (folder / ".github/workflows" / name).read_text(encoding="utf-8")
-    if "\nmypy\n" not in (folder / "scripts/check.sh").read_text(encoding="utf-8"):
+    if '\nstep "Mypy"\n' not in (folder / "scripts/check.sh").read_text(
+        encoding="utf-8"
+    ):
         assert "mypy" not in ci
         return
     job = job_in(ci, "check")
