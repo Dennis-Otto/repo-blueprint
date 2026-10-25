@@ -247,6 +247,35 @@ def test_a_repository_on_the_blueprint() -> None:
     assert row.scorecard == 7.6
 
 
+def test_the_last_run_is_the_one_that_started_last() -> None:
+    # A late run for an older commit cancelled the run for the head of main; the bot
+    # ran that one again, and it cancelled the late one in turn.
+    routes = {
+        last_runs("demo", "ci.yml"): (
+            200,
+            listed(
+                run(
+                    "completed",
+                    "cancelled",
+                    created_at="2026-10-06T10:01:00Z",
+                    run_started_at="2026-10-06T10:01:00Z",
+                ),
+                run(
+                    "completed",
+                    "success",
+                    html_url="https://head",
+                    created_at="2026-10-06T10:00:00Z",
+                    run_started_at="2026-10-06T10:03:00Z",
+                ),
+            ),
+        )
+    }
+
+    found = dashboard.last_run(simulated(routes), "Dennis-Otto/demo", "ci.yml")
+
+    assert found == dashboard.Run("success", "https://head", "2026-10-06T10:00:00Z")
+
+
 def test_the_verification_is_the_newer_of_its_own_run_and_that_of_the_release() -> None:
     api = simulated(ROUTES)
     older = dashboard.Run("failure", "https://weekly", "2026-10-01T05:17:00Z")

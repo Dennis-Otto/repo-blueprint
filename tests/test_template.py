@@ -10018,13 +10018,22 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     assert "github.event.workflow_run.conclusion == 'cancelled'" in cancelled["if"]
     events = """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
     assert events in cancelled["if"]
+    # The runs of a push to main cancel each other too, but only those of main, never
+    # those of a push to another branch or of a fork.
+    main = (
+        "(github.event.workflow_run.event == 'push' &&"
+        " github.event.workflow_run.head_branch == github.event.repository.default_branch &&"
+        " github.event.workflow_run.head_repository.full_name == github.repository)"
+    )
+    assert f"({events} || {main})" in cancelled["if"]
     # Twice at most, whatever cancels the run again.
     assert "github.event.workflow_run.run_attempt < 3" in cancelled["if"]
-    # It reads the runs, their checks and pull requests and starts a run again; it
-    # checks out nothing.
+    # It reads the runs, their checks, pull requests and the head of main and starts a
+    # run again; it checks out nothing.
     assert cancelled["permissions"] == {
         "actions": "write",
         "checks": "read",
+        "contents": "read",
         "pull-requests": "read",
     }
     steps = cancelled["steps"]
@@ -10037,13 +10046,14 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     assert not any("${{" in found.get("run", "") for found in steps)
 
 
-CANCELLED_STEP = "Run the checks of the head of the pull request again"
+CANCELLED_STEP = "Run the checks of the head of a pull request or of main again"
 
 
 def run_the_bot_for_cancelled_checks(
-    tmp_path: Path, pull: str, newer: str, message: str
+    tmp_path: Path, pull: str, newer: str, message: str, head: str | None = None
 ) -> tuple[list[str], str]:
-    # gh answers as the API does, after the filters of jq.
+    # gh answers as the API does, after the filters of jq. With the head of main, the
+    # run is one of a push to main.
     done = workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -10051,6 +10061,7 @@ def run_the_bot_for_cancelled_checks(
         CANCELLED_STEP,
         answers=[
             Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", f"{pull}\n"),
+            Answer(r"api repos/o/r/git/ref/heads/main --jq \.object\.sha", f"{head}\n"),
             Answer(
                 r"api repos/o/r/actions/workflows/3/runs\?head_sha=abc1234def"
                 r" --paginate --jq .+",
@@ -10073,6 +10084,8 @@ def run_the_bot_for_cancelled_checks(
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
+            "EVENT": "pull_request" if head is None else "push",
+            "BRANCH": "feature" if head is None else "main",
         },
     )
     assert done.returncode == 0, done.stderr
@@ -10103,6 +10116,68 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5" in calls) == summary.endswith("it runs again")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("head", "newer", "message", "summary"),
+    [
+        # A newer push cancelled the run of the commit before, as it should.
+        ("fed4321cba", "", RACED, "abc1234 is no longer the head of main"),
+        # A run by hand of the same commit tells the state of main.
+        ("abc1234def", "7", RACED, "A newer run of CodeQL for abc1234 reports"),
+        # A person cancelled it.
+        ("abc1234def", "", "The operation was canceled.", "it stays cancelled"),
+        # A late run for the commit before cancelled the run for the head of main,
+        # whose coverage, alerts of code scanning and fixes would be missing.
+        ("abc1234def", "", RACED, "the head of main; it runs again"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_starts_the_run_of_the_head_of_main_again(
+    tmp_path: Path, head: str, newer: str, message: str, summary: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "", newer, message, head=head
+    )
+
+    assert summary in written
+    assert ("run rerun 5" in calls) == summary.endswith("it runs again")
+    # The head of main comes from its branch, not from a pull request.
+    assert not any("/pulls" in call for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
+    tmp_path: Path,
+) -> None:
+    # A head that GitHub didn't tell is no head that a newer push replaced: the step
+    # fails with the error of gh instead of saying that the run stays cancelled.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "cancelled",
+        CANCELLED_STEP,
+        answers=[
+            Answer(
+                r"api repos/o/r/git/ref/heads/main --jq \.object\.sha",
+                err="HTTP 502: Bad Gateway",
+                code=1,
+            ),
+        ],
+        env={
+            "RUN": "5",
+            "ATTEMPT": "1",
+            "WORKFLOW": "3",
+            "NAME": "CodeQL",
+            "SHA": "abc1234def",
+            "EVENT": "push",
+            "BRANCH": "main",
+        },
+    )
+
+    assert done.returncode != 0
+    assert "stays cancelled" not in done.summary
+    assert not any(call.startswith("run rerun") for call in done.commands)
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
@@ -10606,6 +10681,54 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
     )
     # Only the latest run before counts.
     assert not any("actions/runs/1/" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_compares_with_the_run_before_a_superseded_one(
+    tmp_path: Path,
+) -> None:
+    # A newer push cancelled the run for the commit before, so the run before that
+    # tells whether the failure is a real one: it broke the same job.
+    runs = runs_of_the_branch(2, 1)
+    runs["workflow_runs"][-2]["conclusion"] = "cancelled"  # type: ignore[index]
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs,
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "cancelled"),
+                job_of_a_run(22, "test (3.13)", "cancelled"),
+            ]
+        },
+        "repos/o/r/check-runs/21/annotations": annotations_of_a_job(RACED),
+        "repos/o/r/actions/runs/1/jobs": {
+            "jobs": [
+                job_of_a_run(31, "test (3.12)", "failure"),
+                job_of_a_run(32, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" not in calls
+    assert "broke for the commit before" in summary
+    assert any(call.startswith("api repos/o/r/actions/runs/1/jobs ") for call in calls)
 
 
 def variants_of_a_run(
@@ -11539,6 +11662,109 @@ def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
     # Their runners are worth more than the race, which the bot for cancelled checks
     # repairs.
     assert "head.sha" not in concurrency_of(name)
+
+
+# What a newer push to main does to the run of the commit before, for each workflow
+# that a push to main starts (decision 0076); a new one takes a side here.
+ON_PUSH_TO_MAIN = {
+    # The checks and the scanners: a run of main only tells the state of main, which
+    # the run of the newer commit tells as well, so it cancels the older run, as the
+    # runs of a pull request do. The coverage of main and the fix bot take only runs
+    # that ended, and the bot for cancelled checks starts the run of the head again
+    # when a late run for an older commit cancelled it.
+    "cancels": {
+        "action-test.yml",
+        "ci.yml",
+        "codeql.yml",
+        "links.yml",
+        "osv-scanner.yml",
+        "zizmor.yml",
+    },
+    # The bots whose newest run does all the work of an older one, in one group.
+    "replaces": {"dashboard.yml", "newest-python.yml", "settings.yml"},
+    # They publish, commit or change GitHub, the website and the release among them:
+    # a run that started ends, and only the newest of those that wait for it runs.
+    "waits": {"diagrams.yml", "docs.yml", "labels.yml", "release.yml"},
+    # A push of a few files starts them, or their jobs wait for each other on their
+    # own; OpenSSF Scorecard publishes its results, in one short job.
+    "runs": {
+        "findings.yml",
+        "renovate.yml",
+        "scorecard.yml",
+        "screenshot-bot.yml",
+        "update-branches.yml",
+    },
+}
+# The runs of a pull request and those of the pushes to main cancel their older runs;
+# a run on a schedule or by hand is in a group of its own, which no push cancels.
+SUPERSEDED = {
+    "group": "${{ github.workflow }}-${{ github.event.pull_request.number"
+    " || (github.event_name == 'push' && github.ref) || github.run_id }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request'"
+    " || github.event_name == 'push' }}",
+}
+
+
+def cancels_a_push(value: bool | str) -> bool:
+    """Whether a cancel-in-progress cancels the run of a push: its value, or that of
+    its expression, which compares only the name of the event."""
+    if isinstance(value, bool):
+        return value
+    found = re.fullmatch(r"\$\{\{ (.+) \}\}", value)
+    assert found, value
+    events = re.findall(r"github\.event_name == '(\w+)'", found[1])
+    assert (
+        " || ".join(f"github.event_name == '{event}'" for event in events) == found[1]
+    )
+    return "push" in events
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_push_to_main_cancels_only_the_checks_of_the_commit_before(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # A push to main started the checks again while those of the commit before still
+    # ran, and both held runners to the end, of the 20 that the free plan has for all
+    # repositories of the owner.
+    root = ROOT if project == "blueprint" else projects[project]
+    sides = {name: side for side, names in ON_PUSH_TO_MAIN.items() for name in names}
+    found = set()
+    for path, text in sorted(workflows(root).items()):
+        parsed = parse(text)
+        if "push" not in (parsed["on"] or {}):
+            continue
+        name = "ci.yml" if path.startswith("ci-") else path
+        assert name in sides, f"{path}: what does a newer push do to its run?"
+        found.add(sides[name])
+        concurrency = parsed.get("concurrency")
+        if sides[name] == "cancels":
+            assert concurrency == SUPERSEDED, path
+            assert cancels_a_push(concurrency["cancel-in-progress"])
+        elif sides[name] == "runs":
+            assert concurrency is None, path
+        else:
+            # Every push to main is in the same group, whose newest run replaces the
+            # older one or waits for it.
+            assert concurrency is not None, path
+            assert "run_id" not in concurrency["group"], path
+            replaces = sides[name] == "replaces"
+            assert cancels_a_push(concurrency["cancel-in-progress"]) is replaces, path
+    assert found >= {"cancels", "waits", "runs"}
+
+
+@pytest.mark.parametrize(
+    ("value", "cancels"),
+    [
+        (True, True),
+        (False, False),
+        ("${{ github.event_name == 'pull_request' }}", False),
+        (SUPERSEDED["cancel-in-progress"], True),
+    ],
+)
+def test_a_cancel_in_progress_is_read_for_a_push(
+    value: bool | str, cancels: bool
+) -> None:
+    assert cancels_a_push(value) is cancels
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:
