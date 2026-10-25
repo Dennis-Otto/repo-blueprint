@@ -30,7 +30,7 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0022](0022-every-check-explains-its-failure.md) | Every check explains its failure, in the check and in one comment, also on a pull request from a fork | accepted |
 | [0023](0023-pull-requests-fix-themselves.md) | Pull requests fix what a command can fix by themselves: the check fixes, the fix bot commits, suggests or opens a pull request for main | accepted |
 | [0024](0024-take-over-each-verified-release-of-the-issue-assistant.md) | Take over each verified release of the issue assistant with a bot of the blueprint, not with Renovate | accepted |
-| [0025](0025-run-the-tests-on-every-core.md) | Run the tests of Python projects on every core, with the same coverage gate | accepted |
+| [0025](0025-run-the-tests-on-every-core.md) | Run the tests of Python projects on every core, with the same coverage gate | accepted, amended by [0069](0069-the-tests-run-on-every-logical-core-at-most-eight.md) |
 | [0026](0026-build-the-website-once-and-keep-its-downloads-a-week.md) | Build the website once, in the job of the check, and keep the downloads of Material for a week | accepted |
 | [0027](0027-few-jobs-that-each-run-several-checks.md) | Few jobs that each run several checks, so that a pull request waits for fewer runners, in two releases | accepted |
 | [0028](0028-bring-one-pull-request-at-a-time-up-to-date.md) | Bring one pull request at a time up to date, in the order of its auto-merge | accepted |
@@ -72,3 +72,4 @@ Copy [the template](0000-template.md) to the next free number and describe the d
 | [0064](0064-an-image-of-docker-runs-with-docker-run.md) | An image of Docker runs with `docker run`, and `settings check` names every step that runs one with `docker://`, which GitHub refuses unless every action may run | accepted |
 | [0065](0065-the-release-verification-checks-the-zip-that-hacs-installs.md) | The release verification checks the zip that HACS installs, and the zip of a beta has the version of the beta in its `manifest.json` | accepted |
 | [0066](0066-the-workflows-of-a-project-add-their-parts-to-the-one-report.md) | The workflows of a project add their parts to the one report of the PR coach: an artifact `pr-report-<name>` with `report.md` for the head, which `[report.<name>]` of the catalog names and the coach shows only as code | accepted |
+| [0069](0069-the-tests-run-on-every-logical-core-at-most-eight.md) | The tests run on every logical core, at most eight, and the tests of the blueprint compile each template once | accepted |

@@ -1,6 +1,6 @@
 # Run the tests of Python projects on every core, with the same coverage gate
 
-- Status: accepted
+- Status: accepted, amended by [0069](0069-the-tests-run-on-every-logical-core-at-most-eight.md), with which the tests run on every logical core, at most eight
 - Date: 2026-10-14
 
 ## Context
@@ -28,7 +28,7 @@ Option 2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-tests-run-on-every-core.dark.svg">
-  <img src="../images/diagrams/how-the-tests-run-on-every-core.svg" alt="How the tests run on every core: scripts/check.sh asks the Python of the project for pytest-xdist and pytest-cov. With both, pytest starts a process for each core, which share the tests between them, and pytest-cov brings the coverage of every process together. Without them, coverage runs the tests one after the other. Either way, coverage report applies the settings of the project, such as fail_under, and lists every line that no test runs.">
+  <img src="../images/diagrams/how-the-tests-run-on-every-core.svg" alt="How the tests run on every core: scripts/check.sh asks the Python of the project for pytest-xdist and pytest-cov. With both, pytest starts a process for each logical core, at most eight unless PYTEST_XDIST_AUTO_NUM_WORKERS sets another number, which share the tests between them, and pytest-cov brings the coverage of every process together. Without them, coverage runs the tests one after the other. Either way, coverage report applies the settings of the project, such as fail_under, and lists every line that no test runs.">
 </picture>
 
 ## Consequences

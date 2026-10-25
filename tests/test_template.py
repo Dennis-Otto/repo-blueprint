@@ -27,7 +27,7 @@ import warnings
 import zipfile
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
-from types import SimpleNamespace
+from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple
 from unittest import mock
 from xml.etree import ElementTree
@@ -38,7 +38,7 @@ import workflow_steps
 import yaml
 from copier import _main as copier_main
 from copier import run_copy
-from jinja2 import ChoiceLoader, FileSystemLoader
+from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
@@ -134,6 +134,66 @@ class Template:
 # blueprint, as in every repository of the Rollout. The question has no default.
 OWNER = "Dennis-Otto"
 
+# The code that Jinja compiled from each template in this process, by the settings of
+# its environment and the source; see compile_once().
+COMPILED: dict[tuple[object, ...], CodeType] = {}
+compile_anew = SandboxedEnvironment.compile
+
+
+def settings_of(environment: SandboxedEnvironment) -> tuple[object, ...]:
+    """What the code that Jinja compiles from a source depends on: the syntax of the
+    environment, as Jinja's own cache of lexers names it, its extensions, the filters
+    and tests whose names the compiler checks, and the options of the code that it
+    writes."""
+    return (
+        type(environment),
+        environment.block_start_string,
+        environment.block_end_string,
+        environment.variable_start_string,
+        environment.variable_end_string,
+        environment.comment_start_string,
+        environment.comment_end_string,
+        environment.line_statement_prefix,
+        environment.line_comment_prefix,
+        environment.trim_blocks,
+        environment.lstrip_blocks,
+        environment.newline_sequence,
+        environment.keep_trailing_newline,
+        tuple(sorted(environment.extensions)),
+        tuple(sorted(environment.filters)),
+        tuple(sorted(environment.tests)),
+        environment.optimized,
+        environment.is_async,
+        environment.autoescape,
+        environment.finalize,
+    )
+
+
+def compile_once(
+    environment: SandboxedEnvironment,
+    source: str | nodes.Template,
+    name: str | None = None,
+    filename: str | None = None,
+    raw: bool = False,
+    defer_init: bool = False,
+) -> str | CodeType:
+    """Jinja's compile, which compiles each template once for the whole process.
+    Copier makes a new environment for each project that it renders, which compiles
+    every template anew, the names of the files among them: 1400 of them, two thirds
+    of the time of a render. The same source compiles to the same code in an
+    environment with the same settings, and the code runs in each environment apart,
+    with its own values."""
+    if raw:
+        return compile_anew(environment, source, name, filename, True, defer_init)
+    if not isinstance(source, str):
+        return compile_anew(environment, source, name, filename, False, defer_init)
+    key = (settings_of(environment), source, name, filename, defer_init)
+    if key not in COMPILED:
+        COMPILED[key] = compile_anew(
+            environment, source, name, filename, False, defer_init
+        )
+    return COMPILED[key]
+
 
 def render(destination: Path, *, overwrite: bool = False, **data: str | bool) -> Path:
     data = {"owner": OWNER, **data}
@@ -148,6 +208,10 @@ def render(destination: Path, *, overwrite: bool = False, **data: str | bool) ->
             stack.enter_context(
                 mock.patch.object(copier_main, "is_git_available", return_value=False)
             )
+        # The templates that an earlier render of this process compiled already.
+        stack.enter_context(
+            mock.patch.object(SandboxedEnvironment, "compile", compile_once)
+        )
         run_copy(
             str(Template.folder),
             destination,
@@ -396,6 +460,52 @@ def script_of(found: str | Mapping[str, Any], step: str) -> str:
     in a parsed job, as the runner hands it to bash."""
     script: str = step_named(found, step)["run"]
     return script
+
+
+def test_a_project_renders_the_same_from_templates_that_compiled_before(
+    tmp_path: Path,
+) -> None:
+    def demo(folder: str) -> Path:
+        return render(
+            tmp_path / folder,
+            project_name="Demo Project",
+            description="A project of the tests.",
+            project_type="python-package",
+        )
+
+    # The first render compiles every template anew, as Copier alone does.
+    with mock.patch.dict(COMPILED, clear=True):
+        fresh = demo("fresh")
+        compiled = dict(COMPILED)
+        again = demo("again")
+        unchanged = compiled == COMPILED
+
+    assert compiled
+    # The second compiled nothing, and wrote the same files.
+    assert unchanged
+    assert files_of(again) == files_of(fresh)
+    for name in files_of(fresh):
+        assert (again / name).read_bytes() == (fresh / name).read_bytes(), name
+
+
+def test_a_template_compiles_apart_for_each_syntax_of_jinja() -> None:
+    source = "{{ word }} {= word =}"
+    with (
+        mock.patch.object(SandboxedEnvironment, "compile", compile_once),
+        mock.patch.dict(COMPILED, clear=True),
+    ):
+        curly = SandboxedEnvironment()
+        own = SandboxedEnvironment(variable_start_string="{=", variable_end_string="=}")
+
+        assert curly.from_string(source).render(word="hi") == "hi {= word =}"
+        assert own.from_string(source).render(word="hi") == "{{ word }} hi"
+        assert curly.from_string(source).render(word="ho") == "ho {= word =}"
+        assert len(COMPILED) == 2
+        # The Python source of a template, and a parsed template, compile each time,
+        # as in Jinja itself.
+        assert "word" in curly.compile(source, raw=True)
+        assert isinstance(curly.compile(curly.parse(source)), CodeType)
+        assert len(COMPILED) == 2
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -2670,8 +2780,17 @@ def test_the_tests_of_a_python_project_run_on_every_core(
         stub = stubs / "python"
         stub.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8", newline="\n")
         stub.chmod(0o755)
-    # The tools of the tests first, two processes for -n auto, and none of the
-    # variables of the pytest that runs this test.
+    # psutil, which the tools of Home Assistant install, on a computer whose one
+    # physical core runs two threads: -n auto would start one process, as it started
+    # two on the four logical cores of a runner of GitHub.
+    psutil = tmp_path / "psutil"
+    psutil.mkdir()
+    (psutil / "psutil.py").write_text(
+        "def cpu_count(logical=True):\n    return 2 if logical else 1\n",
+        encoding="utf-8",
+    )
+    # The tools of the tests first, and none of the variables of the pytest that runs
+    # this test.
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -2680,8 +2799,10 @@ def test_the_tests_of_a_python_project_run_on_every_core(
     environment["PATH"] = os.pathsep.join(
         [str(Path(sys.executable).parent), environment.get("PATH", "")]
     )
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(psutil), environment.get("PYTHONPATH")])
+    )
     environment["STUBS"] = stubs.as_posix()
-    environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] = "2"
 
     def step() -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -2698,9 +2819,12 @@ def test_the_tests_of_a_python_project_run_on_every_core(
     module = project / "src/demo_project/__init__.py"
     with module.open("a", encoding="utf-8", newline="\n") as code:
         code.write("\n\ndef untested() -> int:\n    return 1\n")
+    # The number of processes that a maintainer sets.
+    environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] = "3"
     failed = step()
 
     assert passed.returncode == 0, passed.stdout + passed.stderr
+    # A process for each logical core.
     assert ("created: 2/2 workers" in passed.stdout) is plugins, passed.stdout
     assert re.search(r"^TOTAL .* 100%$", passed.stdout, re.M), passed.stdout
     # The data that the CI shows in the summary of the check.
@@ -2708,7 +2832,7 @@ def test_the_tests_of_a_python_project_run_on_every_core(
     # [tool.coverage] of pyproject.toml applies either way: fail_under fails the
     # step, and the report names the line that no test runs.
     assert failed.returncode != 0
-    assert ("created: 2/2 workers" in failed.stdout) is plugins, failed.stdout
+    assert ("created: 3/3 workers" in failed.stdout) is plugins, failed.stdout
     assert re.search(
         r"^src[\\/]demo_project[\\/]__init__\.py .* \d+$", failed.stdout, re.M
     ), failed.stdout
@@ -2734,9 +2858,11 @@ def test_every_python_project_can_run_its_tests_on_every_core(
     assert pytest_settings["timeout"] == 30
     # -n stays out of the settings, because mutmut runs pytest within its own process.
     assert not any(option.startswith("-n") for option in pytest_settings["addopts"])
-    assert "python -m pytest -n auto --cov --cov-report= --cov-fail-under=0" in (
-        project / "scripts/check.sh"
-    ).read_text(encoding="utf-8")
+    # A process for each logical core, at most eight unless a maintainer sets more.
+    assert (
+        'python -m pytest -n logical --maxprocesses="${PYTEST_XDIST_AUTO_NUM_WORKERS:-8}"'
+        " \\\n    --cov --cov-report= --cov-fail-under=0\n"
+    ) in (project / "scripts/check.sh").read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(
@@ -4632,18 +4758,18 @@ AGENT_COMMANDS = {
     "home-assistant": [
         "pip install --require-hashes -r requirements-test.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n auto --cov` runs them on every core",
+        "`pytest -n logical --cov` runs them on every core",
     ],
     "nextcloud-app": ["composer install", "vendor/bin/phpunit"],
     "github-action": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n auto --cov` runs them on every core",
+        "`pytest -n logical --cov` runs them on every core",
     ],
     "python-package": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n auto --cov` runs them on every core",
+        "`pytest -n logical --cov` runs them on every core",
     ],
     "node-package": [
         "npm ci --ignore-scripts",
@@ -4714,7 +4840,7 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     for rule in (
         "bash scripts/check.sh",
-        "`pytest -n auto --cov`",
+        "`pytest -n logical --cov`",
         "`git commit -s`",
         "a new file `changelog.d/<branch>.md`",
         "`python3 blueprint.py fragments`",

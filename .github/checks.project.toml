@@ -34,14 +34,14 @@ reference.py`, and describe a new variable or secret in `ABOUT` first. `python3
 pins.py` downloads each version that moved and writes its sha256 beside it and into
 `.github/pins.toml`; the fix bot runs it too, but commits no change of
 `.github/workflows/`, which a person commits. `coverage run -m
-pytest` runs the tests one after another; `python -m pytest -n auto --cov` runs them in
+pytest` runs the tests one after another; `python -m pytest -n logical --cov` runs them in
 parallel as CI does, where pytest-xdist and pytest-cov are installed:"""
 commands = [
   "python3 reference.py",
   "python3 pins.py",
   "coverage run -m pytest",
   "coverage report",
-  "python -m pytest -n auto --cov",
+  "python -m pytest -n logical --cov",
 ]
 docs = "CONTRIBUTING.md#tests"
 autofix = ["{python} reference.py", "{python} pins.py"]
