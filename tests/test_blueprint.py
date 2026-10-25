@@ -3390,10 +3390,10 @@ def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None
                 continue
             assert key in granted, (path.name, key)
             assert rank[granted[key]] >= rank[access], (path.name, key)
-    # The README names the same permissions.
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    # The guide names the same permissions.
+    guide = (ROOT / "docs/guide.md").read_text(encoding="utf-8")
     paragraph = next(
-        line for line in readme.splitlines() if "**The release app**" in line
+        line for line in guide.splitlines() if "**The release app**" in line
     )
     for name, _, _ in RELEASE_APP_PERMISSIONS:
         assert f"*{name}*" in paragraph, name

@@ -1787,8 +1787,8 @@ WEEKDAYS = {
         "Samstag",
     ),
 }
-# The diagrams of the page, those of the blueprint's README: how a repository looks
-# after itself, and from a change to a release. The page shows the pictures that
+# The diagrams of the page, which the blueprint shows in its README and on its page of
+# the releases: how a repository looks after itself, and from a change to a release. The page shows the pictures that
 # scripts/diagrams.sh draws of them, NAME.svg and NAME.dark.svg, NAME.de.svg and
 # NAME.de.dark.svg in German, which every repository gets in PICTURES beside this
 # file and the website serves in SERVED; the blueprint itself has them in

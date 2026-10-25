@@ -116,8 +116,9 @@ The READMEs, this guide and the pages of `docs/` have one column, so that they r
 - A table holds tabular data, never a layout: no `<table>` that sets a picture beside text, and no `<td width="…">`.
 - A picture or a GIF comes at full width below the text that it illustrates.
 - A long list, such as every option or every entity, goes into `<details>` with a `<summary>` that names it, so that the page stays short.
+- A cell of a Markdown table holds a value, a name or a short sentence: one of more than 30 words is a paragraph, which goes into a list, or onto a page of its own that the table links.
 
-`scripts/check.sh` fails on a `<table>` with a picture and on a cell with a width in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line. `python3 .github/blueprint.py pages --fix` puts the cells of such a table one below the other, the text before its picture, and leaves out the widths; a table inside a table it leaves to you.
+`scripts/check.sh` fails on a `<table>` with a picture and on a cell with a width in a README, a CONTRIBUTING file or a page of `docs/`, with its file and line, and warns of a cell of a Markdown table with more than 30 words, which fails nothing yet. `python3 .github/blueprint.py pages --fix` puts the cells of such a table one below the other, the text before its picture, and leaves out the widths; a table inside a table it leaves to you.
 
 ## Diagrams
 

@@ -76,7 +76,16 @@ from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
 from blueprint.notices import third_party_notices
 from blueprint.overrides import write_overrides
-from blueprint.pages import Layout, annotation, command, fixed, layouts, pages
+from blueprint.pages import (
+    CELL_WORDS,
+    Layout,
+    annotation,
+    command,
+    fixed,
+    layouts,
+    long_cells,
+    pages,
+)
 from blueprint.pr_report import about as pr_parts
 from blueprint.settings import (
     CONFIG,
@@ -612,9 +621,11 @@ def fix_bot_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
 def pages_command(arguments: argparse.Namespace, root: Path) -> int:
     """The layouts of the pages that GitHub shows, one on each line, and in the CI also
     as annotations at their lines; with --fix, the pages in one column first, where
-    there is a safe way to."""
+    there is a safe way to. The cells of Markdown tables that hold a paragraph come
+    first, as warnings, which fail nothing yet."""
     shown = pages(root)
     left: list[tuple[Path, Layout]] = []
+    long: list[tuple[Path, Layout]] = []
     fixable = 0
     for page in shown:
         path = root / page
@@ -628,12 +639,26 @@ def pages_command(arguments: argparse.Namespace, root: Path) -> int:
             found = layouts(text)
             print(f"{page.as_posix()}: {editable} layout(s) in one column now")
         left += [(page, layout) for layout in found]
+        long += [(page, cell) for cell in long_cells(text)]
+    ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    for page, cell in long:
+        print(f"{page.as_posix()}:{cell.line}: {cell.message}")
+    if long:
+        if ci:
+            for page, cell in long:
+                print(annotation(page, cell))
+        print(
+            f"{len(long)} cell(s) of Markdown tables hold more than {CELL_WORDS} words, "
+            "a paragraph that the GitHub app and phones squeeze: make the rows a list, "
+            "or move the detail to a page of its own, as CONTRIBUTING.md describes. "
+            "They are warnings for now."
+        )
     if not left:
         print(f"The {len(shown)} page(s) that GitHub shows have one column.")
         return 0
     for page, layout in left:
         print(f"{page.as_posix()}:{layout.line}: {layout.message}")
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    if ci:
         for page, layout in left:
             print(annotation(page, layout))
     print(
