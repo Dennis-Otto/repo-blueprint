@@ -5,12 +5,12 @@ config:
 ---
 flowchart TB
     accTitle: Wann die Prüfungen laufen
-    accDescr: Jeder Pull Request führt die vorgeschriebenen Prüfungen aus, und die Scanner dessen, was er ändert: zizmor für einen Workflow, OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.
+    accDescr: Jeder Pull Request führt die vorgeschriebenen Prüfungen und zizmor aus, auf dessen Analyse die Regeln von main warten, und die Scanner dessen, was er ändert: OSV-Scanner für eine Lock-Datei, Fuzzing für Python-Code und die Link-Prüfung für ein Dokument. Der Release-Pull-Request, der nur den Changelog und die Version ändert, führt die vorgeschriebenen Prüfungen und zizmor ohne die Scanner aus. Nach einem Merge führt main nur aus, was eine Vergleichsbasis hält oder veröffentlicht. Jede Woche führt main die Scanner vollständig aus, den Secret Scan der ganzen History, die SBOM und das neueste Python.
 
     pr["Pull Request"]
     rpr["Release-Pull-Request<br>Changelog und Version"]
-    required["Vorgeschriebene Prüfungen<br>Tests · Lint · Docs · CodeQL<br>Dependency Review · Secret Scan"]
-    scanners["Scanner dessen, was er ändert<br>Workflows: zizmor · Lock-Dateien: OSV-Scanner<br>Python: Fuzzing · Dokumente: Links"]
+    required["Vorgeschriebene Prüfungen und Analysen<br>Tests · Lint · Docs · CodeQL · zizmor<br>Dependency Review · Secret Scan"]
+    scanners["Scanner dessen, was er ändert<br>Lock-Dateien: OSV-Scanner<br>Python: Fuzzing · Dokumente: Links"]
     main["main"]
     baseline["Was eine Vergleichsbasis hält oder veröffentlicht<br>Tests mit Abdeckung · neuestes Python<br>CodeQL · zizmor · OSV-Scanner · Scorecard<br>Website · Release · Branch-Bot"]
     weekly["Scanner vollständig · 15 Minuten Fuzzing<br>Secret Scan der ganzen History<br>SBOM · neuestes Python"]

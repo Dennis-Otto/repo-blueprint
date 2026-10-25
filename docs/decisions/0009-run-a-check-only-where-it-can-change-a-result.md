@@ -1,6 +1,6 @@
 # Run a check only where it can change a result
 
-- Status: accepted
+- Status: accepted, amended by [0073](0073-zizmor-analyzes-every-pull-request-and-each-new-alert-stops-the-merge.md), with which zizmor analyzes every pull request, the release pull request too, since the rules of `main` wait for its analysis
 - Date: 2026-10-13
 
 ## Context

@@ -2,22 +2,21 @@ name: Workflow security
 
 # zizmor checks every workflow for the ways a workflow gets attacked: template
 # injection, permissions wider than needed, credentials that persist, unpinned
-# actions and dangerous triggers: in every pull request that changes a workflow, an
-# action or the settings of Dependabot, and on main and every week for the analysis
-# that code scanning compares pull requests with. Its findings go to code scanning,
-# where the Findings workflow keeps them fixed or accepted; .github/zizmor.yml holds
-# what the repository accepts on purpose. https://github.com/Dennis-Otto/repo-blueprint
+# actions and dangerous triggers, and asks GitHub for the advisories of the actions
+# that they pin. In every pull request into main, also the release pull request,
+# whatever it changes: the rules of main stop a merge while the pull request adds an
+# alert of zizmor, and while its analysis is missing. On main after every merge and
+# every week, for the analysis that code scanning compares the pull requests with; an
+# advisory published since shows as an alert of the next pull request, until a run
+# on main by hand gives main the alert. Its findings go to code scanning, where the
+# Findings workflow keeps them fixed or accepted; .github/zizmor.yml holds what the
+# repository accepts on purpose. https://github.com/Dennis-Otto/repo-blueprint
 
 on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - .github/workflows/**
-      - "**/action.yml"
-      - "**/action.yaml"
-      - .github/dependabot.yml
-      - .github/zizmor.yml
+    branches: [main]
   schedule:
     - cron: "35 5 * * 2"
   workflow_dispatch:
@@ -31,10 +30,6 @@ concurrency:
 jobs:
   zizmor:
     name: zizmor
-    # Not in the release pull request: the branch of the release bot in this repository.
-    if: >-
-      !startsWith(github.head_ref, 'release-please--') ||
-      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -48,6 +43,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The version of zizmor that the action pins, so that a pull request and main are
+      # audited alike: an update of the action brings a newer one, and its pull request
+      # shows what the newer audits find.
       - name: Check the workflows
         uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
       # The PR coach: what failed, why it matters and how to fix it, in the summary

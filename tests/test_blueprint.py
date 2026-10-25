@@ -147,6 +147,11 @@ CODEQL = {
     "alerts_threshold": "errors",
     "security_alerts_threshold": "high_or_higher",
 }
+ZIZMOR = {
+    "tool": "zizmor",
+    "alerts_threshold": "all",
+    "security_alerts_threshold": "all",
+}
 ACTOR_TYPES = {
     "Integration",
     "OrganizationAdmin",
@@ -958,7 +963,10 @@ RULESETS = Path(__file__).parent / "data/rulesets"
 @pytest.mark.parametrize(
     ("fixture", "ruleset"),
     [
-        ("protect-main.json", main_ruleset(["check (python)", "reuse"], [CODEQL])),
+        (
+            "protect-main.json",
+            main_ruleset(["check (python)", "reuse"], [CODEQL, ZIZMOR]),
+        ),
         ("release-tags.json", tag_ruleset()),
         ("release-tag-creation.json", tag_creation_ruleset(4739928)),
     ],
@@ -1101,13 +1109,12 @@ def test_a_new_alert_of_code_scanning_stops_the_merge() -> None:
 
 
 def test_the_order_of_the_tools_of_code_scanning_is_no_difference() -> None:
-    zizmor = {**CODEQL, "tool": "zizmor"}
-    want = main_ruleset(["a"], [CODEQL, zizmor])
-    have = json.loads(json.dumps(main_ruleset(["a"], [zizmor, CODEQL])))
+    want = main_ruleset(["a"], [CODEQL, ZIZMOR])
+    have = json.loads(json.dumps(main_ruleset(["a"], [ZIZMOR, CODEQL])))
     assert ruleset_differences(want, have) == []
 
     have["rules"][-1]["parameters"]["code_scanning_tools"][0]["alerts_threshold"] = (
-        "all"
+        "errors"
     )
     assert ruleset_differences(want, have) == ["code_scanning.code_scanning_tools"]
     have["rules"].pop()
