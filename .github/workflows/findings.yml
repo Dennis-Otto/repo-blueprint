@@ -31,9 +31,6 @@ permissions: {}
 jobs:
   findings:
     name: Findings
-    # Without code scanning, on a private repository without GitHub Code Security,
-    # there are no alerts to keep fixed or accepted.
-    if: vars.CODE_SCANNING != 'off'
     permissions:
       contents: read
       security-events: write

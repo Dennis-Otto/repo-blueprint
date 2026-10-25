@@ -12878,9 +12878,6 @@ def test_without_code_scanning_no_workflow_sends_its_findings_there(
             if "/osv-scanner-reusable" in uses:
                 assert job["with"]["upload-sarif"] == f"${{{{ {WITH_CODE_SCANNING} }}}}"
                 gated.add(f"{path.name} {job_id}")
-            if "/reusable-findings.yml@" in uses:
-                assert condition_of(job) == WITH_CODE_SCANNING
-                gated.add(f"{path.name} {job_id}")
             for step in job.get("steps", []):
                 action = step.get("uses", "")
                 if action.startswith("github/codeql-action/upload-sarif@"):
@@ -12898,7 +12895,6 @@ def test_without_code_scanning_no_workflow_sends_its_findings_there(
     expected = {
         "codeql.yml Upload the results",
         "dependency-review.yml Check dependency changes for known vulnerabilities",
-        "findings.yml findings",
         "osv-scanner.yml pull-request",
         "osv-scanner.yml repository",
         "scorecard.yml Upload results to code scanning",
