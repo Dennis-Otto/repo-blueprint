@@ -45,6 +45,7 @@ from blueprint.bot_health import (
     missed_time,
     open_issue,
     open_issues,
+    own_issue,
     renovate_problems,
     renovate_report,
     started_after,
@@ -175,6 +176,11 @@ class FakeGitHub:
                 r"/actions/workflows/(\d+)/runs\?branch=main&exclude_pull_requests=true&per_page=50",
                 self.runs_of_workflow,
             ),
+            (
+                r"/actions/workflows/(\d+)/runs\?branch=main&event=(\w+)"
+                r"&exclude_pull_requests=true&per_page=1",
+                self.runs_of_event,
+            ),
             (r"/actions/workflows/(\d+)/enable", self.enable),
             (r"/actions/workflows/(\d+)/dispatches", self.dispatch),
         ):
@@ -243,7 +249,16 @@ class FakeGitHub:
         return 200, {"total_count": len(self.workflows), "workflows": self.workflows}
 
     def runs_of_workflow(self, method: str, body: Any, number: str) -> tuple[int, Any]:
-        return 200, {"workflow_runs": self.workflow_runs.get(int(number), [])}
+        # The newest runs first, a page of them, as GitHub lists them.
+        return 200, {"workflow_runs": self.workflow_runs.get(int(number), [])[:50]}
+
+    def runs_of_event(
+        self, method: str, body: Any, number: str, event: str
+    ) -> tuple[int, Any]:
+        runs = self.workflow_runs.get(int(number), [])
+        return 200, {
+            "workflow_runs": [run for run in runs if run["event"] == event][:1]
+        }
 
     def enable(self, method: str, body: Any, number: str) -> tuple[int, Any]:
         assert method == "PUT"
@@ -774,6 +789,8 @@ def test_the_daily_look_reports_what_the_events_missed(
         "| `Findings` | fails: opened #4 |",
         "| `Labels` | passes |",
         f"| `Links` | passes again: closed #{links} |",
+        "| `Newest Python` | keeps an issue of its own |",
+        "| `Next runner` | keeps an issue of its own |",
         "| `Release` | failed: its second try may still come |",
     ]
     assert github.reruns == []
@@ -860,6 +877,168 @@ def test_the_daily_look_starts_a_few_workflows_a_day(
         f"| `W{MOST_STARTS}` | no finished run on `main`; missed its run of "
         f"2026-10-11 05:40 UTC: starts in a later look, {MOST_STARTS} a day |"
     )
+
+
+# The schedule's last time before NOW minus LATE, Sunday, 2026-10-11 05:40, as the
+# daily look writes it.
+MISSED = datetime(2026, 10, 11, 5, 40, tzinfo=UTC)
+MISSED_TEXT = "missed its run of 2026-10-11 05:40 UTC"
+OWN = SCHEDULED.replace(
+    "name: Clean-up\n", "name: Demo\n# bot-health: own-issue, The demo breaks\n"
+)
+
+
+def test_a_workflow_that_keeps_an_issue_of_its_own_gets_none_of_the_bot(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    path = ".github/workflows/w{}.yml"
+    write(tmp_path, 1, OWN)
+    write(tmp_path, 2, OWN.replace("name: Demo", "name: Docker E2E"))
+    # Without the line, as the workflows of the blueprint that keep their own.
+    write(tmp_path, 3, SCHEDULED.replace("name: Clean-up", "name: Newest Python"))
+    github.workflows = [
+        workflow(1, "Demo"),
+        workflow(2, "Docker E2E"),
+        workflow(3, "Newest Python"),
+    ]
+    github.workflow_runs = {
+        # Its weekly canary failed: the workflow says so in an issue of its own.
+        1: [
+            run_of(
+                10,
+                name="Demo",
+                path=path.format(1),
+                created=MISSED + timedelta(hours=1),
+            )
+        ],
+        # A push passes after the schedule failed: the issue that the bot opened
+        # before the workflow said that it keeps its own closes as continued there.
+        2: [
+            run_of(
+                21,
+                name="Docker E2E",
+                path=path.format(2),
+                event="push",
+                conclusion="success",
+                created=MISSED + timedelta(hours=2),
+            ),
+            run_of(
+                20,
+                name="Docker E2E",
+                path=path.format(2),
+                created=MISSED + timedelta(hours=1),
+            ),
+        ],
+        # Its schedule is missed all the same, and a missed one starts.
+        3: [
+            run_of(
+                30,
+                name="Newest Python",
+                path=path.format(3),
+                created=MISSED - timedelta(days=6),
+            )
+        ],
+    }
+    before = github.add_issue(path.format(2), run=19, failed=1)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert summary.splitlines()[6:] == [
+        "| `Demo` | keeps an issue of its own |",
+        f"| `Docker E2E` | keeps an issue of its own: closed #{before} |",
+        f"| `Newest Python` | keeps an issue of its own; {MISSED_TEXT}: started |",
+    ]
+    assert github.issues[before]["state"] == "closed"
+    assert github.issues[before]["state_reason"] == "not_planned"
+    assert github.comments[before] == [
+        "`Docker E2E` keeps an issue of its own about its failures now, so this one "
+        "closes."
+    ]
+    assert [number for number, issue in github.issues.items()] == [before]
+    assert github.reruns == []
+    assert github.dispatched == [(3, {"ref": "main", "inputs": {}})]
+
+
+@pytest.mark.parametrize(
+    ("text", "own"),
+    [
+        ("# bot-health: own-issue\n", True),
+        ("name: Demo\n  #bot-health:own-issue (The demo breaks)\n", True),
+        ("#  bot-health:  own-issue\r\n", True),
+        ("# bot-health: own-issues\n", False),
+        ("# bot-health: own issue\n", False),
+        ("name: Demo # bot-health: own-issue\n", False),
+        ("        run: echo '# bot-health: own-issue'\n", False),
+        ("", False),
+    ],
+)
+def test_the_line_of_a_workflow_that_keeps_an_issue_of_its_own(
+    text: str, own: bool
+) -> None:
+    assert own_issue(text) is own
+
+
+def test_only_a_run_of_its_schedule_or_by_hand_does_what_a_schedule_does(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # A push starts the workflow too, but only its schedule tests the coming release.
+    text = SCHEDULED.replace("on:\n", "on:\n  push:\n    branches: [main]\n")
+    names = (
+        "A pushed since",
+        "B by hand since",
+        "C on time",
+        "D many pushes, on time",
+        "E many pushes, missed",
+    )
+    for number, name in enumerate(names, 1):
+        write(tmp_path, number, text)
+        github.workflows.append(workflow(number, name))
+
+    def run(number: int, event: str, created: datetime) -> dict[str, Any]:
+        return run_of(
+            number, name="x", event=event, conclusion="success", created=created
+        )
+
+    pushes = [
+        run(100 - minutes, "push", MISSED + timedelta(hours=2, minutes=minutes))
+        for minutes in range(55)
+    ][::-1]
+    late, before = MISSED + timedelta(minutes=20), MISSED - timedelta(days=6)
+    github.workflow_runs = {
+        1: [run(11, "push", MISSED + timedelta(hours=1)), run(10, "schedule", before)],
+        2: [run(21, "workflow_dispatch", late), run(20, "schedule", before)],
+        3: [run(31, "push", MISSED + timedelta(hours=1)), run(30, "schedule", late)],
+        # More pushes since than a page of runs holds: GitHub names the latest run of
+        # its schedule, and of a start by hand.
+        4: [*pushes, run(40, "schedule", late)],
+        5: [*pushes, run(50, "schedule", before)],
+    }
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert summary.splitlines()[6:] == [
+        f"| `A pushed since` | passes; {MISSED_TEXT}: started |",
+        "| `B by hand since` | passes |",
+        "| `C on time` | passes |",
+        "| `D many pushes, on time` | passes |",
+        f"| `E many pushes, missed` | passes; {MISSED_TEXT}: started |",
+    ]
+    assert github.dispatched == [
+        (1, {"ref": "main", "inputs": {}}),
+        (5, {"ref": "main", "inputs": {}}),
+    ]
+    asked = [path.split("/actions/")[1] for _, path in github.calls if "event=" in path]
+    assert asked == [
+        f"workflows/{number}/runs?branch=main&event={event}"
+        "&exclude_pull_requests=true&per_page=1"
+        for number, event in (
+            (4, "schedule"),
+            (5, "schedule"),
+            (5, "workflow_dispatch"),
+        )
+    ]
 
 
 AFTER_CHECKS = """name: After the checks

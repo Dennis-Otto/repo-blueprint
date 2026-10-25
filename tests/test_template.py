@@ -69,6 +69,7 @@ from blueprint.bot_health import (
     TYPE,
     Cron,
     after_pull_requests,
+    own_issue,
 )
 from blueprint.changelog import Fragment, release_changelog
 from blueprint.checklist import RELEASE_APP_PERMISSIONS
@@ -5523,6 +5524,11 @@ def test_every_project_tells_coding_agents_its_rules(
         "`python3 .github/blueprint.py fix run`",
     ):
         assert rule in agents, rule
+    # The line with which a workflow of the project keeps an issue of its own about
+    # its failures is the one that the bot-health bot reads.
+    line = "`# bot-health: own-issue`"
+    assert line in agents
+    assert own_issue(line.strip("`"))
     # A test's own repository leaves the one that runs the tests alone; a generic
     # project has no tests.
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
