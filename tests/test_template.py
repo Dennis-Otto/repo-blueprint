@@ -868,12 +868,12 @@ def test_a_new_alert_of_codeql_or_zizmor_stops_the_merge(
             "security_alerts_threshold": "high_or_higher",
         },
         # zizmor writes its findings as errors, warnings and notes, without a security
-        # severity, and the Findings workflow fails main on each one: every new one
-        # stops the merge.
+        # severity yet, and the Findings workflow fails main on each one: every new one
+        # stops the merge, with a security severity as well.
         {
             "tool": "zizmor",
             "alerts_threshold": "all",
-            "security_alerts_threshold": "none",
+            "security_alerts_threshold": "all",
         },
     ]
     assert main["rules"][-1] == {

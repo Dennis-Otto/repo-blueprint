@@ -150,7 +150,7 @@ CODEQL = {
 ZIZMOR = {
     "tool": "zizmor",
     "alerts_threshold": "all",
-    "security_alerts_threshold": "none",
+    "security_alerts_threshold": "all",
 }
 ACTOR_TYPES = {
     "Integration",

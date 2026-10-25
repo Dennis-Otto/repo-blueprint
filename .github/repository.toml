@@ -134,11 +134,11 @@ required_checks = [
 # thresholds on; an alert that main has already doesn't. Only a tool that analyzes
 # every pull request belongs here, because a missing analysis stops the merge too.
 # zizmor writes its high findings as errors, its medium ones as warnings and the rest
-# as notes, with no security severity; the Findings workflow fails main on each one,
-# so every new one stops the merge.
+# as notes, with no security severity yet; the Findings workflow fails main on each
+# one, so every new one stops the merge, with a security severity as well.
 code_scanning_tools = [
   { tool = "CodeQL", alerts_threshold = "errors", security_alerts_threshold = "high_or_higher" },
-  { tool = "zizmor", alerts_threshold = "all", security_alerts_threshold = "none" },
+  { tool = "zizmor", alerts_threshold = "all", security_alerts_threshold = "all" },
 ]
 
 [variables]
