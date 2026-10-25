@@ -1,0 +1,33 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the findings of a tool reach their lines
+    accDescr: A push to a pull request, also one from a fork, runs scripts/check.sh in the CI. Ruff, Psalm and Biome write their findings as annotations on their own, and the TypeScript compiler through the problem matcher of actions/setup-node. ShellCheck, mypy, PHP CS Fixer and the tests of Node write lines that blueprint.py annotate reads and passes on to the log as they are, and pytest and PHPUnit write a report of JUnit that it reads after a test failed. blueprint.py annotate writes one annotation for each finding, at a file of the repository only and with every text escaped. GitHub keeps the annotations of the check run, the files of the pull request show each finding at its line, and the PR coach lists them in its one comment.
+
+    push(["A push to a pull request<br>also from a fork"])
+    check["scripts/check.sh in the CI<br>runs each tool"]
+    own["Ruff, Psalm and Biome on their own,<br>tsc through the problem matcher<br>of actions/setup-node"]
+    lines["ShellCheck, mypy, PHP CS Fixer<br>and the tests of Node: their lines"]
+    junit["pytest and PHPUnit:<br>their report of JUnit"]
+    annotate["blueprint.py annotate passes the log on<br>and writes one annotation for each finding<br>at a file of the repository, escaped"]
+    run[("The annotations<br>of the check run")]
+    files["The files of the pull request<br>show each finding at its line"]
+    coach["The PR coach lists the findings<br>in its one comment"]
+
+    push --> check
+    check --> own --> run
+    check --> lines --> annotate
+    check --> junit --> annotate
+    annotate --> run
+    run --> files
+    run --> coach
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class check,annotate,coach bot
+    class push person
+    class files done

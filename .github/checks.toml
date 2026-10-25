@@ -735,6 +735,23 @@ commands = ["python3 .github/blueprint.py locks --fix"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#renovate-skips-a-lock-file"
 autofix = ["{blueprint} locks --fix"]
 
+[step."Explanations of the checks"]
+problem = """A required check of `.github/repository.toml` or
+`.github/repository.project.toml`, or a step of `scripts/check.sh`, has no explanation
+in `.github/checks.toml` or `.github/checks.project.toml`, or an explanation says
+neither which commands fix what its check finds nor why no command can; the log names
+each one."""
+why = """The PR coach shows the explanation of a check that fails, to everyone who sends
+a pull request: without one, a contributor finds only the log, and the fix bot doesn't
+know what it may fix."""
+fix = """Explain the check or the step in `.github/checks.project.toml`: what it found, why
+that matters, how to fix it, the commands, a link, and in `autofix` the commands that
+fix it or the reason why none can; CONTRIBUTING.md shows an example. The command lists
+what is left (in the blueprint itself, the tool is `blueprint.py` without `.github/`):"""
+commands = ["python3 .github/blueprint.py coach verify"]
+docs = "CONTRIBUTING.md#when-a-check-fails"
+autofix = """What a check found, and how to fix it, is for a person to explain."""
+
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
 version the release bot writes into every file that has one."""
@@ -766,7 +783,7 @@ can make a hook executable."""
 [step."Shell scripts"]
 problem = """ShellCheck flags a shell script, for a bug, such as a variable without
 quotes, or for a construct that breaks on another shell; the log names each line with
-its rule, such as SC2086. Or the runner of the CI lacks ShellCheck, which the CI never
+its rule, such as SC2086, and in the CI each one is an annotation at its line. Or the runner of the CI lacks ShellCheck, which the CI never
 skips."""
 why = """Shell scripts fail quietly and differently on each system; ShellCheck finds the
 mistakes before they run. A CI that skipped it would pass a script that nobody
@@ -793,7 +810,8 @@ autofix = ["ruff check --fix .", "ruff format ."]
 
 [step.Mypy]
 problem = """mypy, in its strict mode, finds a type that doesn't fit, or a function
-without type hints; the log names each line."""
+without type hints; the log names each line, and in the CI each one is an annotation at
+its line."""
 why = """Type hints catch a whole class of bugs before the code runs, and tell the next
 reader what a function takes and gives."""
 fix = """Fix each line that mypy names, and add the type hints that it asks for:"""
@@ -802,7 +820,8 @@ docs = "CONTRIBUTING.md#coding-standards"
 autofix = """Only a person knows which type is right."""
 
 [step."Tests, with every line and branch covered"]
-problem = """A test fails, or a line or a branch of the code runs in no test; the
+problem = """A test fails, or a line or a branch of the code runs in no test; in
+the CI, each test that fails is an annotation at the line where it failed, and the
 coverage report names the files and lines that it misses. A test also fails when it runs
 longer than the `timeout` of `pyproject.toml` (the log says `Timeout`), or when it depends
 on another test: the tests run in parallel, in another order on each worker."""
@@ -893,7 +912,8 @@ that needs a newer one."""
 
 [step."Coding standard"]
 problem = """The PHP code doesn't follow the Nextcloud coding standard; the log shows the
-diff that php-cs-fixer would make."""
+diff that php-cs-fixer would make, and in the CI each change is an annotation at its
+lines."""
 why = """One standard keeps the code readable for everyone who contributes to
 Nextcloud."""
 fix = """Let php-cs-fixer make the diff:"""
@@ -903,7 +923,8 @@ autofix = ["vendor/bin/php-cs-fixer fix"]
 
 [step.Psalm]
 problem = """Psalm, at its strictest level, finds a type that doesn't fit, a call that
-can fail or code that can't run; the log names each line with its issue. Psalm may
+can fail or code that can't run; the log names each line with its issue, and in
+the CI each one is an annotation at its line. Psalm may
 also have stopped because `nextcloud/ocp` no longer has a method that
 `.github/psalm/NextcloudTaintPlugin.php` names; the log names that method then."""
 why = """Psalm catches bugs that the tests miss, before they reach a Nextcloud server."""
@@ -938,7 +959,8 @@ in Psalm or in Nextcloud."""
 problem = """Untrusted input reaches HTML, SQL, a shell, a file, a request to another
 server or a header without escaping: a parameter of a request to a controller, the
 term of a search or the answer of another server. The log shows its path, from the
-input to the line where it arrives."""
+input to the line where it arrives, and in the CI each one is an annotation at that
+line."""
 why = """That path is a vulnerability, such as cross-site scripting, an injection of
 SQL, a path that climbs out of its folder or a request that the server makes for an
 attacker, which attackers look for."""
@@ -952,8 +974,9 @@ autofix = """Where untrusted input may go, and how to escape it, is the decision
 a person."""
 
 [step."Tests, with every line covered"]
-problem = """A test fails, or a line of `lib/` runs in no test; the coverage report names
-the lines that it misses."""
+problem = """A test fails, or a line of `lib/` runs in no test; in the CI, each test that
+fails is an annotation at the line where it failed, and the coverage report names the
+lines that it misses."""
 why = """Every line under test means that every change of behavior shows in a test, so
 that a bug can't come back unnoticed."""
 fix = """Fix the test that fails, or the code that it catches, and write a test for each
@@ -982,7 +1005,7 @@ autofix = [
 
 [step.Types]
 problem = """The TypeScript compiler, in its strict mode, finds a type that doesn't fit;
-the log names each line."""
+the log names each line, and in the CI each one is an annotation at its line."""
 why = """The types catch a whole class of bugs before the code runs, and tell the next
 reader what a function takes and gives."""
 fix = """Fix each line that the compiler names:"""
@@ -1006,7 +1029,8 @@ autofix = ["npx --no -- biome check --write ."]
 
 [step."Tests, with every line, branch and function covered"]
 problem = """A test fails, or a line, a branch or a function of the code runs in no test;
-the coverage report names what it misses."""
+in the CI, each test that fails is an annotation at the line where it failed, and the
+coverage report names what it misses."""
 why = """Everything under test means that every change of behavior shows in a test, so
 that a bug can't come back unnoticed."""
 fix = """Fix the test that fails, or the code that it catches, and write a test for each

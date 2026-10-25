@@ -15,7 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import advisories, locks, mutation, screenshots, versions
+from blueprint import advisories, annotate, locks, mutation, screenshots, versions
 from blueprint.bootstrap import CreateError, create
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -155,6 +155,22 @@ def coverage_command(arguments: argparse.Namespace) -> int:
     base_file = Path(arguments.base)
     base = Coverage.read(base_file, root) if base_file.is_file() else None
     sys.stdout.write(coverage_comment(head, base))
+    return 0
+
+
+def annotate_command(arguments: argparse.Namespace, root: Path) -> int:
+    """The annotations of a tool of scripts/check.sh, after what it wrote: it reads
+    that from its input and passes it on as it is."""
+    found = annotate.annotations_of(
+        arguments.tool,
+        arguments.report,
+        root.resolve(),
+        sys.stdin.buffer,
+        sys.stdout.buffer,
+    )
+    sys.stdout.flush()
+    for line in found:
+        print(line)
     return 0
 
 
@@ -1019,6 +1035,20 @@ def add_coach_parsers(
         help="whether every required check and every step of scripts/check.sh has "
         "its explanation",
     )
+    annotate_parser = commands.add_parser(
+        "annotate",
+        help="each finding of a tool of scripts/check.sh as an annotation of the CI, "
+        "which the files of a pull request show at its line and the PR coach lists",
+    )
+    annotate_parser.add_argument(
+        "tool",
+        choices=annotate.TOOLS,
+        help="the tool: one whose output comes in on the input and goes on as it is, "
+        "or pytest and phpunit, whose report of JUnit is the second argument",
+    )
+    annotate_parser.add_argument(
+        "report", nargs="?", default="", help="the report of JUnit of the tests"
+    )
 
 
 def add_bot_health_parsers(
@@ -1443,6 +1473,8 @@ def standalone_command(
         except (OSError, ElementTree.ParseError, ValueError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
+    if arguments.command == "annotate":
+        return annotate_command(arguments, root)
     if arguments.command == "coach" and arguments.action != "report":
         try:
             return explain_command(arguments, root)
