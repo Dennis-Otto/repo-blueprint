@@ -171,7 +171,7 @@ jobs:
             echo
             echo "The variable SETTINGS_APP_CLIENT_ID and the secret SETTINGS_APP_PRIVATE_KEY of the environment release name a settings app, but GitHub refused its token, and the log of the step *Create a token of the settings app* has its answer. No setting has changed."
             echo
-            echo "Install the app on this repository, with the permissions that [the settings app](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md#8-the-settings-app-optional) lists, accept new permissions on its installation, and run the workflow *Settings* again. Without the variable, the release app applies the settings again."
+            echo "Install the app on this repository, with the permissions that [the settings app](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md#8-the-settings-app-optional) lists, accept new permissions on its installation, and run the workflow *Settings* again. Without the variable SETTINGS_APP_CLIENT_ID, the release app applies the settings again, as long as it still has their permissions."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Apply the settings as code
         env:
