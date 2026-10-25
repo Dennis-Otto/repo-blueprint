@@ -727,7 +727,7 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
     and in the CI also as annotations; with --output, the further languages and the
     path of the address for the steps that follow."""
     folder = Path(arguments.site).as_posix().rstrip("/") or "."
-    site = check_site(root / arguments.site)
+    site = check_site(root / arguments.site, root, arguments.docs)
     if arguments.output:
         with Path(arguments.output).open("a", encoding="utf-8") as file:
             file.write(f"languages={' '.join(site.further)}\n")
@@ -749,7 +749,11 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
         "with what the hooks write, and report it to the blueprint if its hooks "
         "need to change. A page that loads more than it may at once names what it "
         "loads the most: a picture that is too large, or Mermaid, which a "
-        "```mermaid block loads and the pictures of scripts/diagrams.sh don't."
+        "```mermaid block loads and the pictures of scripts/diagrams.sh don't. A "
+        "page that lacks a picture of its Markdown, or has an empty paragraph where "
+        "one was, lost it in the build: build the website with the lock of its "
+        "tools, .github/docs-requirements.txt, and look for the plugin or the hook "
+        "that takes it out."
     )
     return 1
 
@@ -1413,10 +1417,17 @@ def add_pages_parsers(
         "site-check",
         help="what the website that MkDocs built promises: a sitemap in every folder "
         "of pages, the 404 page in the default language, one canonical address and "
-        "full addresses of the other languages on every page",
+        "full addresses of the other languages on every page, and every picture of "
+        "the Markdown of a page on it",
     )
     site_check_parser.add_argument(
         "site", help="the folder that MkDocs built the website into, such as site"
+    )
+    site_check_parser.add_argument(
+        "--docs",
+        default="docs",
+        help="the folder of the Markdown of the pages, docs_dir of mkdocs.yml "
+        "(default: docs)",
     )
     site_check_parser.add_argument(
         "--output",
