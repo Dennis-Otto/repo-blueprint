@@ -355,6 +355,17 @@ test_workflows:
   validator: >-
     [% if test_workflows and not (test_workflows | regex_search('^[A-Za-z0-9 ()._/,-]+$')) %]Name each workflow as the name: line of its file does, with letters, digits, spaces and ( ) . _ / - only, and separate them by commas.[% endif %]
 
+# The flaky-test bot names the tests that pytest lists as failed in the log of a job.
+# Other tests, such as the browser tests of a Docker E2E, write a line of their own
+# as each test or step starts: the bot names the one that the log names last before
+# the failure, and takes the first exception after that line as the error.
+test_marker:
+  type: str
+  help: The text before the name of each test or step in the logs of the tests that pytest doesn't run, such as "Browser step:", by which the flaky-test bot names the test that failed; empty for none
+  default: ""
+  validator: >-
+    [% if test_marker and not ((test_marker | trim) and (test_marker | regex_search('^[A-Za-z0-9 :()._/#>=-]+$'))) %]Write the text as the log writes it, with letters, digits, spaces and : ( ) . _ / # > = - only, and at least one that isn't a space.[% endif %]
+
 # Derived from the answers; never asked and not stored.
 
 stack:

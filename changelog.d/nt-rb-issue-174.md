@@ -1,0 +1,4 @@
+### Features
+
+- **The issue of flaky tests counts how often each job and test flaked:** to see which test flakes most, you had to read every comment of the issue. Its body now keeps a table of each job and test, how often it flaked and the run in which it last did, the latest first, and each run gets a comment of its own. An issue that the bot opened before keeps its text and gets the table added, which counts from the next run on.
+- **The flaky-test bot names the test that failed in the logs of tests that pytest doesn't run:** for a job of browser tests, such as a Docker E2E that timed out in Safari, the Test column stayed empty and the error was only the exit code. With `copier update --data "test_marker=Browser step:"`, the text that the log writes before the name of each test or step as it starts, the bot names the one that the log names last before the failure, and takes the first exception after it as the error when no annotation names one.

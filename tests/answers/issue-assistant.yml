@@ -25,6 +25,7 @@ renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true
+test_marker: ''
 test_workflows: ''
 topics: ai, automation, claude, github-actions, github-issues, issue-triage, maintainers,
   open-source-tools

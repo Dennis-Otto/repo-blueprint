@@ -8,7 +8,11 @@ name: After the checks
 # runs out of time, it runs the failed jobs once more. A job that passes then failed
 # without a change of the code: its test is flaky, and the bot reports it in one
 # issue, with the step, the test and the error that failed, so that it gets fixed
-# instead of failing pull requests at random. A job that fails again is a real
+# instead of failing pull requests at random: a comment for each run, and in the body
+# how often each job and test flaked, and when it last did. The test is one that
+# pytest names in the log, or else the step or test that the log names last before
+# the failure, after the answer test_marker of the blueprint, such as "Browser step:"
+# before each step of the tests of a browser. A job that fails again is a real
 # failure and stays red, and so does one that failed the same way for the commit
 # before: running it again would only keep a runner busy. A pull request names its
 # jobs and steps and writes its logs, so the issue shows them only as code, and the
@@ -210,9 +214,13 @@ jobs:
           RUN: ${{ github.event.workflow_run.id }}
           NAME: ${{ github.event.workflow_run.name }}
           URL: ${{ github.event.workflow_run.html_url }}
+          WHEN: ${{ github.event.workflow_run.updated_at }}
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          # The text before the name of each test or step in a log that pytest didn't
+          # write, such as "Browser step:"; the answer test_marker of the blueprint sets it.
+          MARKER: ""
         run: |
           # Lengths in characters, not bytes, so that a cut keeps every character whole.
           export LC_ALL=C.UTF-8
@@ -234,15 +242,17 @@ jobs:
             fi
           }
           # Each job that failed in the first attempt, or ran out of time there, with
-          # the step that broke, the tests that pytest names in its log, and the first
-          # error that it reported. An attempt that a newer run cancelled, as one that
-          # the bot for cancelled checks started again, failed in no test. In one that
-          # a person or a time limit cancelled, only the jobs that ran out of time
-          # broke: a job that waits for the others fails when they are cancelled.
+          # the step that broke, its tests and the first error that it reported. An
+          # attempt that a newer run cancelled, as one that the bot for cancelled checks
+          # started again, failed in no test. In one that a person or a time limit
+          # cancelled, only the jobs that ran out of time broke: a job that waits for the
+          # others fails when they are cancelled.
           first="$(gh api "repos/$GH_REPO/actions/runs/$RUN/attempts/1" --jq .conclusion)"
           jobs="$(gh api "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
             --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.id, .conclusion, .html_url, .name, ([.steps[]? | select(.conclusion == "failure" or .conclusion == "cancelled") | .name] | join(", "))] | @tsv')"
           rows=""
+          # Each job with each of its tests, one to a line, for the count in the issue.
+          counted=""
           while IFS=$'\t' read -r -u 3 id conclusion url name steps; do
             if [[ -z "$id" ]] || [[ "$conclusion" == failure && "$first" == cancelled ]]; then
               continue
@@ -251,23 +261,42 @@ jobs:
               --jq '.[] | select(.annotation_level == "failure") | .message | gsub("\\s+"; " ")' || true)"
             if grep -q "higher priority waiting request" <<<"$errors"; then
               rows=""
+              counted=""
               break
             fi
             if [[ "$conclusion" == cancelled ]] && ! grep -q "has exceeded the maximum execution time" <<<"$errors"; then
               continue
             fi
-            failed="$(gh api "repos/$GH_REPO/actions/jobs/$id/logs" 2>/dev/null |
-              sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9-]+T[0-9:.]+Z //' |
-              grep -E '^(FAILED|ERROR) [^ ]+\.py(::| |$)' | head -n 3)"
-            tests="$(sed -nE 's/^[A-Z]+ ([^ ]+).*/\1/p' <<<"$failed" | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+            log="$(gh api "repos/$GH_REPO/actions/jobs/$id/logs" 2>/dev/null |
+              sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9-]+T[0-9:.]+Z //')"
+            # The tests that pytest names in the log. Other tests, such as those of a
+            # browser, write the marker and the name of each test or step as it starts:
+            # the one that the log names last before its first error failed, and the
+            # first exception after that line is its error.
+            failed="$(grep -E '^(FAILED|ERROR) [^ ]+\.py(::| |$)' <<<"$log" | head -n 3)"
+            names="$(sed -nE 's/^[A-Z]+ ([^ ]+).*/\1/p' <<<"$failed")"
+            thrown=""
+            if [[ -z "$names" && -n "$MARKER" ]]; then
+              since="$(awk '/^##\[error\]/ { exit } index($0, ENVIRON["MARKER"]) { found = 1; kept = "" } found { kept = kept $0 "\n" } END { printf "%s", kept }' <<<"$log")"
+              step="$(head -n 1 <<<"$since")"
+              names="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"${step#*"$MARKER"}")"
+              thrown="$(grep -oE '([A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z0-9_]*(Error|Exception|Failure): .*[^[:space:]]' <<<"$since" | head -n 1)"
+            fi
+            tests="$(awk 'NR > 1 { printf ", " } { printf "%s", $0 }' <<<"$names")"
             error="$(grep -v -e '^Process completed with exit code' -e '^The operation was canceled' <<<"$errors" | head -n 1)"
             if [[ -z "$error" ]]; then
               error="$(sed -nE '1s/^[A-Z]+ [^ ]+ - //p' <<<"$failed")"
             fi
             if [[ -z "$error" ]]; then
+              error="$thrown"
+            fi
+            if [[ -z "$error" ]]; then
               error="$(head -n 1 <<<"$errors")"
             fi
             rows+="| [$(cell "$name")]($url) | $(cell "$steps") | $(cell "$tests") | $(cell "$error") |"$'\n'
+            while IFS= read -r test; do
+              counted+="$(cell "$NAME / $name") | $(cell "$test")"$'\n'
+            done <<<"$names"
           done 3<<<"$jobs"
           if [[ -z "$rows" ]]; then
             echo "No job failed or ran out of time at first; nothing to report." >> "$GITHUB_STEP_SUMMARY"
@@ -280,18 +309,81 @@ jobs:
             where="$(cell "$BRANCH")"
           fi
           title="Flaky tests"
-          body="$(printf '**%s** failed at first and passed when it ran again, on %s at %s ([the run](%s)):\n\n%s\n%s\n%s' \
+          report="$(printf '**%s** failed at first and passed when it ran again, on %s at %s ([the run](%s)):\n\n%s\n%s\n%s' \
             "$NAME" "$where" "${SHA:0:7}" "$URL" \
             "| Job | Step | Test | Error |" "| --- | --- | --- | --- |" "$rows")"
           number="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
             --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
+          # Each run gets a comment, and the body of the issue counts how often each job
+          # and test flaked, and when it last did, the latest first. The bot rewrites the
+          # table between its two comments, which it adds to an issue that has none, and
+          # keeps the 100 latest rows, well within the 65,536 characters of a body. A body
+          # that a person edited in the browser ends its lines with CRLF. Two reports at
+          # the same moment may miss a count, never a comment.
           if [[ -n "$number" ]]; then
-            gh issue comment "$number" --body "$body"
+            gh issue comment "$number" --body "$report"
+            body="$(gh issue view "$number" --json body --jq .body)"
           else
-            printf '%s\n\n%s\n' \
-              "The flaky-test bot lists here every job that failed and then passed without a change of the code, with the step, the test and the error that failed. Fix its test, then close this issue." \
-              "$body" > "$RUNNER_TEMP/issue.md"
-            gh issue create --title "$title" --label maintenance --body-file "$RUNNER_TEMP/issue.md"
+            body="The flaky-test bot counts here every job and test that failed at first and then passed without a change of the code, and describes each run in a comment, with the step, the test and the error that failed. Fix the test, then close this issue."
+          fi
+          printf '%s\n' "$body" | tr -d '\r' |
+            COUNTED="$counted" LAST="[${WHEN:0:10}]($URL)" \
+            FROM="<!-- The flaky-test bot rewrites the counts from here to the next comment. -->" \
+            UNTIL="<!-- The end of the counts. -->" \
+            awk '
+              function table(  i) {
+                print ""
+                print "**How often each job and test flaked**, the latest first:"
+                print ""
+                print "| Job | Test | Times | Last run |"
+                print "| --- | --- | --- | --- |"
+                for (i = 1; i <= n; i++) {
+                  printf "| %s | %d | %s |\n", order[i], times[order[i]] + 1, ENVIRON["LAST"]
+                }
+                for (i = 1; i <= m && n + i <= 100; i++) {
+                  print older[i]
+                }
+                print ""
+              }
+              # The jobs and tests of this run first, each once, then the older rows.
+              BEGIN {
+                count = split(ENVIRON["COUNTED"], lines, "\n")
+                for (i = 1; i <= count; i++) {
+                  if (lines[i] != "" && !(lines[i] in now)) {
+                    now[lines[i]] = 1
+                    order[++n] = lines[i]
+                  }
+                }
+              }
+              state == 0 && $0 == ENVIRON["FROM"] { state = 1; print; next }
+              state == 1 && $0 == ENVIRON["UNTIL"] { state = 2; table(); print; next }
+              state == 1 && /^\| (`|–)/ {
+                split(substr($0, 3, length($0) - 4), cells, " [|] ")
+                key = cells[1] " | " cells[2]
+                if (key in now) {
+                  times[key] = cells[3]
+                } else {
+                  older[++m] = $0
+                }
+                next
+              }
+              state != 1 { print }
+              END {
+                if (state == 0) {
+                  print ""
+                  print ENVIRON["FROM"]
+                }
+                if (state != 2) {
+                  table()
+                  print ENVIRON["UNTIL"]
+                }
+              }
+            ' > "$RUNNER_TEMP/issue.md"
+          if [[ -n "$number" ]]; then
+            gh issue edit "$number" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            created="$(gh issue create --title "$title" --label maintenance --body-file "$RUNNER_TEMP/issue.md")"
+            gh issue comment "$created" --body "$report"
           fi
           {
             echo "### Flaky"
