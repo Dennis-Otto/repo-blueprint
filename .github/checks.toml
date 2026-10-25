@@ -465,6 +465,32 @@ docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshoo
 autofix = """Which version fixes an advisory, and whether it affects the project, is
 the decision of a person."""
 
+[check."dependabot alerts"]
+title = "The Dependabot alerts of the accepted advisories"
+problem = """The job closes each Dependabot alert of an advisory that an `osv-scanner.toml`
+accepts, with its reason and its end, and opens again each one that it closed once the
+acceptance is gone, and it couldn't: GitHub refused the app a token with the
+permission *Dependabot alerts* (read and write), or refused the alerts to its token.
+The summary of the run names the app: the settings app once the variable
+`SETTINGS_APP_CLIENT_ID` names it, the release app until then."""
+why = """The token of a workflow can't read the Dependabot alerts, so only an app of the
+owner can close them. Until it may, Dependabot keeps an alert open for every advisory
+that the project accepts, such as each of the Pillow that Home Assistant pins for the
+tests, and a new alert that matters hides among them."""
+fix = """On the settings page of the app that the summary names, under *Permissions &
+events*, set *Dependabot alerts* to *Read and write* and save. GitHub then asks the
+owner to accept the new permission on the installation of the app (*Settings →
+Applications → Configure*, *Review request*); accept it, and run the workflow
+*OSV-Scanner* again. With the GitHub CLI of a maintainer, this shows which alerts the
+job would close or open again (in the blueprint itself, the tool is `blueprint.py`
+without `.github/`):"""
+commands = [
+  "python3 .github/blueprint.py --repo {repo} advisories --dependabot --dry-run",
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md#8-the-settings-app-optional"
+autofix = """Only the owner of the app can grant it a permission, on the settings page of
+the app; no command of a pull request can."""
+
 [check."renovate rules"]
 title = "The rules of Renovate"
 problem = """Renovate doesn't accept the rules of the pull request, or doesn't read

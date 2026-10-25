@@ -184,6 +184,12 @@ python3 .github/blueprint.py advisories --fix
 
 `.github/renovate-accepted.json5` hat dann eine Regel für jede solche Version, die `.github/renovate-blueprint.json5` erweitert: Renovate macht kein Update dieser Version in den Lock-Dateien dieses Ordners, die nur das Paket bewegt, das sie festlegt. Der Schritt *Accepted advisories* von `scripts/check.sh` scheitert, solange die Regeln und die `osv-scanner.toml`-Dateien sich widersprechen, und wenn OSV-Scanner eine Datei nicht verwenden kann: Er ignoriert eine ganze Datei mit einem Schlüssel, den er nicht kennt. Nach `effectiveUntil` meldet OSV-Scanner die Advisories wieder; sobald das Paket, das die Version festlegt, sie bewegt, lösche den Eintrag. Ein Advisory, das das Projekt nicht betrifft, einer Version, die ein Update bewegen könnte, gehört allein in `[[IgnoredVulns]]`, mit seiner `id` und dem Grund, und das OpenVEX-Dokument jedes Releases nennt die der `osv-scanner.toml` im Wurzelordner ([Entscheidung 0059](decisions/0059-accept-a-pinned-version-and-tell-renovate.md), englisch).
 
+Auch Dependabot liest die `osv-scanner.toml` nicht. Nach dem Merge schließt der Job *dependabot alerts* des OSV-Scanner-Workflows jeden Dependabot-Alert, den ein Eintrag abdeckt, als tolerierbares Risiko mit einem Kommentar, der mit *Accepted in* beginnt und die Datei, das Ende und den Grund nennt; ein Eintrag in `[[IgnoredVulns]]` schließt die Alerts seines Advisorys, sobald er `ignoreUntil` und `reason` hat. Er öffnet sie wieder, sobald das Datum vorbei ist, der Eintrag fehlt oder ein Update die Version bewegt hat. Schlägt der Job fehl, weil GitHub das Token verweigert, fehlt der App die Berechtigung *Dependabot alerts* (Read and write), wie [dein eigenes Konto](own-account.md#8-die-settings-app-optional) zeigt ([Entscheidung 0086](decisions/0086-accepted-advisories-close-their-dependabot-alerts.md), englisch). Was er tun würde, zeigt:
+
+```sh
+python3 .github/blueprint.py advisories --dependabot --dry-run
+```
+
 ## Renovate überspringt eine Lock-Datei
 
 **Was du siehst:** Eine Lock-Datei wie `requirements-test.txt` bekommt kein Update, auch keins, das eine Schwachstelle behebt, und das Issue *Renovate logs problems* nennt `pip-compile error` für das Repository. Der Schritt *Lock files* von `scripts/check.sh` scheitert und nennt die Datei und das, woran Renovate hängen bleibt, etwa `--python-version without = before its value`.
