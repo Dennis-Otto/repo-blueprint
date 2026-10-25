@@ -13,7 +13,15 @@ from typing import Any
 from urllib.parse import urlencode
 
 from blueprint.github import Api
-from blueprint.settings import PLAN_GATED, Drift, Settings, check
+from blueprint.settings import (
+    Drift,
+    Plan,
+    Settings,
+    check,
+    fitted,
+    gated,
+    read_plan,
+)
 
 # The permissions of the release app, as its settings page names them and as the link
 # that registers it does, with the access that the bots need: the settings bot,
@@ -257,17 +265,26 @@ def listed(access: str) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def applied_step(drift: list[Drift]) -> Step:
+# The parts that GitHub offers a private repository only on a paid plan, by the
+# prefix of their differences: the rulesets and the website.
+PAID_PARTS = ("ruleset", "pages")
+
+
+def applied_step(drift: list[Drift], private: bool = False) -> Step:
     """Whether the settings as code are applied; neutral when only a switch that
-    depends on the plan is off, which GitHub may keep off on any write."""
+    depends on the plan is off, which GitHub may keep off on any write, or when a
+    private repository lacks only what GitHub may not offer it on its plan."""
     open_items = [item for item in drift if not item.manual]
-    gated = all(
-        item.setting.removeprefix("security.") in PLAN_GATED
-        and item.want is True
-        and item.have is False
+    only_plan = all(
+        (
+            item.setting.removeprefix("security.") in gated(private)
+            and item.want is True
+            and item.have is False
+        )
+        or (private and item.setting.startswith(PAID_PARTS))
         for item in open_items
     )
-    if open_items and gated:
+    if open_items and only_plan:
         return Step(
             "Settings as code applied",
             None,
@@ -279,6 +296,22 @@ def applied_step(drift: list[Drift]) -> Step:
         "Settings as code applied",
         not open_items,
         "python3 blueprint.py settings apply",
+    )
+
+
+def code_security_step(repo: str, plan: Plan) -> Step:
+    """On a private repository: whether it has GitHub Code Security, without which the
+    settings switch the workflows to what they do without code scanning (decision
+    0081); neutral without it, since the plan of the owner may not offer it."""
+    return Step(
+        "Private repository: GitHub Code Security on, for code scanning and the"
+        " dependency review",
+        True if plan.code_security else None,
+        "Without it, the settings set CODE_SCANNING and DEPENDENCY_REVIEW to off:"
+        " CodeQL, zizmor, OSV-Scanner and the Scorecard keep what they find in their"
+        " checks and artifacts, and OSV-Scanner checks the lock files of every pull"
+        " request. Turn it on where the plan of the owner offers it, or make the"
+        f" repository public: https://github.com/{repo}/settings/security_analysis",
     )
 
 
@@ -298,6 +331,8 @@ def checklist(
         if (root / "README.md").exists()
         else ""
     )
+    plan = read_plan(api, repo)
+    settings = fitted(api, repo, settings, plan)
     drift = check(api, repo, settings)
     # What a person sets, which the API can't: the secrets and the files that the
     # community profile counts, each a step of its own.
@@ -308,7 +343,8 @@ def checklist(
     registered, installed = release_app(api, repo, settings)
     steps = [
         registered,
-        applied_step(drift),
+        applied_step(drift, plan.private),
+        *([code_security_step(repo, plan)] if plan.private else []),
         Step(
             "Secrets of the environments set",
             not secrets_missing,

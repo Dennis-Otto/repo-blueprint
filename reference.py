@@ -82,12 +82,31 @@ ABOUT: dict[str, str] = {
         " The checklist asks for it while the answer `issue_assistant_ai` is on;"
         " `ANTHROPIC_API_KEY` works in its place."
     ),
+    "CODE_SCANNING": (
+        "`off` keeps every finding out of code scanning, which GitHub offers a private"
+        " repository only with GitHub Code Security: CodeQL keeps its results as the"
+        " artifact `codeql-sarif`, lists them in its summary and fails on an error or a"
+        " security alert of high or critical severity; zizmor fails on every finding;"
+        " OSV-Scanner and the Scorecard keep theirs in their checks. The settings bot"
+        " sets it to `off` on such a repository and back to `on` once GitHub offers"
+        " code scanning; `[variables]` of `.github/repository.project.toml` decides"
+        " instead where it names it."
+    ),
     "COPILOT_GITHUB_TOKEN": (
         "A fine-grained token of GitHub with the permission *Copilot Requests* alone"
         " and no access to repositories, with which the issue assistant analyzes each"
         " new issue with Copilot, once `name` under `[engine]` of"
         " `.github/issue-assistant/config.toml` is `copilot`. It counts the premium"
         " requests of the Copilot plan of the token's owner."
+    ),
+    "DEPENDENCY_REVIEW": (
+        "`off` makes the check *dependency-review* leave the vulnerabilities to the"
+        " check *osv-scanner (pull request)*, which compares the lock files of a pull"
+        " request with those of its base; GitHub offers its dependency review to a"
+        " private repository only with GitHub Code Security. The settings bot sets it"
+        " to `off` on such a repository and back to `on` once GitHub offers the"
+        " review; `[variables]` of `.github/repository.project.toml` decides instead"
+        " where it names it."
     ),
     "GEMINI_API_KEY": (
         "An API key of Google AI Studio, with which the issue assistant analyzes each"

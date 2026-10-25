@@ -12,6 +12,8 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 
 - [`BETA_CHANNEL`](#beta_channel): `true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases.
 - [`BLUEPRINT_AUTOMERGE`](#blueprint_automerge): `off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way.
+- [`CODE_SCANNING`](#code_scanning): `off` keeps every finding out of code scanning, which GitHub offers a private repository only with GitHub Code Security: CodeQL keeps its results as the artifact `codeql-sarif`, lists them in its summary and fails on an error or a security alert of high or critical severity; zizmor fails on every finding; OSV-Scanner and the Scorecard keep theirs in their checks.
+- [`DEPENDENCY_REVIEW`](#dependency_review): `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security.
 - [`ISSUE_ASSISTANT_AI`](#issue_assistant_ai): `off` makes the issue assistant label the issues and answer the commands of their comments without an AI engine, which then needs no secret; `on` lets the engine analyze each new issue as well.
 - [`MUTATION_PARTS`](#mutation_parts): The number of parts in which the mutation tests run, one job each, in place of the estimate from the number of mutants: more parts for a project whose parts run out of the six hours of a job.
 - [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action` or `none`, by the kind of project.
@@ -42,6 +44,28 @@ What the workflows say of it:
 What the workflows say of it:
 
 - `blueprint-update.yml`: The repository variable `BLUEPRINT_AUTOMERGE` set to off makes every update wait.
+
+### `CODE_SCANNING`
+
+`off` keeps every finding out of code scanning, which GitHub offers a private repository only with GitHub Code Security: CodeQL keeps its results as the artifact `codeql-sarif`, lists them in its summary and fails on an error or a security alert of high or critical severity; zizmor fails on every finding; OSV-Scanner and the Scorecard keep theirs in their checks. The settings bot sets it to `off` on such a repository and back to `on` once GitHub offers code scanning; `[variables]` of `.github/repository.project.toml` decides instead where it names it.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`ci-php.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/ci-php.yml) (CI (php), where `ci_workflow == 'php'`); [`codeql.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/codeql.yml) (CodeQL, every repository); [`findings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/findings.yml) (Findings, every repository); [`osv-scanner.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/osv-scanner.yml) (OSV-Scanner, every repository); [`scorecard.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/scorecard.yml) (OpenSSF Scorecard, every repository); [`zizmor.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/zizmor.yml) (Workflow security, every repository)
+
+What the workflows say of it:
+
+- `codeql.yml`: A private repository without GitHub Code Security has no code scanning: there the settings bot sets the variable `CODE_SCANNING` to off, and the check keeps the results with its run, lists them in its summary and fails on what code scanning would stop.
+
+### `DEPENDENCY_REVIEW`
+
+`off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security. The settings bot sets it to `off` on such a repository and back to `on` once GitHub offers the review; `[variables]` of `.github/repository.project.toml` decides instead where it names it.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`dependency-review.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependency-review.yml) (Dependency review, every repository)
+
+What the workflows say of it:
+
+- `dependency-review.yml`: A private repository without GitHub Code Security has no dependency review: there the settings bot sets the variable `DEPENDENCY_REVIEW` to off, and the check leaves the vulnerabilities of the lock files to OSV-Scanner.
 
 ### `ISSUE_ASSISTANT_AI`
 

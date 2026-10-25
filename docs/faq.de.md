@@ -37,7 +37,27 @@ Die anderen Bots, die ihre eigenen Pull Requests mergen, haben eigene Schalter:
 
 Ja: `python3 .github/blueprint.py create --private` legt ein privates Repository an. Öffentliche Repositorys nutzen GitHub Actions kostenlos. Ein privates hat bei GitHub Free 2.000 Minuten im Monat, und GitHub rundet jeden Job auf eine ganze Minute auf. Die Zeitpläne eines Projekts und die Läufe, die sie starten, kommen auf etwa 20 Läufe am Tag, etwa 600 im Monat; die Prüfungen der Pull Requests kosten mehr, weshalb der Blueprint eine Prüfung nur dort ausführt, wo sie ein Ergebnis ändern kann, und die Jobs wenige hält (Entscheidungen [0009](decisions/0009-run-a-check-only-where-it-can-change-a-result.md) und [0027](decisions/0027-few-jobs-that-each-run-several-checks.md), englisch).
 
-Manches, was der Blueprint einschaltet, ist nur für öffentliche Repositorys kostenlos. Für ein privates verlangt GitHub einen bezahlten Plan für Rulesets und GitHub Pages und GitHub Advanced Security für Code Scanning, das Dependency Review und den Push-Schutz des Secret Scannings. Bis dahin nennt `settings apply` jeden Teil, den GitHub ablehnt, und die Prüfungen, die ihn brauchen, scheitern.
+Manches, was der Blueprint einschaltet, ist nur für öffentliche Repositorys kostenlos, und der Blueprint kommt ohne es aus ([Entscheidung 0081](decisions/0081-a-private-repository-passes-its-checks-without-what-its-plan-lacks.md)):
+
+| Teil | Öffentlich | Privat, Free | Privat, Pro oder Team | Mit Code Security |
+| --- | --- | --- | --- | --- |
+| Actions | kostenlos | 2.000 Minuten | 3.000 Minuten | nach Plan |
+| Rulesets für `main` | ja | nein | ja | ja |
+| Website | Pages | Artefakt | Pages | Pages |
+| Code Scanning | ja | in den Prüfungen | in den Prüfungen | ja |
+| Dependency Review | ja | OSV-Scanner | OSV-Scanner | ja |
+| Secret Scanning | ja | gitleaks | gitleaks | mit Secret Protection |
+
+GitHub Code Security und GitHub Secret Protection gibt es für Organisationen mit GitHub Team oder Enterprise. Ohne sie läuft jede verlangte Prüfung trotzdem, und sie besteht, wo nichts falsch ist:
+
+- **`settings apply`** liest, ob das Repository privat ist und GitHub Code Security hat. Ohne setzt es die Variablen [`CODE_SCANNING`](reference/variables.md#code_scanning) und [`DEPENDENCY_REVIEW`](reference/variables.md#dependency_review) auf `off`, und das Ruleset von `main` wartet nicht mehr auf eine Analyse des Code Scannings. Was GitHub für den Plan ablehnt, etwa die Rulesets und GitHub Pages bei GitHub Free, nennt es als Hinweis, der nichts scheitern lässt; es setzt sie, sobald das Repository öffentlich ist oder einen Plan hat, der sie bietet, und setzt die Variablen zurück auf `on`.
+- **CodeQL** analysiert weiter jeden Pull Request. Es behält die Ergebnisse als Artefakt `codeql-sarif` des Laufs, listet sie in der Zusammenfassung der Prüfung *codeql* und scheitert an einem Fehler oder einem Sicherheitsalarm mit hohem oder kritischem Schweregrad, wie das Ruleset sie stoppen würde.
+- **zizmor** scheitert an jedem Fund, mit einer Anmerkung an seiner Zeile; **OSV-Scanner** und die **Scorecard** behalten ihre Funde in ihren Prüfungen.
+- **Das Dependency Review** überlässt die Schwachstellen der Prüfung *osv-scanner (pull request)*, die die Lock-Dateien des Pull Requests mit denen seiner Basis vergleicht. Die Lizenzen neuer Abhängigkeiten bleiben ungeprüft.
+- **Die Website** jedes Laufs auf `main` ist das Artefakt `website`, wie die eines Pull Requests.
+- **Secret Scanning** ist die Prüfung *gitleaks* jedes Pull Requests; der Push-Schutz von GitHub, der ein Geheimnis schon vor dem Push stoppt, fehlt.
+
+Bei GitHub Free schützt nichts `main`: Ein Push geht an den Prüfungen vorbei, also bleib bei Pull Requests. `python3 .github/blueprint.py checklist` zeigt einem privaten Repository den Schritt *GitHub Code Security on*.
 
 ## Welche Dateien darf ein Projekt ändern?
 

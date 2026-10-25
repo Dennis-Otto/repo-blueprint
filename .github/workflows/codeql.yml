@@ -3,7 +3,10 @@ name: CodeQL
 # The code analysis of GitHub. CodeQL reads the code of every language of this
 # repository and its workflows with the queries of security-extended, for every pull
 # request, every push to main and every week, and sends what it finds to code
-# scanning, where a new alert of a pull request stops its merge.
+# scanning, where a new alert of a pull request stops its merge. A private repository
+# without GitHub Code Security has no code scanning: there the settings bot sets the
+# variable CODE_SCANNING to off, and the check keeps the results with its run, lists
+# them in its summary and fails on what code scanning would stop.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -85,9 +88,27 @@ jobs:
             echo "- $language: \`/language:$language\`" >> "$GITHUB_STEP_SUMMARY"
           done
       - name: Upload the results
+        if: vars.CODE_SCANNING != 'off'
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: ${{ runner.temp }}/codeql
+      # Without code scanning, the results stay with the run for two weeks, and the
+      # check shows each one and fails on an error or a security alert of high or
+      # critical severity, as the rules of main stop them with code scanning.
+      - name: Keep the results with the run
+        if: vars.CODE_SCANNING == 'off'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-sarif
+          path: ${{ runner.temp }}/codeql
+          retention-days: 14
+      - name: Show the results
+        if: vars.CODE_SCANNING == 'off'
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" sarif --artifact codeql-sarif --summary "$GITHUB_STEP_SUMMARY" \
+            "$RUNNER_TEMP"/codeql/*.sarif
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure

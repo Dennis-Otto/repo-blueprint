@@ -175,7 +175,16 @@ def apply_security(api: Api, repo: str, drift: list[Drift]) -> None:
         api.patch(f"repos/{repo}", {"security_and_analysis": analysis})
 
 
-def kept(repo: str, sent: list[Drift], have: list[Drift]) -> list[Drift]:
+def gated(private: bool) -> tuple[str, ...]:
+    """The switches of security_and_analysis that the plan of a repository decides:
+    on a private one every switch of secret scanning, which GitHub offers it only with
+    GitHub Secret Protection (decision 0081)."""
+    return ANALYSIS if private else PLAN_GATED
+
+
+def kept(
+    repo: str, sent: list[Drift], have: list[Drift], private: bool = False
+) -> list[Drift]:
     """The drift after an apply that sent `sent`, in which a switch of
     security_and_analysis that depends on the plan and that GitHub accepted but kept
     as it was is a notice.
@@ -188,7 +197,7 @@ def kept(repo: str, sent: list[Drift], have: list[Drift]) -> list[Drift]:
     tried = {
         item.setting
         for item in sent
-        if item.setting.removeprefix("security.") in PLAN_GATED and not item.notice
+        if item.setting.removeprefix("security.") in gated(private) and not item.notice
     }
     result = []
     for item in have:
@@ -912,7 +921,13 @@ def rulesets(api: Api, repo: str) -> dict[str, Json]:
 
 
 def check_rulesets(api: Api, repo: str, wanted: list[dict[str, Json]]) -> list[Drift]:
-    existing = rulesets(api, repo)
+    try:
+        existing = rulesets(api, repo)
+    except GitHubError as error:
+        if not refused_by_plan(error):
+            raise
+        # A private repository on GitHub Free may have no rulesets to read.
+        return [lacking(repo, Drift("rulesets", "present", "not offered"), error)]
     drift = []
     for want in wanted:
         if want["name"] not in existing:
@@ -1277,6 +1292,139 @@ def check(api: Api, repo: str, settings: Settings) -> list[Drift]:
     )
 
 
+# --------------------------------------------------------------------------- plan
+
+# The variables that switch the workflows to what they do without a part of GitHub
+# that a private repository lacks on its plan, with the part. GitHub offers code
+# scanning and the dependency review to a private repository only with GitHub Code
+# Security, or with GitHub Advanced Security, which includes it (decision 0081):
+# without it, CodeQL, zizmor, OSV-Scanner and the Scorecard keep their findings out
+# of code scanning, and the dependency review leaves the vulnerabilities of the lock
+# files to OSV-Scanner.
+PLAN_VARIABLES = {
+    "CODE_SCANNING": "code scanning",
+    "DEPENDENCY_REVIEW": "the dependency review",
+}
+# The switches of security_and_analysis that bring both.
+CODE_SECURITY = ("advanced_security", "code_security")
+# How GitHub refuses a part that the plan of a private repository lacks, such as a
+# ruleset ("Upgrade to GitHub Pro or make this repository public to enable this
+# feature"), the website ("Your current plan does not support GitHub Pages for this
+# repository") or a switch that needs a product of GitHub Advanced Security.
+PLAN_REFUSAL = re.compile(
+    r"upgrade to github|make this repository public|current plan"
+    r"|advanced security|secret protection|code security",
+    re.IGNORECASE,
+)
+# The prefix of the differences of each part of the settings.
+PARTS = {
+    "repository": "repository.",
+    "security": "security.",
+    "actions": "actions.",
+    "rulesets": "ruleset",
+    "variables": "variable ",
+    "environments": "environment ",
+    "pages": "pages",
+    "labels": "label ",
+}
+
+
+@dataclass(frozen=True)
+class Plan:
+    """What GitHub offers the repository on its plan; a public one has everything."""
+
+    private: bool
+    # GitHub Code Security on a private repository; None where the token may not
+    # read security_and_analysis, which then decides nothing.
+    code_security: bool | None
+
+    @property
+    def offers_code_security(self) -> bool | None:
+        return True if not self.private else self.code_security
+
+
+def read_plan(api: Api, repo: str) -> Plan:
+    data = api.get(f"repos/{repo}") or {}
+    private = data.get("private") is True
+    analysis = data.get("security_and_analysis")
+    if not isinstance(analysis, dict):
+        return Plan(private, None)
+    return Plan(
+        private,
+        any(
+            isinstance(analysis.get(key), dict)
+            and analysis[key].get("status") == "enabled"
+            for key in CODE_SECURITY
+        ),
+    )
+
+
+def refused_by_plan(error: GitHubError) -> bool:
+    """Whether GitHub refused a part of the settings because the plan of a private
+    repository lacks it, which a public repository never hears."""
+    return error.status in (403, 422) and bool(PLAN_REFUSAL.search(error.message))
+
+
+def lacking(repo: str, item: Drift, error: GitHubError) -> Drift:
+    """The difference of a part that the plan of the repository lacks, as a notice."""
+    return replace(
+        item,
+        notice=True,
+        manual=(
+            f"GitHub doesn't offer it to the private repository {repo} on its plan"
+            f' and answered "{error.message}"; the next run of the settings sets it'
+            " once the repository is public or on a plan that offers it"
+        ),
+    )
+
+
+def offered_only(
+    repo: str, drift: list[Drift], unoffered: dict[str, GitHubError]
+) -> list[Drift]:
+    """The drift after an apply, in which each difference of a part that GitHub
+    refused for the plan of the repository is a notice, which fails nothing."""
+    result = []
+    for item in drift:
+        part = next(
+            (name for name in unoffered if item.setting.startswith(PARTS[name])), None
+        )
+        if part is not None and not item.notice:
+            item = lacking(repo, item, unoffered[part])
+        result.append(item)
+    return result
+
+
+def fitted(api: Api, repo: str, settings: Settings, plan: Plan) -> Settings:
+    """The settings for what GitHub offers the repository: where a private repository
+    lacks GitHub Code Security, the variables of PLAN_VARIABLES are off, and the rule
+    of main asks for no alerts of code scanning, to which no tool can upload. One that
+    a repository no longer needs, after it became public or got Code Security, is on
+    again, and a variable that the settings as code set themselves wins."""
+    variables = dict(settings.variables)
+    offered = plan.offers_code_security
+    for name in PLAN_VARIABLES:
+        if name in settings.variables or offered is None:
+            continue
+        if not offered:
+            variables[name] = "off"
+            continue
+        have = api.get(f"repos/{repo}/actions/variables/{name}")
+        if have is not None and have.get("value") != "on":
+            variables[name] = "on"
+    rulesets = settings.rulesets
+    if variables.get("CODE_SCANNING") == "off":
+        rulesets = [
+            {
+                **ruleset,
+                "rules": [
+                    rule for rule in ruleset["rules"] if rule["type"] != "code_scanning"
+                ],
+            }
+            for ruleset in rulesets
+        ]
+    return replace(settings, variables=variables, rulesets=rulesets)
+
+
 # The permissions of the release app that each part of the settings needs to write,
 # as the settings page of the app names them. GitHub writes an environment and the
 # branches that may use it with Administration, and a website with Administration and
@@ -1295,9 +1443,11 @@ PERMISSIONS = {
 
 def apply(
     api: Api, repo: str, settings: Settings, drift: list[Drift]
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[str, GitHubError]]:
     """Apply every part of the drift and return the parts that GitHub refused, each
-    with the reason.
+    with the reason, and those that it refused because the plan of a private
+    repository lacks them, such as the rulesets and the website on GitHub Free, each
+    with its answer.
 
     A part that GitHub refuses, such as one whose permission the release app lacks,
     doesn't keep the parts after it from being applied.
@@ -1323,14 +1473,18 @@ def apply(
         ("labels", lambda: apply_labels(api, repo, settings.labels, part("label "))),
     ]
     refused: dict[str, str] = {}
+    unoffered: dict[str, GitHubError] = {}
     for name, step in steps:
         try:
             step()
         except GitHubError as error:
+            if refused_by_plan(error):
+                unoffered[name] = error
+                continue
             refused[name] = (
                 f"the {name} could not be applied: {error}{hint(name, error)}"
             )
-    return refused
+    return refused, unoffered
 
 
 def hint(part: str, error: GitHubError) -> str:

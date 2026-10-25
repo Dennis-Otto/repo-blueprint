@@ -49,6 +49,10 @@ jobs:
       contents: read
       security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    with:
+      # Code scanning, where GitHub offers it: without it, the findings stay in the
+      # summary and the artifact of the check.
+      upload-sarif: ${{ vars.CODE_SCANNING != 'off' }}
 
   repository:
     name: osv-scanner
@@ -58,3 +62,6 @@ jobs:
       contents: read
       security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+    with:
+      # Code scanning, where GitHub offers it.
+      upload-sarif: ${{ vars.CODE_SCANNING != 'off' }}
