@@ -58,6 +58,9 @@ ARTICLE = "md-content__inner"
 # How many characters of the text of the block before an empty paragraph a finding
 # quotes, such as a paragraph or an item of a list, which a block of HTML starts.
 CONTEXT = 60
+# The spaces of HTML, without those of Unicode such as &nbsp;, which a paragraph
+# holds on purpose.
+WHITESPACE = " \t\n\r\f"
 BLOCKS = frozenset(
     {"p", "li", "dt", "dd", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"}
     | {"blockquote", "div", "figcaption", "pre", "summary"}
@@ -188,7 +191,7 @@ class Page(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self.script is not None:
             setattr(self, self.script, getattr(self, self.script) + data)
-        elif data.strip():
+        elif data.strip(WHITESPACE):
             self.paragraph = False
             self.block += data
 
@@ -251,10 +254,10 @@ class Site:
     findings: tuple[Finding, ...]
 
 
-def check(site: Path, repository: Path | None = None, docs: str = "docs") -> Site:
+def check(site: Path, repository: Path | None = None, docs: str | None = None) -> Site:
     """Check the website that MkDocs built into site; with repository, the one
-    whose folder docs holds the sources of its pages, also that every page shows
-    each picture of its Markdown."""
+    whose folder docs holds the sources of its pages, docs_dir of its mkdocs.yml
+    unless docs names it, also that every page shows each picture of its Markdown."""
     if not (site / "index.html").is_file():
         return Site("", (), "/", (Finding("index.html", "the home page is missing"),))
     pages = {
@@ -283,7 +286,9 @@ def check(site: Path, repository: Path | None = None, docs: str = "docs") -> Sit
         *emptied(pages),
     ]
     if repository is not None:
-        findings += lost(pages, repository, docs, (default, *further))
+        folder, bases = layout(repository)
+        languages_of_pages = (default, *further)
+        findings += lost(pages, repository, docs or folder, languages_of_pages, bases)
     if further:
         findings += sitemaps(site, pages, base)
         findings += not_found(pages, default)
@@ -514,6 +519,21 @@ PART = re.compile(
     r"(?P<path>.*?)(?::(?P<section>[a-z][-_0-9a-z]*)|:(?P<start>\d*)(?::(?P<end>\d*))?)?",
     re.I,
 )
+# The keys of mkdocs.yml that say where the Markdown of the pages and the files
+# that they include are: docs_dir, the options of pymdownx.snippets, its base_path
+# in them, and the file that the configuration inherits.
+VALUE = r"[ \t]*(?P<value>[^#\n]*?)[ \t]*(?:#[^\n]*)?$"
+DOCS_DIR = re.compile(rf"^docs_dir:{VALUE}", re.M)
+INHERIT = re.compile(rf"^INHERIT:{VALUE}", re.M)
+SNIPPETS_BLOCK = re.compile(
+    r"^(?P<indent>[ \t]*)(?:-[ \t]+)?pymdownx\.snippets:[ \t]*(?:#[^\n]*)?\n"
+    r"(?P<block>(?:(?P=indent)[ \t]+\S[^\n]*\n?|[ \t]*\n)*)",
+    re.M,
+)
+BASE_PATH = re.compile(
+    rf"^[ \t]+base_path:{VALUE}(?P<items>(?:\n[ \t]+-[^\n]*)*)", re.M
+)
+ITEM = re.compile(r"^[ \t]+-[ \t]*([^#\n]*?)[ \t]*(?:#[^\n]*)?$", re.M)
 # The picture of a diagram that scripts/diagrams.sh draws, which a hook of a project
 # may show as its source, which the page draws live with Mermaid.
 DIAGRAM = re.compile(r"(?:^|/)diagrams/[^/?#]+\.svg(?:$|[?#])", re.I)
@@ -553,7 +573,11 @@ def emptied(pages: dict[str, Page]) -> list[Finding]:
 
 
 def lost(
-    pages: dict[str, Page], root: Path, docs: str, languages: tuple[str, ...]
+    pages: dict[str, Page],
+    root: Path,
+    docs: str,
+    languages: tuple[str, ...],
+    bases: tuple[str, ...] = (".",),
 ) -> list[Finding]:
     """Every page that MkDocs built from a file of Markdown in root/docs shows each
     picture of it, and of the files that it includes, such as a part of the README:
@@ -564,7 +588,7 @@ def lost(
     findings = []
     for built, source in sources(root / docs, languages, pages).items():
         page = pages[built]
-        for picture in pictures_in(resolved(source, root)):
+        for picture in pictures_in(resolved(source, root, bases)):
             shown = page.content
             if picture.names & shown.names or picture.text in shown.texts:
                 continue
@@ -623,16 +647,29 @@ def built_from(
     )
 
 
-def resolved(path: Path, root: Path) -> list[tuple[str, Path]]:
+def resolved(
+    path: Path, root: Path, bases: tuple[str, ...] = (".",)
+) -> list[tuple[str, Path]]:
     """The lines of the Markdown file at path, each with the file that it comes from,
     once the lines --8<-- include the files that they name, as pymdownx.snippets
-    does: from the root of the repository, and never from outside it."""
-    path = path.resolve()
-    return expanded(lines_of(path), path, root.resolve(), (path,))
+    does: from the first of the folders bases of the repository that has the file,
+    its base_path, and never from outside the repository."""
+    path, root = path.resolve(), root.resolve()
+    folders = tuple((root / base).resolve() for base in bases)
+    return expanded(lines_of(path), path, Snippets(root, folders), (path,))
+
+
+@dataclass(frozen=True)
+class Snippets:
+    """Where a line --8<-- finds its file: in the first of the folders that has it,
+    inside the root of the repository."""
+
+    root: Path
+    folders: tuple[Path, ...]
 
 
 def expanded(
-    lines: list[str], origin: Path, root: Path, seen: tuple[Path, ...]
+    lines: list[str], origin: Path, root: Snippets, seen: tuple[Path, ...]
 ) -> list[tuple[str, Path]]:
     """lines of the file at origin, with the files that they include in place of
     their lines --8<--; a file that includes itself, also through another one, is
@@ -652,16 +689,26 @@ def expanded(
     return found
 
 
-def included(name: str, root: Path, seen: tuple[Path, ...]) -> list[tuple[str, Path]]:
+def included(
+    name: str, root: Snippets, seen: tuple[Path, ...]
+) -> list[tuple[str, Path]]:
     """The lines that a line --8<-- includes with name: a file of the repository,
     a part of it or some of its lines; none for a file that is missing, an address
     of another server or a file outside the repository."""
     part = PART.fullmatch(name)
     assert part is not None  # the pattern matches every name
-    path = (root / part["path"].strip()).resolve()
-    if not part["path"].strip() or not path.is_relative_to(root) or not path.is_file():
-        return []
-    if path in seen:
+    found = [(folder / part["path"].strip()).resolve() for folder in root.folders]
+    path = next(
+        (
+            file
+            for file in found
+            if part["path"].strip()
+            and file.is_relative_to(root.root)
+            and file.is_file()
+        ),
+        None,
+    )
+    if path is None or path in seen:
         return []
     lines = lines_of(path)
     if part["section"]:
@@ -671,6 +718,57 @@ def included(name: str, root: Path, seen: tuple[Path, ...]) -> list[tuple[str, P
         end = int(part["end"]) if part["end"] else None
         lines = lines[max(start, 0) : end]
     return expanded(lines, path, root, (*seen, path))
+
+
+def layout(repository: Path) -> tuple[str, tuple[str, ...]]:
+    """docs_dir of the mkdocs.yml of the repository, the folder of the Markdown of
+    its pages, and the folders base_path of pymdownx.snippets in it, in which a line
+    --8<-- finds its file, also from the file that it inherits; MkDocs' docs and the
+    root of the repository where it names none."""
+    docs = "docs"
+    bases: tuple[str, ...] = (".",)
+    for text in configurations(repository / "mkdocs.yml", ()):
+        if (match := DOCS_DIR.search(text)) is not None:
+            docs = unquoted(match["value"])
+        block = SNIPPETS_BLOCK.search(text)
+        base = None if block is None else BASE_PATH.search(block["block"])
+        if base is not None:
+            bases = folders_of(base) or bases
+    return docs, bases
+
+
+def configurations(path: Path, seen: tuple[Path, ...]) -> list[str]:
+    """The texts of the configuration at path, after those of the file that it
+    inherits, INHERIT; none for a file that is missing or inherits itself."""
+    path = path.resolve()
+    if path in seen or not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    parent = INHERIT.search(text)
+    if parent is None:
+        return [text]
+    inherited = path.parent / unquoted(parent["value"])
+    return [*configurations(inherited, (*seen, path)), text]
+
+
+def folders_of(base: re.Match[str]) -> tuple[str, ...]:
+    """The folders that base_path names: one, a list in brackets or a list of items
+    on the lines below it."""
+    value = base["value"]
+    if value.startswith("["):
+        items = value.strip("[]").split(",")
+    elif value:
+        items = [value]
+    else:
+        items = ITEM.findall(base["items"])
+    return tuple(unquoted(item) for item in items if unquoted(item))
+
+
+def unquoted(value: str) -> str:
+    value = value.strip()
+    if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
 
 
 def section_of(lines: list[str], name: str) -> list[str]:

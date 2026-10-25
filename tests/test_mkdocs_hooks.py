@@ -1406,6 +1406,12 @@ def test_the_website_shows_no_badges() -> None:
         '<p><img alt="REUSE" src="https://api.reuse.software/badge/github.com/o/r">'
         '<img alt="Coverage" src="https://codecov.io/gh/o/r/graph/badge.svg?t=1">'
         "</p>\n"
+        # A row of badges in a block of HTML, as many READMEs on GitHub center them.
+        '<p align="center">\n  <a href="https://github.com/o/r/actions"><img alt="CI" '
+        'src="https://github.com/o/r/actions/workflows/ci.yml/badge.svg"></a>\n  '
+        '<img alt="License" src="https://img.shields.io/badge/license-MIT-blue">\n'
+        "</p>\n"
+        '<p align="center"><img alt="Hero" src="images/hero.png"></p>\n'
     )
     # A button of My Home Assistant shows no status: it stays, with its link.
     button = (
@@ -1418,7 +1424,8 @@ def test_the_website_shows_no_badges() -> None:
         "<h1>Demo</h1>\n"
         "<p>Text with  in it.</p>\n"
         '<p><a href="https://example.org/"><img alt="Logo" src="https://example.org/'
-        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n' + button
+        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n'
+        '<p align="center"><img alt="Hero" src="images/hero.png"></p>\n' + button
     )
 
 

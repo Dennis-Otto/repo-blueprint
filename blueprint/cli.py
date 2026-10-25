@@ -752,7 +752,8 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
         "```mermaid block loads and the pictures of scripts/diagrams.sh don't. A "
         "page that lacks a picture of its Markdown, or has an empty paragraph where "
         "one was, lost it in the build: build the website with the lock of its "
-        "tools, .github/docs-requirements.txt, and look for the plugin or the hook "
+        "tools, .github/docs-requirements.txt (stacks/docs/requirements-docs.txt in "
+        "the blueprint itself), and look for the plugin or the hook "
         "that takes it out."
     )
     return 1
@@ -1425,9 +1426,8 @@ def add_pages_parsers(
     )
     site_check_parser.add_argument(
         "--docs",
-        default="docs",
-        help="the folder of the Markdown of the pages, docs_dir of mkdocs.yml "
-        "(default: docs)",
+        help="the folder of the Markdown of the pages (default: docs_dir of "
+        "mkdocs.yml, or docs)",
     )
     site_check_parser.add_argument(
         "--output",

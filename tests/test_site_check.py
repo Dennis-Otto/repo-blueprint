@@ -24,6 +24,7 @@ from blueprint.site_check import (
     annotation,
     built_from,
     check,
+    layout,
     name_of,
     pictures_in,
     resolved,
@@ -971,6 +972,71 @@ def test_a_page_includes_the_files_of_its_lines_as_the_snippets_do(
     ]
 
 
+def test_a_page_includes_its_files_from_the_base_path_of_the_snippets(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    (root / "docs/snippets").mkdir(parents=True)
+    (root / "note.md").write_text("Root note\n", encoding="utf-8")
+    (root / "LICENSE.md").write_text("License\n", encoding="utf-8")
+    (root / "docs/snippets/note.md").write_text("Snippet note\n", encoding="utf-8")
+    (tmp_path / "outside.md").write_text("Outside\n", encoding="utf-8")
+    (root / "docs/page.md").write_text(
+        '--8<-- "note.md"\n--8<-- "LICENSE.md"\n--8<-- "outside.md"\n',
+        encoding="utf-8",
+    )
+
+    assert resolved(root / "docs/page.md", root, ("docs/snippets", ".", "..")) == [
+        ("Snippet note", (root / "docs/snippets/note.md").resolve()),
+        ("License", (root / "LICENSE.md").resolve()),
+    ]
+
+
+def test_the_layout_of_the_pages_is_that_of_mkdocs_yml(tmp_path: Path) -> None:
+    # Without mkdocs.yml, as MkDocs does.
+    assert layout(tmp_path) == ("docs", (".",))
+    (tmp_path / "base.yml").write_text(
+        "INHERIT: mkdocs.yml\n"
+        "markdown_extensions:\n"
+        "  pymdownx.b64:\n"
+        "    base_path: images\n"
+        "  pymdownx.snippets:\n"
+        "    check_paths: true\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "mkdocs.yml"
+    config.write_text("INHERIT: base.yml\n", encoding="utf-8")
+    # base_path of another extension is not that of the snippets.
+    assert layout(tmp_path) == ("docs", (".",))
+    config.write_text(
+        "INHERIT: 'base.yml'\n"
+        'docs_dir: "pages"  # the Markdown\n'
+        "markdown_extensions:\n"
+        "  - pymdownx.snippets:\n"
+        "      base_path:\n"
+        "        - docs/snippets  # first\n"
+        '        - "."\n'
+        "  - toc\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("pages", ("docs/snippets", "."))
+    config.write_text(
+        "markdown_extensions:\n  pymdownx.snippets:\n    base_path: [a, 'b', ]\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("docs", ("a", "b"))
+    config.write_text(
+        "markdown_extensions:\n  pymdownx.snippets:\n    base_path: one\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("docs", ("one",))
+    config.write_text(
+        "markdown_extensions:\n  pymdownx.snippets:\n    base_path:\n",
+        encoding="utf-8",
+    )
+    assert layout(tmp_path) == ("docs", (".",))
+
+
 def test_the_pictures_of_markdown_are_those_outside_of_comments_and_code(
     tmp_path: Path,
 ) -> None:
@@ -1025,7 +1091,8 @@ def test_the_content_of_a_page_is_its_article() -> None:
     found.feed(
         '<html><body><header><img src="logo.png" alt="Logo"></header><p></p>'
         '<article class="md-content__inner md-typeset"><p>Before</p><p>\n</p>'
-        "<article><p>Nested</p></article><p><br></p>"
+        # A spacer of a README, &nbsp;, is no empty paragraph.
+        "<article><p>Nested</p></article><p><br></p><p>&nbsp;</p>"
         '<script>var a = "<p></p>";</script><p></p>'
         "<p><video><source src='clip.mp4'></video>"
         "<img srcset='a.png 1x, , b.png 2x' alt='Two'></p></article>"
@@ -1041,6 +1108,20 @@ def test_the_content_of_a_page_is_its_article() -> None:
     plain = Page()
     plain.feed('<p><img src="a.png"></p>')
     assert plain.content is plain.whole
+
+
+def test_a_centered_row_of_badges_leaves_no_empty_paragraph() -> None:
+    # The hooks take the paragraph out with its badges, before any plugin.
+    readme = (
+        '<p align="center"><a href="https://github.com/o/r/actions"><img alt="CI" '
+        'src="https://github.com/o/r/actions/workflows/ci.yml/badge.svg"></a> '
+        '<img alt="License" src="https://img.shields.io/badge/license-MIT-blue"></p>'
+        "<p>Demo</p>"
+    )
+    found = Page()
+    found.feed(article(hooks().without_badges(readme)))
+
+    assert found.content.empty == []
 
 
 def test_the_check_reads_the_markdown_as_the_hooks_do() -> None:
@@ -1067,6 +1148,18 @@ def test_the_command_names_a_picture_that_a_page_lost(
         in out
     )
     assert "A page that lacks a picture of its Markdown, or has an empty" in out
+
+
+def test_the_command_reads_the_folder_of_the_pages_from_mkdocs_yml(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project(tmp_path, EMPTIED)
+    (tmp_path / "docs").rename(tmp_path / "pages")
+    (tmp_path / "mkdocs.yml").write_text("docs_dir: pages\n", encoding="utf-8")
+
+    assert main(["site-check", "site"], root=tmp_path) == 1
+
+    assert "site/how.html: lacks the picture" in capsys.readouterr().out
 
 
 def test_an_empty_paragraph_quotes_the_start_of_the_block_before_it(

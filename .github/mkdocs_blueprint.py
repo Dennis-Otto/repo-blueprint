@@ -118,7 +118,7 @@ BADGE = re.compile(
     re.I,
 )
 LINKED_IMAGE = re.compile(rf"<a\b{TAG}>\s*(?P<image><img\b{TAG}>)\s*</a>", re.I)
-EMPTY = re.compile(r"<p>\s*</p>\n?")
+EMPTY = re.compile(rf"<p\b{TAG}>\s*</p>\n?")
 # The first paragraph of a page, from which a page without a description in its
 # front matter takes the description that search engines and preview cards show, of
 # DESCRIPTION characters at most. A paragraph of links alone, such as the line that
