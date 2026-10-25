@@ -15,7 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import advisories, locks, mutation, screenshots
+from blueprint import advisories, locks, mutation, screenshots, versions
 from blueprint.bootstrap import CreateError, create
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -469,6 +469,8 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
             else "Every text file is clean."
         )
         return 0
+    if arguments.action == "version":
+        return fix_version(root)
     if arguments.action == "keep":
         print("\n".join(report_kept(keep_fixes(root, arguments.folder), kept=True)))
         return 0
@@ -492,6 +494,31 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
         lines += report_kept(keep_fixes(root, arguments.keep), kept=True)
     print("\n".join(lines))
     return 0
+
+
+def fix_version(root: Path) -> int:
+    """Writes the version of the manifest of the release bot back into each file that
+    has another one; a file without a version at the place of the step Version stays
+    for a person."""
+    done = versions.fix(root)
+    if done.version is None:
+        print(f"{versions.MANIFEST} names no version, so there is none to write.")
+        return 0
+    for file in done.fixed:
+        print(
+            f"{file.path}: version {done.version} of the release bot, "
+            f"in place of {file.found}"
+        )
+    for file in done.left:
+        print(
+            f"{file.path}: has no version where the step Version reads it; "
+            f"give it version {done.version}"
+        )
+    if done.fixed:
+        print(f"{len(done.fixed)} file(s) have the version of the release bot again.")
+    elif not done.left:
+        print(f"Every file has the version of the release bot, {done.version}.")
+    return 1 if done.left else 0
 
 
 def kept_fixes(folder: Path) -> Fixes:
@@ -1191,6 +1218,11 @@ def add_fix_parsers(
         help="give every text file LF line endings, no trailing whitespace and a line "
         "break at its end",
     )
+    fix_actions.add_parser(
+        "version",
+        help="write the version of .release-please-manifest.json back into each file "
+        "that the release bot writes it into, where a hand changed it",
+    )
     collect_parser = fix_actions.add_parser(
         "collect",
         help="download the fixes of the checks of a commit once they ended, and "
@@ -1438,10 +1470,21 @@ def standalone_command(
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
-    if arguments.command == "fix" and arguments.action in ("run", "keep", "text"):
+    if arguments.command == "fix" and arguments.action in (
+        "run",
+        "keep",
+        "text",
+        "version",
+    ):
         try:
             return fix_command(arguments, root)
-        except (OSError, CatalogError, subprocess.CalledProcessError) as error:
+        # A file of the release bot that isn't JSON, or isn't UTF-8, is a ValueError.
+        except (
+            OSError,
+            ValueError,
+            CatalogError,
+            subprocess.CalledProcessError,
+        ) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command == "fix" and not (

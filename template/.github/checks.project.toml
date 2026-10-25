@@ -13,7 +13,7 @@
 # a file of the repository with its anchor. Each says in autofix how it fixes itself:
 # the commands that fix what it finds, or the reason why no command can. The fix bot
 # commits only the fixes of the runs of Lint and of the CI, not yet those of a
-# workflow of the project's own (Dennis-Otto/repo-blueprint#225), so a person runs
+# workflow of the project's own (Dennis-Otto/repo-blueprint#429), so a person runs
 # the commands of such a check:
 # [check."e2e (*)"]
 # title = "The end-to-end tests"
