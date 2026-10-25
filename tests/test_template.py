@@ -6654,9 +6654,9 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
     project = shutil.copytree(projects[kind], tmp_path / kind)
-    # Home Assistant pins Pillow and uv for the tests of every integration, so a new
-    # one accepts their advisories as the blueprint does in stacks/home-assistant/, in
-    # the root, where its requirements-test.txt is.
+    # Home Assistant pins Pillow for the tests of every integration, so a new one
+    # accepts its advisories as the blueprint does in stacks/home-assistant/, in the
+    # root, where its requirements-test.txt is.
     accepted = project / "osv-scanner.toml"
     assert accepted.is_file() == (kind == "home-assistant")
     if accepted.is_file():
@@ -6675,7 +6675,7 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         (project / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
     )
     names = [rule["matchPackageNames"] for rule in preset["packageRules"]]
-    assert names == ([["pillow"], ["uv"]] if kind == "home-assistant" else [])
+    assert names == ([["pillow"]] if kind == "home-assistant" else [])
     for rule in preset["packageRules"]:
         assert rule["matchFileNames"] == ["/^[^/]+$/"]
         assert rule["description"].startswith("osv-scanner.toml accepts every")

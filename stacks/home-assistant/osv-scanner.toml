@@ -21,13 +21,3 @@ effectiveUntil = 2026-11-22
 reason = """Home Assistant 2026.10 pins Pillow 12.3.0, which only its test plugin
 installs here, for the tests of the integration; the next update of
 pytest-homeassistant-custom-component that brings Pillow 13 ends this."""
-
-[[PackageOverrides]]
-name = "uv"
-version = "0.12.23"
-ecosystem = "PyPI"
-vulnerability.ignore = true
-effectiveUntil = 2026-11-22
-reason = """Home Assistant 2026.10 pins uv 0.12.23, which only its test plugin installs
-here, for the tests of the integration; the next update of
-pytest-homeassistant-custom-component that brings uv 0.13.4 ends this."""
