@@ -7315,24 +7315,29 @@ def test_the_blueprint_bot_keeps_one_pull_request(
     steps = text.split("\n      - ")
     release = next(step for step in steps if "gh release view" in step)
     update = next(step for step in steps if "copier update --" in step)
+    commit = next(step for step in steps if "update-commit" in step)
 
     # Only to a published release: the Release workflow pushes the tag first.
     assert 'gh release view --repo "$source" --json tagName --jq .tagName' in release
     assert "TAG: ${{ steps.release.outputs.tag }}" in update
-    assert "SOURCE: ${{ steps.release.outputs.source }}" in update
-    assert '--source "$SOURCE"' in update
+    assert "SOURCE: ${{ steps.release.outputs.source }}" in commit
+    assert '--source "$SOURCE"' in commit
     assert 'copier update --defaults --conflict inline --vcs-ref "$TAG"' in update
     # The bot of main commits, copied before the update changes it, as the app whose
     # commits it may replace; the scratch branch of a commit without modes is per run.
+    # The step of the update holds no token, and the commit comes in a step of its
+    # own, after the list of the allowed actions has grown.
     assert (
         update.index("cp -R .github/blueprint.py .github/blueprint")
         < update.index("copier update --")
         < update.index("git add --all")
-        < update.index("update-commit")
     )
-    assert "APP: ${{ steps.app.outputs.app-slug }}" in update
-    assert '--app "${APP}[bot]"' in update
-    assert '--run-id "$GITHUB_RUN_ID"' in update
+    assert "GH_TOKEN" not in update
+    assert steps.index(update) < steps.index(commit)
+    assert 'tool="$RUNNER_TEMP/blueprint-tool"' in commit
+    assert "APP: ${{ steps.app.outputs.app-slug }}" in commit
+    assert '--app "${APP}[bot]"' in commit
+    assert '--run-id "$GITHUB_RUN_ID"' in commit
     # The workflow no longer puts the branch back on main, which closed the pull
     # request, nor scans the whole repository for markers.
     for gone in ("force", "createCommitOnBranch", "git grep", "gh pr merge"):
@@ -7872,7 +7877,7 @@ RELEASE_APP_BOTS = {
 }
 
 
-def tokens_of_the_release_app(root: Path) -> Iterator[tuple[str, str, int]]:
+def tokens_of_an_app(root: Path) -> Iterator[tuple[str, str, int]]:
     """The workflow, the job and the index of each step that asks for a token of an app."""
     for path in sorted((root / ".github/workflows").glob("*.yml")):
         jobs = workflow_steps.workflow(path.name, root).get("jobs") or {}
@@ -7880,6 +7885,14 @@ def tokens_of_the_release_app(root: Path) -> Iterator[tuple[str, str, int]]:
             for index, step in enumerate(found.get("steps", [])):
                 if "create-github-app-token" in step.get("uses", ""):
                     yield path.name, job_id, index
+
+
+def tokens_of_the_release_app(root: Path) -> Iterator[tuple[str, str, int]]:
+    """Each token of an app but those of the settings app."""
+    for name, job_id, index in tokens_of_an_app(root):
+        step = workflow_steps.job(name, job_id, root)["steps"][index]
+        if step["with"]["client-id"] != SETTINGS_APP_CLIENT_ID:
+            yield name, job_id, index
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -7957,7 +7970,8 @@ def test_no_token_of_the_release_app_has_every_permission_of_the_app(
     """A token that asks for no permission gets every permission of the installation,
     the administration and the workflows too."""
     root = ROOT if project == "blueprint" else projects[project]
-    for name, job_id, index in tokens_of_the_release_app(root):
+    # The tokens of the settings app too.
+    for name, job_id, index in tokens_of_an_app(root):
         job = workflow_steps.job(name, job_id, root)
         token = {"steps": [job["steps"][index]]}
         assert app_permissions(token), f"{name}/{job_id}/{job['steps'][index]['name']}"
@@ -7987,9 +8001,13 @@ def test_the_settings_bot_asks_for_a_token_with_only_what_it_needs(
     job = workflow_steps.job("settings.yml", "check", root)
 
     assert app_permissions(job) == SETTINGS_TOKEN
-    [token] = steps_using(job, "actions/create-github-app-token")
-    # For this repository alone.
-    assert not {"owner", "repositories"} & set(token["with"])
+    # The settings app, once it is set up, and the release app until then: each
+    # token asks for the same, for this repository alone.
+    tokens = steps_using(job, "actions/create-github-app-token")
+    assert [token["id"] for token in tokens] == ["settings-token", "app"]
+    for token in tokens:
+        assert app_permissions({"steps": [token]}) == SETTINGS_TOKEN
+        assert not {"owner", "repositories"} & set(token["with"])
     # The token may write what each part of the settings writes with.
     names = {name: key for name, key, _ in RELEASE_APP_PERMISSIONS}
     names["Variables"] = "actions_variables"
@@ -8145,6 +8163,319 @@ def test_a_bot_goes_on_with_its_release_app(
     assert done.stdout == ""
     assert done.summary == ""
     assert done.outputs == {"ready": "true"}
+
+
+# The optional settings app: a second GitHub App of the owner with only the permissions
+# of the settings, which the settings bot and the blueprint bot take once the variable
+# and the secret name it, so that the release app needs no Administration.
+SETTINGS_APP_CHECK = "Check whether the settings app is set up"
+SETTINGS_APP_CLIENT_ID = "${{ vars.SETTINGS_APP_CLIENT_ID }}"
+SETTINGS_APP_KEY = "${{ secrets.SETTINGS_APP_PRIVATE_KEY }}"
+SETTINGS_APP_BOTS = {
+    ("blueprint-update.yml", "update"): "the blueprint bot",
+    ("settings.yml", "check"): "the settings bot",
+}
+HALF_CLIENT = (
+    "names a settings app in the variable SETTINGS_APP_CLIENT_ID, but has no private"
+    " key of it in the secret SETTINGS_APP_PRIVATE_KEY of the environment release"
+)
+HALF_KEY = (
+    "has a private key of a settings app in the secret SETTINGS_APP_PRIVATE_KEY of the"
+    " environment release, but names no settings app in the variable"
+    " SETTINGS_APP_CLIENT_ID"
+)
+WIDEN = "Let the actions of the update start"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_only_the_settings_bot_and_the_blueprint_bot_take_the_settings_app(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    script = workflow_steps.step("settings.yml", "check", SETTINGS_APP_CHECK)["run"]
+    found = set()
+    for name, job_id, index in tokens_of_an_app(root):
+        steps = workflow_steps.job(name, job_id, root)["steps"]
+        token = steps[index]
+        if token["with"]["client-id"] != SETTINGS_APP_CLIENT_ID:
+            # Every other token is the release app's, with its key alone.
+            assert "SETTINGS_APP" not in str(token), f"{name}/{job_id}"
+            continue
+        where = f"{name}/{job_id}/{token['name']}"
+        found.add((name, job_id))
+        assert token["id"] == "settings-token", where
+        assert token["with"]["private-key"] == SETTINGS_APP_KEY, where
+        # For the repository of the run alone.
+        assert not {"owner", "repositories"} & set(token["with"]), where
+        assert token["if"] == "steps.settings-app.outputs.ready == 'true'", where
+        checks = [
+            i for i, step in enumerate(steps) if step.get("name") == SETTINGS_APP_CHECK
+        ]
+        assert len(checks) == 1, where
+        assert checks[0] < index, where
+        check = steps[checks[0]]
+        assert check["id"] == "settings-app", where
+        # The same script in both bots, so that both say it the same way.
+        assert check["run"] == script, where
+        assert check["env"]["CLIENT_ID"] == SETTINGS_APP_CLIENT_ID
+        assert check["env"]["KEY_SET"] == (
+            "${{ secrets.SETTINGS_APP_PRIVATE_KEY != '' }}"
+        )
+        assert check["env"]["BOT"] == SETTINGS_APP_BOTS[name, job_id], where
+        assert check["env"]["INSTEAD"], where
+        # The key lives in the environment release, which only main may use.
+        job = workflow_steps.job(name, job_id, root)
+        assert job["environment"]["name"] == "release", where
+    assert found == set(SETTINGS_APP_BOTS)
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_settings_bot_takes_the_settings_app_in_place_of_the_release_app(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    job = workflow_steps.job("settings.yml", "check", root)
+    names = names_of(job)
+    steps = job["steps"]
+    settings_check = names.index(SETTINGS_APP_CHECK)
+    release_check = names.index(RELEASE_APP_CHECK)
+    settings_token = names.index("Create a token of the settings app")
+    release_token = names.index("Create a token of the release app")
+    explain = names.index("Explain a refused token of the settings app")
+    apply_step = names.index("Apply the settings as code")
+    assert settings_check < release_check < settings_token < release_token
+    assert release_token < explain < apply_step
+    # Without the settings app, the release app as before; with it, the release app
+    # is neither checked nor asked for a token.
+    assert steps[release_check]["if"] == "steps.settings-app.outputs.ready != 'true'"
+    assert steps[release_token]["if"] == "steps.release-app.outputs.ready == 'true'"
+    assert steps[apply_step]["env"] == {
+        "GH_TOKEN": "${{ steps.settings-token.outputs.token || steps.app.outputs.token }}"
+    }
+    # The settings app gets the request of the release app: only what the settings
+    # need, which zizmor accepts as it is.
+    token = steps[settings_token]
+    assert app_permissions({"steps": [token]}) == app_permissions(
+        {"steps": [steps[release_token]]}
+    )
+    text = (root / ".github/workflows/settings.yml").read_text(encoding="utf-8")
+    assert "zizmor: ignore" not in text
+    # A refused token says what the app needs, and nothing falls back on the
+    # release app.
+    assert steps[explain]["if"] == (
+        "failure() && steps.settings-token.outcome == 'failure'"
+    )
+    assert "continue-on-error" not in token
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_blueprint_bot_widens_the_allowed_actions_only_with_the_settings_app(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    job = workflow_steps.job("blueprint-update.yml", "update", root)
+    names = names_of(job)
+    steps = job["steps"]
+    token = steps[names.index("Create a token of the settings app")]
+    verify = names.index("Verify the release before updating to it")
+    update = names.index("Update to the latest release of the blueprint")
+    widen = names.index(WIDEN)
+    commit = names.index("Commit the update and open its pull request")
+    # After the verified release is rendered, before the push.
+    assert verify < update < widen < commit
+    # Only the Administration that the list of the allowed actions needs, and a token
+    # that GitHub refuses leaves the update as it was without the settings app.
+    assert token["with"] == {
+        "client-id": SETTINGS_APP_CLIENT_ID,
+        "private-key": SETTINGS_APP_KEY,
+        "permission-administration": "write",
+    }
+    assert token["continue-on-error"] is True
+    step = steps[widen]
+    assert step["if"] == "steps.settings-app.outputs.ready == 'true'"
+    assert step["env"] == {"GH_TOKEN": "${{ steps.settings-token.outputs.token }}"}
+    # The bot of main, copied before the update, reads the settings of the update.
+    assert (
+        'python3 "$RUNNER_TEMP/blueprint-tool/blueprint.py" --repo'
+        ' "$GITHUB_REPOSITORY" settings widen'
+    ) in step["run"]
+    # No other step sees the token of the settings app, and the release app's has
+    # no Administration, as before.
+    for other in steps:
+        if other is not step:
+            assert "steps.settings-token" not in str(other.get("env", {}))
+    release = steps[names.index("Create a token of the release app")]
+    assert "permission-administration" not in release["with"]
+    # The step that renders the update holds no token at all.
+    assert "env" not in steps[update] or not [
+        value for value in steps[update]["env"].values() if "token" in str(value)
+    ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("name", "job_id"), sorted(SETTINGS_APP_BOTS), ids=lambda part: part
+)
+def test_a_bot_takes_the_settings_app_once_both_halves_are_set(
+    tmp_path: Path, name: str, job_id: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        name,
+        job_id,
+        SETTINGS_APP_CHECK,
+        env={"CLIENT_ID": "Iv23liSettings", "KEY_SET": "true"},
+    )
+
+    assert done.returncode == 0
+    assert done.stdout == ""
+    assert done.summary == ""
+    assert done.outputs == {"ready": "true"}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("name", "job_id"), sorted(SETTINGS_APP_BOTS), ids=lambda part: part
+)
+def test_a_bot_without_the_settings_app_says_nothing(
+    tmp_path: Path, name: str, job_id: str
+) -> None:
+    # The settings app is optional: without it, every bot works as it did before.
+    done = workflow_steps.run_step(
+        tmp_path,
+        name,
+        job_id,
+        SETTINGS_APP_CHECK,
+        env={"CLIENT_ID": "", "KEY_SET": "false"},
+    )
+
+    assert done.returncode == 0
+    assert done.stdout == ""
+    assert done.summary == ""
+    assert done.outputs == {}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("name", "job_id", "env", "missing"),
+    [
+        (*bot, env, missing)
+        for bot in sorted(SETTINGS_APP_BOTS)
+        for env, missing in (
+            ({"CLIENT_ID": "Iv23liSettings", "KEY_SET": "false"}, HALF_CLIENT),
+            ({"CLIENT_ID": "", "KEY_SET": "true"}, HALF_KEY),
+        )
+    ],
+)
+def test_a_bot_says_what_the_settings_app_lacks_and_goes_on(
+    tmp_path: Path, name: str, job_id: str, env: dict[str, str], missing: str
+) -> None:
+    bot = SETTINGS_APP_BOTS[name, job_id]
+    instead = workflow_steps.step(name, job_id, SETTINGS_APP_CHECK)["env"]["INSTEAD"]
+    done = workflow_steps.run_step(tmp_path, name, job_id, SETTINGS_APP_CHECK, env=env)
+
+    sentence = f"This repository {missing}, so {bot} goes on without it: {instead}."
+    assert done.stdout.splitlines() == [f"::warning::{sentence}"]
+    assert done.summary.startswith(
+        f"### The settings app is set up only in part\n\n{sentence} The settings app"
+        " is an optional second GitHub App of the owner"
+    )
+    assert "docs/own-account.md#8-the-settings-app-optional" in done.summary
+    assert done.summary.endswith(
+        f" Once both are set, {bot} takes the settings app in its next run.\n"
+    )
+    # A warning: the bot goes on with the release app.
+    assert done.returncode == 0
+    assert done.outputs == {}
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_blueprint_bot_widens_the_allowed_actions_before_the_push(
+    tmp_path: Path,
+) -> None:
+    widened = "GitHub now lets Octo/repo start these patterns as well:\n- new/action@*"
+    done = workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        WIDEN,
+        env={"GH_TOKEN": "ghs_settings"},
+        stubs={"python3": workflow_steps.recording("python3", f"echo '{widened}'")},
+    )
+
+    assert done.returncode == 0
+    assert done.stubbed == [
+        f"python3 {done.runner_temp.as_posix()}/blueprint-tool/blueprint.py --repo"
+        f" {workflow_steps.REPOSITORY} settings widen"
+    ]
+    assert done.stdout == widened + "\n"
+    assert done.summary == (
+        f"### The allowed actions of the update\n```\n{widened}\n```\n"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_list_that_cant_grow_leaves_the_update_as_it_was(tmp_path: Path) -> None:
+    # Settings with the markers of a conflict, or an answer of GitHub that fails: the
+    # update goes on, and its pull request waits as it did before.
+    refused = "blueprint.py: Invalid statement (at line 1, column 1)"
+    done = workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        WIDEN,
+        env={"GH_TOKEN": "ghs_settings"},
+        stubs={
+            "python3": workflow_steps.recording(
+                "python3", f"echo '{refused}' >&2; exit 2"
+            )
+        },
+    )
+
+    assert done.returncode == 0
+    assert done.stdout.splitlines() == [
+        refused,
+        "::warning::The list of the allowed actions could not grow by the patterns of"
+        " the update; its pull request may wait for settings apply from its branch.",
+    ]
+    assert refused in done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_refused_token_of_the_settings_app_leaves_the_update_as_it_was(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "blueprint-update.yml",
+        "update",
+        WIDEN,
+        env={"GH_TOKEN": ""},
+        stubs={"python3": workflow_steps.recording("python3")},
+    )
+
+    assert done.returncode == 0
+    assert done.stubbed == []
+    assert done.stdout.startswith(
+        "::warning::GitHub refused a token of the settings app, which may not be"
+        " installed on this repository or may lack Administration;"
+    )
+    assert done.summary == ""
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_settings_bot_explains_a_refused_token_of_the_settings_app(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path, "settings.yml", "check", "Explain a refused token of the settings app"
+    )
+
+    assert done.returncode == 0
+    assert done.stdout.startswith("::error::GitHub refused a token of the settings app")
+    assert done.summary.startswith("### GitHub refused a token of the settings app\n")
+    assert "No setting has changed." in done.summary
+    assert "docs/own-account.md#8-the-settings-app-optional" in done.summary
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -10024,13 +10355,22 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     assert "github.event.workflow_run.conclusion == 'cancelled'" in cancelled["if"]
     events = """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
     assert events in cancelled["if"]
+    # The runs of a push to main cancel each other too, but only those of main, never
+    # those of a push to another branch or of a fork.
+    main = (
+        "(github.event.workflow_run.event == 'push' &&"
+        " github.event.workflow_run.head_branch == github.event.repository.default_branch &&"
+        " github.event.workflow_run.head_repository.full_name == github.repository)"
+    )
+    assert f"({events} || {main})" in cancelled["if"]
     # Twice at most, whatever cancels the run again.
     assert "github.event.workflow_run.run_attempt < 3" in cancelled["if"]
-    # It reads the runs, their checks and pull requests and starts a run again; it
-    # checks out nothing.
+    # It reads the runs, their checks, pull requests and the head of main and starts a
+    # run again; it checks out nothing.
     assert cancelled["permissions"] == {
         "actions": "write",
         "checks": "read",
+        "contents": "read",
         "pull-requests": "read",
     }
     steps = cancelled["steps"]
@@ -10043,13 +10383,14 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     assert not any("${{" in found.get("run", "") for found in steps)
 
 
-CANCELLED_STEP = "Run the checks of the head of the pull request again"
+CANCELLED_STEP = "Run the checks of the head of a pull request or of main again"
 
 
 def run_the_bot_for_cancelled_checks(
-    tmp_path: Path, pull: str, newer: str, message: str
+    tmp_path: Path, pull: str, newer: str, message: str, head: str | None = None
 ) -> tuple[list[str], str]:
-    # gh answers as the API does, after the filters of jq.
+    # gh answers as the API does, after the filters of jq. With the head of main, the
+    # run is one of a push to main.
     done = workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -10057,6 +10398,7 @@ def run_the_bot_for_cancelled_checks(
         CANCELLED_STEP,
         answers=[
             Answer(r"api repos/o/r/commits/abc1234def/pulls --jq .+", f"{pull}\n"),
+            Answer(r"api repos/o/r/git/ref/heads/main --jq \.object\.sha", f"{head}\n"),
             Answer(
                 r"api repos/o/r/actions/workflows/3/runs\?head_sha=abc1234def"
                 r" --paginate --jq .+",
@@ -10079,6 +10421,8 @@ def run_the_bot_for_cancelled_checks(
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
+            "EVENT": "pull_request" if head is None else "push",
+            "BRANCH": "feature" if head is None else "main",
         },
     )
     assert done.returncode == 0, done.stderr
@@ -10109,6 +10453,68 @@ def test_the_bot_for_cancelled_checks_starts_only_a_run_that_lost_a_race(
 
     assert summary in written
     assert ("run rerun 5" in calls) == summary.endswith("it runs again")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("head", "newer", "message", "summary"),
+    [
+        # A newer push cancelled the run of the commit before, as it should.
+        ("fed4321cba", "", RACED, "abc1234 is no longer the head of main"),
+        # A run by hand of the same commit tells the state of main.
+        ("abc1234def", "7", RACED, "A newer run of CodeQL for abc1234 reports"),
+        # A person cancelled it.
+        ("abc1234def", "", "The operation was canceled.", "it stays cancelled"),
+        # A late run for the commit before cancelled the run for the head of main,
+        # whose coverage, alerts of code scanning and fixes would be missing.
+        ("abc1234def", "", RACED, "the head of main; it runs again"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_starts_the_run_of_the_head_of_main_again(
+    tmp_path: Path, head: str, newer: str, message: str, summary: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "", newer, message, head=head
+    )
+
+    assert summary in written
+    assert ("run rerun 5" in calls) == summary.endswith("it runs again")
+    # The head of main comes from its branch, not from a pull request.
+    assert not any("/pulls" in call for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
+    tmp_path: Path,
+) -> None:
+    # A head that GitHub didn't tell is no head that a newer push replaced: the step
+    # fails with the error of gh instead of saying that the run stays cancelled.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "cancelled",
+        CANCELLED_STEP,
+        answers=[
+            Answer(
+                r"api repos/o/r/git/ref/heads/main --jq \.object\.sha",
+                err="HTTP 502: Bad Gateway",
+                code=1,
+            ),
+        ],
+        env={
+            "RUN": "5",
+            "ATTEMPT": "1",
+            "WORKFLOW": "3",
+            "NAME": "CodeQL",
+            "SHA": "abc1234def",
+            "EVENT": "push",
+            "BRANCH": "main",
+        },
+    )
+
+    assert done.returncode != 0
+    assert "stays cancelled" not in done.summary
+    assert not any(call.startswith("run rerun") for call in done.commands)
 
 
 # The bots of the blueprint alone, which a project's bot-health bot leaves out.
@@ -10612,6 +11018,54 @@ def test_the_flaky_test_bot_runs_a_job_once_more_that_broke_for_the_first_time(
     )
     # Only the latest run before counts.
     assert not any("actions/runs/1/" in call for call in calls)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_compares_with_the_run_before_a_superseded_one(
+    tmp_path: Path,
+) -> None:
+    # A newer push cancelled the run for the commit before, so the run before that
+    # tells whether the failure is a real one: it broke the same job.
+    runs = runs_of_the_branch(2, 1)
+    runs["workflow_runs"][-2]["conclusion"] = "cancelled"  # type: ignore[index]
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/actions/workflows/3/runs": runs,
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "cancelled"),
+                job_of_a_run(22, "test (3.13)", "cancelled"),
+            ]
+        },
+        "repos/o/r/check-runs/21/annotations": annotations_of_a_job(RACED),
+        "repos/o/r/actions/runs/1/jobs": {
+            "jobs": [
+                job_of_a_run(31, "test (3.12)", "failure"),
+                job_of_a_run(32, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="push",
+        BRANCH="main",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" not in calls
+    assert "broke for the commit before" in summary
+    assert any(call.startswith("api repos/o/r/actions/runs/1/jobs ") for call in calls)
 
 
 def variants_of_a_run(
@@ -11545,6 +11999,109 @@ def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
     # Their runners are worth more than the race, which the bot for cancelled checks
     # repairs.
     assert "head.sha" not in concurrency_of(name)
+
+
+# What a newer push to main does to the run of the commit before, for each workflow
+# that a push to main starts (decision 0076); a new one takes a side here.
+ON_PUSH_TO_MAIN = {
+    # The checks and the scanners: a run of main only tells the state of main, which
+    # the run of the newer commit tells as well, so it cancels the older run, as the
+    # runs of a pull request do. The coverage of main and the fix bot take only runs
+    # that ended, and the bot for cancelled checks starts the run of the head again
+    # when a late run for an older commit cancelled it.
+    "cancels": {
+        "action-test.yml",
+        "ci.yml",
+        "codeql.yml",
+        "links.yml",
+        "osv-scanner.yml",
+        "zizmor.yml",
+    },
+    # The bots whose newest run does all the work of an older one, in one group.
+    "replaces": {"dashboard.yml", "newest-python.yml", "settings.yml"},
+    # They publish, commit or change GitHub, the website and the release among them:
+    # a run that started ends, and only the newest of those that wait for it runs.
+    "waits": {"diagrams.yml", "docs.yml", "labels.yml", "release.yml"},
+    # A push of a few files starts them, or their jobs wait for each other on their
+    # own; OpenSSF Scorecard publishes its results, in one short job.
+    "runs": {
+        "findings.yml",
+        "renovate.yml",
+        "scorecard.yml",
+        "screenshot-bot.yml",
+        "update-branches.yml",
+    },
+}
+# The runs of a pull request and those of the pushes to main cancel their older runs;
+# a run on a schedule or by hand is in a group of its own, which no push cancels.
+SUPERSEDED = {
+    "group": "${{ github.workflow }}-${{ github.event.pull_request.number"
+    " || (github.event_name == 'push' && github.ref) || github.run_id }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request'"
+    " || github.event_name == 'push' }}",
+}
+
+
+def cancels_a_push(value: bool | str) -> bool:
+    """Whether a cancel-in-progress cancels the run of a push: its value, or that of
+    its expression, which compares only the name of the event."""
+    if isinstance(value, bool):
+        return value
+    found = re.fullmatch(r"\$\{\{ (.+) \}\}", value)
+    assert found, value
+    events = re.findall(r"github\.event_name == '(\w+)'", found[1])
+    assert (
+        " || ".join(f"github.event_name == '{event}'" for event in events) == found[1]
+    )
+    return "push" in events
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_a_push_to_main_cancels_only_the_checks_of_the_commit_before(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # A push to main started the checks again while those of the commit before still
+    # ran, and both held runners to the end, of the 20 that the free plan has for all
+    # repositories of the owner.
+    root = ROOT if project == "blueprint" else projects[project]
+    sides = {name: side for side, names in ON_PUSH_TO_MAIN.items() for name in names}
+    found = set()
+    for path, text in sorted(workflows(root).items()):
+        parsed = parse(text)
+        if "push" not in (parsed["on"] or {}):
+            continue
+        name = "ci.yml" if path.startswith("ci-") else path
+        assert name in sides, f"{path}: what does a newer push do to its run?"
+        found.add(sides[name])
+        concurrency = parsed.get("concurrency")
+        if sides[name] == "cancels":
+            assert concurrency == SUPERSEDED, path
+            assert cancels_a_push(concurrency["cancel-in-progress"])
+        elif sides[name] == "runs":
+            assert concurrency is None, path
+        else:
+            # Every push to main is in the same group, whose newest run replaces the
+            # older one or waits for it.
+            assert concurrency is not None, path
+            assert "run_id" not in concurrency["group"], path
+            replaces = sides[name] == "replaces"
+            assert cancels_a_push(concurrency["cancel-in-progress"]) is replaces, path
+    assert found >= {"cancels", "waits", "runs"}
+
+
+@pytest.mark.parametrize(
+    ("value", "cancels"),
+    [
+        (True, True),
+        (False, False),
+        ("${{ github.event_name == 'pull_request' }}", False),
+        (SUPERSEDED["cancel-in-progress"], True),
+    ],
+)
+def test_a_cancel_in_progress_is_read_for_a_push(
+    value: bool | str, cancels: bool
+) -> None:
+    assert cancels_a_push(value) is cancels
 
 
 def test_the_tests_start_the_bash_of_the_path() -> None:
@@ -13189,6 +13746,7 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
         text = "".join(
             page.read_text(encoding="utf-8")
             for page in sorted((ROOT / "docs/features").glob(f"*{suffix}"))
+            if page.name.endswith(".de.md") == (suffix == ".de.md")
         )
         for name in names:
             assert f'srcset="../images/{name}.dark.png"' in text, (suffix, name)

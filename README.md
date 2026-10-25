@@ -128,7 +128,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 - **Lint:** The workflows, the license of every file, the Markdown, and the spelling and style of the changed documents.
 - **Coverage:** The report of a pull request compares the coverage of each file with that of `main`.
 - **Fast checks:** A scanner runs only in the pull requests that change what it reads, and the rest of the scans every week.
-- **PR coach:** Every check that fails says what it found, why that matters and how to fix it, in one comment that follows every push, also on forks.
+- <a id="the-pr-coach"></a>**PR coach:** Every check that fails says what it found, why that matters and how to fix it, in one comment that follows every push, also on forks.
 
 ### [Fix bot and self-healing](docs/features/self-healing.md)
 

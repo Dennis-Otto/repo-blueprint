@@ -32,7 +32,7 @@ A test run that fails, or whose job runs out of time, runs its failed jobs once 
 
 ## Cancelled checks
 
-The quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge.
+The quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge; a newer push to `main` cancels the tests and scanners of the push before, and their run for the head of `main` starts again as well when a late run cancelled it.
 
 **How:** `after-checks.yml`.
 
@@ -58,8 +58,14 @@ A check that a runner, a site or GitHub fails for a moment, or that a race of tw
 - **Tests that pytest doesn't run,** such as the browser tests of a Docker E2E, name the test that failed as well, with `copier update --data "test_marker=Browser step:"`: when the log of such a job writes that text before the name of each test or step as it starts, the bot names the one that the log names last before the failure, in the step of the job and the worker that failed, and takes the first exception after it as the error when no annotation names one.
 - **What the issue shows of a pull request:** a name or a line of a log is written as plain code, so a pull request can't end the table or mention anybody with it, and the branch of a fork, which it names as it likes, isn't named.
 - **The quick checks run once for each commit:** the title and the changelog, the dependency review, the secret scan, the area labels and the website. A late run for an older commit, such as one that an edit of the release pull request starts while release-please pushes to it, no longer cancels them for the head. The checks that take minutes, the tests, Lint, CodeQL and the variants, still cancel the run for an older commit; the bot for cancelled checks repairs a race there.
+- **A newer push to `main` cancels the checks of the push before:** the tests, CodeQL, the link check, OSV-Scanner and the workflow security check of `main` only tell the state of `main`, which the run of the newer commit tells as well, so they stop, as in a pull request, and leave their runners to the runs that matter. The website, the release and the bots that commit or change GitHub end what they started, and no push cancels a run on a schedule or by hand. When a late run for an older commit cancelled the run for the head of `main`, the bot for cancelled checks starts it again, so that the coverage of `main`, the alerts of code scanning and the fix bot always see its newest commit (decision 0076 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
 - **Other workflows of tests** that a repository has, such as visual tests, join the CI and Docker E2E with `copier update --data "test_workflows=Visual check, Screenshot bot"`.
 - **The link check of a pull request** reads the documents that it changes, and every document when it changes the rules, or moves or deletes a file that a document may link to. lychee keeps the answers of the sites for a day and asks again for a link that failed, so that a site that is down for a moment fails only the pull requests that link to it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-a-newer-push-to-main-cancels.dark.svg">
+  <img src="../images/diagrams/what-a-newer-push-to-main-cancels.svg" alt="What a newer push to main cancels: A merge pushes to main while the runs of the push before may still go. The tests, CodeQL and the scanners of the push before only tell what the run of the newer commit tells as well, so the newer push cancels them, as a newer push to a pull request does. When a late run for an older commit cancelled the run for the head of main instead, the bot for cancelled checks starts it again. The website, the release and the bots that commit or change GitHub end the run that they started, and only the newest run that waits comes next. No push cancels a run on a schedule or by hand.">
+</picture>
 
 ## When a bot fails
 
