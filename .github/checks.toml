@@ -220,7 +220,7 @@ autofix = """A heading of a fragment that surely means a kind of change, such as
 for `### Fixed`, the fix bot renames, since the step *Changelog fragments* of
 `scripts/check.sh` checks every fragment as well. Not yet: a draft fragment from the
 title, a new file of `changelog.d/` and never an entry under `## Unreleased`, follows in
-Dennis-Otto/repo-blueprint#225; the words for users stay the author's."""
+Dennis-Otto/repo-blueprint#429; the words for users stay the author's."""
 
 [check.codeql]
 title = "The CodeQL analysis"

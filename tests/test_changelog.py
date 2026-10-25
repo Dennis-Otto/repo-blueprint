@@ -532,6 +532,14 @@ def test_a_fragment_takes_the_headings_that_the_changelog_has() -> None:
         ("news", "New"),
         # As close to Changes as to Changed: a person decides.
         ("Change", None),
+        # Only somewhat close to a kind: the fix would turn their meaning around.
+        ("Improved", None),
+        ("Renamed", None),
+        ("Reverted", None),
+        ("Removed features", None),
+        ("Features removed", None),
+        ("Added and changed", None),
+        ("Chores", None),
         ("Zebras", None),
         ("1.4.0", None),
         ("", None),

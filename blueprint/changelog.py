@@ -188,6 +188,10 @@ def shown(text: str) -> str:
 # How close a heading is to a kind of change at least, by the ratio of difflib, to be
 # taken for a typo of it: the cutoff of difflib.get_close_matches.
 CLOSE = 0.6
+# How close a heading is to a kind of change at least for the fix to rename it to that
+# kind: much closer than a hint needs, so that `Improved` never turns into Removed,
+# `Removed features` into Features, or `Added and changed` into Breaking changes.
+HEAL = 0.8
 # A line of a fragment that may be meant as the heading of a kind of change: one, as
 # the release reads it, or one that would start a section of the changelog of its own.
 HEADING_LINE = re.compile(rf"{SUBHEADING.pattern}|{TOP_HEADING.pattern}", re.MULTILINE)
@@ -209,10 +213,11 @@ def close_kinds(heading: str, known: Sequence[str]) -> list[tuple[float, str]]:
 
 
 def meant_kind(heading: str, known: Sequence[str]) -> str | None:
-    """The kind of change that a heading surely means: the closest, when no other is
-    as close, such as Fixed for `Fixes`; none for `Change`, as close to Changes as to
-    Changed, and none for a heading that is close to no kind."""
-    close = close_kinds(heading, known)
+    """The kind of change that a heading surely means: the closest of the kinds that
+    are at least as close as HEAL, when no other is as close, such as Fixed for
+    `Fixes`; none for `Change`, as close to Changes as to Changed, and none for a
+    heading such as `Improved` that is only somewhat close to a kind (Removed)."""
+    close = [pair for pair in close_kinds(heading, known) if pair[0] >= HEAL]
     if close and (len(close) == 1 or close[0][0] > close[1][0]):
         return close[0][1]
     return None
