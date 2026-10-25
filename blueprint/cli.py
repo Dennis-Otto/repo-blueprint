@@ -94,8 +94,11 @@ from blueprint.settings import (
     apply,
     check,
     describe,
+    fitted,
     kept,
     line_of,
+    offered_only,
+    read_plan,
     unlisted_actions,
     widen_selected_actions,
 )
@@ -792,14 +795,20 @@ def settings_command(
 ) -> int:
     """settings check or apply: 0 when GitHub matches the settings, 1 when it differs,
     2 when GitHub refused a part of them. What GitHub doesn't do for the repository,
-    such as a switch that its plan lacks, is named after them and fails nothing."""
-    drift = check(api, repo, settings)
+    such as a switch that its plan lacks, is named after them and fails nothing, and
+    what a private repository lacks on its plan the settings leave to the workflows,
+    by the variables of PLAN_VARIABLES."""
+    plan = read_plan(api, repo)
+    settings = fitted(api, repo, settings, plan)
+    drift = check(api, repo, settings, plan.private)
     refused: dict[str, str] = {}
     if action == "apply" and drift:
-        refused = apply(api, repo, settings, drift)
-        after = check(api, repo, settings)
+        refused, unoffered = apply(api, repo, settings, drift, plan.private)
+        after = check(api, repo, settings, plan.private)
         # A refused write shows nothing about what GitHub keeps.
-        drift = after if "security" in refused else kept(repo, drift, after)
+        if "security" not in {*refused, *unoffered}:
+            after = kept(repo, drift, after, plan.private)
+        drift = offered_only(repo, after, unoffered)
     for reason in refused.values():
         print(f"blueprint.py: {reason}", file=sys.stderr)
     # The path as the documentation writes it, with slashes on Windows too.

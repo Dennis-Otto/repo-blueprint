@@ -1201,7 +1201,9 @@ def test_zizmor_audits_a_pull_request_as_it_audits_main(
     # With the advisories of the actions, as on main, or the alerts of main that come
     # from an advisory would look fixed in every pull request.
     assert options.get("online-audits", True) is True
-    assert options.get("advanced-security", True) is True
+    # To code scanning wherever GitHub offers it; a private repository without GitHub
+    # Code Security fails the check on the findings instead (decision 0082).
+    assert options["advanced-security"] == "${{ vars.CODE_SCANNING != 'off' }}"
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -12854,7 +12856,8 @@ def test_the_check_docs_keeps_the_website_of_a_pull_request(
     assert step == {
         "name": "Keep the website of the pull request",
         "if": "${{ !cancelled() && steps.build.outcome == 'success'"
-        " && github.event_name == 'pull_request' }}",
+        " && (github.event_name == 'pull_request'"
+        " || steps.site.outputs.keep == 'true') }}",
         "timeout-minutes": 5,
         "with": {
             "name": WEBSITE_ARTIFACT,
@@ -12866,7 +12869,7 @@ def test_the_check_docs_keeps_the_website_of_a_pull_request(
 
 
 def run_the_search_for_the_website(
-    tmp_path: Path, root: Path, event: str, pages: str, fork: bool
+    tmp_path: Path, root: Path, event: str, pages: str, fork: bool, private: bool
 ) -> tuple[str, str]:
     """The step of the check docs that looks for the website, in the checkout root, with
     the fake gh answering as GitHub Pages does: its build type, or 404 where it is off;
@@ -12886,6 +12889,7 @@ def run_the_search_for_the_website(
         env={
             "EVENT": event,
             "FORK": str(fork).lower(),
+            "PRIVATE": str(private).lower(),
             "GITHUB_REF": "refs/heads/main" if event == "push" else "refs/pull/1/merge",
         },
         workspace=root,
@@ -12898,12 +12902,25 @@ def run_the_search_for_the_website(
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
-    ("project", "event", "pages", "fork", "output", "notice"),
+    ("project", "event", "pages", "fork", "output", "notice", "private"),
     [
         # Every pull request builds the website as the check docs.
-        ("generic", "pull_request", "workflow", False, "build=true\n", ""),
+        ("generic", "pull_request", "workflow", False, "build=true\n", "", False),
+        # GitHub Pages publishes a private repository only on a paid plan: main
+        # keeps the website as its artifact until it does.
+        (
+            "generic",
+            "push",
+            "",
+            False,
+            "build=true\nkeep=true\n",
+            "the run keeps the website as its artifact website",
+            True,
+        ),
+        # A private repository whose plan has GitHub Pages publishes it.
+        ("generic", "push", "workflow", False, "build=true\npublish=true\n", "", True),
         # main publishes what it built where GitHub Pages publishes from a workflow.
-        ("generic", "push", "workflow", False, "build=true\npublish=true\n", ""),
+        ("generic", "push", "workflow", False, "build=true\npublish=true\n", "", False),
         (
             "generic",
             "push",
@@ -12911,6 +12928,7 @@ def run_the_search_for_the_website(
             False,
             "build=true\n",
             "doesn't publish from GitHub Actions",
+            False,
         ),
         # The blueprint's Dashboard publishes it with the dashboard; main only builds it.
         (
@@ -12920,10 +12938,19 @@ def run_the_search_for_the_website(
             False,
             "build=true\n",
             "dashboard.yml publishes",
+            False,
         ),
         # A fork of the blueprint runs no Dashboard, so its Docs publishes the website.
-        ("blueprint", "push", "workflow", True, "build=true\npublish=true\n", ""),
-        ("none", "push", "workflow", False, "", "No website here"),
+        (
+            "blueprint",
+            "push",
+            "workflow",
+            True,
+            "build=true\npublish=true\n",
+            "",
+            False,
+        ),
+        ("none", "push", "workflow", False, "", "No website here", False),
     ],
 )
 def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
@@ -12935,16 +12962,133 @@ def test_the_docs_workflow_publishes_the_website_unless_another_workflow_does(
     fork: bool,
     output: str,
     notice: str,
+    private: bool,
 ) -> None:
     roots = {"blueprint": ROOT, "none": tmp_path}
     root = roots.get(project) or projects[project]
 
     printed, written = run_the_search_for_the_website(
-        tmp_path, root, event, pages, fork
+        tmp_path, root, event, pages, fork, private
     )
 
     assert written == output
     assert (notice in printed) if notice else printed == ""
+
+
+# The variables that the settings bot sets to off where a private repository lacks
+# GitHub Code Security (decision 0082).
+WITH_CODE_SCANNING = "vars.CODE_SCANNING != 'off'"
+WITHOUT_CODE_SCANNING = "vars.CODE_SCANNING == 'off'"
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_without_code_scanning_no_workflow_sends_its_findings_there(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # An upload to code scanning fails on a private repository without GitHub Code
+    # Security, so each one waits for CODE_SCANNING, which a public repository never
+    # sets: there every workflow uploads as before.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    gated = set()
+    for path in sorted((root / ".github/workflows").glob("*.yml")):
+        jobs = parse(path.read_text(encoding="utf-8"))["jobs"]
+        for job_id, job in jobs.items():
+            uses = job.get("uses", "")
+            if "/osv-scanner-reusable" in uses:
+                assert job["with"]["upload-sarif"] == f"${{{{ {WITH_CODE_SCANNING} }}}}"
+                gated.add(f"{path.name} {job_id}")
+            for step in job.get("steps", []):
+                action = step.get("uses", "")
+                if action.startswith("github/codeql-action/upload-sarif@"):
+                    assert WITH_CODE_SCANNING in condition_of(step), (path, step)
+                    gated.add(f"{path.name} {step['name']}")
+                if action.startswith("zizmorcore/zizmor-action@"):
+                    assert step["with"] == {
+                        "advanced-security": f"${{{{ {WITH_CODE_SCANNING} }}}}",
+                        "annotations": f"${{{{ {WITHOUT_CODE_SCANNING} }}}}",
+                    }
+                    gated.add(f"{path.name} {step['name']}")
+                if action.startswith("actions/dependency-review-action@"):
+                    assert condition_of(step) == "vars.DEPENDENCY_REVIEW != 'off'"
+                    gated.add(f"{path.name} {step['name']}")
+    expected = {
+        "codeql.yml Upload the results",
+        "dependency-review.yml Check dependency changes for known vulnerabilities",
+        "osv-scanner.yml pull-request",
+        "osv-scanner.yml repository",
+        "scorecard.yml Upload results to code scanning",
+        "zizmor.yml Check the workflows",
+    }
+    # The taint analysis of PHP, in the checks of the blueprint and of a Nextcloud app.
+    php = {"blueprint": "ci-php.yml", "nextcloud-app": "ci.yml"}.get(kind)
+    if php:
+        expected.add(f"{php} Upload the paths to code scanning")
+    assert gated == expected
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_without_code_scanning_codeql_does_not_analyze(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The terms of CodeQL allow it on private code only with GitHub Code Security or
+    # Advanced Security: without it, the job passes and analyzes nothing.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    job = job_in((root / ".github/workflows/codeql.yml").read_text("utf-8"), "codeql")
+    names = names_of(job)
+    skip = names.index("Skip the analysis without GitHub Code Security")
+    assert names[skip + 1] == "Initialize the analysis"
+    assert condition_of(job["steps"][skip]) == WITHOUT_CODE_SCANNING
+    analysis = [
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("github/codeql-action/")
+        or step.get("name")
+        == "File the results of each language under its own category"
+    ]
+    assert len(analysis) == 4
+    for step in analysis:
+        assert condition_of(step) == WITH_CODE_SCANNING, step
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_without_code_scanning_codeql_passes_with_a_notice(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "codeql.yml",
+        "codeql",
+        "Skip the analysis without GitHub Code Security",
+        workspace=ROOT,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "::notice::CodeQL doesn't analyze this repository" in done.stdout
+    assert "GitHub Code Security or Advanced Security" in done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_without_the_dependency_review_osv_scanner_checks_the_lock_files(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "dependency-review.yml",
+        "dependency-review",
+        "Leave the vulnerabilities to OSV-Scanner",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.startswith("::notice title=Dependency review::GitHub doesn't")
+    assert done.summary.startswith("### The dependency review\n\nGitHub doesn't")
+    assert "osv-scanner (pull request)" in done.summary
+    # The check that the step names is the job of the workflow OSV-Scanner.
+    osv = parse((ROOT / ".github/workflows/osv-scanner.yml").read_text("utf-8"))
+    assert osv["jobs"]["pull-request"]["name"] == "osv-scanner (pull request)"
+    job = job_in(
+        (ROOT / ".github/workflows/dependency-review.yml").read_text("utf-8"),
+        "dependency-review",
+    )
+    fallback = step_in(job, "Leave the vulnerabilities to OSV-Scanner")
+    assert condition_of(fallback) == "vars.DEPENDENCY_REVIEW == 'off'"
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
