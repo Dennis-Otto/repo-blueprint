@@ -7,6 +7,53 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.1.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.8...v1.1.0) (2026-10-25)
+
+
+### Features
+
+* a Chrome extension project kind that delivers to the Chrome Web Store without a stored secret ([#476](https://github.com/Dennis-Otto/repo-blueprint/issues/476)) ([02b8e6c](https://github.com/Dennis-Otto/repo-blueprint/commit/02b8e6c8306ca26382eb6324e30ac999428d2110))
+* a new repository photographs its website and its integration or app, and the README shows GitHub's pages ([#425](https://github.com/Dennis-Otto/repo-blueprint/issues/425)) ([08e1b6c](https://github.com/Dennis-Otto/repo-blueprint/commit/08e1b6ced71af44e240ec298900f218fa5e58aec))
+* **advisories:** close the Dependabot alerts of accepted advisories, and open them again when the acceptance ends ([#474](https://github.com/Dennis-Otto/repo-blueprint/issues/474)) ([648ce24](https://github.com/Dennis-Otto/repo-blueprint/commit/648ce24ed2a6534e846510e165f30a543349c3bd))
+* check git, gh, sign-in and the repository name before create, and let create resume where it stopped ([#454](https://github.com/Dennis-Otto/repo-blueprint/issues/454)) ([5796289](https://github.com/Dennis-Otto/repo-blueprint/commit/57962890f8618c13ea998fddf968d2e2ccd38a73))
+* **coach:** let project workflows add a part to the report of the PR coach ([#426](https://github.com/Dennis-Otto/repo-blueprint/issues/426)) ([459995b](https://github.com/Dennis-Otto/repo-blueprint/commit/459995b5a4410a0a4ae3498b82b134c9c3515956))
+* **coach:** show the findings of every tool at their lines and in the PR coach ([#434](https://github.com/Dennis-Otto/repo-blueprint/issues/434)) ([98b0a26](https://github.com/Dennis-Otto/repo-blueprint/commit/98b0a26b1e98888e84fece75394b9c86e57dce1f))
+* **dashboard:** show the measured delay of scheduled workflow runs ([#419](https://github.com/Dennis-Otto/repo-blueprint/issues/419)) ([3566408](https://github.com/Dennis-Otto/repo-blueprint/commit/35664082a28496b9e93dfbf11a3027c5fced2de8))
+* **fix-bot:** versions and the lock files of Composer and npm fix themselves (self-healing, part 2) ([#431](https://github.com/Dennis-Otto/repo-blueprint/issues/431)) ([2f169e2](https://github.com/Dennis-Otto/repo-blueprint/commit/2f169e2fba28260108824d1652f70af1ea6880f5))
+* **flaky-tests:** count each job and test in the issue, and name the failing step of logs that pytest didn't write ([#435](https://github.com/Dennis-Otto/repo-blueprint/issues/435)) ([96ff58b](https://github.com/Dennis-Otto/repo-blueprint/commit/96ff58b794e04e1bbfd58be2002a6f2385ba3381))
+* **lint:** fail a pull request that runs an action the allowed list lacks, also in turn ([#438](https://github.com/Dennis-Otto/repo-blueprint/issues/438)) ([3538877](https://github.com/Dennis-Otto/repo-blueprint/commit/3538877468de4ab30b04aca3630fb45cd594913a))
+* one registry of the repositories that follow the blueprint, for the Rollout, the canaries and the showcase ([#457](https://github.com/Dennis-Otto/repo-blueprint/issues/457)) ([6dd0391](https://github.com/Dennis-Otto/repo-blueprint/commit/6dd03914ec494d595becdf2138f409723650cd89))
+* **pages:** warn of table cells that hold a paragraph, and a README that reads on a phone ([#455](https://github.com/Dennis-Otto/repo-blueprint/issues/455)) ([b1fd229](https://github.com/Dennis-Otto/repo-blueprint/commit/b1fd22954cc8717222db2e5c94266aeda9842b3b))
+* private repositories on GitHub Free pass their checks, with what GitHub doesn't offer them switched off ([#462](https://github.com/Dennis-Otto/repo-blueprint/issues/462)) ([1376b5b](https://github.com/Dennis-Otto/repo-blueprint/commit/1376b5bbc535a97a8a50f98d65d54a5263d15b8e))
+* **release:** verify the zip that HACS installs ([#424](https://github.com/Dennis-Otto/repo-blueprint/issues/424)) ([8ad243d](https://github.com/Dennis-Otto/repo-blueprint/commit/8ad243d34306569775f98e20d0a94001b9a306f8))
+* **security:** block network egress in the jobs that hold secrets or write permissions ([#452](https://github.com/Dennis-Otto/repo-blueprint/issues/452)) ([24947ee](https://github.com/Dennis-Otto/repo-blueprint/commit/24947ee81b864b3e69272bd166413d8142f33e85))
+* **security:** zizmor analyzes every pull request, and each new alert of it stops the merge ([#436](https://github.com/Dennis-Otto/repo-blueprint/issues/436)) ([d758d9c](https://github.com/Dennis-Otto/repo-blueprint/commit/d758d9c71b472c4b53720efa432972dfaadcfa09))
+* **settings:** an optional settings app writes the administration, and the blueprint bot widens the allowed actions with it ([#448](https://github.com/Dennis-Otto/repo-blueprint/issues/448)) ([9df1d31](https://github.com/Dennis-Otto/repo-blueprint/commit/9df1d31b12acf954677013fb955427c94f3c47f9))
+* show changelog fragments on the website, explain them in the PR coach, and heal heading typos ([#432](https://github.com/Dennis-Otto/repo-blueprint/issues/432)) ([9a02ce5](https://github.com/Dennis-Otto/repo-blueprint/commit/9a02ce5d69ab336c9a4d8930292dfc0705087f21))
+
+
+### Bug fixes
+
+* **bot-health:** skip project workflows that keep their own issue, and let a push run no longer hide a missed schedule ([#468](https://github.com/Dennis-Otto/repo-blueprint/issues/468)) ([768f1d2](https://github.com/Dennis-Otto/repo-blueprint/commit/768f1d22b8ff143e8a3161025b15134105d528f3))
+* bots without a release app name what is missing instead of failing at the token ([#414](https://github.com/Dennis-Otto/repo-blueprint/issues/414)) ([46a2178](https://github.com/Dennis-Otto/repo-blueprint/commit/46a21787a9ae505f8be458d2d418d3d2cb117c66))
+* check in every repository that Renovate can compile each lock file again ([#408](https://github.com/Dennis-Otto/repo-blueprint/issues/408)) ([96031da](https://github.com/Dennis-Otto/repo-blueprint/commit/96031daf6f9df31e11940f006e5c3f891a0a2a02))
+* **ci:** let the newest-Python check really run the newest Python, and add a newest-Node check ([#463](https://github.com/Dennis-Otto/repo-blueprint/issues/463)) ([2be7dac](https://github.com/Dennis-Otto/repo-blueprint/commit/2be7dac9a325f6ae5c82cd59339f88e0a9cfa50f))
+* **deps:** update pytest-homeassistant-custom-component to 0.13.375 for uv 0.13.5 ([#473](https://github.com/Dennis-Otto/repo-blueprint/issues/473)) ([26d0266](https://github.com/Dennis-Otto/repo-blueprint/commit/26d0266bd2e96c4511138f70ee13f074d453c71d))
+* **docs:** name every picture that a page of the website lost ([#441](https://github.com/Dennis-Otto/repo-blueprint/issues/441)) ([c879406](https://github.com/Dennis-Otto/repo-blueprint/commit/c87940657b6627cb5188cf144d274d288242bc58))
+* end a download that hangs and start it again ([#410](https://github.com/Dennis-Otto/repo-blueprint/issues/410)) ([38a709f](https://github.com/Dennis-Otto/repo-blueprint/commit/38a709fb5a663ba3eb0ee515d221a2bd20f2d1a6))
+* explain a failure of the check renovate rules through the PR coach ([#413](https://github.com/Dennis-Otto/repo-blueprint/issues/413)) ([2eb6643](https://github.com/Dennis-Otto/repo-blueprint/commit/2eb6643ca1d7250fdfcff0bd51d6157fb9725d67))
+* **mutation:** the Mutation run passes again and names a test that fails without any mutant ([#409](https://github.com/Dennis-Otto/repo-blueprint/issues/409)) ([2c35a3f](https://github.com/Dennis-Otto/repo-blueprint/commit/2c35a3f730fc712ffdc987cc422a0bd95af3afe5))
+* **security:** scope the settings bot's token and stop admins bypassing environment protection ([#443](https://github.com/Dennis-Otto/repo-blueprint/issues/443)) ([c92bfee](https://github.com/Dennis-Otto/repo-blueprint/commit/c92bfeee4be5856838e8807d648e285c31dd50e0))
+* serve the repository's own raw/main pictures from the checkout in the website build ([#412](https://github.com/Dennis-Otto/repo-blueprint/issues/412)) ([02cbd5c](https://github.com/Dennis-Otto/repo-blueprint/commit/02cbd5c1aa15b7d6bca04344c50a384e710998ed))
+* settings check reports docker:// steps that the selected actions refuse ([#415](https://github.com/Dennis-Otto/repo-blueprint/issues/415)) ([19dd807](https://github.com/Dennis-Otto/repo-blueprint/commit/19dd807a9e17490fa83dc7a44d47c288ac112d67))
+
+
+### Performance
+
+* **ci:** give every repository its own times for the scheduled workflows ([#465](https://github.com/Dennis-Otto/repo-blueprint/issues/465)) ([e6ba189](https://github.com/Dennis-Otto/repo-blueprint/commit/e6ba1899c040f268d29141c22c9c49447df898b7))
+* **ci:** remove the jobs of single checks that the combined jobs replaced ([#449](https://github.com/Dennis-Otto/repo-blueprint/issues/449)) ([2b55f8e](https://github.com/Dennis-Otto/repo-blueprint/commit/2b55f8e74964c7f5aee94b6f096d24a1e0bd66f5))
+* run the tests on every logical core, at most eight, and compile each template once ([#430](https://github.com/Dennis-Otto/repo-blueprint/issues/430)) ([98534a7](https://github.com/Dennis-Otto/repo-blueprint/commit/98534a755b79e8b46ce49d96c1f7bfca633311d9))
+
 ## [1.0.8](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.7...v1.0.8) (2026-10-24)
 
 ### Bug fixes
