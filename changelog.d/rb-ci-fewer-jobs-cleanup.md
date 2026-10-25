@@ -1,0 +1,3 @@
+### Performance
+
+- **Six jobs fewer in every pull request, eight in a Home Assistant integration:** the jobs that ran a single check next to the jobs that took them over are gone: `workflow-lint`, `reuse`, `markdown`, `dco` and `issue-assistant`, which *lint* runs, `changelog`, which *conventional title* checks, and `hacs` and `hassfest`, which *home-assistant* runs. Their checks still run and report as before, in fewer runners. The REUSE action, which no workflow runs any more, leaves the allowed actions as well. The rules of a repository that still require one of the old checks wait for it in vain: `python3 .github/blueprint.py settings apply` sets the new ones.
