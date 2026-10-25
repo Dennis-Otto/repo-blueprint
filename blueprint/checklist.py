@@ -33,12 +33,13 @@ RELEASE_APP_PERMISSIONS = (
     ("Checks", "checks", "write"),
     ("Commit statuses", "statuses", "write"),
     ("Contents", "contents", "write"),
+    # The OSV-Scanner workflow closes the alerts of the accepted advisories with it.
+    ("Dependabot alerts", "vulnerability_alerts", "write"),
     ("Issues", "issues", "write"),
     ("Pages", "pages", "write"),
     ("Pull requests", "pull_requests", "write"),
     ("Variables", "", "write"),
     ("Workflows", "workflows", "write"),
-    ("Dependabot alerts", "vulnerability_alerts", "read"),
     ("Environments", "environments", "read"),
     ("Secrets", "secrets", "read"),
 )
@@ -315,6 +316,22 @@ def code_security_step(repo: str, plan: Plan) -> Step:
     )
 
 
+# The OSV-Scanner workflow closes the Dependabot alerts that an osv-scanner.toml
+# accepts as the settings app, or as the release app without one; no API tells the
+# permissions of an app to its repository (decision 0086).
+DEPENDABOT_ALERTS = Step(
+    "The settings app, or the release app without one, may write the Dependabot alerts,"
+    " so that the OSV-Scanner workflow closes those that osv-scanner.toml accepts",
+    None,
+    "On the settings page of the app, under Permissions & events -> Repository"
+    " permissions, set Dependabot alerts to Read and write and save; then accept the new"
+    " permission on its installation: Settings -> Applications -> Installed GitHub Apps,"
+    " Configure, Review request.\n"
+    "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md"
+    "#8-the-settings-app-optional",
+)
+
+
 def checklist(
     api: Api,
     repo: str,
@@ -356,6 +373,7 @@ def checklist(
             "\n".join(item.manual for item in community),
         ),
         installed,
+        DEPENDABOT_ALERTS,
         renovate(api, repo, settings, root),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "

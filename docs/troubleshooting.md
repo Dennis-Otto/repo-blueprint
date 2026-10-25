@@ -184,6 +184,12 @@ python3 .github/blueprint.py advisories --fix
 
 `.github/renovate-accepted.json5` then has a rule for each such version, which `.github/renovate-blueprint.json5` extends: Renovate makes no update of that version in the lock files of that folder, which only the package that pins it moves. The step *Accepted advisories* of `scripts/check.sh` fails while the rules and the `osv-scanner.toml` files disagree, and when OSV-Scanner couldn't use a file: it ignores a whole file with a key that it doesn't know. After `effectiveUntil`, OSV-Scanner reports the advisories again; once the package that pins the version moves it, delete the entry. An advisory that doesn't affect the project, of a version that an update could move, goes into `[[IgnoredVulns]]` alone, with its `id` and reason, and the OpenVEX document of each release states those of the `osv-scanner.toml` in the root ([decision 0059](decisions/0059-accept-a-pinned-version-and-tell-renovate.md)).
 
+Dependabot doesn't read `osv-scanner.toml` either. After the merge, the job *dependabot alerts* of the OSV-Scanner workflow closes each Dependabot alert that an entry covers, as a tolerable risk with a comment that starts with *Accepted in* and names the file, the end and the reason; an entry of `[[IgnoredVulns]]` closes the alerts of its advisory once it has `ignoreUntil` and `reason`. It opens them again once the date has passed, the entry is gone or an update moved the version. When the job fails because GitHub refused the token, the app lacks the permission *Dependabot alerts* (read and write), as [your own account](own-account.md#8-the-settings-app-optional) shows ([decision 0086](decisions/0086-accepted-advisories-close-their-dependabot-alerts.md)). To see what it would do:
+
+```sh
+python3 .github/blueprint.py advisories --dependabot --dry-run
+```
+
 ## Renovate skips a lock file
 
 **What you see:** a lock file such as `requirements-test.txt` gets no update, also none that fixes a vulnerability, and the issue *Renovate logs problems* lists `pip-compile error` for the repository. The step *Lock files* of `scripts/check.sh` fails and names the file and what Renovate stumbles on, such as `--python-version without = before its value`.

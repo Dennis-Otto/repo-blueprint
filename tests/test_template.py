@@ -8262,6 +8262,7 @@ RELEASE_APP_BOTS = {
     ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
     ("diagrams.yml", "pull-request"): ("the diagram bot", False),
     ("docs-pictures.yml", "pull-request"): ("the picture bot", False),
+    ("osv-scanner.yml", "dependabot"): ("the Dependabot alert bot", False),
     ("release.yml", "release-please"): ("the release bot", False),
     ("renovate.yml", "renovate"): ("Renovate", True),
     ("rollout.yml", "plan"): ("the Rollout", True),
@@ -8353,6 +8354,7 @@ def test_every_token_of_the_release_app_comes_after_its_check(
             ("blueprint-update.yml", "update"),
             ("dependabot-automerge.yml", "auto-merge"),
             ("diagrams.yml", "pull-request"),
+            ("osv-scanner.yml", "dependabot"),
             ("release.yml", "release-please"),
             ("screenshot-bot.yml", "pull-request"),
             ("settings.yml", "check"),
@@ -8573,6 +8575,7 @@ SETTINGS_APP_CLIENT_ID = "${{ vars.SETTINGS_APP_CLIENT_ID }}"
 SETTINGS_APP_KEY = "${{ secrets.SETTINGS_APP_PRIVATE_KEY }}"
 SETTINGS_APP_BOTS = {
     ("blueprint-update.yml", "update"): "the blueprint bot",
+    ("osv-scanner.yml", "dependabot"): "the Dependabot alert bot",
     ("settings.yml", "check"): "the settings bot",
 }
 HALF_CLIENT = (
@@ -8947,6 +8950,13 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
     assert answers["author"] == "octo-org"
     assert answers["sponsor"] == "octo-org"
     assert "maintained by octo-org" in (project / "GOVERNANCE.md").read_text("utf-8")
+    # Their apps may lack the permission of the Dependabot alerts: a refused token is a
+    # notice there, and fails the check only in the repositories of the blueprint's
+    # owner.
+    lacks = workflow_steps.step(
+        "osv-scanner.yml", "dependabot", "Say what the app lacks", project
+    )
+    assert lacks["env"]["STRICT"] == "false"
     # No release app yet: no variable names one, no ruleset lets one create the release
     # tags, and the environment release waits for no private key of one.
     assert answers["release_app"] == ""
@@ -17756,3 +17766,56 @@ def test_a_test_can_stay_out_of_the_mutation_tests(
 
     assert marker(ROOT / "pyproject.toml")
     assert marker(projects[kind] / "pyproject.toml") == marker(ROOT / "pyproject.toml")
+
+
+DEPENDABOT_LACKS = "Say what the app lacks"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_dependabot_alert_bot_asks_for_the_alerts_alone(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # The token of a workflow can't read the Dependabot alerts: the settings app, or
+    # the release app without it, closes them, with that permission alone.
+    root = ROOT if project == "blueprint" else projects[project]
+    job = workflow_steps.job("osv-scanner.yml", "dependabot", root)
+    tokens = steps_using(job, "actions/create-github-app-token")
+
+    assert [token["id"] for token in tokens] == ["settings-token", "release-token"]
+    for token in tokens:
+        assert app_permissions({"steps": [token]}) == {"vulnerability-alerts": "write"}
+        # A refused token is the next step's to explain, not a failure of the step.
+        assert token["continue-on-error"] is True
+    assert "pull_request" in job["if"]
+    assert "fork" in job["if"]
+    # The blueprint's owner, whose apps have the permission, fails the check.
+    lacks = workflow_steps.step_in(job, DEPENDABOT_LACKS)
+    assert lacks["env"]["STRICT"] == "true"
+    run = workflow_steps.step_in(job, "Close the alerts that osv-scanner.toml accepts")
+    assert "advisories --dependabot" in run["run"]
+    assert run["env"]["DRY_RUN"] == "${{ inputs.dry_run || false }}"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("strict", "code", "level"), [("true", 1, "error"), ("false", 0, "notice")]
+)
+def test_the_dependabot_alert_bot_says_what_the_app_lacks(
+    tmp_path: Path, strict: str, code: int, level: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "osv-scanner.yml",
+        "dependabot",
+        DEPENDABOT_LACKS,
+        env={"APP": "settings", "STRICT": strict},
+    )
+
+    assert done.returncode == code
+    [said] = done.stdout.splitlines()
+    assert said.startswith(f"::{level}::GitHub refused a token of the settings app")
+    assert "Dependabot alerts (read and write)" in said
+    assert done.summary.startswith(
+        "### The settings app may not close the Dependabot alerts\n\n"
+    )
+    assert "set *Dependabot alerts* to *Read and write*" in done.summary
