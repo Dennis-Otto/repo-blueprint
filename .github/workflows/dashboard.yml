@@ -36,6 +36,9 @@ on:
       - README.md
       - README.de.md
       - CHANGELOG.md
+      # The changelog page shows the waiting fragments with this code.
+      - changelog.d/**
+      - blueprint/changelog.py
       - stacks/docs/requirements-docs.txt
   schedule:
     - cron: "5 */2 * * *"

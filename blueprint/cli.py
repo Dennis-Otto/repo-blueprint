@@ -15,7 +15,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import advisories, locks, mutation, screenshots
+from blueprint import advisories, annotate, locks, mutation, screenshots, versions
 from blueprint.bootstrap import CreateError, create
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -24,6 +24,7 @@ from blueprint.changelog import (
     FragmentError,
     beta_notes,
     fragment_problems,
+    heal,
     read_fragments,
     release_changelog,
     release_notes,
@@ -85,6 +86,8 @@ from blueprint.settings import (
     check,
     describe,
     kept,
+    line_of,
+    unlisted_actions,
 )
 from blueprint.site_check import annotation as site_annotation
 from blueprint.site_check import check as check_site
@@ -130,10 +133,14 @@ def changelog_command(arguments: argparse.Namespace) -> int:
 
 def fragments_command(arguments: argparse.Namespace) -> int:
     """Checks the fragments as the release takes them in: the problems on stdout, one
-    on each line, for the check of a pull request to show."""
+    on each line, for the check of a pull request to show. With --fix, it renames each
+    heading that surely means a kind of change first, and names each renaming."""
     folder = Path(arguments.folder)
     changelog = Path(arguments.file)
     text = changelog.read_text(encoding="utf-8") if changelog.is_file() else ""
+    if arguments.fix:
+        for said in heal(folder, text):
+            print(said)
     fragments = read_fragments(folder)
     problems = fragment_problems(fragments, text)
     for problem in problems:
@@ -150,6 +157,22 @@ def coverage_command(arguments: argparse.Namespace) -> int:
     base_file = Path(arguments.base)
     base = Coverage.read(base_file, root) if base_file.is_file() else None
     sys.stdout.write(coverage_comment(head, base))
+    return 0
+
+
+def annotate_command(arguments: argparse.Namespace, root: Path) -> int:
+    """The annotations of a tool of scripts/check.sh, after what it wrote: it reads
+    that from its input and passes it on as it is."""
+    found = annotate.annotations_of(
+        arguments.tool,
+        arguments.report,
+        root.resolve(),
+        sys.stdin.buffer,
+        sys.stdout.buffer,
+    )
+    sys.stdout.flush()
+    for line in found:
+        print(line)
     return 0
 
 
@@ -464,6 +487,8 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
             else "Every text file is clean."
         )
         return 0
+    if arguments.action == "version":
+        return fix_version(root)
     if arguments.action == "keep":
         print("\n".join(report_kept(keep_fixes(root, arguments.folder), kept=True)))
         return 0
@@ -487,6 +512,31 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
         lines += report_kept(keep_fixes(root, arguments.keep), kept=True)
     print("\n".join(lines))
     return 0
+
+
+def fix_version(root: Path) -> int:
+    """Writes the version of the manifest of the release bot back into each file that
+    has another one; a file without a version at the place of the step Version stays
+    for a person."""
+    done = versions.fix(root)
+    if done.version is None:
+        print(f"{versions.MANIFEST} names no version, so there is none to write.")
+        return 0
+    for file in done.fixed:
+        print(
+            f"{file.path}: version {done.version} of the release bot, "
+            f"in place of {file.found}"
+        )
+    for file in done.left:
+        print(
+            f"{file.path}: has no version where the step Version reads it; "
+            f"give it version {done.version}"
+        )
+    if done.fixed:
+        print(f"{len(done.fixed)} file(s) have the version of the release bot again.")
+    elif not done.left:
+        print(f"Every file has the version of the release bot, {done.version}.")
+    return 1 if done.left else 0
 
 
 def kept_fixes(folder: Path) -> Fixes:
@@ -679,7 +729,7 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
     and in the CI also as annotations; with --output, the further languages and the
     path of the address for the steps that follow."""
     folder = Path(arguments.site).as_posix().rstrip("/") or "."
-    site = check_site(root / arguments.site)
+    site = check_site(root / arguments.site, root, arguments.docs)
     if arguments.output:
         with Path(arguments.output).open("a", encoding="utf-8") as file:
             file.write(f"languages={' '.join(site.further)}\n")
@@ -701,7 +751,12 @@ def site_check_command(arguments: argparse.Namespace, root: Path) -> int:
         "with what the hooks write, and report it to the blueprint if its hooks "
         "need to change. A page that loads more than it may at once names what it "
         "loads the most: a picture that is too large, or Mermaid, which a "
-        "```mermaid block loads and the pictures of scripts/diagrams.sh don't."
+        "```mermaid block loads and the pictures of scripts/diagrams.sh don't. A "
+        "page that lacks a picture of its Markdown, or has an empty paragraph where "
+        "one was, lost it in the build: build the website with the lock of its "
+        "tools, .github/docs-requirements.txt (stacks/docs/requirements-docs.txt in "
+        "the blueprint itself), and look for the plugin or the hook "
+        "that takes it out."
     )
     return 1
 
@@ -738,6 +793,50 @@ def settings_command(
     if not drift:
         return 0
     return 2 if refused else 1
+
+
+def actions_command(api: Api, root: Path, path: Path) -> int:
+    """settings actions: 0 when the list of the allowed actions in the settings as code
+    lets every action and reusable workflow that the workflows run start, also those
+    that these run in turn; 1 when it lacks one, or GitHub refused the file of one.
+    The check of the Lint workflow: it reads the public files of the actions and none
+    of the settings on GitHub, which the token of a pull request may not read."""
+    settings = Settings.load(root / path, root)
+    # The blueprint renders the list of every repository from its template.
+    listed_in = (
+        "template/.github/repository.toml.jinja and .github/repository.toml"
+        if (root / "copier.yml").is_file() and (root / "template").is_dir()
+        else ".github/repository.project.toml"
+    )
+    found = unlisted_actions(api, settings.actions, settings.workflows, listed_in)
+    # The path as the documentation writes it, with slashes on Windows too.
+    config = path.as_posix()
+    if not found:
+        print(
+            "GitHub starts every action that the workflows run, also those that"
+            f" these run in turn, by [actions] of {config}."
+        )
+        return 0
+    print(f"GitHub won't start a workflow that runs these, by [actions] of {config}:")
+    annotations = []
+    for item in found:
+        file = settings.workflows[item.via]
+        how = (
+            f"{file} names it"
+            if item.reference == item.via
+            else f"{item.where} runs it in turn, from {item.via} that {file} names"
+        )
+        message = f"{item.reference}: {how}; {item.fix}"
+        print(f"- {message}")
+        text = (root / file).read_text(encoding="utf-8")
+        annotations.append(
+            annotate.Annotation(
+                "Allowed actions", message, file, line_of(text, item.via)
+            )
+        )
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print("\n".join(annotate.commands(annotations)))
+    return 1
 
 
 def checklist_command(api: Api, repo: str, settings: Settings, root: Path) -> int:
@@ -784,7 +883,13 @@ def add_settings_parsers(
     settings_parser = commands.add_parser(
         "settings", help="compare or apply the settings as code"
     )
-    settings_parser.add_argument("action", choices=["check", "apply"])
+    settings_parser.add_argument(
+        "action",
+        choices=["check", "apply", "actions"],
+        help="check: compare with GitHub; apply: make GitHub match; actions: whether "
+        "the list of the allowed actions lets every action that the workflows run "
+        "start, also in turn, from the files alone (the check of the Lint workflow)",
+    )
     commands.add_parser(
         "checklist", help="the steps outside the API, and which are done"
     )
@@ -859,6 +964,12 @@ def add_changelog_parsers(
         "--file",
         default="CHANGELOG.md",
         help="the changelog, whose headings a fragment may use too",
+    )
+    fragments_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="first rename each heading that surely means a kind of change, such as "
+        "### Fixes to ### Fixed, as the fix bot does",
     )
     coverage_parser = commands.add_parser(
         "coverage",
@@ -980,6 +1091,20 @@ def add_coach_parsers(
         "verify",
         help="whether every required check and every step of scripts/check.sh has "
         "its explanation",
+    )
+    annotate_parser = commands.add_parser(
+        "annotate",
+        help="each finding of a tool of scripts/check.sh as an annotation of the CI, "
+        "which the files of a pull request show at its line and the PR coach lists",
+    )
+    annotate_parser.add_argument(
+        "tool",
+        choices=annotate.TOOLS,
+        help="the tool: one whose output comes in on the input and goes on as it is, "
+        "or pytest and phpunit, whose report of JUnit is the second argument",
+    )
+    annotate_parser.add_argument(
+        "report", nargs="?", default="", help="the report of JUnit of the tests"
     )
 
 
@@ -1180,6 +1305,11 @@ def add_fix_parsers(
         help="give every text file LF line endings, no trailing whitespace and a line "
         "break at its end",
     )
+    fix_actions.add_parser(
+        "version",
+        help="write the version of .release-please-manifest.json back into each file "
+        "that the release bot writes it into, where a hand changed it",
+    )
     collect_parser = fix_actions.add_parser(
         "collect",
         help="download the fixes of the checks of a commit once they ended, and "
@@ -1340,10 +1470,16 @@ def add_pages_parsers(
         "site-check",
         help="what the website that MkDocs built promises: a sitemap in every folder "
         "of pages, the 404 page in the default language, one canonical address and "
-        "full addresses of the other languages on every page",
+        "full addresses of the other languages on every page, and every picture of "
+        "the Markdown of a page on it",
     )
     site_check_parser.add_argument(
         "site", help="the folder that MkDocs built the website into, such as site"
+    )
+    site_check_parser.add_argument(
+        "--docs",
+        help="the folder of the Markdown of the pages (default: docs_dir of "
+        "mkdocs.yml, or docs)",
     )
     site_check_parser.add_argument(
         "--output",
@@ -1400,6 +1536,8 @@ def standalone_command(
         except (OSError, ElementTree.ParseError, ValueError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
+    if arguments.command == "annotate":
+        return annotate_command(arguments, root)
     if arguments.command == "coach" and arguments.action != "report":
         try:
             return explain_command(arguments, root)
@@ -1427,10 +1565,21 @@ def standalone_command(
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
-    if arguments.command == "fix" and arguments.action in ("run", "keep", "text"):
+    if arguments.command == "fix" and arguments.action in (
+        "run",
+        "keep",
+        "text",
+        "version",
+    ):
         try:
             return fix_command(arguments, root)
-        except (OSError, CatalogError, subprocess.CalledProcessError) as error:
+        # A file of the release bot that isn't JSON, or isn't UTF-8, is a ValueError.
+        except (
+            OSError,
+            ValueError,
+            CatalogError,
+            subprocess.CalledProcessError,
+        ) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command == "fix" and not (
@@ -1503,6 +1652,8 @@ def main(
     try:
         if arguments.command == "create":
             return create_command(api, arguments, root)
+        if arguments.command == "settings" and arguments.action == "actions":
+            return actions_command(api, root, arguments.config)
         repo = arguments.repo or current_repo(api)
         if arguments.command == "coach":
             number = int(arguments.pull) if arguments.pull else None

@@ -131,8 +131,10 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
     assert found == [
         ("Text files", "{blueprint} fix text"),
         ("Pages in one column", "{blueprint} pages --fix"),
+        ("Changelog fragments", "{blueprint} fragments --fix"),
         ("Accepted advisories", "{blueprint} advisories --fix"),
         ("Lock files", "{blueprint} locks --fix"),
+        ("Version", "{blueprint} fix version"),
         ("Ruff", "ruff check --fix ."),
         ("Ruff", "ruff format ."),
         # Of the blueprint alone, by its .github/checks.project.toml.
@@ -184,6 +186,59 @@ def test_the_step_of_the_project_fixes_itself_within_its_if(tmp_path: Path) -> N
     assert fixers(Catalog.load(tmp_path), tmp_path, "check (php)") == [
         ("Checks of this project", "node scripts/check-l10n.mjs --write")
     ]
+
+
+# A lock file that Composer or npm refuses, as after a change of composer.json or
+# package.json by hand, is locked again; one that they take stays as it is, also where
+# another version of the tool would write it otherwise.
+@needs_bash
+@pytest.mark.parametrize(
+    ("step", "tool", "check", "relock"),
+    [
+        (
+            "Composer",
+            "composer",
+            "validate --no-check-publish --quiet",
+            "update --minimal-changes --no-install --no-scripts --no-plugins "
+            "--no-interaction",
+        ),
+        (
+            "Package lock",
+            "npm",
+            "ci --dry-run --ignore-scripts --no-audit --no-fund",
+            "install --package-lock-only --ignore-scripts --no-audit --no-fund",
+        ),
+    ],
+)
+@pytest.mark.parametrize("refused", [True, False])
+def test_a_lock_file_is_locked_again_only_when_its_tool_refuses_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    step: str,
+    tool: str,
+    check: str,
+    relock: str,
+    refused: bool,
+) -> None:
+    calls = tmp_path / "calls"
+    stub = write(
+        tmp_path / "stubs",
+        tool,
+        f"#!/usr/bin/env bash\necho \"$*\" >> '{calls.as_posix()}'\n"
+        f'[[ "$*" != "{check}" ]] || exit {int(refused)}\n',
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stub.parent}{os.pathsep}{os.environ['PATH']}")
+    entry = Catalog.load(ROOT).step(step)
+    assert entry
+
+    said = run([(step, command) for command in entry.autofix], tmp_path, BASH)
+
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        check,
+        *([relock] if refused else []),
+    ]
+    assert said == [f"- {step}: `{entry.autofix[0]}`"]
 
 
 # The fix bot runs pins.py in the repository, a copy of the one of the blueprint. In the
@@ -495,6 +550,56 @@ def test_a_pull_request_with_mistakes_passes_after_its_fixes(
     fixes = load([tmp_path / "fixes"])
     assert sorted(fixes.files) == ["README.md", "app.py"]
     assert fixes.files["app.py"] == b"x = 1\nprint(x)\n"
+
+
+# The tool that the test copies into the repository is the code with the mutants in
+# the copy of the mutation tests.
+@pytest.mark.mutation_unsafe
+@needs_bash
+def test_a_fragment_with_a_typo_in_its_heading_heals_itself(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    changelog = "# Changelog\n\n## Unreleased\n\n## 1.0.0\n\n- First.\n"
+    root = repository(
+        tmp_path / "repo",
+        {
+            "CHANGELOG.md": changelog,
+            "changelog.d/.gitkeep": "",
+            "scripts/check.sh": 'step "Changelog fragments"\n',
+        },
+    )
+    (root / ".github").mkdir()
+    shutil.copy(ROOT / ".github/checks.toml", root / ".github/checks.toml")
+    shutil.copy(ROOT / "blueprint.py", root / ".github/blueprint.py")
+    shutil.copytree(
+        ROOT / "blueprint",
+        root / ".github/blueprint",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    git(root, "add", "--all")
+    git(root, "commit", "--quiet", "-m", "tools")
+    # The pull request of a branch of the repository, with the fragment of its change.
+    write(root, "changelog.d/dark-mode.md", "### Fixes\n\n- **Dark mode:** works.\n")
+    git(root, "add", "--all")
+    git(root, "commit", "--quiet", "-m", "the change")
+
+    code = cli.main(
+        ["fix", "run", "check (python)", "--keep", str(tmp_path / "fixes")], root=root
+    )
+
+    assert code == 0
+    summary = capsys.readouterr().out
+    assert (
+        "- Changelog fragments: `python3 .github/blueprint.py fragments --fix`"
+        in summary
+    )
+    assert "- `changelog.d/dark-mode.md`" in summary
+    # What the fix bot commits onto the branch, or suggests on a pull request from a
+    # fork: the heading that the release reads.
+    fixes = load([tmp_path / "fixes"])
+    assert fixes.files == {
+        "changelog.d/dark-mode.md": b"### Fixed\n\n- **Dark mode:** works.\n"
+    }
 
 
 # ---------------------------------------------------------------- what the checks kept

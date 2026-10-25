@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 import tomllib
 import urllib.parse
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -284,12 +283,33 @@ def allows(selected: dict[str, Json], reference: str) -> bool:
     return any(matches(pattern, reference) for pattern in patterns)
 
 
-def run_by(api: Api, reference: str) -> list[str]:
-    """The actions and reusable workflows that an action or a reusable workflow runs in
-    turn, at the commit that it is pinned to: GitHub allows or blocks them as well.
-    An image of Docker runs none, and GitHub has no file of it."""
-    if reference.startswith(DOCKER):
-        return []
+# The actions and reusable workflows whose files one query of GraphQL reads: GitHub
+# counts such a query as one request, where its contents API took one for each file,
+# about 40 for a repository of the blueprint, of the 1,000 in an hour that the token of
+# a workflow has for every workflow of the repository.
+BATCH = 50
+# The file of each action or reusable workflow, which the query reads as text.
+BLOB = "... on Blob { text }"
+
+
+@dataclass(frozen=True)
+class Runs:
+    """Every action and reusable workflow that the workflows run: those that the
+    workflows name, and those that these run in turn."""
+
+    # Each, with what names it: the file of the repository, or the action or reusable
+    # workflow that runs it in turn.
+    found: dict[str, str]
+    # Each, with the one that a file of the repository names and that runs it, at last.
+    via: dict[str, str]
+    # Those whose file GitHub refused to give, with its answer: what they run in turn
+    # is unknown.
+    refused: dict[str, str]
+
+
+def action_files(reference: str) -> tuple[str, str, list[str]]:
+    """The owner and the name of the repository of an action or a reusable workflow,
+    and each place of its file at the commit that it is pinned to, as Git names it."""
     name, _, ref = reference.partition("@")
     owner, _, rest = name.partition("/")
     repo, _, path = rest.partition("/")
@@ -299,38 +319,203 @@ def run_by(api: Api, reference: str) -> list[str]:
         candidates = [
             f"{path}/{file}".lstrip("/") for file in ("action.yml", "action.yaml")
         ]
-    for candidate in candidates:
-        data = api.get(
-            f"repos/{owner}/{repo}/contents/{urllib.parse.quote(candidate)}"
-            f"?ref={urllib.parse.quote(ref, safe='')}"
+    return owner, repo, [f"{ref}:{candidate}" for candidate in candidates]
+
+
+def files_query(references: Sequence[str]) -> tuple[str, dict[str, str]]:
+    """The query of GraphQL of the files of the actions and reusable workflows, the
+    repository of each as r0, r1, ... and each place of its file as f0, f1, ...: the
+    names come as variables, never as text of the query."""
+    variables: dict[str, str] = {}
+    fields = []
+    for index, reference in enumerate(references):
+        owner, repo, places = action_files(reference)
+        variables[f"o{index}"], variables[f"n{index}"] = owner, repo
+        files = []
+        for number, place in enumerate(places):
+            variables[f"e{index}_{number}"] = place
+            files.append(
+                f"f{number}: object(expression: $e{index}_{number}) {{ {BLOB} }}"
+            )
+        fields.append(
+            f"r{index}: repository(owner: $o{index}, name: $n{index})"
+            f" {{ {' '.join(files)} }}"
         )
-        if isinstance(data, dict) and data.get("content"):
-            text = base64.b64decode(str(data["content"])).decode("utf-8", "replace")
-            return references(text)
-    return []
+    declared = ", ".join(f"${key}: String!" for key in variables)
+    return f"query({declared}) {{ {' '.join(fields)} }}", variables
 
 
-def actions_that_run(
-    api: Api, named: dict[str, str]
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Every action and reusable workflow that the workflows run, with what names it:
-    those that the workflows name, and those that these run in turn; and those whose
-    file GitHub refused to give, with its answer."""
+def graphql_problems(answer: Json) -> dict[str, str]:
+    """Why GraphQL refused a part of a query, by the alias of the part, or by "" for
+    the whole query. A repository or a file that GitHub doesn't know is no refusal: the
+    contents API answers 404 to both, and an action that isn't there runs nothing."""
+    problems: dict[str, str] = {}
+    errors = answer.get("errors") if isinstance(answer, dict) else None
+    for error in errors if isinstance(errors, list) else []:
+        if not isinstance(error, dict) or error.get("type") == "NOT_FOUND":
+            continue
+        place = error.get("path") or [""]
+        kind = error.get("type") or "an error"
+        problems.setdefault(
+            str(place[0]), f"GitHub answered {kind}: {error.get('message', '')}"
+        )
+    return problems
+
+
+def file_text(found: Json, places: int) -> str:
+    """The text of the first file of an action that GitHub has, or none."""
+    if not isinstance(found, dict):
+        return ""
+    for number in range(places):
+        blob = found.get(f"f{number}")
+        if isinstance(blob, dict) and isinstance(blob.get("text"), str):
+            return str(blob["text"])
+    return ""
+
+
+def run_by(
+    api: Api, wanted: Sequence[str]
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """What each action and reusable workflow runs in turn, at the commit that it is
+    pinned to: GitHub allows or blocks those as well; and those whose file GitHub
+    refused to give, with its answer. One query of GraphQL reads the files of BATCH of
+    them. An image of Docker runs none, and GitHub has no file of it."""
+    inner: dict[str, list[str]] = {}
+    refused: dict[str, str] = {}
+    files = []
+    for reference in wanted:
+        if reference.startswith(DOCKER):
+            inner[reference] = []
+        else:
+            files.append(reference)
+    for start in range(0, len(files), BATCH):
+        batch = files[start : start + BATCH]
+        query, variables = files_query(batch)
+        try:
+            # A query only reads: a gateway that timed out is asked once more.
+            answer = api.request(
+                "POST", "graphql", {"query": query, "variables": variables}, retry=True
+            ).data
+        except GitHubError as error:
+            refused.update(dict.fromkeys(batch, str(error)))
+            continue
+        problems = graphql_problems(answer)
+        data = answer.get("data") if isinstance(answer, dict) else None
+        data = data if isinstance(data, dict) else {}
+        for index, reference in enumerate(batch):
+            found = data.get(f"r{index}")
+            problem = problems.get(f"r{index}") or (
+                problems.get("") if found is None else None
+            )
+            if problem:
+                refused[reference] = problem
+                continue
+            places = len(action_files(reference)[2])
+            inner[reference] = references(file_text(found, places))
+    return inner, refused
+
+
+def actions_that_run(api: Api, named: dict[str, str]) -> Runs:
+    """Every action and reusable workflow that the workflows run: those that the
+    workflows name, and those that these run in turn, read one level after another."""
     found = dict(named)
-    refused = {}
+    via = {reference: reference for reference in named}
+    refused: dict[str, str] = {}
     todo = sorted(named)
     while todo:
-        reference = todo.pop()
-        try:
-            inner_references = run_by(api, reference)
-        except GitHubError as error:
-            refused[reference] = str(error)
-            continue
-        for inner in inner_references:
-            if inner not in found:
-                found[inner] = reference.partition("@")[0]
-                todo.append(inner)
-    return found, refused
+        inner, unread = run_by(api, todo)
+        refused.update(unread)
+        todo = []
+        for reference, items in sorted(inner.items()):
+            for item in items:
+                if item not in found:
+                    found[item] = reference.partition("@")[0]
+                    via[item] = via[reference]
+                    todo.append(item)
+    return Runs(found, via, refused)
+
+
+def lacking_patterns(selected: dict[str, Json], found: Iterable[str]) -> dict[str, str]:
+    """The pattern of each action and reusable workflow that runs but that
+    [actions.selected] doesn't allow, with the first one that needs it. An image of
+    Docker needs a step of its own, not a pattern."""
+    lacking: dict[str, str] = {}
+    for reference in sorted(found):
+        if not reference.startswith(DOCKER) and not allows(selected, reference):
+            lacking.setdefault(pattern_of(reference), reference)
+    return lacking
+
+
+@dataclass(frozen=True)
+class Unlisted:
+    """An action, a reusable workflow or an image of Docker that a workflow runs but
+    that GitHub won't start, or one whose file GitHub refused to give."""
+
+    reference: str
+    # What names it: a file of the repository, or the action that runs it in turn.
+    where: str
+    # The one that a file of the repository names and that runs it, at last.
+    via: str
+    # What to change.
+    fix: str
+
+
+def unlisted_actions(
+    api: Api, actions: dict[str, Json], named: dict[str, str], listed_in: str
+) -> list[Unlisted]:
+    """Every action and reusable workflow that the workflows run, also in turn, that
+    [actions] doesn't let start, from the files alone, not the settings on GitHub: a
+    pattern that a pull request leaves out stops every workflow that runs the action
+    once the list is on GitHub. The patterns go into the file listed_in."""
+    allowed = actions.get("allowed_actions", "all")
+    if allowed == "all":
+        return []
+    selected = actions.get("selected") if allowed == "selected" else None
+    selected = selected if isinstance(selected, dict) else {}
+    runs = actions_that_run(api, named)
+    found: list[Unlisted] = []
+    for pattern, reference in lacking_patterns(selected, runs.found).items():
+        fix = (
+            f"add {json.dumps(pattern)} to patterns_allowed of [actions.selected]"
+            f" in {listed_in}"
+        )
+        if allowed != "selected":
+            fix = f'set allowed_actions = "selected" in [actions] and {fix}'
+        found.append(
+            Unlisted(reference, runs.found[reference], runs.via[reference], fix)
+        )
+    found += [
+        Unlisted(
+            reference,
+            runs.found[reference],
+            runs.via[reference],
+            "run the image in a run: step instead, as docker run --rm --volume"
+            ' "$PWD:/github/workspace" --workdir /github/workspace'
+            f" {reference.removeprefix(DOCKER)}: GitHub refuses a step with docker://"
+            " whatever [actions.selected] lists",
+        )
+        for reference in sorted(runs.found)
+        if reference.startswith(DOCKER)
+    ]
+    found += [
+        Unlisted(
+            reference,
+            runs.found[reference],
+            runs.via[reference],
+            f"GitHub refused its file ({answer}), so what it runs in turn is unknown:"
+            " run the check again",
+        )
+        for reference, answer in sorted(runs.refused.items())
+    ]
+    return found
+
+
+def line_of(text: str, reference: str) -> int:
+    """The line of the first step or job that names the action, or 0."""
+    for match in USES.finditer(text):
+        if match[1] == reference:
+            return text.count("\n", 0, match.start(1)) + 1
+    return 0
 
 
 def check_actions(
@@ -402,23 +587,21 @@ def check_selected_actions(
             same = sorted(map(str.casefold, value)) == sorted(map(str.casefold, have))
         if not same:
             drift.append(Drift(f"actions.selected.{key}", value, have))
-    found, refused = actions_that_run(api, named)
-    lacking: dict[str, str] = {}
-    for reference, where in sorted(found.items()):
-        if not reference.startswith(DOCKER) and not allows(selected, reference):
-            lacking.setdefault(pattern_of(reference), where)
+    runs = actions_that_run(api, named)
+    found, refused = runs.found, runs.refused
     drift += [
         Drift(
             f"actions.selected.patterns_allowed lacks {pattern}",
             "listed",
             "missing",
             manual=(
-                f"{where} runs it: add {json.dumps(pattern)} to patterns_allowed of"
-                " [actions.selected] in .github/repository.project.toml; until then"
-                " the list of the allowed actions on GitHub only grows"
+                f"{found[reference]} runs it: add {json.dumps(pattern)} to"
+                " patterns_allowed of [actions.selected] in"
+                " .github/repository.project.toml; until then the list of the allowed"
+                " actions on GitHub only grows"
             ),
         )
-        for pattern, where in lacking.items()
+        for pattern, reference in lacking_patterns(selected, found).items()
     ]
     # What an action runs in turn that no one could read may be missing as well.
     drift += [

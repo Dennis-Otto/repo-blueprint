@@ -25,6 +25,7 @@ renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
 successor: true
+test_marker: ''
 test_workflows: Demo, Visual check
 topics: document-management, full-text-search, nextcloud, ocr, paperless-ngx, php,
   search

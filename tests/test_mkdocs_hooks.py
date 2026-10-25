@@ -1261,15 +1261,16 @@ def test_a_strict_build_fails_when_a_plugin_takes_pictures_out_of_a_page(
     config = SimpleNamespace(docs_dir=str(tmp_path / "docs"), plugins={}, site_url="")
     module.on_page_content(html, page=page, config=config, files=[page.file])
     wrapped = '<p><a class="glightbox" href="images/a.png"><img src="images/a.png"></a>'
-    assert module.BUILT.images == {"guide.html": 2}
+    assert module.BUILT.images == {"guide.html": ["a.png", "b.png"]}
 
     with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
         module.on_post_page(f"<html><body>{wrapped}</p></body></html>", page, config)
 
     assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    # It names the picture that is gone.
     assert (
-        "guide.md: a plugin took 1 of its 2 picture(s) out of the page, such as "
-        "mkdocs-glightbox" in caplog.text
+        "guide.md: a plugin took 1 of its 2 picture(s) out of the page (b.png), such "
+        "as mkdocs-glightbox" in caplog.text
     )
     assert module.BUILT.images == {}
     # A page that keeps them, and one that the hook saw no content of.
@@ -1289,7 +1290,22 @@ def test_a_strict_build_fails_when_a_plugin_takes_pictures_out_of_a_page(
     module.on_page_content(html, page=page, config=config, files=[page.file])
     with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
         module.on_post_page(themed, page, config)
-    assert "a plugin took 1 of its 2 picture(s)" in caplog.text
+    assert "a plugin took 1 of its 2 picture(s) out of the page (b.png)" in caplog.text
+    # A picture that a plugin renamed, as the privacy plugin downloads one of another
+    # server, is one of those that may be gone.
+    caplog.clear()
+    external = (
+        '<p><img src="https://example.org/a.png?v=1" alt="A">'
+        '<img src="https://example.org/b.png" alt="B"></p>'
+    )
+    downloaded = '<p><img src="assets/external/example.org/a.1a2b3c4d.png" alt="A">'
+    module.on_page_content(external, page=page, config=config, files=[page.file])
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        module.on_post_page(f"<html><body>{downloaded}</p></body></html>", page, config)
+    assert (
+        "a plugin took 1 of its 2 picture(s) out of the page (among a.png, b.png), "
+        "such as" in caplog.text
+    )
 
 
 def test_the_lightbox_wraps_each_picture_and_keeps_it() -> None:
@@ -1390,6 +1406,12 @@ def test_the_website_shows_no_badges() -> None:
         '<p><img alt="REUSE" src="https://api.reuse.software/badge/github.com/o/r">'
         '<img alt="Coverage" src="https://codecov.io/gh/o/r/graph/badge.svg?t=1">'
         "</p>\n"
+        # A row of badges in a block of HTML, as many READMEs on GitHub center them.
+        '<p align="center">\n  <a href="https://github.com/o/r/actions"><img alt="CI" '
+        'src="https://github.com/o/r/actions/workflows/ci.yml/badge.svg"></a>\n  '
+        '<img alt="License" src="https://img.shields.io/badge/license-MIT-blue">\n'
+        "</p>\n"
+        '<p align="center"><img alt="Hero" src="images/hero.png"></p>\n'
     )
     # A button of My Home Assistant shows no status: it stays, with its link.
     button = (
@@ -1402,7 +1424,8 @@ def test_the_website_shows_no_badges() -> None:
         "<h1>Demo</h1>\n"
         "<p>Text with  in it.</p>\n"
         '<p><a href="https://example.org/"><img alt="Logo" src="https://example.org/'
-        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n' + button
+        'logo.png"></a> <img alt="Card" src="images/card.png"></p>\n'
+        '<p align="center"><img alt="Hero" src="images/hero.png"></p>\n' + button
     )
 
 
@@ -1987,6 +2010,126 @@ def test_a_page_that_includes_files_takes_the_date_of_the_newest(
         tmp_path / "README.md",
         tmp_path / "NESTED.md",
         tmp_path / "CHANGELOG.md",
+    ]
+
+
+RELEASED = "# Changelog\n\nBy release.\n\n## Unreleased\n\n## 1.0.0\n\n- First.\n"
+DARK_MODE = "### Features\n\n- **Dark mode:** the pages follow the system.\n"
+TOKEN = "### Bug fixes\n\n- **Token:** stays secret.\n"
+
+
+def changelog_repository(root: Path, **fragments: str) -> SimpleNamespace:
+    """A repository with CHANGELOG.md, the fragments in changelog.d/ beside it and a
+    README.md, and the parts of its configuration that the hooks read."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "CHANGELOG.md").write_text(RELEASED, encoding="utf-8")
+    (root / "README.md").write_text("# Demo\n", encoding="utf-8")
+    if fragments:
+        folder = root / "changelog.d"
+        folder.mkdir()
+        (folder / ".gitkeep").touch()
+        for name, text in fragments.items():
+            (folder / name).write_text(text, encoding="utf-8")
+    return SimpleNamespace(
+        config_file_path=str(root / "mkdocs.yml"), mdx_configs={}, plugins={}
+    )
+
+
+def test_the_changelog_of_the_website_shows_the_fragments_under_unreleased(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    settings = changelog_repository(
+        tmp_path, **{"token.md": TOKEN, "dark-mode.md": DARK_MODE}
+    )
+    markdown = (
+        "# Changes\n\n"
+        '--8<-- "CHANGELOG.md"\n\n'
+        "- In a list:\n\n"
+        "    --8<-- 'CHANGELOG.md'\r\n"
+        # A part of the changelog, another file and one that is missing stay lines.
+        '--8<-- "CHANGELOG.md:3:5"\n'
+        '--8<-- "README.md"\n'
+        '--8<-- "missing.md"\n'
+        "--8<--\n"
+        "CHANGELOG.md\n"
+        "--8<--\n"
+    )
+
+    shown = module.on_page_markdown(markdown, page_of("changelog.html"), settings, [])
+
+    # The fragments by their names, each kind of change under one heading in the
+    # order of a release.
+    changelog = (
+        "# Changelog\n\nBy release.\n\n## Unreleased\n\n"
+        f"{DARK_MODE}\n{TOKEN}\n## 1.0.0\n\n- First.\n"
+    )
+    indented = "".join(
+        f"    {line}" if line.strip() else line
+        for line in changelog.splitlines(keepends=True)
+    )
+    assert shown == (
+        f"# Changes\n\n{changelog}\n- In a list:\n\n{indented}"
+        '--8<-- "CHANGELOG.md:3:5"\n--8<-- "README.md"\n--8<-- "missing.md"\n'
+        "--8<--\nCHANGELOG.md\n--8<--\n"
+    )
+    # A page that includes no changelog reads nothing.
+    assert module.with_fragments("# Guide\n", SimpleNamespace()) == "# Guide\n"
+
+
+def test_a_changelog_without_fragments_stays_a_line_that_includes_it(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    line = '--8<-- "CHANGELOG.md"\n'
+
+    without = changelog_repository(tmp_path / "without")
+    empty = changelog_repository(tmp_path / "empty", **{"notes.md": ""})
+
+    assert module.with_fragments(line, without) == line
+    assert module.with_fragments(line, empty) == line
+
+
+# The copy of blueprint/changelog.py in a folder of its own is the code with the
+# mutants in the copy of the mutation tests, which finds no configuration of mutmut.
+@pytest.mark.mutation_unsafe
+def test_the_changelog_code_comes_from_beside_the_hook_or_the_root(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    settings = changelog_repository(tmp_path / "repo", **{"token.md": TOKEN})
+    line = '--8<-- "CHANGELOG.md"\n'
+    # In a repository made from the blueprint, the hook and blueprint.py are in its
+    # .github/; in the blueprint itself, blueprint.py is at the root.
+    made = tmp_path / "made/.github"
+    (made / "blueprint").mkdir(parents=True)
+    shutil.copy(ROOT / "blueprint/changelog.py", made / "blueprint/changelog.py")
+    module.__file__ = str(made / "mkdocs_blueprint.py")
+    assert f"## Unreleased\n\n{TOKEN}" in module.with_fragments(line, settings)
+    code = module.changelog_code()
+    assert Path(code.__file__) == (made / "blueprint/changelog.py").resolve()
+    # Without blueprint.py, the page shows the changelog as it is.
+    module.__file__ = str(tmp_path / "alone/.github/mkdocs_blueprint.py")
+    assert module.changelog_code() is None
+    assert module.with_fragments(line, settings) == line
+
+
+def test_the_changelog_takes_the_date_of_its_newest_fragment(tmp_path: Path) -> None:
+    settings = changelog_repository(
+        tmp_path, **{"dark-mode.md": DARK_MODE, "token.md": TOKEN}
+    )
+    plugin = Dates(
+        {"changelog.md": 100, "CHANGELOG.md": 200, "dark-mode.md": 400}
+        | {"token.md": 300}
+    )
+    settings.plugins["git-revision-date-localized"] = plugin
+    page = page_of("changelog.html")
+    page.meta["git_revision_date_localized"] = "a date"
+
+    hooks().redate('--8<-- "CHANGELOG.md"\n', page, settings)
+
+    assert plugin.rendered == [
+        ("en", "git_revision_date_localized", "hash of dark-mode.md", 400)
     ]
 
 

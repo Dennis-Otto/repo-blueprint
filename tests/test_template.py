@@ -27,7 +27,7 @@ import warnings
 import zipfile
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
-from types import SimpleNamespace
+from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple
 from unittest import mock
 from xml.etree import ElementTree
@@ -38,7 +38,8 @@ import workflow_steps
 import yaml
 from copier import _main as copier_main
 from copier import run_copy
-from jinja2 import ChoiceLoader, FileSystemLoader
+from copier._jinja_ext import YieldExtension, get_yield_context
+from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
@@ -76,6 +77,9 @@ from blueprint.mutation import default_paths
 from blueprint.pages import layouts, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import Settings, allows
+from blueprint.versions import CONFIG, MANIFEST
+from blueprint.versions import files as versioned_files
+from blueprint.versions import fix as fix_versions
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -134,6 +138,69 @@ class Template:
 # blueprint, as in every repository of the Rollout. The question has no default.
 OWNER = "Dennis-Otto"
 
+# The code that Jinja compiled from each template in this process, by the settings of
+# its environment and the source; see compile_once().
+COMPILED: dict[tuple[object, ...], CodeType] = {}
+compile_anew = SandboxedEnvironment.compile
+
+
+def settings_of(environment: SandboxedEnvironment) -> tuple[object, ...]:
+    """What the code that Jinja compiles from a source depends on: the syntax of the
+    environment, as Jinja's own cache of lexers names it, its extensions, the filters
+    and tests whose names the compiler checks, and the options of the code that it
+    writes."""
+    return (
+        type(environment),
+        environment.block_start_string,
+        environment.block_end_string,
+        environment.variable_start_string,
+        environment.variable_end_string,
+        environment.comment_start_string,
+        environment.comment_end_string,
+        environment.line_statement_prefix,
+        environment.line_comment_prefix,
+        environment.trim_blocks,
+        environment.lstrip_blocks,
+        environment.newline_sequence,
+        environment.keep_trailing_newline,
+        tuple(sorted(environment.extensions)),
+        tuple(sorted(environment.filters)),
+        tuple(sorted(environment.tests)),
+        environment.optimized,
+        environment.is_async,
+        environment.autoescape,
+        environment.finalize,
+    )
+
+
+def compile_once(
+    environment: SandboxedEnvironment,
+    source: str | nodes.Template,
+    name: str | None = None,
+    filename: str | None = None,
+    raw: bool = False,
+    defer_init: bool = False,
+) -> str | CodeType:
+    """Jinja's compile, which compiles each template once for the whole process.
+    Copier makes a new environment for each project that it renders, which compiles
+    every template anew, the names of the files among them: 1400 of them, two thirds
+    of the time of a render. The same source compiles to the same code in an
+    environment with the same settings, and the code runs in each environment apart,
+    with its own values. The preprocess hooks of the environment and its extensions
+    run for each source still, as Copier's yield tag resets its state in one."""
+    if raw:
+        return compile_anew(environment, source, name, filename, True, defer_init)
+    if not isinstance(source, str):
+        return compile_anew(environment, source, name, filename, False, defer_init)
+    key = (settings_of(environment), source, name, filename, defer_init)
+    if key in COMPILED:
+        environment.preprocess(source, name, filename)
+    else:
+        COMPILED[key] = compile_anew(
+            environment, source, name, filename, False, defer_init
+        )
+    return COMPILED[key]
+
 
 def render(destination: Path, *, overwrite: bool = False, **data: str | bool) -> Path:
     data = {"owner": OWNER, **data}
@@ -148,6 +215,10 @@ def render(destination: Path, *, overwrite: bool = False, **data: str | bool) ->
             stack.enter_context(
                 mock.patch.object(copier_main, "is_git_available", return_value=False)
             )
+        # The templates that an earlier render of this process compiled already.
+        stack.enter_context(
+            mock.patch.object(SandboxedEnvironment, "compile", compile_once)
+        )
         run_copy(
             str(Template.folder),
             destination,
@@ -396,6 +467,69 @@ def script_of(found: str | Mapping[str, Any], step: str) -> str:
     in a parsed job, as the runner hands it to bash."""
     script: str = step_named(found, step)["run"]
     return script
+
+
+def test_a_project_renders_the_same_from_templates_that_compiled_before(
+    tmp_path: Path,
+) -> None:
+    def demo(folder: str) -> Path:
+        return render(
+            tmp_path / folder,
+            project_name="Demo Project",
+            description="A project of the tests.",
+            project_type="python-package",
+        )
+
+    # The first render compiles every template anew, as Copier alone does.
+    with mock.patch.dict(COMPILED, clear=True):
+        fresh = demo("fresh")
+        compiled = dict(COMPILED)
+        again = demo("again")
+        unchanged = compiled == COMPILED
+
+    assert compiled
+    # The second compiled nothing, and wrote the same files.
+    assert unchanged
+    assert files_of(again) == files_of(fresh)
+    for name in files_of(fresh):
+        assert (again / name).read_bytes() == (fresh / name).read_bytes(), name
+
+
+def test_a_template_compiles_apart_for_each_syntax_of_jinja() -> None:
+    source = "{{ word }} {= word =}"
+    with (
+        mock.patch.object(SandboxedEnvironment, "compile", compile_once),
+        mock.patch.dict(COMPILED, clear=True),
+    ):
+        curly = SandboxedEnvironment()
+        own = SandboxedEnvironment(variable_start_string="{=", variable_end_string="=}")
+
+        assert curly.from_string(source).render(word="hi") == "hi {= word =}"
+        assert own.from_string(source).render(word="hi") == "{{ word }} hi"
+        assert curly.from_string(source).render(word="ho") == "ho {= word =}"
+        assert len(COMPILED) == 2
+        # The Python source of a template, and a parsed template, compile each time,
+        # as in Jinja itself.
+        assert "word" in curly.compile(source, raw=True)
+        assert isinstance(curly.compile(curly.parse(source)), CodeType)
+        assert len(COMPILED) == 2
+
+
+def test_a_cached_template_runs_the_preprocess_hooks_of_its_extensions() -> None:
+    """Copier's yield tag keeps the name of a yield of the last string that it
+    rendered, and resets it in its preprocess hook before the next string."""
+    with (
+        mock.patch.object(SandboxedEnvironment, "compile", compile_once),
+        mock.patch.dict(COMPILED, clear=True),
+    ):
+        environment = SandboxedEnvironment(extensions=[YieldExtension])
+        environment.from_string("plain").render()
+        loop = "{% yield item from items %}{{ item }}{% endyield %}"
+        environment.from_string(loop).render(items=["a"])
+        assert get_yield_context(environment).yield_name == "item"
+        # From the cache now: the hook still resets the yield of the loop before.
+        assert environment.from_string("plain").render() == "plain"
+        assert get_yield_context(environment).yield_name is None
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -713,31 +847,71 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
     assert patterns == sorted(patterns, key=str.casefold)
 
 
+# The workflow and the job that send the analysis of each tool of code scanning.
+CODE_SCANNING_JOBS = {
+    "CodeQL": ("codeql.yml", "codeql"),
+    "zizmor": ("zizmor.yml", "zizmor"),
+}
+
+
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_a_new_alert_of_codeql_stops_the_merge(
+def test_a_new_alert_of_codeql_or_zizmor_stops_the_merge(
     projects: dict[str, Path], project: str
 ) -> None:
     root = ROOT if project == "blueprint" else projects[project]
     settings = Settings.load(root / ".github/repository.toml")
     main = next(item for item in settings.rulesets if item["name"] == "Protect main")
+    tools = [
+        {
+            "tool": "CodeQL",
+            "alerts_threshold": "errors",
+            "security_alerts_threshold": "high_or_higher",
+        },
+        # zizmor writes its findings as errors, warnings and notes, without a security
+        # severity yet, and the Findings workflow fails main on each one: every new one
+        # stops the merge, with a security severity as well.
+        {
+            "tool": "zizmor",
+            "alerts_threshold": "all",
+            "security_alerts_threshold": "all",
+        },
+    ]
     assert main["rules"][-1] == {
         "type": "code_scanning",
-        "parameters": {
-            "code_scanning_tools": [
-                {
-                    "tool": "CodeQL",
-                    "alerts_threshold": "errors",
-                    "security_alerts_threshold": "high_or_higher",
-                }
-            ]
-        },
+        "parameters": {"code_scanning_tools": tools},
     }
-    # A missing analysis stops a merge too, so CodeQL analyzes every pull request.
-    codeql = (root / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
-    analysis = parse(codeql)
-    assert "paths" not in analysis["on"]["pull_request"]
-    assert "if" not in job_in(analysis, "codeql")
+    # A missing analysis stops a merge too, so each tool analyzes every pull request
+    # into main, whatever it changes, also the release pull request.
+    for tool in tools:
+        name, job = CODE_SCANNING_JOBS[tool["tool"]]
+        analysis = parse(
+            (root / ".github/workflows" / name).read_text(encoding="utf-8")
+        )
+        assert analysis["on"]["pull_request"] == {"branches": ["main"]}, name
+        assert "if" not in job_in(analysis, job), name
+        # main after every merge, for the analysis that code scanning compares with.
+        assert analysis["on"]["push"] == {"branches": ["main"]}, name
     assert settings.security["secret_scanning_non_provider_patterns"] is True
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_zizmor_audits_a_pull_request_as_it_audits_main(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Code scanning compares the analysis of a pull request with that of main, so both
+    # come from the same zizmor: the version that its action pins to a commit. Newer
+    # audits come only with an update of the action, whose pull request shows what they
+    # find, and never as alerts of a pull request that changes no workflow.
+    root = ROOT if project == "blueprint" else projects[project]
+    zizmor = (root / ".github/workflows/zizmor.yml").read_text(encoding="utf-8")
+    step = step_in(job_in(zizmor, "zizmor"), "Check the workflows")
+    assert re.fullmatch(r"zizmorcore/zizmor-action@[0-9a-f]{40}", step["uses"])
+    options = step.get("with", {})
+    assert "version" not in options
+    # With the advisories of the actions, as on main, or the alerts of main that come
+    # from an advisory would look fixed in every pull request.
+    assert options.get("online-audits", True) is True
+    assert options.get("advanced-security", True) is True
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -755,6 +929,55 @@ def test_the_versions_agree(projects: dict[str, Path], kind: str) -> None:
         ]
     if config["release-type"] == "simple":
         assert (project / "version.txt").read_text(encoding="utf-8") == "0.0.0\n"
+
+
+def version_step(check: str) -> str:
+    """The set-up of scripts/check.sh and its step Version."""
+    start = check.index('step "Version"')
+    return (
+        check[: check.index('step "Text files"')]
+        + check[start : check.index('step "Git hooks"', start)]
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_fix_bot_writes_the_version_of_the_release_bot_back(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    project = projects[kind]
+    script = version_step((project / "scripts/check.sh").read_text(encoding="utf-8"))
+    # The fix writes the version into the files whose version the step reads, all of
+    # them, in the order of the step.
+    checked = re.findall(r"^version_in (\S+) ", script, re.M)
+    assert checked
+    assert versioned_files(project) == checked
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    for name in [MANIFEST, CONFIG, *checked]:
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(project / name, repository / name)
+    assert run_the_steps(repository, script).returncode == 0
+    # A version changed by hand in each file, the last first, so that each fails the
+    # step, which stops at the first file with another version.
+    for name in reversed(checked):
+        data = (project / name).read_bytes()
+        (repository / name).write_bytes(data.replace(b"0.0.0", b"0.4.2", 1))
+        failed = run_the_steps(repository, script)
+        assert failed.returncode == 1, name
+        assert (
+            f"{name} has version 0.4.2; the manifest of the release bot has 0.0.0."
+            in failed.stdout
+        )
+
+    fixed = fix_versions(repository)
+
+    assert [file.path for file in fixed.fixed] == checked
+    assert fixed.left == []
+    for name in checked:
+        assert (repository / name).read_bytes() == (project / name).read_bytes(), name
+    passed = run_the_steps(repository, script)
+    assert passed.returncode == 0, passed.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -1606,6 +1829,55 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("locked", [True, False])
+def test_the_lock_file_of_a_node_package_locks_what_its_package_json_asks_for(
+    projects: dict[str, Path], tmp_path: Path, locked: bool
+) -> None:
+    # The first step of a node package, before its tools run: npm ci stops at a lock
+    # file that package.json no longer agrees with, and its dry run changes nothing.
+    check = (projects["node-package"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Package lock"')
+    end = check.index('step "Lint and format"', start)
+    assert check.index('step "Git hooks"') < start
+    assert re.findall(r'^step "(.+)"$', check[start:end], re.M) == ["Package lock"]
+    script = check[: check.index('step "Text files"')] + check[start:end]
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    calls = tmp_path / "calls"
+    refusal = (
+        ""
+        if locked
+        else "echo 'npm error Missing: x@1.0.0 from lock file' >&2\nexit 1\n"
+    )
+    (stubs / "npm").write_text(
+        f"#!/usr/bin/env bash\necho \"$*\" >> '{calls.as_posix()}'\n"
+        f"echo 'up to date'\n{refusal}",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "npm").chmod(0o755)
+
+    result = run_the_steps(
+        repository, script, path=f"{stubs}{os.pathsep}{os.environ['PATH']}", ci=True
+    )
+
+    assert calls.read_text(encoding="utf-8") == (
+        "ci --dry-run --ignore-scripts --no-audit --no-fund\n"
+    )
+    if locked:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == (
+            "\n== Package lock\npackage-lock.json locks what package.json asks for.\n"
+        )
+    else:
+        assert result.returncode == 1
+        assert "Missing: x@1.0.0 from lock file" in result.stderr
+        assert "locks what" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize("listed", [True, False])
 def test_the_lint_of_a_node_package_waits_for_biome_in_its_package_json(
     projects: dict[str, Path], tmp_path: Path, listed: bool
@@ -1987,11 +2259,16 @@ def path_without(folder: Path, *commands: str) -> str:
 
 
 def run_the_steps(
-    repository: Path, script: str, *, path: str | None = None, ci: bool = False
+    repository: Path,
+    script: str,
+    *,
+    path: str | None = None,
+    ci: bool = False,
+    variables: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """The set-up of scripts/check.sh and steps after it, as script, in the repository:
     from a file that git leaves out, without the variables of a run of the CI or with
-    those of GitHub Actions, and with this PATH."""
+    those of GitHub Actions, and these variables, and with this PATH."""
     (repository / "scripts").mkdir(exist_ok=True)
     (repository / "scripts/steps.sh").write_text(script, encoding="utf-8", newline="\n")
     (repository / ".git/info").mkdir(exist_ok=True)
@@ -2005,6 +2282,7 @@ def run_the_steps(
     }
     if ci:
         environment |= {"CI": "true", "GITHUB_ACTIONS": "true"}
+    environment |= variables or {}
     if path is not None:
         environment["PATH"] = path
     assert BASH
@@ -2284,6 +2562,244 @@ def test_the_ci_never_skips_shellcheck(
     assert calls.read_text(encoding="utf-8") == "tool.sh\n"
 
 
+def annotate_function(check: str) -> str:
+    start = check.index("\nannotate() {\n")
+    return check[start : check.index("\n}\n", start) + 3]
+
+
+PYTHON_ANNOTATIONS = [
+    "  mypy --no-pretty --show-error-end 2>&1 | annotate mypy\n",
+    '  junit=("--junitxml=$report" -o junit_family=xunit1)\n',
+    '    annotate pytest "$report"\n',
+]
+# What each kind writes as annotations through blueprint.py annotate, besides
+# ShellCheck; Ruff, Psalm and Biome write their own, and tsc through the problem
+# matcher of actions/setup-node.
+TOOL_ANNOTATIONS = {
+    "home-assistant": PYTHON_ANNOTATIONS,
+    "github-action": PYTHON_ANNOTATIONS,
+    "python-package": PYTHON_ANNOTATIONS,
+    "nextcloud-app": [
+        "  vendor/bin/php-cs-fixer fix --dry-run --diff 2>&1 | annotate php-cs-fixer\n",
+        "vendor/bin/phpunit --log-junit build/phpunit.xml \\\n",
+        "    annotate phpunit build/phpunit.xml\n",
+    ],
+    "node-package": ["  npm test 2>&1 | annotate node-test\n"],
+}
+
+# The tools whose findings CONTRIBUTING.md names, besides the text files and
+# ShellCheck, and the kinds that have them.
+TOOLS_IN_CONTRIBUTING = {
+    "Ruff, mypy and pytest": ["home-assistant", "github-action", "python-package"],
+    "PHP CS Fixer, Psalm and PHPUnit": ["nextcloud-app"],
+    "Biome, the TypeScript compiler and the tests of Node": ["node-package"],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_shows_the_findings_of_its_tools_at_their_lines(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # The same function in every kind and in the blueprint, before the first step,
+    # with the module of the blueprint.
+    assert annotate_function(check) == annotate_function(own)
+    assert check.index("\nannotate() {\n") < check.index('\nstep "Text files"\n')
+    assert (project / ".github/blueprint/annotate.py").read_bytes() == (
+        ROOT / "blueprint/annotate.py"
+    ).read_bytes()
+    shellcheck = (
+        '    shellcheck --format=gcc "${scripts[@]}" 2>&1 | annotate shellcheck\n'
+    )
+    assert shellcheck in shell_step(check)
+    for line in TOOL_ANNOTATIONS.get(kind, []):
+        assert line in check, (kind, line)
+    for line in PYTHON_ANNOTATIONS:
+        assert line in own
+        assert (line in check) == (TOOL_ANNOTATIONS.get(kind) == PYTHON_ANNOTATIONS)
+    # CONTRIBUTING.md names the tools of this kind alone.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "the comment lists them: those of the text files and of ShellCheck" in (
+        contributing
+    )
+    for tools, kinds in TOOLS_IN_CONTRIBUTING.items():
+        assert (tools in contributing) == (kind in kinds), (kind, tools)
+    if kind == "node-package":
+        # The problem matcher of tsc comes with actions/setup-node.
+        ci = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        assert "uses: actions/setup-node@" in ci
+
+
+def the_ci_steps(project: Path, *steps: Callable[[str], str]) -> str:
+    """The set-up of scripts/check.sh of a project, the Python and blueprint.py that
+    the step Pages in one column finds, and the steps that each function cuts out."""
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    tool = (project / ".github/blueprint.py").as_posix()
+    python = Path(sys.executable).as_posix()
+    return "".join(
+        [check[: check.index('step "Text files"')], f"python={python}\ntool={tool}\n"]
+        + [step(check) for step in steps]
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_ci_shows_each_finding_of_shellcheck_at_its_line(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "tool.sh").write_text("echo $1\n", encoding="utf-8", newline="\n")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    # What ShellCheck writes in the format of gcc, and how it ends.
+    (stubs / "shellcheck").write_text(
+        "#!/usr/bin/env bash\n"
+        '[[ "$1" == --format=gcc ]] || exit 3\n'
+        'echo "$2:1:6: note: Double quote to prevent globbing and word splitting.'
+        ' [SC2086]"\n'
+        "exit 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "shellcheck").chmod(0o755)
+    script = the_ci_steps(projects["generic"], shell_step)
+
+    ci = run_the_steps(
+        repository, script, path=f"{stubs}{os.pathsep}{os.environ['PATH']}", ci=True
+    )
+
+    assert ci.returncode == 1, ci.stderr
+    assert ci.stdout == (
+        "\n== Shell scripts\n"
+        "tool.sh:1:6: note: Double quote to prevent globbing and word splitting."
+        " [SC2086]\n"
+        "::group::Annotations\n"
+        "::error file=tool.sh,line=1,col=6,title=ShellCheck SC2086::Double quote to "
+        "prevent globbing and word splitting. https://www.shellcheck.net/wiki/SC2086\n"
+        "::endgroup::\n"
+    )
+
+
+def python_tests_step(check: str) -> str:
+    start = check.index('step "Tests, with every line and branch covered"')
+    return check[start : check.index("\ncoverage report\n", start) + 17]
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("ci", [False, True])
+def test_the_ci_shows_each_test_of_pytest_that_fails_at_its_line(
+    projects: dict[str, Path], tmp_path: Path, ci: bool
+) -> None:
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    (repository / "tests").mkdir()
+    (repository / "tests/test_a.py").write_text(
+        "def test_passes():\n    assert True\n\n\ndef test_fails():\n    assert 1 == 2\n",
+        encoding="utf-8",
+    )
+    (repository / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    script = the_ci_steps(projects["python-package"], python_tests_step)
+    # The Python of the tests, with pytest, pytest-cov and pytest-xdist.
+    path = os.pathsep.join([str(Path(sys.executable).parent), os.environ["PATH"]])
+
+    result = run_the_steps(
+        repository,
+        script,
+        path=path,
+        ci=ci,
+        variables={"PYTEST_XDIST_AUTO_NUM_WORKERS": "2"},
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    annotation = (
+        "::error file=tests/test_a.py,line=6,title=pytest%3A "
+        "tests/test_a.py%3A%3Atest_fails::assert 1 == 2\n"
+    )
+    assert (annotation in result.stdout) == ci
+    assert "1 failed, 1 passed" in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_path_of_the_taint_analysis_fails_the_ci_too(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Psalm taint analysis"')
+    step = check[start : check.index('step "Tests, with every line covered"', start)]
+    repository = tmp_path / "repository"
+    subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+    psalm = repository / "vendor/bin/psalm"
+    psalm.parent.mkdir(parents=True)
+    # As Psalm 6 ends a taint analysis that writes a report: with 0 in a workflow of
+    # GitHub, which it tells by GITHUB_WORKFLOW, whatever it found.
+    psalm.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "::error file=lib/A.php,line=3,title=TaintedHtml::lib/A.php:3:1"\n'
+        '[[ -n "${GITHUB_WORKFLOW+set}" ]] && exit 0\n'
+        "exit 2\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    psalm.chmod(0o755)
+    script = check[: check.index('step "Text files"')] + step
+    result = run_the_steps(
+        repository, script, ci=True, variables={"GITHUB_WORKFLOW": "CI (PHP)"}
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "::error file=lib/A.php,line=3,title=TaintedHtml::" in result.stdout
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_each_check_explains_itself(
+    projects: dict[str, Path], kind: str
+) -> None:
+    check = (projects[kind] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the lock files, with their Python and blueprint.py, the same in every kind
+    # of project and in the blueprint.
+    assert check.index('\nstep "Lock files"\n') < check.index(
+        '\nstep "Explanations of the checks"\n'
+    )
+    assert explanations_step(check) == explanations_step(own)
+    assert '  "$python" "$tool" coach verify\n' in explanations_step(check)
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_a_step_without_its_explanation(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    script = the_ci_steps(project, explanations_step)
+    path = os.environ["PATH"]
+
+    explained = run_the_steps(project, script, path=path)
+    with (project / "scripts/check.sh").open(
+        "a", encoding="utf-8", newline="\n"
+    ) as file:
+        file.write('step "Unexplained"\n')
+    unexplained = run_the_steps(project, script, path=path, ci=True)
+
+    assert (explained.returncode, explained.stdout) == (
+        0,
+        "\n== Explanations of the checks\nEvery required check and every step of "
+        "scripts/check.sh is explained, and every explanation says how it fixes "
+        "itself or why it can't.\n",
+    )
+    assert unexplained.returncode == 1
+    assert unexplained.stderr == (
+        "blueprint.py: the step Unexplained of scripts/check.sh has no explanation; "
+        "add it to .github/checks.project.toml\n"
+    )
+
+
 def pages_step(check: str) -> str:
     start = check.index('step "Pages in one column"')
     return check[start : check.index('step "Changelog fragments"', start)]
@@ -2301,6 +2817,11 @@ def advisories_step(check: str) -> str:
 
 def locks_step(check: str) -> str:
     start = check.index('step "Lock files"')
+    return check[start : check.index('step "Explanations of the checks"', start)]
+
+
+def explanations_step(check: str) -> str:
+    start = check.index('step "Explanations of the checks"')
     return check[start : check.index('step "Version"', start)]
 
 
@@ -2670,8 +3191,17 @@ def test_the_tests_of_a_python_project_run_on_every_core(
         stub = stubs / "python"
         stub.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8", newline="\n")
         stub.chmod(0o755)
-    # The tools of the tests first, two processes for -n auto, and none of the
-    # variables of the pytest that runs this test.
+    # psutil, which the tools of Home Assistant install, on a computer whose one
+    # physical core runs two threads: -n auto would start one process, as it started
+    # two on the four logical cores of a runner of GitHub.
+    psutil = tmp_path / "psutil"
+    psutil.mkdir()
+    (psutil / "psutil.py").write_text(
+        "def cpu_count(logical=True):\n    return 2 if logical else 1\n",
+        encoding="utf-8",
+    )
+    # The tools of the tests first, and none of the variables of the pytest that runs
+    # this test.
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -2680,8 +3210,10 @@ def test_the_tests_of_a_python_project_run_on_every_core(
     environment["PATH"] = os.pathsep.join(
         [str(Path(sys.executable).parent), environment.get("PATH", "")]
     )
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(psutil), environment.get("PYTHONPATH")])
+    )
     environment["STUBS"] = stubs.as_posix()
-    environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] = "2"
 
     def step() -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -2698,9 +3230,12 @@ def test_the_tests_of_a_python_project_run_on_every_core(
     module = project / "src/demo_project/__init__.py"
     with module.open("a", encoding="utf-8", newline="\n") as code:
         code.write("\n\ndef untested() -> int:\n    return 1\n")
+    # The number of processes that a maintainer sets.
+    environment["PYTEST_XDIST_AUTO_NUM_WORKERS"] = "3"
     failed = step()
 
     assert passed.returncode == 0, passed.stdout + passed.stderr
+    # A process for each logical core.
     assert ("created: 2/2 workers" in passed.stdout) is plugins, passed.stdout
     assert re.search(r"^TOTAL .* 100%$", passed.stdout, re.M), passed.stdout
     # The data that the CI shows in the summary of the check.
@@ -2708,7 +3243,7 @@ def test_the_tests_of_a_python_project_run_on_every_core(
     # [tool.coverage] of pyproject.toml applies either way: fail_under fails the
     # step, and the report names the line that no test runs.
     assert failed.returncode != 0
-    assert ("created: 2/2 workers" in failed.stdout) is plugins, failed.stdout
+    assert ("created: 3/3 workers" in failed.stdout) is plugins, failed.stdout
     assert re.search(
         r"^src[\\/]demo_project[\\/]__init__\.py .* \d+$", failed.stdout, re.M
     ), failed.stdout
@@ -2734,9 +3269,12 @@ def test_every_python_project_can_run_its_tests_on_every_core(
     assert pytest_settings["timeout"] == 30
     # -n stays out of the settings, because mutmut runs pytest within its own process.
     assert not any(option.startswith("-n") for option in pytest_settings["addopts"])
-    assert "python -m pytest -n auto --cov --cov-report= --cov-fail-under=0" in (
-        project / "scripts/check.sh"
-    ).read_text(encoding="utf-8")
+    # A process for each logical core, at most eight unless a maintainer sets more.
+    assert (
+        'python -m pytest -n logical --maxprocesses="${PYTEST_XDIST_AUTO_NUM_WORKERS:-8}"'
+        ' \\\n    ${junit[@]+"${junit[@]}"} --cov --cov-report= --cov-fail-under=0'
+        " || status=$?\n"
+    ) in (project / "scripts/check.sh").read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(
@@ -3690,8 +4228,8 @@ def test_a_nextcloud_app_follows_untrusted_input(projects: dict[str, Path]) -> N
     steps = re.findall(r'^step "(Psalm[^"]*)"$', check, re.M)
     assert steps == ["Psalm", "Psalm taint canary", "Psalm taint analysis"]
     assert (
-        "\nvendor/bin/psalm --taint-analysis --threads=1 --no-cache"
-        " --report=build/psalm-taint.sarif\n" in check
+        "\nenv -u GITHUB_WORKFLOW vendor/bin/psalm --taint-analysis --threads=1"
+        " --no-cache --report=build/psalm-taint.sarif\n" in check
     )
     # Only a Nextcloud app has PHP.
     for kind in KINDS:
@@ -4392,7 +4930,7 @@ def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
         encoding="utf-8"
     )
     check = (project / "scripts/check.sh").read_text(encoding="utf-8")
-    assert "\nvendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
+    assert "\n  vendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -4632,18 +5170,18 @@ AGENT_COMMANDS = {
     "home-assistant": [
         "pip install --require-hashes -r requirements-test.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n auto --cov` runs them on every core",
+        "`pytest -n logical --maxprocesses=8 --cov` runs them on every core",
     ],
     "nextcloud-app": ["composer install", "vendor/bin/phpunit"],
     "github-action": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n auto --cov` runs them on every core",
+        "`pytest -n logical --maxprocesses=8 --cov` runs them on every core",
     ],
     "python-package": [
         "pip install --require-hashes -r requirements-dev.txt",
         "coverage run -m pytest && coverage report",
-        "`pytest -n auto --cov` runs them on every core",
+        "`pytest -n logical --maxprocesses=8 --cov` runs them on every core",
     ],
     "node-package": [
         "npm ci --ignore-scripts",
@@ -4714,7 +5252,7 @@ def test_the_blueprint_tells_coding_agents_its_rules() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     for rule in (
         "bash scripts/check.sh",
-        "`pytest -n auto --cov`",
+        "`pytest -n logical --maxprocesses=8 --cov`",
         "`git commit -s`",
         "a new file `changelog.d/<branch>.md`",
         "`python3 blueprint.py fragments`",
@@ -4879,6 +5417,10 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
         ".github/screenshots-paths.txt",
     ):
         assert not (project / sample).exists(), sample
+    # Nor does its guide describe the starter script that it lacks.
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "`scripts/screenshots.sh` renders the social preview" not in contributing
+    assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
     assert sorted(files_of(project / "tests")) == (
@@ -8657,8 +9199,8 @@ OTHER_CHECKS = {
     "Pull request title",
     "Secret scan",
 }
-# The workflows of the scanners of the pull requests that change what they read; the PR
-# coach reports them too.
+# The workflows of the scanners of the pull requests that change what they read, and of
+# zizmor, whose analysis the rules of main wait for; the PR coach reports them too.
 SCANNER_WORKFLOWS = {"Fuzzing", "Links", "OSV-Scanner", "Workflow security"}
 
 
@@ -8917,7 +9459,14 @@ def explain_parts_step(check: str, failed: list[tuple[str, str]]) -> dict[str, A
 
 # The checks that the job of each of these checks runs, in the order of its steps.
 PARTS = {
-    "lint": ["workflow-lint", "reuse", "markdown", "issue-assistant", "dco"],
+    "lint": [
+        "workflow-lint",
+        "allowed-actions",
+        "reuse",
+        "markdown",
+        "issue-assistant",
+        "dco",
+    ],
     "conventional title": ["conventional title", "changelog"],
     "home-assistant": ["hacs", "hassfest"],
 }
@@ -8989,8 +9538,8 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
     assert variant["name"] == name
     assert variant["steps"][-1] == explain_step(name)
     explained_under_their_comments(variants)
-    # The scanners of the pull requests, which aren't required, explain theirs too, and
-    # so does the check of the rules of Renovate.
+    # zizmor and the scanners of the pull requests, which aren't required checks,
+    # explain theirs too, and so does the check of the rules of Renovate.
     for workflow, job, check in (
         ("zizmor", "zizmor", "zizmor"),
         ("links", "links", "links"),
@@ -9050,6 +9599,7 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
     after = "${{ !cancelled() && steps.checkout.outcome == 'success'"
     for name in (
         "Lint the workflows",
+        "Check that the allowed actions let every action start",
         "Check that every file names its license",
         "Lint the Markdown of every document",
         "Check the issue assistant's set-up",
@@ -9086,6 +9636,40 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
         step.get("with", {}).get("fetch-depth") == 0
         for step in steps_using(lint, "actions/checkout")
     )
+
+
+def test_a_pull_request_fails_that_runs_an_action_that_the_list_lacks() -> None:
+    # The list of the allowed actions lets every action that a workflow runs start,
+    # also those that these run in turn (#275): from the files of the pull request,
+    # with the token of the job, which reads the files of the public actions, and the
+    # blueprint.py of the repository, or that of the blueprint itself.
+    lint = job_in(
+        (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8"), "lint"
+    )
+    step = step_in(lint, "Check that the allowed actions let every action start")
+    assert step["id"] == "allowed-actions"
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert step["run"] == (
+        "script=.github/blueprint.py\n"
+        '[[ -f "$script" ]] || script=blueprint.py\n'
+        'python3 "$script" settings actions\n'
+    )
+    # And so does every kind of project, new or updated from the latest release, and
+    # each repository that takes the blueprint, before a release brings the change.
+    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    variant = job_in(variants, "variant")
+    name = "Check that the allowed actions of the project let every action start"
+    step = step_in(variant, name)
+    assert "if" not in step
+    assert step["working-directory"] == "${{ env.PROJECT }}"
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert step["run"] == "python3 .github/blueprint.py settings actions"
+    names = names_of(variant)
+    for render in (
+        "Render the project from this commit",
+        "Render the project from the latest release and update it to this commit",
+    ):
+        assert names.index(render) < names.index(name)
 
 
 def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
@@ -9218,13 +9802,14 @@ def test_every_project_gets_the_pr_coach(projects: dict[str, Path], kind: str) -
 
 
 # What each kind of project fixes by a command when its checks fail, besides the text
-# files and the pages of every kind.
+# files, the pages, the lock files of pip-compile and the versions of every kind: the
+# format and the lint, and the lock files of Composer and npm.
 FIXED_STEPS = {
     "python": ["Ruff"],
     "github-action": ["Ruff"],
     "home-assistant": ["Ruff"],
-    "php": ["Coding standard"],
-    "node": ["Lint and format"],
+    "php": ["Composer", "Coding standard"],
+    "node": ["Package lock", "Lint and format"],
     "container": [],
     "generic": [],
 }
@@ -9263,8 +9848,10 @@ def test_every_project_fixes_what_a_command_can_fix(
     expected = [
         "Text files",
         "Pages in one column",
+        "Changelog fragments",
         "Accepted advisories",
         "Lock files",
+        "Version",
         *FIXED_STEPS.get(stack, []),
     ]
     assert list(dict.fromkeys(steps)) == expected, stack
@@ -9799,7 +10386,8 @@ def run_after_the_checks(
     """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
     answers as gh_answers() says, these stubs of other commands, and these files of
     the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python) for the commit
-    abc1234def of the branch feature of o/r, unless the variables say otherwise."""
+    abc1234def of the branch feature of o/r, which ended on 12 October 2026, unless the
+    variables say otherwise."""
     return workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -9809,6 +10397,7 @@ def run_after_the_checks(
         env={
             "RUN": "5",
             "NAME": "CI (python)",
+            "WHEN": "2026-10-12T09:20:00Z",
             "BRANCH": "feature",
             "HEAD_REPO": "o/r",
             "SHA": "abc1234def",
@@ -10233,6 +10822,62 @@ FLAKY_ROWS = [
     "| [`docs`](https://github.com/o/r/actions/runs/5/job/16)"
     f" | `Build the website` | {NOTHING} | `{EXITED}` |",
 ]
+# The report of the run, as its comment on the issue of flaky tests has it.
+FLAKY_REPORT = "\n".join(
+    [
+        "**CI (python)** failed at first and passed when it ran again, on `feature`"
+        " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
+        "",
+        "| Job | Step | Test | Error |",
+        "| --- | --- | --- | --- |",
+        *FLAKY_ROWS,
+    ]
+)
+# The run in the counts of the issue: when it ended, and its link.
+LAST_RUN = "[2026-10-12](https://github.com/o/r/actions/runs/5)"
+# The counts of the run: each job with each test that pytest names, the first time.
+FLAKY_COUNTS = [
+    "| `CI (python) / test (3.12)` | `tests/test_cards.py::test_board[dark]`"
+    f" | 1 | {LAST_RUN} |",
+    f"| `CI (python) / test (3.12)` | `tests/test_cards.py::test_score` | 1 | {LAST_RUN} |",
+    f"| `CI (python) / e2e (Safari)` | {NOTHING} | 1 | {LAST_RUN} |",
+    f"| `CI (python) / build` | {NOTHING} | 1 | {LAST_RUN} |",
+    f"| `CI (python) / docs` | {NOTHING} | 1 | {LAST_RUN} |",
+]
+FLAKY_INTRO = (
+    "The flaky-test bot counts here every job and test that failed at first and then"
+    " passed without a change of the code, and describes each run in a comment, with"
+    " the step, the test and the error that failed. Fix the test, then close this issue."
+)
+COUNTS_FROM = (
+    "<!-- The flaky-test bot rewrites the counts from here to the next comment. -->"
+)
+COUNTS_UNTIL = "<!-- The end of the counts. -->"
+
+
+def flaky_counts(*rows: str) -> list[str]:
+    """The lines of the counts in the body of the issue of flaky tests, with these rows
+    of the table, between the comments of the bot."""
+    return [
+        COUNTS_FROM,
+        "",
+        "**How often each job and test flaked**, the latest first:",
+        "",
+        "| Job | Test | Times | Last run |",
+        "| --- | --- | --- | --- |",
+        *rows,
+        "",
+        COUNTS_UNTIL,
+    ]
+
+
+def count_of(job: str, test: str, times: int, run: int, day: int) -> str:
+    """A row of the counts: a job and test of CI (python), how often it flaked, and the
+    run on that day of October 2026 that it last flaked in."""
+    return (
+        f"| `CI (python) / {job}` | {f'`{test}`' if test else NOTHING} | {times}"
+        f" | [2026-10-{day:02}](https://github.com/o/r/actions/runs/{run}) |"
+    )
 
 
 @WITH_JQ
@@ -10243,27 +10888,26 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
         tmp_path,
         "report",
         "Add the jobs that failed at first to the issue of flaky tests",
-        {**FIRST_ATTEMPT, "issue list": []},
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
         URL="https://github.com/o/r/actions/runs/5",
     )
 
+    # The body counts the jobs and tests, and the run gets a comment, as every later
+    # one does.
     assert written["issue-create"] == "\n".join(
-        [
-            "The flaky-test bot lists here every job that failed and then passed without"
-            " a change of the code, with the step, the test and the error that failed."
-            " Fix its test, then close this issue.",
-            "",
-            "**CI (python)** failed at first and passed when it ran again, on `feature`"
-            " at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):",
-            "",
-            "| Job | Step | Test | Error |",
-            "| --- | --- | --- | --- |",
-            *FLAKY_ROWS,
-            "",
-        ]
+        [FLAKY_INTRO, "", *flaky_counts(*FLAKY_COUNTS), ""]
     )
     assert any(
         call.startswith("issue create --title Flaky tests --label maintenance ")
+        for call in calls
+    )
+    assert written["issue-comment"] == FLAKY_REPORT
+    assert any(
+        call.startswith("issue comment https://github.com/o/r/issues/9 --body ")
         for call in calls
     )
     assert "\n".join(FLAKY_ROWS) in summary
@@ -10271,6 +10915,20 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
 
 @WITH_JQ
 def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
+    # A person edited the issue in the browser, which ends its lines with CRLF.
+    before = [
+        FLAKY_INTRO,
+        "",
+        "A note of the maintainer.",
+        "",
+        *flaky_counts(
+            count_of("lint", "tests/test_x.py::test_y", 4, 2, 1),
+            count_of("docs", "", 2, 3, 2),
+            count_of("test (3.12)", "tests/test_cards.py::test_score", 1, 4, 3),
+        ),
+        "",
+        "And one below.",
+    ]
     calls, _, written = run_a_bot_after_the_checks(
         tmp_path,
         "report",
@@ -10281,13 +10939,130 @@ def test_the_flaky_test_bot_keeps_one_issue(tmp_path: Path) -> None:
                 {"number": 8, "title": "Flaky tests of the website"},
                 {"number": 7, "title": "Flaky tests"},
             ],
+            "issue view 7": {"body": "\r\n".join(before)},
+            "issue edit 7": "",
         },
         URL="https://github.com/o/r/actions/runs/5",
     )
 
     assert "issue-create" not in written
     assert any(call.startswith("issue comment 7 --body ") for call in calls)
-    assert written["issue-comment"].endswith("\n".join(FLAKY_ROWS))
+    assert written["issue-comment"] == FLAKY_REPORT
+    assert any(call.startswith("issue view 7 --json body --jq .body") for call in calls)
+    # The jobs and tests of this run count once more and come first, the others keep
+    # their counts below them, and the rest of the body stays as it was.
+    assert written["issue-edit"] == "\n".join(
+        [
+            *before[:4],
+            *flaky_counts(
+                FLAKY_COUNTS[0],
+                FLAKY_COUNTS[1].replace(" | 1 | ", " | 2 | "),
+                *FLAKY_COUNTS[2:4],
+                FLAKY_COUNTS[4].replace(" | 1 | ", " | 3 | "),
+                count_of("lint", "tests/test_x.py::test_y", 4, 2, 1),
+            ),
+            "",
+            "And one below.",
+            "",
+        ]
+    )
+    # The comment comes first: a body that GitHub refused would lose no run.
+    edits = [index for index, call in enumerate(calls) if call.startswith("issue ")]
+    assert [calls[index].split()[1] for index in edits] == [
+        "list",
+        "comment",
+        "view",
+        "edit",
+    ]
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_adds_the_counts_to_an_issue_that_has_none(
+    tmp_path: Path,
+) -> None:
+    # An issue that the bot opened before it counted: the counts start with this run.
+    before = (
+        "The flaky-test bot lists here every job that failed and then passed without a"
+        " change of the code.\n\n| Job | Step | Test | Error |\n| --- | --- | --- | --- |"
+        "\n| [`lint`](https://github.com/o/r/actions/runs/2/job/3) | `Run`"
+        f" | {NOTHING} | {NOTHING} |"
+    )
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {"body": before},
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [before, "", *flaky_counts(*FLAKY_COUNTS), ""]
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_the_text_of_a_body_without_the_end_of_the_counts(
+    tmp_path: Path,
+) -> None:
+    # A person deleted the end comment: their text below the table stays.
+    lint = count_of("lint", "tests/test_x.py::test_y", 4, 2, 1)
+    before = [
+        FLAKY_INTRO,
+        "",
+        *flaky_counts(lint)[:-1],
+        "A note of the maintainer, where the end was.",
+    ]
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {"body": "\n".join(before)},
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [
+            FLAKY_INTRO,
+            "",
+            *flaky_counts(*FLAKY_COUNTS, lint),
+            "A note of the maintainer, where the end was.",
+            "",
+        ]
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_keeps_the_hundred_latest_counts(tmp_path: Path) -> None:
+    # A body of an issue holds 65,536 characters at most.
+    older = [count_of(f"job {number}", "", 1, number, 1) for number in range(100)]
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {
+                "body": "\n".join([FLAKY_INTRO, "", *flaky_counts(*older)])
+            },
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [FLAKY_INTRO, "", *flaky_counts(*FLAKY_COUNTS, *older[:95]), ""]
+    )
 
 
 @WITH_JQ
@@ -10377,11 +11152,15 @@ def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_t
 
     # Not the job that waits for the legs.
     assert [
-        line for line in written["issue-create"].splitlines() if line.startswith("| [")
+        line for line in written["issue-comment"].splitlines() if line.startswith("| [")
     ] == [
         "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
         f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
     ]
+    assert (
+        f"| `Variants / update (generic)` | {NOTHING} | 1 | {LAST_RUN} |"
+        in written["issue-create"].splitlines()
+    )
 
 
 @WITH_JQ
@@ -10418,7 +11197,7 @@ def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
         BRANCH="`@team`\n# x",
     )
 
-    body = written["issue-create"]
+    body = written["issue-comment"]
     assert "on `@team # x` at abc1234" in body
     rows = body.splitlines()
     assert (
@@ -10432,6 +11211,13 @@ def test_the_flaky_test_bot_writes_names_and_logs_as_plain_code(
     ) in rows
     # The code of the branch and of the cells.
     assert body.count("`") == 2 * 8
+    counts = written["issue-create"]
+    assert (
+        "| `CI (python) / x \\| @team\\n[a](https://e.vil)` | `tests/x.py::@team`"
+        f" | 1 | {LAST_RUN} |"
+    ) in counts.splitlines()
+    # The code of the cells of the jobs and of the one test.
+    assert counts.count("`") == 2 * 3
 
 
 @WITH_JQ
@@ -10447,13 +11233,293 @@ def test_the_flaky_test_bot_names_no_branch_of_a_fork(tmp_path: Path) -> None:
         HEAD_REPO="fork/r",
     )
 
-    body = written["issue-create"]
+    assert "@team" not in written["issue-create"]
+    body = written["issue-comment"]
     assert (
         "**CI (python)** failed at first and passed when it ran again, on a branch of"
         " a fork at abc1234 ([the run](https://github.com/o/r/actions/runs/5)):"
     ) in body.splitlines()
     assert "@team" not in body
     assert "e.vil" not in body
+
+
+# The log of the browser tests of a Docker E2E, as ha-autodarts' tests/e2e/browser.sh
+# writes it: each step names itself as it starts and once more when it passed, one of
+# them through Docker Compose, which puts the name of the container first. The steps
+# after the first error ran after the failure.
+BROWSER_LOG = "".join(
+    f"2026-10-12T09:16:{second:02}.0000000Z {line}\n"
+    for second, line in enumerate(
+        [
+            "##[group]Run bash tests/e2e/browser.sh",
+            "Browser step: Open the board",
+            "Browser step: Open the board (1.2 s)",
+            "browser-1  | Browser step:  Show the score ",
+            "browser-1  | Traceback (most recent call last):",
+            'browser-1  |   File "/tests/e2e/browser.py", line 3720, in <module>',
+            "browser-1  |     step.run()",
+            "browser-1  | \x1b[31mplaywright._impl._errors.TimeoutError\x1b[0m: Page.goto:"
+            " Timeout 30000ms exceeded.",
+            "browser-1  | During handling of the above exception, another exception"
+            " occurred:",
+            "browser-1  | BrowserFailure: the board took too long",
+            "browser-1  | Call log:",
+            'browser-1  |   - navigating to "http://homeassistant:8123/", waiting until'
+            ' "load"',
+            "##[error]Process completed with exit code 1.",
+            "Browser step: Stop the board",
+            "ValueError: after the failure",
+        ]
+    )
+)
+
+
+@WITH_JQ
+@pytest.mark.parametrize("marker", ["Browser step:", ""], ids=["marker", "none"])
+def test_the_flaky_test_bot_names_the_step_that_other_tests_name_last(
+    tmp_path: Path, marker: str
+) -> None:
+    # ha-autodarts#223: Safari timed out in Page.goto, and only the exit code of the
+    # browser tests named the failure.
+    _, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        21,
+                        "e2e (Safari)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        22,
+                        "e2e (Chrome)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        23,
+                        "e2e (Firefox)",
+                        "failure",
+                        ("Start the demo", "failure"),
+                    ),
+                    job_of_a_run(24, "test (3.12)", "failure", ("Run", "failure")),
+                ]
+            },
+            "repos/o/r/check-runs/21/annotations": annotations_of_a_job(EXITED),
+            # browser.sh explains a failed step in an annotation of its own.
+            "repos/o/r/check-runs/22/annotations": annotations_of_a_job(
+                "The browser tests failed at the step Show the score", EXITED
+            ),
+            "repos/o/r/check-runs/23/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/24/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/21/logs": BROWSER_LOG,
+            "repos/o/r/actions/jobs/22/logs": BROWSER_LOG,
+            # No step started: the demo failed before the tests.
+            "repos/o/r/actions/jobs/23/logs": (
+                "Error: the demo did not start\n"
+                "##[error]Process completed with exit code 1.\n"
+            ),
+            # pytest names its own tests, also after a line with the marker.
+            "repos/o/r/actions/jobs/24/logs": (
+                "Browser step: Open the board\n"
+                "FAILED tests/test_a.py::test_b - AssertionError: no\n"
+            ),
+            "issue list": [],
+        },
+        NAME="Docker E2E",
+        URL="https://github.com/o/r/actions/runs/5",
+        MARKER=marker,
+    )
+
+    step = "`Show the score`" if marker else NOTHING
+    rows = [
+        "| [`e2e (Safari)`](https://github.com/o/r/actions/runs/5/job/21)"
+        f" | `Run the browser tests` | {step} | `"
+        + (
+            "playwright._impl._errors.TimeoutError: Page.goto: Timeout 30000ms exceeded."
+            if marker
+            else EXITED
+        )
+        + "` |",
+        "| [`e2e (Chrome)`](https://github.com/o/r/actions/runs/5/job/22)"
+        f" | `Run the browser tests` | {step}"
+        " | `The browser tests failed at the step Show the score` |",
+        "| [`e2e (Firefox)`](https://github.com/o/r/actions/runs/5/job/23)"
+        f" | `Start the demo` | {NOTHING} | `{EXITED}` |",
+        "| [`test (3.12)`](https://github.com/o/r/actions/runs/5/job/24)"
+        " | `Run` | `tests/test_a.py::test_b` | `AssertionError: no` |",
+    ]
+    assert "\n".join(rows) in written["issue-comment"]
+    assert "\n".join(rows) in summary
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| `")
+    ] == [
+        f"| `Docker E2E / e2e (Safari)` | {step} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / e2e (Chrome)` | {step} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / e2e (Firefox)` | {NOTHING} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / test (3.12)` | `tests/test_a.py::test_b` | 1 | {LAST_RUN} |",
+    ]
+
+
+def a_log_of(*lines: str) -> str:
+    """The log of a job with these lines, each after its time, as GitHub keeps it."""
+    return "".join(
+        f"2026-10-12T09:16:{second:02}.0000000Z {line}\n"
+        for second, line in enumerate(lines)
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_step_of_the_worker_that_failed(
+    tmp_path: Path,
+) -> None:
+    # homedarts-for-autodarts runs two workers of browser tests side by side, each line
+    # after its shard. The one that failed stops, the other goes on and passes, and the
+    # error of the job comes only at the end, after the logs of Home Assistant.
+    workers = a_log_of(
+        "##[group]Run bash tests/e2e/screenshots.sh",
+        "Browser step: Take the screenshots",
+        "##[group]Run bash tests/e2e/browser.sh",
+        "[1/4] Browser step: Open the board",
+        "[2/4] Browser step: Open the board",
+        "[1/4] Browser step: Open the board (1.0 s)",
+        "[1/4] Browser step: Show the score",
+        "[2/4] Browser step: Open the board (1.1 s)",
+        "[2/4] Browser step: Pick a game",
+        "[1/4] Traceback (most recent call last):",
+        '[1/4]   File "/repo/tests/e2e/browser.py", line 3629, in main',
+        "[2/4] Browser step: Pick a game (2.2 s)",
+        "[1/4] playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms"
+        " exceeded.",
+        "[2/4] Browser check of shard 2/4 passed, 2 steps in 3 s: Open the board, Pick a"
+        " game.",
+        "homeassistant-1  | homeassistant.exceptions.HomeAssistantError: the board left",
+        'The browser check failed in shard 1/4 at the step "Show the score".',
+        "##[error]Process completed with exit code 1.",
+    )
+    # The browser tests passed, and a later step of the job failed.
+    later = a_log_of(
+        "##[group]Run bash tests/e2e/browser.sh",
+        "Browser step: Open the board",
+        "Browser step: Open the board (1.2 s)",
+        "##[group]Run actions/upload-artifact",
+        "Error: no files were found",
+        "##[error]Process completed with exit code 1.",
+    )
+    # The tests failed after their last step had passed.
+    after = a_log_of(
+        "##[group]Run bash tests/e2e/browser.sh",
+        "Browser step: Open the board",
+        "Browser step: Open the board (1.2 s)",
+        "ValueError: after the steps",
+        "##[error]Process completed with exit code 1.",
+    )
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        31,
+                        "browser (cards)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        32,
+                        "browser (upload)",
+                        "failure",
+                        ("Upload the artifacts", "failure"),
+                    ),
+                    job_of_a_run(
+                        33,
+                        "browser (after)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/31/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/32/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/33/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/31/logs": workers,
+            "repos/o/r/actions/jobs/32/logs": later,
+            "repos/o/r/actions/jobs/33/logs": after,
+            "issue list": [],
+        },
+        NAME="Docker E2E",
+        URL="https://github.com/o/r/actions/runs/5",
+        MARKER="Browser step:",
+    )
+
+    assert (
+        "\n".join(
+            [
+                "| [`browser (cards)`](https://github.com/o/r/actions/runs/5/job/31)"
+                " | `Run the browser tests` | `Show the score`"
+                " | `playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms"
+                " exceeded.` |",
+                "| [`browser (upload)`](https://github.com/o/r/actions/runs/5/job/32)"
+                f" | `Upload the artifacts` | {NOTHING} | `{EXITED}` |",
+                "| [`browser (after)`](https://github.com/o/r/actions/runs/5/job/33)"
+                " | `Run the browser tests` | `Open the board`"
+                " | `ValueError: after the steps` |",
+            ]
+        )
+        in written["issue-comment"]
+    )
+    # The same step counts the same, whatever its seconds.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| `")
+    ] == [
+        f"| `Docker E2E / browser (cards)` | `Show the score` | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / browser (upload)` | {NOTHING} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / browser (after)` | `Open the board` | 1 | {LAST_RUN} |",
+    ]
+
+
+def test_the_flaky_test_bot_of_a_project_takes_the_marker_of_its_tests(
+    tmp_path: Path,
+) -> None:
+    report = "Add the jobs that failed at first to the issue of flaky tests"
+    assert (
+        workflow_steps.step("after-checks.yml", "report", report)["env"]["MARKER"] == ""
+    )
+    project = render(
+        tmp_path,
+        project_name="Demo",
+        description="A demo.",
+        project_type="home-assistant",
+        test_marker="Browser step: ",
+    )
+
+    found = workflow_steps.step("after-checks.yml", "report", report, project)
+    assert found["env"]["MARKER"] == "Browser step: "
+
+
+@pytest.mark.parametrize(
+    "marker", ['Say "step"', "Step\\", "`step`", "${{ github.token }}", "   "]
+)
+def test_the_marker_of_the_tests_of_a_project_stays_text(
+    tmp_path: Path, marker: str
+) -> None:
+    # The marker goes into a string of YAML in the workflow.
+    with pytest.raises(ValueError, match="test_marker"):
+        render(
+            tmp_path,
+            project_name="Demo",
+            description="A demo.",
+            project_type="generic",
+            test_marker=marker,
+        )
 
 
 def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
@@ -10516,7 +11582,7 @@ def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
 
 
 # What a newer push to main does to the run of the commit before, for each workflow
-# that a push to main starts (decision 0067); a new one takes a side here.
+# that a push to main starts (decision 0075); a new one takes a side here.
 ON_PUSH_TO_MAIN = {
     # The checks and the scanners: a run of main only tells the state of main, which
     # the run of the newer commit tells as well, so it cancels the older run, as the
@@ -10676,9 +11742,9 @@ RELEASE_PULL_REQUEST = (
     "github.event.pull_request.head.repo.full_name != github.repository"
 )
 # The scanners of pull requests, by workflow and job, each for the files it reads.
+# zizmor is none of them: the rules of main wait for its analysis of every pull request.
 SCANNERS = {
     "fuzz.yml": "fuzz",
-    "zizmor.yml": "zizmor",
     "osv-scanner.yml": "pull-request",
     "links.yml": "links",
 }
@@ -10691,6 +11757,9 @@ def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> 
     skipped = {"variants.yml": "variant", **SCANNERS}
     for name, job in skipped.items():
         assert RELEASE_PULL_REQUEST in condition_of(job_in(flows[name], job)), name
+    # Every tool of the rule of code scanning analyzes it, or its merge would wait.
+    for name, job in CODE_SCANNING_JOBS.values():
+        assert "if" not in job_in(flows[name], job), name
     # The hints at the prose, steps of lint, which start with the changed documents.
     documents = step_in(job_in(flows["lint.yml"], "lint"), "Find the changed documents")
     assert RELEASE_PULL_REQUEST in condition_of(documents)
@@ -10700,7 +11769,7 @@ def test_one_check_stands_for_every_variant() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     gate = job_in(variants, "variants")
     assert gate["name"] == "variants"
-    assert gate["needs"] == "variant"
+    assert gate["needs"] == ["variant", "pictures"]
     # Also after a variant failed, so that the check reports the failure.
     assert condition_of(gate) == "always()"
     settings = tomllib.loads(
@@ -10819,12 +11888,6 @@ def test_a_scanner_runs_in_the_pull_requests_that_change_what_it_reads(
         name = path.rsplit("/", 1)[-1]
         if scanner == "fuzz.yml":
             return path.endswith(".py") or path.startswith("fuzz/")
-        if scanner == "zizmor.yml":
-            return path.startswith(".github/workflows/") or path in (
-                "action.yml",
-                ".github/dependabot.yml",
-                ".github/zizmor.yml",
-            )
         if scanner == "osv-scanner.yml":
             return bool(re.search(r"requirements[^/]*\.txt$", name)) or name in (
                 "package-lock.json",
@@ -11951,6 +13014,188 @@ def test_the_screenshot_bot_is_in_every_repository_and_waits_for_its_script(
     assert "`scripts/screenshots.sh`" in decided.stdout
 
 
+# What the starter script of each kind photographs besides the website, by the server
+# that it starts in Docker, and the files of the project that the pictures show.
+STARTER_PICTURES: dict[str, tuple[str, str, str]] = {
+    "home-assistant": (
+        "home-assistant",
+        "ghcr.io/home-assistant/home-assistant:",
+        "custom_components/**",
+    ),
+    "nextcloud-app": ("nextcloud", "docker.io/library/nextcloud:", "appinfo/**"),
+}
+
+
+def starter_python(script: str) -> str:
+    """The Python that the starter script runs in the browser's container."""
+    return script.split("<<'PYTHON'\n", 1)[1].split("\nPYTHON\n", 1)[0]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_new_repository_photographs_its_website_and_what_its_kind_shows(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The starter script photographs the website of every kind, and by its kind the
+    # integration in a Home Assistant or the app in a Nextcloud, each in Docker and
+    # in both themes, with the Playwright that the blueprint pins and keeps current.
+    project = projects[kind]
+    script = (project / "scripts/screenshots.sh").read_text(encoding="utf-8")
+    assert "\npictures=docs/images/screenshots\n" in script
+    assert '"website", "http://127.0.0.1:8000/"' in script
+    assert '(("light", ""), ("dark", ".dark"))' in script
+    assert "page.clock.set_fixed_time(CLOCK)" in script
+    assert "-r /tmp/screenshots-browser-requirements.txt" in script
+    assert 'docker network create --internal "$run"' in script
+    assert (project / ".github/screenshots-browser-requirements.txt").read_text(
+        encoding="utf-8"
+    ) == (ROOT / "stacks/screenshots/requirements-browser.txt").read_text(
+        encoding="utf-8"
+    )
+    paths = (project / ".github/screenshots-paths.txt").read_text(encoding="utf-8")
+    for pattern in ("docs/**", "!docs/images/screenshots/**", "mkdocs.yml"):
+        assert f"\n{pattern}\n" in paths, pattern
+    assert "\n.github/screenshots-browser-requirements.txt\n" in paths
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "\n- `scripts/screenshots.sh` renders the social preview" in contributing
+    for other, (name, image, sources) in STARTER_PICTURES.items():
+        assert (f'"{name}",' in script) == (other == kind), name
+        assert (image in script) == (other == kind), image
+        assert (f"\n{sources}\n" in paths) == (other == kind), sources
+    if kind == "home-assistant":
+        assert '"/api/config/config_entries/flow", {"handler": DOMAIN}' in script
+        assert 'while call("/api/config", token=token)["state"] != "RUNNING":' in script
+        assert 'DOMAIN = "demo_project"' in script
+        assert '"$root/custom_components:/config/custom_components:ro"' in script
+    if kind == "nextcloud-app":
+        assert "occ app:enable demo_project >/dev/null" in script
+        assert '"$root:/var/www/html/custom_apps/demo_project:ro"' in script
+        # Only for this run, never in the repository.
+        assert 'password="$(od -An -N16 -tx1 /dev/urandom' in script
+    # The script passes ShellCheck, and its Python compiles and has nothing unused,
+    # in every kind.
+    # ShellCheck of shellcheck-py, beside the Python of the tests.
+    tools = os.pathsep.join([str(Path(sys.executable).parent), os.environ["PATH"]])
+    checked = subprocess.run(
+        [
+            shutil.which("shellcheck", path=tools) or "shellcheck",
+            str(project / "scripts/screenshots.sh"),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert checked.returncode == 0, checked.stdout.decode(errors="replace")
+    python = starter_python(script)
+    compile(python, "screenshots.sh", "exec")
+    linted = subprocess.run(
+        [
+            *(sys.executable, "-m", "ruff", "check", "--isolated", "--no-cache"),
+            *("--select", "F,E9,B", "--stdin-filename", "shoot.py", "-"),
+        ],
+        input=python.encode(),
+        capture_output=True,
+        check=False,
+    )
+    assert linted.returncode == 0, linted.stdout.decode(errors="replace")
+
+
+def images_that_renovate_finds(
+    config: str, path: str, text: str
+) -> list[tuple[str, str, str]]:
+    """The images that the custom managers of a configuration of Renovate find in
+    the file at path, by name, tag and digest."""
+    found = []
+    for manager in renovate_rules(config)["customManagers"]:
+        files = [re.compile(name.strip("/")) for name in manager["managerFilePatterns"]]
+        if not any(name.search(path) for name in files):
+            continue
+        for pattern in manager["matchStrings"]:
+            for match in re.finditer(pattern.replace("(?<", "(?P<"), text):
+                found.append(
+                    (match["depName"], match["currentValue"], match["currentDigest"])
+                )
+    return found
+
+
+def test_renovate_keeps_the_servers_of_the_starter_pictures_current(
+    projects: Mapping[str, Path],
+) -> None:
+    # Renovate finds the image of Home Assistant and of Nextcloud by tag and digest,
+    # in the template of the starter script for the blueprint, and in the script of
+    # a new repository for that repository.
+    name = "template/scripts/[% if sample_code %]screenshots.sh[% endif %].jinja"
+    template = (ROOT / name).read_text(encoding="utf-8")
+    images = re.findall(
+        r'^\w+="([^:"]+):([^@"]+)@(sha256:[0-9a-f]{64})"$', template, re.M
+    )
+    assert [name for name, _, _ in images] == [
+        "ghcr.io/home-assistant/home-assistant",
+        "docker.io/library/nextcloud",
+    ]
+    own = (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    assert images_that_renovate_finds(own, name, template) == images
+    shared = (ROOT / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    for kind, image in zip(STARTER_PICTURES, images, strict=True):
+        script = (projects[kind] / "scripts/screenshots.sh").read_text(encoding="utf-8")
+        found = images_that_renovate_finds(shared, "scripts/screenshots.sh", script)
+        assert found == [image], kind
+    # A version of Nextcloud that the app allows.
+    info = (
+        ROOT / "template/[% if stack == 'php' %]appinfo[% endif %]/info.xml.jinja"
+    ).read_text(encoding="utf-8")
+    allowed = re.search(r'<nextcloud min-version="(\d+)" max-version="(\d+)"/>', info)
+    assert allowed
+    major = int(images[1][1].split(".")[0])
+    assert int(allowed[1]) <= major <= int(allowed[2])
+    # Neither Renovate moves it to a major version beyond that max-version.
+    nextcloud = (
+        projects["nextcloud-app"] / ".github/renovate-blueprint.json5"
+    ).read_text(encoding="utf-8")
+    held = {
+        "matchDepNames": ["docker.io/library/nextcloud"],
+        "matchUpdateTypes": ["major"],
+        "enabled": False,
+    }
+    for rules, files in (
+        (own, ["template/scripts/**"]),
+        (nextcloud, ["scripts/screenshots.sh"]),
+    ):
+        found = renovate_rules(rules)["packageRules"]
+        assert {"matchFileNames": files, **held} in found
+
+
+def test_the_browser_of_the_pictures_and_its_playwright_move_together() -> None:
+    # The image of the social preview holds the browsers of one version of
+    # Playwright, which only the package of the same version starts; Renovate moves
+    # both in one pull request.
+    dockerfile = (ROOT / ".github/social-preview/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    image = re.search(
+        r"^FROM mcr\.microsoft\.com/playwright/python:v([\d.]+)-", dockerfile, re.M
+    )
+    assert image
+    lock = (ROOT / "stacks/screenshots/requirements-browser.txt").read_text(
+        encoding="utf-8"
+    )
+    assert f"\nplaywright=={image[1]} \\\n" in lock
+    assert "--hash=sha256:" in lock
+    rules = renovate_rules(
+        (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    )
+    grouped = [
+        rule for rule in rules["packageRules"] if rule.get("groupName") == "Playwright"
+    ]
+    assert grouped == [
+        {
+            "matchDepNames": ["mcr.microsoft.com/playwright/python", "playwright"],
+            "groupName": "Playwright",
+        }
+    ]
+    # And it comes last, so that no rule for the images or the Python tools takes
+    # either of them into a group of its own.
+    assert rules["packageRules"][-1] == grouped[0]
+
+
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
@@ -12059,6 +13304,32 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
         assert f" {picture}" in script, picture
     for picture in ("copier-copy.gif", "dashboard.png"):
         assert f"docs/images/{picture}" in script, picture
+    # Public pages of GitHub, in both themes, by the Playwright of the starter
+    # scripts, from pages that no longer change and with a clock that stands still.
+    assert "python3 /work/.github/docs-pictures/github_pages.py /tmp/github" in script
+    assert "-r /work/stacks/screenshots/requirements-browser.txt" in script
+    for pattern in (
+        ".github/social-preview/Dockerfile",
+        "stacks/screenshots/requirements-browser.txt",
+    ):
+        assert f"\n{pattern}\n" in listed, pattern
+    pages = (ROOT / ".github/docs-pictures/github_pages.py").read_text(encoding="utf-8")
+    assert "page.clock.set_fixed_time(CLOCK)" in pages
+    names = re.findall(r'^        "(github-[a-z-]+)",$', pages, re.M)
+    assert names == [
+        "github-update-pull-request",
+        "github-release",
+        "github-pr-coach",
+    ]
+    for readme in ("README.md", "README.de.md"):
+        text = (ROOT / readme).read_text(encoding="utf-8")
+        for name in names:
+            assert f'srcset="docs/images/{name}.dark.png"' in text, (readme, name)
+            assert f'<img src="docs/images/{name}.png"' in text, (readme, name)
+    for name in names:
+        for suffix in ("", ".dark"):
+            taken = ROOT / f"docs/images/{name}{suffix}.png"
+            assert taken.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), taken
 
 
 def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> None:
@@ -12558,7 +13829,9 @@ def test_mypy_starts_from_the_cache_of_the_last_run_that_passed(
     folder = ROOT if kind == "blueprint" else projects[kind]
     name = "ci-python.yml" if kind == "blueprint" else "ci.yml"
     ci = (folder / ".github/workflows" / name).read_text(encoding="utf-8")
-    if "\nmypy\n" not in (folder / "scripts/check.sh").read_text(encoding="utf-8"):
+    if '\nstep "Mypy"\n' not in (folder / "scripts/check.sh").read_text(
+        encoding="utf-8"
+    ):
         assert "mypy" not in ci
         return
     job = job_in(ci, "check")
@@ -12836,6 +14109,9 @@ if [[ -n "${BROKEN:-}" ]]; then
   echo '<html lang="en"><link rel="canonical" href="https://x.org/">' > "$4/index.html"
   echo '<html lang="en"><meta name="generator" content="mkdocs-1.6.1">' > "$4/guide.html"
 fi
+if [[ -n "${LOST:-}" ]]; then
+  echo '<html lang="en"><meta name="generator" content="mkdocs-1.6.1"><p></p>' > "$4/index.html"
+fi
 echo "INFO    -  Building documentation to directory: $4"
 if [[ -n "${FAIL:-}" ]]; then
   echo "WARNING -  Doc file 'index.md' contains a link 'nowhere.md', but the target is not found."
@@ -12853,10 +14129,12 @@ def run_the_website_step(
     fail: bool = False,
     tool: bool = False,
     broken: bool = False,
+    lost: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """The step Website of scripts/check.sh, in a repository with these pages and a
     fake MkDocs at this place: in .venv-docs, in an activated environment (VIRTUAL_ENV
-    and its folder), alone on the PATH, or nowhere ("")."""
+    and its folder), alone on the PATH, or nowhere (""); with lost, its home page
+    shows a picture that the built page lacks."""
     check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
     repository = tmp_path / "repository"
     (repository / "scripts").mkdir(parents=True)
@@ -12875,6 +14153,10 @@ def run_the_website_step(
     for page in pages:
         (repository / page).parent.mkdir(parents=True, exist_ok=True)
         (repository / page).write_text("# Demo\n", encoding="utf-8", newline="\n")
+    if lost:
+        (repository / "docs/index.md").write_text(
+            "# Demo\n\n![The screen](images/screen.png)\n", encoding="utf-8"
+        )
     # The PATH without a MkDocs of this computer.
     path = [
         entry
@@ -12910,6 +14192,8 @@ def run_the_website_step(
         environment["FAIL"] = "1"
     if broken:
         environment["BROKEN"] = "1"
+    if lost:
+        environment["LOST"] = "1"
     assert BASH
     result = subprocess.run(
         [BASH, "scripts/website.sh"],
@@ -12976,6 +14260,26 @@ def test_the_website_step_checks_what_the_hooks_promise(
         assert result.returncode == 0, result.stdout + result.stderr
         assert "keeps what its hooks promise (one language).\n" in result.stdout
     assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_website_step_names_a_picture_that_a_page_lost(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The step reads the Markdown of the pages in docs/ of the repository, although
+    # MkDocs built the website into a temporary folder: a lightbox that takes the
+    # pictures out of the pages fails it, with the page and the picture.
+    result, _, _ = run_the_website_step(
+        projects, tmp_path, ".venv-docs/bin/mkdocs", tool=True, lost=True
+    )
+
+    assert result.returncode == 1
+    assert "/index.html: has an empty paragraph after" in result.stdout
+    assert (
+        "/index.html: lacks the picture images/screen.png that docs/index.md shows"
+        in result.stdout
+    )
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -14354,14 +15658,52 @@ def test_every_repository_gets_the_folder_of_the_fragments(
         "`python3 .github/blueprint.py fragments`.",
         "The check of the title, *conventional title*, takes only a new fragment as "
         "the entry of a pull request",
+        # The fix bot heals a typo of a heading, and the website shows the fragments.
+        "`python3 .github/blueprint.py fragments --fix` renames, as the fix bot does",
+        "shows the entries of the fragments under Unreleased until the release takes "
+        "them in",
     ):
         assert text in contributing, text
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert "with `--fix`, it renames a heading that surely means a kind" in agents
     template = (project / ".github/pull_request_template.md").read_text(
         encoding="utf-8"
     )
     assert "a new file in `changelog.d/`" in template
     # The blueprint follows its template.
     assert (ROOT / "changelog.d/.gitkeep").read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_shows_the_fragments_under_unreleased(
+    projects: dict[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # The hook and blueprint.py as the project has them, beside a changelog with a
+    # fragment that waits for the release.
+    project = projects[kind]
+    for name in (".github/mkdocs_blueprint.py", ".github/blueprint/changelog.py"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(project / name, tmp_path / name)
+    shutil.copy(project / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
+    (tmp_path / "changelog.d").mkdir()
+    entry = "### Features\n\n- **Dark mode:** the pages follow the system.\n"
+    (tmp_path / "changelog.d/dark-mode.md").write_text(entry, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        f"fragments_of_{kind.replace('-', '_')}",
+        tmp_path / ".github/mkdocs_blueprint.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    config = SimpleNamespace(
+        config_file_path=str(tmp_path / "mkdocs.yml"), mdx_configs={}
+    )
+
+    page = hooks.with_fragments('--8<-- "CHANGELOG.md"\n', config)
+
+    changelog = (project / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert page == changelog.replace("## Unreleased\n", f"## Unreleased\n\n{entry}")
 
 
 def test_release_tags_are_signed_and_verified_with_one_gitsign() -> None:

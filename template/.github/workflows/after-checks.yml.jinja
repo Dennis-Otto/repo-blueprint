@@ -6,4 +6,7 @@
 [#- The check of the rules of Renovate runs in the Renovate workflow of a repository
     that runs Renovate itself; the blueprint's checks the rules of the others. -#]
 [%- set renovate = [] if renovate_runner == 'self' else [[", Workflow security, Renovate, Release]\n", ", Workflow security, Release]\n"], ['"Workflow security", "Renovate", "Release"]', '"Workflow security", "Release"]']] -%]
-{= replaced(".github/workflows/after-checks.yml", [[workflows, project]] + renovate) -=}
+[#- The marker of the tests of the project, which the validator of test_marker keeps
+    free of quotes and backslashes. -#]
+[%- set marker = [['          MARKER: ""', '          MARKER: "' ~ test_marker ~ '"']] -%]
+{= replaced(".github/workflows/after-checks.yml", [[workflows, project]] + renovate + marker) -=}

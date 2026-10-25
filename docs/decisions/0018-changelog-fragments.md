@@ -1,6 +1,6 @@
 # Each pull request writes its entry of the changelog into a file of its own
 
-- Status: accepted
+- Status: accepted, amended by [0068](0068-the-website-shows-the-fragments-and-the-fix-bot-heals-their-headings.md), with which the website shows the fragments under Unreleased and the fix bot renames a heading that surely means a kind of change
 - Date: 2026-10-13
 
 ## Context

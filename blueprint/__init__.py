@@ -7,7 +7,7 @@ and the changelog of its releases.
     python3 blueprint.py create [--private] the repository on GitHub of a new copy, set up
     python3 blueprint.py changelog ...      the changelog of a release (the release bot)
     python3 blueprint.py commit-overrides   the titles that release-please reads (the release bot)
-    python3 blueprint.py fragments          check the fragments of the changelog in changelog.d/
+    python3 blueprint.py fragments [--fix]  check the fragments of the changelog in changelog.d/
     python3 blueprint.py notices ...        the licenses of the third-party components
     python3 blueprint.py update-commit ...  the pull request of an update (the blueprint bot)
     python3 blueprint.py bot-health ...     one issue per failing bot (the bot-health bot)
