@@ -589,10 +589,31 @@ jobs:
         run: |
           set -euo pipefail
           response="$RUNNER_TEMP/upload.json"
-          curl --fail-with-body --silent --show-error --retry 3 --retry-connrefused \
+          fail() {
+            echo "::error title=Chrome Web Store::$1"
+            echo "- **Problem:** $1" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          # Why the store refused the upload, and what fixes it.
+          refused() {
+            local said
+            said="$(jq -r '[.error.details[]?.reason, .error.message, .error.status, .itemError[]?.error_detail] | map(strings) | join("; ")' "$response" 2>/dev/null || true)"
+            case "$said" in
+              *[Vv]ersion*)
+                fail "The store refused $ZIP ($said): the store takes only a version above the one it has. Release a version above that of the Developer Dashboard. docs/releases.md#when-a-run-fails says more." ;;
+              *[Mm]anifest*)
+                fail "The store refused $ZIP for its manifest ($said): run node scripts/check-manifest.mjs, fix what the store names, and release a new version. docs/releases.md#when-a-run-fails says more." ;;
+              *[Rr]eview* | *[Pp]ending*)
+                fail "The store refused $ZIP while a review is pending ($said): the item takes no new package until Google has decided. The daily run delivers it then, or cancel the review in the Developer Dashboard. docs/releases.md#when-a-run-fails says more." ;;
+            esac
+            fail "The store refused $ZIP ($1, ${said:-no reason}); its answer is in the log above. docs/releases.md#when-a-run-fails says what to do."
+          }
+          if ! curl --fail-with-body --silent --show-error --retry 3 --retry-connrefused \
             --connect-timeout 15 --max-time 600 --output "$response" \
-            --header @"$RUNNER_TEMP/authorization" --request POST --upload-file "$ZIP" "$UPLOAD" ||
-            { cat "$response"; echo "::error::The store refused the upload of $ZIP."; exit 1; }
+            --header @"$RUNNER_TEMP/authorization" --request POST --upload-file "$ZIP" "$UPLOAD"; then
+            cat "$response"
+            refused "the upload"
+          fi
           state="$(jq -r '.uploadState // empty' "$response")"
           # The store may go on processing the upload after its answer; the status of the
           # item says when it is done.
@@ -602,13 +623,12 @@ jobs:
             curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
               --connect-timeout 15 --max-time 60 --output "$response" \
               --header @"$RUNNER_TEMP/authorization" "$ITEM:fetchStatus" ||
-              { cat "$response"; echo "::error::The store didn't tell the status of the upload."; exit 1; }
+              { cat "$response"; fail "The store didn't tell the status of the upload of $ZIP; the next daily run tries again."; }
             state="$(jq -r '.lastAsyncUploadState // empty' "$response")"
           done
           if [[ "$state" != SUCCEEDED ]]; then
             cat "$response"
-            echo "::error::The upload of $ZIP ended in the state ${state:-unknown}."
-            exit 1
+            refused "the state ${state:-unknown}"
           fi
           echo "The store took the upload of $ZIP." | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Submit the release for review
@@ -650,8 +670,7 @@ jobs:
               ;;
             *)
               cat "$response"
-              echo "::error::The submission of the release $TAG ended in the state ${state:-unknown}."
-              exit 1
+              fail "The submission of the release $TAG ended in the state ${state:-unknown}, which the workflow doesn't know; the Developer Dashboard shows the state of the item. docs/releases.md#when-a-run-fails says what to do."
               ;;
           esac
       - name: Wait until Harden-Runner has removed Docker

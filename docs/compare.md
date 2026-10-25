@@ -14,7 +14,7 @@ The tools: [template repositories](https://docs.github.com/en/repositories/creat
 - **No code of the template runs at the copy.** The template has no tasks, migrations or Jinja extensions, so Copier needs no `--trust`, neither at the copy nor at an update.
 - **Settings as code, with a bot against drift.** The rulesets, the security, Actions, the environments, the variables, the labels and GitHub Pages live in `.github/repository.toml`, and the settings bot applies them after every change and every week.
 - **Releases of SLSA Build Level 3, with SBOMs and VEX.** A release has signed tags, the provenance of an isolated build, SBOMs as SPDX and CycloneDX, an OpenVEX document and an immutable release, and its workflow verifies it as its users can, also every week.
-- **Home Assistant, Nextcloud and GitHub Actions in one standard,** beside Python and Node packages, containers and repositories without a build: the same checks, bots and settings for each, with the tools of each kind.
+- **Home Assistant, Nextcloud and GitHub Actions in one standard,** beside Python and Node packages, Chrome extensions, containers and repositories without a build: the same checks, bots and settings for each, with the tools of each kind.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-a-change-of-the-template-meets-the-repositories.dark.svg">

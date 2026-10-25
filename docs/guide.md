@@ -105,5 +105,6 @@ The configuration of the checks belongs to the blueprint and looks for the code 
 | --- | --- | --- | --- |
 | Nextcloud app | `lib/` | PHPUnit tests in `tests/Unit/` | `psalm.xml` and `phpunit.xml`, with the `tests/bootstrap.php` and `tests/stubs/` that they load |
 | Node package | `src/`, built into `dist/` | `test/`, typechecked by `tsconfig.json`; the `npm test` of a new project runs `test/**/*.test.ts` | `tsconfig.json` and `tsconfig.build.json`, which need `typescript` and `@types/node` in the `package.json` of the project, and `biome.jsonc`, whose step *Lint and format* runs once `@biomejs/biome` is there too |
+| Chrome extension | `src/`, built into `extension/lib/`; `extension/` with `manifest.json` and `_locales/` | `test/`, as for a Node package | the files of a Node package, with `tsconfig.build.json` writing into `extension/lib/`; the step *Extension* needs `extension/manifest.json`, `store/permissions.json` and a `store/listing.<language>.md` for each language |
 
 The other kinds set these places in files of their own, such as `pyproject.toml`. What lies in `tests/` belongs to the project: the copy and every update add only the files that are missing there, so an app with its own bootstrap keeps it.

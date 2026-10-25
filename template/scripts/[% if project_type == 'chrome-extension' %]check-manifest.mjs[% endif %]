@@ -118,7 +118,11 @@ export function checkManifest({
       `extension/manifest.json has manifest_version ${manifest.manifest_version ?? "none"}; the Chrome Web Store takes new versions only of Manifest V3: set it to 3.`,
     );
   }
-  if (!/^\d+(\.\d+){0,3}$/.test(manifest.version ?? "")) {
+  if (/^\d+(\.\d+){0,3}-/.test(manifest.version ?? "")) {
+    problems.push(
+      `extension/manifest.json has the version ${manifest.version}, a prerelease, which Chrome refuses: a Chrome extension makes its prereleases only on the beta channel (the variable BETA_CHANNEL=true), never with Release-As: x.y.z-beta.n. Remove the Release-As line of the release PR, and set the version of the manifest, package.json and .release-please-manifest.json back to the last release.`,
+    );
+  } else if (!/^\d+(\.\d+){0,3}$/.test(manifest.version ?? "")) {
     problems.push(
       `extension/manifest.json has the version ${manifest.version ?? "none"}; Chrome takes one to four numbers separated by dots, such as 1.2.3.`,
     );

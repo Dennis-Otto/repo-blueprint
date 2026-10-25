@@ -14,7 +14,7 @@ Die Werkzeuge: [Template-Repositorys](https://docs.github.com/de/repositories/cr
 - **Beim Kopieren läuft kein Code der Vorlage.** Die Vorlage hat keine Tasks, Migrationen oder Jinja-Erweiterungen, also braucht Copier kein `--trust`, weder beim Kopieren noch bei einem Update.
 - **Einstellungen als Code, mit einem Bot gegen Abweichungen.** Die Rulesets, die Sicherheit, Actions, die Environments, die Variablen, die Labels und GitHub Pages stehen in `.github/repository.toml`, und der Einstellungs-Bot wendet sie nach jeder Änderung und jede Woche an.
 - **Releases nach SLSA Build Level 3, mit SBOMs und VEX.** Ein Release hat signierte Tags, die Provenance eines isolierten Builds, SBOMs als SPDX und CycloneDX, ein OpenVEX-Dokument und ein unveränderliches Release, und sein Workflow prüft es so, wie seine Nutzer es können, auch jede Woche.
-- **Home Assistant, Nextcloud und GitHub Actions in einem Standard,** neben Python- und Node-Paketen, Containern und Repositories ohne Build: dieselben Prüfungen, Bots und Einstellungen für jede Art, mit den Werkzeugen jeder Art.
+- **Home Assistant, Nextcloud und GitHub Actions in einem Standard,** neben Python- und Node-Paketen, Chrome-Erweiterungen, Containern und Repositories ohne Build: dieselben Prüfungen, Bots und Einstellungen für jede Art, mit den Werkzeugen jeder Art.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-a-change-of-the-template-meets-the-repositories.de.dark.svg">

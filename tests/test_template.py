@@ -11290,8 +11290,21 @@ def test_only_a_chrome_extension_delivers_to_the_chrome_web_store(
     assert ("chrome-web-store" in settings["environments"]) == extension
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert ("and delivers it to the Chrome Web Store" in contributing) == extension
+    # The security design and the notes for agents describe an extension, not a package.
+    security = (project / "docs/security.md").read_text(encoding="utf-8")
+    assert ("**Web pages and content scripts → extension.**" in security) == extension
+    notes = (project / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert ("its manifest and version in `extension/manifest.json`" in notes) == (
+        extension
+    )
+    assert ("its prereleases come only from the beta channel" in contributing) == (
+        extension
+    )
     if not extension:
         return
+    assert "**Caller → package.**" not in security
+    assert "npm ci --ignore-scripts" in security
+    assert "The package is in `src/`" not in notes
     # The store needs no secret: the jobs sign in with the OIDC token of GitHub.
     assert settings["environments"]["chrome-web-store"] == {"secrets": []}
     assert settings["variables"]["PUBLISH_TO"] == "chrome-web-store"
@@ -11408,9 +11421,20 @@ MANIFEST_PROBLEMS: list[tuple[str, Callable[[Path], object], str]] = [
         "a version that Chrome refuses",
         lambda root: edit_json(
             root / "extension/manifest.json",
-            lambda manifest: manifest.update(version="1.0.0-beta.1"),
+            lambda manifest: manifest.update(version="1.0.0.0.1"),
         ),
         "Chrome takes one to four numbers separated by dots",
+    ),
+    (
+        "a prerelease of a release PR with Release-As",
+        lambda root: [
+            edit_json(
+                root / name,
+                lambda data: data.update(version="2.0.0-beta.1"),
+            )
+            for name in ("extension/manifest.json", "package.json")
+        ],
+        "a Chrome extension makes its prereleases only on the beta channel",
     ),
     (
         "Manifest V2",
@@ -11563,6 +11587,9 @@ def test_the_zip_of_the_store_is_the_same_for_the_same_commit(
 ) -> None:
     folder = the_extension(projects["chrome-extension"], tmp_path / "extension")
     manifest = (folder / "extension/manifest.json").read_bytes()
+    # The configuration of tools and the sources of TypeScript stay out of the zip.
+    for name in ("biome.jsonc", "biome.json", "tsconfig.json", "options.ts"):
+        (folder / "extension" / name).write_text("{}\n", encoding="utf-8")
 
     first = package_extension(folder)
     assert first.returncode == 0, first.stderr
@@ -11583,6 +11610,8 @@ def test_the_zip_of_the_store_is_the_same_for_the_same_commit(
         assert {entry.date_time for entry in archive.infolist()} == {
             (2026, 1, 1, 0, 0, 0)
         }
+        # Made by Unix, also on Windows, so that every system makes the same bytes.
+        assert {entry.create_system for entry in archive.infolist()} == {3}
         assert archive.read("manifest.json") == manifest
 
     # Zip files hold no time before 1980.
@@ -11978,7 +12007,9 @@ def test_each_run_checks_the_set_up_of_the_store_first(
         assert value not in result.stdout + result.stderr
 
 
-def submit_answer(tmp_path: Path, answer: dict[str, Any]) -> workflow_steps.StepResult:
+def submit_answer(
+    tmp_path: Path, answer: dict[str, Any], step: str = "Submit the release for review"
+) -> workflow_steps.StepResult:
     """The step that submits the release for review, with a store that answers the
     publish with this error, for the zip of a manifest that asks for a permission and
     a host and speaks two languages."""
@@ -12010,7 +12041,7 @@ def submit_answer(tmp_path: Path, answer: dict[str, Any]) -> workflow_steps.Step
         tmp_path,
         "publish-store.yml",
         "store",
-        "Submit the release for review",
+        step,
         env={
             "TAG": "v1.2.3",
             "ZIP": "dist/demo-1.2.3.zip",
@@ -12055,6 +12086,39 @@ def test_a_submission_that_the_store_refuses_names_its_reason(tmp_path: Path) ->
     assert result.returncode == 1
     assert "refused to submit v1.2.3 for review (PERMISSION_DENIED)" in result.summary
     assert "INVALID_ITEM_METADATA" not in result.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("message", "fix"),
+    [
+        (
+            "The version of the package must be higher than the published version.",
+            "the store takes only a version above the one it has",
+        ),
+        ("Invalid manifest.", "run node scripts/check-manifest.mjs"),
+        (
+            "The item is pending review.",
+            "the item takes no new package until Google has decided",
+        ),
+        ("Something else.", "its answer is in the log above"),
+    ],
+    ids=["version", "manifest", "review", "unknown"],
+)
+def test_an_upload_that_the_store_refuses_says_why_and_what_fixes_it(
+    tmp_path: Path, message: str, fix: str
+) -> None:
+    result = submit_answer(
+        tmp_path,
+        {"error": {"code": 400, "status": "FAILED_PRECONDITION", "message": message}},
+        "Upload the zip",
+    )
+
+    assert result.returncode == 1
+    assert "- **Problem:** The store refused dist/demo-1.2.3.zip" in result.summary
+    assert message in result.summary
+    assert fix in result.summary
+    assert "::error title=Chrome Web Store::" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -12141,8 +12205,9 @@ def test_the_check_of_a_release_finds_the_zip_of_the_extension(
         workflow_steps.workflow("verify-release.yml"),
         "Verify the release as its users can",
     )
-    branch = script[script.index("            chrome-web-store)\n") :]
-    branch = branch[: branch.index("              ;;\n") + len("              ;;\n")]
+    # The runner hands the script over without the indentation of its block.
+    branch = script[script.index("\n  chrome-web-store)\n") + 1 :]
+    branch = branch[: branch.index("\n    ;;\n") + len("\n    ;;\n")]
     (tmp_path / "check.sh").write_text(
         'pass() { echo "PASS $1"; }\nfail() { echo "FAIL $1"; }\n'
         'version="1.3.0-beta.2"\ncase chrome-web-store in\n' + branch + "esac\n",

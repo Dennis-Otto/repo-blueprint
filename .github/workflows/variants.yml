@@ -434,7 +434,10 @@ jobs:
         if: matrix.start != 'adopted' && matrix.kind == 'chrome-extension'
         timeout-minutes: 5
         working-directory: ${{ env.PROJECT }}
-        run: node scripts/load-extension.mjs "$(bash scripts/chrome-for-testing.sh Stable "$RUNNER_TEMP/chrome-for-testing")"
+        run: |
+          # On a line of its own, so that a failed download stops the step.
+          chrome="$(bash scripts/chrome-for-testing.sh Stable "$RUNNER_TEMP/chrome-for-testing")"
+          node scripts/load-extension.mjs "$chrome"
       - name: Lint the workflows of the project
         timeout-minutes: 5
         run: |

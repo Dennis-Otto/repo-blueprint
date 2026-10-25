@@ -24,7 +24,7 @@ const fail = (text) => {
   process.exit(1);
 };
 
-const chrome = process.argv[2] ?? process.env.CHROME;
+const chrome = process.argv[2] || process.env.CHROME;
 if (!chrome) {
   fail(
     'Name the executable of Chrome for Testing: node scripts/load-extension.mjs "$(bash scripts/chrome-for-testing.sh)"',
