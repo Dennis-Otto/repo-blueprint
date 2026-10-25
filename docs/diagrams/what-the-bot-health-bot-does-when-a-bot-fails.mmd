@@ -5,10 +5,12 @@ config:
 ---
 flowchart TB
     accTitle: What the bot-health bot does when a bot fails
-    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or switched off.
+    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, but leaves a workflow that keeps an issue of its own to that issue. It starts a workflow whose schedule GitHub missed or switched off: one with no run of its schedule or by hand since the time of its schedule, whatever pushes ran it since.
 
     run(["A run of a bot ends<br>on main"])
     nightly(["Every night<br>the latest run of every workflow"])
+    own{"Keeps an issue<br>of its own?"}
+    left["Leaves it to that issue"]
     passed{"Passed?"}
     first{"A first failure<br>that a second try can fix?"}
     again["Runs the failed jobs<br>once more"]
@@ -17,8 +19,10 @@ flowchart TB
     missed["Starts a workflow<br>whose schedule GitHub missed"]
 
     run --> passed
-    nightly --> passed
-    nightly -- "a schedule missed<br>or switched off" --> missed
+    nightly --> own
+    own -- "yes, as its workflow says" --> left
+    own -- "no" --> passed
+    nightly -- "no run of its schedule or by hand<br>since its time, or switched off" --> missed
     passed -- "yes" --> closed
     passed -- "no" --> first
     first -- "yes" --> again
@@ -30,4 +34,4 @@ flowchart TB
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class run,nightly,again,missed bot
     class issue person
-    class closed done
+    class closed,left done

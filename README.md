@@ -137,7 +137,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 - **Flaky tests:** Failed test jobs run once more, and a job that passes then is reported in one issue.
 - **Cancelled checks:** A required check that a late run for an older commit cancelled starts again by itself.
 - **Failed releases:** The release of a merge that fails for a moment runs its failed jobs once more.
-- **Bot health:** A bot that fails on `main` tries once more where that can help, and otherwise keeps one issue per workflow open.
+- **Bot health:** A bot that fails on `main` tries once more where that can help, and otherwise keeps one issue per workflow open, unless the workflow keeps its own.
 
 ### [Mutation tests, fuzzing and property tests](docs/features/tests.md)
 

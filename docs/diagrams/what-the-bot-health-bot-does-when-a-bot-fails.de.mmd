@@ -5,10 +5,12 @@ config:
 ---
 flowchart TB
     accTitle: Was der Bot für den Zustand der Bots tut, wenn ein Bot fehlschlägt
-    accDescr: Wenn ein Lauf eines Bots oder eines geplanten Workflows auf dem Standardbranch endet, sieht der Bot ihn sich an; Läufe von Pull Requests starten nichts. Ein erster Fehlschlag, den ein zweiter Versuch beheben kann, führt seine fehlgeschlagenen Jobs einmal neu aus. Ein Fehlschlag, der bleibt, öffnet ein Issue für den Workflow oder aktualisiert es, mit den fehlgeschlagenen Jobs, ihren Schritten und ihren ersten Fehlern. Ein Lauf, der besteht, schließt das Issue. Jede Nacht sieht sich der Bot den letzten Lauf jedes Workflows an, falls GitHub ein Ereignis verloren hat, und startet einen Workflow, dessen Zeitplan GitHub verpasst oder abgeschaltet hat.
+    accDescr: Wenn ein Lauf eines Bots oder eines geplanten Workflows auf dem Standardbranch endet, sieht der Bot ihn sich an; Läufe von Pull Requests starten nichts. Ein erster Fehlschlag, den ein zweiter Versuch beheben kann, führt seine fehlgeschlagenen Jobs einmal neu aus. Ein Fehlschlag, der bleibt, öffnet ein Issue für den Workflow oder aktualisiert es, mit den fehlgeschlagenen Jobs, ihren Schritten und ihren ersten Fehlern. Ein Lauf, der besteht, schließt das Issue. Jede Nacht sieht sich der Bot den letzten Lauf jedes Workflows an, falls GitHub ein Ereignis verloren hat, überlässt aber einen Workflow, der ein eigenes Issue hält, diesem Issue. Er startet einen Workflow, dessen Zeitplan GitHub verpasst oder abgeschaltet hat: einen ohne Lauf seines Zeitplans oder von Hand seit der Zeit seines Zeitplans, gleich welche Pushes ihn seitdem ausgeführt haben.
 
     run(["Ein Lauf eines Bots endet<br>auf main"])
     nightly(["Jede Nacht<br>der letzte Lauf jedes Workflows"])
+    own{"Hält ein<br>eigenes Issue?"}
+    left["Überlässt ihn diesem Issue"]
     passed{"Bestanden?"}
     first{"Ein erster Fehlschlag,<br>den ein zweiter Versuch beheben kann?"}
     again["Führt die fehlgeschlagenen<br>Jobs einmal neu aus"]
@@ -17,8 +19,10 @@ flowchart TB
     missed["Startet einen Workflow,<br>dessen Zeitplan GitHub verpasst hat"]
 
     run --> passed
-    nightly --> passed
-    nightly -- "ein Zeitplan verpasst<br>oder abgeschaltet" --> missed
+    nightly --> own
+    own -- "ja, wie sein Workflow sagt" --> left
+    own -- "nein" --> passed
+    nightly -- "kein Lauf seines Zeitplans oder von Hand<br>seit dessen Zeit, oder abgeschaltet" --> missed
     passed -- "ja" --> closed
     passed -- "nein" --> first
     first -- "ja" --> again
@@ -30,4 +34,4 @@ flowchart TB
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class run,nightly,again,missed bot
     class issue person
-    class closed done
+    class closed,left done
