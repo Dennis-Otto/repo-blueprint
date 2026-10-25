@@ -10551,6 +10551,42 @@ def test_the_flaky_test_bot_adds_the_counts_to_an_issue_that_has_none(
 
 
 @WITH_JQ
+def test_the_flaky_test_bot_keeps_the_text_of_a_body_without_the_end_of_the_counts(
+    tmp_path: Path,
+) -> None:
+    # A person deleted the end comment: their text below the table stays.
+    lint = count_of("lint", "tests/test_x.py::test_y", 4, 2, 1)
+    before = [
+        FLAKY_INTRO,
+        "",
+        *flaky_counts(lint)[:-1],
+        "A note of the maintainer, where the end was.",
+    ]
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue view 7": {"body": "\n".join(before)},
+            "issue edit 7": "",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-edit"] == "\n".join(
+        [
+            FLAKY_INTRO,
+            "",
+            *flaky_counts(*FLAKY_COUNTS, lint),
+            "A note of the maintainer, where the end was.",
+            "",
+        ]
+    )
+
+
+@WITH_JQ
 def test_the_flaky_test_bot_keeps_the_hundred_latest_counts(tmp_path: Path) -> None:
     # A body of an issue holds 65,536 characters at most.
     older = [count_of(f"job {number}", "", 1, number, 1) for number in range(100)]
@@ -10764,15 +10800,17 @@ BROWSER_LOG = "".join(
             "Browser step: Open the board",
             "Browser step: Open the board (1.2 s)",
             "browser-1  | Browser step:  Show the score ",
-            "Traceback (most recent call last):",
-            '  File "/tests/e2e/browser.py", line 3720, in <module>',
-            "    step.run()",
-            "\x1b[31mplaywright._impl._errors.TimeoutError\x1b[0m: Page.goto: Timeout"
-            " 30000ms exceeded.",
-            "During handling of the above exception, another exception occurred:",
-            "BrowserFailure: the board took too long",
-            "Call log:",
-            '  - navigating to "http://homeassistant:8123/", waiting until "load"',
+            "browser-1  | Traceback (most recent call last):",
+            'browser-1  |   File "/tests/e2e/browser.py", line 3720, in <module>',
+            "browser-1  |     step.run()",
+            "browser-1  | \x1b[31mplaywright._impl._errors.TimeoutError\x1b[0m: Page.goto:"
+            " Timeout 30000ms exceeded.",
+            "browser-1  | During handling of the above exception, another exception"
+            " occurred:",
+            "browser-1  | BrowserFailure: the board took too long",
+            "browser-1  | Call log:",
+            'browser-1  |   - navigating to "http://homeassistant:8123/", waiting until'
+            ' "load"',
             "##[error]Process completed with exit code 1.",
             "Browser step: Stop the board",
             "ValueError: after the failure",
@@ -10870,6 +10908,126 @@ def test_the_flaky_test_bot_names_the_step_that_other_tests_name_last(
         f"| `Docker E2E / e2e (Chrome)` | {step} | 1 | {LAST_RUN} |",
         f"| `Docker E2E / e2e (Firefox)` | {NOTHING} | 1 | {LAST_RUN} |",
         f"| `Docker E2E / test (3.12)` | `tests/test_a.py::test_b` | 1 | {LAST_RUN} |",
+    ]
+
+
+def a_log_of(*lines: str) -> str:
+    """The log of a job with these lines, each after its time, as GitHub keeps it."""
+    return "".join(
+        f"2026-10-12T09:16:{second:02}.0000000Z {line}\n"
+        for second, line in enumerate(lines)
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_names_the_step_of_the_worker_that_failed(
+    tmp_path: Path,
+) -> None:
+    # homedarts-for-autodarts runs two workers of browser tests side by side, each line
+    # after its shard. The one that failed stops, the other goes on and passes, and the
+    # error of the job comes only at the end, after the logs of Home Assistant.
+    workers = a_log_of(
+        "##[group]Run bash tests/e2e/screenshots.sh",
+        "Browser step: Take the screenshots",
+        "##[group]Run bash tests/e2e/browser.sh",
+        "[1/4] Browser step: Open the board",
+        "[2/4] Browser step: Open the board",
+        "[1/4] Browser step: Open the board (1.0 s)",
+        "[1/4] Browser step: Show the score",
+        "[2/4] Browser step: Open the board (1.1 s)",
+        "[2/4] Browser step: Pick a game",
+        "[1/4] Traceback (most recent call last):",
+        '[1/4]   File "/repo/tests/e2e/browser.py", line 3629, in main',
+        "[2/4] Browser step: Pick a game (2.2 s)",
+        "[1/4] playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms"
+        " exceeded.",
+        "[2/4] Browser check of shard 2/4 passed, 2 steps in 3 s: Open the board, Pick a"
+        " game.",
+        "homeassistant-1  | homeassistant.exceptions.HomeAssistantError: the board left",
+        'The browser check failed in shard 1/4 at the step "Show the score".',
+        "##[error]Process completed with exit code 1.",
+    )
+    # The browser tests passed, and a later step of the job failed.
+    later = a_log_of(
+        "##[group]Run bash tests/e2e/browser.sh",
+        "Browser step: Open the board",
+        "Browser step: Open the board (1.2 s)",
+        "##[group]Run actions/upload-artifact",
+        "Error: no files were found",
+        "##[error]Process completed with exit code 1.",
+    )
+    # The tests failed after their last step had passed.
+    after = a_log_of(
+        "##[group]Run bash tests/e2e/browser.sh",
+        "Browser step: Open the board",
+        "Browser step: Open the board (1.2 s)",
+        "ValueError: after the steps",
+        "##[error]Process completed with exit code 1.",
+    )
+    _, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        31,
+                        "browser (cards)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                    job_of_a_run(
+                        32,
+                        "browser (upload)",
+                        "failure",
+                        ("Upload the artifacts", "failure"),
+                    ),
+                    job_of_a_run(
+                        33,
+                        "browser (after)",
+                        "failure",
+                        ("Run the browser tests", "failure"),
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/31/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/32/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/33/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/31/logs": workers,
+            "repos/o/r/actions/jobs/32/logs": later,
+            "repos/o/r/actions/jobs/33/logs": after,
+            "issue list": [],
+        },
+        NAME="Docker E2E",
+        URL="https://github.com/o/r/actions/runs/5",
+        MARKER="Browser step:",
+    )
+
+    assert (
+        "\n".join(
+            [
+                "| [`browser (cards)`](https://github.com/o/r/actions/runs/5/job/31)"
+                " | `Run the browser tests` | `Show the score`"
+                " | `playwright._impl._errors.TimeoutError: Locator.click: Timeout 5000ms"
+                " exceeded.` |",
+                "| [`browser (upload)`](https://github.com/o/r/actions/runs/5/job/32)"
+                f" | `Upload the artifacts` | {NOTHING} | `{EXITED}` |",
+                "| [`browser (after)`](https://github.com/o/r/actions/runs/5/job/33)"
+                " | `Run the browser tests` | `Open the board`"
+                " | `ValueError: after the steps` |",
+            ]
+        )
+        in written["issue-comment"]
+    )
+    # The same step counts the same, whatever its seconds.
+    assert [
+        line for line in written["issue-create"].splitlines() if line.startswith("| `")
+    ] == [
+        f"| `Docker E2E / browser (cards)` | `Show the score` | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / browser (upload)` | {NOTHING} | 1 | {LAST_RUN} |",
+        f"| `Docker E2E / browser (after)` | `Open the board` | 1 | {LAST_RUN} |",
     ]
 
 
