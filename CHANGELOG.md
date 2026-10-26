@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [1.1.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.2...v1.1.3) (2026-10-26)
 
-
 ### Bug fixes
 
 * **deps:** update dependency cspell to v10.4.0 ([#482](https://github.com/Dennis-Otto/repo-blueprint/issues/482)) ([23ad15d](https://github.com/Dennis-Otto/repo-blueprint/commit/23ad15d7939c6023c353ee6c67c9de6c638ca4b5))
