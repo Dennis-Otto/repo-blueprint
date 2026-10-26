@@ -9,7 +9,7 @@ A Chrome extension of Manifest V3 in TypeScript on Node 24, which every release 
 ## Start one
 
 ```sh
-uvx --from copier==9.19.0 copier copy --data project_type=chrome-extension gh:Dennis-Otto/repo-blueprint my-extension
+uvx --from copier==9.19.1 copier copy --data project_type=chrome-extension gh:Dennis-Otto/repo-blueprint my-extension
 cd my-extension
 python3 .github/blueprint.py create
 ```
