@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [1.1.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.4...v1.1.5) (2026-10-26)
 
-
 ### Bug fixes
 
 * **deps:** update dependency infection/infection to v0.35.8 ([#480](https://github.com/Dennis-Otto/repo-blueprint/issues/480)) ([5fe6cef](https://github.com/Dennis-Otto/repo-blueprint/commit/5fe6cefc7a1b144ad8bc89106fda3ad67ac7e1f3))
