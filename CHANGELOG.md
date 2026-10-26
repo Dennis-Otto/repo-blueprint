@@ -7,6 +7,16 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.2.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.5...v1.2.0) (2026-10-26)
+
+### Features
+
+- **The dependency updates of a day make one release:** a release of nothing but dependency updates no longer merges itself after each update, but once a day, in the daily run of the release bot, or when someone starts the Release workflow by hand; one that fixes a vulnerability, an update of Renovate with `[security]` in its title, still merges at once. In the blueprint, this ends the run of releases that each brought a pull request with all its checks to every repository of the Rollout (decision 0087).
+
+### Bug fixes
+
+- **The Findings check passes again with the newer zizmor:** zizmor now reports the start of the issue assistant on a new comment (`issue_comment`) as a dangerous trigger. `.github/zizmor.yml` accepts it for that rule and that workflow alone, with the reason: the issue assistant checks out no code of a pull request and reads the comment only as text, its AI runs with read-only tools on the egress-firewall runner, and its answer is checked before anything is written.
+
 ## [1.1.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.4...v1.1.5) (2026-10-26)
 
 ### Bug fixes
