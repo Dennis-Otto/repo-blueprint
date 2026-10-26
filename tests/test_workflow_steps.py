@@ -762,22 +762,43 @@ def test_a_dependabot_update_merges_only_the_commit_that_was_checked(
     assert len(done.calls) == 1
 
 
+MERGE_STEP = "Merge a release of dependency updates once its checks pass"
+RELEASE_PR = json.dumps({"number": 21, "headBranchName": "release-please--x"})
+SINCE_V120 = [
+    exact("release view --repo o/r --json tagName --jq .tagName", "v1.2.0\n"),
+]
+
+
 def run_the_merge_of_dependency_updates(
-    tmp_path: Path, *answers: Answer
+    tmp_path: Path, *answers: Answer, event: str = "schedule", pr: str = RELEASE_PR
 ) -> tuple[list[str], str]:
     done = run_step(
         tmp_path,
         "release.yml",
         "release-please",
-        "Merge a release of dependency updates once its checks pass",
+        MERGE_STEP,
         answers=[*answers, Answer(r"pr merge --repo o/r --auto --squash 21")],
-        env={
-            "GH_TOKEN": "app-token",
-            "PR": json.dumps({"number": 21, "headBranchName": "release-please--x"}),
-        },
+        env={"GH_TOKEN": "app-token", "PR": pr, "GITHUB_EVENT_NAME": event},
     )
     assert done.returncode == 0, done.stderr
     return done.called("pr merge"), done.stdout
+
+
+def subjects_since_v120(subjects: str) -> list[Answer]:
+    return [
+        *SINCE_V120,
+        Answer(rf"api repos/o/r/compare/v1\.2\.0\.\.\.{SHA} --jq .*", subjects),
+    ]
+
+
+def test_the_merge_runs_in_every_run_without_a_new_release() -> None:
+    merge = step("release.yml", "release-please", MERGE_STEP)
+
+    # Also in the run of the schedule, where release-please changed nothing.
+    assert merge["if"] == (
+        "steps.app.outputs.token != '' && "
+        "steps.release.outputs.release_created != 'true'"
+    )
 
 
 @WITH_JQ
@@ -808,13 +829,105 @@ def test_a_release_merges_itself_only_with_dependency_updates_alone(
     tmp_path: Path, subjects: str, merges: bool
 ) -> None:
     merged, said = run_the_merge_of_dependency_updates(
-        tmp_path,
-        exact("release view --repo o/r --json tagName --jq .tagName", "v1.2.0\n"),
-        Answer(rf"api repos/o/r/compare/v1\.2\.0\.\.\.{SHA} --jq .*", subjects),
+        tmp_path, *subjects_since_v120(subjects)
     )
 
     assert merged == (["pr merge --repo o/r --auto --squash 21"] if merges else [])
     assert ("the maintainer merges it" in said) == (not merges)
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("event", "subjects", "merges"),
+    [
+        ("push", "fix(deps): update ruff (#7)\nchore(deps): update uv (#8)", False),
+        (
+            "push",
+            "fix(deps): update ruff (#7)\nfix(deps): update uv [SECURITY] (#8)",
+            True,
+        ),
+        ("push", "fix(deps): update pillow to v13 [security] (#9)", True),
+        ("schedule", "fix(deps): update ruff (#7)", True),
+        ("workflow_dispatch", "fix(deps): update ruff (#7)", True),
+    ],
+)
+def test_dependency_updates_release_once_a_day_and_a_fix_of_security_at_once(
+    tmp_path: Path, event: str, subjects: str, merges: bool
+) -> None:
+    merged, said = run_the_merge_of_dependency_updates(
+        tmp_path, *subjects_since_v120(subjects), event=event
+    )
+
+    assert merged == (["pr merge --repo o/r --auto --squash 21"] if merges else [])
+    assert ("merges in the daily run of the release bot" in said) == (not merges)
+
+
+@WITH_JQ
+def test_the_daily_run_finds_the_release_pull_request_that_stayed_the_same(
+    tmp_path: Path,
+) -> None:
+    merged, _ = run_the_merge_of_dependency_updates(
+        tmp_path,
+        Answer(
+            r"pr list --repo o/r --state open --label autorelease: pending "
+            r"--json number --jq .*",
+            json=[{"number": 21}],
+        ),
+        *subjects_since_v120("fix(deps): update ruff (#7)"),
+        pr="",
+    )
+
+    assert merged == ["pr merge --repo o/r --auto --squash 21"]
+
+
+@WITH_JQ
+def test_without_a_release_pull_request_nothing_merges(tmp_path: Path) -> None:
+    merged, said = run_the_merge_of_dependency_updates(
+        tmp_path,
+        Answer(r"pr list --repo o/r --state open .*", json=[]),
+        pr="",
+    )
+
+    assert merged == []
+    assert said == "No release pull request is open.\n"
+
+
+@WITH_JQ
+@pytest.mark.parametrize("passes", [True, False])
+def test_a_release_whose_checks_passed_already_merges_at_once(
+    tmp_path: Path, passes: bool
+) -> None:
+    done = run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        MERGE_STEP,
+        answers=[
+            *subjects_since_v120("fix(deps): update ruff (#7)"),
+            exact(
+                "pr merge --repo o/r --auto --squash 21",
+                err="Pull request Pull request is in clean status",
+                code=1,
+            ),
+            exact(
+                "pr merge --repo o/r --squash 21",
+                code=0 if passes else 1,
+                err="" if passes else "the base branch policy prohibits the merge",
+            ),
+        ],
+        env={
+            "GH_TOKEN": "app-token",
+            "PR": RELEASE_PR,
+            "GITHUB_EVENT_NAME": "schedule",
+        },
+    )
+
+    # Without --auto, the rules of main still decide, and a refusal fails the run.
+    assert (done.returncode == 0) == passes
+    assert done.called("pr merge") == [
+        "pr merge --repo o/r --auto --squash 21",
+        "pr merge --repo o/r --squash 21",
+    ]
 
 
 # The release bot.
