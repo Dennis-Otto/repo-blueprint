@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.1.4](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.3...v1.1.4) (2026-10-26)
+
+
+### Bug fixes
+
+* **deps:** update the actions ([#484](https://github.com/Dennis-Otto/repo-blueprint/issues/484)) ([449e1f6](https://github.com/Dennis-Otto/repo-blueprint/commit/449e1f64771d58f7b6a9e768b5804ca2c45ca6b3))
+
 ## [1.1.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.2...v1.1.3) (2026-10-26)
 
 ### Bug fixes
