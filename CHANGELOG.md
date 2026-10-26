@@ -7,6 +7,18 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.1.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.1...v1.1.2) (2026-10-26)
+
+### Bug fixes
+
+* **deps:** update dependency copier to v9.19.1 ([#479](https://github.com/Dennis-Otto/repo-blueprint/issues/479)) ([bd26d42](https://github.com/Dennis-Otto/repo-blueprint/commit/bd26d42db85795f8e8bfc926ab06e066d64ddeec))
+
+## [1.1.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.0...v1.1.1) (2026-10-26)
+
+### Bug fixes
+
+* **deps:** update dependency nextcloud/server to v35.0.2 ([#481](https://github.com/Dennis-Otto/repo-blueprint/issues/481)) ([36eedb6](https://github.com/Dennis-Otto/repo-blueprint/commit/36eedb6b52321ab27ba7d6308d5c2fa22e81353c))
+
 ## [1.1.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.0.8...v1.1.0) (2026-10-25)
 
 ### Features
