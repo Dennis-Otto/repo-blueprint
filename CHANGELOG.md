@@ -7,6 +7,12 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.2.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.0...v1.2.1) (2026-10-26)
+
+### Bug fixes
+
+* **deps:** update renovatebot/github-action action to v46.3.9 ([#509](https://github.com/Dennis-Otto/repo-blueprint/issues/509)) ([52e1083](https://github.com/Dennis-Otto/repo-blueprint/commit/52e1083558bf4ba8d1395e1e528bf3ad636052bc))
+
 ## [1.2.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.5...v1.2.0) (2026-10-26)
 
 ### Features
