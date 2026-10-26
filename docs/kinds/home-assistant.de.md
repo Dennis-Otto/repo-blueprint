@@ -9,7 +9,7 @@ Eine eigene Integration für Home Assistant, mit den Prüfungen von Home Assista
 ## Eines anlegen
 
 ```sh
-uvx --from copier==9.19.0 copier copy --data project_type=home-assistant gh:Dennis-Otto/repo-blueprint my-integration
+uvx --from copier==9.19.1 copier copy --data project_type=home-assistant gh:Dennis-Otto/repo-blueprint my-integration
 cd my-integration
 python3 .github/blueprint.py create
 ```
