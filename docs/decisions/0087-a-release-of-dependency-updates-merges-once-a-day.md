@@ -23,4 +23,4 @@ Option 3.
 
 ## Consequences
 
-The updates of a day make one release, and one Rollout, in place of one each; a routine update reaches the users of a repository up to a day later, its release notes list all of the day's updates together, and a fix of a vulnerability is not delayed. The maintainer can release the waiting updates at once by starting the Release workflow by hand.
+The updates of a day make one release, and one Rollout, in place of one each; a routine update reaches the users of a repository up to a day later, its release notes list all of the day's updates together, and a fix of a vulnerability is not delayed. The maintainer can release the waiting updates at once by starting the Release workflow by hand. GitHub runs schedules late and drops some; a dropped one the bot-health bot starts within the day, since only a run of the schedule or by hand counts for it, so the updates wait at most about a day longer.
