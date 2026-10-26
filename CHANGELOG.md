@@ -7,6 +7,18 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.2.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.5...v1.2.0) (2026-10-26)
+
+
+### Features
+
+* **release:** merge a release of dependency updates once a day ([#505](https://github.com/Dennis-Otto/repo-blueprint/issues/505)) ([ed2925c](https://github.com/Dennis-Otto/repo-blueprint/commit/ed2925c31b04b5b6220b5f8453be219326f084d5))
+
+
+### Bug fixes
+
+* **security:** accept the comment trigger of the issue assistant in zizmor ([#502](https://github.com/Dennis-Otto/repo-blueprint/issues/502)) ([f8fdb15](https://github.com/Dennis-Otto/repo-blueprint/commit/f8fdb1516f96efd70518c65fe581c16cc00bdb05))
+
 ## [1.1.5](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.1.4...v1.1.5) (2026-10-26)
 
 ### Bug fixes
