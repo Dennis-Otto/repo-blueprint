@@ -36,14 +36,14 @@ Die [Website des Blueprints](https://dennis-otto.github.io/repo-blueprint/de/) z
 Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator des Kontos oder der Organisation, der das Repository gehören soll (`gh auth login`):
 
 ```sh
-uvx --from copier==9.19.0 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
+uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
 cd mein-projekt
 python3 .github/blueprint.py create
 ```
 
 ![copier copy im Terminal: Copier klont den Blueprint und fragt nach dem Namen Paperless Sync, dem Repository, einer Beschreibung, der Art des Projekts, Python-Paket, und dem Eigentümer Dennis-Otto, übernimmt für den Rest die Vorgaben, auch die Release-App, schreibt die Dateien und nennt den einen Befehl danach; das neue Repository hat seine Community-Dateien, seine Prüfungen und seine Workflows, und ein Probelauf von python3 .github/blueprint.py create zeigt die Befehle, die daraus das Repository auf GitHub machen](docs/images/copier-copy.gif)
 
-Mit pipx statt uv lautet die erste Zeile `pipx run --spec copier==9.19.0 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt`, und ein eigenes Copier, Copier ab 9.8, führt `copier copy gh:Dennis-Otto/repo-blueprint mein-projekt` aus; unter Windows startet `py -3` Python statt `python3`. Das Kopieren führt keinen Code des Blueprints aus: Das Template hat keine Tasks, Migrationen oder Jinja-Erweiterungen, also braucht Copier kein `--trust`.
+Mit pipx statt uv lautet die erste Zeile `pipx run --spec copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt`, und ein eigenes Copier, Copier ab 9.8, führt `copier copy gh:Dennis-Otto/repo-blueprint mein-projekt` aus; unter Windows startet `py -3` Python statt `python3`. Das Kopieren führt keinen Code des Blueprints aus: Das Template hat keine Tasks, Migrationen oder Jinja-Erweiterungen, also braucht Copier kein `--trust`.
 
 Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, dem GitHub-Konto oder der Organisation, der es gehört, der Lizenz (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later oder AGPL-3.0-or-later), ein paar Details der Art und der Release-App des Eigentümers, die leer bleiben darf, bis die Checkliste sie registriert hat. Die Homepage ist die Website, die der Docs-Workflow auf GitHub Pages veröffentlicht, wenn du keine andere oder keine nennst, und README, About-Box, Issue-Formulare, das Manifest einer Integration und `appinfo/info.xml` einer App verlinken sie; jede Art beginnt mit eigenen Topics, etwa `home-assistant, hacs` für eine Integration, die HACS braucht, um sie aufzulisten. Copier lehnt eine Antwort ab, die eine Datei kaputt machen würde: eine Beschreibung oder einen Namen mit `"""`, `*/`, `]]>` oder einem Backslash, die einen Docstring von Python, einen Kommentar von TypeScript oder das CDATA von `appinfo/info.xml` beenden würden, eine Nextcloud-App-ID, die der App Store nicht nimmt, und Topics, die GitHub nicht nimmt.
 

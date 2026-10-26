@@ -9,7 +9,7 @@ Eine Bibliothek oder ein Befehl für PyPI, gebaut mit Hatchling und veröffentli
 ## Eines anlegen
 
 ```sh
-uvx --from copier==9.19.0 copier copy --data project_type=python-package gh:Dennis-Otto/repo-blueprint my-package
+uvx --from copier==9.19.1 copier copy --data project_type=python-package gh:Dennis-Otto/repo-blueprint my-package
 cd my-package
 python3 .github/blueprint.py create
 ```
