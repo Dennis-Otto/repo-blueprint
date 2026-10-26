@@ -5939,6 +5939,31 @@ def test_actionlint_ignores_only_the_queue_of_the_issue_assistant(
     assert ignored == ['- \'unexpected key "queue" for "concurrency" section\'']
 
 
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_zizmor_accepts_only_the_comment_trigger_of_the_issue_assistant(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The issue assistant answers a new comment, so it starts on issue_comment, which
+    # zizmor reports as a dangerous trigger since its action 0.7.1. It is accepted for
+    # that rule and that workflow alone, with the reason in the configuration: the
+    # workflow checks out nothing, and its jobs read the comment only as text.
+    root = ROOT if project == "blueprint" else projects[project]
+    text = (root / ".github/workflows/issue-assistant.yml").read_text(encoding="utf-8")
+    assert set(triggers(text)) == {"issues", "issue_comment", "workflow_dispatch"}
+    assert triggers(text)["issue_comment"] == ["    types: [created]"]
+    assert "actions/checkout" not in text
+    zizmor = (root / ".github/zizmor.yml").read_text(encoding="utf-8")
+    assert zizmor == (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    rules = yaml.safe_load(zizmor)["rules"]
+    accepted = {
+        rule
+        for rule, found in rules.items()
+        if "issue-assistant.yml" in found["ignore"]
+    }
+    assert accepted == {"dangerous-triggers"}
+    assert "issue-assistant.yml" in accepted_dangerous_triggers()
+
+
 def test_the_issue_forms_point_to_the_documentation(tmp_path: Path) -> None:
     project = render(
         tmp_path,
