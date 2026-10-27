@@ -7,6 +7,16 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.2.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.1...v1.2.2) (2026-10-27)
+
+
+### Bug fixes
+
+* **deps:** lock file maintenance ([#488](https://github.com/Dennis-Otto/repo-blueprint/issues/488)) ([e08aae1](https://github.com/Dennis-Otto/repo-blueprint/commit/e08aae158f627301e7ea086d224be1b53b297877))
+* **deps:** update dependency anchore/syft to v1.55.0 ([#516](https://github.com/Dennis-Otto/repo-blueprint/issues/516)) ([ab513cc](https://github.com/Dennis-Otto/repo-blueprint/commit/ab513cc73d4f48994e18aaab1245644c674e3f00))
+* **deps:** update step-security/harden-runner action to v2.22.2 ([#515](https://github.com/Dennis-Otto/repo-blueprint/issues/515)) ([02bd169](https://github.com/Dennis-Otto/repo-blueprint/commit/02bd169b651b9de017de1ef9305c8634b4aa3663))
+* **deps:** update the issue assistant to v1.8.0 ([#512](https://github.com/Dennis-Otto/repo-blueprint/issues/512)) ([d6fd33e](https://github.com/Dennis-Otto/repo-blueprint/commit/d6fd33eeac9f93835d7fec04e943f07d9f10f269))
+
 ## [1.2.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.0...v1.2.1) (2026-10-26)
 
 ### Bug fixes
