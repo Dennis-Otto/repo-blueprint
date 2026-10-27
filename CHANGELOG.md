@@ -9,7 +9,6 @@ requests when there is none.
 
 ## [1.2.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.1...v1.2.2) (2026-10-27)
 
-
 ### Bug fixes
 
 * **deps:** lock file maintenance ([#488](https://github.com/Dennis-Otto/repo-blueprint/issues/488)) ([e08aae1](https://github.com/Dennis-Otto/repo-blueprint/commit/e08aae158f627301e7ea086d224be1b53b297877))
