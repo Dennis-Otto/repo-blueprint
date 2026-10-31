@@ -4,4 +4,4 @@
 # and scripts/docs-pictures.sh install it in that container, never on the runner.
 # Renovate compiles it again with the command in the header of requirements-browser.txt.
 # https://github.com/Dennis-Otto/repo-blueprint
-playwright==1.63.0
+playwright==1.64.1
