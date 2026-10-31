@@ -2954,6 +2954,9 @@ def the_ci_steps(project: Path, *steps: Callable[[str], str]) -> str:
     )
 
 
+# In the copy of the mutation tests, the annotations come from the tool of the project,
+# which is the code with the mutants and fails in the process that the step starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_ci_shows_each_finding_of_shellcheck_at_its_line(
     projects: dict[str, Path], tmp_path: Path
