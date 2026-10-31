@@ -32,7 +32,9 @@ Option 3, with option 1 as the fallback, as Dennis decided on 31 October 2026: w
 
 ## What was measured
 
-Before the change, 53 hung jobs in 1,478 runs of all repositories on v2.22.2. The numbers after it are in [the pull request](https://github.com/Dennis-Otto/repo-blueprint/pull/521) of this decision: runs of a job with the steps of a real bot, and of the real workflows that can run from a branch, none of which failed or hung through this cause. Every job on `westus2` among them says `[github-dns-experiment] reverted` in the log of the agent, and none dropped an address.
+Before the change, from 29 to 31 October 2026: 53 hung jobs in 1,478 runs of all repositories, on v2.22.2.
+
+With the change, on 31 October 2026: 79 jobs with the steps of a real bot (the warm-up, a checkout, a call of the API and the wait for Docker), 6 of them on `westus2`. None failed, hung, waited in the warm-up or dropped an address, and each of the 6 says `[github-dns-experiment] reverted` in the log of the agent. The warm-up took about 0.4 seconds: 16.8 seconds on average, against 16.4 of 36 jobs on v2.22.2 without it. None of those 36 ran on `westus2`, so they show what the warm-up costs, not what it cures. The pull request that fixes [#518](https://github.com/Dennis-Otto/repo-blueprint/issues/518) has the numbers of the real workflows that can run from a branch; those that run only from `main`, such as the check of the title, can't be measured before the merge.
 
 ## Consequences
 
