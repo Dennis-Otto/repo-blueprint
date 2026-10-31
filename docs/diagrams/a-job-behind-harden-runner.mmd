@@ -1,0 +1,33 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: A job behind Harden-Runner
+    accDescr: Harden-Runner blocks every host that the job doesn't name. The job then asks each of its hosts every 3 seconds, for two minutes at most, until Harden-Runner lets it through, and runs its steps. Without sudo and Docker, it waits until Harden-Runner has removed Docker. A job that ends is done. One that hangs until its time limit ends as cancelled, and a bot runs its cancelled jobs once more; when that hangs too, a required check stays cancelled for you, and a bot gets an issue.
+
+    block["Harden-Runner blocks every host<br>that the job doesn't name"]
+    warm["The job asks each of its hosts,<br>every 3 s, for 2 minutes at most"]
+    steps["The steps of the job"]
+    docker["Wait until Harden-Runner<br>has removed Docker"]
+    ends{"Does the job end?"}
+    done["Done"]
+    again["A bot runs the cancelled jobs<br>once more"]
+    you["A check stays cancelled,<br>a bot gets an issue"]
+
+    block --> warm
+    warm --> steps
+    steps --> docker
+    docker --> ends
+    ends -- "yes" --> done
+    ends -- "hangs until its time limit" --> again
+    again -- "ends" --> done
+    again -- "hangs again" --> you
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class warm,docker,again bot
+    class you person
+    class done done
