@@ -6439,6 +6439,8 @@ def test_renovate_keeps_every_project_current(
     assert ('constraintsFiltering: "strict"' in rules) == (kind == "nextcloud-app")
     review = (project / ".github/dependency-review.yml").read_text(encoding="utf-8")
     assert ("- pkg:pypi/regex\n" in review) == (kind == "home-assistant")
+    # A tool of the blueprint bot, in every project.
+    assert "- pkg:pypi/wcwidth\n" in review
     # The images of the scripts, also in a variable with quotes.
     pattern = re.search(r'^\s*"(\(\?:\^\|.*sha256.*)",$', rules, re.MULTILINE)
     assert pattern
