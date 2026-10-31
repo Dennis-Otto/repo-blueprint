@@ -7,10 +7,6 @@ requests when there is none.
 
 ## Unreleased
 
-### Bug fixes
-
-- **The recording of a copy in the README and on the website renews itself again:** the Docs pictures workflow failed after every release since the question about the markers of test logs, which the recording left unanswered. It now answers each question, a test keeps it that way for every new question, and its dry run of `create` ends on the commands that make the repository and not on the marks of its preflight.
-
 ## [1.2.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.1...v1.2.2) (2026-10-27)
 
 ### Bug fixes
