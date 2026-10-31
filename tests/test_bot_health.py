@@ -517,6 +517,59 @@ def test_a_cancelled_run_is_no_failure(
     assert writes(github) == []
 
 
+OUT_OF_TIME = "The job has exceeded the maximum execution time of 5m0s"
+
+
+def test_a_job_that_ran_out_of_time_gets_a_second_try(github: FakeGitHub) -> None:
+    # A job that hangs until its time limit ends as cancelled, even after its last step.
+    github.runs[1] = run_of(1, conclusion="cancelled")
+    github.jobs[(1, 1)] = [
+        job_of_a_run(11, "release", "cancelled", [("Run it", "success")]),
+        job_of_a_run(12, "notes", "success"),
+    ]
+    github.annotations[11] = [failure("failure", OUT_OF_TIME)]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Release: failed: runs the failed jobs once more."
+    assert [write[:2] for write in writes(github)] == [
+        ("POST", f"repos/{REPO}/actions/runs/1/rerun-failed-jobs")
+    ]
+
+
+def test_a_job_that_runs_out_of_time_twice_is_reported(github: FakeGitHub) -> None:
+    github.runs[1] = run_of(1, conclusion="cancelled", attempt=2)
+    github.jobs[(1, 2)] = [job_of_a_run(11, "release", "cancelled")]
+    github.annotations[11] = [failure("failure", OUT_OF_TIME)]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Release: fails: opened #1."
+    assert OUT_OF_TIME in github.issues[1]["body"]
+
+
+@pytest.mark.parametrize(
+    ("job", "annotations"),
+    [
+        # A person or a newer run cancelled it, or a job that didn't run out of time.
+        ("cancelled", [failure("failure", "The operation was canceled.")]),
+        ("cancelled", []),
+        ("success", [failure("failure", OUT_OF_TIME)]),
+    ],
+)
+def test_a_run_that_only_something_else_cancelled_is_no_failure(
+    github: FakeGitHub, job: str, annotations: list[dict[str, str]]
+) -> None:
+    github.runs[1] = run_of(1, conclusion="cancelled")
+    github.jobs[(1, 1)] = [job_of_a_run(11, "release", job)]
+    github.annotations[11] = annotations
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Release: ended as cancelled: no failure."
+    assert writes(github) == []
+
+
 @pytest.mark.parametrize("name", sorted(ONE_TRY))
 def test_a_finding_is_reported_without_a_second_try(
     github: FakeGitHub, name: str
