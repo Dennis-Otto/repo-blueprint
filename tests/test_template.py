@@ -11098,7 +11098,7 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     # reports; of a run that ran out of time, only the jobs that it cancelled.
     script = workflow_steps.step("after-checks.yml", "cancelled", CANCELLED_STEP)["run"]
     assert script.count('gh run rerun "$RUN"\n') == 1
-    assert script.count('gh run rerun "$RUN" --failed\n') == 1
+    assert script.count('gh run rerun "$RUN" --failed 2>&1') == 1
     # The values of the event reach the scripts as variables only.
     assert not any("${{" in found.get("run", "") for found in steps)
 
@@ -11115,6 +11115,8 @@ def run_the_bot_for_cancelled_checks(
     *,
     attempt: int = 1,
     tests: str = "false",
+    state: str = "completed 1",
+    rerun: Answer | None = None,
 ) -> tuple[list[str], str]:
     # gh answers as the API does, after the filters of jq. With the head of main, the
     # run is one of a push to main.
@@ -11140,8 +11142,9 @@ def run_the_bot_for_cancelled_checks(
                 r" --jq \.\[\]\.message",
                 f"{message}\n",
             ),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", f"{state}\n"),
             exact("run rerun 5"),
-            exact("run rerun 5 --failed"),
+            rerun or exact("run rerun 5 --failed"),
         ],
         env={
             "RUN": "5",
@@ -11251,6 +11254,41 @@ def test_the_bot_for_cancelled_checks_leaves_other_jobs_that_ran_out_of_time(
 
     assert "it stays cancelled" in written
     assert not any(call.startswith("run rerun") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("state", ["in_progress 2", "completed 2"])
+def test_the_bot_for_cancelled_checks_leaves_a_run_that_ran_again_already(
+    tmp_path: Path, state: str
+) -> None:
+    # The bot-health bot was first, and its second try still runs or has ended: a third
+    # attempt would break the promise of one more try.
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, state=state
+    )
+
+    assert "ran again already" in written
+    assert not any(call.startswith("run rerun") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_tolerates_losing_the_race_to_another_bot(
+    tmp_path: Path,
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path,
+        "136",
+        "",
+        OUT_OF_TIME,
+        rerun=exact(
+            "run rerun 5 --failed",
+            code=1,
+            err="run 5 cannot be rerun; it is already running\n",
+        ),
+    )
+
+    assert "run rerun 5 --failed" in calls
+    assert "runs again already" in written
 
 
 def test_the_bot_for_cancelled_checks_knows_the_workflows_of_the_flaky_test_bot() -> (
@@ -16871,14 +16909,45 @@ def test_a_release_is_built_in_isolation() -> None:
     assert job_in(build, "assets")["environment"]["name"] == "release"
 
 
-def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
+def test_a_release_left_as_a_draft_is_finished_by_hand_or_by_a_second_try() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "release-please")
     step = step_in(job, "resume")
-    assert "github.event_name == 'workflow_dispatch'" in condition_of(step)
+    # A job that hung after it created the release gets a second try, in which
+    # release-please has nothing left to create; without this it would end green.
+    assert condition_of(step) == (
+        "(github.event_name == 'workflow_dispatch' || github.run_attempt > 1)"
+        " && steps.release.outputs.release_created != 'true'"
+    )
     assert "--json isDraft" in step["run"]
     for output in ("created", "tag", "sha", "version", "major"):
         assert "steps.resume.outputs." in job["outputs"][output], output
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_second_try_of_a_release_takes_up_its_draft(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        "Take up a release that an earlier run left as a draft",
+        answers=[
+            Answer(
+                r"release view v1\.2\.3 --repo o/r --json isDraft --jq \.isDraft",
+                "true\n",
+            ),
+            Answer(r"api repos/o/r/commits\?path=.+ --jq .+", "abc1234def\n"),
+        ],
+        env={"GITHUB_SHA": "fed4321cba"},
+        # The version in the manifest, as jq reads it, also on a machine without jq.
+        stubs={"jq": "echo 1.2.3"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.outputs["tag"] == "v1.2.3"
+    assert done.outputs["sha"] == "abc1234def"
+    assert done.outputs["version"] == "1.2.3"
+    assert done.outputs["major"] == "1"
 
 
 # What each kind of release ships, which its SBOMs describe: the files of its package,

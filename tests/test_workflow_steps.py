@@ -1596,8 +1596,12 @@ def test_the_weekly_report_is_posted_in_the_general_discussions(
         "Post it in the discussions",
         answers=[
             Answer(
-                r"api graphql -F owner=o -F name=r -f query=query.* --jq .*",
+                r"api graphql -F owner=o -F name=r -f query=query.*discussionCategories.*",
                 "R_1 DIC_2\n",
+            ),
+            Answer(
+                r"api graphql -F owner=o -F name=r -f query=query.*discussions\(.*",
+                "The week before\n",
             ),
             Answer(
                 r"api graphql -F repository=R_1 -F category=DIC_2 -F title=The week"
@@ -1613,6 +1617,34 @@ def test_the_weekly_report_is_posted_in_the_general_discussions(
     assert '| select(.name == "General") |' in done.commands[0]
     assert done.read_by("api graphql -F repository", "-F body") == ["# The week\n"]
     assert done.stdout == "https://github.com/o/r/discussions/9\n"
+
+
+def test_a_second_try_of_the_weekly_report_does_not_post_it_again(
+    tmp_path: Path,
+) -> None:
+    # A job that hung after its last step runs once more.
+    done = run_step(
+        tmp_path,
+        "weekly-report.yml",
+        "report",
+        "Post it in the discussions",
+        answers=[
+            Answer(
+                r"api graphql -F owner=o -F name=r -f query=query.*discussionCategories.*",
+                "R_1 DIC_2\n",
+            ),
+            Answer(
+                r"api graphql -F owner=o -F name=r -f query=query.*discussions\(.*",
+                "The week\nThe week before\n",
+            ),
+        ],
+        env={"TITLE": "The week"},
+        files={"$RUNNER_TEMP/report.md": "# The week\n"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("api graphql -F repository") == []
+    assert done.stdout == "The report is posted already.\n"
 
 
 def test_a_first_pull_request_is_welcomed_once(tmp_path: Path) -> None:

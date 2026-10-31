@@ -739,7 +739,23 @@ jobs:
           # step, and leave a required check cancelled: the jobs get one more try. The
           # flaky-test bot does that for the tests.
           if [[ "$late" == true && "$ATTEMPT" == 1 && "$TESTS" != true ]]; then
-            gh run rerun "$RUN" --failed
+            # The bot-health bot watches some of these workflows too and may have run it
+            # again first: then the run is its own, and GitHub refuses a rerun while it runs.
+            state="$(gh api "repos/$GH_REPO/actions/runs/$RUN" --jq '"\(.status) \(.run_attempt)"')"
+            if [[ "$state" != "completed 1" ]]; then
+              echo "$NAME for the head of $head ran again already; the bot leaves it alone." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            # It may also start again between the look and the rerun.
+            if ! output="$(gh run rerun "$RUN" --failed 2>&1)"; then
+              if grep -q "already running" <<<"$output"; then
+                echo "$NAME for the head of $head runs again already; the bot leaves it alone." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              printf '%s\n' "$output" >&2
+              exit 1
+            fi
+            printf '%s\n' "$output"
             echo "A job of $NAME for the head of $head ran out of time; the failed jobs run once more." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
