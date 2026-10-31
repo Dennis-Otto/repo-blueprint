@@ -379,11 +379,20 @@ def is_the_text_of_the_tool(node: ast.AST) -> bool:
     return ast.unparse(called) == "str" and any(map(is_the_tool, node.args))
 
 
+def runs_the_step_of_the_tool(function: ast.FunctionDef) -> bool:
+    """Whether the function runs the step "Pages in one column" of scripts/check.sh, which
+    finds the tool itself, and whose text pages_step of test_template.py cuts out.
+
+    A test that only reads the text of the step runs no mutant."""
+    names = {node.id for node in ast.walk(function) if isinstance(node, ast.Name)}
+    return "pages_step" in names and bool(names & {"BASH", "run_the_steps"})
+
+
 def runs_the_tool(function: ast.FunctionDef) -> bool:
     """Whether the function starts the tool of a project or hands its path to a script.
 
     A test that only reads the tool, or writes one of its own there, runs no mutant."""
-    return any(
+    return runs_the_step_of_the_tool(function) or any(
         starts_the_tool(node) or is_the_text_of_the_tool(node)
         for node in ast.walk(function)
     )
@@ -545,6 +554,23 @@ def test_that_reads_the_tool_of_a_project(project):
     assert str()
 
 
+def test_that_runs_the_step_of_the_tool(check):
+    subprocess.run([BASH, "-c", pages_step(check)])
+
+
+def test_that_runs_the_steps_of_the_tool(project, check):
+    run_the_steps(project, pages_step(check))
+
+
+def test_that_reads_the_step_of_the_tool(check):
+    assert '"$tool" pages' in pages_step(check)
+
+
+def test_with_other_steps_in_bash(project, check):
+    subprocess.run([BASH, "-c", fragments_step(check)])
+    run_the_steps(project, check)
+
+
 def test_with_a_tool_of_its_own(tmp_path):
     (tmp_path / ".github/blueprint.py").write_text("print()")
     (tmp_path / ".github/blueprint.py").unlink()
@@ -560,6 +586,8 @@ def test_that_lists_the_tool_of_a_project(project):
     code = ["tool.py", "package"]
 
     assert unmarked_copies(source, code) == [
+        "test_that_runs_the_step_of_the_tool",
+        "test_that_runs_the_steps_of_the_tool",
         "test_that_starts_it_by_its_path",
         "test_that_starts_the_tool_of_a_project",
         "test_through_a_fixture",
