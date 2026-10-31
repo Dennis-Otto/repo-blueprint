@@ -1,0 +1,120 @@
+name: Measure Harden-Runner
+
+# A temporary measurement for the package n2-rb-harden-runner: this branch is deleted
+# after it. Harden-Runner v2.22.3 with the warm-up against v2.22.2 without it.
+
+on:
+  push:
+    branches: [measure/n2-rb-harden-runner]
+
+permissions:
+  contents: read
+
+env:
+  GH_TELEMETRY: "false"
+
+jobs:
+  candidate:
+    name: candidate ${{ matrix.n }}
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Block every host that the job doesn't need
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+      - name: Say where the job runs
+        run: |
+          setup="$(find /home/runner -maxdepth 5 -name .setup_info 2>/dev/null | head -1)"
+          region="$(grep -ho 'Azure Region[^"]*' "$setup" 2>/dev/null | head -1)"
+          dropin="$(ls /etc/systemd/resolved.conf.d/ /run/systemd/resolved.conf.d/ 2>/dev/null | tr '\n' ' ')"
+          resolv="$(grep -m1 nameserver /etc/resolv.conf)"
+          service="$(systemctl is-active egress-dns-resolver.service 2>/dev/null)"
+          experiment="$(grep -h 'github-dns-experiment' /home/agent/agent.log 2>/dev/null | tail -1 | cut -c1-80)"
+          echo "::notice title=where::region=$region; dropin=$dropin; resolv=$resolv; service=$service; experiment=$experiment"
+      - name: Wait until Harden-Runner lets the hosts through
+        env:
+          HOSTS: api.github.com github.com
+        run: |
+          start=$SECONDS
+          for host in $HOSTS; do
+            try=1
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if ((SECONDS - start >= 120)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes."
+                break
+              fi
+              echo "::notice title=warm-up::Harden-Runner still blocks $host (try $try), waiting 3 s."
+              try=$((try + 1))
+              sleep 3
+            done
+          done
+          echo "::notice title=waited::$((SECONDS - start)) s"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Ask the API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY" --jq .full_name
+      - name: Wait until Harden-Runner has removed Docker
+        if: always()
+        run: |
+          start=$SECONDS
+          while pgrep -x 'apt-get|dpkg' >/dev/null && ((SECONDS - start < 120)); do
+            sleep 1
+          done
+          drops="$(grep -c 'ip address dropped' /home/agent/agent.log 2>/dev/null)"
+          echo "::notice title=end::dropped=$drops; waited for docker $((SECONDS - start)) s"
+
+  control:
+    name: control ${{ matrix.n }}
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Block every host that the job doesn't need
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+      - name: Say where the job runs
+        run: |
+          setup="$(find /home/runner -maxdepth 5 -name .setup_info 2>/dev/null | head -1)"
+          region="$(grep -ho 'Azure Region[^"]*' "$setup" 2>/dev/null | head -1)"
+          dropin="$(ls /etc/systemd/resolved.conf.d/ /run/systemd/resolved.conf.d/ 2>/dev/null | tr '\n' ' ')"
+          resolv="$(grep -m1 nameserver /etc/resolv.conf)"
+          service="$(systemctl is-active egress-dns-resolver.service 2>/dev/null)"
+          echo "::notice title=where::region=$region; dropin=$dropin; resolv=$resolv; service=$service"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Ask the API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY" --jq .full_name
+      - name: Wait until Harden-Runner has removed Docker
+        if: always()
+        run: |
+          start=$SECONDS
+          while pgrep -x 'apt-get|dpkg' >/dev/null && ((SECONDS - start < 120)); do
+            sleep 1
+          done
+          drops="$(grep -c 'ip address dropped' /home/agent/agent.log 2>/dev/null)"
+          echo "::notice title=end::dropped=$drops; waited for docker $((SECONDS - start)) s"
