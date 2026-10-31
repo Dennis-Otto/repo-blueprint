@@ -32,13 +32,13 @@ A test run that fails, or whose job runs out of time, runs its failed jobs once 
 
 ## Cancelled checks
 
-The quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge; a newer push to `main` cancels the tests and scanners of the push before, and their run for the head of `main` starts again as well when a late run cancelled it.
+The quick checks run once for each commit, so that no run for another commit cancels them; a run of a longer required check for the latest commit of a pull request that a late run for an older commit cancelled starts again by itself instead of blocking the merge; a newer push to `main` cancels the tests and scanners of the push before, and their run for the head of `main` starts again as well when a late run cancelled it. A job that ran out of time, as one that hangs behind Harden-Runner can, runs once more for the head of a pull request or of `main`.
 
 **How:** `after-checks.yml`.
 
 ## Failed releases
 
-The release of a merge that fails, as at a push of its tag that GitHub refuses for a moment, runs its failed jobs once more by itself, where they stopped.
+The release of a merge that fails, as at a push of its tag that GitHub refuses for a moment, runs its failed jobs once more by itself, where they stopped. A second try also takes up a release that the first left as a draft, as when its job hung after it had created the release.
 
 **How:** `after-checks.yml`.
 
@@ -48,11 +48,12 @@ A check that a runner, a site or GitHub fails for a moment, or that a race of tw
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/when-a-check-fails-or-stops.dark.svg">
-  <img src="../images/diagrams/when-a-check-fails-or-stops.svg" alt="When a check fails or stops: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. The release of a merge that failed runs its failed jobs once more, where they stopped.">
+  <img src="../images/diagrams/when-a-check-fails-or-stops.svg" alt="When a check fails or stops: When a run of the checks or of the release ends, the bots after the checks look at how. Tests that failed or ran out of time at first run their failed jobs once more, unless the same jobs broke for the commit before; a job that passes then goes into the issue of flaky tests with its step, its test and its error, and one that fails again stays red. A required check that a late run for an older commit cancelled starts again. A job of another check that ran out of time at the first attempt runs once more. The release of a merge that failed runs its failed jobs once more, where they stopped.">
 </picture>
 
 - **A download that hangs starts again, before a bot is needed:** each download of the website that sets no time limit of its own, such as one of the social plugin, gets 10 seconds to connect and 30 for each next part of the file, and every download starts again twice. In the Variants, a setup of uv that doesn't end within two minutes gives way to a second one from the releases of uv on GitHub, and a container whose image failed to download starts again. Only what fails every attempt fails its step (decision 0061 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
-- **Once, not again and again:** the flaky-test bot runs the failed jobs of the first attempt of a test run once more, and so does the bot for failed releases with a release that a merge started; a release that you already run again is yours, and the bot leaves it alone; the bot for cancelled checks starts a run twice at most. A job that GitHub stops at its time limit ends cancelled, not failed, and runs once more as well. A run that you or a newer run cancelled stays cancelled, even when a job that waits for the others failed because of it.
+- **Once, not again and again:** the flaky-test bot runs the failed jobs of the first attempt of a test run once more, and so does the bot for failed releases with a release that a merge started; a release that you already run again is yours, and the bot leaves it alone; the bot for cancelled checks starts a run twice at most. A job that GitHub stops at its time limit ends cancelled, not failed, and runs once more as well: a test by the flaky-test bot, another check for the head of a pull request or of `main` by the bot for cancelled checks, and a bot by the bot-health bot. A run that you or a newer run cancelled stays cancelled, even when a job that waits for the others failed because of it.
+- **A job behind Harden-Runner waits for its hosts:** a job that blocks every host that it doesn't need first asks those it needs, for two minutes at most, because on some of GitHub's runners Harden-Runner [blocks an address of a host that it allows](https://github.com/step-security/harden-runner/issues/708) until the DNS has forgotten it. Such a job can still hang after its last step until its time limit, and then runs once more ([decision 0088](../decisions/0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md)).
 - **A failure that repeats is real:** when the same jobs broke for the commit before on the same branch, after they ran once more, the jobs don't run again, so that a broken test doesn't keep a runner busy for nothing.
 - **The issue of flaky tests** gets a comment for each run that passed when it ran again, with a table: each job that failed at first, with a link to its log, the step that broke, the tests that pytest names in the log, and the first error. Its body counts how often each job and test flaked, and links the run in which it last did, the latest first, so the test that flakes most stands out without reading every comment.
 - **Tests that pytest doesn't run,** such as the browser tests of a Docker E2E, name the test that failed as well, with `copier update --data "test_marker=Browser step:"`: when the log of such a job writes that text before the name of each test or step as it starts, the bot names the one that the log names last before the failure, in the step of the job and the worker that failed, and takes the first exception after it as the error when no annotation names one.
@@ -65,6 +66,11 @@ A check that a runner, a site or GitHub fails for a moment, or that a race of tw
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-a-newer-push-to-main-cancels.dark.svg">
   <img src="../images/diagrams/what-a-newer-push-to-main-cancels.svg" alt="What a newer push to main cancels: A merge pushes to main while the runs of the push before may still go. The tests, CodeQL and the scanners of the push before only tell what the run of the newer commit tells as well, so the newer push cancels them, as a newer push to a pull request does. When a late run for an older commit cancelled the run for the head of main instead, the bot for cancelled checks starts it again. The website, the release and the bots that commit or change GitHub end the run that they started, and only the newest run that waits comes next. No push cancels a run on a schedule or by hand.">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-job-behind-harden-runner.dark.svg">
+  <img src="../images/diagrams/a-job-behind-harden-runner.svg" alt="A job behind Harden-Runner: Harden-Runner blocks every host that the job doesn't name. The job then asks each of its hosts every 3 seconds, for two minutes at most, until Harden-Runner lets it through, and runs its steps. Without sudo and Docker, it waits until Harden-Runner has removed Docker. A job that ends is done. One that hangs until its time limit ends as cancelled, and a bot runs its cancelled jobs once more; when that hangs too, a required check stays cancelled for you, and a bot gets an issue.">
 </picture>
 
 ## When a bot fails
