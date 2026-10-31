@@ -36,6 +36,6 @@ Option 4.
 
 The same loops, with the hook of this decision, passed 4000 builds with 31 threads and 2000 with 3, without a hang. Tests prove each outcome of the placeholder without a network or Material. It reaches the website of every repository with the next release.
 
-The hook reaches into the plugin: when a version of Material gives the jobs another name, the hook fails the build with an `AttributeError`, and Renovate's pull request with it, so that someone looks whether Material closed the gap and removes `Layers`. The time limits of [0061](0061-a-download-that-hangs-ends-and-starts-again.md) stay, since a server that stops answering would hang the social plugin as well.
+The hook reaches into the plugin: when a version of Material gives the jobs another name, the hook warns with what to look at, which fails the strict build, and Renovate's pull request with it, so that someone looks whether Material closed the gap and changes or removes `Layers`. The time limits of [0061](0061-a-download-that-hangs-ends-and-starts-again.md) stay, since a server that stops answering would hang the social plugin as well.
 
 The other flake of issue 491, the job *keep the pull request of the release*, ended all its steps and then hung in *Cleaning up orphan processes*, which belongs to Harden-Runner, not to this decision.

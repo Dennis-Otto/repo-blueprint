@@ -450,6 +450,25 @@ def test_the_jobs_of_the_layers_stay_when_a_build_starts_again(
     assert jobs["other"] is done
 
 
+def test_a_social_plugin_without_the_jobs_says_what_to_look_at(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A version of Material that renames the jobs may have closed the gap, or may leave
+    # it open with the hook doing nothing. A warning fails the strict build and names
+    # what to look at, where a raw AttributeError would only name the attribute.
+    social = plugin(monkeypatch, "social", Network())
+    del social.card_layer_pool_jobs
+
+    with caplog.at_level(logging.WARNING, logger="mkdocs.hooks.blueprint"):
+        hooks().on_config(mkdocs_config(plugins={"material/social": social}))
+
+    assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    assert "card_layer_pool_jobs" in caplog.text
+    assert "decision 0089" in caplog.text
+    assert ".github/mkdocs_blueprint.py" in caplog.text
+    assert not hasattr(social, "card_layer_pool_jobs")
+
+
 def test_a_build_that_nearly_ran_out_of_its_time_says_where_each_thread_stands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

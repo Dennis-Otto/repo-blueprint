@@ -220,9 +220,9 @@ class Layers(dict[str, Any]):
     its step until the CI ends it, with no error and no line in the log. Starting a
     job can start a thread, which lets the other threads run just then.
 
-    When a version of Material gives the jobs another name, on_config fails with an
-    AttributeError: then look whether Material fixed this, and remove this class.
-    Decision 0089 of the blueprint tells how this was found.
+    When a version of Material gives the jobs another name, on_config warns, which
+    fails a strict build: then look whether Material fixed this, and change or remove
+    this class. Decision 0089 of the blueprint tells how this was found.
     """
 
     def __setitem__(self, key: str, job: Any) -> None:
@@ -240,6 +240,19 @@ class Layers(dict[str, Any]):
             placeholder.set_exception(error)
         else:
             placeholder.set_result(job.result())
+
+
+def watch_the_layers(social: Any) -> None:
+    """Give the social plugin the jobs of Layers, or say what to do when it has none."""
+    jobs = getattr(social, "card_layer_pool_jobs", None)
+    if jobs is None:
+        log.warning(
+            "Material no longer keeps the jobs of the social plugin in "
+            "card_layer_pool_jobs: look whether it closed the gap of decision 0089 of "
+            "the blueprint, and change or remove Layers in .github/mkdocs_blueprint.py."
+        )
+    elif not isinstance(jobs, Layers):
+        social.card_layer_pool_jobs = Layers(jobs)
 
 
 def on_startup(command: str, dirty: bool) -> None:
@@ -273,8 +286,8 @@ def on_config(config: Any) -> None:
         if not isinstance(module.requests, Retrying):
             module.requests = Retrying(module.requests)
     social = config.plugins.get("material/social")
-    if social is not None and not isinstance(social.card_layer_pool_jobs, Layers):
-        social.card_layer_pool_jobs = Layers(social.card_layer_pool_jobs)
+    if social is not None:
+        watch_the_layers(social)
     for path, listed in (
         (STYLESHEET, config.extra_css),
         (SCRIPT, config.extra_javascript),
