@@ -161,7 +161,7 @@ A run that failed for a reason of GitHub or of the network needs nothing: the ne
 
 ## The network of the jobs
 
-The jobs that sign in to the store could publish a version to every user, so each job reaches only the hosts it needs. [Harden-Runner](https://github.com/step-security/harden-runner) blocks every other one, and the jobs run without sudo and containers:
+The jobs that sign in to the store could publish a version to every user, so each job reaches only the hosts it needs. [Harden-Runner](https://github.com/step-security/harden-runner) blocks every other one, each job first waits until it lets those hosts through, and the jobs run without sudo and containers:
 
 | Job | Secrets | Hosts |
 | --- | --- | --- |

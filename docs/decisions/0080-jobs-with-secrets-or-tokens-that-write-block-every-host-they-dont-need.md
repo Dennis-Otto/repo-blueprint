@@ -1,6 +1,6 @@
 # Jobs with secrets or tokens that write block every host they don't need
 
-- Status: accepted
+- Status: accepted, amended by [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md), by which every job that blocks first waits until Harden-Runner lets its hosts through
 - Date: 2026-10-25
 
 ## Context

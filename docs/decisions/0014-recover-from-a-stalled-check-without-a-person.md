@@ -1,6 +1,6 @@
 # Recover from a stalled check without a person, once
 
-- Status: accepted
+- Status: accepted, amended by [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md), by which a job that ran out of time runs once more as well
 - Date: 2026-10-13
 
 ## Context
