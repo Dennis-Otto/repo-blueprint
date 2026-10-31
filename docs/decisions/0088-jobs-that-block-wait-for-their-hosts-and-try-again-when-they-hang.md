@@ -10,9 +10,9 @@
 GitHub tries a DNS resolver and an outbound proxy of its own on the hosted runners of the region `westus2` (`egress-dns-resolver.service`, `90-egress-proxy.conf`), which keeps the questions of the runner from reaching Harden-Runner. So Harden-Runner knows one address of a host and the runner connects to another, which Harden-Runner drops ([step-security/harden-runner#708](https://github.com/step-security/harden-runner/issues/708)):
 
 - A step fails on a host that it may reach, such as a `gh` with `ECONNREFUSED`, or `actions/checkout` after its three tries.
-- The questions of systemd-resolved to the DNS of Azure, `168.63.129.16`, are dropped as well, so the runner can't reach its own hosts at the end of the job. It hangs in *Cleaning up orphan processes* until the time limit of the job, and GitHub takes five minutes more to cancel it: a job of 15 seconds with a limit of 5 minutes takes 10, ends as cancelled, even when every step passed, and has no log. A required check that ends so blocks its pull request.
+- The questions of systemd-resolved to the DNS of Azure, `168.63.129.16`, are dropped as well, so the runner can't reach its own hosts at the end of the job. It hangs in *Cleaning up orphan processes* until the time limit of the job, and GitHub takes five minutes more to cancel it: a job of 15 seconds with a limit of 5 minutes takes 10, and ends as cancelled, even when every step passed. A required check that ends so blocks its pull request.
 
-From 29 to 31 October 2026, on Harden-Runner v2.22.2, 53 jobs in all seven repositories hung like that, in 1,478 runs; [issue-assistant#181](https://github.com/Dennis-Otto/issue-assistant/issues/181) and [homedarts-for-autodarts#488](https://github.com/Dennis-Otto/homedarts-for-autodarts/issues/488) describe the same. Harden-Runner v2.22.3, of 27 October, removes GitHub's experiment before it starts, when a feature flag that it fetches once, within 3 seconds, tells it to; when that request fails, the experiment stays, as a report on the issue shows.
+From 29 to 31 October 2026, on Harden-Runner v2.22.2, 50 jobs in the seven repositories hung like that, in 1,478 runs: all 50 ran on `westus2`, dropped `168.63.129.16` and end in *Cleaning up orphan processes*; [issue-assistant#181](https://github.com/Dennis-Otto/issue-assistant/issues/181) and [homedarts-for-autodarts#488](https://github.com/Dennis-Otto/homedarts-for-autodarts/issues/488) describe the same. Harden-Runner v2.22.3, of 27 October, removes GitHub's experiment before it starts, when a feature flag that it fetches once, within 3 seconds, tells it to; when that request fails, the experiment stays, as a report on the issue shows.
 
 ## Options
 
@@ -32,7 +32,7 @@ Option 3, with option 1 as the fallback, as Dennis decided on 31 October 2026: w
 
 ## What was measured
 
-Before the change, from 29 to 31 October 2026: 53 hung jobs in 1,478 runs of all repositories, on v2.22.2.
+Before the change, from 29 to 31 October 2026: 50 hung jobs in 1,478 runs of the seven repositories, on v2.22.2, all on `westus2`.
 
 With the change, on 31 October 2026: 79 jobs with the steps of a real bot (the warm-up, a checkout, a call of the API and the wait for Docker), 6 of them on `westus2`. None failed, hung, waited in the warm-up or dropped an address, and each of the 6 says `[github-dns-experiment] reverted` in the log of the agent. The warm-up took about 0.4 seconds: 16.8 seconds on average, against 16.4 of 36 jobs on v2.22.2 without it. None of those 36 ran on `westus2`, so they show what the warm-up costs, not what it cures. The pull request that fixes [#518](https://github.com/Dennis-Otto/repo-blueprint/issues/518) has the numbers of the real workflows that can run from a branch; those that run only from `main`, such as the check of the title, can't be measured before the merge.
 
