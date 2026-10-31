@@ -12,7 +12,9 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -204,7 +206,9 @@ def plugin(monkeypatch: pytest.MonkeyPatch, name: str, network: Network) -> Any:
     module: Any = ModuleType(f"material.plugins.{name}.plugin")
     module.requests = network
     monkeypatch.setitem(sys.modules, module.__name__, module)
-    return type("Plugin", (), {"__module__": module.__name__})()
+    made = type("Plugin", (), {"__module__": module.__name__})()
+    made.card_layer_pool_jobs = {}
+    return made
 
 
 def requests_of(plugin: Any) -> Any:
@@ -240,9 +244,9 @@ def test_a_download_without_a_time_limit_gets_one(
     monkeypatch: pytest.MonkeyPatch, waits: list[float]
 ) -> None:
     # The social plugin downloads the fonts of its preview cards with no time limit:
-    # a server that stopped answering held the build of the website until its step
-    # ran out of time, four times in the Variants in a week (#179). Now an attempt
-    # ends when the connection or the next bytes take too long, and the next starts.
+    # a server that stops answering would hold the build of the website until its step
+    # runs out of time. Now an attempt ends when the connection or the next bytes take
+    # too long, and the next starts.
     module = hooks()
     network = Network(Network.Timeout("Read timed out."), 200, timeout=module.TIMEOUT)
     social = plugin(monkeypatch, "social", network)
@@ -316,6 +320,151 @@ def test_both_plugins_that_download_try_again_and_nothing_else_changes(
     assert isinstance(requests_of(search), Network)
     # The rest of requests is the same.
     assert retrying.Timeout is Network.Timeout
+
+
+def drawing_layers(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The jobs of the layers of the social plugin, after the hook has set it up."""
+    social = plugin(monkeypatch, "social", Network())
+    hooks().on_config(mkdocs_config(plugins={"material/social": social}))
+    return social.card_layer_pool_jobs
+
+
+def second_card_while_the_first_starts_the_layer(
+    jobs: Any, job: Future[str]
+) -> Future[str]:
+    """What the threads of two cards with the same layer do in
+    material/plugins/social/plugin.py, in the order that hung the build: the second
+    one asks for the layer before the first has put its job in place of its
+    placeholder. The future that the second one waits for."""
+    placeholder: Future[str] = Future()
+    assert jobs.setdefault("layer", placeholder) is placeholder
+    other: Future[str] = Future()
+    assert jobs.setdefault("layer", other) is placeholder
+    waiting: Future[str] = jobs["layer"]
+    jobs["layer"] = job
+    return waiting
+
+
+def test_a_card_that_asks_for_a_layer_while_it_starts_gets_its_picture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The build of the website hung until its step ran out of its five minutes, seven
+    # times in the Variants from 2026-10-13 to 2026-10-26, always without an error
+    # and with no network needed (#179, #491): the second card waited for a future
+    # that nothing ever finishes.
+    jobs = drawing_layers(monkeypatch)
+    job: Future[str] = Future()
+    waiting = second_card_while_the_first_starts_the_layer(jobs, job)
+
+    assert not waiting.done()
+    job.set_result("picture")
+
+    assert waiting.result(timeout=0) == "picture"
+    assert jobs["layer"] is job
+
+
+def test_a_card_that_asks_for_a_layer_while_it_starts_gets_its_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job: Future[str] = Future()
+    waiting = second_card_while_the_first_starts_the_layer(
+        drawing_layers(monkeypatch), job
+    )
+
+    job.set_exception(OSError("unknown file format"))
+
+    with pytest.raises(OSError, match="unknown file format"):
+        waiting.result(timeout=0)
+
+
+def test_a_card_that_asks_for_a_layer_while_it_starts_stops_when_it_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The plugin cancels the jobs that haven't started when the build ends, also after
+    # an error: a card that keeps waiting would hold the end of the build.
+    job: Future[str] = Future()
+    waiting = second_card_while_the_first_starts_the_layer(
+        drawing_layers(monkeypatch), job
+    )
+
+    assert job.cancel()
+
+    assert waiting.cancelled()
+
+
+def test_a_layer_whose_job_ended_before_it_took_its_place_finishes_as_well(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job: Future[str] = Future()
+    job.set_result("picture")
+
+    waiting = second_card_while_the_first_starts_the_layer(
+        drawing_layers(monkeypatch), job
+    )
+
+    assert waiting.result(timeout=0) == "picture"
+
+
+def test_every_card_of_real_threads_ends_when_their_layers_start_slowly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The same as the plugin with real threads, and with the time that a job takes to
+    # start made long enough to see each thread arrive in it. Without the hook, this
+    # ends only by the time limit of the first card.
+    jobs = drawing_layers(monkeypatch)
+    arrived = threading.Barrier(4)
+
+    def card(layers: ThreadPoolExecutor) -> str:
+        placeholder: Future[str] = Future()
+        arrived.wait(timeout=10)
+        if jobs.setdefault("layer", placeholder) is placeholder:
+            time.sleep(0.2)
+            jobs["layer"] = layers.submit(lambda: "picture")
+        return str(jobs["layer"].result(timeout=5))
+
+    with ThreadPoolExecutor(1) as layers, ThreadPoolExecutor(4) as cards:
+        drawn = [cards.submit(card, layers) for _ in range(4)]
+        assert [each.result(timeout=10) for each in drawn] == ["picture"] * 4
+
+
+def test_the_jobs_of_the_layers_stay_when_a_build_starts_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # mkdocs serve and each further language run the hook again with the same plugin,
+    # whose jobs hold the layers that it may use again.
+    module = hooks()
+    social = plugin(monkeypatch, "social", Network())
+    done: Future[str] = Future()
+    social.card_layer_pool_jobs["layer"] = done
+    config = mkdocs_config(plugins={"material/social": social})
+
+    module.on_config(config)
+    jobs = social.card_layer_pool_jobs
+    module.on_config(config)
+
+    assert isinstance(jobs, module.Layers)
+    assert social.card_layer_pool_jobs is jobs
+    assert jobs["layer"] is done
+    # A job with no placeholder before it just takes its place.
+    jobs["other"] = done
+    assert jobs["other"] is done
+
+
+def test_a_build_that_nearly_ran_out_of_its_time_says_where_each_thread_stands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Seven hangs left a log that ended with the last font, which sent the search to
+    # the network (0061). Before the CI ends the step, the stacks say where it stands.
+    module = hooks()
+    calls: list[int] = []
+    monkeypatch.setattr(module.faulthandler, "dump_traceback_later", calls.append)
+
+    module.on_startup(command="build", dirty=False)
+    # A preview runs for as long as the author writes.
+    module.on_startup(command="serve", dirty=False)
+
+    assert calls == [module.STACKS_AFTER]
+    assert 60 < module.STACKS_AFTER < 5 * 60
 
 
 # The events of MkDocs 1.6. MkDocs takes every function of a hook whose name starts
