@@ -34,8 +34,9 @@ jobs:
             github.com:443
       - name: Say where the job runs
         run: |
+          set +e
           setup="$(find /home/runner -maxdepth 5 -name .setup_info 2>/dev/null | head -1)"
-          region="$(grep -ho 'Azure Region[^"]*' "$setup" 2>/dev/null | head -1)"
+          region="$(grep -hio 'region[^,}]*' "$setup" 2>/dev/null | head -1 | tr -d '\\"')"
           dropin="$(ls /etc/systemd/resolved.conf.d/ /run/systemd/resolved.conf.d/ 2>/dev/null | tr '\n' ' ')"
           resolv="$(grep -m1 nameserver /etc/resolv.conf)"
           service="$(systemctl is-active egress-dns-resolver.service 2>/dev/null)"
@@ -69,6 +70,7 @@ jobs:
       - name: Wait until Harden-Runner has removed Docker
         if: always()
         run: |
+          set +e
           start=$SECONDS
           while pgrep -x 'apt-get|dpkg' >/dev/null && ((SECONDS - start < 120)); do
             sleep 1
@@ -96,8 +98,9 @@ jobs:
             github.com:443
       - name: Say where the job runs
         run: |
+          set +e
           setup="$(find /home/runner -maxdepth 5 -name .setup_info 2>/dev/null | head -1)"
-          region="$(grep -ho 'Azure Region[^"]*' "$setup" 2>/dev/null | head -1)"
+          region="$(grep -hio 'region[^,}]*' "$setup" 2>/dev/null | head -1 | tr -d '\\"')"
           dropin="$(ls /etc/systemd/resolved.conf.d/ /run/systemd/resolved.conf.d/ 2>/dev/null | tr '\n' ' ')"
           resolv="$(grep -m1 nameserver /etc/resolv.conf)"
           service="$(systemctl is-active egress-dns-resolver.service 2>/dev/null)"
@@ -112,6 +115,7 @@ jobs:
       - name: Wait until Harden-Runner has removed Docker
         if: always()
         run: |
+          set +e
           start=$SECONDS
           while pgrep -x 'apt-get|dpkg' >/dev/null && ((SECONDS - start < 120)); do
             sleep 1
