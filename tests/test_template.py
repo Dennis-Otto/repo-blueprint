@@ -25,7 +25,7 @@ import time
 import tomllib
 import warnings
 import zipfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple
@@ -33,6 +33,7 @@ from unittest import mock
 from xml.etree import ElementTree
 
 import pathspec
+import preflight
 import pytest
 import workflow_steps
 import yaml
@@ -58,6 +59,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
+from blueprint import bootstrap
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -15668,6 +15670,96 @@ def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> N
     assert "\nWait /paperless_sync$/\n" in tape
     assert "\nWait /to invert\\)$/\n" in tape
     assert "\nWait /\\(Y.n\\)$/\n" in tape
+
+
+def test_the_recording_answers_each_question_that_copier_asks(tmp_path: Path) -> None:
+    # The tape presses one Enter for each question, in the order of copier.yml. A
+    # question without its key keeps Copier waiting while the tape waits for the prompt,
+    # and the recording times out on an empty line; only the run after the next release
+    # showed that test_marker had none (#507). A key in the wrong place waits for what
+    # another question shows. So a new question needs its key in the tape, and Copier
+    # itself says which questions the answers of the tape lead to: those it stores.
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    start = tape.index("\nWait+Screen@60s /The name of the project/\n")
+    keys = tape[start : tape.index("\nWait@60s /^\\$$/\n")].split("\nEnter\n")
+    # What follows the last key waits for the prompt.
+    keys.pop()
+    typed = re.findall(r'^Type "(.+)"$', "\n".join(keys), flags=re.MULTILINE)
+    assert len(typed) == 3
+    down = re.search(r"^Down@\S+ (\d+)$", "\n".join(keys), flags=re.MULTILINE)
+    assert down
+    kind = list(copier["project_type"]["choices"].values())[int(down[1])]
+    # The tape says that it copies a Python package, which asks for python_package.
+    assert kind == "python-package"
+    project = render(
+        tmp_path,
+        project_name=typed[0],
+        description=typed[1],
+        owner=typed[2],
+        project_type=kind,
+    )
+    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    asked = [name for name in copier if name in answers]
+    assert len(keys) == len(asked), (
+        f"The tape has {len(keys)} keys, Copier asks {len(asked)} questions: {asked}"
+    )
+    # Each key waits only for what its question shows: its help, or the line of the
+    # cursor, which holds its default, the help of a choice or (Y/n).
+    for name, key in zip(asked, keys, strict=True):
+        question = copier[name]
+        if question.get("multiselect"):
+            cursor = "(Use arrow keys to move, <space> to select, <i> to invert)"
+        elif "choices" in question:
+            cursor = "(Use arrow keys)"
+        elif question["type"] == "bool":
+            cursor = "(Y/n)" if answers[name] else "(y/N)"
+        else:
+            cursor = str(answers[name])
+        waits = re.findall(r"^Wait\S* /(.+)/$", key, flags=re.MULTILINE)
+        for wait in waits:
+            assert re.search(wait, question["help"]) or re.search(wait, cursor), (
+                f"The key of {name} waits for /{wait}/"
+            )
+
+
+def test_the_dry_run_of_the_recording_passes_the_preflight(tmp_path: Path) -> None:
+    # The recording ends with create --dry-run, which shows its commands only after a
+    # preflight that nothing stops. Without a Git identity and a signed-in GitHub CLI,
+    # which a recording without secrets lacks, it would end on the marks of the problems
+    # and not on the commands that the README describes, so the image brings both (#507).
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    command = "cd paperless-sync && python3 .github/blueprint.py create --dry-run"
+    assert f'\nType "{command}"\n' in tape
+    image = (ROOT / ".github/docs-pictures/Dockerfile").read_text(encoding="utf-8")
+    assert "\nCOPY --chmod=755 .github/docs-pictures/gh.sh /usr/local/bin/gh\n" in image
+    assert 'git config --system user.name "' in image
+    assert 'git config --system user.email "' in image
+    repo = "Dennis-Otto/paperless-sync"
+    gh = (ROOT / ".github/docs-pictures/gh.sh").as_posix()
+    bash = BASH
+    assert bash
+
+    def run(arguments: Sequence[str], folder: Path) -> subprocess.CompletedProcess[str]:
+        if arguments[0] == "gh":
+            return subprocess.run(
+                [bash, gh, *arguments[1:]],
+                cwd=folder,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(
+            arguments, 0, preflight.answers(repo)[" ".join(arguments)][1], ""
+        )
+
+    findings, plan = bootstrap.preflight(tmp_path, repo, run, (3, 13))
+    shown = bootstrap.describe(repo, findings)
+    assert all(finding.ok is True for finding in findings), shown
+    assert f"{repo} is free on GitHub" in shown
+    assert "gh is signed in to github.com as Dennis-Otto" in shown
+    assert plan.commits
+    assert not plan.resume
 
 
 def test_the_tools_of_the_website_install_on_windows() -> None:

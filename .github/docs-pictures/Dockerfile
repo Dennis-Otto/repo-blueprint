@@ -15,3 +15,10 @@ COPY stacks/copier/requirements.txt /tmp/copier-requirements.txt
 RUN python3 -m venv /opt/copier \
     && /opt/copier/bin/pip install --no-cache-dir --require-hashes -r /tmp/copier-requirements.txt \
     && ln -s /opt/copier/bin/copier /usr/local/bin/copier
+
+# The dry run of blueprint.py create at the end of the recording shows its commands
+# only after its preflight, which asks for the identity of the first commit and for a
+# GitHub CLI that is signed in. The recording has no secrets, so gh.sh answers for it.
+COPY --chmod=755 .github/docs-pictures/gh.sh /usr/local/bin/gh
+RUN git config --system user.name "Dennis Otto" \
+    && git config --system user.email "Dennis-Otto@users.noreply.github.com"
