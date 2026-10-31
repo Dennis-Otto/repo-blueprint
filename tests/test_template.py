@@ -905,6 +905,124 @@ def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
     )
 
 
+WARM_UP = "Wait until Harden-Runner lets the hosts through"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
+    projects: dict[str, Path], project: str
+) -> None:
+    # An address that the runner asked for past Harden-Runner stays in the cache of
+    # systemd-resolved for up to a minute, and Harden-Runner blocks it until then, so
+    # the first step that needs a host would fail (step-security/harden-runner#708).
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            where = f"{name}: {job_id}"
+            steps = job.get("steps") or []
+            hardening = steps_using(job, "step-security/harden-runner")
+            if not hardening or hardening[0]["with"]["egress-policy"] != "block":
+                assert WARM_UP not in [step.get("name") for step in steps], where
+                continue
+            # Before every step that could need a host, and for just the hosts that the
+            # job allows, by the same words, so that they can't drift apart.
+            warm_up = steps[steps.index(hardening[0]) + 1]
+            assert warm_up["name"] == WARM_UP, where
+            allowed = hardening[0]["with"]["allowed-endpoints"]
+            assert warm_up["env"] == {"HOSTS": allowed}, where
+            # Two minutes, and a last try of 5 s for each host, of a job of 5 minutes.
+            assert warm_up["timeout-minutes"] == 4, where
+            scripts.add(warm_up["run"])
+    assert len(scripts) <= 1, scripts
+
+
+def warm_up(
+    tmp_path: Path, blocked: int
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    script = step_named(job_in(workflows(ROOT)["welcome.yml"], "welcome"), WARM_UP)[
+        "run"
+    ]
+    # curl fails the first times that it is asked, and each look at the clock takes 3 s.
+    tries = tmp_path / "tries"
+    tries.write_text("0", encoding="utf-8")
+    clock = tmp_path / "clock"
+    clock.write_text("1000", encoding="utf-8")
+    return run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "curl": (
+                f'n=$(( $(cat "{tries.as_posix()}") + 1 ))\n'
+                f'echo "$n" > "{tries.as_posix()}"\n'
+                f"(( n > {blocked} ))\n"
+            ),
+            "date": (
+                f'now=$(cat "{clock.as_posix()}")\n'
+                f'echo "$((now + 3))" > "{clock.as_posix()}"\n'
+                'echo "$now"\n'
+            ),
+            "sleep": "",
+        },
+        HOSTS="api.github.com:443 *.actions.githubusercontent.com:443 github.com:443",
+    )
+
+
+PROBE = "curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_asks_each_host_once_when_harden_runner_lets_it_through(
+    tmp_path: Path,
+) -> None:
+    result, calls = warm_up(tmp_path, 0)
+
+    assert result.returncode == 0, result.stderr
+    # The wildcard names no host to ask.
+    assert [call for call in calls if call.startswith("curl")] == [
+        f"{PROBE}https://api.github.com/",
+        f"{PROBE}https://github.com/",
+    ]
+    assert not any(call.startswith("sleep") for call in calls)
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_asks_again_until_harden_runner_lets_the_host_through(
+    tmp_path: Path,
+) -> None:
+    result, calls = warm_up(tmp_path, 3)
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(f"{PROBE}https://api.github.com/") == 4
+    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert calls.count("sleep 3") == 3
+    assert result.stdout.count("Harden-Runner still blocks api.github.com") == 3
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
+    tmp_path: Path,
+) -> None:
+    # A host that doesn't answer may be one that this run doesn't need.
+    result, calls = warm_up(tmp_path, 10_000)
+
+    assert result.returncode == 0, result.stderr
+    # At most 40 tries of 3 s for the first host, and then one for each other host.
+    assert calls.count(f"{PROBE}https://api.github.com/") == 40
+    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert calls.count("sleep 3") == 39
+    for host in ("api.github.com", "github.com"):
+        assert (
+            f"::warning::Harden-Runner still blocks {host} after two minutes"
+            in result.stdout
+        )
+
+
 def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
     flows = workflows(ROOT)
     build = job_in(flows["build-release.yml"], "assets")
@@ -4442,6 +4560,10 @@ def test_every_download_tries_again_after_a_passing_error(
                 # harm, as the release in the App Store does.
                 if "--request POST" in command:
                     continue
+                # The warm-up after Harden-Runner downloads nothing: it only asks
+                # whether a host answers, and asks again by itself.
+                if "--head" in command:
+                    continue
                 # A request for a status that is an error, such as the 404 of an
                 # address that leads nowhere, tries again only after an error of the
                 # server or of the network, which --retry alone does.
@@ -6499,13 +6621,13 @@ def test_dependabot_merges_as_the_release_app(
     assert len(parse(text)["jobs"]) == 1
     assert not steps_using(job, "actions/checkout")
     # The check of the release app, the explanation of a token that failed and the
-    # merge, besides the wait until Harden-Runner has removed Docker.
+    # merge, besides the waits for Harden-Runner.
     assert (
         len(
             [
                 step
                 for step in job["steps"]
-                if "run" in step and step["name"] != WAIT_FOR_DOCKER
+                if "run" in step and step["name"] not in {WARM_UP, WAIT_FOR_DOCKER}
             ]
         )
         == 3
@@ -10972,10 +11094,11 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     }
     steps = cancelled["steps"]
     assert not any("actions/checkout" in found.get("uses", "") for found in steps)
-    # Every job of the run starts again, so that each of its checks reports.
+    # Every job of a run that lost a race starts again, so that each of its checks
+    # reports; of a run that ran out of time, only the jobs that it cancelled.
     script = workflow_steps.step("after-checks.yml", "cancelled", CANCELLED_STEP)["run"]
-    assert 'gh run rerun "$RUN"\n' in script
-    assert "--failed" not in script
+    assert script.count('gh run rerun "$RUN"\n') == 1
+    assert script.count('gh run rerun "$RUN" --failed\n') == 1
     # The values of the event reach the scripts as variables only.
     assert not any("${{" in found.get("run", "") for found in steps)
 
@@ -10984,7 +11107,14 @@ CANCELLED_STEP = "Run the checks of the head of a pull request or of main again"
 
 
 def run_the_bot_for_cancelled_checks(
-    tmp_path: Path, pull: str, newer: str, message: str, head: str | None = None
+    tmp_path: Path,
+    pull: str,
+    newer: str,
+    message: str,
+    head: str | None = None,
+    *,
+    attempt: int = 1,
+    tests: str = "false",
 ) -> tuple[list[str], str]:
     # gh answers as the API does, after the filters of jq. With the head of main, the
     # run is one of a push to main.
@@ -11002,7 +11132,7 @@ def run_the_bot_for_cancelled_checks(
                 f"{newer}\n",
             ),
             Answer(
-                r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+",
+                rf"api repos/o/r/actions/runs/5/attempts/{attempt}/jobs --paginate --jq .+",
                 "11\n12\n",
             ),
             Answer(
@@ -11011,10 +11141,12 @@ def run_the_bot_for_cancelled_checks(
                 f"{message}\n",
             ),
             exact("run rerun 5"),
+            exact("run rerun 5 --failed"),
         ],
         env={
             "RUN": "5",
-            "ATTEMPT": "1",
+            "ATTEMPT": str(attempt),
+            "TESTS": tests,
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
@@ -11080,6 +11212,61 @@ def test_the_bot_for_cancelled_checks_starts_the_run_of_the_head_of_main_again(
     assert not any("/pulls" in call for call in calls)
 
 
+OUT_OF_TIME = "The job has exceeded the maximum execution time of 5m0s"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("head", [None, "abc1234def"])
+def test_the_bot_for_cancelled_checks_tries_a_job_that_ran_out_of_time_once_more(
+    tmp_path: Path, head: str | None
+) -> None:
+    # A job can hang behind Harden-Runner until its time limit, even after its last
+    # step, and a required check such as the title of a pull request stays cancelled.
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, head=head
+    )
+
+    place = "#136" if head is None else "main"
+    assert f"A job of CodeQL for the head of {place} ran out of time" in written
+    assert "run rerun 5 --failed" in calls
+    assert "run rerun 5" not in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("attempt", "tests"),
+    [
+        # Once, not again and again.
+        (2, "false"),
+        # The flaky-test bot runs the jobs of the tests again.
+        (1, "true"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_leaves_other_jobs_that_ran_out_of_time(
+    tmp_path: Path, attempt: int, tests: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, attempt=attempt, tests=tests
+    )
+
+    assert "it stays cancelled" in written
+    assert not any(call.startswith("run rerun") for call in calls)
+
+
+def test_the_bot_for_cancelled_checks_knows_the_workflows_of_the_flaky_test_bot() -> (
+    None
+):
+    text = workflows(ROOT)["after-checks.yml"]
+    left = re.search(
+        r"!contains\(fromJSON\('([^']+)'\)", condition_of(job_in(text, "rerun"))
+    )
+    assert left
+    step = step_named(job_in(text, "cancelled"), CANCELLED_STEP)
+    assert step["env"]["TESTS"] == (
+        f"${{{{ !contains(fromJSON('{left[1]}'), github.event.workflow_run.name) }}}}"
+    )
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
     tmp_path: Path,
@@ -11101,6 +11288,7 @@ def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
         env={
             "RUN": "5",
             "ATTEMPT": "1",
+            "TESTS": "false",
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
@@ -11223,7 +11411,7 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         condition,
     )
     assert ends
-    assert set(json.loads(ends[1])) == FAILED | {"success"}
+    assert set(json.loads(ends[1])) == FAILED | {"success", "cancelled"}
     assert "github.event_name != 'workflow_run'" in condition_of(job_in(text, "sweep"))
     # One run at a time per workflow, set on the job: a run that skips, for a pull
     # request, never replaces the waiting one for the default branch.

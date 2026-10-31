@@ -1,0 +1,33 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Ein Job hinter Harden-Runner
+    accDescr: Harden-Runner sperrt jeden Host, den der Job nicht nennt. Der Job fragt dann alle 3 Sekunden jeden seiner Hosts, höchstens zwei Minuten lang, bis Harden-Runner ihn durchlässt, und führt seine Schritte aus. Ohne sudo und Docker wartet er, bis Harden-Runner Docker entfernt hat. Ein Job, der endet, ist fertig. Einer, der bis zu seinem Zeitlimit hängt, endet abgebrochen, und ein Bot führt seine abgebrochenen Jobs einmal neu aus; hängt das auch, bleibt eine vorgeschriebene Prüfung für dich abgebrochen, und ein Bot bekommt ein Issue.
+
+    block["Harden-Runner sperrt jeden Host,<br>den der Job nicht nennt"]
+    warm["Der Job fragt jeden seiner Hosts,<br>alle 3 s, höchstens 2 Minuten lang"]
+    steps["Die Schritte des Jobs"]
+    docker["Warten, bis Harden-Runner<br>Docker entfernt hat"]
+    ends{"Endet der Job?"}
+    done["Fertig"]
+    again["Ein Bot führt die abgebrochenen<br>Jobs einmal neu aus"]
+    you["Eine Prüfung bleibt abgebrochen,<br>ein Bot bekommt ein Issue"]
+
+    block --> warm
+    warm --> steps
+    steps --> docker
+    docker --> ends
+    ends -- "ja" --> done
+    ends -- "hängt bis zum Zeitlimit" --> again
+    again -- "endet" --> done
+    again -- "hängt wieder" --> you
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class warm,docker,again bot
+    class you person
+    class done done
