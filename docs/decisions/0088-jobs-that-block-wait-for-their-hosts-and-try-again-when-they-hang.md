@@ -40,7 +40,7 @@ With the change, on 31 October 2026: 79 jobs with the steps of a real bot (the w
 
 The block stays in force, so a compromised step in a job with the key of the release app still reaches only the hosts of its job.
 
-A job that blocks takes a moment longer, about 100 ms for each host when nothing is wrong, and up to two minutes when something is. When the request for the feature flag fails on `westus2`, the warm-up gets the steps through, and the job may still hang at its end, until the bots try it again. Such a hang costs a runner up to the limit of the job and five minutes more; and it reaches only the workflows that the bots watch, a bot of the project's own stays cancelled until its next run. The workflows of a project change in the project: [homedarts-for-autodarts#488](https://github.com/Dennis-Otto/homedarts-for-autodarts/issues/488) takes the warm-up into the workflows that it owns.
+A job that blocks takes a moment longer, less than a second when nothing is wrong, as measured above, and up to two minutes when something is. When the request for the feature flag fails on `westus2`, the warm-up gets the steps through, and the job may still hang at its end, until the bots try it again. Such a hang costs a runner up to the limit of the job and five minutes more; and it reaches only the workflows that the bots watch, a bot of the project's own stays cancelled until its next run. The workflows of a project change in the project: [homedarts-for-autodarts#488](https://github.com/Dennis-Otto/homedarts-for-autodarts/issues/488) takes the warm-up into the workflows that it owns.
 
 ### The way to audit and back
 
