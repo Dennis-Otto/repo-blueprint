@@ -2389,6 +2389,18 @@ def test_biome_passes_what_the_tools_of_a_node_package_write(
         lint, cwd=project, capture_output=True, encoding="utf-8", check=False
     )
     assert done.returncode == 0, done.stdout + done.stderr
+    if kind == "chrome-extension":
+        # The manifest as an update of the blueprint keeps it, which is the project's:
+        # a release of the blueprint wrote a short array on one line.
+        manifest = project / "extension/manifest.json"
+        written = manifest.read_text(encoding="utf-8")
+        collapsed = re.sub(r'\[\s*("storage")\s*\]', r"[\1]", written)
+        assert collapsed != written
+        manifest.write_text(collapsed, encoding="utf-8", newline="\n")
+        done = subprocess.run(
+            lint, cwd=project, capture_output=True, encoding="utf-8", check=False
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
     # It still checks that stylesheet, so the exceptions don't hide the files around them.
     stylesheet.write_text("a {\n    color: red;\n}\n", encoding="utf-8", newline="\n")
     done = subprocess.run(

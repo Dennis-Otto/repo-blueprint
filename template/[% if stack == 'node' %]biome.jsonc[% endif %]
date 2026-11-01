@@ -8,9 +8,11 @@
 // both in the format they keep, and the pictures that scripts/diagrams.sh draws into
 // docs/images/diagrams, whose code Mermaid writes and the next drawing writes again.
 //
-// The manifest of an extension keeps the format of release-please, which writes the
-// version into it on every release pull request and puts each item of an array on a
-// line of its own, where Biome would keep a short array on one line.
+// Biome leaves the format of the manifest of an extension alone. release-please
+// writes the version into it on every release pull request and puts each item of an
+// array on a line of its own, where Biome would keep a short array on one line, and
+// an update of the blueprint keeps the manifest a project has, in either format.
+// scripts/check-manifest.mjs checks its content.
 //
 // The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
 {
@@ -35,10 +37,8 @@
   "overrides": [
     {
       "includes": ["extension/manifest.json"],
-      "json": {
-        "formatter": {
-          "expand": "always"
-        }
+      "formatter": {
+        "enabled": false
       }
     }
   ],
