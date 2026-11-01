@@ -6,6 +6,7 @@ the filters of jq, and a sleep that only counts."""
 from __future__ import annotations
 
 import dataclasses
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def answer(kind: str, outcome: str, values: dict[str, str]) -> Answer:
         return failing_or(r"release view .*", outcome == "fail", values["latest"])
     if kind == "jobs":
         return failing_or(
-            r"api repos/o/r/actions/runs/7/jobs\?per_page=100 .*",
+            r"api repos/o/r/actions/runs/7/jobs\?filter=all&per_page=100 .*",
             outcome == "fail",
             values["publish"],
         )
@@ -101,12 +102,15 @@ class Rollout:
 
     folder: Path
     planned: dict[str, list[str]] = dataclasses.field(default_factory=dict)
+    # Answers of a test that come before all others.
+    first: list[Answer] = dataclasses.field(default_factory=list)
 
     def plan(self, kind: str, *outcomes: str) -> None:
         """The next outcomes of a kind of call, one call each, before the usual."""
         self.planned[kind] = list(outcomes)
 
     def answers(self, values: dict[str, str]) -> Iterator[Answer]:
+        yield from self.first
         for kind, outcomes in self.planned.items():
             for outcome in outcomes:
                 yield dataclasses.replace(answer(kind, outcome, values), once=True)
@@ -185,6 +189,56 @@ def test_the_rollout_takes_the_release_that_the_run_published(
     assert result.outputs == ({"tag": tag} if tag else {})
     made_none = "The run made no release; the latest one, v1.2.0, went out before."
     assert (made_none in result.summary) == (not tag)
+
+
+def publish_job(attempt: int, conclusion: str, started_at: str) -> dict[str, object]:
+    """The job of the Release workflow that makes a release public, as GitHub lists it."""
+    return {
+        "name": "publish the release",
+        "run_attempt": attempt,
+        "conclusion": conclusion,
+        "started_at": started_at,
+    }
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the filter of gh needs jq")
+@pytest.mark.parametrize(
+    ("jobs", "tag"),
+    [
+        # The job of the only attempt.
+        ([publish_job(1, "success", "2026-10-13T10:00:10Z")], "v1.2.0"),
+        # A run that GitHub started again: the last attempt counts.
+        (
+            [
+                publish_job(1, "failure", "2026-10-13T09:00:10Z"),
+                publish_job(2, "success", "2026-10-13T10:00:10Z"),
+            ],
+            "v1.2.0",
+        ),
+        (
+            [
+                publish_job(2, "failure", "2026-10-13T10:00:10Z"),
+                publish_job(1, "success", "2026-10-13T09:00:10Z"),
+            ],
+            "",
+        ),
+        # A run without that job, among the other jobs.
+        ([{"name": "release assets", "run_attempt": 1}], ""),
+    ],
+)
+def test_the_last_attempt_of_the_job_that_publishes_counts(
+    rollout: Rollout, jobs: list[dict[str, object]], tag: str
+) -> None:
+    # The list with every job, which also holds one that GitHub dates before the start
+    # of the run, as on 2026-11-01 when the clocks of the US went back and the Rollout
+    # took v1.3.0 for no release.
+    pattern = r"api repos/o/r/actions/runs/7/jobs\?filter=all&per_page=100 .*"
+    rollout.first = [Answer(pattern, json={"jobs": jobs})]
+
+    result = rollout.run("Find the release", RUN_ID="7", latest=LATEST)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.outputs == ({"tag": tag} if tag else {})
 
 
 def test_started_by_hand_the_rollout_takes_the_latest_release(
