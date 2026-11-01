@@ -7,6 +7,18 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.5.0...v1.6.0) (2026-11-01)
+
+
+### Features
+
+* project websites serve an llms.txt ([#569](https://github.com/Dennis-Otto/repo-blueprint/issues/569)) ([e059e2e](https://github.com/Dennis-Otto/repo-blueprint/commit/e059e2eea3a0eabad22b8053d5613b98f432adc1))
+
+
+### Bug fixes
+
+* **a11y:** read the accepted violations without looking at the file first ([#577](https://github.com/Dennis-Otto/repo-blueprint/issues/577)) ([e28c6cb](https://github.com/Dennis-Otto/repo-blueprint/commit/e28c6cbc8a01bb11e30cfabcbaaa54eb0e23679a))
+
 ## [1.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.4.0...v1.5.0) (2026-11-01)
 
 ### Features
