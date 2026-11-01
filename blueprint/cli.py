@@ -218,12 +218,18 @@ def ownership_command(arguments: argparse.Namespace, root: Path) -> int:
     """The step of the check lint, which needs neither the API nor the settings."""
     try:
         listing = arguments.changed.read_bytes()
+        part_diff = (
+            arguments.contributing_diff.read_text(encoding="utf-8", errors="replace")
+            if arguments.contributing_diff
+            else ""
+        )
     except OSError as error:
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2
     return ownership_check(
         root,
         listing,
+        part_diff=part_diff,
         branch=arguments.branch,
         head_repo=arguments.head_repo,
         repo=arguments.repo or "",
@@ -1208,6 +1214,12 @@ def add_ownership_parser(
     )
     parser.add_argument(
         "changed", type=Path, help="the file with the output of git diff -z --name-only"
+    )
+    parser.add_argument(
+        "--contributing-diff",
+        type=Path,
+        help="the file with the git diff of CONTRIBUTING.md: a change that stays "
+        "between its two marked lines belongs to the project",
     )
     parser.add_argument("--branch", default="", help="the head branch")
     parser.add_argument("--head-repo", default="", help="the repository of the branch")

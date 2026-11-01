@@ -6,7 +6,7 @@ description: Every question of the Copier template of Repo Blueprint, with its d
 
 <!-- reference.py writes this page from copier.yml: change copier.yml and run python3 reference.py. -->
 
-Copier asks these 26 questions when it copies the blueprint, in this order, and keeps the answers in `.copier-answers.yml`, so that `copier update` asks only a new question. `--data name=value` gives an answer without the question, also later: `copier update --defaults --vcs-ref=:current: --data name=value` changes an answer of an existing repository, and the defaults of Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) answer the questions that stay the same for all of your repositories, as [your own account](../own-account.md) shows. A default that is a template of Copier comes from the answers before it, in the delimiters of the blueprint: `{= … =}` for a value and `[% … %]` for a block.
+Copier asks these 27 questions when it copies the blueprint, in this order, and keeps the answers in `.copier-answers.yml`, so that `copier update` asks only a new question. `--data name=value` gives an answer without the question, also later: `copier update --defaults --vcs-ref=:current: --data name=value` changes an answer of an existing repository, and the defaults of Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) answer the questions that stay the same for all of your repositories, as [your own account](../own-account.md) shows. A default that is a template of Copier comes from the answers before it, in the delimiters of the blueprint: `{= … =}` for a value and `[% … %]` for a block.
 
 - [`project_name`](#project_name): The name of the project, such as "Paperless Sync"
 - [`project_slug`](#project_slug): The name of the repository; owner.github.io, such as dennis-otto.github.io, for the website of the owner itself
@@ -31,6 +31,7 @@ Copier asks these 26 questions when it copies the blueprint, in this order, and 
 - [`release_app_id`](#release_app_id): The App ID of the release app, the number on its settings page
 - [`renovate_runner`](#renovate_runner): Who runs Renovate, which opens the updates of the dependencies
 - [`issue_assistant_ai`](#issue_assistant_ai): Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant
+- [`publish_to_npm`](#publish_to_npm): Publish each release on npm; a package that no registry takes, such as a browser extension that people load from a zip, answers no
 - [`sample_code`](#sample_code): Start with sample code and tests; an existing repository that takes the blueprint answers no
 - [`test_workflows`](#test_workflows): Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more; empty for none
 - [`test_marker`](#test_marker): The text before the name of each test or step in the logs of the tests that pytest doesn't run, such as "Browser step:", by which the flaky-test bot names the test that failed; empty for none
@@ -353,6 +354,16 @@ The issue assistant labels the issues and answers its commands without AI; with 
 - **Asked:** always
 - **Default:** yes
 
+### `publish_to_npm`
+
+Publish each release on npm; a package that no registry takes, such as a browser extension that people load from a zip, answers no.
+
+A release of a Node package delivers it to npm, and the guides, the settings and the answers of the Best Practices say so. A package that no registry takes, such as a browser extension that people load from a zip, answers no: publish\_to then says none.
+
+- **Type:** yes or no
+- **Asked:** only when `project_type == 'node-package'`
+- **Default:** yes
+
 ### `sample_code`
 
 Start with sample code and tests; an existing repository that takes the blueprint answers no.
@@ -427,7 +438,7 @@ release_app_id: '4739928'
 [%- elif project_type == 'nextcloud-app' -%]nextcloud-appstore
 [%- elif project_type == 'github-action' -%]github-action
 [%- elif project_type == 'python-package' -%]pypi
-[%- elif project_type == 'node-package' -%]npm
+[%- elif project_type == 'node-package' and publish_to_npm -%]npm
 [%- elif project_type == 'chrome-extension' -%]chrome-web-store
 [%- elif project_type == 'container' -%]ghcr
 [%- else -%]none

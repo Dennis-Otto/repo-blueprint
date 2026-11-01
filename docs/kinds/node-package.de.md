@@ -33,7 +33,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 ## Auslieferung
 
-Der Merge des Release-Pull-Requests veröffentlicht das Paket auf npm mit Provenance, per Trusted Publishing aus dem Environment `npm`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3.
+Der Merge des Release-Pull-Requests veröffentlicht das Paket auf npm mit Provenance, per Trusted Publishing aus dem Environment `npm`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3. Ein Paket, das keine Registry aufnimmt, antwortet bei [`publish_to_npm`](../reference/questions.md#publish_to_npm) mit Nein: Sein Release bleibt dann auf GitHub, mit dem, was `scripts/release-assets.sh` baut, und die Anleitung für Beiträge, `SECURITY.md` und die Einstellungen sagen das auch.
 
 ## Einmal von Hand
 

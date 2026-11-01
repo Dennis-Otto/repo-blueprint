@@ -19,6 +19,7 @@ owner: Dennis-Otto
 project_name: Player Switch for Autodarts
 project_slug: player-switch-for-autodarts
 project_type: node-package
+publish_to_npm: false
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
 release_app_id: '4739928'

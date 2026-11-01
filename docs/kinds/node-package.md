@@ -33,7 +33,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 ## Delivery
 
-Merging the release pull request publishes the package on npm with provenance, by trusted publishing from the environment `npm`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
+Merging the release pull request publishes the package on npm with provenance, by trusted publishing from the environment `npm`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3. A package that no registry takes answers no to [`publish_to_npm`](../reference/questions.md#publish_to_npm): its release then stays on GitHub, with what `scripts/release-assets.sh` builds, and the contributing guide, `SECURITY.md` and the settings say so.
 
 ## Once by hand
 

@@ -347,6 +347,15 @@ issue_assistant_ai:
   help: Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant
   default: true
 
+# A release of a Node package delivers it to npm, and the guides, the settings and the
+# answers of the Best Practices say so. A package that no registry takes, such as a
+# browser extension that people load from a zip, answers no: publish_to then says none.
+publish_to_npm:
+  type: bool
+  help: Publish each release on npm; a package that no registry takes, such as a browser extension that people load from a zip, answers no
+  default: true
+  when: "{= project_type == 'node-package' =}"
+
 sample_code:
   type: bool
   help: Start with sample code and tests; an existing repository that takes the blueprint answers no
@@ -393,7 +402,7 @@ publish_to:
     [%- elif project_type == 'nextcloud-app' -%]nextcloud-appstore
     [%- elif project_type == 'github-action' -%]github-action
     [%- elif project_type == 'python-package' -%]pypi
-    [%- elif project_type == 'node-package' -%]npm
+    [%- elif project_type == 'node-package' and publish_to_npm -%]npm
     [%- elif project_type == 'chrome-extension' -%]chrome-web-store
     [%- elif project_type == 'container' -%]ghcr
     [%- else -%]none[%- endif -%]
