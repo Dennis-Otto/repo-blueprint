@@ -6,11 +6,13 @@ import os
 import subprocess
 import sys
 import time
+from importlib.util import cache_from_source
 from pathlib import Path
 
 import pytest
 import shared
-from shared import INTERVAL, copy_of, once, run_folder
+import yaml
+from shared import INTERVAL, copy_of, load_yaml, once, run_folder
 
 
 def made_elsewhere(folder: Path) -> None:
@@ -27,6 +29,62 @@ def test_the_folder_of_the_run_holds_that_of_each_process(
 
     assert alone == tmp_path_factory.getbasetemp()
     assert shared_by_all == tmp_path_factory.getbasetemp().parent
+
+
+def test_the_processes_of_the_run_share_one_folder_for_their_bytecode(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    # A folder for each process compiles the standard library and Copier once in each.
+    folder = str(run_folder(tmp_path_factory) / "pycache")
+
+    assert sys.pycache_prefix == folder
+    assert os.environ["PYTHONPYCACHEPREFIX"] == folder
+
+
+def test_a_python_of_a_test_reads_the_bytecode_that_another_one_wrote(
+    tmp_path: Path,
+) -> None:
+    module = tmp_path / "written_once.py"
+    module.write_text("VALUE = 1\n", encoding="utf-8")
+    command = [sys.executable, "-c", "import written_once"]
+
+    subprocess.run(command, cwd=tmp_path, check=True)
+    written = Path(cache_from_source(str(module)))
+    before = written.stat().st_mtime_ns
+    subprocess.run(command, cwd=tmp_path, check=True)
+
+    assert written.stat().st_mtime_ns == before
+    assert not (tmp_path / "__pycache__").exists()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "on: push\nyes: [1, 1.5, 0x10, ~, 2026-11-01]\n",
+        "base: &base {a: 1}\nderived:\n  <<: *base\n  b: |\n    text\n",
+        '"quoted: key": "\u00dcmlaut"\n',
+    ],
+)
+def test_the_fast_parser_reads_what_the_safe_one_reads(text: str) -> None:
+    assert load_yaml(text) == yaml.safe_load(text)
+
+
+def test_the_fast_parser_reads_the_workflows_as_the_safe_one_does() -> None:
+    for workflow in (shared.ROOT / ".github/workflows").glob("*.yml"):
+        text = workflow.read_text(encoding="utf-8")
+        assert load_yaml(text) == yaml.safe_load(text), workflow.name
+
+
+def test_no_test_parses_yaml_with_the_slow_parser() -> None:
+    # The parser of Python took 23 of 460 seconds of all the processes of a run.
+    slow = "yaml." + "safe_load("
+    found = [
+        path.name
+        for path in Path(__file__).parent.glob("*.py")
+        if path != Path(__file__) and slow in path.read_text(encoding="utf-8")
+    ]
+
+    assert not found
 
 
 def test_a_folder_is_made_once(tmp_path: Path) -> None:

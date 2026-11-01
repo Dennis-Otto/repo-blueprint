@@ -364,6 +364,18 @@ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
   report="$(mktemp)"
   junit=("--junitxml=$report" -o junit_family=xunit1)
 fi
+# On a Linux runner, the temporary folders of the tests live in memory when at least
+# 4 GB are free there: tests that make many folders and start many processes take less
+# time than on the disk of the runner. Not in a job in a container, whose /dev/shm has
+# 64 MB, not on the machine of a contributor, and not where a TMPDIR is set already, as
+# a project does whose tests write more than that.
+memory=""
+if [[ "${GITHUB_ACTIONS:-}" == true && -z "${TMPDIR:-}" && "$(uname -s)" == Linux ]]; then
+  memory="$(df -k --output=avail /dev/shm 2>/dev/null | tail -n 1 || true)"
+fi
+if ((${memory:-0} >= 4194304)); then
+  export TMPDIR=/dev/shm
+fi
 status=0
 if python -c 'import pytest, pytest_cov, xdist' 2>/dev/null; then
   python -m pytest -n logical --maxprocesses="${PYTEST_XDIST_AUTO_NUM_WORKERS:-8}" \

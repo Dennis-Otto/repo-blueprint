@@ -24,8 +24,11 @@ import sys
 
 if __name__ == "__main__":
     # Before the import: like the single file it was, the tool leaves no __pycache__
-    # in the repository.
-    sys.dont_write_bytecode = True
+    # in the repository. Bytecode in a folder that the machine names, with
+    # PYTHONPYCACHEPREFIX, is outside of it, and saves each later start a tenth of a
+    # second of compiling.
+    if sys.pycache_prefix is None:
+        sys.dont_write_bytecode = True
     # Before the import too: the package needs tomllib of Python 3.11, and an older
     # Python would stop with a traceback before the preflight of create could say so.
     if sys.version_info < (3, 11):  # noqa: UP036 - it runs before the requirement
