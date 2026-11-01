@@ -13,7 +13,7 @@ The tools: [template repositories](https://docs.github.com/en/repositories/creat
 - **A tested rollout to every repository.** Before a change of the template merges, the Variants workflow makes a new repository of every kind from it and updates one of every kind from the latest release, and the Downstream workflow updates a clone of each real repository with it. After the release, the Rollout workflow starts the blueprint bot of each repository, one after the other; the bot verifies the signed release, runs `copier update` and keeps one pull request, which merges itself once every check passes.
 - **No code of the template runs at the copy.** The template has no tasks, migrations or Jinja extensions, so Copier needs no `--trust`, neither at the copy nor at an update.
 - **Settings as code, with a bot against drift.** The rulesets, the security, Actions, the environments, the variables, the labels and GitHub Pages live in `.github/repository.toml`, and the settings bot applies them after every change and every week.
-- **Releases of SLSA Build Level 3, with SBOMs and VEX.** A release has signed tags, the provenance of an isolated build, SBOMs as SPDX and CycloneDX, an OpenVEX document and an immutable release, and its workflow verifies it as its users can, also every week.
+- **Releases of SLSA Build Level 3, with SBOMs and VEX.** A release has signed tags, the provenance of an isolated build (a container image has that of the release workflow, Level 2), SBOMs as SPDX and CycloneDX, an OpenVEX document and an immutable release, and its workflow verifies it as its users can, also every week.
 - **Home Assistant, Nextcloud and GitHub Actions in one standard,** beside Python and Node packages, Chrome extensions, containers and repositories without a build: the same checks, bots and settings for each, with the tools of each kind.
 
 <picture>
@@ -32,7 +32,7 @@ A dash means that the tool doesn't do it; *the template* means that it depends o
 | Code that runs at the copy | none; then `blueprint.py create` from the copy, which you start yourself | none | the hooks of the template, if any | the tasks, migrations and extensions of the template, if any, with `--trust` | `.projenrc` at every run |
 | What a new repository needs | Git, Python, uv and the GitHub CLI | a button on GitHub | Python and `cookiecutter` | Python and `copier` | Node and `npx projen new` |
 | Settings of the repository | as code, with a bot against drift | — | the template | the template | — |
-| Releases | release-please, signed tags, SLSA Build Level 3, SBOM, VEX, verified | the template | the template | the template | to npm, and with jsii to PyPI, Maven, NuGet and Go |
+| Releases | release-please, signed tags, SLSA Build Level 3 (container images: Level 2), SBOM, VEX, verified | the template | the template | the template | to npm, and with jsii to PyPI, Maven, NuGet and Go |
 | Security checks | CodeQL, Scorecard, zizmor, OSV-Scanner, Harden-Runner, a secret scan, actions pinned to commits | the template | the template | the template | the template |
 | Dependency updates | Renovate, with merge rules and a dashboard | the template | the template | the template | a workflow that upgrades them |
 | Kinds of projects | eight, from Home Assistant to Chrome extensions and containers | one for each template | thousands of templates, one stack each | copier-uv: Python; cookie: Python with many build backends | TypeScript, AWS CDK, jsii, Python, Java and more |

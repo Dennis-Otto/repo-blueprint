@@ -59,7 +59,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap
+from blueprint import bootstrap, ownership
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -613,6 +613,25 @@ def test_the_workflows_are_the_blueprints_own(
             watched = r"    # The bots and the scheduled workflows of every repository.*\n    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
+        if kind == "nextcloud-app" and name in ("build-release.yml", "release.yml"):
+            # The build of a Nextcloud app enters the environment of the key that signs
+            # it, and gets the secrets of the release, which no other build does.
+            source, entered = re.subn(
+                r"    # No environment and no secret but the token of the job.*\n"
+                r"    # the build can reach the private key of the release app\.\n"
+                r"|    # The build gets none of the secrets of the release.*\n",
+                "",
+                source,
+            )
+            text, signs = re.subn(
+                r"    # The key that signs a Nextcloud app is a secret of this.*\n"
+                r"(?:    # .*\n)*    environment:\n      name: release\n"
+                r"      deployment: false\n"
+                r"|(?:    # .*\n)*    secrets: inherit # zizmor: ignore\[secrets-inherit\]\n",
+                "",
+                text,
+            )
+            assert entered == signs == 1, name
         assert text == source, name
 
 
@@ -1765,7 +1784,9 @@ def test_every_repository_gets_the_settings_tool(
     copies = sorted(
         path.relative_to(github).as_posix()
         for path in [github / "blueprint.py", *(github / "blueprint").iterdir()]
-        if path.is_file()
+        # The list of the files of the blueprint is no part of the tool: it is data of
+        # this kind of project, not a copy of a file of the blueprint.
+        if path.is_file() and path != projects[kind] / ownership.LIST
     )
 
     assert copies == TOOL
@@ -5681,6 +5702,102 @@ AGENT_COMMANDS = {
 
 
 @pytest.mark.parametrize("kind", KINDS)
+def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    owned = ownership.load(project)
+    assert owned is not None
+    # A file that the project doesn't get leaves no empty line, and the end is a line
+    # break as in every other file.
+    text = (project / ownership.LIST).read_text(encoding="utf-8")
+    assert "\n\n" not in text
+    assert text.endswith("\n")
+    # The patterns as Copier reads them.
+    matcher = pathspec.PathSpec.from_lines("gitignore", files_of_the_project())
+    rendered = {
+        path.relative_to(project).as_posix()
+        for path in project.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(project).parts
+    }
+    assert owned == {
+        path
+        for path in rendered
+        if path != ".copier-answers.yml"
+        and path not in reference.OWNED_EXCEPTIONS
+        and not matcher.match_file(path)
+    }
+    # The list names itself, and what the pull requests of player-switch changed.
+    assert {
+        ownership.LIST.as_posix(),
+        ".github/workflows/lint.yml",
+        ".github/workflows/codeql.yml",
+        "scripts/check.sh",
+        "CONTRIBUTING.md",
+    } <= owned
+    # The file of a project is on no list, and neither is a workflow of its own.
+    assert (
+        not {
+            "README.md",
+            ".github/repository.project.toml",
+            ".github/workflows/e2e.yml",
+            "scripts/check-project.sh",
+        }
+        & owned
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("mode", "code", "level"), [("", 0, "notice"), ("fail", 1, "error")]
+)
+def test_the_step_of_a_project_annotates_what_the_pull_request_changes(
+    tmp_path: Path,
+    projects: dict[str, Path],
+    mode: str,
+    code: int,
+    level: str,
+) -> None:
+    # The step as it is, with the command of a project, in a repository whose pull
+    # request changes a document and a file of the blueprint and moves another one.
+    changes: dict[str, str | None] = {
+        "lychee.toml": "changed\n",
+        "docs/guide.md": "->docs/moved.md",
+        "docs/own.md": "new\n",
+    }
+    repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
+    made = projects["python-package"] / ".github"
+    shutil.copytree(made / "blueprint", repository / ".github/blueprint")
+    shutil.copy(made / "blueprint.py", repository / ".github/blueprint.py")
+    (repository / ownership.LIST).write_text(
+        "lychee.toml\ndocs/guide.md\nCHANGELOG.md\n", encoding="utf-8"
+    )
+    result = workflow_steps.run_step(
+        tmp_path,
+        "lint.yml",
+        "lint",
+        "Find the changed files of the blueprint",
+        env={
+            "BASE_REF": "main",
+            "BRANCH": "topic",
+            "HEAD_REPO": "o/r",
+            "AUTHOR_TYPE": "User",
+            "BLUEPRINT_OWNERSHIP": mode,
+            "GITHUB_REPOSITORY": "o/r",
+        },
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"'},
+        workspace=repository,
+    )
+    assert result.returncode == code, result.stderr
+    # Both paths of the move and the changed file, and neither the document of the
+    # project nor a file of the blueprint that only main changed.
+    assert re.findall(r"^::(\w+) file=([^,]+),", result.stdout, re.MULTILINE) == [
+        (level, "docs/guide.md"),
+        (level, "lychee.toml"),
+    ]
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_every_project_tells_coding_agents_its_rules(
     projects: dict[str, Path], kind: str
 ) -> None:
@@ -5858,11 +5975,33 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
         ]
         assert len(verify) == 1, kind
         workflow = "release.yml" if kind == "container" else "build-release.yml"
+        # And only of a run for main, the only branch whose runs make releases, on a
+        # runner of GitHub, not on a machine that someone else controls.
         for line in verify:
             assert line.endswith(
                 " --repo Dennis-Otto/demo-project --signer-workflow"
                 f" Dennis-Otto/demo-project/.github/workflows/{workflow}"
+                " --source-ref refs/heads/main --deny-self-hosted-runners"
             ), line
+        explained = "`--source-ref` only that of a run for `main`" in security(kind)
+        assert explained == bool(verify), kind
+    # The releases of the blueprint itself are verified the same way.
+    assert (
+        "--signer-workflow Dennis-Otto/repo-blueprint/.github/workflows/build-release.yml"
+        " --source-ref refs/heads/main --deny-self-hosted-runners"
+    ) in (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    # The image is built and attested in the job of the release workflow that pushes
+    # it, outside the isolated build: SLSA Build Level 2, not 3.
+    for kind in KINDS:
+        level = "the image in the registry carries the signed provenance of the release"
+        assert (level in security(kind)) == (kind == "container"), kind
+    readme = (projects["container"] / "README.md").read_text(encoding="utf-8")
+    assert (
+        "gh attestation verify oci://ghcr.io/dennis-otto/demo-project:latest"
+        " --repo Dennis-Otto/demo-project --signer-workflow"
+        " Dennis-Otto/demo-project/.github/workflows/release.yml"
+        " --source-ref refs/heads/main --deny-self-hosted-runners\n"
+    ) in readme
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10107,6 +10246,13 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
         found = [match.groupdict() for match in re.finditer(pattern, text)]
         assert [item["currentValue"] for item in found] == [version], page.name
         assert f"uvx --from copier=={version} copier copy --data project_type=" in text
+    # The walkthrough for an owner's own account copies and updates with the same
+    # release: GitHub shows the page too, where a snippet of the website stays a line.
+    assert '"/^docs/own-account(\\\\.de)?\\\\.md$/"' in renovate
+    for name in ("docs/own-account.md", "docs/own-account.de.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        found = [match.groupdict() for match in re.finditer(pattern, text)]
+        assert [item["currentValue"] for item in found] == [version] * 4, name
 
 
 # The pages of the kinds, in English and in German: the heading of the section of
@@ -10664,6 +10810,7 @@ PARTS = {
         "markdown",
         "issue-assistant",
         "dco",
+        "ownership",
     ],
     "conventional title": ["conventional title", "changelog"],
     "home-assistant": ["hacs", "hassfest"],
@@ -11494,6 +11641,10 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         "github.event_name == 'workflow_run'",
         "!github.event.repository.fork",
         "github.event.workflow_run.head_branch == github.event.repository.default_branch",
+        # The one run of a tag that counts, whose failure GitHub mails to whoever
+        # published the release.
+        "(github.event.workflow_run.event == 'release' &&"
+        " github.event.workflow_run.name == 'Release verification')",
         "github.event.workflow_run.head_repository.full_name == github.repository",
         '!contains(fromJSON(\'["pull_request", "pull_request_target"]\'), '
         "github.event.workflow_run.event)",
@@ -12201,6 +12352,7 @@ def test_the_store_workflow_signs_in_alike_and_only_where_it_talks_to_the_store(
     )
     assert "gh attestation verify" in package
     assert '--signer-workflow "$GH_REPO/.github/workflows/build-release.yml"' in package
+    assert "--source-ref refs/heads/main --deny-self-hosted-runners" in package
     uses = [step.get("uses", "") for step in jobs["store"]["steps"]]
     assert not any(use.startswith("actions/checkout@") for use in uses)
     hosts = jobs["store"]["steps"][0]["with"]["allowed-endpoints"].split()
@@ -17048,10 +17200,46 @@ def test_a_release_is_built_in_isolation() -> None:
     assert "workflow_call:" in build
     verify = (workflows_dir / "verify-release.yml").read_text(encoding="utf-8")
     assert 'build="$GH_REPO/.github/workflows/build-release.yml"' in verify
-    # The build signs a Nextcloud app with the key of the environment release, which a
-    # called workflow sees only with the secrets of its caller.
-    assert assets["secrets"] == "inherit"
-    assert job_in(build, "assets")["environment"]["name"] == "release"
+    # The blueprint publishes no package, so its build holds no secret at all.
+    assert "secrets" not in assets
+    assert "environment" not in job_in(build, "assets")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_release_is_built_without_the_secrets_of_the_release(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The build runs actions of others, such as those that write the SBOMs or set up
+    # PHP, Node and Python. Only the build of a Nextcloud app, which signs the app with
+    # the key of the environment release, enters an environment, and a called
+    # workflow sees its secrets only when the caller passes them on; every other
+    # build holds only the token of its job, never the private key of the release app.
+    project = projects[kind]
+    release = (project / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    build = (project / ".github/workflows/build-release.yml").read_text(
+        encoding="utf-8"
+    )
+    signs = kind == "nextcloud-app"
+    assert job_in(release, "assets").get("secrets") == ("inherit" if signs else None)
+    assert job_in(build, "assets").get("environment") == (
+        {"name": "release", "deployment": False} if signs else None
+    )
+    # zizmor accepts the passed secrets at that one line of a Nextcloud app, not in
+    # every workflow of the name release.yml of every repository.
+    zizmor = yaml.safe_load(
+        (project / ".github/zizmor.yml").read_text(encoding="utf-8")
+    )
+    assert "secrets-inherit" not in zizmor["rules"]
+    inherited = [line for line in release.splitlines() if "secrets: inherit" in line]
+    assert inherited == (
+        ["    secrets: inherit # zizmor: ignore[secrets-inherit]"] if signs else []
+    )
+    # The one secret that the build reads is the key of a Nextcloud app; the other
+    # is the token of its job, which every called workflow gets.
+    assert set(re.findall(r"secrets\.(\w+)", build)) == {
+        "APP_PRIVATE_KEY",
+        "GITHUB_TOKEN",
+    }
 
 
 HOOK = "hashFiles('scripts/release-assets.sh') != ''"
@@ -17750,6 +17938,10 @@ HACS_MANIFEST = {"domain": "demo", "name": "Démo", "version": "1.2.3"}
 # The gitsign that the stand-in for curl downloads: it verifies every tag.
 GITSIGN = b"#!/usr/bin/env bash\nexit 0\n"
 PYTHON3 = f'exec "{Path(sys.executable).as_posix()}" "$@"\n'
+# What every check of a provenance demands besides its workflow: a run for main, the
+# only branch whose runs make releases, on a runner of GitHub. gh answers only a
+# check that demands it, so a check without it fails.
+TRUSTED_RUN = " --source-ref refs/heads/main --deny-self-hosted-runners"
 
 
 def verify_a_hacs_release(
@@ -17762,14 +17954,15 @@ def verify_a_hacs_release(
     manifest: Mapping[str, str] | None = None,
     zipped: dict[str, str] | None = None,
     zip_name: str = "demo.zip",
+    publish_to: str = "hacs",
     extra: Mapping[str, str] | None = None,
     unattested: str | None = None,
 ) -> workflow_steps.StepResult:
     """Runs the verification of a release of the integration demo, delivered to HACS,
     with gh, git and curl as stand-ins: everything verifies, but for what the test
     changes, such as the manifest.json in the zip or the files of the zip, with the
-    extra assets of a scripts/release-assets.sh, and without the provenance of the
-    asset unattested."""
+    extra assets of a scripts/release-assets.sh, without the provenance of the asset
+    unattested, or the delivery, such as the image of the release in GHCR."""
     version = tag.removeprefix("v")
     assets = tmp_path / "runner/assets"
     assets.mkdir(parents=True)
@@ -17827,9 +18020,15 @@ def verify_a_hacs_release(
             exact(f"release download {tag}"),
             *missing,
             Answer(
-                r"attestation verify \S+ --repo o/r --signer-workflow"
+                r"attestation verify (?!oci://)\S+ --repo o/r --signer-workflow"
                 r" o/r/\.github/workflows/build-release\.yml"
-                r"( --bundle provenance\.sigstore\.json)?"
+                + re.escape(TRUSTED_RUN)
+                + r"( --bundle provenance\.sigstore\.json)?"
+            ),
+            # The image, which the release workflow builds and attests itself.
+            exact(
+                f"attestation verify oci://ghcr.io/o/r:{version} --repo o/r"
+                " --signer-workflow o/r/.github/workflows/release.yml" + TRUSTED_RUN
             ),
             exact(
                 "api -H Accept: application/vnd.github.raw+json"
@@ -17848,7 +18047,7 @@ def verify_a_hacs_release(
         ],
         env={
             "TAG": tag,
-            "PUBLISH_TO": "hacs",
+            "PUBLISH_TO": publish_to,
             "WEEKLY": "false",
             "GITSIGN_SHA256": hashlib.sha256(GITSIGN).hexdigest(),
         },
@@ -17994,6 +18193,46 @@ def test_a_zip_that_hacs_would_install_wrong_fails_the_verification(
     # The one problem of the release: every other check passes.
     assert done.summary.count("✘") == 1, done.summary
     assert "has 1 problem(s)." in done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("publish_to", ["hacs", "ghcr"])
+def test_the_provenance_of_a_release_is_that_of_main_on_github(
+    tmp_path: Path, publish_to: str
+) -> None:
+    done = verify_a_hacs_release(tmp_path, publish_to=publish_to)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "✘" not in done.summary
+    # Every check of a provenance names the workflow that made it and demands a run
+    # for main on a runner of GitHub, also that of the image in GHCR, which the
+    # release workflow attests.
+    checks = done.called("attestation verify ")
+    assert checks
+    for check in checks:
+        assert " --signer-workflow o/r/.github/workflows/" in check, check
+        assert TRUSTED_RUN in check, check
+    image = "ghcr.io/o/r:1.2.3 carries the signed provenance of the release workflow."
+    assert (f"- ✔ {image}\n" in done.summary) == (publish_to == "ghcr")
+
+
+def test_a_release_that_someone_else_publishes_is_verified_at_once() -> None:
+    verify = workflow_steps.workflow("verify-release.yml")
+    assert verify["on"]["release"] == {"types": ["published"]}
+    step = step_in(job_in(verify, "verify"), "Verify the release as its users can")
+    # The release that was just published, not the latest, which a prerelease isn't.
+    assert step["env"]["TAG"] == "${{ inputs.tag || github.event.release.tag_name }}"
+    # The release workflow publishes with the token of its job, whose events start no
+    # workflow: the event comes only from a release that it didn't publish, and its
+    # own releases aren't verified twice.
+    release = workflow_steps.workflow("release.yml")
+    publish = step_in(job_in(release, "publish"), "Make the complete release public")
+    assert publish["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert "gh release edit" in publish["run"]
+    # And its failure reaches the bot-health bot, as GitHub mails it only to whoever
+    # published the release.
+    health = workflow_steps.workflow("bot-health.yml")
+    assert "Release verification" in health["on"]["workflow_run"]["workflows"]
 
 
 def package_for_hacs(

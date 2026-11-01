@@ -5,6 +5,7 @@ does, after the filters of jq."""
 
 from __future__ import annotations
 
+import ast
 import base64
 import dataclasses
 import json
@@ -256,6 +257,36 @@ def test_adopt_takes_the_release_over(
 
 
 @needs_git
+def test_adopt_starts_a_release_that_is_a_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = blueprint(tmp_path / "blueprint")
+    tool = release(tmp_path / "release")
+    (tool / "issue_assistant.py").unlink()
+    written(
+        tool,
+        {
+            "issue_assistant/__init__.py": "",
+            "issue_assistant/__main__.py": INSTALL.replace(
+                "resolve().parent", "resolve().parents[1]"
+            ),
+        },
+    )
+    # A json.py in the folder of the job doesn't reach the imports of the release.
+    job = tmp_path / "job"
+    written(job, {"json.py": 'raise SystemExit("ran the code of the job")'})
+    monkeypatch.chdir(job)
+
+    changed = sync.adopt(root, tool, NEW, "v1.3.1")
+
+    assert ".github/workflows/issue-assistant.yml" in changed
+    assert sync.pinned(root) == [f"{NEW} v1.3.1"]
+    assert "wrote .github/workflows/labels.yml" in capsys.readouterr().err
+
+
+@needs_git
 def test_adopt_renders_no_workflow_that_install_left_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -276,6 +307,7 @@ def test_adopt_renders_no_workflow_that_install_left_out(
 
 # A reference.py that writes the page of the variables from the workflows, as the
 # blueprint's does, or that fails.
+OWNED_LIST = sync.OWNED.as_posix()
 REFERENCE = """\
 import pathlib, sys
 if pathlib.Path("fail").exists():
@@ -285,6 +317,12 @@ page = pathlib.Path("docs/reference/variables.md")
 page.parent.mkdir(parents=True, exist_ok=True)
 page.write_text("\\n".join(names) + "\\n", encoding="utf-8", newline="\\n")
 print("reference.py: wrote docs/reference/variables.md")
+owned = pathlib.Path("template/.github/blueprint/owned.txt.jinja")
+owned.write_text(
+    "".join(f".github/workflows/{name}\\n" for name in names),
+    encoding="utf-8",
+    newline="\\n",
+)
 """
 
 
@@ -292,11 +330,17 @@ print("reference.py: wrote docs/reference/variables.md")
 def test_adopt_writes_the_reference_pages_anew(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = blueprint(tmp_path / "blueprint", {**BLUEPRINT, "reference.py": REFERENCE})
+    root = blueprint(
+        tmp_path / "blueprint",
+        {**BLUEPRINT, "reference.py": REFERENCE, OWNED_LIST: "old\n"},
+    )
 
     changed = sync.adopt(root, release(tmp_path / "release"), NEW, "v1.3.1")
 
     assert "docs/reference/variables.md" in changed
+    # A new workflow joins the list of the files of the blueprint.
+    assert OWNED_LIST in changed
+    assert ".github/workflows/triage.yml\n" in text(root, OWNED_LIST)
     assert "triage.yml\n" in text(root, "docs/reference/variables.md")
     assert "reference.py: wrote docs/reference/variables.md\n" in (
         capsys.readouterr().err
@@ -305,6 +349,24 @@ def test_adopt_writes_the_reference_pages_anew(
     folder = tmp_path / "kept"
     sync.keep(root, folder, changed)
     assert "docs/reference/variables.md" in sync.kept(folder)
+    assert OWNED_LIST in sync.kept(folder)
+    assert (
+        f"- `{OWNED_LIST}`: the list of the files of the blueprint, written anew\n"
+        in sync.listing(root, folder)
+    )
+
+
+def test_the_job_of_the_sync_can_import_what_the_real_reference_script_needs() -> None:
+    # The job adopt runs reference.py on the Python of the runner, with nothing installed
+    # but PyYAML of its image; the fake script of the tests above can't show that.
+    tree = ast.parse((ROOT / sync.REFERENCE).read_text(encoding="utf-8"))
+    imported = {
+        (alias.name if isinstance(node, ast.Import) else str(node.module)).split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+    }
+    assert imported - sys.stdlib_module_names == {"yaml"}
 
 
 @needs_git
