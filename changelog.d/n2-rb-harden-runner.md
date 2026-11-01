@@ -1,3 +1,0 @@
-### Bug fixes
-
-- Jobs that block every host they don't need no longer fail on a host they may reach, or hang until their time limit after their last step, as they did at random on GitHub's runners in `westus2`: the workflows move to Harden-Runner v2.22.3, each such job first waits until Harden-Runner lets its hosts through, and a job that still runs out of time runs once more, in a required check such as the title of a pull request and in a bot alike. A workflow of your project's own that blocks takes the same step: copy *Wait until Harden-Runner lets the hosts through* from `.github/workflows/welcome.yml` right after Harden-Runner, with `HOSTS` equal to its `allowed-endpoints`; a Chrome extension can add the clause to `docs/releases.md`.
