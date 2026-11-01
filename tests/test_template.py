@@ -5702,7 +5702,9 @@ def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
     assert owned == {
         path
         for path in rendered
-        if path != ".copier-answers.yml" and not matcher.match_file(path)
+        if path != ".copier-answers.yml"
+        and path not in reference.OWNED_EXCEPTIONS
+        and not matcher.match_file(path)
     }
     # The list names itself, and what the pull requests of player-switch changed.
     assert {

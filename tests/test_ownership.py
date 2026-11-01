@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import pathspec
 import pytest
 import yaml
 
@@ -148,6 +149,8 @@ def a_pull(
         ("srcs/a.txt", True),
         # The answers belong to the command that writes them.
         (".copier-answers.yml.jinja", False),
+        # A file that says that a project changes it there.
+        (".vale.ini.jinja", False),
     ],
 )
 def test_the_list_leaves_out_what_the_patterns_of_a_project_hold(
@@ -179,6 +182,35 @@ def test_a_line_of_the_list_keeps_the_condition_of_its_file(
     template_file: str, path: str, line: str
 ) -> None:
     assert reference.owned_line(template_file) == (path, line)
+
+
+@pytest.mark.parametrize("name", sorted(reference.OWNED_EXCEPTIONS))
+def test_a_file_that_is_left_off_the_list_says_that_a_project_changes_it(
+    name: str,
+) -> None:
+    head = (ROOT / name).read_text(encoding="utf-8")[:300]
+    assert "A project that needs other rules changes them here" in head
+
+
+@pytest.mark.parametrize(
+    ("path", "held"),
+    [
+        ("a.py", True),
+        ("sub/a.py", False),
+        ("a.pyc", False),
+        ("src", True),
+        ("src/deep/a.txt", True),
+        ("src2/a.txt", False),
+        ("other/src/a.txt", False),
+        (".github/labels.toml", True),
+        (".github", False),
+        (".github/labels.toml.old", False),
+    ],
+)
+def test_the_forms_of_the_patterns_of_a_project(path: str, held: bool) -> None:
+    patterns = ["/*.py", "/src", ".github/labels.toml"]
+    assert reference.left_to_project(path, patterns) is held
+    assert pathspec.PathSpec.from_lines("gitignore", patterns).match_file(path) is held
 
 
 def test_the_list_is_sorted_by_the_paths_of_its_files() -> None:

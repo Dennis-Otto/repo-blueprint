@@ -149,9 +149,9 @@ def report_text(repo: str, changed: Sequence[str]) -> str:
     lines = [
         "#### Files of the blueprint",
         "",
-        "📌 This pull request changes files that the blueprint keeps current. It may "
-        "merge, but the next update of the blueprint that changes the same lines "
-        "conflicts with it, and that update then waits for a person:",
+        "📌 This pull request changes files that the blueprint keeps current. The next "
+        "update of the blueprint that changes the same lines conflicts with this "
+        "change, and that update then waits for a person:",
         "",
     ]
     lines += [f"- {code(path)}" for path in changed[:MOST_NAMED]]

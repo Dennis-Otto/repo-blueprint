@@ -32,10 +32,10 @@ import sys
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
-import pathspec
 import yaml
 
 COPIER = Path("copier.yml")
@@ -55,6 +55,9 @@ OWNED_HEAD = """\
 # that changes the same lines conflicts with it. reference.py of the blueprint writes
 # this list: https://github.com/Dennis-Otto/repo-blueprint
 """
+# A file of the blueprint that says in its first lines that a project changes it there,
+# which AGENTS.md of a project names as the exception, so it gets no notice.
+OWNED_EXCEPTIONS = frozenset({".vale.ini"})
 # The address of a file of the blueprint on GitHub, which the website links.
 BLOB = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/"
 # The token that GitHub gives every run, which nobody sets.
@@ -1315,16 +1318,33 @@ def owned_line(template_file: str) -> tuple[str, str]:
     )
 
 
+def left_to_project(path: str, patterns: Iterable[str]) -> bool:
+    """Whether a pattern of _skip_if_exists holds path. Copier reads them like .gitignore
+    with a library that the Issue assistant sync doesn't have, as it runs this script on
+    the Python of the runner. Every pattern of the blueprint has a slash, so it counts
+    from the root, its * stays within a name, and a folder holds all that is below it;
+    tests/test_template.py compares the result with that library for each kind."""
+    parts = path.split("/")
+    for pattern in patterns:
+        wanted = pattern.removeprefix("/").split("/")
+        if len(parts) >= len(wanted) and all(map(fnmatchcase, parts, wanted)):
+            return True
+    return False
+
+
 def owned_list(copier: str, template_files: Iterable[str]) -> str:
     """The template of .github/blueprint/owned.txt: each file of the template, other
-    than those that _skip_if_exists leaves to the project, as Copier reads its patterns,
-    and its answers, which belong to a command rather than to the blueprint or a person."""
+    than those that _skip_if_exists leaves to the project, its answers, which belong to
+    a command rather than to the blueprint or a person, and the files that say that a
+    project changes them."""
     settings = yaml.safe_load(copier)
-    project = pathspec.PathSpec.from_lines("gitignore", settings["_skip_if_exists"])
-    answers = settings.get("_answers_file", ".copier-answers.yml")
+    project = settings["_skip_if_exists"]
+    left_out = {settings.get("_answers_file", ".copier-answers.yml"), *OWNED_EXCEPTIONS}
     lines = sorted(owned_line(name) for name in template_files)
     return OWNED_HEAD + "".join(
-        line for path, line in lines if path != answers and not project.match_file(path)
+        line
+        for path, line in lines
+        if path not in left_out and not left_to_project(path, project)
     )
 
 
