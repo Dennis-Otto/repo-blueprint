@@ -7854,9 +7854,15 @@ def test_a_pull_request_checks_the_renovate_rules_without_waiting_for_the_bot() 
         "group": "renovate-rules-${{ github.event.pull_request.number }}",
         "cancel-in-progress": True,
     }
-    # One run of the bot at a time, and a waiting one isn't cancelled by a check.
+    # One run of the bot at a time in a repository, and a waiting one isn't cancelled
+    # by a check. A group for all of them would keep one run going and only the newest
+    # of the others waiting: GitHub cancels every other one that waits in a group.
     assert job_in(workflow, "renovate")["concurrency"] == {
-        "group": "renovate",
+        "group": "renovate-${{ matrix.repo }}",
+        "cancel-in-progress": False,
+    }
+    assert job_in(workflow, "problems")["concurrency"] == {
+        "group": "renovate-problems",
         "cancel-in-progress": False,
     }
 
@@ -8648,6 +8654,7 @@ RELEASE_APP_BOTS = {
     ("osv-scanner.yml", "dependabot"): ("the Dependabot alert bot", False),
     ("release.yml", "release-please"): ("the release bot", False),
     ("renovate.yml", "renovate"): ("Renovate", True),
+    ("renovate.yml", "repositories"): ("Renovate", True),
     ("rollout.yml", "plan"): ("the Rollout", True),
     ("rollout.yml", "rollout"): ("the Rollout", True),
     ("screenshot-bot.yml", "pull-request"): ("the screenshot bot", False),
@@ -9368,6 +9375,261 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
     assert (project / ".github/workflows/renovate.yml").is_file()
 
 
+def cut_out(text: str, *parts: tuple[str, str | None]) -> str:
+    """The text without each part, from its start up to its end, which stays, or up to
+    the end of the text without one."""
+    for start, end in parts:
+        head, tail = text.split(start, 1)
+        text = head + (end + tail.split(end, 1)[1] if end else "")
+    return text
+
+
+RENOVATE_LIST = "List the repositories that have rules for Renovate"
+RENOVATE_REACH = "Check that the token reaches this repository alone"
+RENOVATE_LISTING = r"api --paginate installation/repositories --jq .*"
+
+
+def test_each_run_of_renovate_has_a_token_for_its_repository_alone() -> None:
+    # A package manager that runs code of a dependency while it writes a lock file
+    # can't push to another repository of the owner (#445).
+    text = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_in(text, "renovate")
+    # One run for each repository of the list, two at a time, as the owner has about 20
+    # jobs at once for all of its repositories, and every one of them.
+    assert job["needs"] == "repositories"
+    assert job["strategy"] == {
+        "max-parallel": 2,
+        "fail-fast": False,
+        "matrix": {"repo": "${{ fromJSON(needs.repositories.outputs.repositories) }}"},
+    }
+    # Each writes with a token for its repository alone, and nothing else in the job.
+    token = step_in(job, "Create a token of the release app")["with"]
+    assert token["owner"] == "${{ github.repository_owner }}"
+    assert token["repositories"] == "${{ matrix.repo }}"
+    assert job["permissions"] == {"contents": "read"}
+    variables = step_in(job, "Run Renovate")["env"]
+    assert (
+        variables["RENOVATE_REPOSITORIES"]
+        == "${{ github.repository_owner }}/${{ matrix.repo }}"
+    )
+    assert not {"RENOVATE_AUTODISCOVER", "RENOVATE_AUTODISCOVER_FILTER"} & set(
+        variables
+    )
+    # Renovate gets the token only after the look at what it reaches.
+    names = names_of(job)
+    token_step = "Create a token of the release app"
+    assert (
+        names.index(token_step)
+        < names.index(RENOVATE_REACH)
+        < names.index("Run Renovate")
+    )
+    reach = step_in(job, RENOVATE_REACH)
+    assert reach["env"]["GH_TOKEN"] == "${{ steps.app.outputs.token }}"
+    assert (
+        reach["env"]["REPOSITORY"]
+        == "${{ github.repository_owner }}/${{ matrix.repo }}"
+    )
+    # The token of the whole installation is gone from the job, and with it the
+    # exception of zizmor: the one token that remains lists the repositories and reads.
+    leg = text[text.index("\n  renovate:\n") : text.index("\n  problems:\n")]
+    assert "zizmor: ignore" not in leg
+    lister = job_in(text, "repositories")
+    assert lister["permissions"] == {}
+    token = step_in(
+        lister, "Create a token of the release app that lists its repositories"
+    )
+    assert {
+        key: value
+        for key, value in token["with"].items()
+        if key.startswith("permission-")
+    } == {"permission-metadata": "read"}
+    assert lister["outputs"]["repositories"] == (
+        "${{ steps.repositories.outputs.repositories }}"
+    )
+    # Without a repository there is no run, and GitHub would refuse an empty matrix.
+    assert job["if"] == "needs.repositories.outputs.repositories != ''"
+    assert "github.repository ==" in lister["if"]
+    assert "github.repository ==" not in job["if"]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_doesnt_start_with_a_token_that_reaches_more(tmp_path: Path) -> None:
+    reaches = "api --paginate installation/repositories --jq .repositories[].full_name"
+    env = {"REPOSITORY": "octo-org/app"}
+
+    alone = workflow_steps.run_step(
+        tmp_path / "alone",
+        "renovate.yml",
+        "renovate",
+        RENOVATE_REACH,
+        answers=[exact(reaches, "octo-org/app\n")],
+        env=env,
+    )
+    assert alone.returncode == 0
+    # The log shows what the token reaches.
+    assert alone.stdout.splitlines()[-1] == "octo-org/app"
+
+    more = workflow_steps.run_step(
+        tmp_path / "more",
+        "renovate.yml",
+        "renovate",
+        RENOVATE_REACH,
+        answers=[exact(reaches, "octo-org/app\nocto-org/other\n")],
+        env=env,
+    )
+    assert more.returncode == 1
+    assert "octo-org/other" in more.stdout
+    assert (
+        "::error::The token of this run reaches more than octo-org/app" in more.stdout
+    )
+
+    another = workflow_steps.run_step(
+        tmp_path / "another",
+        "renovate.yml",
+        "renovate",
+        RENOVATE_REACH,
+        answers=[exact(reaches, "octo-org/other\n")],
+        env=env,
+    )
+    assert another.returncode == 1
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_runs_for_the_repositories_that_may_have_rules(tmp_path: Path) -> None:
+    def rules(name: str, **answer: Any) -> workflow_steps.Answer:
+        return exact(
+            f"api repos/octo-org/{name}/contents/.github/renovate.json5 --silent",
+            **answer,
+        )
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[
+            workflow_steps.Answer(
+                RENOVATE_LISTING,
+                "app false\nno-rules false\nsecret true\nflaky false\nempty false\n",
+            ),
+            rules("app"),
+            rules("no-rules", code=1, err="gh: Not Found (HTTP 404)\n"),
+            rules("flaky", code=1, err="gh: Server Error (HTTP 502)\n"),
+            # GitHub answers so for a repository without a commit, which Renovate skips.
+            rules("empty", code=1, err="gh: Git Repository is empty. (HTTP 409)\n"),
+        ],
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 0
+    # Only a clear 404 takes a repository off the list: Renovate itself skips one
+    # without rules, as .github/renovate-global.json5 asks for them.
+    assert done.outputs == {"repositories": '["app","secret","flaky","empty"]'}
+    assert "- flaky\n" in done.summary
+    # A token that reads metadata can't read the files of a private repository, so the
+    # step doesn't ask, and a 404 would not tell anything.
+    assert not done.called(r"api repos/octo-org/secret/")
+    bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    assert 'requireConfig: "required"' in bot
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_has_no_run_without_a_repository(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[
+            workflow_steps.Answer(RENOVATE_LISTING, "no-rules false\n"),
+            exact(
+                "api repos/octo-org/no-rules/contents/.github/renovate.json5 --silent",
+                code=1,
+                err="gh: Not Found (HTTP 404)\n",
+            ),
+        ],
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 0
+    # Without the output, the job renovate is skipped rather than refused for an empty
+    # matrix.
+    assert done.outputs == {}
+    assert "no repository with rules for Renovate" in done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_says_when_it_cant_list_its_repositories(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[workflow_steps.Answer(RENOVATE_LISTING, code=1, err="gh: HTTP 502\n")],
+        stubs={"sleep": workflow_steps.recording("sleep")},
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 1
+    # GitHub fails for a moment now and then: it asks three times before it gives up.
+    assert len(done.called(RENOVATE_LISTING)) == 3
+    assert "::error::The repositories of the release app could not be listed." in (
+        done.stdout
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_brings_the_log_of_every_repository_into_its_issue(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "problems",
+        "Keep the issue of Renovate's problems current",
+        stubs={"python3": workflow_steps.recording("python3")},
+        files={
+            "$RUNNER_TEMP/problems/renovate-problems-app/problems.json": "{}\n",
+            "$RUNNER_TEMP/problems/renovate-problems-other/problems.json": "{}\n",
+        },
+        env={
+            "GITHUB_REPOSITORY": "octo-org/hub",
+            "RUN_URL": "https://run",
+            "RESULT": "failure",
+        },
+    )
+
+    assert done.returncode == 0
+    call = done.stubbed[0]
+    assert call.startswith(
+        "python3 blueprint.py --repo octo-org/hub bot-health renovate "
+    )
+    assert "/problems/renovate-problems-app/problems.json " in call
+    assert "/problems/renovate-problems-other/problems.json " in call
+    assert call.endswith(" --result failure --run https://run")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_finds_the_log_of_a_single_repository(tmp_path: Path) -> None:
+    # download-artifact puts the files of a single artifact straight into its path.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "problems",
+        "Keep the issue of Renovate's problems current",
+        stubs={"python3": workflow_steps.recording("python3")},
+        files={"$RUNNER_TEMP/problems/problems.json": "{}\n"},
+        env={
+            "GITHUB_REPOSITORY": "octo-org/hub",
+            "RUN_URL": "https://run",
+            "RESULT": "success",
+        },
+    )
+
+    assert done.returncode == 0
+    assert "/problems/problems.json " in done.stubbed[0]
+
+
 def test_a_foreign_owner_runs_renovate_in_their_own_repository(
     tmp_path: Path,
 ) -> None:
@@ -9381,38 +9643,86 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
 
     workflow = (project / ".github/workflows/renovate.yml").read_text("utf-8")
     hub = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
-    # The workflow of the blueprint, for this repository alone: the job without the
-    # name of the blueprint, a token of the release app for this repository, and this
-    # repository in place of every repository of the owner. The rest is the same, the
-    # Renovate that it pins by digest too, and its schedule in the slot of the project.
+    # The workflow of the blueprint, for this repository alone: one job, without the
+    # list of the repositories, the logs for a report of its own and that report, whose
+    # last steps stay as its own, and with a token of the release app for this
+    # repository. The rest is the same, the Renovate that it pins by digest too, and its
+    # schedule in the slot of the project.
     slot = project_slot(project)
+    kept = cut_out(
+        in_slot(hub, slot),
+        ("  repositories:\n", "  renovate:\n"),
+        (
+            "      # The job problems brings the log of each repository",
+            "      # A warning, such as a lock file that Renovate can't read",
+        ),
+        ("      - name: Wait until Harden-Runner has removed Docker\n", None),
+    )
     changed = [
         line
         for line in difflib.unified_diff(
-            in_slot(hub, slot).splitlines(), workflow.splitlines(), lineterm="", n=0
+            kept.splitlines(), workflow.splitlines(), lineterm="", n=0
         )
         if line[:1] in "+-" and not line.startswith(("+++", "---"))
     ]
     assert changed == [
-        "-    if: github.event_name != 'pull_request' && github.repository =="
-        " 'Dennis-Otto/repo-blueprint'",
+        "-    needs: repositories",
+        "-    if: needs.repositories.outputs.repositories != ''",
         "+    if: github.event_name != 'pull_request'",
-        "-          # In the blueprint, every repository of the installation, on"
-        " purpose: the",
-        "-          # app is installed on exactly the repositories that Renovate keeps"
-        " current.",
-        "-          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]",
-        "-          # In the blueprint, every repository of the owner on which the app is",
-        "-          # installed and that has a .github/renovate.json5.",
-        '-          RENOVATE_AUTODISCOVER: "true"',
-        "-          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*",
-        "+          # This repository alone, by its name, also after a rename.",
+        "-      group: renovate-${{ matrix.repo }}",
+        "+      group: renovate",
+        "-    strategy:",
+        "-      # Two at a time, as the owner has about 20 jobs at once for all of its",
+        "-      # repositories, and every repository, also after one that failed.",
+        "-      max-parallel: 2",
+        "-      fail-fast: false",
+        "-      matrix:",
+        "-        repo: ${{ fromJSON(needs.repositories.outputs.repositories) }}",
+        "+      # The one issue with the warnings and errors of Renovate.",
+        "+      issues: write",
+        "-          # For this repository alone: a package manager that runs code of a"
+        " dependency",
+        "-          # while it writes a lock file can't push to another repository of"
+        " the owner.",
+        "-          owner: ${{ github.repository_owner }}",
+        "-          repositories: ${{ matrix.repo }}",
+        "-          REPOSITORY: ${{ github.repository_owner }}/${{ matrix.repo }}",
+        "+          REPOSITORY: ${{ github.repository }}",
+        "-          RENOVATE_REPOSITORIES: ${{ github.repository_owner }}/"
+        "${{ matrix.repo }}",
         "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
+        "-          # A repository that didn't finish wrote no log, so the run isn't a"
+        " quiet one.",
+        "-          RESULT: ${{ needs.renovate.result }}",
+        "-          # download-artifact puts the files of a single artifact straight into"
+        " its path,",
+        "-          # so with one leg's log there is no folder of the artifact.",
+        '-          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate \\',
+        '-            "$RUNNER_TEMP"/problems/problems.json'
+        ' "$RUNNER_TEMP"/problems/*/problems.json \\',
+        '-            --result "$RESULT" --run "$RUN_URL" |',
+        '+          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate'
+        ' /tmp/renovate/problems.json --run "$RUN_URL" |',
     ]
+    assert "matrix" not in workflow
     parsed = yaml.safe_load(workflow)
     assert parsed[True]["schedule"] == [{"cron": moved("17 */2 * * *", slot)}]
+    # One job for the checks of the rules and one for the bot, which needs no other.
+    assert set(parsed["jobs"]) == {"validate", "renovate"}
+    assert "needs" not in parsed["jobs"]["renovate"]
     steps = {step.get("name"): step for step in parsed["jobs"]["renovate"]["steps"]}
-    assert "owner" not in steps["Create a token of the release app"]["with"]
+    # A token without an owner and without repositories is for this repository alone,
+    # and the job looks at it as the jobs of the blueprint do.
+    token = steps["Create a token of the release app"]["with"]
+    assert not {"owner", "repositories"} & set(token)
+    reach = steps["Check that the token reaches this repository alone"]
+    assert reach["env"]["REPOSITORY"] == "${{ github.repository }}"
+    # The job keeps the issue itself, from the log of its own Renovate.
+    assert list(steps)[-1] == "Keep the issue of Renovate's problems current"
+    assert parsed["jobs"]["renovate"]["permissions"] == {
+        "contents": "read",
+        "issues": "write",
+    }
     run = steps["Run Renovate"]
     assert re.fullmatch(
         r"\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", run["with"]["renovate-version"]
@@ -10027,6 +10337,31 @@ def test_a_template_stops_when_the_text_that_it_replaces_is_gone(
     )
     with pytest.raises(FilterArgumentError, match=re.escape(message)):
         rendered(reworded)
+
+
+def test_a_template_cuts_parts_of_a_file_and_stops_when_they_are_gone(
+    tmp_path: Path,
+) -> None:
+    file = "start\n# one\nout\n# two\nkept\n# three\nout too\n"
+
+    def rendered(text: str, cuts: str) -> str:
+        (tmp_path / "file.yml").write_text(text, encoding="utf-8", newline="\n")
+        template = blueprint_environment(tmp_path).from_string(
+            '[%- from "includes/replace.jinja" import replaced with context -%]\n'
+            f"{{= replaced('file.yml', [['kept', 'changed']], {cuts}) -=}}"
+        )
+        return template.render(schedule_slot=0)
+
+    # Up to a text that stays, or to the end of the file, and before the replacements,
+    # so that a text that the replacements know needs to be there once only after them.
+    cuts = '[["# one\\n", "# two\\n"], ["# three\\n", none]]'
+    assert rendered(file, cuts) == "start\n# two\nchanged\n"
+    # Each text that a cut looks for stops the render when it is gone, as one that the
+    # template replaces does.
+    message = "file.yml no longer holds the text that its template replaces"
+    for reworded in ("# three", "# two", "# one"):
+        with pytest.raises(FilterArgumentError, match=re.escape(message)):
+            rendered(file.replace(reworded, "# other"), cuts)
 
 
 def blueprint_environment(*folders: Path) -> SandboxedEnvironment:
@@ -11735,11 +12070,38 @@ def test_renovate_reports_its_problems_in_one_issue() -> None:
     assert log.startswith("/tmp/")
     assert log == log.lower()
     assert variables["RENOVATE_LOG_FILE_LEVEL"] == "warn"
+    # Each run keeps its log, also a run that failed, under a name of its own.
+    kept = "Keep the log of Renovate's problems for the issue"
+    assert names_of(job)[-1] == kept
+    assert condition_of(step_in(job, kept)) == "${{ !cancelled() }}"
+    artifact = step_in(job, kept)["with"]
+    assert artifact["path"] == log
+    assert artifact["name"] == "renovate-problems-${{ matrix.repo }}"
+    assert artifact["if-no-files-found"] == "ignore"
+    assert artifact["retention-days"] == 1
+    # One job takes them all into the one issue, after every run, also one that failed,
+    # without the private key of the release app: only the job of the issue may write it.
+    report = job_in(text, "problems")
+    assert report["needs"] == "renovate"
+    assert report["if"] == "${{ !cancelled() && needs.renovate.result != 'skipped' }}"
+    assert "environment" not in report
+    assert report["permissions"] == {"contents": "read", "issues": "write"}
+    assert "issues" not in job["permissions"]
+    fetched = step_in(report, "Fetch the log of each repository")["with"]
+    assert fnmatch.fnmatch(artifact["name"].split("$")[0] + "app", fetched["pattern"])
+    assert fetched["path"] == "${{ runner.temp }}/problems"
     step = "Keep the issue of Renovate's problems current"
-    assert names_of(job).index(step) > names_of(job).index("Run Renovate")
-    assert f"bot-health renovate {log} " in script_of(job, step)
-    assert condition_of(step_in(job, step)) == "${{ !cancelled() }}"
-    assert job["permissions"]["issues"] == "write"
+    assert names_of(report).index(step) > names_of(report).index(
+        "Fetch the log of each repository"
+    )
+    logs = (
+        '"$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json'
+    )
+    script = script_of(report, step)
+    assert logs in script
+    assert '--result "$RESULT" --run "$RUN_URL"' in script
+    assert step_in(report, step)["env"]["RESULT"] == "${{ needs.renovate.result }}"
+    assert condition_of(step_in(report, step)) == "${{ !cancelled() }}"
 
 
 # jq, which gh runs for its option --jq: the steps that rely on its filters run with
@@ -11748,6 +12110,44 @@ JQ = shutil.which("jq")
 WITH_JQ = pytest.mark.skipif(
     BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
 )
+
+
+@WITH_JQ
+def test_renovate_leaves_out_what_it_never_looked_at(tmp_path: Path) -> None:
+    def repository(name: str, **flags: bool) -> dict[str, Any]:
+        return {
+            "name": name,
+            "private": flags.get("private", False),
+            "archived": flags.get("archived", False),
+            "disabled": flags.get("disabled", False),
+            "fork": flags.get("fork", False),
+        }
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[
+            workflow_steps.Answer(
+                RENOVATE_LISTING,
+                json={
+                    "repositories": [
+                        repository("app"),
+                        repository("secret", private=True),
+                        repository("old", archived=True),
+                        repository("blocked", disabled=True),
+                        repository("theirs", fork=True),
+                    ]
+                },
+            ),
+            exact("api repos/octo-org/app/contents/.github/renovate.json5 --silent"),
+        ],
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 0
+    assert done.outputs == {"repositories": '["app","secret"]'}
 
 
 NODE_JS = shutil.which("node")
