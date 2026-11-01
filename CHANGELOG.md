@@ -7,6 +7,25 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.2...v1.3.0) (2026-11-01)
+
+### Features
+
+- **A project can add its own assets to a release, attested like the rest:** a `scripts/release-assets.sh` of the project builds what no registry builds, such as the zip of a browser extension. The build of the release runs `bash scripts/release-assets.sh FOLDER VERSION` at the commit of the release, in a job of its own that may write nothing and holds no secret, with Node.js and `npm ci --ignore-scripts` first where a `package.json` is, then attests each file with the package, the SBOMs and the notices and attaches it to the draft before it is published. Where `PUBLISH_TO` is `none`, the SBOMs describe the zips and tarballs of the script, and the verification of the release fails for an asset without its signed provenance. `SECURITY.md` shows how to verify such an asset. A name that the release or its registry keeps for its own files stops the build. A project without the script releases as before (decision 0084).
+
+### Bug fixes
+
+- The website of a project no longer hangs at random in the CI until its step ends after five minutes: a preview card that needed a layer which another card was just starting waited without end, in the social plugin of Material. The hooks of the website now let it wait for the job itself, and a build still running after four minutes prints where each of its threads stands.
+- **The recording of a copy in the README and on the website renews itself again:** the Docs pictures workflow failed after every release since the question about the markers of test logs, which the recording left unanswered. It now answers each question, a test keeps it that way for every new question, and its dry run of `create` ends on the commands that make the repository and not on the marks of its preflight.
+- Jobs that block every host they don't need no longer fail on a host they may reach, or hang until their time limit after their last step, as they did at random on GitHub's runners in `westus2`: the workflows move to Harden-Runner v2.22.3, each such job first waits until Harden-Runner lets its hosts through, and a job that still runs out of time runs once more, in a required check such as the title of a pull request and in a bot alike. A workflow of your project's own that blocks takes the same step: copy *Wait until Harden-Runner lets the hosts through* from `.github/workflows/welcome.yml` right after Harden-Runner, with `HOSTS` equal to its `allowed-endpoints`; a Chrome extension can add the clause to `docs/releases.md`.
+- **Biome 2.6 stays out of the Markdown and YAML of a Node package:** since version 2.6 Biome also formats Markdown and YAML, so `biome ci` in the step *Lint and format* of a Node package or Chrome extension failed on files the blueprint renders, such as `AGENTS.md` and `mkdocs.yml`. `biome.jsonc` now leaves these files out, markdownlint still checks the Markdown, and Biome checks the code and the JSON, as before. The new lock takes Biome 2.6.3 and the other updates of this lock file maintenance.
+- **The dependency review accepts the new license of `wcwidth`:** the current release of this tool of the blueprint bot declares `HPND-Markus-Kuhn AND MIT`, a permissive license that the review did not know, so it stopped every refresh of the lock files. A new project accepts it from the start. An existing project owns its `.github/dependency-review.yml`, so add `pkg:pypi/wcwidth` under `allow-dependencies-licenses` there.
+- Delivering a Python package to PyPI no longer runs an action with a known vulnerability: the Release workflow moves to `pypa/gh-action-pypi-publish` v1.14.3, which no longer trusts the revoked root certificate of [GHSA-5xjx-3w67-w9x9](https://github.com/advisories/GHSA-5xjx-3w67-w9x9). With the update of the blueprint, the alert of zizmor that this advisory opened on `release.yml` closes, and the Findings workflow passes again, in every repository. The PR coach now also says how to fix such an alert: move the pin to the release that the advisory names as fixed.
+
+### Performance
+
+- **The mutation tests collect mutmut's stats once, not in every part:** mutmut first runs the whole suite with trampolines that record which tests reach each function, which takes about ten times as long as the tests, and each part of the Mutation workflow did that on its own: in issue-assistant, six parts spent 13 to 21 minutes each. Now the job *mutation stats* runs them once and hands `mutants/mutmut-stats.json` to every part, which loads it and runs only its mutants, with the same configuration of mutmut (decision 0090). When a test fails without any mutant, no part starts: the run costs one job, and its summary and annotation name the test, also when pytest prints only a traceback. A pull request that changes how the mutants run collects the stats and tries a sample of about 200 mutants in one part, the same functions each time, for at most 12 minutes, in place of every part.
+
 ## [1.2.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.1...v1.2.2) (2026-10-27)
 
 ### Bug fixes
