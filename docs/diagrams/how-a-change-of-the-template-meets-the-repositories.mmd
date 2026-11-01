@@ -5,10 +5,10 @@ config:
 ---
 flowchart TB
     accTitle: How a change of the template meets the repositories before its release
-    accDescr: A pull request changes what the repositories get from the blueprint. The Variants workflow makes a new repository of every kind, updates one of every kind from the latest release, and updates one with the answers of each repository in tests/answers, which must give every file as a new repository with these answers has it and pass the build of its website and the lint of its workflows and Markdown. The Downstream workflow clones each repository and updates it as its blueprint bot does, to main and to the pull request, and names the files whose update the pull request changes and every conflict; a conflict that the pull request brings into a workflow or a script fails it. Then the pull request merges, and the release and the Rollout bring it to every repository.
+    accDescr: A pull request changes what the repositories get from the blueprint. The Variants workflow makes a new repository of every kind whose files the pull request changes, updates one of each from the latest release, and updates one with the answers of each repository in tests/answers whose files it changes, which must give every file as a new repository with these answers has it and pass the build of its website and the lint of its workflows and Markdown. The Downstream workflow clones each repository and updates it as its blueprint bot does, to main and to the pull request, and names the files whose update the pull request changes and every conflict; a conflict that the pull request brings into a workflow or a script fails it. Then the pull request merges, and the release and the Rollout bring it to every repository.
 
     change(["A pull request changes the template"])
-    variants["Variants: a new repository of every kind,<br>one updated from the latest release,<br>and one with the answers of each repository<br>in tests/answers/"]
+    variants["Variants: for every kind whose files it changes,<br>a new repository and one updated from the latest release,<br>and one with the answers of each repository<br>in tests/answers/ whose files it changes"]
     downstream["Downstream: each repository cloned<br>and updated as its blueprint bot does,<br>to main and to the pull request"]
     summary["The summary: the files whose update<br>the pull request changes, and each conflict"]
     conflict{"A conflict that the pull request<br>brings into a workflow or a script?"}
@@ -20,7 +20,7 @@ flowchart TB
     downstream --> summary --> conflict
     conflict -- "yes: the check fails" --> fix --> change
     conflict -- "no" --> merge
-    variants -- "every leg passes" --> merge
+    variants -- "every leg that runs passes" --> merge
     merge --> rollout
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px

@@ -51,7 +51,7 @@ Diese Art bringt diese Schritte dazu:
 
 [Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) ist aus dem Blueprint entstanden: ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung.
 
-Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von Player Switch for Autodarts aus, bevor er merged.
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Player Switch for Autodarts rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 

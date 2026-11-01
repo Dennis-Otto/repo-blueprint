@@ -1,6 +1,6 @@
 # One registry names the repositories that follow the blueprint
 
-- Status: accepted
+- Status: accepted, amended by [0100](0100-a-pull-request-runs-only-the-variants-whose-project-it-changes.md), by which `variants.py` makes the legs of the canaries from `tests/answers/` and the registry no longer writes them into the workflow
 - Date: 2026-10-25
 
 ## Context

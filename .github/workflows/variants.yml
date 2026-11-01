@@ -25,6 +25,13 @@ name: Variants
 # (pictures), in a pull request that changes what the pictures depend on, such as an
 # update of an image or of Playwright by Renovate, and every week.
 #
+# A pull request runs only the legs whose project it changes: the job variants plan
+# renders the project of each leg from the pull request and from the main it merges
+# into, with variants.py, and a project that stays the same to the byte has nothing new
+# to show, since main passed with it. Every leg runs when the pull request changes what
+# every leg runs with or when a project fails to render, and every week and in the
+# Next runner workflow.
+#
 # Not after a merge: main takes a pull request only when it is up to date, so a merge
 # gives main the tree that the pull request ran here. Nor in the release pull request,
 # which changes only the changelog and the version, files that no project gets. The
@@ -66,14 +73,86 @@ env:
   GH_TELEMETRY: "false"
 
 jobs:
-  variant:
-    # A new repository (variant), one updated from the latest release (update), and
-    # one updated with the answers of a repository that takes the blueprint (adopted).
-    name: ${{ matrix.start == 'new' && 'variant' || matrix.start }} (${{ matrix.answers || matrix.kind }})
+  # The legs that this run needs, and why not the others, in its summary.
+  plan:
+    name: variants plan
     # Not in the release pull request: the branch of the release bot in this repository.
     if: >-
       !startsWith(github.head_ref, 'release-please--') ||
       github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    # A few times its longest run, so that a run that hangs ends early.
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.legs.outputs.matrix }}
+      run: ${{ steps.legs.outputs.run }}
+    steps:
+      - name: Record the network traffic of the job
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      # The merge commit of a pull request and the main it merges into.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 5
+        with:
+          python-version-file: .python-version
+      # No leg runs without the plan, so a download of uv that hangs gives way to a
+      # second attempt here too, as in the legs below.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        id: uv
+        continue-on-error: true
+        timeout-minutes: 2
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.13.4"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: requirements-dev.txt
+          cache-suffix: plan
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        if: steps.uv.outcome == 'failure'
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.13.4"
+          enable-cache: true
+          prune-cache: true
+          cache-dependency-glob: requirements-dev.txt
+          cache-suffix: plan
+          download-from-astral-mirror: false
+      - name: Install the hash-pinned Copier
+        timeout-minutes: 5
+        run: uv pip install --system --require-hashes -r requirements-dev.txt
+      # Only a pull request names a base. A run on a schedule, by hand or of the Next
+      # runner workflow, which names a runner, runs every leg.
+      - name: Find the legs whose project the pull request changes
+        id: legs
+        timeout-minutes: 5
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && !inputs.runner && 'HEAD^1' || '' }}
+        run: python3 variants.py ${BASE:+--base "$BASE"}
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml.
+      - name: Explain the failure
+        if: failure()
+        env:
+          CHECK: variants plan
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
+
+  variant:
+    # A new repository (variant), one updated from the latest release (update), and
+    # one updated with the answers of a repository that takes the blueprint (adopted).
+    name: ${{ matrix.start == 'new' && 'variant' || matrix.start }} (${{ matrix.answers || matrix.kind }})
+    needs: plan
+    # GitHub stops at a matrix without a leg, so a plan without one skips the job.
+    if: needs.plan.outputs.run == 'true'
     # The runner of every job, or the one that a run by hand or the Next runner
     # workflow names.
     runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
@@ -82,24 +161,9 @@ jobs:
     timeout-minutes: 10
     strategy:
       fail-fast: false
-      matrix:
-        kind: [home-assistant, nextcloud-app, github-action, python-package, node-package, chrome-extension, container, generic]
-        start: [new, update]
-        # Each file of tests/answers/, with the project_type of its answers.
-        include:
-          # The new generic repository of an owner other than the blueprint's, without
-          # a release app yet: it gets nothing of the blueprint owner's app or person,
-          # but a Renovate workflow of its own; and without the AI of the issue
-          # assistant, whose check then asks no file to name an engine.
-          - { kind: generic, start: new, owner: octo-org, ai: "false" }
-          # [start:canaries] reference.py writes these from .github/fleet.toml.
-          - { kind: generic, start: adopted, answers: dennis-otto.github.io }
-          - { kind: home-assistant, start: adopted, answers: homedarts-for-autodarts }
-          - { kind: github-action, start: adopted, answers: issue-assistant }
-          - { kind: nextcloud-app, start: adopted, answers: paperless-sync }
-          - { kind: nextcloud-app, start: adopted, answers: paperless-unified-search }
-          - { kind: node-package, start: adopted, answers: player-switch-for-autodarts }
-          # [end:canaries]
+      # variants.py names the legs: a new repository and an update of each kind of
+      # copier.yml, and an update with each file of tests/answers/.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       KIND: ${{ matrix.kind }}
       ANSWERS: ${{ matrix.answers }}
@@ -621,7 +685,7 @@ jobs:
   variants:
     name: variants
     if: always()
-    needs: [variant, pictures]
+    needs: [plan, variant, pictures]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -629,11 +693,13 @@ jobs:
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
+      # The plan too: a plan that fails skips the legs, which would look like none had
+      # to run.
       - name: Require every variant to pass, or none to run
         env:
-          RESULT: ${{ needs.variant.result }} ${{ needs.pictures.result }}
+          RESULT: ${{ needs.plan.result }} ${{ needs.variant.result }} ${{ needs.pictures.result }}
         run: |
-          echo "The variants and their pictures: $RESULT"
+          echo "The plan, the variants and their pictures: $RESULT"
           read -ra results <<<"$RESULT"
           for result in "${results[@]}"; do
             [[ "$result" == success || "$result" == skipped ]]

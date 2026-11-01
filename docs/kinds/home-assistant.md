@@ -55,7 +55,7 @@ This kind adds these steps:
 
 [HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) is made from the blueprint: local real-time board control, games, tournaments and statistics, without a cloud account.
 
-The Variants workflow tries every pull request of the blueprint on the answers of HomeDarts for Autodarts, before it merges.
+The Variants workflow tries every pull request of the blueprint that changes what the answers of HomeDarts for Autodarts render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 

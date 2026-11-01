@@ -1,6 +1,6 @@
 # Try every change of the template on the answers and the files of the repositories that take the blueprint, before its release
 
-- Status: accepted
+- Status: accepted, amended by [0100](0100-a-pull-request-runs-only-the-variants-whose-project-it-changes.md), by which a pull request runs only the adopted legs whose project it changes
 - Date: 2026-10-18
 
 ## Context
@@ -24,7 +24,7 @@ Option 3.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-a-change-of-the-template-meets-the-repositories.dark.svg">
-  <img src="../images/diagrams/how-a-change-of-the-template-meets-the-repositories.svg" alt="How a change of the template meets the repositories before its release: A pull request changes what the repositories get from the blueprint. The Variants workflow makes a new repository of every kind, updates one of every kind from the latest release, and updates one with the answers of each repository in tests/answers, which must give every file as a new repository with these answers has it and pass the build of its website and the lint of its workflows and Markdown. The Downstream workflow clones each repository and updates it as its blueprint bot does, to main and to the pull request, and names the files whose update the pull request changes and every conflict; a conflict that the pull request brings into a workflow or a script fails it. Then the pull request merges, and the release and the Rollout bring it to every repository.">
+  <img src="../images/diagrams/how-a-change-of-the-template-meets-the-repositories.svg" alt="How a change of the template meets the repositories before its release: A pull request changes what the repositories get from the blueprint. The Variants workflow makes a new repository of every kind whose files the pull request changes, updates one of each from the latest release, and updates one with the answers of each repository in tests/answers whose files it changes, which must give every file as a new repository with these answers has it and pass the build of its website and the lint of its workflows and Markdown. The Downstream workflow clones each repository and updates it as its blueprint bot does, to main and to the pull request, and names the files whose update the pull request changes and every conflict; a conflict that the pull request brings into a workflow or a script fails it. Then the pull request merges, and the release and the Rollout bring it to every repository.">
 </picture>
 
 ## Consequences

@@ -590,6 +590,23 @@ autofix = """Which rule is meant, only a person knows; a lock file that Renovate
 compile again fails the step Lock files of the tests too, whose fix writes its header
 anew."""
 
+[check."variants plan"]
+title = "The legs of the Variants"
+problem = """The plan of the Variants named no legs: `copier.yml` offers no kind of project,
+a file of `tests/answers/` can't be read or names none, or the step that installs
+Copier failed. When that step failed, a download failed or hung until the step ran out
+of its time: that usually passes when the job runs again, which the flaky-test bot does
+once by itself. A project that fails to render doesn't fail the plan: every leg runs
+then, and its log names the project."""
+why = """No leg of the Variants starts without the plan, so the required check `variants`
+fails with it, rather than count the skipped legs as passed."""
+fix = """Run the plan on your machine, for the commits of the pull request. It names what it
+could not read, or which legs it runs and why:"""
+commands = ["python3 variants.py --base origin/main"]
+docs = "CONTRIBUTING.md#tests"
+autofix = """Which answers or which kind a file should have, only a person knows; a
+download that failed passes when the flaky-test bot runs the job again."""
+
 [check."variant (*)"]
 title = "A new repository of one kind"
 problem = """A repository of this kind, made from the template of the pull request, fails
@@ -664,14 +681,14 @@ autofix = """A script that takes no picture needs a fix of its template."""
 title = "Every kind of project"
 problem = """At least one kind of project, new, updated or with the answers of a
 repository that takes the blueprint, fails its checks, or a new one takes no
-pictures; the check `variant (…)`, `update (…)`, `adopted (…)` or `pictures (…)`
-that failed says why."""
+pictures, or the plan of the legs failed; the check `variant (…)`, `update (…)`,
+`adopted (…)`, `pictures (…)` or `variants plan` that failed says why."""
 why = """The rules of `main` require that every kind of project passes."""
-fix = """Fix the check `variant (…)`, `update (…)`, `adopted (…)` or `pictures (…)` that
-failed; this one passes with it."""
+fix = """Fix the check `variant (…)`, `update (…)`, `adopted (…)`, `pictures (…)` or
+`variants plan` that failed; this one passes with it."""
 docs = "CONTRIBUTING.md#tests"
-autofix = """It passes once every `variant (…)`, `update (…)`, `adopted (…)` and
-`pictures (…)` passes."""
+autofix = """It passes once `variants plan` and every `variant (…)`, `update (…)`,
+`adopted (…)` and `pictures (…)` that runs passes."""
 
 [check.downstream]
 title = "The update of the repositories that take the blueprint"

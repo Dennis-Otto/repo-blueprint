@@ -10,7 +10,7 @@ set: what it does, who sets it, the workflows that read it and what their commen
 say of it. ABOUT below says what each one is for, since many have no comment.
 .github/fleet.toml names the repositories that follow the blueprint, and from it come
 the showcase of README.md and README.de.md, the section "A real repository" of each
-page of docs/kinds/, the order of the Rollout and the canaries of the Variants.
+page of docs/kinds/ and the order of the Rollout.
 template/.github/blueprint/owned.txt.jinja lists the files of template/ that belong to
 the blueprint in the repository that it makes, with the condition of each.
 
@@ -913,7 +913,6 @@ FLEET = Path(".github/fleet.toml")
 READMES = {"en": Path("README.md"), "de": Path("README.de.md")}
 KINDS = Path("docs/kinds")
 ROLLOUT = WORKFLOWS / "rollout.yml"
-VARIANTS = WORKFLOWS / "variants.yml"
 # Each field of a repository of the registry, with its type.
 FIELDS: dict[str, type] = {
     "name": str,
@@ -930,11 +929,6 @@ FIELDS: dict[str, type] = {
 NAME = re.compile(r"[A-Za-z0-9._-]+")
 # The line of the Rollout that names the repositories in the order of their checks.
 ORDER = re.compile(r"^(          ORDER: ).*$", re.M)
-# The marks around the legs of the canaries in the Variants workflow.
-CANARIES = (
-    "          # [start:canaries] reference.py writes these from .github/fleet.toml.\n",
-    "          # [end:canaries]\n",
-)
 # The texts that name the repositories, in each language of the website.
 WORDS: dict[str, dict[str, str]] = {
     "en": {
@@ -957,16 +951,16 @@ WORDS: dict[str, dict[str, str]] = {
         "them": "each of them",
         "none": (
             "No public repository of this kind follows the blueprint yet. The Variants"
-            " workflow of the blueprint makes one from every change and runs its checks"
-            " with their real tools, and updates one from the latest release as its"
-            " blueprint bot would."
+            " workflow of the blueprint makes one from every change of its files and"
+            " runs its checks with their real tools, and updates one from the latest"
+            " release as its blueprint bot would."
         ),
         "kind one": "[{title}]({url}) is made from the blueprint: {pitch}",
         "kind many": "These public repositories of this kind are made from the blueprint:",
         "kind item": "- **[{title}]({url})**: {pitch}",
         "canary": (
-            "The Variants workflow tries every pull request of the blueprint on the"
-            " answers of {titles}, before it merges."
+            "The Variants workflow tries every pull request of the blueprint that"
+            " changes what the answers of {titles} render on them, before it merges."
         ),
         "and": "and",
     },
@@ -991,8 +985,9 @@ WORDS: dict[str, dict[str, str]] = {
         "them": "jedes davon",
         "none": (
             "Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der"
-            " Workflow Variants des Blueprints macht bei jeder Änderung eines daraus und"
-            " führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert"
+            " Workflow Variants des Blueprints macht bei jeder Änderung seiner Dateien"
+            " eines daraus und führt seine Prüfungen mit ihren echten Werkzeugen aus, und"
+            " er aktualisiert"
             " eines von der neuesten Version, wie sein Blueprint-Bot es täte."
         ),
         "kind one": "[{title}]({url}) ist aus dem Blueprint entstanden: {pitch}",
@@ -1002,8 +997,9 @@ WORDS: dict[str, dict[str, str]] = {
         ),
         "kind item": "- **[{title}]({url})**: {pitch}",
         "canary": (
-            "Der Workflow Variants probiert jeden Pull Request des Blueprints mit den"
-            " Antworten von {titles} aus, bevor er merged."
+            "Der Workflow Variants probiert jeden Pull Request des Blueprints, der"
+            " ändert, was die Antworten von {titles} rendern, mit ihnen aus, bevor er"
+            " merged."
         ),
         "and": "und",
     },
@@ -1225,15 +1221,6 @@ def rollout_order(text: str, registry: Fleet) -> str:
     return written
 
 
-def canary_legs(registry: Fleet) -> str:
-    """A leg of the Variants for each canary, by name, with its kind."""
-    return "".join(
-        f"          - {{ kind: {item.kind}, start: adopted, answers: {item.name} }}\n"
-        for item in sorted(registry.members, key=lambda item: item.name)
-        if item.canary
-    )
-
-
 def kinds_of(root: Path, registry: Fleet) -> list[str]:
     """The kinds that have a page, which the kind of each repository must be."""
     kinds = sorted(
@@ -1275,9 +1262,6 @@ def fleet_pages(root: Path) -> dict[Path, str]:
                 read(path), snippet("real-repository"), part, path
             )
     written[ROLLOUT] = rollout_order(read(ROLLOUT), registry)
-    written[VARIANTS] = with_part(
-        read(VARIANTS), CANARIES, canary_legs(registry), VARIANTS
-    )
     return written
 
 

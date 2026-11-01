@@ -45,7 +45,7 @@ Diese Art bringt keinen eigenen Schritt dazu.
 
 [dennis-otto.github.io](https://github.com/Dennis-Otto/dennis-otto.github.io) ist aus dem Blueprint entstanden: die Website mit jedem Projekt seines Eigentümers.
 
-Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von dennis-otto.github.io aus, bevor er merged.
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von dennis-otto.github.io rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 

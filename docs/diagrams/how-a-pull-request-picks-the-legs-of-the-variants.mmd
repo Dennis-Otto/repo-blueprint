@@ -1,0 +1,33 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a pull request picks the legs of the Variants
+    accDescr: A pull request starts the job variants plan, and a run on a schedule, by hand or of the Next runner workflow runs every leg. A change of what every leg runs with, the workflow, Copier, its Python, copier.yml or the plan itself, runs every leg. Otherwise the plan renders the project of each leg from the merge commit and from main; a render that fails runs every leg. A project that differs, or an adopted leg whose answers change, runs its leg; a project that stays the same to the byte skips it, and its reason goes into the summary. The required check variants passes when each leg that ran passed and the plan passed.
+
+    pr(["A pull request"])
+    other(["A run on a schedule, by hand<br>or of the Next runner workflow"])
+    files{"Does it change what<br>every leg runs with?"}
+    render["The plan renders the project of each leg<br>from the merge commit and from main"]
+    differs{"Does this project differ,<br>or the answers of this leg?"}
+    every["Every leg runs"]
+    leg["This leg runs"]
+    skip["This leg doesn't run<br>the summary says why"]
+    gate(["The check variants: the plan and<br>each leg that ran have passed"])
+
+    pr --> files
+    other --> every
+    files -- "yes" --> every
+    files -- "no" --> render
+    render -- "a render fails" --> every
+    render --> differs
+    differs -- "yes" --> leg
+    differs -- "no" --> skip
+    every --> gate
+    leg --> gate
+    skip --> gate
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    class pr,other,render,every,leg bot

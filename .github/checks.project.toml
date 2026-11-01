@@ -20,7 +20,7 @@ blueprint, `tests/test_reference.py` also fails when a page of `docs/reference/`
 from what `reference.py` writes from `copier.yml`, the workflows and the settings as
 code, or when a variable or a secret has no description in `ABOUT` of `reference.py`;
 and when the showcase of the READMEs, the section *A real repository* of a page of
-`docs/kinds/`, the order of the Rollout or the canaries of the Variants differ from the
+`docs/kinds/` or the order of the Rollout differ from the
 registry `.github/fleet.toml`, or a canary lacks its answers in `tests/answers/`.
 `tests/test_pins.py` fails when a pinned download of the workflows or of
 `.github/sign-tag.sh` has a version or a sha256 other than `.github/pins.toml`, as after

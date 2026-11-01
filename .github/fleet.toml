@@ -1,13 +1,14 @@
 # The public repositories that follow the blueprint, the one list of them, in the
 # order of the showcase. `python3 reference.py` writes from it the showcase of
 # README.md and README.de.md, the section "A real repository" of each page of
-# docs/kinds/, the order of the Rollout in .github/workflows/rollout.yml and the legs
-# of the canaries in .github/workflows/variants.yml; tests/test_reference.py fails
-# while one of them differs, and the fix bot runs the command.
+# docs/kinds/ and the order of the Rollout in .github/workflows/rollout.yml;
+# tests/test_reference.py fails while one of them differs, and the fix bot runs the
+# command.
 #
 # A new repository takes one entry here and `python3 reference.py`. A canary takes its
 # answers in tests/answers/<name>.yml too, without _commit and _src_path, which
-# `python3 downstream.py --answers` keeps equal to those of the repository.
+# `python3 downstream.py --answers` keeps equal to those of the repository, and from
+# which variants.py makes its leg of the Variants workflow.
 
 # The owner of every repository here, on GitHub.
 owner = "Dennis-Otto"
@@ -18,7 +19,8 @@ owner = "Dennis-Otto"
 #   rollout  its place in the Rollout, from 1: the quickest checks first, so that each
 #            update pull request is done soon, and the longest last
 #   canary   true when the Variants workflow updates a copy with its answers in every
-#            pull request of the blueprint, before the change merges
+#            pull request of the blueprint that changes what they render, before the
+#            change merges
 #   title    its name in a sentence, and what it is and does, which follow its name
 #   what     in the showcase: "HomeDarts for Autodarts, a Home Assistant integration:
 #   pitch    local real-time board control, ..."; the pitch ends with a full stop

@@ -20,7 +20,7 @@ branch = true
 # is the package blueprint/, which the script blueprint.py only starts, and
 # mkdocs_blueprint and mkdocs_project the hooks of the website in .github/, and
 # github_pages the pictures of GitHub's pages in .github/docs-pictures/.
-source_pkgs = ["blueprint", "dashboard", "weekly", "sync_issue_assistant", "pins", "downstream", "reference", "mkdocs_blueprint", "mkdocs_project", "github_pages"]
+source_pkgs = ["blueprint", "dashboard", "weekly", "sync_issue_assistant", "pins", "downstream", "variants", "reference", "mkdocs_blueprint", "mkdocs_project", "github_pages"]
 # The tests render the template from a copy of the blueprint, and Jinja runs its
 # includes of the tool, such as blueprint.py, as templates of the same names there;
 # that is no code of the tool.
@@ -46,7 +46,7 @@ python_version = "3.12"
 strict = true
 # The package, not the script that starts it: mypy would find the module blueprint
 # twice. A test runs the script.
-files = ["blueprint", "dashboard.py", "weekly.py", "sync_issue_assistant.py", "pins.py", "downstream.py", "reference.py", ".github/mkdocs_blueprint.py", ".github/mkdocs_project.py", ".github/docs-pictures/github_pages.py", "tests"]
+files = ["blueprint", "dashboard.py", "weekly.py", "sync_issue_assistant.py", "pins.py", "downstream.py", "variants.py", "reference.py", ".github/mkdocs_blueprint.py", ".github/mkdocs_project.py", ".github/docs-pictures/github_pages.py", "tests"]
 
 [[tool.mypy.overrides]]
 # PyYAML, which Copier brings, has no types of its own, and downstream.py and its tests

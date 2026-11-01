@@ -45,7 +45,7 @@ This kind adds no step of its own.
 
 [dennis-otto.github.io](https://github.com/Dennis-Otto/dennis-otto.github.io) is made from the blueprint: the website with every project of its owner.
 
-The Variants workflow tries every pull request of the blueprint on the answers of dennis-otto.github.io, before it merges.
+The Variants workflow tries every pull request of the blueprint that changes what the answers of dennis-otto.github.io render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 
