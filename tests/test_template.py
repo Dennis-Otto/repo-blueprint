@@ -16297,7 +16297,7 @@ def test_every_website_serves_a_map_of_its_pages(
     assert "\n  - .github/mkdocs_blueprint.py\n" in (
         project / ".github/mkdocs-blueprint.yml"
     ).read_text(encoding="utf-8")
-    settings = yaml.safe_load((project / "mkdocs.yml").read_text(encoding="utf-8"))
+    settings = load_yaml((project / "mkdocs.yml").read_text(encoding="utf-8"))
     address = settings["site_url"]
     site = tmp_path / "site"
     pages: list[str] = []
