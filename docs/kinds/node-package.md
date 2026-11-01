@@ -35,13 +35,15 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request publishes the package on npm with provenance, by trusted publishing from the environment `npm`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
 
+A package that nobody installs from npm, such as a private one or a browser extension that people load from a zip, answers [`publish_package`](../reference/questions.md#publish_package) with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data "topics=typescript, nodejs"`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `package.json` of a new repository is `private`, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of npm or of a `*.tgz`.
+
 ## Once by hand
 
 `python3 .github/blueprint.py checklist` ticks off each step that it can see and names the rest, each with its link: the release app of the owner with its private key, as [your own account](../own-account.md) shows, the token of the issue assistant unless its AI is off, OpenSSF Best Practices, the REUSE API and the social preview.
 
 This kind adds these steps:
 
-- Add the trusted publisher on npm, with the workflow `release.yml` and the environment `npm`: <https://www.npmjs.com/settings/~/packages>.
+- Add the trusted publisher on npm, with the workflow `release.yml` and the environment `npm`, unless the package answers no to `publish_package`: <https://www.npmjs.com/settings/~/packages>.
 
 ## A real repository
 

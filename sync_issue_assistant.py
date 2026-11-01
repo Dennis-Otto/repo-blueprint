@@ -133,17 +133,29 @@ def adopt(root: Path, release: Path, ref: str, version: str) -> list[str]:
             f"{version} has no workflows and no firewall policy in {TEMPLATES}/; it "
             "is no release of the issue assistant that the sync knows."
         )
+    # A release from the split of the script on is a package, which runs as the action
+    # runs it: -P keeps the folder of the job out of its imports. An older one is the
+    # script, for a run that takes such a release over again.
+    package = (release / "issue_assistant" / "__main__.py").is_file()
     installed = subprocess.run(
         [
             sys.executable,
-            str(release / "issue_assistant.py"),
+            *(
+                ("-P", "-B", "-m", "issue_assistant")
+                if package
+                else (str(release / "issue_assistant.py"),)
+            ),
             "install",
             "--ref",
             ref,
             "--version",
             version,
         ],
-        env={**os.environ, "ISSUE_ASSISTANT_ROOT": str(root)},
+        env={
+            **os.environ,
+            "ISSUE_ASSISTANT_ROOT": str(root),
+            "PYTHONPATH": str(release),
+        },
         capture_output=True,
         encoding="utf-8",
         check=False,

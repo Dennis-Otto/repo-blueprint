@@ -1,6 +1,6 @@
 # Every owner brings their own release app, and only the blueprint's owner gets its defaults
 
-- Status: accepted
+- Status: accepted, amended by [0093](0093-the-release-app-comes-from-a-manifest-and-its-key-touches-no-disk.md), with which one command registers the app in place of the link of the checklist
 - Date: 2026-10-18
 
 ## Context

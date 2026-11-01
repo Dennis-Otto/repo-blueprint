@@ -58,31 +58,38 @@ python3 .github/blueprint.py create
 
 ## 3. Register the release app
 
-The checklist starts with a link that registers the app on your account or organization, with its name and permissions filled in and without a webhook; set *Variables* by hand, which the link can't fill in. Create the app. On its settings page, on the tab *Credentials*, under *Key pairs*, press *New key*; your browser saves the private key as a file. Then name the app in the answers of the blueprint, with the name in its address and the Client ID and App ID of its settings page. `create` has protected `main` already, so the change goes through a pull request:
+One command registers the app on your account or organization, with its name and all of its permissions filled in and without a webhook, sets its private key and opens the pull request that names it:
 
 ```sh
-git switch --create name-the-release-app
-uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data release_app=NAME --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID
-git commit --all --signoff --message "chore: name the release app"
-git push --set-upstream origin HEAD
-gh pr create --fill
+python3 .github/blueprint.py app register
 ```
 
-If Git asks for a password at the push, `gh auth setup-git` signs it in with GitHub CLI.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-the-release-app-is-registered.dark.svg">
+  <img src="images/diagrams/how-the-release-app-is-registered.svg" alt="How the release app is registered: python3 .github/blueprint.py app register first checks what it needs, and nothing happens while something would stop it. A form on a free port of 127.0.0.1 sends the manifest of the app to GitHub, and you press Create GitHub App on the page of GitHub. GitHub comes back to that port with a code and the state of the form; a wrong state is refused, and the wait goes on. gh trades the code for the App ID, the Client ID and the private key. gh secret set takes the key on its stdin, so no file holds it, and Copier names the app in a pull request. You install the app and merge the pull request, and the checklist ticks the app off.">
+</picture>
 
-Merge the pull request once its checks are green, on its page or with `gh pr merge --squash`.
+Like `create`, it first checks what it needs, and a finding marked with ✘ stops it before anything is made. Then it opens a page in your browser, which sends the [manifest of the app](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) to GitHub. Be signed in to GitHub there as the owner of the repository, or as an owner of its organization, and press *Create GitHub App*. GitHub then hands over the name, the Client ID and the App ID of the app, so nothing is copied by hand, and its private key, this once:
 
-Install the app on the repository, at `https://github.com/apps/NAME/installations/new`, and set its private key from the file that GitHub gave you; the GitHub CLI reads it and shows it nowhere. In Git Bash or another POSIX shell:
+- **The private key** goes on the stdin of GitHub CLI, into the secret `RELEASE_AUTOMATION_PRIVATE_KEY` of the environment `release`. No file holds it, nothing prints it, and no download is left behind.
+- **The answers of the blueprint** name the app on a branch of its own, in a pull request, because `create` has protected `main` already. `--no-update` prints these commands instead of running them.
+
+Two things are left for you, and the command prints the link of the first:
+
+1. **Install the app** on the repository, at `https://github.com/apps/NAME/installations/new`.
+2. **Merge the pull request** once its checks are green, on its page or with `gh pr merge --squash`.
+
+The checklist sees the installation by the check suite that GitHub opens for an installed app at each push, so it ticks the app off after the merge when you install first, and after the next push otherwise.
+
+The browser has to run on the same machine, since only this machine reaches the page. On another machine, `--no-browser` prints the address of the page: forward its port, such as with `ssh -L`, and open it there. An organization that GitHub doesn't name as the owner takes `--org ORG`. [The troubleshooting](troubleshooting.md#app-register-doesnt-go-on) shows what to do when the command waits or stops.
+
+**A further repository** takes the same app, so register it once. Keep the three lines that the command printed in [the settings file of Copier](guide.md#your-own-account), and each new copy names the app. Each repository still needs the private key: on the settings page of the app, on the tab *Credentials*, under *Key pairs*, press *New key*; your browser saves it as a file, which you give to the command of the copy and then delete:
 
 ```sh
-gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo octo-org/my-project < private-key.pem
+python3 .github/blueprint.py app connect --key-file private-key.pem
 ```
 
-In PowerShell, which has no `<` that reads a file:
-
-```powershell
-Get-Content -Raw private-key.pem | gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo octo-org/my-project
-```
+The same command takes an app that you registered by hand, with the permissions that [the guide](guide.md#once-per-repository) lists, or an existing copy that doesn't name the app yet: add `--name NAME --client-id CLIENT_ID --app-id APP_ID` from its settings page. They can't come from GitHub, which shows a private app to no token of GitHub CLI. The command checks them as the questions of Copier do, and it names the app in a pull request like `app register`.
 
 Until the app is named and has its private key, each bot that acts as it says in its summary what is missing, rather than fail at its token: one whose work is what the app does fails, and one that only helps a pull request along warns, as [Troubleshooting](troubleshooting.md#a-bot-says-that-it-needs-the-release-app) shows. An app that is not installed on the repository still fails at its token.
 

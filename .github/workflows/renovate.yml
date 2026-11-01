@@ -4,9 +4,11 @@ name: Renovate
 # and often hours late, and on demand, it runs Renovate as the release app of the
 # owner: in the blueprint for each repository of its owner that has a
 # .github/renovate.json5, and in a repository that runs Renovate itself, the answer
-# renovate_runner "self" of the blueprint, for that repository alone. It opens the
-# updates of the actions, the dependencies, the images and the pins, and the checks
-# of each repository decide whether they merge. The rules of the updates are in the
+# renovate_runner "self" of the blueprint, for that repository alone. Every run has
+# a token for its one repository, so a package manager that runs code of a dependency
+# while it writes a lock file can't push to another. It opens the updates of the
+# actions, the dependencies, the images and the pins, and the checks of each
+# repository decide whether they merge. The rules of the updates are in the
 # .github/renovate.json5 of each repository; .github/renovate-global.json5 holds
 # those of the bot itself. A pull request that changes the rules or a lock file
 # shows whether Renovate accepts the rules and still reads every file of the
@@ -182,25 +184,181 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" coach explain "$CHECK"
 
-  renovate:
-    name: renovate
+  repositories:
+    name: repositories of Renovate
     # In the blueprint, for the repositories of its owner; a repository that runs
-    # Renovate itself gets the job without the name of the blueprint.
+    # Renovate itself has neither this job nor the job problems.
     if: github.event_name != 'pull_request' && github.repository == 'Dennis-Otto/repo-blueprint'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The environment holds the private key of the release app; only main may use it.
+    environment:
+      name: release
+      deployment: false
+    permissions: {}
+    outputs:
+      repositories: ${{ steps.repositories.outputs.repositories }}
+    steps:
+      - name: Block every host that the job doesn't need
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
+      # Without the release app of the owner, the run names what is missing rather than
+      # fail at the token; every workflow has this step, the same but for its variables.
+      - name: Check that the release app is set up
+        id: release-app
+        env:
+          CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+          # Who needs the app and for what, what happens without it, and whether the
+          # run fails then.
+          BOT: Renovate
+          TASK: list the repositories that it keeps current
+          WITHOUT: no dependency was updated
+          REQUIRED: "true"
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
+          elif [[ "$KEY_SET" != true ]]; then
+            missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          level=warning
+          if [[ "$REQUIRED" == true ]]; then
+            level=error
+          fi
+          echo "::$level::This repository $missing, which $BOT needs to $TASK; $WITHOUT."
+          {
+            echo "### ${BOT^} needs the release app of the owner"
+            echo
+            echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
+            echo
+            echo "\`python3 .github/blueprint.py app register\` registers the app, sets its private key and opens the pull request that names it in \`.github/repository.toml\`; \`python3 .github/blueprint.py checklist\` shows what is left, such as its installation and the settings. Once they are done, $BOT can $TASK in its next run."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$REQUIRED" == true ]]; then
+            exit 1
+          fi
+      - name: Create a token of the release app that lists its repositories
+        id: app
+        if: steps.release-app.outputs.ready == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          # Every repository of the installation, on purpose: the app is installed on
+          # exactly the repositories that Renovate keeps current, and this token only
+          # reads their names, and the files of those that are public.
+          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+          permission-metadata: read
+      - name: List the repositories that have rules for Renovate
+        id: repositories
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          # GitHub fails for a moment now and then, so it asks three times.
+          for attempt in 1 2 3; do
+            # Renovate, when it looked for the repositories itself, skipped the forks
+            # and the archived ones as well.
+            if listing="$(gh api --paginate installation/repositories \
+              --jq '.repositories[] | select((.archived or .disabled or .fork) | not) | "\(.name) \(.private)"')"; then
+              break
+            fi
+            if ((attempt == 3)); then
+              echo "::error::The repositories of the release app could not be listed."
+              exit 1
+            fi
+            sleep 15
+          done
+          # The question only saves a job: Renovate itself skips a repository without
+          # the file (requireConfig in .github/renovate-global.json5). So only a clear
+          # 404 takes a repository off the list, and a private one, whose files this
+          # token can't read, or one that GitHub doesn't answer for, stays on it.
+          may_have_rules() {
+            local answer
+            [[ "$2" == true ]] && return 0
+            answer="$(gh api "repos/$GITHUB_REPOSITORY_OWNER/$1/contents/.github/renovate.json5" --silent 2>&1)" && return 0
+            [[ "$answer" != *"HTTP 404"* ]]
+          }
+          repositories=()
+          while read -r name private; do
+            if [[ -n "$name" ]] && may_have_rules "$name" "$private"; then
+              repositories+=("$name")
+            fi
+          done <<<"$listing"
+          if ((${#repositories[@]} == 0)); then
+            echo "The release app has no repository with rules for Renovate." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "Renovate keeps these repositories current, two at a time, each with a token for it alone:"
+            echo
+            printf -- '- %s\n' "${repositories[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The names of repositories need no escapes in JSON.
+          matrix="$(printf '"%s",' "${repositories[@]}")"
+          echo "repositories=[${matrix%,}]" >> "$GITHUB_OUTPUT"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
+
+  renovate:
+    name: renovate
+    needs: repositories
+    if: needs.repositories.outputs.repositories != ''
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
-    # One run of the bot at a time; the next one waits for it.
+    # One run of the bot at a time in a repository; the next one waits for it.
     concurrency:
-      group: renovate
+      group: renovate-${{ matrix.repo }}
       cancel-in-progress: false
+    strategy:
+      # Two at a time, as the owner has about 20 jobs at once for all of its
+      # repositories, and every repository, also after one that failed.
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.repositories.outputs.repositories) }}
     # The environment holds the private key of the release app; only main may use it.
     environment:
       name: release
       deployment: false
     permissions:
       contents: read
-      # The one issue with the warnings and errors of Renovate.
-      issues: write
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -243,7 +401,7 @@ jobs:
             echo
             echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
             echo
-            echo "\`python3 .github/blueprint.py checklist\` shows the steps: a link that registers the app with its permissions filled in, the update of the answers of the blueprint that names it in \`.github/repository.toml\`, the settings and its private key. Once they are done, $BOT can $TASK in its next run."
+            echo "\`python3 .github/blueprint.py app register\` registers the app, sets its private key and opens the pull request that names it in \`.github/repository.toml\`; \`python3 .github/blueprint.py checklist\` shows what is left, such as its installation and the settings. Once they are done, $BOT can $TASK in its next run."
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$REQUIRED" == true ]]; then
             exit 1
@@ -255,9 +413,10 @@ jobs:
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
-          # In the blueprint, every repository of the installation, on purpose: the
-          # app is installed on exactly the repositories that Renovate keeps current.
-          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]
+          # For this repository alone: a package manager that runs code of a dependency
+          # while it writes a lock file can't push to another repository of the owner.
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repo }}
           # Only what updates need, and no administration: the package managers
           # that write the lock files can't change a setting with it.
           permission-contents: write
@@ -267,6 +426,21 @@ jobs:
           permission-statuses: write
           permission-checks: read
           permission-vulnerability-alerts: read
+      # GitHub decides what a token reaches: the log shows it, and Renovate doesn't get
+      # a token that reaches more than the repository of its run.
+      - name: Check that the token reaches this repository alone
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPOSITORY: ${{ github.repository_owner }}/${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          reached="$(gh api --paginate installation/repositories --jq '.repositories[].full_name')"
+          echo "The token of this run reaches:"
+          echo "$reached"
+          if [[ "$reached" != "$REPOSITORY" ]]; then
+            echo "::error::The token of this run reaches more than $REPOSITORY, so Renovate doesn't start."
+            exit 1
+          fi
       # Renovate commits and comments as the bot user of the app, and knows its own
       # commits by their author, whose number GitHub gave the bot user.
       - name: Name the bot user of the release app
@@ -292,14 +466,82 @@ jobs:
           LOG_LEVEL: info
           RENOVATE_USERNAME: ${{ steps.bot.outputs.username }}
           RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.git-author }}
-          # In the blueprint, every repository of the owner on which the app is
-          # installed and that has a .github/renovate.json5.
-          RENOVATE_AUTODISCOVER: "true"
-          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*
+          # This repository alone, by its name, also after a rename.
+          RENOVATE_REPOSITORIES: ${{ github.repository_owner }}/${{ matrix.repo }}
           # The warnings and errors once more, in JSON, for the next step; the action
           # shares /tmp with the container of Renovate.
           RENOVATE_LOG_FILE: /tmp/renovate/problems.json
           RENOVATE_LOG_FILE_LEVEL: warn
+      # The job problems brings the log of each repository into the one issue.
+      - name: Keep the log of Renovate's problems for the issue
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: renovate-problems-${{ matrix.repo }}
+          path: /tmp/renovate/problems.json
+          if-no-files-found: ignore
+          retention-days: 1
+          # A failed run that starts again writes its log anew.
+          overwrite: true
+
+  problems:
+    name: problems of Renovate
+    # After the runs of all repositories, also when one of them failed; none ran when
+    # the job renovate was skipped.
+    needs: renovate
+    if: ${{ !cancelled() && needs.renovate.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # One issue, so one report at a time.
+    concurrency:
+      group: renovate-problems
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # The one issue with the warnings and errors of Renovate.
+      issues: write
+    steps:
+      - name: Block every host that the job doesn't need
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            results-receiver.actions.githubusercontent.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+            results-receiver.actions.githubusercontent.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the log of each repository
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: renovate-problems-*
+          path: ${{ runner.temp }}/problems
       # A warning, such as a lock file that Renovate can't read, ends no run with a
       # failure, and the bot then skips that file in every run: one issue lists them
       # and closes after three runs in a row without a problem.
@@ -308,6 +550,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # A repository that didn't finish wrote no log, so the run isn't a quiet one.
+          RESULT: ${{ needs.renovate.result }}
         run: |
           set -o pipefail
           # Repositories have the copy that the blueprint keeps current; the blueprint
@@ -316,5 +560,19 @@ jobs:
           if [[ ! -f "$script" ]]; then
             script=blueprint.py
           fi
-          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate /tmp/renovate/problems.json --run "$RUN_URL" |
+          # download-artifact puts the files of a single artifact straight into its path,
+          # so with one leg's log there is no folder of the artifact.
+          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate \
+            "$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json \
+            --result "$RESULT" --run "$RUN_URL" |
             tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."

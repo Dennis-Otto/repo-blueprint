@@ -216,8 +216,9 @@ and so the updates of this repository stop until someone resolves them."""
 fix = """Make the change beside these files: settings in
 `.github/repository.project.toml`, a check in `scripts/check-project.sh` with its
 explanation in `.github/checks.project.toml`, notes for coding agents in
-`.github/agents.project.md`, and a workflow in a file of its own. What every repository
-needs belongs in the blueprint: the report of the PR coach links a new issue there,
+`.github/agents.project.md`, text about the releases of this project between the two
+marked lines of `CONTRIBUTING.md`, and a workflow in a file of its own. What every
+repository needs belongs in the blueprint: the report of the PR coach links a new issue there,
 filled in with these files. Then undo the change of each file:"""
 commands = [
   "git fetch https://github.com/{repo}.git main",

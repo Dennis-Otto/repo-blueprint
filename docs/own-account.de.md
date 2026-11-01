@@ -58,31 +58,38 @@ python3 .github/blueprint.py create
 
 ## 3. Die Release-App registrieren
 
-Die Checkliste beginnt mit einem Link, der die App auf deinem Konto oder deiner Organisation registriert, mit Name und Berechtigungen vorausgefüllt und ohne Webhook; *Variables* setzt du von Hand, das kann der Link nicht. Leg die App an. Drück auf ihrer Einstellungsseite im Tab *Credentials* unter *Key pairs* auf *New key*; dein Browser speichert den privaten Schlüssel als Datei. Nenne die App dann in den Antworten des Blueprints, mit dem Namen in ihrer Adresse und der Client ID und App ID ihrer Einstellungsseite. `create` hat `main` schon geschützt, deshalb geht die Änderung durch einen Pull Request:
+Ein Befehl registriert die App auf deinem Konto oder deiner Organisation, mit Name und allen Berechtigungen vorausgefüllt und ohne Webhook, setzt ihren privaten Schlüssel und öffnet den Pull Request, der sie nennt:
 
 ```sh
-git switch --create name-the-release-app
-uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data release_app=NAME --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID
-git commit --all --signoff --message "chore: name the release app"
-git push --set-upstream origin HEAD
-gh pr create --fill
+python3 .github/blueprint.py app register
 ```
 
-Fragt Git beim Push nach einem Passwort, meldet `gh auth setup-git` es mit der GitHub CLI an.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-the-release-app-is-registered.de.dark.svg">
+  <img src="images/diagrams/how-the-release-app-is-registered.de.svg" alt="Wie die Release-App registriert wird: python3 .github/blueprint.py app register prüft zuerst, was es braucht, und nichts geschieht, solange etwas es aufhalten würde. Ein Formular auf einem freien Port von 127.0.0.1 schickt das Manifest der App an GitHub, und du drückst auf der Seite von GitHub auf Create GitHub App. GitHub kommt zu diesem Port zurück, mit einem Code und dem State des Formulars; ein falscher State wird abgewiesen, und das Warten geht weiter. gh tauscht den Code gegen die App ID, die Client ID und den privaten Schlüssel. gh secret set nimmt den Schlüssel auf seiner Standardeingabe, sodass keine Datei ihn hält, und Copier nennt die App in einem Pull Request. Du installierst die App und mergst den Pull Request, und die Checkliste hakt die App ab.">
+</picture>
 
-Merge den Pull Request, sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`.
+Wie `create` prüft er zuerst, was er braucht, und ein mit ✘ markierter Befund hält ihn an, bevor etwas entsteht. Dann öffnet er in deinem Browser eine Seite, die das [Manifest der App](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) an GitHub schickt. Sei dort bei GitHub als Eigentümer des Repositorys oder als Eigentümer seiner Organisation angemeldet und drücke auf *Create GitHub App*. GitHub übergibt dann den Namen, die Client ID und die App ID der App, sodass nichts von Hand kopiert wird, und ihren privaten Schlüssel, dieses eine Mal:
 
-Installiere die App auf dem Repository, unter `https://github.com/apps/NAME/installations/new`, und setze ihren privaten Schlüssel aus der Datei, die GitHub dir gegeben hat; die GitHub CLI liest ihn und zeigt ihn nirgends. In Git Bash oder einer anderen POSIX-Shell:
+- **Der private Schlüssel** geht über die Standardeingabe der GitHub CLI in das Secret `RELEASE_AUTOMATION_PRIVATE_KEY` der Umgebung `release`. Keine Datei hält ihn, nichts gibt ihn aus, und kein Download bleibt liegen.
+- **Die Antworten des Blueprints** nennen die App auf einem eigenen Branch, in einem Pull Request, weil `create` `main` schon geschützt hat. `--no-update` gibt diese Befehle aus, statt sie auszuführen.
+
+Zwei Dinge bleiben dir, und den Link des ersten gibt der Befehl aus:
+
+1. **Installiere die App** auf dem Repository, unter `https://github.com/apps/NAME/installations/new`.
+2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`.
+
+Die Checkliste erkennt die Installation an der Check Suite, die GitHub für eine installierte App bei jedem Push öffnet. Sie hakt die App also nach dem Merge ab, wenn du zuerst installierst, und sonst nach dem nächsten Push.
+
+Der Browser muss auf demselben Rechner laufen, denn nur dieser Rechner erreicht die Seite. Auf einem anderen Rechner gibt `--no-browser` die Adresse der Seite aus: Leite ihren Port weiter, etwa mit `ssh -L`, und öffne sie dort. Eine Organisation, die GitHub nicht als Eigentümer nennt, nimmt `--org ORG`. [Die Fehlerbehebung](troubleshooting.md#app-register-geht-nicht-weiter) zeigt, was zu tun ist, wenn der Befehl wartet oder anhält.
+
+**Ein weiteres Repository** nimmt dieselbe App, registriere sie also einmal. Behalte die drei Zeilen, die der Befehl ausgegeben hat, in [der Einstellungsdatei von Copier](guide.md#dein-eigenes-konto), dann nennt jede neue Kopie die App. Jedes Repository braucht trotzdem den privaten Schlüssel: Drück auf der Einstellungsseite der App im Tab *Credentials* unter *Key pairs* auf *New key*; dein Browser speichert ihn als Datei, die du dem Befehl der Kopie gibst und danach löschst:
 
 ```sh
-gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo octo-org/mein-projekt < private-key.pem
+python3 .github/blueprint.py app connect --key-file private-key.pem
 ```
 
-In PowerShell, die kein `<` kennt, das eine Datei liest:
-
-```powershell
-Get-Content -Raw private-key.pem | gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo octo-org/mein-projekt
-```
+Derselbe Befehl nimmt eine App, die du von Hand registriert hast, mit den Berechtigungen, die [die Anleitung](guide.md#einmal-pro-repository) aufzählt, oder eine vorhandene Kopie, die die App noch nicht nennt: Ergänze `--name NAME --client-id CLIENT_ID --app-id APP_ID` von ihrer Einstellungsseite. Sie können nicht von GitHub kommen, das eine private App keinem Token der GitHub CLI zeigt. Der Befehl prüft sie wie die Fragen von Copier und nennt die App in einem Pull Request wie `app register`.
 
 Bis die App genannt ist und ihren privaten Schlüssel hat, sagt jeder Bot, der als sie handelt, in seiner Zusammenfassung, was fehlt, statt an seinem Token zu scheitern: Einer, dessen Arbeit die der App ist, schlägt fehl, und einer, der einem Pull Request nur weiterhilft, warnt, wie die [Fehlerbehebung](troubleshooting.md#ein-bot-sagt-dass-er-die-release-app-braucht) zeigt. Eine App, die nicht auf dem Repository installiert ist, scheitert weiterhin an ihrem Token.
 

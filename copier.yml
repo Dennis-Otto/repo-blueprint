@@ -115,8 +115,9 @@ _message_after_copy: |
   [%- if not release_app %]
 
   The checklist starts with the release app of {= owner =}, which opens the release and
-  update pull requests and runs the bots: it registers one with a link that fills in
-  its permissions, and copier update names it in .github/repository.toml.
+  update pull requests and runs the bots: python3 .github/blueprint.py app register
+  registers one, sets its private key and opens the pull request that names it in
+  .github/repository.toml.
   [%- endif %]
 
 # The name and the description stand as they are in a docstring of Python, a comment
@@ -232,6 +233,15 @@ nextcloud_namespace:
   validator: >-
     [% if not (nextcloud_namespace | regex_search('^[A-Z][A-Za-z0-9_]*$')) %]Use a name of PHP in CamelCase, such as PaperlessSync or Files_Sharing: a capital letter, then letters, digits and underscores.[% endif %]
 
+# A package goes to the registry of its kind, unless nobody installs it from there, such
+# as a private one that only its releases carry. publish_to follows this answer, and with
+# it the variable PUBLISH_TO and every document that speaks of the delivery (decision 0096).
+publish_package:
+  type: bool
+  help: Publish the package on the registry of its kind, npm or PyPI, with every release; no for a package that nobody installs from there, such as a private one
+  default: true
+  when: "{= project_type in ['node-package', 'python-package'] =}"
+
 languages:
   type: yaml
   multiselect: true
@@ -277,8 +287,8 @@ topics:
     [%- if project_type == 'home-assistant' -%]home-assistant, hacs, hacs-integration, home-assistant-integration, home-assistant-custom-component, homeassistant
     [%- elif project_type == 'nextcloud-app' -%]nextcloud, nextcloud-app
     [%- elif project_type == 'github-action' -%]github-actions, github-action
-    [%- elif project_type == 'python-package' -%]python, pypi
-    [%- elif project_type == 'node-package' -%]typescript, nodejs, npm
+    [%- elif project_type == 'python-package' -%]{= 'python, pypi' if publish_package else 'python' =}
+    [%- elif project_type == 'node-package' -%]{= 'typescript, nodejs, npm' if publish_package else 'typescript, nodejs' =}
     [%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
     [%- elif project_type == 'container' -%]docker, container, ghcr
     [%- endif -%]
@@ -297,7 +307,7 @@ sponsor:
 
 # The GitHub App of the release and update pull requests, whose token starts their
 # checks, signs the release tags and runs the bots. Empty for none yet: the checklist
-# then shows how to register one, and copier update with these answers names it.
+# then points to app register, which registers one and names it in a pull request.
 release_app:
   type: str
   help: >-
@@ -389,7 +399,8 @@ publish_to:
   type: str
   when: false
   default: >-
-    [%- if project_type == 'home-assistant' -%]hacs
+    [%- if project_type in ['node-package', 'python-package'] and not publish_package -%]none
+    [%- elif project_type == 'home-assistant' -%]hacs
     [%- elif project_type == 'nextcloud-app' -%]nextcloud-appstore
     [%- elif project_type == 'github-action' -%]github-action
     [%- elif project_type == 'python-package' -%]pypi

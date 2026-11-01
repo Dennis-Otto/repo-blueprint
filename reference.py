@@ -141,8 +141,9 @@ ABOUT: dict[str, str] = {
     ),
     "BLUEPRINT_OWNERSHIP": (
         "`fail` makes the check *lint* fail on a pull request of a person that changes"
-        " a file of the blueprint, where it leaves a notice with any other value or"
-        " none. The report of the PR coach says where the change belongs instead."
+        " a file of the blueprint outside the marked lines of `CONTRIBUTING.md`, where"
+        " it leaves a notice with any other value or none. The report of the PR coach"
+        " says where the change belongs instead."
         " Bots stay out of it: the update of the blueprint and the pull requests of"
         " the other bots."
     ),
@@ -210,8 +211,12 @@ ABOUT: dict[str, str] = {
     "PUBLISH_TO": (
         "Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`,"
         " `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the"
-        " kind of project."
-        " The build, the release and the check of the latest release follow it."
+        " kind of project and, for a package of npm or PyPI, the answer"
+        " `publish_package`."
+        " The build, the release and the check of the latest release follow it. A value"
+        " in `.github/repository.project.toml` changes only the delivery: the documents"
+        " follow the answer, so a package that publishes nowhere answers"
+        " `publish_package` with no."
     ),
     "RELEASE_APP": (
         "The name of the release app, as its address says: github.com/apps/NAME. No"
@@ -230,11 +235,12 @@ ABOUT: dict[str, str] = {
         " request starts no checks."
     ),
     "RELEASE_AUTOMATION_PRIVATE_KEY": (
-        "The private key of the release app, the file that its settings page"
-        " generates. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the"
+        "The private key of the release app, which `app register` sets without a file."
+        " With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the"
         " app: they open and merge the release and update pull requests, so that their"
-        " checks run, create the release tags and apply the settings. The file goes in"
-        " with `< key.pem` after the command below."
+        " checks run, create the release tags and apply the settings. For an app that"
+        " exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it"
+        " from the file that the settings page of the app generates."
     ),
     "SETTINGS_APP_CLIENT_ID": (
         "The Client ID of the settings app, an optional second GitHub App of the owner"

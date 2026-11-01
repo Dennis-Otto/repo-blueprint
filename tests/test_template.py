@@ -38,7 +38,7 @@ import pytest
 import workflow_steps
 import yaml
 from copier import _main as copier_main
-from copier import run_copy
+from copier import run_copy, run_update
 from copier._jinja_ext import YieldExtension, get_yield_context
 from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
@@ -60,6 +60,7 @@ import downstream
 import pins
 import reference
 from blueprint import bootstrap, ownership
+from blueprint.app import App, answered_app
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -1819,8 +1820,19 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
     # Every copy brings create and its preflight alone, for the folder that copier
-    # copy wrote.
-    assert ",create,doctor," in result.stdout
+    # copy wrote, and what registers its release app after them.
+    assert ",app,create,doctor," in result.stdout
+    for action in ("register", "connect"):
+        command = subprocess.run(
+            [sys.executable, ".github/blueprint.py", "app", action, "--help"],
+            cwd=project,
+            capture_output=True,
+            encoding="utf-8",
+            env=without_bytecode_prefix(os.environ),
+            check=False,
+        )
+        assert command.returncode == 0, command.stderr
+        assert "--no-update" in command.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
     assert not (project / ".github/blueprint/__pycache__").exists()
 
@@ -4460,6 +4472,8 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         # The configuration of the mutation tests that a project commits, which the
         # weekly Mutation workflow reads in place of the one it writes.
         "infection.json5",
+        # A demo that a project commits for people to try the app, such as a Compose file.
+        "demo",
         "lychee.toml",
         "mkdocs.yml",
         "screenshots",
@@ -5699,6 +5713,21 @@ AGENT_COMMANDS = {
 }
 
 
+def test_an_import_in_a_test_leaves_no_bytecode_next_to_the_file(
+    tmp_path: Path,
+) -> None:
+    # The tests share the rendered projects, and some import the hooks of a website
+    # from there: a __pycache__ beside them would count as a file of the project.
+    (tmp_path / "hooks.py").write_text("LOADED = True\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("hooks", tmp_path / "hooks.py")
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    assert hooks.LOADED
+    assert not (tmp_path / "__pycache__").exists()
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
     projects: dict[str, Path], kind: str
@@ -5793,6 +5822,77 @@ def test_the_step_of_a_project_annotates_what_the_pull_request_changes(
         (level, "docs/guide.md"),
         (level, "lychee.toml"),
     ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("project_part", "code", "annotations"),
+    [
+        (True, 0, []),
+        (False, 1, [("error", "CONTRIBUTING.md")]),
+    ],
+)
+def test_the_step_of_a_project_leaves_its_part_of_the_guide_alone(
+    tmp_path: Path,
+    projects: dict[str, Path],
+    project_part: bool,
+    code: int,
+    annotations: list[tuple[str, str]],
+) -> None:
+    # The step as it is, with the command of a project and the guide of a project: a
+    # pull request that writes between the two marked lines changes nothing that an
+    # update can conflict with, even in the mode that fails.
+    made = projects["python-package"]
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    shutil.copytree(made / ".github/blueprint", repository / ".github/blueprint")
+    shutil.copy(made / ".github/blueprint.py", repository / ".github/blueprint.py")
+    guide = (made / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    (repository / "CONTRIBUTING.md").write_text(guide, encoding="utf-8", newline="\n")
+
+    def git(*arguments: str) -> None:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        subprocess.run(
+            ["git", *identity, "-c", "commit.gpgsign=false", *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+        )
+
+    git("init", "--quiet", "--initial-branch=main")
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "main")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    changed = (
+        guide.replace(ownership.PART_END, f"Ours.\n{ownership.PART_END}")
+        if project_part
+        else guide.replace("## Releases\n", "## Releases\n\nOurs.\n")
+    )
+    assert changed != guide
+    (repository / "CONTRIBUTING.md").write_text(changed, encoding="utf-8", newline="\n")
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "pull request")
+    result = workflow_steps.run_step(
+        tmp_path,
+        "lint.yml",
+        "lint",
+        "Find the changed files of the blueprint",
+        env={
+            "BASE_REF": "main",
+            "BRANCH": "topic",
+            "HEAD_REPO": "o/r",
+            "AUTHOR_TYPE": "User",
+            "BLUEPRINT_OWNERSHIP": "fail",
+            "GITHUB_REPOSITORY": "o/r",
+        },
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"'},
+        workspace=repository,
+    )
+    assert result.returncode == code, result.stderr
+    assert (
+        re.findall(r"^::(\w+) file=([^,]+),", result.stdout, re.MULTILINE)
+        == annotations
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -5953,6 +6053,17 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
+    # The zip of a Chrome extension, which its users load by hand and the store gets
+    # only after the same check; no other kind verifies its package by the glob ./*.zip.
+    extension = security("chrome-extension")
+    assert (
+        "gh release download vX.Y.Z --repo Dennis-Otto/demo-project --pattern '*.zip'\n"
+        "gh attestation verify ./*.zip --repo Dennis-Otto/demo-project"
+    ) in extension
+    assert "The Chrome Web Store gets exactly this zip" in extension
+    for kind in KINDS:
+        zipped = "gh attestation verify ./*.zip" in security(kind)
+        assert zipped == (kind == "chrome-extension"), kind
     # A project that no registry delivers verifies each asset, those of its own
     # scripts/release-assets.sh too, such as the zip of a browser extension.
     generic = security("generic")
@@ -6231,6 +6342,15 @@ def test_the_issue_assistant_shows_its_limits_of_the_ai_runs(
             "max_per_author_per_day": 3,
             "release_replies": 2,
         }
+
+
+def test_actionlint_knows_the_next_runner() -> None:
+    # A project may test on it before the jobs move, as the Action test of the issue
+    # assistant does in a matrix, and actionlint 1.7.12 doesn't know the label yet.
+    config = yaml.safe_load(
+        (ROOT / ".github/actionlint.yaml").read_text(encoding="utf-8")
+    )
+    assert NEXT_RUNNER in config["self-hosted-runner"]["labels"]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -6521,6 +6641,154 @@ def test_a_successor_alone_cannot_release_in_a_store(tmp_path: Path) -> None:
     assert (
         "Psalm's taint analysis"
         in answers["static_analysis_common_vulnerabilities_justification"]
+    )
+
+
+def package_that_publishes_nowhere(folder: Path, kind: str) -> Path:
+    """The project of the kind, as Projects renders it, that answers no."""
+    return render(
+        folder,
+        project_name="Demo Project",
+        description=f'A {kind} of the tests, with "quotes" and Ümlauts.',
+        project_type=kind,
+        publish_package=False,
+    )
+
+
+def what_a_project_says_of_its_delivery(project: Path) -> str:
+    return "\n".join(
+        (project / name).read_text(encoding="utf-8")
+        for name in (
+            "README.md",
+            "SECURITY.md",
+            "GOVERNANCE.md",
+            "CONTRIBUTING.md",
+            ".bestpractices.json",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "registry", "words"),
+    [
+        (
+            "node-package",
+            "npm",
+            (
+                "npm install demo-project",
+                "--pattern '*.tgz'",
+                "gh attestation verify ./*.tgz",
+                "npm audit signatures",
+                "the package on npm",
+                "from npm",
+                "to npm",
+                "the package that you install",
+            ),
+        ),
+        (
+            "python-package",
+            "pypi",
+            (
+                "pip install demo-project",
+                "--pattern '*.whl'",
+                "gh attestation verify ./*.whl",
+                "the project on PyPI",
+                "from PyPI",
+                "to PyPI",
+                "the package that you install",
+            ),
+        ),
+    ],
+)
+def test_a_package_that_publishes_nowhere_speaks_of_no_registry(
+    tmp_path: Path,
+    projects: dict[str, Path],
+    kind: str,
+    registry: str,
+    words: tuple[str, ...],
+) -> None:
+    # What a repository tells its users follows its real target: a *.tgz that its
+    # releases don't have can't be verified (issue 446).
+    published = projects[kind]
+    nowhere = package_that_publishes_nowhere(tmp_path / "nowhere", kind)
+
+    for word in words:
+        assert word in what_a_project_says_of_its_delivery(published), word
+        assert word not in what_a_project_says_of_its_delivery(nowhere), word
+    # The commands that hold for any asset, as for a project that has no package.
+    security = (nowhere / "SECURITY.md").read_text(encoding="utf-8")
+    assert "--pattern '<asset>'" in security
+    assert "gh attestation verify <asset> --repo" in security
+    contributing = (nowhere / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "creates the release with its SBOM and signed provenance." in contributing
+
+    # The release and the settings say the same, and the update keeps the answer.
+    def settings(project: Path) -> dict[str, Any]:
+        text = (project / ".github/repository.toml").read_text(encoding="utf-8")
+        return tomllib.loads(text)
+
+    assert settings(published)["variables"]["PUBLISH_TO"] == registry
+    assert registry in settings(published)["environments"]
+    assert registry in settings(published)["repository"]["topics"]
+    assert settings(nowhere)["variables"]["PUBLISH_TO"] == "none"
+    assert registry not in settings(nowhere)["environments"]
+    assert registry not in settings(nowhere)["repository"]["topics"]
+    answers = (nowhere / ".copier-answers.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(answers)["publish_package"] is False
+
+
+def test_a_node_package_that_publishes_nowhere_is_private(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    def manifest(project: Path) -> dict[str, Any]:
+        text = (project / "package.json").read_text(encoding="utf-8")
+        found: dict[str, Any] = json.loads(text)
+        return found
+
+    assert "private" not in manifest(projects["node-package"])
+    nowhere = package_that_publishes_nowhere(tmp_path, "node-package")
+    assert manifest(nowhere)["private"] is True
+    # npm refuses to publish it, not to pack it, which scripts/check.sh does.
+    assert "npm pack --dry-run" in (nowhere / "scripts/check.sh").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_a_python_package_that_publishes_nowhere_is_one_that_pypi_refuses(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    def classifiers(project: Path) -> list[str]:
+        text = (project / "pyproject.toml").read_text(encoding="utf-8")
+        found: list[str] = tomllib.loads(text)["project"]["classifiers"]
+        return found
+
+    refused = "Private :: Do Not Upload"
+    assert refused not in classifiers(projects["python-package"])
+    nowhere = package_that_publishes_nowhere(tmp_path, "python-package")
+    assert refused in classifiers(nowhere)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_a_package_of_a_registry_answers_whether_it_publishes(
+    projects: dict[str, Path], kind: str
+) -> None:
+    answers = (projects[kind] / ".copier-answers.yml").read_text(encoding="utf-8")
+    asked = kind in {"node-package", "python-package"}
+    assert yaml.safe_load(answers).get("publish_package") is (True if asked else None)
+
+
+def test_the_answer_changes_nothing_of_a_kind_that_it_doesnt_ask(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    # An extension delivers to its store, whatever an answer of another kind says.
+    kind = "chrome-extension"
+    project = package_that_publishes_nowhere(tmp_path, kind)
+    for name in (".github/repository.toml", "SECURITY.md", "package.json"):
+        assert (project / name).read_text(encoding="utf-8") == (
+            projects[kind] / name
+        ).read_text(encoding="utf-8"), name
+    assert "publish_package" not in (project / ".copier-answers.yml").read_text(
+        encoding="utf-8"
     )
 
 
@@ -7829,9 +8097,15 @@ def test_a_pull_request_checks_the_renovate_rules_without_waiting_for_the_bot() 
         "group": "renovate-rules-${{ github.event.pull_request.number }}",
         "cancel-in-progress": True,
     }
-    # One run of the bot at a time, and a waiting one isn't cancelled by a check.
+    # One run of the bot at a time in a repository, and a waiting one isn't cancelled
+    # by a check. A group for all of them would keep one run going and only the newest
+    # of the others waiting: GitHub cancels every other one that waits in a group.
     assert job_in(workflow, "renovate")["concurrency"] == {
-        "group": "renovate",
+        "group": "renovate-${{ matrix.repo }}",
+        "cancel-in-progress": False,
+    }
+    assert job_in(workflow, "problems")["concurrency"] == {
+        "group": "renovate-problems",
         "cancel-in-progress": False,
     }
 
@@ -8623,6 +8897,7 @@ RELEASE_APP_BOTS = {
     ("osv-scanner.yml", "dependabot"): ("the Dependabot alert bot", False),
     ("release.yml", "release-please"): ("the release bot", False),
     ("renovate.yml", "renovate"): ("Renovate", True),
+    ("renovate.yml", "repositories"): ("Renovate", True),
     ("rollout.yml", "plan"): ("the Rollout", True),
     ("rollout.yml", "rollout"): ("the Rollout", True),
     ("screenshot-bot.yml", "pull-request"): ("the screenshot bot", False),
@@ -8770,7 +9045,6 @@ def test_the_settings_bot_asks_for_a_token_with_only_what_it_needs(
         assert not {"owner", "repositories"} & set(token["with"])
     # The token may write what each part of the settings writes with.
     names = {name: key for name, key, _ in RELEASE_APP_PERMISSIONS}
-    names["Variables"] = "actions_variables"
     for part, needed in PERMISSIONS.items():
         for name in needed:
             key = names[name].replace("_", "-")
@@ -8837,7 +9111,9 @@ def test_each_bot_says_that_it_needs_the_release_app(
         f"### {bot[0].upper()}{bot[1:]} needs the release app of the owner\n\n"
         f"{sentence} The release app is a GitHub App of the owner, "
     )
-    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
+    assert (
+        "`python3 .github/blueprint.py app register` registers the app" in done.summary
+    )
     assert done.summary.endswith(
         f" Once they are done, {bot} can {env['TASK']} in its next run.\n"
     )
@@ -8895,10 +9171,10 @@ def test_the_blueprint_bot_says_what_its_release_app_lacks(tmp_path: Path) -> No
         " GitHub App of the owner, whose token may do what the token of a job can't:"
         " start the checks of a pull request, change a workflow and apply the"
         " settings.\n\n"
-        "`python3 .github/blueprint.py checklist` shows the steps: a link that registers"
-        " the app with its permissions filled in, the update of the answers of the"
-        " blueprint that names it in `.github/repository.toml`, the settings and its"
-        " private key. Once they are done, the blueprint bot can push an update and"
+        "`python3 .github/blueprint.py app register` registers the app, sets its private"
+        " key and opens the pull request that names it in `.github/repository.toml`;"
+        " `python3 .github/blueprint.py checklist` shows what is left, such as its"
+        " installation and the settings. Once they are done, the blueprint bot can push an update and"
         " open its pull request in its next run.\n"
     )
 
@@ -9334,11 +9610,267 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
         not in (settings.environments["release"]["secrets"])
     )
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
-    assert "`python3 .github/blueprint.py checklist` shows how to register" in toml
+    assert "`python3 .github/blueprint.py app register` registers one" in toml
+    assert answered_app(project) == App()
     # Renovate runs in the repository itself, and the issue assistant with its AI.
     assert answers["renovate_runner"] == "self"
     assert answers["issue_assistant_ai"] is True
     assert (project / ".github/workflows/renovate.yml").is_file()
+
+
+def cut_out(text: str, *parts: tuple[str, str | None]) -> str:
+    """The text without each part, from its start up to its end, which stays, or up to
+    the end of the text without one."""
+    for start, end in parts:
+        head, tail = text.split(start, 1)
+        text = head + (end + tail.split(end, 1)[1] if end else "")
+    return text
+
+
+RENOVATE_LIST = "List the repositories that have rules for Renovate"
+RENOVATE_REACH = "Check that the token reaches this repository alone"
+RENOVATE_LISTING = r"api --paginate installation/repositories --jq .*"
+
+
+def test_each_run_of_renovate_has_a_token_for_its_repository_alone() -> None:
+    # A package manager that runs code of a dependency while it writes a lock file
+    # can't push to another repository of the owner (#445).
+    text = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
+    job = job_in(text, "renovate")
+    # One run for each repository of the list, two at a time, as the owner has about 20
+    # jobs at once for all of its repositories, and every one of them.
+    assert job["needs"] == "repositories"
+    assert job["strategy"] == {
+        "max-parallel": 2,
+        "fail-fast": False,
+        "matrix": {"repo": "${{ fromJSON(needs.repositories.outputs.repositories) }}"},
+    }
+    # Each writes with a token for its repository alone, and nothing else in the job.
+    token = step_in(job, "Create a token of the release app")["with"]
+    assert token["owner"] == "${{ github.repository_owner }}"
+    assert token["repositories"] == "${{ matrix.repo }}"
+    assert job["permissions"] == {"contents": "read"}
+    variables = step_in(job, "Run Renovate")["env"]
+    assert (
+        variables["RENOVATE_REPOSITORIES"]
+        == "${{ github.repository_owner }}/${{ matrix.repo }}"
+    )
+    assert not {"RENOVATE_AUTODISCOVER", "RENOVATE_AUTODISCOVER_FILTER"} & set(
+        variables
+    )
+    # Renovate gets the token only after the look at what it reaches.
+    names = names_of(job)
+    token_step = "Create a token of the release app"
+    assert (
+        names.index(token_step)
+        < names.index(RENOVATE_REACH)
+        < names.index("Run Renovate")
+    )
+    reach = step_in(job, RENOVATE_REACH)
+    assert reach["env"]["GH_TOKEN"] == "${{ steps.app.outputs.token }}"
+    assert (
+        reach["env"]["REPOSITORY"]
+        == "${{ github.repository_owner }}/${{ matrix.repo }}"
+    )
+    # The token of the whole installation is gone from the job, and with it the
+    # exception of zizmor: the one token that remains lists the repositories and reads.
+    leg = text[text.index("\n  renovate:\n") : text.index("\n  problems:\n")]
+    assert "zizmor: ignore" not in leg
+    lister = job_in(text, "repositories")
+    assert lister["permissions"] == {}
+    token = step_in(
+        lister, "Create a token of the release app that lists its repositories"
+    )
+    assert {
+        key: value
+        for key, value in token["with"].items()
+        if key.startswith("permission-")
+    } == {"permission-metadata": "read"}
+    assert lister["outputs"]["repositories"] == (
+        "${{ steps.repositories.outputs.repositories }}"
+    )
+    # Without a repository there is no run, and GitHub would refuse an empty matrix.
+    assert job["if"] == "needs.repositories.outputs.repositories != ''"
+    assert "github.repository ==" in lister["if"]
+    assert "github.repository ==" not in job["if"]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_doesnt_start_with_a_token_that_reaches_more(tmp_path: Path) -> None:
+    reaches = "api --paginate installation/repositories --jq .repositories[].full_name"
+    env = {"REPOSITORY": "octo-org/app"}
+
+    alone = workflow_steps.run_step(
+        tmp_path / "alone",
+        "renovate.yml",
+        "renovate",
+        RENOVATE_REACH,
+        answers=[exact(reaches, "octo-org/app\n")],
+        env=env,
+    )
+    assert alone.returncode == 0
+    # The log shows what the token reaches.
+    assert alone.stdout.splitlines()[-1] == "octo-org/app"
+
+    more = workflow_steps.run_step(
+        tmp_path / "more",
+        "renovate.yml",
+        "renovate",
+        RENOVATE_REACH,
+        answers=[exact(reaches, "octo-org/app\nocto-org/other\n")],
+        env=env,
+    )
+    assert more.returncode == 1
+    assert "octo-org/other" in more.stdout
+    assert (
+        "::error::The token of this run reaches more than octo-org/app" in more.stdout
+    )
+
+    another = workflow_steps.run_step(
+        tmp_path / "another",
+        "renovate.yml",
+        "renovate",
+        RENOVATE_REACH,
+        answers=[exact(reaches, "octo-org/other\n")],
+        env=env,
+    )
+    assert another.returncode == 1
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_runs_for_the_repositories_that_may_have_rules(tmp_path: Path) -> None:
+    def rules(name: str, **answer: Any) -> workflow_steps.Answer:
+        return exact(
+            f"api repos/octo-org/{name}/contents/.github/renovate.json5 --silent",
+            **answer,
+        )
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[
+            workflow_steps.Answer(
+                RENOVATE_LISTING,
+                "app false\nno-rules false\nsecret true\nflaky false\nempty false\n",
+            ),
+            rules("app"),
+            rules("no-rules", code=1, err="gh: Not Found (HTTP 404)\n"),
+            rules("flaky", code=1, err="gh: Server Error (HTTP 502)\n"),
+            # GitHub answers so for a repository without a commit, which Renovate skips.
+            rules("empty", code=1, err="gh: Git Repository is empty. (HTTP 409)\n"),
+        ],
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 0
+    # Only a clear 404 takes a repository off the list: Renovate itself skips one
+    # without rules, as .github/renovate-global.json5 asks for them.
+    assert done.outputs == {"repositories": '["app","secret","flaky","empty"]'}
+    assert "- flaky\n" in done.summary
+    # A token that reads metadata can't read the files of a private repository, so the
+    # step doesn't ask, and a 404 would not tell anything.
+    assert not done.called(r"api repos/octo-org/secret/")
+    bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    assert 'requireConfig: "required"' in bot
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_has_no_run_without_a_repository(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[
+            workflow_steps.Answer(RENOVATE_LISTING, "no-rules false\n"),
+            exact(
+                "api repos/octo-org/no-rules/contents/.github/renovate.json5 --silent",
+                code=1,
+                err="gh: Not Found (HTTP 404)\n",
+            ),
+        ],
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 0
+    # Without the output, the job renovate is skipped rather than refused for an empty
+    # matrix.
+    assert done.outputs == {}
+    assert "no repository with rules for Renovate" in done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_says_when_it_cant_list_its_repositories(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[workflow_steps.Answer(RENOVATE_LISTING, code=1, err="gh: HTTP 502\n")],
+        stubs={"sleep": workflow_steps.recording("sleep")},
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 1
+    # GitHub fails for a moment now and then: it asks three times before it gives up.
+    assert len(done.called(RENOVATE_LISTING)) == 3
+    assert "::error::The repositories of the release app could not be listed." in (
+        done.stdout
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_brings_the_log_of_every_repository_into_its_issue(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "problems",
+        "Keep the issue of Renovate's problems current",
+        stubs={"python3": workflow_steps.recording("python3")},
+        files={
+            "$RUNNER_TEMP/problems/renovate-problems-app/problems.json": "{}\n",
+            "$RUNNER_TEMP/problems/renovate-problems-other/problems.json": "{}\n",
+        },
+        env={
+            "GITHUB_REPOSITORY": "octo-org/hub",
+            "RUN_URL": "https://run",
+            "RESULT": "failure",
+        },
+    )
+
+    assert done.returncode == 0
+    call = done.stubbed[0]
+    assert call.startswith(
+        "python3 blueprint.py --repo octo-org/hub bot-health renovate "
+    )
+    assert "/problems/renovate-problems-app/problems.json " in call
+    assert "/problems/renovate-problems-other/problems.json " in call
+    assert call.endswith(" --result failure --run https://run")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_finds_the_log_of_a_single_repository(tmp_path: Path) -> None:
+    # download-artifact puts the files of a single artifact straight into its path.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "problems",
+        "Keep the issue of Renovate's problems current",
+        stubs={"python3": workflow_steps.recording("python3")},
+        files={"$RUNNER_TEMP/problems/problems.json": "{}\n"},
+        env={
+            "GITHUB_REPOSITORY": "octo-org/hub",
+            "RUN_URL": "https://run",
+            "RESULT": "success",
+        },
+    )
+
+    assert done.returncode == 0
+    assert "/problems/problems.json " in done.stubbed[0]
 
 
 def test_a_foreign_owner_runs_renovate_in_their_own_repository(
@@ -9354,38 +9886,86 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
 
     workflow = (project / ".github/workflows/renovate.yml").read_text("utf-8")
     hub = (ROOT / ".github/workflows/renovate.yml").read_text(encoding="utf-8")
-    # The workflow of the blueprint, for this repository alone: the job without the
-    # name of the blueprint, a token of the release app for this repository, and this
-    # repository in place of every repository of the owner. The rest is the same, the
-    # Renovate that it pins by digest too, and its schedule in the slot of the project.
+    # The workflow of the blueprint, for this repository alone: one job, without the
+    # list of the repositories, the logs for a report of its own and that report, whose
+    # last steps stay as its own, and with a token of the release app for this
+    # repository. The rest is the same, the Renovate that it pins by digest too, and its
+    # schedule in the slot of the project.
     slot = project_slot(project)
+    kept = cut_out(
+        in_slot(hub, slot),
+        ("  repositories:\n", "  renovate:\n"),
+        (
+            "      # The job problems brings the log of each repository",
+            "      # A warning, such as a lock file that Renovate can't read",
+        ),
+        ("      - name: Wait until Harden-Runner has removed Docker\n", None),
+    )
     changed = [
         line
         for line in difflib.unified_diff(
-            in_slot(hub, slot).splitlines(), workflow.splitlines(), lineterm="", n=0
+            kept.splitlines(), workflow.splitlines(), lineterm="", n=0
         )
         if line[:1] in "+-" and not line.startswith(("+++", "---"))
     ]
     assert changed == [
-        "-    if: github.event_name != 'pull_request' && github.repository =="
-        " 'Dennis-Otto/repo-blueprint'",
+        "-    needs: repositories",
+        "-    if: needs.repositories.outputs.repositories != ''",
         "+    if: github.event_name != 'pull_request'",
-        "-          # In the blueprint, every repository of the installation, on"
-        " purpose: the",
-        "-          # app is installed on exactly the repositories that Renovate keeps"
-        " current.",
-        "-          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]",
-        "-          # In the blueprint, every repository of the owner on which the app is",
-        "-          # installed and that has a .github/renovate.json5.",
-        '-          RENOVATE_AUTODISCOVER: "true"',
-        "-          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*",
-        "+          # This repository alone, by its name, also after a rename.",
+        "-      group: renovate-${{ matrix.repo }}",
+        "+      group: renovate",
+        "-    strategy:",
+        "-      # Two at a time, as the owner has about 20 jobs at once for all of its",
+        "-      # repositories, and every repository, also after one that failed.",
+        "-      max-parallel: 2",
+        "-      fail-fast: false",
+        "-      matrix:",
+        "-        repo: ${{ fromJSON(needs.repositories.outputs.repositories) }}",
+        "+      # The one issue with the warnings and errors of Renovate.",
+        "+      issues: write",
+        "-          # For this repository alone: a package manager that runs code of a"
+        " dependency",
+        "-          # while it writes a lock file can't push to another repository of"
+        " the owner.",
+        "-          owner: ${{ github.repository_owner }}",
+        "-          repositories: ${{ matrix.repo }}",
+        "-          REPOSITORY: ${{ github.repository_owner }}/${{ matrix.repo }}",
+        "+          REPOSITORY: ${{ github.repository }}",
+        "-          RENOVATE_REPOSITORIES: ${{ github.repository_owner }}/"
+        "${{ matrix.repo }}",
         "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
+        "-          # A repository that didn't finish wrote no log, so the run isn't a"
+        " quiet one.",
+        "-          RESULT: ${{ needs.renovate.result }}",
+        "-          # download-artifact puts the files of a single artifact straight into"
+        " its path,",
+        "-          # so with one leg's log there is no folder of the artifact.",
+        '-          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate \\',
+        '-            "$RUNNER_TEMP"/problems/problems.json'
+        ' "$RUNNER_TEMP"/problems/*/problems.json \\',
+        '-            --result "$RESULT" --run "$RUN_URL" |',
+        '+          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate'
+        ' /tmp/renovate/problems.json --run "$RUN_URL" |',
     ]
+    assert "matrix" not in workflow
     parsed = yaml.safe_load(workflow)
     assert parsed[True]["schedule"] == [{"cron": moved("17 */2 * * *", slot)}]
+    # One job for the checks of the rules and one for the bot, which needs no other.
+    assert set(parsed["jobs"]) == {"validate", "renovate"}
+    assert "needs" not in parsed["jobs"]["renovate"]
     steps = {step.get("name"): step for step in parsed["jobs"]["renovate"]["steps"]}
-    assert "owner" not in steps["Create a token of the release app"]["with"]
+    # A token without an owner and without repositories is for this repository alone,
+    # and the job looks at it as the jobs of the blueprint do.
+    token = steps["Create a token of the release app"]["with"]
+    assert not {"owner", "repositories"} & set(token)
+    reach = steps["Check that the token reaches this repository alone"]
+    assert reach["env"]["REPOSITORY"] == "${{ github.repository }}"
+    # The job keeps the issue itself, from the log of its own Renovate.
+    assert list(steps)[-1] == "Keep the issue of Renovate's problems current"
+    assert parsed["jobs"]["renovate"]["permissions"] == {
+        "contents": "read",
+        "issues": "write",
+    }
     run = steps["Run Renovate"]
     assert re.fullmatch(
         r"\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", run["with"]["renovate-version"]
@@ -9570,6 +10150,10 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "https://github.com/apps/octo-org-release-automation" in toml
     assert "maintained by Octo Org" in (project / "GOVERNANCE.md").read_text("utf-8")
+    # app connect reads the answers as Copier writes them, with the App ID as text.
+    assert answered_app(project) == App(
+        "octo-org-release-automation", "Iv23liOcto", "12345"
+    )
 
 
 @pytest.mark.parametrize(
@@ -9998,6 +10582,31 @@ def test_a_template_stops_when_the_text_that_it_replaces_is_gone(
         rendered(reworded)
 
 
+def test_a_template_cuts_parts_of_a_file_and_stops_when_they_are_gone(
+    tmp_path: Path,
+) -> None:
+    file = "start\n# one\nout\n# two\nkept\n# three\nout too\n"
+
+    def rendered(text: str, cuts: str) -> str:
+        (tmp_path / "file.yml").write_text(text, encoding="utf-8", newline="\n")
+        template = blueprint_environment(tmp_path).from_string(
+            '[%- from "includes/replace.jinja" import replaced with context -%]\n'
+            f"{{= replaced('file.yml', [['kept', 'changed']], {cuts}) -=}}"
+        )
+        return template.render(schedule_slot=0)
+
+    # Up to a text that stays, or to the end of the file, and before the replacements,
+    # so that a text that the replacements know needs to be there once only after them.
+    cuts = '[["# one\\n", "# two\\n"], ["# three\\n", none]]'
+    assert rendered(file, cuts) == "start\n# two\nchanged\n"
+    # Each text that a cut looks for stops the render when it is gone, as one that the
+    # template replaces does.
+    message = "file.yml no longer holds the text that its template replaces"
+    for reworded in ("# three", "# two", "# one"):
+        with pytest.raises(FilterArgumentError, match=re.escape(message)):
+            rendered(file.replace(reworded, "# other"), cuts)
+
+
 def blueprint_environment(*folders: Path) -> SandboxedEnvironment:
     """Jinja as Copier renders the template, with the delimiters and the filters of the
     blueprint, from the folders and then the blueprint's files."""
@@ -10215,6 +10824,8 @@ def test_copier_names_what_the_copy_needs_and_the_one_command_after_it(
     assert "gh repo create --" not in after
     # Only an owner without a release app is told that the checklist registers one.
     assert ("The checklist starts with the release app of" in after) is (owner != OWNER)
+    assert ("blueprint.py app register" in after) is (owner != OWNER)
+    assert "a link" not in after
 
 
 def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
@@ -10250,7 +10861,13 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
     for name in ("docs/own-account.md", "docs/own-account.de.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
         found = [match.groupdict() for match in re.finditer(pattern, text)]
-        assert [item["currentValue"] for item in found] == [version] * 4, name
+        assert [item["currentValue"] for item in found] == [version] * 3, name
+    # So does app register, which names the release app with it: one line, for uv and
+    # for pipx.
+    assert '"/^blueprint/app\\\\.py$/"' in renovate
+    text = (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
+    found = [match.groupdict() for match in re.finditer(pattern, text)]
+    assert [item["currentValue"] for item in found] == [version]
 
 
 # The pages of the kinds, in English and in German: the heading of the section of
@@ -11696,11 +12313,38 @@ def test_renovate_reports_its_problems_in_one_issue() -> None:
     assert log.startswith("/tmp/")
     assert log == log.lower()
     assert variables["RENOVATE_LOG_FILE_LEVEL"] == "warn"
+    # Each run keeps its log, also a run that failed, under a name of its own.
+    kept = "Keep the log of Renovate's problems for the issue"
+    assert names_of(job)[-1] == kept
+    assert condition_of(step_in(job, kept)) == "${{ !cancelled() }}"
+    artifact = step_in(job, kept)["with"]
+    assert artifact["path"] == log
+    assert artifact["name"] == "renovate-problems-${{ matrix.repo }}"
+    assert artifact["if-no-files-found"] == "ignore"
+    assert artifact["retention-days"] == 1
+    # One job takes them all into the one issue, after every run, also one that failed,
+    # without the private key of the release app: only the job of the issue may write it.
+    report = job_in(text, "problems")
+    assert report["needs"] == "renovate"
+    assert report["if"] == "${{ !cancelled() && needs.renovate.result != 'skipped' }}"
+    assert "environment" not in report
+    assert report["permissions"] == {"contents": "read", "issues": "write"}
+    assert "issues" not in job["permissions"]
+    fetched = step_in(report, "Fetch the log of each repository")["with"]
+    assert fnmatch.fnmatch(artifact["name"].split("$")[0] + "app", fetched["pattern"])
+    assert fetched["path"] == "${{ runner.temp }}/problems"
     step = "Keep the issue of Renovate's problems current"
-    assert names_of(job).index(step) > names_of(job).index("Run Renovate")
-    assert f"bot-health renovate {log} " in script_of(job, step)
-    assert condition_of(step_in(job, step)) == "${{ !cancelled() }}"
-    assert job["permissions"]["issues"] == "write"
+    assert names_of(report).index(step) > names_of(report).index(
+        "Fetch the log of each repository"
+    )
+    logs = (
+        '"$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json'
+    )
+    script = script_of(report, step)
+    assert logs in script
+    assert '--result "$RESULT" --run "$RUN_URL"' in script
+    assert step_in(report, step)["env"]["RESULT"] == "${{ needs.renovate.result }}"
+    assert condition_of(step_in(report, step)) == "${{ !cancelled() }}"
 
 
 # jq, which gh runs for its option --jq: the steps that rely on its filters run with
@@ -11709,6 +12353,44 @@ JQ = shutil.which("jq")
 WITH_JQ = pytest.mark.skipif(
     BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
 )
+
+
+@WITH_JQ
+def test_renovate_leaves_out_what_it_never_looked_at(tmp_path: Path) -> None:
+    def repository(name: str, **flags: bool) -> dict[str, Any]:
+        return {
+            "name": name,
+            "private": flags.get("private", False),
+            "archived": flags.get("archived", False),
+            "disabled": flags.get("disabled", False),
+            "fork": flags.get("fork", False),
+        }
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "repositories",
+        RENOVATE_LIST,
+        answers=[
+            workflow_steps.Answer(
+                RENOVATE_LISTING,
+                json={
+                    "repositories": [
+                        repository("app"),
+                        repository("secret", private=True),
+                        repository("old", archived=True),
+                        repository("blocked", disabled=True),
+                        repository("theirs", fork=True),
+                    ]
+                },
+            ),
+            exact("api repos/octo-org/app/contents/.github/renovate.json5 --silent"),
+        ],
+        env={"GITHUB_REPOSITORY_OWNER": "octo-org"},
+    )
+
+    assert done.returncode == 0
+    assert done.outputs == {"repositories": '["app","secret"]'}
 
 
 NODE_JS = shutil.which("node")
@@ -17567,6 +18249,242 @@ def test_contributing_explains_the_assets_that_a_project_builds_itself(
     assert Catalog.load(projects[kind]).check("assets of the project") is not None
 
 
+def releases_of(guide: str) -> str:
+    """The section of the contributing guide about releases."""
+    return guide.split("\n## Releases\n", 1)[1]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_guide_leaves_a_project_a_part_of_its_section_about_releases(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Two marked lines, right under each other and empty in a new project, with a line
+    # of their own on each side: an update merges line by line, so the lines around
+    # the text of a project must be ones that no change of a sentence touches.
+    guide = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    marks = f"\n\n{ownership.PART_START}\n{ownership.PART_END}\n\n"
+    assert guide.count(marks) == 1
+    assert marks in releases_of(guide)
+    # The step that gives a pull request its notice reads the same lines.
+    template = (ROOT / "template/CONTRIBUTING.md.jinja").read_text(encoding="utf-8")
+    assert marks in template
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_the_guide_of_an_action_names_the_pull_request_of_its_users(
+    projects: dict[str, Path], kind: str
+) -> None:
+    guide = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    said = "Repositories that use the action receive the release as a Dependabot"
+    assert (said in releases_of(guide)) == (kind == "github-action")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_rules_for_agents_name_the_part_of_the_guide(
+    projects: dict[str, Path], kind: str
+) -> None:
+    agents = (projects[kind] / "AGENTS.md").read_text(encoding="utf-8")
+    assert "the two marked lines of `## Releases` in `CONTRIBUTING.md`" in agents
+
+
+class GuideReleases:
+    """The questions and the guide of the blueprint with releases, whose guide a test
+    writes, and a repository made from it: Copier in full, as the blueprint bot runs it,
+    on the one file that it merges here, as the others take seconds to render."""
+
+    MARKS = f"{ownership.PART_START}\n{ownership.PART_END}\n\n"
+
+    def __init__(self, folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # What the update step of the bot sets, for Git in the background and Copier.
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+        self.blueprint = folder / "blueprint"
+        self.project = folder / "project"
+        self.project.mkdir()
+        self.template = self.blueprint / "template/CONTRIBUTING.md.jinja"
+        self.template.parent.mkdir(parents=True)
+        (self.blueprint / ".github").mkdir()
+        shutil.copy(ROOT / "copier.yml", self.blueprint)
+        shutil.copy(ROOT / ".github/fleet.toml", self.blueprint / ".github")
+        # Line ends of Git on Windows that merge a whole file into one conflict.
+        shutil.copy(ROOT / ".gitattributes", self.blueprint)
+        shutil.copy(ROOT / ".gitattributes", self.template.parent)
+        shutil.copy(ROOT / "template/CONTRIBUTING.md.jinja", self.template)
+        shutil.copy(ROOT / "template/.copier-answers.yml.jinja", self.template.parent)
+        self.target = self.project / "CONTRIBUTING.md"
+        self.current = self.template.read_text(encoding="utf-8")
+        self.git(self.blueprint, "init", "--quiet", "--initial-branch=main")
+
+    def git(self, where: Path, *arguments: str) -> None:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        unsigned = ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+        subprocess.run(
+            ["git", *identity, *unsigned, *arguments],
+            cwd=where,
+            capture_output=True,
+            check=True,
+        )
+
+    def commit(self, where: Path) -> None:
+        self.git(where, "add", "--all")
+        self.git(where, "commit", "--quiet", "--allow-empty", "-m", "next")
+
+    def release(self, tag: str, guide: str) -> None:
+        self.template.write_text(guide, encoding="utf-8", newline="\n")
+        self.commit(self.blueprint)
+        self.git(self.blueprint, "tag", tag)
+
+    def copy(self, tag: str, kind: str) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            run_copy(
+                str(self.blueprint),
+                self.project,
+                data={
+                    "owner": OWNER,
+                    "project_name": "Demo",
+                    "project_slug": "demo",
+                    "description": "A demo",
+                    "project_type": kind,
+                    "sample_code": False,
+                },
+                defaults=True,
+                vcs_ref=tag,
+                quiet=True,
+            )
+        self.git(self.project, "init", "--quiet", "--initial-branch=main")
+        self.commit(self.project)
+
+    def write_guide(self, old: str, new: str) -> None:
+        """A change of the guide of the repository, committed."""
+        guide = self.target.read_text(encoding="utf-8")
+        assert guide.count(old) == 1, old
+        self.target.write_text(guide.replace(old, new), encoding="utf-8", newline="\n")
+        self.commit(self.project)
+
+    def update(self, tag: str) -> str:
+        """The guide after the update, which must leave no conflict."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            run_update(
+                self.project,
+                vcs_ref=tag,
+                defaults=True,
+                overwrite=True,
+                conflict="inline",
+                quiet=True,
+            )
+        guide = self.target.read_text(encoding="utf-8")
+        assert "<<<<<<<" not in guide
+        assert not list(self.project.rglob("*.rej"))
+        self.commit(self.project)
+        return guide
+
+
+VULNERABILITY = "or at once when it fixes a vulnerability."
+
+
+def test_a_real_update_brings_the_sentence_of_an_action_and_merges_around_the_part(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reason for the part: a repository that wrote in the paragraphs of `## Releases`
+    # conflicted with every update that changed them, as issue-assistant did.
+    releases = GuideReleases(tmp_path, monkeypatch)
+    current = releases.current
+    sentence = (
+        " Repositories that use the action receive the release as a Dependabot"
+        " pull request."
+    )
+    kept = f"[% if publish_to == 'github-action' %]{sentence}[% endif %]"
+    assert kept in current
+    # A release from before the part and the sentence of the kind of project, and a
+    # repository that writes the sentence into the paragraph.
+    releases.release("v1.0.0", current.replace(kept, "").replace(releases.MARKS, ""))
+    releases.copy("v1.0.0", "github-action")
+    releases.write_guide(VULNERABILITY, f"{VULNERABILITY}{sentence}")
+
+    # The release that brings them both merges without a conflict, and the sentence is
+    # then the blueprint's. A part right after the paragraph would conflict here: a
+    # merge marks lines added right after a line that both sides changed.
+    releases.release("v2.0.0", current)
+    guide = releases.update("v2.0.0")
+    assert guide.count(sentence) == 1
+    assert f"\n\n{releases.MARKS}" in guide
+
+    # The repository writes its text into the part. A release that changes the
+    # paragraphs on both sides of the part keeps the text and brings the new sentences,
+    # without a conflict.
+    own = "The [release guide](docs/releases.md) describes every step."
+    releases.write_guide(ownership.PART_END, f"{own}\n{ownership.PART_END}")
+    changes = {
+        "The release bot keeps a pull request": "The release bot holds a pull request",
+        "A file that the release ships beside": "A file that a release ships beside",
+        "By contributing, you agree": "By contributing, you accept",
+    }
+    next_guide = current
+    for old, new in changes.items():
+        assert old in next_guide
+        next_guide = next_guide.replace(old, new)
+    releases.release("v3.0.0", next_guide)
+    guide = releases.update("v3.0.0")
+    assert f"\n{ownership.PART_START}\n{own}\n{ownership.PART_END}\n" in guide
+    for old, new in changes.items():
+        assert new in guide
+        assert old not in guide
+
+
+def test_a_real_update_brings_the_part_to_a_repository_with_its_own_sentence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As homedarts-for-autodarts and player-switch-for-autodarts wrote it: a sentence
+    # that the blueprint doesn't have stays until the repository moves it, and stops no
+    # update.
+    releases = GuideReleases(tmp_path, monkeypatch)
+    releases.release("v1.0.0", releases.current.replace(releases.MARKS, ""))
+    releases.copy("v1.0.0", "home-assistant")
+    own = "The [release guide](docs/releases.md) describes every step."
+    releases.write_guide(", and delivers it to HACS.", f"; {own}")
+    releases.release("v2.0.0", releases.current)
+    guide = releases.update("v2.0.0")
+    assert f"; {own}" in guide
+    assert ", and delivers it to HACS." not in guide
+    assert f"\n\n{releases.MARKS}" in guide
+
+
+def test_a_node_package_that_no_registry_takes_says_so_everywhere(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    published = projects["node-package"]
+    private = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A package that stays off npm.",
+        project_type="node-package",
+        publish_package=False,
+    )
+    settings = private / ".github/repository.toml"
+    for name, said in (
+        ("CONTRIBUTING.md", "delivers it to npm"),
+        ("CONTRIBUTING.md", "`*.tgz` for what it publishes on npm"),
+        (".github/repository.toml", 'PUBLISH_TO = "npm"'),
+        (".github/repository.toml", "[environments.npm]"),
+        ("SECURITY.md", "gh attestation verify ./*.tgz"),
+        (".bestpractices.json", "and from npm"),
+        ("README.md", "npm install"),
+    ):
+        assert said in (published / name).read_text(encoding="utf-8"), said
+        assert said not in (private / name).read_text(encoding="utf-8"), said
+    assert 'PUBLISH_TO = "none"' in settings.read_text(encoding="utf-8")
+    manifest = (private / "package.json").read_text(encoding="utf-8")
+    assert json.loads(manifest)["private"] is True
+    assert "private" not in json.loads(
+        (published / "package.json").read_text(encoding="utf-8")
+    )
+    answers = (private / ".copier-answers.yml").read_text(encoding="utf-8")
+    assert "publish_package: false\n" in answers
+
+
 def test_a_release_left_as_a_draft_is_finished_by_hand_or_by_a_second_try() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "release-please")
@@ -17625,12 +18543,14 @@ PACKAGES: dict[str, dict[str, dict[str, str] | None]] = {
         "demo.tar.gz": {"demo/appinfo/info.xml": "<info/>\n"},
         "demo.tar.gz.sig": None,
     },
+    "chrome-web-store": {"demo-1.2.3.zip": {"manifest.json": "{}\n", "lib/sw.js": ""}},
 }
 SHIPPED = {
     "hacs": ["manifest.json", "sensor.py"],
     "pypi": ["demo-1.2.3.dist-info/METADATA", "demo/__init__.py"],
     "npm": ["package/package.json"],
     "nextcloud-appstore": ["demo/appinfo/info.xml"],
+    "chrome-web-store": ["lib/sw.js", "manifest.json"],
 }
 # The tree of the tag of a project that ships its sources, with what only checks,
 # tests and documents it, the tools of the blueprint among them.
@@ -17884,6 +18804,7 @@ def describe_the_release(
         ("pypi", "image"),
         ("npm", "image"),
         ("nextcloud-appstore", "image"),
+        ("chrome-web-store", "image"),
         ("github-action", "directory"),
         ("ghcr", "directory"),
         ("none", "directory"),
@@ -18220,6 +19141,34 @@ def test_the_verification_fails_for_an_asset_of_the_project_without_its_provenan
     assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
     assert (attested in done.summary) is (unattested is None), done.summary
     assert (missing in done.summary) is (unattested is not None), done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("unattested", [None, "demo-extension-1.2.3.zip"])
+def test_the_verification_of_a_chrome_extension_needs_the_provenance_of_its_zip(
+    tmp_path: Path, unattested: str | None
+) -> None:
+    # The whole step: the right manifest in the zip doesn't make up for a zip without
+    # the signed provenance of the isolated build, the one that the store then gets.
+    done = verify_a_hacs_release(
+        tmp_path,
+        publish_to="chrome-web-store",
+        zip_name="demo-extension-1.2.3.zip",
+        zipped={
+            "manifest.json": json.dumps({"manifest_version": 3, "version": "1.2.3"})
+        },
+        unattested=unattested,
+    )
+
+    assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
+    assert (
+        "- ✔ ./demo-extension-1.2.3.zip holds the manifest.json of Manifest V3 and the"
+        " version 1.2.3 at its root"
+    ) in done.summary
+    attested = "demo-extension-1.2.3.zip carries the signed provenance of the isolated"
+    missing = "demo-extension-1.2.3.zip has no valid provenance of the isolated build."
+    assert (f"- ✔ {attested}" in done.summary) is (unattested is None), done.summary
+    assert (f"- ✘ {missing}" in done.summary) is (unattested is not None), done.summary
 
 
 @WITH_JQ
