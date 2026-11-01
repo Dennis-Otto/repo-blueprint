@@ -824,6 +824,44 @@ def plain_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("plain_git")
+def test_a_new_repository_fails_on_every_violation_from_its_first_run(
+    tmp_path: Path,
+) -> None:
+    # The line baseline = true is for a repository that an update brings the check to.
+    root = tmp_path / "demo"
+    (root / ".github").mkdir(parents=True)
+    (root / ".copier-answers.yml").write_text(ANSWERS, encoding="utf-8")
+    accepted = root / ".github/a11y-accepted.toml"
+    accepted.write_text(
+        "# What it accepts.\n\n# Until the first run.\n# It writes.\nbaseline = true\n",
+        encoding="utf-8",
+    )
+    gh = Shell()
+
+    def git_and_simulated_gh(
+        arguments: Sequence[str], folder: Path
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments[0] == "gh":
+            return gh(arguments, folder)
+        return bootstrap.run_command(arguments, folder)
+
+    create(root, "A demo", run=git_and_simulated_gh)
+
+    assert accepted.read_text(encoding="utf-8") == "# What it accepts.\n"
+    assert (
+        bootstrap.run_command(["git", "status", "--porcelain"], root).stdout.strip()
+        == ""
+    )
+
+
+def test_a_repository_without_accepted_violations_starts_all_the_same(
+    tmp_path: Path,
+) -> None:
+    bootstrap.no_baseline(tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.usefixtures("plain_git")
 def test_the_first_commit_is_signed_off_on_main_with_every_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -53,6 +53,7 @@ _skip_if_exists:
   - .github/cspell-words.txt
   - .github/renovate.json5
   - .github/renovate-accepted.json5
+  - .github/a11y-accepted.toml
   - /osv-scanner.toml
   - .github/findings.toml
   - .github/dependency-review.yml

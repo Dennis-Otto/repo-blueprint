@@ -73,6 +73,13 @@ jobs:
           path: .mypy_cache
           key: mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-${{ hashFiles('**/*.py') }}
           restore-keys: mypy-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}-
+      # The tests of the accessibility check, a step of scripts/check.sh, need the Node
+      # of the check docs, which measures their coverage. The blueprint alone keeps them.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: hashFiles('.github/a11y/check.test.mjs') != ''
+        timeout-minutes: 5
+        with:
+          node-version: 24
       - name: Run the checks
         run: bash scripts/check.sh
       - name: Show the coverage
