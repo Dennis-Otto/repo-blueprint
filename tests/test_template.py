@@ -17075,9 +17075,11 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     # attests anything.
     (checkout,) = steps_using(job, "actions/checkout")
     assert checkout["with"] == {
-        "ref": "${{ inputs.sha }}",
+        "ref": "${{ inputs.tag }}",
         "persist-credentials": False,
     }
+    check = step_named(job, "Check that the tag stands at the commit of the release")
+    assert check["env"]["SHA"] == "${{ inputs.sha }}"
     (node,) = steps_using(job, "actions/setup-node")
     assert node["with"]["package-manager-cache"] is False
     assert node["if"] == f"{HOOK} && hashFiles('package.json') != ''"
@@ -17140,6 +17142,25 @@ def build_the_assets_of_the_project(
         root=root,
         workspace=workspace,
     )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(("commit", "passes"), [("abc", True), ("moved", False)])
+def test_the_hook_runs_only_at_the_commit_of_the_release(
+    tmp_path: Path, commit: str, passes: bool
+) -> None:
+    step = workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        "project-assets",
+        "Check that the tag stands at the commit of the release",
+        env={"SHA": "abc"},
+        stubs={"git": f"echo {commit}
+"},
+    )
+
+    assert (step.returncode == 0) is passes, step.stdout + step.stderr
+    assert ("::error::The tag stands at moved" in step.stdout) is not passes
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
