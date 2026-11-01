@@ -40,6 +40,8 @@ Ein Projekt, das etwas ausliefert, das keine Registry baut, etwa das Zip einer B
   <img src="../images/diagrams/how-a-project-adds-its-own-release-assets.de.svg" alt="Wie ein Projekt eigene Assets zum Release hinzufügt: Das scripts/release-assets.sh des Projekts baut seine eigenen Assets, etwa das Zip einer Browser-Erweiterung, am Commit des Releases, in einem Job, der nichts schreiben darf, kein Secret hat und nur GitHub, Node.js und npm erreicht. Der Job prüft, dass jedes Asset eine Datei mit einem Namen ist, den GitHub behält, und gibt die Dateien als Artefakt weiter. Der Job des Releases übernimmt sie, nachdem er den signierten Tag geprüft hat, lehnt einen Namen ab, den eines seiner eigenen Assets hat, und attestiert sie mit dem Paket, den SBOMs und den Hinweisen. Alle kommen an den Entwurf, bevor er veröffentlicht wird, und die Release-Prüfung schlägt bei einem Asset ohne seine signierte Provenance fehl.">
 </picture>
 
+Scheitert das Skript, bleibt das Release ein Entwurf, und der Job erklärt in der Zusammenfassung seines Laufs, was fehlschlug und wie man es behebt. Läuft der Workflow Release erneut, nimmt er den Entwurf wieder auf; eine Korrektur des Skripts kommt mit dem nächsten Release, denn der Build läuft auf dem Commit des Releases.
+
 Ein Release von paperless-sync, wie GitHub seine Assets zeigt: die signierte App, ihre Signatur, ihre SBOMs als CycloneDX und SPDX, die Provenance ihres Builds mit ihrem Sigstore-Bundle, die Hinweise zu ihren Abhängigkeiten und die Attestation des Releases:
 
 <picture>
