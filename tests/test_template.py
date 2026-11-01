@@ -10096,6 +10096,13 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
         found = [match.groupdict() for match in re.finditer(pattern, text)]
         assert [item["currentValue"] for item in found] == [version], page.name
         assert f"uvx --from copier=={version} copier copy --data project_type=" in text
+    # The walkthrough for an owner's own account copies and updates with the same
+    # release: GitHub shows the page too, where a snippet of the website stays a line.
+    assert '"/^docs/own-account(\\\\.de)?\\\\.md$/"' in renovate
+    for name in ("docs/own-account.md", "docs/own-account.de.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        found = [match.groupdict() for match in re.finditer(pattern, text)]
+        assert [item["currentValue"] for item in found] == [version] * 4, name
 
 
 # The pages of the kinds, in English and in German: the heading of the section of
