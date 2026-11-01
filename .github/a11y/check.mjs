@@ -606,6 +606,13 @@ export async function main(argv, root = ".") {
     accepted = parseAccepted(acceptedText);
   } catch (error) {
     console.error(error.message);
+    if (process.env.GITHUB_ACTIONS === "true") {
+      const title = escaped("Accessibility: the accepted violations", true);
+      console.log(`::error file=${escaped(ACCEPTED, true)},title=${title}::${escaped(error.message)}`);
+    }
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Accessibility of the website\n\nThe check can't read what it accepts, so it stopped before it opened a page.\n\n**The problem:** ${error.message}\n\n**How to fix it:** every \`[[accepted]]\` entry in \`${ACCEPTED}\` has a \`page\`, a \`rule\` and a \`reason\`, and the file holds nothing else than those and the line \`baseline = true\`.\n`);
+    }
     return 2;
   }
   const digest = await digestOf(site, root);

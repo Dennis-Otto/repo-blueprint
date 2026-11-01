@@ -13901,6 +13901,13 @@ def test_a_quick_check_never_cancels_the_run_for_another_commit(name: str) -> No
     assert group.endswith("-${{ github.event.pull_request.head.sha }}")
 
 
+def test_the_weekly_docs_run_never_takes_the_place_of_a_waiting_push() -> None:
+    # GitHub keeps one waiting run for each group. The run of the schedule publishes
+    # nothing, so in the group of main it could leave the latest commit unpublished.
+    group = concurrency_of("docs.yml")
+    assert "github.event_name == 'schedule' && 'weekly-' || ''" in group
+
+
 @pytest.mark.parametrize("name", LONG_CHECKS)
 def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
     # Their runners are worth more than the race, which the bot for cancelled checks

@@ -287,6 +287,14 @@ test("an entry without its reason, or a file that isn't one, stops the check", a
     const { status, lines } = await run(t, repo, [repo.built]);
     assert.equal(status, 2);
     assert.match(lines[0], message);
+    // On a runner it says so at the file and in the summary, also on a fork.
+    const seen = await run(t, repo, [repo.built], { onRunner: true });
+    assert.equal(seen.status, 2);
+    assert.ok(seen.lines.some((line) =>
+      line.startsWith("::error file=.github/a11y-accepted.toml,title=Accessibility%3A the accepted violations::") &&
+      message.test(line)));
+    assert.match(seen.summary, message);
+    assert.match(seen.summary, /How to fix it/);
   }
 });
 

@@ -847,7 +847,9 @@ def test_a_new_repository_fails_on_every_violation_from_its_first_run(
 
     create(root, "A demo", run=git_and_simulated_gh)
 
-    assert accepted.read_text(encoding="utf-8") == "# What it accepts.\n"
+    # In bytes: a carriage return on Windows would fail the step Text files of the
+    # check of the new repository.
+    assert accepted.read_bytes() == b"# What it accepts.\n"
     assert (
         bootstrap.run_command(["git", "status", "--porcelain"], root).stdout.strip()
         == ""

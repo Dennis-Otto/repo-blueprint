@@ -37,9 +37,11 @@ permissions: {}
 # One run for each commit of a pull request: a quick check, whose runs for different
 # commits never cancel each other, so that a late run for an older commit can't
 # cancel the check of the head. Runs on main wait for each other, so that the
-# website of the latest commit is published last.
+# website of the latest commit is published last. The run of each week has a group of
+# its own: it publishes nothing, and GitHub keeps one waiting run for each group, so
+# in that of main it could take the place of a push that waits.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'weekly-' || '' }}${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

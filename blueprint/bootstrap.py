@@ -254,7 +254,11 @@ def no_baseline(root: Path) -> None:
     path = root / ACCEPTED
     if path.is_file():
         text = path.read_text(encoding="utf-8")
-        path.write_text(BASELINE.sub("", text).rstrip("\n") + "\n", encoding="utf-8")
+        path.write_text(
+            BASELINE.sub("", text).rstrip("\n") + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
 
 
 def python_finding(python: tuple[int, ...]) -> Finding:
