@@ -638,6 +638,36 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
 
 
+# The release that fixes an advisory which a pin of the blueprint once fell under.
+# Renovate only ever moves a pin forward; this holds it against a move back by hand,
+# on the machine and in the workflows of every kind, while zizmor reports it only on
+# GitHub, in the analysis of the pull request.
+FIXED_RELEASES = {
+    # GHSA-5xjx-3w67-w9x9: the action trusts a revoked root certificate in the chain
+    # that Sigstore uses for trusted publishing and attestations on PyPI.
+    "pypa/gh-action-pypi-publish": "1.14.3",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_no_workflow_pins_an_action_below_the_release_that_fixes_its_advisory(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    pins = re.findall(
+        r"uses: ([\w./-]+)@[0-9a-f]{40} # v?(\S+)", "\n".join(workflows(root).values())
+    )
+    # A renamed action would otherwise pass without a look at its pin.
+    assert {action for action, _ in pins} >= set(FIXED_RELEASES)
+
+    def release(version: str) -> list[int]:
+        return [int(part) for part in version.split(".")]
+
+    for action, version in pins:
+        if action in FIXED_RELEASES:
+            assert release(version) >= release(FIXED_RELEASES[action]), action
+
+
 # The runner of the jobs, named with its version, and the one that the Next runner
 # workflow tries every week before the jobs move to it. A move changes both here.
 RUNNER = "ubuntu-24.04"
