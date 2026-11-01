@@ -235,7 +235,7 @@ nextcloud_namespace:
 
 # A package goes to the registry of its kind, unless nobody installs it from there, such
 # as a private one that only its releases carry. publish_to follows this answer, and with
-# it the variable PUBLISH_TO and every document that speaks of the delivery (decision 0094).
+# it the variable PUBLISH_TO and every document that speaks of the delivery (decision 0095).
 publish_package:
   type: bool
   help: Publish the package on the registry of its kind, npm or PyPI, with every release; no for a package that nobody installs from there, such as a private one
