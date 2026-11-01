@@ -1,0 +1,222 @@
+# The files that the blueprint keeps current in this repository: all that it renders,
+# other than those that belong to the project. A pull request that changes one gets a
+# notice from the check lint and in the report of the PR coach, because the next update
+# that changes the same lines conflicts with it. reference.py of the blueprint writes
+# this list: https://github.com/Dennis-Otto/repo-blueprint
+.bestpractices.json
+.devcontainer/Dockerfile
+.devcontainer/devcontainer-lock.json
+.devcontainer/devcontainer.json
+.devcontainer/setup.sh
+[%- if stack == 'container' %]
+.dockerignore
+[%- endif %]
+.editorconfig
+.gitattributes
+.githooks/pre-push
+[%- if sponsor %]
+.github/FUNDING.yml
+[%- endif %]
+.github/a11y/check.mjs
+.github/a11y/package-lock.json
+.github/a11y/package.json
+.github/actionlint.yaml
+.github/blueprint.py
+.github/blueprint/__init__.py
+.github/blueprint/advisories.py
+.github/blueprint/annotate.py
+.github/blueprint/bootstrap.py
+.github/blueprint/bot_health.py
+.github/blueprint/branches.py
+.github/blueprint/changelog.py
+.github/blueprint/checklist.py
+.github/blueprint/cli.py
+.github/blueprint/coach.py
+.github/blueprint/coverage_comment.py
+.github/blueprint/dependabot.py
+.github/blueprint/diagrams.py
+.github/blueprint/fixes.py
+.github/blueprint/github.py
+.github/blueprint/locks.py
+.github/blueprint/mutation.py
+.github/blueprint/notices.py
+.github/blueprint/overrides.py
+.github/blueprint/owned.txt
+.github/blueprint/ownership.py
+.github/blueprint/pages.py
+.github/blueprint/pr_report.py
+.github/blueprint/ruff.toml
+.github/blueprint/screenshots.py
+.github/blueprint/settings.py
+.github/blueprint/site_check.py
+.github/blueprint/update.py
+.github/blueprint/versions.py
+.github/blueprint/vex.py
+.github/checks.toml
+.github/copier-requirements.txt
+.github/dependabot.yml
+.github/docs-requirements.txt
+.github/egress-firewall.yaml
+.github/issue-assistant/config.toml
+.github/markdownlint.jsonc
+.github/mkdocs-blueprint-diagrams/from-a-change-to-a-release.dark.svg
+.github/mkdocs-blueprint-diagrams/from-a-change-to-a-release.de.dark.svg
+.github/mkdocs-blueprint-diagrams/from-a-change-to-a-release.de.svg
+.github/mkdocs-blueprint-diagrams/from-a-change-to-a-release.svg
+.github/mkdocs-blueprint-diagrams/how-a-repository-looks-after-itself.dark.svg
+.github/mkdocs-blueprint-diagrams/how-a-repository-looks-after-itself.de.dark.svg
+.github/mkdocs-blueprint-diagrams/how-a-repository-looks-after-itself.de.svg
+.github/mkdocs-blueprint-diagrams/how-a-repository-looks-after-itself.svg
+.github/mkdocs-blueprint.css
+.github/mkdocs-blueprint.js
+.github/mkdocs-blueprint.yml
+.github/mkdocs_blueprint.py
+[%- if stack in ['python', 'home-assistant'] %]
+.github/mutation-requirements.txt
+[%- endif %]
+.github/prose/cspell.json
+.github/prose/package-lock.json
+.github/prose/package.json
+[%- if stack == 'php' %]
+.github/psalm/NextcloudTaintPlugin.php
+[%- endif %]
+[%- if stack == 'php' %]
+.github/psalm/canary.xml
+[%- endif %]
+[%- if stack == 'php' %]
+.github/psalm/canary/CanaryController.php
+[%- endif %]
+[%- if stack == 'php' %]
+.github/psalm/check-canary.php
+[%- endif %]
+.github/pull_request_template.md
+.github/renovate-blueprint.json5
+[%- if renovate_runner == 'self' %]
+.github/renovate-global.json5
+[%- endif %]
+.github/repository.toml
+.github/screenshots-browser-requirements.txt
+.github/screenshots-requirements.txt
+.github/sign-tag.sh
+.github/social-preview/Dockerfile
+.github/workflows/after-checks.yml
+.github/workflows/area-labels.yml
+.github/workflows/blueprint-update.yml
+.github/workflows/bot-health.yml
+.github/workflows/build-release.yml
+.github/workflows/ci.yml
+.github/workflows/cleanup.yml
+.github/workflows/codeql.yml
+.github/workflows/dependabot-automerge.yml
+.github/workflows/dependency-review.yml
+.github/workflows/diagrams.yml
+.github/workflows/docs.yml
+.github/workflows/findings.yml
+[%- if project_type in ['python-package', 'github-action'] %]
+.github/workflows/fuzz.yml
+[%- endif %]
+.github/workflows/issue-assistant.yml
+.github/workflows/issue-lifecycle.yml
+.github/workflows/labels.yml
+.github/workflows/links.yml
+.github/workflows/lint.yml
+[%- if stack in ['python', 'home-assistant', 'php'] %]
+.github/workflows/mutation.yml
+[%- endif %]
+[%- if stack == 'node' %]
+.github/workflows/newest-node.yml
+[%- endif %]
+[%- if stack == 'python' %]
+.github/workflows/newest-python.yml
+[%- endif %]
+.github/workflows/osv-scanner.yml
+[%- if stack in ['python', 'home-assistant'] %]
+.github/workflows/properties.yml
+[%- endif %]
+[%- if publish_to == 'chrome-web-store' %]
+.github/workflows/publish-store.yml
+[%- endif %]
+.github/workflows/pull-request-title.yml
+[%- if project_type == 'nextcloud-app' %]
+.github/workflows/register-app.yml
+[%- endif %]
+.github/workflows/release.yml
+[%- if renovate_runner == 'self' %]
+.github/workflows/renovate.yml
+[%- endif %]
+.github/workflows/sbom.yml
+.github/workflows/scorecard.yml
+.github/workflows/screenshot-bot.yml
+.github/workflows/secret-scan.yml
+.github/workflows/settings.yml
+.github/workflows/update-branches.yml
+[%- if project_type == 'nextcloud-app' %]
+.github/workflows/upstream.yml
+[%- endif %]
+.github/workflows/verify-release.yml
+.github/workflows/welcome.yml
+.github/workflows/zizmor.yml
+.github/zizmor.yml
+.gitignore
+.markdownlint-cli2.jsonc
+[%- if stack == 'php' %]
+.nextcloudignore
+[%- endif %]
+[%- if stack == 'node' %]
+.nvmrc
+[%- endif %]
+[%- if stack == 'php' %]
+.php-cs-fixer.dist.php
+[%- endif %]
+[%- if stack in ['python', 'home-assistant'] %]
+.python-version
+[%- endif %]
+AGENTS.md
+CLAUDE.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+GOVERNANCE.md
+LICENSE
+LICENSES/{= license =}.txt
+REUSE.toml
+SECURITY.md
+SUPPORT.md
+[%- if stack == 'node' %]
+biome.jsonc
+[%- endif %]
+changelog.d/.gitkeep
+[%- if stack == 'php' %]
+krankerl.toml
+[%- endif %]
+lychee.toml
+[%- if stack == 'php' %]
+phpunit.xml
+[%- endif %]
+[%- if stack == 'php' %]
+psalm.xml
+[%- endif %]
+release-please-config.json
+[%- if project_type == 'chrome-extension' %]
+scripts/check-manifest.mjs
+[%- endif %]
+scripts/check.sh
+[%- if project_type == 'chrome-extension' %]
+scripts/chrome-for-testing.sh
+[%- endif %]
+scripts/diagrams.sh
+[%- if project_type == 'chrome-extension' %]
+scripts/load-extension.mjs
+[%- endif %]
+[%- if project_type == 'chrome-extension' %]
+scripts/package-extension.sh
+[%- endif %]
+scripts/social-preview.sh
+[%- if project_type == 'chrome-extension' %]
+scripts/store-status.mjs
+[%- endif %]
+[%- if stack == 'node' %]
+tsconfig.build.json
+[%- endif %]
+[%- if stack == 'node' %]
+tsconfig.json
+[%- endif %]

@@ -51,8 +51,9 @@ INCLUDES = Path("template/.github/workflows")
 # The templates of a release, in the checkout of its commit.
 TEMPLATES = Path("templates/.github")
 # What the sync may write, by paths of plain names: a workflow, the firewall policy,
-# the file of the template that renders a workflow and the reference pages of the
-# website, which reference.py writes anew from the workflows. Anything else that
+# the file of the template that renders a workflow, and what reference.py writes anew
+# from the workflows: the reference pages of the website and the list of the files of
+# the blueprint, which a new workflow joins. Anything else that
 # install of a release writes is new, and a maintainer takes it over by hand.
 NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 TAKEABLE = re.compile(
@@ -60,9 +61,12 @@ TAKEABLE = re.compile(
     r"|\.github/egress-firewall\.yaml"
     rf"|template/\.github/workflows/{NAME}\.yml\.jinja"
     r"|docs/reference/(?:questions|variables)\.md"
+    r"|template/\.github/blueprint/owned\.txt\.jinja"
 )
 # The script that writes the reference pages, in the root of the blueprint.
 REFERENCE = Path("reference.py")
+# The list of the files of the blueprint, which that script writes too.
+OWNED = Path("template/.github/blueprint/owned.txt.jinja")
 COMMIT = (
     "mutation($input: CreateCommitOnBranchInput!) "
     "{ createCommitOnBranch(input: $input) { commit { oid } } }"
@@ -236,7 +240,8 @@ def kept(folder: Path) -> list[str]:
             if path.is_symlink() or not TAKEABLE.fullmatch(relative):
                 raise SyncError(
                     f"The sync kept {relative}, which is no workflow, firewall policy, "
-                    "file of the template that renders a workflow or reference page."
+                    "file of the template that renders a workflow, reference page or list of "
+                    "the files of the blueprint."
                 )
             found.append(relative)
     if not found:
@@ -288,6 +293,8 @@ def what(root: Path, folder: Path, path: str) -> str:
     the release."""
     if path == FIREWALL.as_posix():
         return "the firewall policy of the release"
+    if path == OWNED.as_posix():
+        return "the list of the files of the blueprint, written anew"
     if path.startswith(f"{INCLUDES.as_posix()}/"):
         name = path.removeprefix(f"{INCLUDES.as_posix()}/").removesuffix(".jinja")
         return f"new, renders `{WORKFLOWS.as_posix()}/{name}` in every repository"

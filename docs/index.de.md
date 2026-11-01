@@ -44,7 +44,7 @@ hide:
 
     ---
 
-    Ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests, und dem Changelog als Notes. Sein Merge veröffentlicht das Release mit Paket, SBOM und signierter Provenance (SLSA Build Level 3) und prüft es so, wie es seine Nutzer können.
+    Ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests, und dem Changelog als Notes. Sein Merge veröffentlicht das Release mit Paket, SBOM und signierter Provenance (SLSA Build Level 3, Level 2 bei einem Container-Image) und prüft es so, wie es seine Nutzer können.
 
 - :material-package-up:{ .lg .middle } **Abhängigkeiten**
 

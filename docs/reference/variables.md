@@ -12,6 +12,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 
 - [`BETA_CHANNEL`](#beta_channel): `true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases.
 - [`BLUEPRINT_AUTOMERGE`](#blueprint_automerge): `off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way.
+- [`BLUEPRINT_OWNERSHIP`](#blueprint_ownership): `fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint, where it leaves a notice with any other value or none.
 - [`CODE_SCANNING`](#code_scanning): `off` keeps every finding out of code scanning, which GitHub offers a private repository only with GitHub Code Security: CodeQL doesn't analyze, since its terms allow it on private code only with GitHub Code Security or Advanced Security, and its check passes with a notice; zizmor fails on every finding; OSV-Scanner and the Scorecard keep theirs in their checks.
 - [`CWS_EXTENSION_ID`](#cws_extension_id): The ID of the item of a Chrome extension in the Chrome Web Store, from the address of the item in the Developer Dashboard, to which the workflow *Chrome Web Store* delivers every release.
 - [`CWS_PUBLISHER_ID`](#cws_publisher_id): The ID of the publisher of a Chrome extension, under *Account* in the Developer Dashboard of the Chrome Web Store; the API of the store names the item by it and `CWS_EXTENSION_ID`.
@@ -48,6 +49,17 @@ What the workflows say of it:
 What the workflows say of it:
 
 - `blueprint-update.yml`: The repository variable `BLUEPRINT_AUTOMERGE` set to off makes every update wait.
+
+### `BLUEPRINT_OWNERSHIP`
+
+`fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint, where it leaves a notice with any other value or none. The report of the PR coach says where the change belongs instead. Bots stay out of it: the update of the blueprint and the pull requests of the other bots.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`lint.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/lint.yml) (Lint, every repository)
+
+What the workflows say of it:
+
+- `lint.yml`: A failure only with the repository variable `BLUEPRINT_OWNERSHIP` set to fail.
 
 ### `CODE_SCANNING`
 

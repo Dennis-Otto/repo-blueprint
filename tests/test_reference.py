@@ -180,6 +180,7 @@ def test_the_committed_pages_say_what_their_sources_say() -> None:
     assert set(written) == {
         reference.QUESTIONS,
         reference.VARIABLES,
+        reference.OWNED,
         *reference.READMES.values(),
         *kinds,
         reference.ROLLOUT,
@@ -726,11 +727,14 @@ def test_the_command_writes_the_pages_and_checks_them(
         " python3 reference.py writes it anew\n"
         "reference.py: docs/reference/variables.md differs from its sources;"
         " python3 reference.py writes it anew\n"
+        "reference.py: template/.github/blueprint/owned.txt.jinja differs from its"
+        " sources; python3 reference.py writes it anew\n"
     )
     assert reference.main([], repository) == 0
     assert capsys.readouterr().out == (
         "reference.py: wrote docs/reference/questions.md\n"
         "reference.py: wrote docs/reference/variables.md\n"
+        "reference.py: wrote template/.github/blueprint/owned.txt.jinja\n"
     )
     written = (repository / reference.VARIABLES).read_bytes()
     assert b"\r" not in written
