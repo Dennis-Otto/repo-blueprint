@@ -7,6 +7,24 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.3.0...v1.4.0) (2026-11-01)
+
+
+### Features
+
+* give each Renovate run a token scoped to its repository ([#560](https://github.com/Dennis-Otto/repo-blueprint/issues/560)) ([683f1bf](https://github.com/Dennis-Otto/repo-blueprint/commit/683f1bf107432ce5ffac05e8166dd02f4672fed8))
+* register the release app with one command through GitHub's app manifest flow ([#555](https://github.com/Dennis-Otto/repo-blueprint/issues/555)) ([c997ff6](https://github.com/Dennis-Otto/repo-blueprint/commit/c997ff648036c7ad7fa106ca4899db65db192f5d))
+* tell a pull request that edits a file of the blueprint where its change belongs, before the next update conflicts ([#540](https://github.com/Dennis-Otto/repo-blueprint/issues/540)) ([fd5b5b3](https://github.com/Dennis-Otto/repo-blueprint/commit/fd5b5b382d74f2319d33b088b9ac0757c15bbb16))
+
+
+### Bug fixes
+
+* a node package that publishes nowhere gets no npm text ([#558](https://github.com/Dennis-Otto/repo-blueprint/issues/558)) ([28cdf76](https://github.com/Dennis-Otto/repo-blueprint/commit/28cdf76d3848992a4b3736ec01d2695683e49e2b))
+* let a project add its own text to the Releases part of CONTRIBUTING.md ([#557](https://github.com/Dennis-Otto/repo-blueprint/issues/557)) ([cba8524](https://github.com/Dennis-Otto/repo-blueprint/commit/cba8524f9760a323d24470457857a81fa430c3b6))
+* let the Rollout find the job that published a release in the hour that repeats ([#544](https://github.com/Dennis-Otto/repo-blueprint/issues/544)) ([cec4e48](https://github.com/Dennis-Otto/repo-blueprint/commit/cec4e485b15867d42524b46f141a9d6f101e74d1))
+* **nextcloud:** leave a demo folder out of the app package ([#533](https://github.com/Dennis-Otto/repo-blueprint/issues/533)) ([1a5350f](https://github.com/Dennis-Otto/repo-blueprint/commit/1a5350f390f1a97df5c90b7bea3244fc38849db1))
+* **security:** build releases without the release app's key, and verify provenance by ref and runner ([#529](https://github.com/Dennis-Otto/repo-blueprint/issues/529)) ([8577c1c](https://github.com/Dennis-Otto/repo-blueprint/commit/8577c1c1c4402c5de7a7e94eef91cce95bf3d002))
+
 ## [1.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.2...v1.3.0) (2026-11-01)
 
 ### Features
