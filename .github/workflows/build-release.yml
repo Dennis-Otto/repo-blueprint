@@ -58,7 +58,7 @@ jobs:
       SBOM_SYFT_SHA256: bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           disable-sudo-and-containers: ${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}
@@ -75,6 +75,39 @@ jobs:
             ${{ vars.PUBLISH_TO == 'pypi' && 'raw.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443' || '' }}
             ${{ vars.PUBLISH_TO == 'npm' && 'raw.githubusercontent.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }}
             ${{ vars.PUBLISH_TO == 'chrome-web-store' && 'raw.githubusercontent.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }}
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+            uploads.github.com:443
+            release-assets.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            *.actions.githubusercontent.com:443
+            ${{ vars.PUBLISH_TO == 'nextcloud-appstore' && 'raw.githubusercontent.com:443 download.nextcloud.com:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'pypi' && 'raw.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'npm' && 'raw.githubusercontent.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'chrome-web-store' && 'raw.githubusercontent.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }}
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
       # Anybody with a token that may push could create the tag of a coming release
       # first, at a commit of their own. Only a tag that the release workflow signed, at
       # the commit of the release, is built and signed here. The check is the script of

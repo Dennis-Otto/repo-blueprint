@@ -3,7 +3,9 @@
 // `npx --no -- biome check --write .` fixes what it can. Biome checks the code and the JSON of the package that git
 // doesn't ignore, in the indentation of .editorconfig, with its recommended rules
 // and sorted imports. It leaves out .github/, the tools and the settings of the
-// bots, which keep the format of the blueprint.
+// bots, which keep the format of the blueprint, and Markdown and YAML, which Biome
+// formats since 2.6: markdownlint checks the Markdown, and the blueprint renders
+// both in the format they keep.
 //
 // The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
 {
@@ -16,7 +18,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!.github"]
+    "includes": ["**", "!.github", "!**/*.md", "!**/*.yml", "!**/*.yaml"]
   },
   "formatter": {
     "useEditorconfig": true
