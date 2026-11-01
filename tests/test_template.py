@@ -4439,6 +4439,8 @@ def test_a_nextcloud_app_packages_only_what_it_needs(
         # The configuration of the mutation tests that a project commits, which the
         # weekly Mutation workflow reads in place of the one it writes.
         "infection.json5",
+        # A demo that a project commits for people to try the app, such as a Compose file.
+        "demo",
         "lychee.toml",
         "mkdocs.yml",
         "screenshots",
