@@ -45,4 +45,4 @@ A release app that lacks one of the seven permissions now fails the settings bot
 
 An administrator can no longer approve a deployment past the rules of `release` or `issue-assistant`; a job that needs their secrets runs on `main`.
 
-What remains for later: the second app of option 4, which the owner creates, and a token of Renovate for each repository, from a matrix over the repositories of the app with at most two at once, so that a package manager that runs code of one repository's dependencies can't push to the others ([#445](https://github.com/Dennis-Otto/repo-blueprint/issues/445)).
+What remains for later: the second app of option 4, which the owner creates. A token of Renovate for each repository, so that a package manager that runs code of one repository's dependencies can't push to the others, came with [decision 0094](0094-each-run-of-renovate-has-a-token-for-its-repository-alone.md).
