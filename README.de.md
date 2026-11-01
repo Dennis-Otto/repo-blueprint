@@ -19,7 +19,7 @@
 Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für acht Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Chrome-Erweiterungen, Container-Images und Repositories ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
 
 - **Getestet bei jeder Änderung.** `scripts/check.sh` führt dieselben Prüfungen auf deinem Rechner und in der CI aus, mit voller Abdeckung des Codes. Der PR-Coach erklärt jede Prüfung, die scheitert, und der Fix-Bot committet, was ein Befehl beheben kann.
-- **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3 und prüft es danach so, wie seine Nutzer es können.
+- **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3 (Container-Images: Level 2) und prüft es danach so, wie seine Nutzer es können.
 - **Sicher ab dem ersten Commit.** CodeQL, OpenSSF Scorecard, ein Secret-Scan und eine Prüfung der Workflows laufen von Anfang an, jede Action ist auf einen Commit-Hash festgelegt, und etwa 90 bis 100 Antworten von OpenSSF Best Practices sind ausgefüllt.
 - **Von selbst aktuell.** Renovate aktualisiert die Abhängigkeiten, der Einstellungs-Bot hält die Einstellungen als Code, und der Blueprint-Bot bringt jede Version des Blueprints als Pull Request, den seine Prüfungen testen, bevor er merged; jedes öffentliche Repository, das [mit dem Blueprint gebaut](#mit-dem-blueprint-gebaut) ist, bekommt so jede Version.
 

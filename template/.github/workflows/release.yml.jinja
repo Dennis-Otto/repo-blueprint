@@ -1,2 +1,7 @@
 [%- from "includes/replace.jinja" import replaced with context -%]
-{= replaced(".github/workflows/release.yml", []) -=}
+[#- The build of a Nextcloud app signs it with the key of its environment, which a
+    called workflow sees only when the caller passes its secrets on; every other
+    build gets none of them. -#]
+[%- set nothing = "    # The build gets none of the secrets of the release, only the token of its job.\n" -%]
+[%- set inherit = "    # A called workflow sees the secrets of its environment only when the caller\n    # passes its secrets on: the build signs the Nextcloud app with the key of the\n    # environment release. The build is a workflow of this repository.\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n" -%]
+{= replaced(".github/workflows/release.yml", [[nothing, inherit if publish_to == 'nextcloud-appstore' else nothing]]) -=}

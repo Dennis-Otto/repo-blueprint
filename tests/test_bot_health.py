@@ -490,6 +490,44 @@ def test_runs_of_pull_requests_and_other_branches_change_nothing(
     assert writes(github) == []
 
 
+def test_the_verification_of_a_published_release_opens_the_issue(
+    github: FakeGitHub,
+) -> None:
+    # It runs for the tag of the release, and GitHub mails its failure only to whoever
+    # published it, who may be the one that the verification is about.
+    github.runs[1] = run_of(
+        1, name="Release verification", event="release", branch="v1.2.3", attempt=2
+    )
+    github.jobs[(1, 2)] = [job_of_a_run(11, "verify the release", "failure")]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result.startswith("Release verification: ")
+    assert "started by a published release." in github.issues[1]["body"]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        # Any other workflow that a release starts is no check of the release.
+        {"name": "Release", "event": "release"},
+        # The name of the workflow on another branch counts as little as any other.
+        {"name": "Release verification", "event": "push"},
+        # A fork's release doesn't reach this repository's issues.
+        {"name": "Release verification", "event": "release", "head": "someone/demo"},
+    ],
+)
+def test_no_other_run_of_a_tag_counts(
+    github: FakeGitHub, changes: dict[str, str]
+) -> None:
+    github.runs[1] = run_of(1, branch="v1.2.3", attempt=2, **changes)  # type: ignore[arg-type]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result.endswith("not a run of `main`, nothing to do.")
+    assert writes(github) == []
+
+
 def test_a_run_that_runs_again_counts_at_its_next_end(github: FakeGitHub) -> None:
     github.runs[1] = run_of(1, status="in_progress", conclusion=None, attempt=2)
 

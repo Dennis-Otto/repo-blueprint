@@ -36,6 +36,9 @@ LABEL_DESCRIPTION = (
 # The type of these issues, which every repository has among its labels.
 TYPE = "maintenance"
 PULL_REQUESTS = frozenset({"pull_request", "pull_request_target"})
+# The verification that a published release starts: its run is one of the tag of the
+# release, not of the default branch, and it is the only such run that counts.
+VERIFICATION = "Release verification"
 FAILED = frozenset({"failure", "timed_out", "startup_failure"})
 OUT_OF_TIME = "The job has exceeded the maximum execution time"
 PASSED = "success"
@@ -99,6 +102,7 @@ EVENTS = {
     "push": "a push",
     "workflow_dispatch": "hand",
     "workflow_run": "the end of another workflow",
+    "release": "a published release",
 }
 
 
@@ -172,6 +176,13 @@ class Run:
             self.event not in PULL_REQUESTS
             and self.branch == branch
             and self.head == repo
+        )
+
+    def verifies_a_published_release(self, repo: str) -> bool:
+        """Whether the run is the verification that a release starts when someone
+        publishes it outside the release workflow."""
+        return (
+            self.event == "release" and self.name == VERIFICATION and self.head == repo
         )
 
     def deserves_second_try(self) -> bool:
@@ -491,7 +502,7 @@ def watch_run(api: Api, repo: str, run_id: int, now: datetime) -> str:
         return f"GitHub doesn't know the run {run_id}."
     run = Run.of(data)
     branch = default_branch(api, repo)
-    if not run.of_branch(repo, branch):
+    if not (run.of_branch(repo, branch) or run.verifies_a_published_release(repo)):
         return f"{run.name}: not a run of `{branch}`, nothing to do."
     if run.status != "completed":
         return f"{run.name}: runs again, its next end counts."

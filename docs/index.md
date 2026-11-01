@@ -44,7 +44,7 @@ hide:
 
     ---
 
-    A pull request with the next version, from the titles of the merged pull requests, and the changelog as its notes. Merging it publishes the release with its package, SBOM and signed provenance (SLSA Build Level 3), and verifies it as its users can.
+    A pull request with the next version, from the titles of the merged pull requests, and the changelog as its notes. Merging it publishes the release with its package, SBOM and signed provenance (SLSA Build Level 3, Level 2 for a container image), and verifies it as its users can.
 
 - :material-package-up:{ .lg .middle } **Dependencies**
 
