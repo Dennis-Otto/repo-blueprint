@@ -1019,9 +1019,13 @@ def problems_text(problems: Mapping[Problem, int], hidden: int, run: str) -> str
     return "\n".join(lines) + "\n"
 
 
-def renovate_report(api: Api, repo: str, logs: Iterable[Path], run: str) -> str:
+def renovate_report(
+    api: Api, repo: str, logs: Iterable[Path], run: str, *, complete: bool = True
+) -> str:
     """Keeps the one issue with Renovate's problems current from the logs of a run, one
-    for each repository where the blueprint runs Renovate for several."""
+    for each repository where the blueprint runs Renovate for several. A run that isn't
+    complete missed a repository, which may be the one with the problems, so it doesn't
+    count towards closing the issue."""
     written = [log for log in logs if log.is_file()]
     if not written:
         return "Renovate wrote no log of problems; the issue stays as it is.\n"
@@ -1039,6 +1043,11 @@ def renovate_report(api: Api, repo: str, logs: Iterable[Path], run: str) -> str:
     if not problems:
         if issue is None:
             return "Renovate logged no warning and no error.\n"
+        if not complete:
+            return (
+                "Renovate logged no problem, but not every repository finished; "
+                f"#{issue.number} stays as it is.\n"
+            )
         quiet = int(issue.state.get("quiet") or 0) + 1
         if quiet >= QUIET_RUNS:
             close_issue(

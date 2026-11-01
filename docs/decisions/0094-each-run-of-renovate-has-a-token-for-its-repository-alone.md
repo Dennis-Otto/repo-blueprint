@@ -27,7 +27,7 @@ Option 3.
 - **Each run has its own token.** `repositories: ${{ matrix.repo }}` scopes the token, `RENOVATE_REPOSITORIES` names the repository, and no run looks for others.
 - **The run looks at its token.** GitHub decides what a token reaches, so a step lists it in the log, and Renovate doesn't start when the token reaches more than the repository of its run. A repository that runs Renovate itself has the same step.
 - **Two at a time, each repository for itself.** `max-parallel: 2` leaves the jobs of the free plan, about 20 at once for the whole account, to the checks. The group of concurrency is per repository, since GitHub cancels all but the newest job that waits in a group, and a run that fails stops no other.
-- **One issue for all of them.** Each run keeps its log of problems as an artifact for a day, and the job `problems` reads them all with `bot-health renovate`. That job holds no private key and blocks every host that it doesn't need; the runs themselves no longer can write issues.
+- **One issue for all of them.** Each run keeps its log of problems as an artifact for a day, and the job `problems` reads them all with `bot-health renovate`. That job holds no private key and blocks every host that it doesn't need; the runs themselves no longer can write issues. A run in which a repository didn't finish doesn't count towards closing that issue, since the repository it missed may be the one with the problems.
 - **A repository that runs Renovate itself stays as it was:** one job, a token for itself, its own report. `includes/replace.jinja` learned to cut parts of a file, so that the template doesn't have to quote jobs whose pins Renovate moves.
 
 ## Consequences

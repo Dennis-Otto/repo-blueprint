@@ -306,7 +306,9 @@ def bot_health_command(
         summary, healthy = sweep(api, repo, root, now)
         print(summary, end="")
         return 0 if healthy else 1
-    print(renovate_report(api, repo, map(Path, arguments.log), arguments.run), end="")
+    complete = arguments.result == "success"
+    logs = map(Path, arguments.log)
+    print(renovate_report(api, repo, logs, arguments.run, complete=complete), end="")
     return 0
 
 
@@ -1399,6 +1401,12 @@ def add_bot_health_parsers(
     )
     renovate_parser.add_argument(
         "--run", required=True, help="the link of the run of Renovate"
+    )
+    renovate_parser.add_argument(
+        "--result",
+        default="success",
+        help="how the runs ended, as GitHub says it; without success, the run doesn't "
+        "count as one without problems",
     )
 
 

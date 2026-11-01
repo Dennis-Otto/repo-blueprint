@@ -9590,7 +9590,11 @@ def test_renovate_brings_the_log_of_every_repository_into_its_issue(
             "$RUNNER_TEMP/problems/renovate-problems-app/problems.json": "{}\n",
             "$RUNNER_TEMP/problems/renovate-problems-other/problems.json": "{}\n",
         },
-        env={"GITHUB_REPOSITORY": "octo-org/hub", "RUN_URL": "https://run"},
+        env={
+            "GITHUB_REPOSITORY": "octo-org/hub",
+            "RUN_URL": "https://run",
+            "RESULT": "failure",
+        },
     )
 
     assert done.returncode == 0
@@ -9600,7 +9604,28 @@ def test_renovate_brings_the_log_of_every_repository_into_its_issue(
     )
     assert "/problems/renovate-problems-app/problems.json " in call
     assert "/problems/renovate-problems-other/problems.json " in call
-    assert call.endswith(" --run https://run")
+    assert call.endswith(" --result failure --run https://run")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_renovate_finds_the_log_of_a_single_repository(tmp_path: Path) -> None:
+    # download-artifact puts the files of a single artifact straight into its path.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "renovate.yml",
+        "problems",
+        "Keep the issue of Renovate's problems current",
+        stubs={"python3": workflow_steps.recording("python3")},
+        files={"$RUNNER_TEMP/problems/problems.json": "{}\n"},
+        env={
+            "GITHUB_REPOSITORY": "octo-org/hub",
+            "RUN_URL": "https://run",
+            "RESULT": "success",
+        },
+    )
+
+    assert done.returncode == 0
+    assert "/problems/problems.json " in done.stubbed[0]
 
 
 def test_a_foreign_owner_runs_renovate_in_their_own_repository(
@@ -9639,10 +9664,8 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         if line[:1] in "+-" and not line.startswith(("+++", "---"))
     ]
     assert changed == [
-        "-    name: renovate ${{ matrix.repo }}",
         "-    needs: repositories",
         "-    if: needs.repositories.outputs.repositories != ''",
-        "+    name: renovate",
         "+    if: github.event_name != 'pull_request'",
         "-      group: renovate-${{ matrix.repo }}",
         "+      group: renovate",
@@ -9666,8 +9689,16 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         "-          RENOVATE_REPOSITORIES: ${{ github.repository_owner }}/"
         "${{ matrix.repo }}",
         "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
-        '-          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate'
-        ' "$RUNNER_TEMP"/problems/*/problems.json --run "$RUN_URL" |',
+        "-          # A repository that didn't finish wrote no log, so the run isn't a"
+        " quiet one.",
+        "-          RESULT: ${{ needs.renovate.result }}",
+        "-          # download-artifact puts the files of a single artifact straight into"
+        " its path,",
+        "-          # so with one leg's log there is no folder of the artifact.",
+        '-          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate \\',
+        '-            "$RUNNER_TEMP"/problems/problems.json'
+        ' "$RUNNER_TEMP"/problems/*/problems.json \\',
+        '-            --result "$RESULT" --run "$RUN_URL" |',
         '+          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate'
         ' /tmp/renovate/problems.json --run "$RUN_URL" |',
     ]
@@ -12061,8 +12092,13 @@ def test_renovate_reports_its_problems_in_one_issue() -> None:
     assert names_of(report).index(step) > names_of(report).index(
         "Fetch the log of each repository"
     )
-    logs = '"$RUNNER_TEMP"/problems/*/problems.json'
-    assert f"bot-health renovate {logs} " in script_of(report, step)
+    logs = (
+        '"$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json'
+    )
+    script = script_of(report, step)
+    assert logs in script
+    assert '--result "$RESULT" --run "$RUN_URL"' in script
+    assert step_in(report, step)["env"]["RESULT"] == "${{ needs.renovate.result }}"
     assert condition_of(step_in(report, step)) == "${{ !cancelled() }}"
 
 

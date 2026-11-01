@@ -337,7 +337,7 @@ jobs:
           echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
 
   renovate:
-    name: renovate ${{ matrix.repo }}
+    name: renovate
     needs: repositories
     if: needs.repositories.outputs.repositories != ''
     runs-on: ubuntu-24.04
@@ -550,6 +550,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # A repository that didn't finish wrote no log, so the run isn't a quiet one.
+          RESULT: ${{ needs.renovate.result }}
         run: |
           set -o pipefail
           # Repositories have the copy that the blueprint keeps current; the blueprint
@@ -558,7 +560,11 @@ jobs:
           if [[ ! -f "$script" ]]; then
             script=blueprint.py
           fi
-          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate "$RUNNER_TEMP"/problems/*/problems.json --run "$RUN_URL" |
+          # download-artifact puts the files of a single artifact straight into its path,
+          # so with one leg's log there is no folder of the artifact.
+          python3 "$script" --repo "$GITHUB_REPOSITORY" bot-health renovate \
+            "$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json \
+            --result "$RESULT" --run "$RUN_URL" |
             tee -a "$GITHUB_STEP_SUMMARY"
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends

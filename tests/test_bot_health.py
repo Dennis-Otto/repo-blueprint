@@ -1715,6 +1715,30 @@ def test_the_issue_of_renovate_closes_after_quiet_runs(
     )
 
 
+def test_a_run_that_missed_a_repository_is_not_a_quiet_one(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The repository with the problems may be the one that didn't finish.
+    log = tmp_path / "problems.json"
+    log.write_text("", encoding="utf-8")
+    number = github.add_issue(RENOVATE, quiet=QUIET_RUNS - 1)
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN, complete=False)
+
+    assert summary == (
+        "Renovate logged no problem, but not every repository finished; "
+        f"#{number} stays as it is.\n"
+    )
+    assert writes(github) == []
+    assert github.issues[number]["state"] == "open"
+
+    # The problems of the repositories that did finish still reach the issue.
+    log.write_text(log_line(40, "Base branch is missing"), encoding="utf-8")
+    renovate_report(api_of(github), REPO, [log], RUN, complete=False)
+    assert "`Base branch is missing`" in github.issues[number]["body"]
+    assert github.state_of(number)["quiet"] == 0
+
+
 def test_without_a_log_the_issue_of_renovate_stays(
     github: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -1825,6 +1849,16 @@ def test_the_command_line_of_the_bot(
     command = [*arguments, "renovate", str(tmp_path / "*/problems.json"), "--run", RUN]
     assert cli.main(command, Api(github), tmp_path) == 0
     assert capsys.readouterr().out.startswith("Renovate wrote no log of problems;")
+    # How the runs ended decides whether a run counts as quiet.
+    number = github.add_issue(RENOVATE, quiet=0)
+    command = [*arguments, "renovate", str(log), "--run", RUN, "--result", "failure"]
+    assert cli.main(command, Api(github), tmp_path) == 0
+    assert "stays as it is" in capsys.readouterr().out
+    assert github.state_of(number)["quiet"] == 0
+    command = [*arguments, "renovate", str(log), "--run", RUN, "--result", "success"]
+    assert cli.main(command, Api(github), tmp_path) == 0
+    assert github.state_of(number)["quiet"] == 1
+    capsys.readouterr()
 
     # An error of GitHub ends the command as every other one.
     github.known = False
