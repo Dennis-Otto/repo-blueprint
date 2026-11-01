@@ -127,8 +127,8 @@ On Windows, create the environment with `py -3 -m venv %USERPROFILE%\.venvs\copi
 
 **What to do:**
 
-1. Register the release app and name it, as the page [Your own account](own-account.md#3-register-the-release-app) shows; the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) then names it.
-2. Install the app on the repository, and set its private key as the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release`: `python3 .github/blueprint.py checklist` prints the command.
+1. Run `python3 .github/blueprint.py app register`, as the page [Your own account](own-account.md#3-register-the-release-app) shows. It registers the release app, sets its private key and opens the pull request that names it, or `app connect --key-file FILE` does so for an app that exists; the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) then names it, and the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release` holds the key.
+2. Install the app on the repository, and merge the pull request.
 3. Start the Release workflow under *Actions → Release → Run workflow*, or merge the next pull request. It updates the release pull request as the app, and its checks start.
 
 When the token of the app fails, as for an app that isn't installed on the repository or a key that doesn't belong to it, the step that asks for the token fails, and the bot-health bot keeps an issue open until a run passes. A pull request whose checks didn't start for another reason starts them when a person closes and reopens it.
@@ -159,7 +159,7 @@ When the token of the app fails, as for an app that isn't installed on the repos
   <img src="images/diagrams/the-check-of-the-release-app.svg" alt="The check of the release app: Before a bot asks for a token of the release app, it checks that the repository names the app in the variable RELEASE_AUTOMATION_CLIENT_ID and has its private key in the environment release. With both, it asks for the token and does its work. Without one, it says in an annotation and in its summary which one is missing and that the checklist sets it up. A bot whose work is what the app does, such as the blueprint bot, the settings bot or Renovate, then fails; one that only helps a pull request along, such as the fix bot or the branch bot, warns and goes on without the token.">
 </picture>
 
-**What to do:** take the steps of the release app that `python3 .github/blueprint.py checklist` shows, as the page [Your own account](own-account.md#3-register-the-release-app) does: register the app and name it, so that the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) names it, install it on the repository and set its private key as the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release`. The next run of each bot does its work.
+**What to do:** run `python3 .github/blueprint.py app register`, as the page [Your own account](own-account.md#3-register-the-release-app) shows, or `app connect --key-file FILE` for an app that exists. It sets the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release` and opens the pull request that names the app in the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id). Install the app on the repository and merge the pull request; `python3 .github/blueprint.py checklist` shows what is left. The next run of each bot does its work.
 
 ## Renovate opens no updates
 

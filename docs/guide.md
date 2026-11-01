@@ -67,7 +67,7 @@ The blueprint works for every account and organization on GitHub, and a reposito
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-an-owner-gets-a-release-app.dark.svg">
-  <img src="images/diagrams/how-an-owner-gets-a-release-app.svg" alt="How an owner gets a release app: You copy the blueprint with the question of the release app left empty. The checklist links the registration of the app on your account or organization, with its name and permissions filled in. You create the app and its private key, and name it with copier update and the name, Client ID and App ID of its settings page. After the commit, settings apply sets the variables and the ruleset of the release tags, and the checklist asks for the private key and the installation on the repository. Then the bots run as your app; until then each bot that acts as it says in its summary what is missing.">
+  <img src="images/diagrams/how-an-owner-gets-a-release-app.svg" alt="How an owner gets a release app: You copy the blueprint with the question of the release app left empty. python3 .github/blueprint.py app register registers the app on your account or organization: you confirm one page, it sets the private key, and it opens the pull request that names the app. You install the app and merge the pull request. Then settings apply sets the variables and the ruleset of the release tags, and the bots run as your app; until then each bot that acts as it says in its summary what is missing.">
 </picture>
 
 Two more answers decide what runs for you, and the page [Your own account](https://dennis-otto.github.io/repo-blueprint/own-account.html) walks through every step:

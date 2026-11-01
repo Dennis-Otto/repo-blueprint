@@ -30,10 +30,11 @@ from blueprint.app import (
     CLIENT_ID,
     COPIERS,
     KEY_FILE,
+    KEY_NAME,
     MESSAGE,
     NAME,
     PINNED,
-    SECRET,
+    SLICE,
     App,
     AppError,
     Made,
@@ -74,7 +75,7 @@ WEBHOOK_SECRET = "webhook-secret-44d2"
 CODE = "code-a1b2"
 EXCHANGE = f"gh api --method POST app-manifests/{CODE}/conversions"
 APP = App("octo-org-release-automation", "Iv23liExample", "4242")
-SECRET_SET = f"gh secret set {SECRET} --env release --repo {REPO}"
+SECRET_SET = f"gh secret set {KEY_NAME} --env release --repo {REPO}"
 DATA = (
     "--data release_app=octo-org-release-automation"
     " --data release_app_client_id=Iv23liExample --data release_app_id=4242"
@@ -128,6 +129,8 @@ class Shell:
             f"gh api repos/{REPO}/environments/release": done("{}"),
             EXCHANGE: done(conversion()),
             "gh pr create --fill": done(PULL + "\n"),
+            "git branch --show-current": done("main\n"),
+            f"git rev-parse --verify --quiet refs/heads/{BRANCH}": done(code=1),
         }
 
     def __call__(
@@ -498,6 +501,28 @@ def test_stopping_the_command_sets_nothing(copy: Path, shell: Shell) -> None:
     assert EXCHANGE not in shell.calls
 
 
+def test_the_wait_comes_in_slices_so_that_stopping_reaches_it() -> None:
+    """On Windows before Python 3.14, Ctrl+C reaches a long wait only at its end."""
+    waits: list[float] = []
+
+    class Stopped(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            assert timeout is not None
+            waits.append(timeout)
+            if len(waits) == 3:
+                raise KeyboardInterrupt
+            return False
+
+    server = Waiting("octo-org", True)
+    server.arrived = Stopped()
+
+    with server, pytest.raises(AppError, match="Stopped before GitHub came back"):
+        wait_for_code(server, lambda address: True, 600)
+
+    assert len(waits) == 3
+    assert all(wait <= SLICE for wait in waits)
+
+
 @pytest.mark.parametrize("browser", [None, lambda address: False])
 def test_without_a_browser_the_command_says_where_to_go(
     copy: Path,
@@ -703,12 +728,14 @@ def test_the_preflight_shows_what_it_checked(
     register(copy, run=shell, browser=Browser(), timeout=5)
 
     out = capsys.readouterr().out.splitlines()
-    assert out[:6] == [
+    assert out[:8] == [
         f"The preflight of {REPO}:",
         "  ✔ gh is signed in to github.com as octocat",
         "  ✔ octo-org is an organization that octocat owns",
         f"  ✔ {REPO} has the environment release",
         "  ✔ This folder has no changes that a commit doesn't hold",
+        "  ✔ This folder is on main, where the pull request starts",
+        f"  ✔ No branch {BRANCH} is left of an earlier attempt",
         "  ✔ Copier runs with uvx",
     ]
 
@@ -859,6 +886,24 @@ def test_changes_in_the_folder_stop_it_as_they_would_stop_copier(
     out = stopped(copy, shell, capsys)
     assert "✘ This folder has changes that no commit holds" in out
     assert "--no-update" in out
+
+
+def test_another_branch_stops_it_as_it_would_come_along_in_the_pull_request(
+    copy: Path, shell: Shell, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shell.answers["git branch --show-current"] = done("feature\n")
+    out = stopped(copy, shell, capsys)
+    assert "✘ This folder isn't on main" in out
+    assert "git switch main" in out
+
+
+def test_the_branch_of_an_earlier_attempt_stops_it_before_the_browser(
+    copy: Path, shell: Shell, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shell.answers[f"git rev-parse --verify --quiet refs/heads/{BRANCH}"] = done("abc\n")
+    out = stopped(copy, shell, capsys)
+    assert f"✘ The branch {BRANCH} is left of an earlier attempt" in out
+    assert f"git branch -D {BRANCH}" in out
 
 
 def test_a_folder_that_git_cant_read_stops_it(

@@ -722,10 +722,8 @@ def test_check_reports_every_difference(
     ):
         assert setting in out
     assert 'pages: GitHub has "off", the configuration wants "on"' in out
-    assert (
-        "gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo Dennis-Otto/demo"
-        in out
-    )
+    assert "python3 .github/blueprint.py app connect --key-file FILE" in out
+    assert "gh secret set RELEASE_AUTOMATION_PRIVATE_KEY" not in out
     assert "settings apply" in out
     assert not any(method != "GET" for method, _ in github.calls)
 
@@ -3331,7 +3329,7 @@ def test_the_checklist_of_a_new_repository(
     assert "✘ Settings as code applied" in out
     assert "✘ Secrets of the environments set" in out
     assert "✔ Community profile complete (100 %)" in out
-    assert "gh secret set RELEASE_AUTOMATION_PRIVATE_KEY" in out
+    assert "app connect --key-file FILE" in out
     assert "· Settings → General → Features: Sponsorships on" in out
     assert "✘ Social preview uploaded" in out
     assert "✘ OpenSSF Best Practices badge" in out
@@ -3470,7 +3468,7 @@ def test_the_checklist_tells_secrets_and_the_community_profile_apart(
     # Only what a person sets is left, which the API can't.
     assert "  ✔ Settings as code applied" in lines
     secrets = lines.index("  ✘ Secrets of the environments set")
-    assert lines[secrets + 1].strip().startswith("gh secret set RELEASE_AUTOMATION")
+    assert lines[secrets + 1].strip().endswith("app connect --key-file FILE")
     community = lines.index("  ✘ Community profile complete (100 %)")
     assert lines[community + 1].strip() == (
         "add license: https://github.com/Dennis-Otto/demo/community"

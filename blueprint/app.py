@@ -30,6 +30,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from collections.abc import Callable, Sequence
 from dataclasses import astuple, dataclass, field
@@ -60,7 +61,7 @@ from blueprint.checklist import (
     release_app_name,
 )
 
-SECRET = "RELEASE_AUTOMATION_PRIVATE_KEY"
+KEY_NAME = "RELEASE_AUTOMATION_PRIVATE_KEY"
 ENVIRONMENT = "release"
 BRANCH = "name-the-release-app"
 MESSAGE = "chore: name the release app"
@@ -72,6 +73,9 @@ LOCAL = "127.0.0.1"
 CALLBACK = "/callback"
 # How often the server looks for the end of its wait, in seconds.
 POLL = 0.05
+# How long one wait for GitHub lasts: on Windows before Python 3.14, Ctrl+C reaches
+# Python only between two waits, so one long wait would ignore it.
+SLICE = 0.2
 # Copier of the quick start, by the first program of the owner that runs it, or one
 # of their own. A manager in .github/renovate.json5 moves the version with the pages.
 PINNED = "copier==9.19.1 copier update"
@@ -327,11 +331,15 @@ def wait_for_code(
                 " to it first, such as with ssh -L.",
                 flush=True,
             )
-        if not server.arrived.wait(timeout):
-            raise AppError(
-                f"GitHub didn't come back within {timeout:g} seconds, because the page"
-                f" was closed or wasn't confirmed. {again}"
-            )
+        deadline = time.monotonic() + timeout
+        while not server.arrived.wait(
+            min(SLICE, max(0.0, deadline - time.monotonic()))
+        ):
+            if time.monotonic() >= deadline:
+                raise AppError(
+                    f"GitHub didn't come back within {timeout:g} seconds, because the"
+                    f" page was closed or wasn't confirmed. {again}"
+                )
     except KeyboardInterrupt:
         raise AppError(f"Stopped before GitHub came back. {again}") from None
     finally:
@@ -378,7 +386,9 @@ def trade(run: Runner, root: Path, code: str, owner: str, organization: bool) ->
 def set_key(run: Runner, root: Path, repo: str, key: str) -> str:
     """Hand the private key to gh on its stdin; what gh said when it failed, or nothing."""
     result = run(
-        ["gh", "secret", "set", SECRET, "--env", ENVIRONMENT, "--repo", repo], root, key
+        ["gh", "secret", "set", KEY_NAME, "--env", ENVIRONMENT, "--repo", repo],
+        root,
+        key,
     )
     return problem(result) if result.returncode != 0 else ""
 
@@ -508,6 +518,31 @@ def environment_finding(run: Runner, root: Path, repo: str) -> Finding:
     )
 
 
+def branch_findings(run: Runner, root: Path) -> list[Finding]:
+    """Whether the branch of the pull request can start at main: a branch of an earlier
+    attempt would fail after the key is made, and another branch would come along."""
+    current = installed(run, ["git", "branch", "--show-current"], root)
+    left = installed(
+        run, ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}"], root
+    )
+    return [
+        Finding(True, "This folder is on main, where the pull request starts")
+        if current is not None and current.stdout.strip() == "main"
+        else Finding(
+            False,
+            "This folder isn't on main, where the pull request has to start",
+            "git switch main, or add --no-update",
+        ),
+        Finding(True, f"No branch {BRANCH} is left of an earlier attempt")
+        if left is None
+        else Finding(
+            False,
+            f"The branch {BRANCH} is left of an earlier attempt",
+            f"git branch -D {BRANCH}, or add --no-update",
+        ),
+    ]
+
+
 def local_findings(run: Runner, root: Path) -> tuple[list[Finding], list[str]]:
     """Whether Copier can write the answers: it refuses a folder with changes that no
     commit holds, and the command that runs it."""
@@ -530,6 +565,7 @@ def local_findings(run: Runner, root: Path) -> tuple[list[Finding], list[str]]:
     copier = copier_command(run, root)
     return [
         clean,
+        *branch_findings(run, root),
         Finding(True, f"Copier runs with {copier[0]}")
         if copier
         else Finding(
@@ -704,7 +740,7 @@ def register(
             f" it, so make another on {page}, on the tab Credentials, under Key pairs,"
             f" and go on with:\n  {app.connect_command()}"
         )
-    print(f"Set its private key as {SECRET} of {ENVIRONMENT}; no file holds it.")
+    print(f"Set its private key as {KEY_NAME} of {ENVIRONMENT}; no file holds it.")
     steps = naming_steps(ready.copier or shlex.split(COPIERS[0]), app)
     pull = name_app(runner, root, steps) if update else ""
     finish(app, repo, pull, steps, update)
@@ -757,7 +793,7 @@ def connect(
     if refused:
         raise AppError(f"GitHub refused the private key of {app.name}: {refused}")
     print(
-        f"Set the private key of {app.name} as {SECRET} of {ENVIRONMENT}.", flush=True
+        f"Set the private key of {app.name} as {KEY_NAME} of {ENVIRONMENT}.", flush=True
     )
     steps = (
         naming_steps(ready.copier or shlex.split(COPIERS[0]), app) if differs else []

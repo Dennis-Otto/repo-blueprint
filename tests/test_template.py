@@ -8848,7 +8848,9 @@ def test_each_bot_says_that_it_needs_the_release_app(
         f"### {bot[0].upper()}{bot[1:]} needs the release app of the owner\n\n"
         f"{sentence} The release app is a GitHub App of the owner, "
     )
-    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
+    assert (
+        "`python3 .github/blueprint.py app register` registers the app" in done.summary
+    )
     assert done.summary.endswith(
         f" Once they are done, {bot} can {env['TASK']} in its next run.\n"
     )
@@ -8906,10 +8908,10 @@ def test_the_blueprint_bot_says_what_its_release_app_lacks(tmp_path: Path) -> No
         " GitHub App of the owner, whose token may do what the token of a job can't:"
         " start the checks of a pull request, change a workflow and apply the"
         " settings.\n\n"
-        "`python3 .github/blueprint.py checklist` shows the steps: a link that registers"
-        " the app with its permissions filled in, the update of the answers of the"
-        " blueprint that names it in `.github/repository.toml`, the settings and its"
-        " private key. Once they are done, the blueprint bot can push an update and"
+        "`python3 .github/blueprint.py app register` registers the app, sets its private"
+        " key and opens the pull request that names it in `.github/repository.toml`;"
+        " `python3 .github/blueprint.py checklist` shows what is left, such as its"
+        " installation and the settings. Once they are done, the blueprint bot can push an update and"
         " open its pull request in its next run.\n"
     )
 
@@ -10231,6 +10233,8 @@ def test_copier_names_what_the_copy_needs_and_the_one_command_after_it(
     assert "gh repo create --" not in after
     # Only an owner without a release app is told that the checklist registers one.
     assert ("The checklist starts with the release app of" in after) is (owner != OWNER)
+    assert ("blueprint.py app register" in after) is (owner != OWNER)
+    assert "a link" not in after
 
 
 def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
