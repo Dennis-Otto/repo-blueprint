@@ -51,11 +51,15 @@ gh release download vX.Y.Z --repo {= owner =}/{= project_slug =} --pattern '*.tg
 gh attestation verify ./*.tgz --repo {= owner =}/{= project_slug =} --signer-workflow {= owner =}/{= project_slug =}/.github/workflows/build-release.yml --source-ref refs/heads/main --deny-self-hosted-runners[% elif publish_to == 'chrome-web-store' %]
 gh release download vX.Y.Z --repo {= owner =}/{= project_slug =} --pattern '*.zip'
 gh attestation verify ./*.zip --repo {= owner =}/{= project_slug =} --signer-workflow {= owner =}/{= project_slug =}/.github/workflows/build-release.yml --source-ref refs/heads/main --deny-self-hosted-runners[% elif publish_to == 'ghcr' %]
-gh attestation verify oci://ghcr.io/{= owner | lower =}/{= project_slug =}:X.Y.Z --repo {= owner =}/{= project_slug =} --signer-workflow {= owner =}/{= project_slug =}/.github/workflows/release.yml --source-ref refs/heads/main --deny-self-hosted-runners[% endif %]
+gh attestation verify oci://ghcr.io/{= owner | lower =}/{= project_slug =}:X.Y.Z --repo {= owner =}/{= project_slug =} --signer-workflow {= owner =}/{= project_slug =}/.github/workflows/release.yml --source-ref refs/heads/main --deny-self-hosted-runners[% else %]
+gh release download vX.Y.Z --repo {= owner =}/{= project_slug =} --pattern '<asset>'
+gh attestation verify <asset> --repo {= owner =}/{= project_slug =} --signer-workflow {= owner =}/{= project_slug =}/.github/workflows/build-release.yml --source-ref refs/heads/main --deny-self-hosted-runners[% endif %]
 ```
-[% if publish_to in ['hacs', 'nextcloud-appstore', 'pypi', 'npm', 'chrome-web-store', 'ghcr'] %]
+
 `--signer-workflow` accepts only the provenance of the workflow that builds the release, `--source-ref` only that of a run for `main`, the only branch whose runs make releases, and `--deny-self-hosted-runners` only that of a runner of GitHub: an attestation that another workflow, another branch or a machine of someone else made for this repository fails.
-[% endif %][% if publish_to == 'nextcloud-appstore' %]
+
+Every asset of a release carries this provenance, those that the project builds itself with `scripts/release-assets.sh`, such as the zip of a browser extension, too.
+[% if publish_to == 'nextcloud-appstore' %]
 The package is signed with the certificate of the app as well, which Nextcloud checks when it installs or updates the app. Its public certificate, in [nextcloud/app-certificate-requests](https://github.com/nextcloud/app-certificate-requests), checks the detached signature `{= nextcloud_app_id =}.tar.gz.sig` of the release:
 
 ```sh
@@ -72,7 +76,7 @@ The Chrome Web Store gets exactly this zip: the workflow *Chrome Web Store* down
 [% elif publish_to == 'github-action' %]
 Repositories that use the action pin the commit hash of a release; `gh release verify` shows which commit the tag of a release stands for.
 [% endif %]
-Every release describes what it ships in an SBOM, as SPDX in `{= project_slug =}.spdx.json` and as CycloneDX in `{= project_slug =}.cdx.json`: [% if publish_to in ['hacs', 'pypi', 'npm', 'nextcloud-appstore', 'chrome-web-store'] %]the package that you install, with every component inside it[% else %]the files of its tag, without those that only check, test and document the project[% endif %], under the name `{= project_slug =}` and the version of the release.[% if publish_to == 'ghcr' %] The image carries an SBOM of every package inside it as well, in the registry.[% endif %] A scanner such as [Grype](https://github.com/anchore/grype) checks it against the advisories it knows. When the project accepts an advisory in `osv-scanner.toml`, with its reason, the release carries the OpenVEX document `{= project_slug =}.openvex.json` too, which tells the scanner that the advisory doesn't affect the release; without that document, leave out `--vex`:
+Every release describes what it ships in an SBOM, as SPDX in `{= project_slug =}.spdx.json` and as CycloneDX in `{= project_slug =}.cdx.json`: [% if publish_to in ['hacs', 'pypi', 'npm', 'nextcloud-appstore', 'chrome-web-store'] %]the package that you install, with every component inside it[% else %]the files of its tag, without those that only check, test and document the project, or, where the project builds assets of its own with `scripts/release-assets.sh`, the zips and tarballs of that script[% endif %], under the name `{= project_slug =}` and the version of the release.[% if publish_to == 'ghcr' %] The image carries an SBOM of every package inside it as well, in the registry.[% endif %] A scanner such as [Grype](https://github.com/anchore/grype) checks it against the advisories it knows. When the project accepts an advisory in `osv-scanner.toml`, with its reason, the release carries the OpenVEX document `{= project_slug =}.openvex.json` too, which tells the scanner that the advisory doesn't affect the release; without that document, leave out `--vex`:
 
 ```sh
 gh release download vX.Y.Z --repo {= owner =}/{= project_slug =} --pattern '{= project_slug =}.*.json'

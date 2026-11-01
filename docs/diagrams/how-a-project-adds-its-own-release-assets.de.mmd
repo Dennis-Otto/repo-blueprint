@@ -1,0 +1,26 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Projekt eigene Assets zum Release hinzufügt
+    accDescr: Das scripts/release-assets.sh des Projekts baut seine eigenen Assets, etwa das Zip einer Browser-Erweiterung, am Commit des Releases, in einem Job, der nichts schreiben darf, kein Secret hat und nur GitHub, Node.js und npm erreicht. Der Job prüft, dass jedes Asset eine Datei mit einem Namen ist, den GitHub behält, und gibt die Dateien als Artefakt weiter. Der Job des Releases übernimmt sie, nachdem er den signierten Tag geprüft hat, lehnt einen Namen ab, den eines seiner eigenen Assets hat, und attestiert sie mit dem Paket, den SBOMs und den Hinweisen. Alle kommen an den Entwurf, bevor er veröffentlicht wird, und die Release-Prüfung schlägt bei einem Asset ohne seine signierte Provenance fehl.
+
+    hook(["scripts/release-assets.sh<br>ORDNER VERSION"])
+    build["Der Job der Assets des Projekts<br>liest nur · kein Secret · GitHub, Node.js und npm"]
+    checked{"Je eine Datei, mit einem Namen,<br>den GitHub behält"}
+    release["Der Job der Release-Assets<br>prüft den signierten Tag, übernimmt die Dateien"]
+    attest["Attestiert mit dem Paket,<br>den SBOMs und den Hinweisen"]
+    draft["Am Entwurf,<br>bevor er veröffentlicht wird"]
+    verify["verify-release.yml:<br>jedes Asset hat seine Provenance"]
+
+    hook --> build --> checked
+    checked -- "Artefakt" --> release --> attest --> draft --> verify
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class hook you
+    class build,checked,release,attest bot
+    class draft,verify done
