@@ -18,7 +18,7 @@
   'php': ('composer.json', 'composer.json lists the direct dependencies, and composer.lock pins each'),
   'node': ('package.json', 'package.json lists the direct dependencies, and package-lock.json pins each with its hash'),
 }.get(stack) -%]
-[%- set registry = {'pypi': ' and from PyPI', 'npm': ' and from npm', 'ghcr': ' and from the GitHub Container Registry', 'nextcloud-appstore': ' and from the Nextcloud App Store'}.get(publish_to, '') -%]
+[%- set registry = {'pypi': ' and from PyPI', 'npm': ' and from npm', 'ghcr': ' and from the GitHub Container Registry', 'nextcloud-appstore': ' and from the Nextcloud App Store', 'chrome-web-store': ' and from the Chrome Web Store'}.get(publish_to, '') -%]
 [#- Every site of the project is on GitHub: the repository and, on GitHub Pages, the website. -#]
 [%- set on_github = not homepage or homepage.startswith('https://' ~ (owner | lower) ~ '.github.io/') -%]
 [%- set channels = 'GitHub Issues and pull requests' ~ (', and GitHub Discussions' if discussions else '') -%]
@@ -112,7 +112,7 @@
 [%- if successor %]
 [#- A store entry doesn't pass with the repository (GOVERNANCE.md#continuity), so a
     successor alone can't release there within a week. -#]
-[%- if publish_to not in ['nextcloud-appstore', 'pypi', 'npm'] %]
+[%- if publish_to not in ['nextcloud-appstore', 'pypi', 'npm', 'chrome-web-store'] %]
   "access_continuity_status": "Met",
   "access_continuity_justification": "The owner has designated a successor through GitHub's account successor setting, who can take the repository over, and everything that builds, tests, releases and protects the project is in the repository: {= files =}GOVERNANCE.md#continuity",
 [%- endif %]

@@ -350,8 +350,7 @@ def test_the_blueprint_tells_renovate_what_its_osv_scanner_files_accept() -> Non
     assert outcome.problems == []
     assert outcome.in_step
     # The test tools of Home Assistant, which pins them for the tests of every
-    # integration.
+    # integration: Pillow; the uv of Home Assistant 2026.10.4 has no advisory.
     assert {(entry.folder, entry.name) for entry in outcome.accepted} >= {
         ("stacks/home-assistant", "pillow"),
-        ("stacks/home-assistant", "uv"),
     }

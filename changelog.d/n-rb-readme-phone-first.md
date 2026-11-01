@@ -1,4 +1,0 @@
-### Features
-
-- **The pages check warns of tables whose cells hold paragraphs:** a cell of a Markdown table with more than 30 words, in a README, a CONTRIBUTING file or a page of `docs/`, is a warning at the line of its row, in the log of *Pages in one column* and as an annotation of the pull request, since the GitHub app and phones squeeze such a table into narrow columns or scroll it sideways, and a screen reader reads it cell by cell. It fails nothing yet: make the rows a list, or move the detail to a page of its own and link it.
-- **The README of the blueprint reads on a phone:** it has a sixth of its words, with one line for each area of what a new repository gets, and the details are pages of their own on the website, under *Features*, in English and German. The guide of the website keeps the start, the kinds of projects and the set-up, with the anchors that other pages link to.

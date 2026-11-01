@@ -3504,9 +3504,37 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 11
+        assert len(texts) == 12
     else:
         assert any(text in step for step in texts)
+
+
+def test_the_checklist_of_an_extension_asks_for_the_item_and_the_sign_in_of_the_store(
+    github: FakeGitHub, root: Path
+) -> None:
+    settings = Settings.load(root / ".github/repository.toml")
+    settings.variables["PUBLISH_TO"] = "chrome-web-store"
+
+    def store() -> list[Step]:
+        steps = checklist(Api(github), REPO, settings, root, reuse=lambda repo: False)
+        return [step for step in steps if step.text.startswith("Chrome Web Store:")]
+
+    item, sign_in = store()
+    assert "uploaded by hand" in item.text
+    assert "CWS_EXTENSION_ID and CWS_PUBLISHER_ID" in item.text
+    assert item.how.endswith("/docs/releases.md#the-first-listing")
+    assert "CWS_WORKLOAD_IDENTITY_PROVIDER and CWS_SERVICE_ACCOUNT" in sign_in.text
+    assert sign_in.how.endswith("/docs/releases.md#sign-in-without-a-stored-secret")
+    assert (item.done, sign_in.done) == (False, False)
+
+    # One of the two variables of a step leaves it open.
+    github.variables["CWS_EXTENSION_ID"] = "abcdefghijklmnopabcdefghijklmnop"
+    assert [step.done for step in store()] == [False, False]
+    github.variables["CWS_PUBLISHER_ID"] = "publisher"
+    assert [step.done for step in store()] == [True, False]
+    github.variables["CWS_WORKLOAD_IDENTITY_PROVIDER"] = "projects/1/locations/global"
+    github.variables["CWS_SERVICE_ACCOUNT"] = "store@demo.iam.gserviceaccount.com"
+    assert [step.done for step in store()] == [True, True]
 
 
 def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
@@ -3603,14 +3631,14 @@ def test_the_checklist_registers_a_release_app_of_the_owner(
         "pages": "write",
         "pull_requests": "write",
         "workflows": "write",
-        "vulnerability_alerts": "read",
+        "vulnerability_alerts": "write",
         "environments": "read",
         "secrets": "read",
     }
     assert lines[2] == (
         "It needs read and write access to Actions, Administration, Checks, Commit"
-        " statuses, Contents, Issues, Pages, Pull requests, Variables and Workflows,"
-        " and read access to Dependabot alerts, Environments and Secrets; set"
+        " statuses, Contents, Dependabot alerts, Issues, Pages, Pull requests,"
+        " Variables and Workflows, and read access to Environments and Secrets; set"
         " Variables by hand, which the link can't fill in."
     )
     assert lines[-1] == (
@@ -3678,6 +3706,14 @@ def test_the_checklist_of_a_named_release_app_links_its_installation(
     assert lines[installed + 1] == (
         "      https://github.com/apps/demo-release-automation/installations/new"
     )
+    # Which app the OSV-Scanner workflow closes the accepted Dependabot alerts as, and
+    # the permission that it needs, which no API tells.
+    assert lines[installed + 2] == (
+        "  · The settings app, or the release app without one, may write the Dependabot"
+        " alerts, so that the OSV-Scanner workflow closes those that osv-scanner.toml"
+        " accepts"
+    )
+    assert "set Dependabot alerts to Read and write" in lines[installed + 3]
     # Its owner is no question once it is named.
     assert ("GET", "users/Dennis-Otto") not in github.calls
 

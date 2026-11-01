@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **The build of a website no longer hangs on a font server that stopped answering:** the social plugin of Material downloads the fonts of the preview cards with no time limit, so a server that stalled held the build of the website until its step ran out of its five minutes, in the Docs workflow of a repository as in the Variants of the blueprint. `.github/mkdocs_blueprint.py` now gives every download of the plugins that names no time limit of its own 10 seconds to connect and 30 for each next part of the file, and tries it again, as it did for the other errors of the network. Decision 0061 says why.

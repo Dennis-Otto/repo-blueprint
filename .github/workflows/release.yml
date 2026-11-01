@@ -13,8 +13,10 @@ name: Release
 # affect it (OpenVEX) and its signed provenance, write the notes, make the
 # release public, announce it in the discussions, and then deliver it where the
 # repository variable PUBLISH_TO says: pypi, npm, ghcr, hacs, nextcloud-appstore,
-# github-action or none. Last, verify-release.yml checks the release as its users
-# can. A release that only updates dependencies merges itself once its checks pass.
+# github-action, chrome-web-store, which publish-store.yml takes over once this
+# workflow has passed, or none. Last, verify-release.yml checks the release as its
+# users can. A release that only updates dependencies merges itself once its checks pass,
+# once a day, or at once with a fix of a vulnerability.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -23,7 +25,8 @@ on:
   # Every merge into main is a push of the release app or of a person, which starts
   # the release bot at once. The schedule is only a safety net, for a push that GitHub
   # lost and a tag that a failed run left to sign: GitHub runs schedules as it can,
-  # often hours late, and the bot-health bot starts a run that it missed.
+  # often hours late, and the bot-health bot starts a run that it missed. It is also
+  # the daily run that merges a release of dependency updates.
   schedule:
     - cron: "25 5 * * *"
   workflow_dispatch:
@@ -64,7 +67,7 @@ jobs:
       major: ${{ steps.release.outputs.major || steps.resume.outputs.major }}
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           disable-sudo-and-containers: true
@@ -76,6 +79,34 @@ jobs:
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             *.actions.githubusercontent.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            *.actions.githubusercontent.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
       # Without the release app of the owner, the run names what is missing rather than
       # fail at the token; every workflow has this step, the same but for its variables.
       - name: Check that the release app is set up
@@ -116,7 +147,7 @@ jobs:
       - name: Create a token of the release app
         id: app
         if: steps.release-app.outputs.ready == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
@@ -226,9 +257,11 @@ jobs:
           skip-github-release: ${{ steps.sign.outputs.signed != 'true' }}
       - name: Take up a release that an earlier run left as a draft
         id: resume
-        # A run that failed after the release was created leaves it as a draft, with
-        # its signed tag. Started by hand, the workflow builds and publishes it.
-        if: github.event_name == 'workflow_dispatch' && steps.release.outputs.release_created != 'true'
+        # A run that failed or hung after the release was created leaves it as a draft,
+        # with its signed tag. Started by hand or run again, the workflow builds and
+        # publishes it; a second attempt of the job would otherwise end green without it,
+        # since release-please has nothing left to create.
+        if: (github.event_name == 'workflow_dispatch' || github.run_attempt > 1) && steps.release.outputs.release_created != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -309,14 +342,30 @@ jobs:
                       + if $deletions == [] then {} else {deletions: $deletions} end)}}}' |
                 gh api graphql --input - --jq .data.createCommitOnBranch.commit.oid
             done
+      # A release of nothing but dependency updates merges itself, bundled: the daily
+      # run of the schedule, or a run started by hand, sets its auto-merge, so that the
+      # updates of a day make one release and not one each, which the Rollout of the
+      # blueprint would bring to every repository (decision 0087). A release with the
+      # fix of a vulnerability, which Renovate marks with [security], merges at once.
       - name: Merge a release of dependency updates once its checks pass
-        if: steps.release.outputs.pr != '' && steps.app.outputs.token != ''
+        if: steps.app.outputs.token != '' && steps.release.outputs.release_created != 'true'
         env:
           # Merged by the app, the release starts this workflow again and is created.
           GH_TOKEN: ${{ steps.app.outputs.token }}
           PR: ${{ steps.release.outputs.pr }}
         run: |
-          number="$(jq -r .number <<<"$PR")"
+          set -euo pipefail
+          # The pull request that release-please has just updated, or else the open one,
+          # which a run of the schedule finds unchanged.
+          number="$(jq -r '.number // empty' <<<"${PR:-null}")"
+          if [[ -z "$number" ]]; then
+            number="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label "autorelease: pending" \
+              --json number --jq '.[0].number // ""')"
+          fi
+          if [[ -z "$number" ]]; then
+            echo "No release pull request is open."
+            exit 0
+          fi
           latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
           if [[ -z "$latest" ]]; then
             echo "The first release waits for the maintainer."
@@ -330,7 +379,14 @@ jobs:
             echo "$others"
             exit 0
           fi
-          gh pr merge --repo "$GITHUB_REPOSITORY" --auto --squash "$number"
+          if [[ "$GITHUB_EVENT_NAME" == push ]] && ! grep -qi '\[security\]' <<<"$subjects"; then
+            echo "The release of dependency updates merges in the daily run of the release bot, with the updates of the day."
+            exit 0
+          fi
+          # GitHub sets no auto-merge on a pull request whose checks have all passed
+          # already; that one merges now. The rules of main still hold for the merge.
+          gh pr merge --repo "$GITHUB_REPOSITORY" --auto --squash "$number" ||
+            gh pr merge --repo "$GITHUB_REPOSITORY" --squash "$number"
       - name: Publish a beta of the next release
         id: beta
         # Where the repository variable BETA_CHANNEL is true, every change for users
@@ -418,12 +474,34 @@ jobs:
       discussions: write
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           disable-sudo-and-containers: true
           allowed-endpoints: >-
             api.github.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
       - name: Make the complete release public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -472,7 +550,7 @@ jobs:
       id-token: write
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
       - name: Download the packages of the release
@@ -480,7 +558,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag }}
         run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist --pattern '*.whl' --pattern '*.tar.gz'
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   npm:
     name: deliver to npm
@@ -497,7 +575,7 @@ jobs:
       id-token: write
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -528,7 +606,7 @@ jobs:
       packages: write
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -584,7 +662,7 @@ jobs:
       contents: read
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           disable-sudo-and-containers: true
@@ -593,6 +671,31 @@ jobs:
             github.com:443
             release-assets.githubusercontent.com:443
             apps.nextcloud.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+            apps.nextcloud.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.tag }}
@@ -642,13 +745,36 @@ jobs:
       contents: write
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           disable-sudo-and-containers: true
           allowed-endpoints: >-
             api.github.com:443
             github.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.tag }}

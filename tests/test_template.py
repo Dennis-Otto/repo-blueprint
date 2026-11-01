@@ -25,7 +25,7 @@ import time
 import tomllib
 import warnings
 import zipfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple
@@ -33,6 +33,7 @@ from unittest import mock
 from xml.etree import ElementTree
 
 import pathspec
+import preflight
 import pytest
 import workflow_steps
 import yaml
@@ -58,6 +59,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
+from blueprint import bootstrap
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -72,7 +74,11 @@ from blueprint.bot_health import (
     own_issue,
 )
 from blueprint.changelog import Fragment, release_changelog
-from blueprint.checklist import RELEASE_APP_PERMISSIONS
+from blueprint.checklist import (
+    CHROME_WEB_STORE_ITEM,
+    CHROME_WEB_STORE_SIGN_IN,
+    RELEASE_APP_PERMISSIONS,
+)
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
 from blueprint.locks import why_renovate_skips
@@ -91,9 +97,13 @@ KINDS = [
     "github-action",
     "python-package",
     "node-package",
+    "chrome-extension",
     "container",
     "generic",
 ]
+# The kinds of the stack of Node: a package of npm, and a Chrome extension, which the
+# same tools build and check.
+NODE = ("node-package", "chrome-extension")
 # The languages that CodeQL analyzes in each kind of project by default, besides the
 # workflows: a Nextcloud app has its PHP, which CodeQL doesn't know, and the
 # JavaScript of its pages.
@@ -103,6 +113,7 @@ CODEQL = {
     "github-action": "python, actions",
     "python-package": "python, actions",
     "node-package": "javascript-typescript, actions",
+    "chrome-extension": "javascript-typescript, actions",
     "container": "actions",
     "generic": "actions",
 }
@@ -627,6 +638,36 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
 
 
+# The release that fixes an advisory which a pin of the blueprint once fell under.
+# Renovate only ever moves a pin forward; this holds it against a move back by hand,
+# on the machine and in the workflows of every kind, while zizmor reports it only on
+# GitHub, in the analysis of the pull request.
+FIXED_RELEASES = {
+    # GHSA-5xjx-3w67-w9x9: the action trusts a revoked root certificate in the chain
+    # that Sigstore uses for trusted publishing and attestations on PyPI.
+    "pypa/gh-action-pypi-publish": "1.14.3",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_no_workflow_pins_an_action_below_the_release_that_fixes_its_advisory(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    pins = re.findall(
+        r"uses: ([\w./-]+)@[0-9a-f]{40} # v?(\S+)", "\n".join(workflows(root).values())
+    )
+    # A renamed action would otherwise pass without a look at its pin.
+    assert {action for action, _ in pins} >= set(FIXED_RELEASES)
+
+    def release(version: str) -> list[int]:
+        return [int(part) for part in version.split(".")]
+
+    for action, version in pins:
+        if action in FIXED_RELEASES:
+            assert release(version) >= release(FIXED_RELEASES[action]), action
+
+
 # The runner of the jobs, named with its version, and the one that the Next runner
 # workflow tries every week before the jobs move to it. A move changes both here.
 RUNNER = "ubuntu-24.04"
@@ -894,6 +935,124 @@ def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
     assert ("::warning::Harden-Runner still removes Docker" in result.stdout) == (
         busy > 120
     )
+
+
+WARM_UP = "Wait until Harden-Runner lets the hosts through"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
+    projects: dict[str, Path], project: str
+) -> None:
+    # An address that the runner asked for past Harden-Runner stays in the cache of
+    # systemd-resolved for up to a minute, and Harden-Runner blocks it until then, so
+    # the first step that needs a host would fail (step-security/harden-runner#708).
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            where = f"{name}: {job_id}"
+            steps = job.get("steps") or []
+            hardening = steps_using(job, "step-security/harden-runner")
+            if not hardening or hardening[0]["with"]["egress-policy"] != "block":
+                assert WARM_UP not in [step.get("name") for step in steps], where
+                continue
+            # Before every step that could need a host, and for just the hosts that the
+            # job allows, by the same words, so that they can't drift apart.
+            warm_up = steps[steps.index(hardening[0]) + 1]
+            assert warm_up["name"] == WARM_UP, where
+            allowed = hardening[0]["with"]["allowed-endpoints"]
+            assert warm_up["env"] == {"HOSTS": allowed}, where
+            # Two minutes, and a last try of 5 s for each host, of a job of 5 minutes.
+            assert warm_up["timeout-minutes"] == 4, where
+            scripts.add(warm_up["run"])
+    assert len(scripts) <= 1, scripts
+
+
+def warm_up(
+    tmp_path: Path, blocked: int
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    script = step_named(job_in(workflows(ROOT)["welcome.yml"], "welcome"), WARM_UP)[
+        "run"
+    ]
+    # curl fails the first times that it is asked, and each look at the clock takes 3 s.
+    tries = tmp_path / "tries"
+    tries.write_text("0", encoding="utf-8")
+    clock = tmp_path / "clock"
+    clock.write_text("1000", encoding="utf-8")
+    return run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "curl": (
+                f'n=$(( $(cat "{tries.as_posix()}") + 1 ))\n'
+                f'echo "$n" > "{tries.as_posix()}"\n'
+                f"(( n > {blocked} ))\n"
+            ),
+            "date": (
+                f'now=$(cat "{clock.as_posix()}")\n'
+                f'echo "$((now + 3))" > "{clock.as_posix()}"\n'
+                'echo "$now"\n'
+            ),
+            "sleep": "",
+        },
+        HOSTS="api.github.com:443 *.actions.githubusercontent.com:443 github.com:443",
+    )
+
+
+PROBE = "curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_asks_each_host_once_when_harden_runner_lets_it_through(
+    tmp_path: Path,
+) -> None:
+    result, calls = warm_up(tmp_path, 0)
+
+    assert result.returncode == 0, result.stderr
+    # The wildcard names no host to ask.
+    assert [call for call in calls if call.startswith("curl")] == [
+        f"{PROBE}https://api.github.com/",
+        f"{PROBE}https://github.com/",
+    ]
+    assert not any(call.startswith("sleep") for call in calls)
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_asks_again_until_harden_runner_lets_the_host_through(
+    tmp_path: Path,
+) -> None:
+    result, calls = warm_up(tmp_path, 3)
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(f"{PROBE}https://api.github.com/") == 4
+    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert calls.count("sleep 3") == 3
+    assert result.stdout.count("Harden-Runner still blocks api.github.com") == 3
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
+    tmp_path: Path,
+) -> None:
+    # A host that doesn't answer may be one that this run doesn't need.
+    result, calls = warm_up(tmp_path, 10_000)
+
+    assert result.returncode == 0, result.stderr
+    # At most 40 tries of 3 s for the first host, and then one for each other host.
+    assert calls.count(f"{PROBE}https://api.github.com/") == 40
+    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert calls.count("sleep 3") == 39
+    for host in ("api.github.com", "github.com"):
+        assert (
+            f"::warning::Harden-Runner still blocks {host} after two minutes"
+            in result.stdout
+        )
 
 
 def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
@@ -2039,7 +2198,7 @@ def test_every_project_has_a_dev_container(
         assert (project / requirements[kind]).exists()
         assert "charliermarsh.ruff" in config["customizations"]["vscode"]["extensions"]
     biome = "biomejs.biome" in config["customizations"]["vscode"]["extensions"]
-    assert biome == (kind == "node-package")
+    assert biome == (kind in NODE)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -2054,7 +2213,7 @@ def test_npm_never_runs_the_install_scripts_of_the_packages(
         text = path.read_text(encoding="utf-8", errors="replace")
         for line in re.findall(r"^.*\bnpm ci\b.*$", text, re.MULTILINE):
             assert "--ignore-scripts" in line, f"{path.relative_to(project)}: {line}"
-    if kind == "node-package":
+    if kind in NODE:
         setup = (project / ".devcontainer/setup.sh").read_text(encoding="utf-8")
         assert "\nnpm ci --ignore-scripts\n" in setup
         for name in ("CONTRIBUTING.md", "AGENTS.md"):
@@ -2086,7 +2245,7 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
 ) -> None:
     project = projects[kind]
     check = (project / "scripts/check.sh").read_text(encoding="utf-8")
-    node = kind == "node-package"
+    node = kind in NODE
 
     assert (project / "biome.jsonc").is_file() == node
     assert ('\nstep "Lint and format"\n' in check) == node
@@ -2101,11 +2260,18 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     # Locked with its hash, as every package of the lock.
     biome = lock["packages"]["node_modules/@biomejs/biome"]
     assert biome["integrity"].startswith("sha512-")
-    # The settings: the files of the blueprint in .github/ keep its format, and the
+    # The settings: the files of the blueprint in .github/ keep its format, Biome 2.6
+    # stays out of the Markdown and the YAML that the blueprint renders, and the
     # indentation comes from .editorconfig, which has it for JSONC too.
     settings = (project / "biome.jsonc").read_text(encoding="utf-8")
     config = json.loads(re.sub(r"^//.*\n", "", settings, flags=re.MULTILINE))
-    assert config["files"]["includes"] == ["**", "!.github"]
+    assert config["files"]["includes"] == [
+        "**",
+        "!.github",
+        "!**/*.md",
+        "!**/*.yml",
+        "!**/*.yaml",
+    ]
     assert config["formatter"]["useEditorconfig"] is True
     assert config["linter"]["rules"]["preset"] == "recommended"
     assert config["vcs"]["useIgnoreFile"] is True
@@ -2123,7 +2289,8 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     )
     ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/lcov.info" in ignored
-    assert manifest["files"] == ["dist"]
+    # A package of npm holds its build; a Chrome extension reaches no registry.
+    assert manifest.get("files") == (["dist"] if kind == "node-package" else None)
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -2883,6 +3050,7 @@ TOOL_ANNOTATIONS = {
         "    annotate phpunit build/phpunit.xml\n",
     ],
     "node-package": ["  npm test 2>&1 | annotate node-test\n"],
+    "chrome-extension": ["  npm test 2>&1 | annotate node-test\n"],
 }
 
 # The tools whose findings CONTRIBUTING.md names, besides the text files and
@@ -2890,7 +3058,7 @@ TOOL_ANNOTATIONS = {
 TOOLS_IN_CONTRIBUTING = {
     "Ruff, mypy and pytest": ["home-assistant", "github-action", "python-package"],
     "PHP CS Fixer, Psalm and PHPUnit": ["nextcloud-app"],
-    "Biome, the TypeScript compiler and the tests of Node": ["node-package"],
+    "Biome, the TypeScript compiler and the tests of Node": list(NODE),
 }
 
 
@@ -2925,7 +3093,7 @@ def test_every_repository_shows_the_findings_of_its_tools_at_their_lines(
     )
     for tools, kinds in TOOLS_IN_CONTRIBUTING.items():
         assert (tools in contributing) == (kind in kinds), (kind, tools)
-    if kind == "node-package":
+    if kind in NODE:
         # The problem matcher of tsc comes with actions/setup-node.
         ci = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         assert "uses: actions/setup-node@" in ci
@@ -2943,6 +3111,9 @@ def the_ci_steps(project: Path, *steps: Callable[[str], str]) -> str:
     )
 
 
+# In the copy of the mutation tests, the annotations come from the tool of the project,
+# which is the code with the mutants and fails in the process that the step starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_ci_shows_each_finding_of_shellcheck_at_its_line(
     projects: dict[str, Path], tmp_path: Path
@@ -4431,6 +4602,10 @@ def test_every_download_tries_again_after_a_passing_error(
                 # harm, as the release in the App Store does.
                 if "--request POST" in command:
                     continue
+                # The warm-up after Harden-Runner downloads nothing: it only asks
+                # whether a host answers, and asks again by itself.
+                if "--head" in command:
+                    continue
                 # A request for a status that is an error, such as the 404 of an
                 # address that leads nowhere, tries again only after an error of the
                 # server or of the network, which --retry alone does.
@@ -5493,6 +5668,11 @@ AGENT_COMMANDS = {
         "`npm test`",
         "`npx --no -- biome check --write .`",
     ],
+    "chrome-extension": [
+        "npm ci --ignore-scripts",
+        "`npm test`",
+        "`npx --no -- biome check --write .`",
+    ],
     "container": ["docker run --rm demo-project:check --self-test"],
     "generic": ["no build and no tests of its own"],
 }
@@ -5704,6 +5884,7 @@ def test_a_release_tells_how_to_scan_what_it_ships(
         "nextcloud-app",
         "python-package",
         "node-package",
+        "chrome-extension",
     )
     assert ("the package that you install" in verify) == package
     assert ("the files of its tag, without those that only" in verify) != package
@@ -5929,6 +6110,31 @@ def test_actionlint_ignores_only_the_queue_of_the_issue_assistant(
         line.strip() for line in paths.splitlines() if line.strip().startswith("- ")
     ]
     assert ignored == ['- \'unexpected key "queue" for "concurrency" section\'']
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_zizmor_accepts_only_the_comment_trigger_of_the_issue_assistant(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The issue assistant answers a new comment, so it starts on issue_comment, which
+    # zizmor reports as a dangerous trigger since its action 0.7.1. It is accepted for
+    # that rule and that workflow alone, with the reason in the configuration: the
+    # workflow checks out nothing, and its jobs read the comment only as text.
+    root = ROOT if project == "blueprint" else projects[project]
+    text = (root / ".github/workflows/issue-assistant.yml").read_text(encoding="utf-8")
+    assert set(triggers(text)) == {"issues", "issue_comment", "workflow_dispatch"}
+    assert triggers(text)["issue_comment"] == ["    types: [created]"]
+    assert "actions/checkout" not in text
+    zizmor = (root / ".github/zizmor.yml").read_text(encoding="utf-8")
+    assert zizmor == (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+    rules = yaml.safe_load(zizmor)["rules"]
+    accepted = {
+        rule
+        for rule, found in rules.items()
+        if "issue-assistant.yml" in found["ignore"]
+    }
+    assert accepted == {"dangerous-triggers"}
+    assert "issue-assistant.yml" in accepted_dangerous_triggers()
 
 
 def test_the_issue_forms_point_to_the_documentation(tmp_path: Path) -> None:
@@ -6279,6 +6485,8 @@ def test_renovate_keeps_every_project_current(
     assert ('constraintsFiltering: "strict"' in rules) == (kind == "nextcloud-app")
     review = (project / ".github/dependency-review.yml").read_text(encoding="utf-8")
     assert ("- pkg:pypi/regex\n" in review) == (kind == "home-assistant")
+    # A tool of the blueprint bot, in every project.
+    assert "- pkg:pypi/wcwidth\n" in review
     # The images of the scripts, also in a variable with quotes.
     pattern = re.search(r'^\s*"(\(\?:\^\|.*sha256.*)",$', rules, re.MULTILINE)
     assert pattern
@@ -6466,13 +6674,13 @@ def test_dependabot_merges_as_the_release_app(
     assert len(parse(text)["jobs"]) == 1
     assert not steps_using(job, "actions/checkout")
     # The check of the release app, the explanation of a token that failed and the
-    # merge, besides the wait until Harden-Runner has removed Docker.
+    # merge, besides the waits for Harden-Runner.
     assert (
         len(
             [
                 step
                 for step in job["steps"]
-                if "run" in step and step["name"] != WAIT_FOR_DOCKER
+                if "run" in step and step["name"] not in {WARM_UP, WAIT_FOR_DOCKER}
             ]
         )
         == 3
@@ -6663,9 +6871,9 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
     projects: dict[str, Path], kind: str, tmp_path: Path
 ) -> None:
     project = shutil.copytree(projects[kind], tmp_path / kind)
-    # Home Assistant pins Pillow and uv for the tests of every integration, so a new
-    # one accepts their advisories as the blueprint does in stacks/home-assistant/, in
-    # the root, where its requirements-test.txt is.
+    # Home Assistant pins Pillow for the tests of every integration, so a new one
+    # accepts its advisories as the blueprint does in stacks/home-assistant/, in the
+    # root, where its requirements-test.txt is.
     accepted = project / "osv-scanner.toml"
     assert accepted.is_file() == (kind == "home-assistant")
     if accepted.is_file():
@@ -6684,7 +6892,7 @@ def test_renovate_tries_no_fix_of_what_osv_scanner_accepts(
         (project / ".github/renovate-accepted.json5").read_text(encoding="utf-8")
     )
     names = [rule["matchPackageNames"] for rule in preset["packageRules"]]
-    assert names == ([["pillow"], ["uv"]] if kind == "home-assistant" else [])
+    assert names == ([["pillow"]] if kind == "home-assistant" else [])
     for rule in preset["packageRules"]:
         assert rule["matchFileNames"] == ["/^[^/]+$/"]
         assert rule["description"].startswith("osv-scanner.toml accepts every")
@@ -6825,6 +7033,7 @@ WHAT_THE_USERS_RUN = {
     ],
     "python-package": [("pep621", "project.dependencies", "pyproject.toml")],
     "node-package": [("npm", "dependencies", "package.json")],
+    "chrome-extension": [("npm", "dependencies", "package.json")],
     "container": [("dockerfile", "final", "Dockerfile")],
     "generic": [],
 }
@@ -6850,6 +7059,7 @@ THE_TOOLS_OF_A_KIND = {
         ("pep621", "dependency-groups", "pyproject.toml"),
     ],
     "node-package": [("npm", "devDependencies", "package.json")],
+    "chrome-extension": [("npm", "devDependencies", "package.json")],
     "container": [],
     "generic": [],
 }
@@ -8271,6 +8481,7 @@ RELEASE_APP_BOTS = {
     ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
     ("diagrams.yml", "pull-request"): ("the diagram bot", False),
     ("docs-pictures.yml", "pull-request"): ("the picture bot", False),
+    ("osv-scanner.yml", "dependabot"): ("the Dependabot alert bot", False),
     ("release.yml", "release-please"): ("the release bot", False),
     ("renovate.yml", "renovate"): ("Renovate", True),
     ("rollout.yml", "plan"): ("the Rollout", True),
@@ -8362,6 +8573,7 @@ def test_every_token_of_the_release_app_comes_after_its_check(
             ("blueprint-update.yml", "update"),
             ("dependabot-automerge.yml", "auto-merge"),
             ("diagrams.yml", "pull-request"),
+            ("osv-scanner.yml", "dependabot"),
             ("release.yml", "release-please"),
             ("screenshot-bot.yml", "pull-request"),
             ("settings.yml", "check"),
@@ -8582,6 +8794,7 @@ SETTINGS_APP_CLIENT_ID = "${{ vars.SETTINGS_APP_CLIENT_ID }}"
 SETTINGS_APP_KEY = "${{ secrets.SETTINGS_APP_PRIVATE_KEY }}"
 SETTINGS_APP_BOTS = {
     ("blueprint-update.yml", "update"): "the blueprint bot",
+    ("osv-scanner.yml", "dependabot"): "the Dependabot alert bot",
     ("settings.yml", "check"): "the settings bot",
 }
 HALF_CLIENT = (
@@ -8956,6 +9169,13 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
     assert answers["author"] == "octo-org"
     assert answers["sponsor"] == "octo-org"
     assert "maintained by octo-org" in (project / "GOVERNANCE.md").read_text("utf-8")
+    # Their apps may lack the permission of the Dependabot alerts: a refused token is a
+    # notice there, and fails the check only in the repositories of the blueprint's
+    # owner.
+    lacks = workflow_steps.step(
+        "osv-scanner.yml", "dependabot", "Say what the app lacks", project
+    )
+    assert lacks["env"]["STRICT"] == "false"
     # No release app yet: no variable names one, no ruleset lets one create the release
     # tags, and the environment release waits for no private key of one.
     assert answers["release_app"] == ""
@@ -9387,6 +9607,7 @@ HOSTILE_DESCRIPTION = (
         "github-action",
         "python-package",
         "node-package",
+        "chrome-extension",
         "container",
     ],
 )
@@ -9428,6 +9649,20 @@ def test_names_with_quotes_and_markup_render_files_that_parse(
         source = (project / "src/index.ts").read_text(encoding="utf-8")
         # The comment ends where the template ends it.
         assert source.index("*/") > source.index("The starting point of the package")
+    if kind == "chrome-extension":
+        source = (project / "src/background.ts").read_text(encoding="utf-8")
+        assert source.index("*/") > source.index("The service worker of the extension")
+        # The store shows the name and the description, which JSON quotes, within
+        # its limits.
+        messages = json.loads(
+            (project / "extension/_locales/en/messages.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert messages["extName"]["message"] == HOSTILE_NAME
+        description = messages["extDescription"]["message"]
+        assert len(description) <= 132
+        assert HOSTILE_DESCRIPTION.startswith(description.removesuffix("…"))
     if kind == "container":
         dockerfile = (project / "Dockerfile").read_text(encoding="utf-8")
         labels = dockerfile[dockerfile.index("LABEL org.opencontainers.image.title") :]
@@ -9481,6 +9716,7 @@ TOPICS = {
     "github-action": ["github-actions", "github-action"],
     "python-package": ["python", "pypi"],
     "node-package": ["typescript", "nodejs", "npm"],
+    "chrome-extension": ["chrome-extension", "browser-extension", "manifest-v3"],
     "container": ["docker", "container", "ghcr"],
     "generic": [],
 }
@@ -9920,16 +10156,20 @@ def test_the_page_of_a_kind_names_its_required_checks_and_its_steps(
     delivery = re.search(
         rf'\n        "{re.escape(target)}": \((.*?)\n        \),', source, re.S
     )
-    added = (delivery is not None) + (target == "hacs")
+    # The Chrome Web Store adds two steps of its own: the item and the sign-in.
+    store = 2 if target == "chrome-web-store" else 0
+    added = (delivery is not None) + (target == "hacs") + store
     if added:
-        steps = text.split(f"\n{some}\n", 1)[1].split("\n## ", 1)[0]
+        steps = text.split(f"\n{some}", 1)[1].split("\n## ", 1)[0]
         # A step of two parts, such as the certificate and then the registration of a
         # Nextcloud app, may take an item for each part.
         assert steps.count("\n- ") >= added
-        assert delivery is not None
-        for link in re.findall(r"https://[^\s\"\\]+", delivery[1]):
+        assert (delivery is not None) != bool(store)
+        for link in re.findall(r"https://[^\s\"\\]+", delivery[1] if delivery else ""):
             if "{" not in link:
                 assert link in steps, link
+        for variable in CHROME_WEB_STORE_ITEM + CHROME_WEB_STORE_SIGN_IN:
+            assert (f"`{variable}`" in steps) == bool(store), variable
     else:
         assert none in text
         assert some not in text
@@ -10907,10 +11147,11 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     }
     steps = cancelled["steps"]
     assert not any("actions/checkout" in found.get("uses", "") for found in steps)
-    # Every job of the run starts again, so that each of its checks reports.
+    # Every job of a run that lost a race starts again, so that each of its checks
+    # reports; of a run that ran out of time, only the jobs that it cancelled.
     script = workflow_steps.step("after-checks.yml", "cancelled", CANCELLED_STEP)["run"]
-    assert 'gh run rerun "$RUN"\n' in script
-    assert "--failed" not in script
+    assert script.count('gh run rerun "$RUN"\n') == 1
+    assert script.count('gh run rerun "$RUN" --failed 2>&1') == 1
     # The values of the event reach the scripts as variables only.
     assert not any("${{" in found.get("run", "") for found in steps)
 
@@ -10919,7 +11160,16 @@ CANCELLED_STEP = "Run the checks of the head of a pull request or of main again"
 
 
 def run_the_bot_for_cancelled_checks(
-    tmp_path: Path, pull: str, newer: str, message: str, head: str | None = None
+    tmp_path: Path,
+    pull: str,
+    newer: str,
+    message: str,
+    head: str | None = None,
+    *,
+    attempt: int = 1,
+    tests: str = "false",
+    state: str = "completed 1",
+    rerun: Answer | None = None,
 ) -> tuple[list[str], str]:
     # gh answers as the API does, after the filters of jq. With the head of main, the
     # run is one of a push to main.
@@ -10937,7 +11187,7 @@ def run_the_bot_for_cancelled_checks(
                 f"{newer}\n",
             ),
             Answer(
-                r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+",
+                rf"api repos/o/r/actions/runs/5/attempts/{attempt}/jobs --paginate --jq .+",
                 "11\n12\n",
             ),
             Answer(
@@ -10945,11 +11195,14 @@ def run_the_bot_for_cancelled_checks(
                 r" --jq \.\[\]\.message",
                 f"{message}\n",
             ),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", f"{state}\n"),
             exact("run rerun 5"),
+            rerun or exact("run rerun 5 --failed"),
         ],
         env={
             "RUN": "5",
-            "ATTEMPT": "1",
+            "ATTEMPT": str(attempt),
+            "TESTS": tests,
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
@@ -11015,6 +11268,96 @@ def test_the_bot_for_cancelled_checks_starts_the_run_of_the_head_of_main_again(
     assert not any("/pulls" in call for call in calls)
 
 
+OUT_OF_TIME = "The job has exceeded the maximum execution time of 5m0s"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("head", [None, "abc1234def"])
+def test_the_bot_for_cancelled_checks_tries_a_job_that_ran_out_of_time_once_more(
+    tmp_path: Path, head: str | None
+) -> None:
+    # A job can hang behind Harden-Runner until its time limit, even after its last
+    # step, and a required check such as the title of a pull request stays cancelled.
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, head=head
+    )
+
+    place = "#136" if head is None else "main"
+    assert f"A job of CodeQL for the head of {place} ran out of time" in written
+    assert "run rerun 5 --failed" in calls
+    assert "run rerun 5" not in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("attempt", "tests"),
+    [
+        # Once, not again and again.
+        (2, "false"),
+        # The flaky-test bot runs the jobs of the tests again.
+        (1, "true"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_leaves_other_jobs_that_ran_out_of_time(
+    tmp_path: Path, attempt: int, tests: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, attempt=attempt, tests=tests
+    )
+
+    assert "it stays cancelled" in written
+    assert not any(call.startswith("run rerun") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("state", ["in_progress 2", "completed 2"])
+def test_the_bot_for_cancelled_checks_leaves_a_run_that_ran_again_already(
+    tmp_path: Path, state: str
+) -> None:
+    # The bot-health bot was first, and its second try still runs or has ended: a third
+    # attempt would break the promise of one more try.
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, state=state
+    )
+
+    assert "ran again already" in written
+    assert not any(call.startswith("run rerun") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_tolerates_losing_the_race_to_another_bot(
+    tmp_path: Path,
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path,
+        "136",
+        "",
+        OUT_OF_TIME,
+        rerun=exact(
+            "run rerun 5 --failed",
+            code=1,
+            err="run 5 cannot be rerun; it is already running\n",
+        ),
+    )
+
+    assert "run rerun 5 --failed" in calls
+    assert "runs again already" in written
+
+
+def test_the_bot_for_cancelled_checks_knows_the_workflows_of_the_flaky_test_bot() -> (
+    None
+):
+    text = workflows(ROOT)["after-checks.yml"]
+    left = re.search(
+        r"!contains\(fromJSON\('([^']+)'\)", condition_of(job_in(text, "rerun"))
+    )
+    assert left
+    step = step_named(job_in(text, "cancelled"), CANCELLED_STEP)
+    assert step["env"]["TESTS"] == (
+        f"${{{{ !contains(fromJSON('{left[1]}'), github.event.workflow_run.name) }}}}"
+    )
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
     tmp_path: Path,
@@ -11036,6 +11379,7 @@ def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
         env={
             "RUN": "5",
             "ATTEMPT": "1",
+            "TESTS": "false",
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
@@ -11158,7 +11502,7 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         condition,
     )
     assert ends
-    assert set(json.loads(ends[1])) == FAILED | {"success"}
+    assert set(json.loads(ends[1])) == FAILED | {"success", "cancelled"}
     assert "github.event_name != 'workflow_run'" in condition_of(job_in(text, "sweep"))
     # One run at a time per workflow, set on the job: a run that skips, for a pull
     # request, never replaces the waiting one for the default branch.
@@ -11214,6 +11558,991 @@ JQ = shutil.which("jq")
 WITH_JQ = pytest.mark.skipif(
     BASH is None or JQ is None, reason="the step runs in bash, with the jq of gh"
 )
+
+
+NODE_JS = shutil.which("node")
+WITH_NODE = pytest.mark.skipif(NODE_JS is None, reason="the script runs in Node")
+# The files of the delivery of a Chrome extension, which only that kind renders.
+EXTENSION_FILES = [
+    ".github/workflows/publish-store.yml",
+    "docs/releases.md",
+    "extension/manifest.json",
+    "extension/_locales/en/messages.json",
+    "scripts/check-manifest.mjs",
+    "scripts/chrome-for-testing.sh",
+    "scripts/load-extension.mjs",
+    "scripts/package-extension.sh",
+    "scripts/store-status.mjs",
+    "src/background.ts",
+    "store/listing.en.md",
+    "store/permissions.json",
+    "test/background.test.ts",
+]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_a_chrome_extension_delivers_to_the_chrome_web_store(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    extension = kind == "chrome-extension"
+    for name in EXTENSION_FILES:
+        assert (project / name).is_file() == extension, name
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert ("chrome-web-store" in settings["environments"]) == extension
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert ("and delivers it to the Chrome Web Store" in contributing) == extension
+    # The security design and the notes for agents describe an extension, not a package.
+    security = (project / "docs/security.md").read_text(encoding="utf-8")
+    assert ("**Web pages and content scripts → extension.**" in security) == extension
+    notes = (project / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert ("its manifest and version in `extension/manifest.json`" in notes) == (
+        extension
+    )
+    assert ("its prereleases come only from the beta channel" in contributing) == (
+        extension
+    )
+    if not extension:
+        return
+    assert "**Caller → package.**" not in security
+    assert "npm ci --ignore-scripts" in security
+    assert "The package is in `src/`" not in notes
+    # The store needs no secret: the jobs sign in with the OIDC token of GitHub.
+    assert settings["environments"]["chrome-web-store"] == {"secrets": []}
+    assert settings["variables"]["PUBLISH_TO"] == "chrome-web-store"
+    assert "to npm" not in contributing
+    # The release bot writes the version of each release into the manifest as well.
+    config = json.loads(
+        (project / "release-please-config.json").read_text(encoding="utf-8")
+    )
+    assert config["packages"]["."]["release-type"] == "node"
+    assert config["packages"]["."]["extra-files"] == [
+        {"type": "json", "path": "extension/manifest.json", "jsonpath": "$.version"}
+    ]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "version_in extension/manifest.json" in check
+    assert '\nstep "Extension"\n' in check
+    assert "npm pack" not in check
+    package = json.loads((project / "package.json").read_text(encoding="utf-8"))
+    # A package of the store, never of npm.
+    assert package["private"] is True
+    assert "exports" not in package
+    assert "files" not in package
+    build = json.loads((project / "tsconfig.build.json").read_text(encoding="utf-8"))
+    assert build["compilerOptions"]["outDir"] == "extension/lib"
+    manifest = json.loads(
+        (project / "extension/manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["background"]["service_worker"] == "lib/background.js"
+    assert "/extension/lib/\n" in (project / ".gitignore").read_text(encoding="utf-8")
+    mkdocs = (project / "mkdocs.yml").read_text(encoding="utf-8")
+    assert "\n  - Releases and the Chrome Web Store: releases.md\n" in mkdocs
+
+
+def the_extension(project: Path, folder: Path) -> Path:
+    """A copy of the extension of a project and of what checks and packs it."""
+    for name in (
+        "package.json",
+        "extension",
+        "store",
+        "scripts/check-manifest.mjs",
+        "scripts/package-extension.sh",
+        "scripts/store-status.mjs",
+    ):
+        source = project / name
+        if source.is_dir():
+            shutil.copytree(source, folder / name)
+        else:
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, folder / name)
+    return folder
+
+
+def edit_json(path: Path, change: Callable[[dict[str, Any]], None]) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    change(data)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def check_manifest(folder: Path) -> subprocess.CompletedProcess[str]:
+    assert NODE_JS
+    return subprocess.run(
+        [NODE_JS, "scripts/check-manifest.mjs"],
+        cwd=folder,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def release_as(root: Path, version: str) -> None:
+    """The versions that a release PR with `Release-As: <version>` writes."""
+    for name in ("extension/manifest.json", "package.json"):
+        edit_json(root / name, lambda data: data.update(version=version))
+
+
+def listing_without(text: str, line: str) -> str:
+    assert line in text
+    return text.replace(line, "")
+
+
+# Each change of a new extension that the check of its manifest finds, with what it
+# says: the store would refuse it, hold it up in its review, or Chrome would disable
+# the update until its user accepts it.
+MANIFEST_PROBLEMS: list[tuple[str, Callable[[Path], object], str]] = [
+    (
+        "a permission without its reason",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest["permissions"].append("tabs"),
+        ),
+        "asks for tabs, which permissions of store/permissions.json gives no reason",
+    ),
+    (
+        "a host of a content script without its reason",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest.update(
+                content_scripts=[{"matches": ["https://example.com/*"], "js": ["a.js"]}]
+            ),
+        ),
+        "asks for https://example.com/*, which host_permissions of"
+        " store/permissions.json gives no reason",
+    ),
+    (
+        "a reason of a permission that the manifest doesn't ask for",
+        lambda root: edit_json(
+            root / "store/permissions.json",
+            lambda allowed: allowed["permissions"].update(alarms="Wakes it up."),
+        ),
+        "names alarms, which extension/manifest.json doesn't ask for",
+    ),
+    (
+        "a version other than that of package.json",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest.update(version="0.0.1"),
+        ),
+        "has the version 0.0.1, package.json 0.0.0",
+    ),
+    (
+        "a version that Chrome refuses",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest.update(version="1.0.0.0.1"),
+        ),
+        "Chrome takes one to four numbers separated by dots",
+    ),
+    (
+        "a prerelease of a release PR with Release-As",
+        lambda root: release_as(root, "2.0.0-beta.1"),
+        "a Chrome extension makes its prereleases only on the beta channel",
+    ),
+    (
+        "Manifest V2",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest.update(manifest_version=2),
+        ),
+        "has manifest_version 2",
+    ),
+    (
+        "a key, which the store refuses",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest.update(key="MIIB"),
+        ),
+        "has the key key",
+    ),
+    (
+        "a default language that the extension doesn't speak",
+        lambda root: edit_json(
+            root / "extension/manifest.json",
+            lambda manifest: manifest.update(default_locale="de"),
+        ),
+        "names the default_locale de, but extension/_locales/ has en",
+    ),
+    (
+        "a description over the limit of the store",
+        lambda root: edit_json(
+            root / "extension/_locales/en/messages.json",
+            lambda messages: messages["extDescription"].update(message="x" * 133),
+        ),
+        "has 133 characters in en; the store takes 132 at most",
+    ),
+    (
+        "a name without its text",
+        lambda root: edit_json(
+            root / "extension/_locales/en/messages.json",
+            lambda messages: messages.pop("extName"),
+        ),
+        "The name of extension/manifest.json has no text in en",
+    ),
+    (
+        "a language without its listing",
+        lambda root: shutil.copytree(
+            root / "extension/_locales/en", root / "extension/_locales/de"
+        ),
+        "The extension speaks de, but store/listing.de.md is missing",
+    ),
+    (
+        "a listing of a language that the extension doesn't speak",
+        lambda root: shutil.copy2(
+            root / "store/listing.en.md", root / "store/listing.fr.md"
+        ),
+        "store/listing.fr.md is the listing of a language that the extension"
+        " doesn't speak",
+    ),
+    (
+        "a listing that doesn't justify a permission",
+        lambda root: (root / "store/listing.en.md").write_text(
+            listing_without(
+                (root / "store/listing.en.md").read_text(encoding="utf-8"),
+                "- storage: ",
+            ),
+            encoding="utf-8",
+        ),
+        "store/listing.en.md doesn't justify storage",
+    ),
+    (
+        "a listing without its justifications",
+        lambda root: (root / "store/listing.en.md").write_text(
+            "## Short description\n\nShort.\n", encoding="utf-8"
+        ),
+        'store/listing.en.md has no section "## Permission justifications"',
+    ),
+    (
+        "a short description over the limit",
+        lambda root: (root / "store/listing.en.md").write_text(
+            "## Short description\n\n" + "x" * 133 + "\n\n"
+            "## Permission justifications\n\n- storage: why.\n",
+            encoding="utf-8",
+        ),
+        "The short description of store/listing.en.md has 133 characters",
+    ),
+    (
+        "no allowlist",
+        lambda root: (root / "store/permissions.json").unlink(),
+        "store/permissions.json is missing",
+    ),
+    (
+        "no manifest",
+        lambda root: (root / "extension/manifest.json").unlink(),
+        "extension/manifest.json is missing",
+    ),
+]
+
+
+@WITH_NODE
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [(change, problem) for _, change, problem in MANIFEST_PROBLEMS],
+    ids=[name for name, _, _ in MANIFEST_PROBLEMS],
+)
+def test_the_check_of_the_manifest_finds_what_the_store_would_hold_up(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    change: Callable[[Path], object],
+    problem: str,
+) -> None:
+    folder = the_extension(projects["chrome-extension"], tmp_path / "extension")
+    fits = check_manifest(folder)
+    assert fits.returncode == 0, fits.stdout
+    assert "fits the Chrome Web Store" in fits.stdout
+
+    change(folder)
+    found = check_manifest(folder)
+
+    assert found.returncode == 1
+    assert problem in found.stdout
+
+
+def package_extension(
+    folder: Path, *arguments: str, epoch: str = "1767225600"
+) -> subprocess.CompletedProcess[str]:
+    """scripts/package-extension.sh with an npm whose build writes the script of the
+    worker, its source map and a hidden file, as tsc and an editor would."""
+    stubs = folder.parent / "stubs"
+    stubs.mkdir(exist_ok=True)
+    (stubs / "npm").write_text(
+        "#!/usr/bin/env bash\nmkdir -p extension/lib\n"
+        "echo 'export {};' > extension/lib/background.js\n"
+        "echo '{}' > extension/lib/background.js.map\n"
+        "echo x > extension/.DS_Store\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "npm").chmod(0o755)
+    return subprocess.run(
+        in_bash("scripts/package-extension.sh", *arguments),
+        cwd=folder,
+        env={**os.environ, "STUBS": stubs.as_posix(), "SOURCE_DATE_EPOCH": epoch},
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash")
+def test_the_zip_of_the_store_is_the_same_for_the_same_commit(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    folder = the_extension(projects["chrome-extension"], tmp_path / "extension")
+    manifest = (folder / "extension/manifest.json").read_bytes()
+    # The configuration of tools and the sources of TypeScript stay out of the zip.
+    for name in ("biome.jsonc", "biome.json", "tsconfig.json", "options.ts"):
+        (folder / "extension" / name).write_text("{}\n", encoding="utf-8")
+
+    first = package_extension(folder)
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.strip() == "dist/demo-project-0.0.0.zip"
+    zipped = folder / "dist/demo-project-0.0.0.zip"
+    once = zipped.read_bytes()
+    assert package_extension(folder).returncode == 0
+    assert zipped.read_bytes() == once
+
+    with zipfile.ZipFile(zipped) as archive:
+        # The manifest at the root, without source maps and hidden files, in order,
+        # each file at the time of the commit.
+        assert archive.namelist() == [
+            "_locales/en/messages.json",
+            "lib/background.js",
+            "manifest.json",
+        ]
+        assert {entry.date_time for entry in archive.infolist()} == {
+            (2026, 1, 1, 0, 0, 0)
+        }
+        # Made by Unix, also on Windows, so that every system makes the same bytes.
+        assert {entry.create_system for entry in archive.infolist()} == {3}
+        assert archive.read("manifest.json") == manifest
+
+    # Zip files hold no time before 1980.
+    assert package_extension(folder, "early", epoch="0").returncode == 0
+    with zipfile.ZipFile(folder / "early/demo-project-0.0.0.zip") as archive:
+        assert archive.infolist()[0].date_time == (1980, 1, 1, 0, 0, 0)
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash")
+def test_the_zip_of_a_beta_has_the_numbers_of_its_version_and_a_release_its_own(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    folder = the_extension(projects["chrome-extension"], tmp_path / "extension")
+
+    beta = package_extension(folder, "assets", "1.3.0-beta.2")
+
+    assert beta.returncode == 0, beta.stderr
+    with zipfile.ZipFile(folder / "assets/demo-project-1.3.0-beta.2.zip") as archive:
+        zipped = json.loads(archive.read("manifest.json"))
+    assert (zipped["version"], zipped["version_name"]) == ("1.3.0", "1.3.0-beta.2")
+    # The manifest of the repository stays as it is.
+    source = json.loads((folder / "extension/manifest.json").read_text("utf-8"))
+    assert source["version"] == "0.0.0"
+
+    # A release has its version in the manifest, as the release bot writes it.
+    release = package_extension(folder, "assets", "1.3.0")
+    assert release.returncode == 1
+    assert (
+        "extension/manifest.json has the version 0.0.0, the release 1.3.0"
+        in release.stderr
+    )
+    assert package_extension(folder, "assets", "next").returncode == 1
+
+    (folder / "extension/manifest.json").unlink()
+    missing = package_extension(folder)
+    assert missing.returncode == 1
+    assert "extension/manifest.json is missing" in missing.stderr
+
+
+def store_status(
+    tmp_path: Path, status: dict[str, Any], **variables: str
+) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    """A run of scripts/store-status.mjs for the release v1.2.3 and this answer of the
+    store: its result, its job summary and its outputs."""
+    assert NODE_JS
+    answer = tmp_path / "status.json"
+    answer.write_text(json.dumps(status), encoding="utf-8")
+    summary = tmp_path / "summary.md"
+    output = tmp_path / "output"
+    summary.write_text("", encoding="utf-8")
+    output.write_text("", encoding="utf-8")
+    script = tmp_path / "store-status.mjs"
+    shutil.copy2(
+        ROOT
+        / "template/scripts"
+        / "[% if project_type == 'chrome-extension' %]store-status.mjs[% endif %]",
+        script,
+    )
+    result = subprocess.run(
+        [NODE_JS, str(script)],
+        env={
+            **os.environ,
+            "STATUS": str(answer),
+            "TAG": "v1.2.3",
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "GITHUB_OUTPUT": str(output),
+            "DOCS": "https://example.org/releases.md",
+            **variables,
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return (
+        result,
+        summary.read_text(encoding="utf-8"),
+        output.read_text(encoding="utf-8"),
+    )
+
+
+def revision(version: str, state: str) -> dict[str, Any]:
+    return {"state": state, "distributionChannels": [{"crxVersion": version}]}
+
+
+def days_ago(days: int) -> str:
+    return (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days, hours=1)
+    ).isoformat()
+
+
+# What a run does for each state of the store, for the release v1.2.3: whether it
+# delivers it, whether it fails for a person to act, and what it says.
+STORE_STATES: list[tuple[str, dict[str, Any], dict[str, str], bool, bool, str]] = [
+    ("a new item", {}, {}, True, False, "The release v1.2.3 goes to the Chrome"),
+    (
+        "an older version in the store",
+        {"publishedItemRevisionStatus": revision("1.2.2", "PUBLISHED")},
+        {},
+        True,
+        False,
+        "| Published | 1.2.2 (PUBLISHED) |",
+    ),
+    (
+        "the release in the store",
+        {"publishedItemRevisionStatus": revision("1.2.3", "PUBLISHED")},
+        {},
+        False,
+        False,
+        "The store has v1.2.3 already",
+    ),
+    (
+        "a higher version in the store",
+        {"publishedItemRevisionStatus": revision("1.10.0", "PUBLISHED")},
+        {},
+        False,
+        True,
+        "Release a version above 1.10.0",
+    ),
+    (
+        "an earlier version in review",
+        {"submittedItemRevisionStatus": revision("1.2.2", "PENDING_REVIEW")},
+        {"SUBMITTED_AT": days_ago(2), "SUBMITTED_FROM": "delivery"},
+        False,
+        False,
+        "pending for 2 days, since the delivery on",
+    ),
+    (
+        "the release in review",
+        {"submittedItemRevisionStatus": revision("1.2.3", "PENDING_REVIEW")},
+        {},
+        False,
+        False,
+        "pending, since an unknown day",
+    ),
+    (
+        "a review of more than seven days",
+        {"submittedItemRevisionStatus": revision("1.2.2", "PENDING_REVIEW")},
+        {"SUBMITTED_AT": days_ago(9), "SUBMITTED_FROM": "release"},
+        False,
+        True,
+        "has taken 9 days, longer than 7",
+    ),
+    (
+        "the release rejected",
+        {"submittedItemRevisionStatus": revision("1.2.3", "REJECTED")},
+        {},
+        False,
+        True,
+        "Google rejected v1.2.3",
+    ),
+    (
+        "the release rejected, given by hand again",
+        {"submittedItemRevisionStatus": revision("1.2.3", "REJECTED")},
+        {"EXPLICIT": "true"},
+        True,
+        False,
+        "The release v1.2.3 goes to the Chrome",
+    ),
+    (
+        "an earlier submission rejected",
+        {"submittedItemRevisionStatus": revision("1.2.2", "REJECTED")},
+        {},
+        True,
+        False,
+        "Google rejected the earlier submission 1.2.2",
+    ),
+    (
+        "the release cancelled",
+        {"submittedItemRevisionStatus": revision("1.2.3", "CANCELLED")},
+        {},
+        False,
+        False,
+        "was cancelled in the Developer Dashboard",
+    ),
+    (
+        "the release staged",
+        {"submittedItemRevisionStatus": revision("1.2.3", "STAGED")},
+        {},
+        False,
+        False,
+        "in the state STAGED; nothing to deliver",
+    ),
+    (
+        "a warned item",
+        {"warned": True},
+        {},
+        True,
+        True,
+        "| Item | warned |",
+    ),
+    (
+        "a taken-down item",
+        {"takenDown": True},
+        {},
+        False,
+        True,
+        "| Item | taken down |",
+    ),
+    (
+        "a taken-down item, with the tag of its fix",
+        {"takenDown": True},
+        {"EXPLICIT": "true"},
+        True,
+        True,
+        "Google took the item down",
+    ),
+]
+
+
+@WITH_NODE
+@pytest.mark.parametrize(
+    ("status", "variables", "deliver", "fails", "said"),
+    [case[1:] for case in STORE_STATES],
+    ids=[case[0] for case in STORE_STATES],
+)
+def test_the_state_of_the_store_decides_what_a_run_delivers(
+    tmp_path: Path,
+    status: dict[str, Any],
+    variables: dict[str, str],
+    deliver: bool,
+    fails: bool,
+    said: str,
+) -> None:
+    result, summary, output = store_status(tmp_path, status, **variables)
+
+    assert result.returncode == (1 if fails else 0), result.stderr
+    assert (output == "tag=v1.2.3\n") == deliver
+    assert said in summary or said in result.stdout
+    assert summary.startswith("### The Chrome Web Store\n")
+    # A problem fails the run with its annotation and the page that says what to do.
+    assert ("::error title=Chrome Web Store::" in result.stdout) == fails
+    assert (
+        "How to fix a problem of the store: https://example.org/releases.md"
+        "#when-a-run-fails"
+    ) in summary or not fails
+
+
+def test_the_store_workflow_signs_in_alike_and_only_where_it_talks_to_the_store() -> (
+    None
+):
+    store = workflow_steps.workflow("publish-store.yml")
+    jobs = store["jobs"]
+    assert list(jobs) == ["status", "package", "store"]
+    # Only in a repository that delivers to the store; never in the blueprint itself
+    # or a fork, which have no such variable.
+    assert workflow_steps.condition_of(jobs["status"]).startswith(
+        "vars.PUBLISH_TO == 'chrome-web-store' && ("
+    )
+    for job_id, job in jobs.items():
+        harden = job["steps"][0]
+        assert harden["uses"].startswith("step-security/harden-runner@"), job_id
+        assert harden["with"]["egress-policy"] == "block", job_id
+        assert harden["with"]["disable-sudo-and-containers"] is True, job_id
+        assert job["runs-on"] == "ubuntu-24.04", job_id
+    # The OIDC token only for the two jobs that sign in to Google, and the same
+    # sign-in in both.
+    assert {
+        job_id for job_id, job in jobs.items() if "id-token" in job["permissions"]
+    } == {"status", "store"}
+    for name in (
+        "Sign in to the Chrome Web Store API with GitHub's OIDC token",
+        "Check the set-up of the environment",
+    ):
+        found = [
+            step["run"]
+            for job in jobs.values()
+            for step in job["steps"]
+            if step.get("name") == name
+        ]
+        assert len(found) == (2 if "OIDC" in name else 1), name
+        assert len(set(found)) == 1, name
+    # The package of the store is the one that the release attests: the job checks
+    # its provenance with what may only read, and the job that uploads it runs no
+    # code of the repository and reaches only Google.
+    assert jobs["package"]["permissions"] == {
+        "contents": "read",
+        "attestations": "read",
+    }
+    package = script_of(
+        jobs["package"], "Take the zip of the release and check its provenance"
+    )
+    assert "gh attestation verify" in package
+    assert '--signer-workflow "$GH_REPO/.github/workflows/build-release.yml"' in package
+    uses = [step.get("uses", "") for step in jobs["store"]["steps"]]
+    assert not any(use.startswith("actions/checkout@") for use in uses)
+    hosts = jobs["store"]["steps"][0]["with"]["allowed-endpoints"].split()
+    assert all(re.fullmatch(r"[a-z0-9-]+\.googleapis\.com:443", host) for host in hosts)
+    assert jobs["store"]["environment"]["name"] == "chrome-web-store"
+    assert jobs["status"]["environment"] == {
+        "name": "chrome-web-store",
+        "deployment": False,
+    }
+
+
+# The set-up of the environment of the store that each run checks first: which way it
+# signs in, and what it says is missing.
+STORE_SET_UPS: list[tuple[str, dict[str, str], str | None, list[str]]] = [
+    (
+        "the sign-in without a stored secret",
+        {
+            "CWS_WORKLOAD_IDENTITY_PROVIDER": (
+                "projects/123/locations/global/workloadIdentityPools/github/providers/demo"
+            ),
+            "CWS_SERVICE_ACCOUNT": "chrome-web-store@demo.iam.gserviceaccount.com",
+        },
+        "keyless",
+        [],
+    ),
+    (
+        "a secret left from the refresh token",
+        {
+            "CWS_WORKLOAD_IDENTITY_PROVIDER": (
+                "projects/123/locations/global/workloadIdentityPools/github/providers/demo"
+            ),
+            "CWS_SERVICE_ACCOUNT": "chrome-web-store@demo.iam.gserviceaccount.com",
+            "CWS_REFRESH_TOKEN": "token-value-3",
+        },
+        "keyless",
+        [
+            "::warning title=Chrome Web Store::The sign-in needs the secret"
+            " CWS_REFRESH_TOKEN no more: delete it with gh secret delete"
+            " CWS_REFRESH_TOKEN --env chrome-web-store"
+        ],
+    ),
+    (
+        "a provider by the ID of the project",
+        {
+            "CWS_WORKLOAD_IDENTITY_PROVIDER": "//iam.googleapis.com/projects/demo",
+            "CWS_SERVICE_ACCOUNT": "chrome-web-store@demo.iam.gserviceaccount.com",
+        },
+        None,
+        ["::error::The variable CWS_WORKLOAD_IDENTITY_PROVIDER is missing or names"],
+    ),
+    (
+        "the refresh token",
+        {
+            "CWS_CLIENT_ID": "client-value-1",
+            "CWS_CLIENT_SECRET": "secret-value-2",
+            "CWS_REFRESH_TOKEN": "token-value-3",
+        },
+        "refresh-token",
+        [],
+    ),
+    (
+        "neither way",
+        {"CWS_CLIENT_ID": "client-value-1"},
+        None,
+        [
+            "::error::The secret CWS_CLIENT_SECRET of the environment chrome-web-store"
+            " is missing, and so are the variables of the sign-in without a stored"
+            " secret"
+        ],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("given", "sign_in", "said"),
+    [case[1:] for case in STORE_SET_UPS],
+    ids=[case[0] for case in STORE_SET_UPS],
+)
+def test_each_run_checks_the_set_up_of_the_store_first(
+    tmp_path: Path, given: dict[str, str], sign_in: str | None, said: list[str]
+) -> None:
+    names = [
+        "CWS_CLIENT_ID",
+        "CWS_CLIENT_SECRET",
+        "CWS_REFRESH_TOKEN",
+        "CWS_WORKLOAD_IDENTITY_PROVIDER",
+        "CWS_SERVICE_ACCOUNT",
+    ]
+    result = workflow_steps.run_step(
+        tmp_path,
+        "publish-store.yml",
+        "status",
+        "Check the set-up of the environment",
+        env={
+            **dict.fromkeys(names, ""),
+            "CWS_EXTENSION_ID": "abcdefghijklmnopabcdefghijklmnop",
+            "CWS_PUBLISHER_ID": "publisher",
+            "ITEM": "https://chromewebstore.googleapis.com/v2/publishers/p/items/i",
+            **given,
+        },
+    )
+
+    assert result.returncode == (0 if sign_in else 1), result.stdout
+    if sign_in:
+        assert result.outputs["sign-in"] == sign_in
+    for text in said:
+        assert text in result.stdout
+    # Nothing of a secret reaches the log.
+    for value in ("client-value-1", "secret-value-2", "token-value-3"):
+        assert value not in result.stdout + result.stderr
+
+
+def submit_answer(
+    tmp_path: Path, answer: dict[str, Any], step: str = "Submit the release for review"
+) -> workflow_steps.StepResult:
+    """The step that submits the release for review, with a store that answers the
+    publish with this error, for the zip of a manifest that asks for a permission and
+    a host and speaks two languages."""
+    workspace = tmp_path / "workspace"
+    (workspace / "dist").mkdir(parents=True)
+    with zipfile.ZipFile(workspace / "dist/demo-1.2.3.zip", "w") as archive:
+        archive.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "manifest_version": 3,
+                    "version": "1.2.3",
+                    "permissions": ["storage"],
+                    "host_permissions": ["https://example.com/*"],
+                }
+            ),
+        )
+        archive.writestr("_locales/de/messages.json", "{}")
+        archive.writestr("_locales/en/messages.json", "{}")
+    (tmp_path / "answer.json").write_text(json.dumps(answer), encoding="utf-8")
+    curl = (
+        "while [[ $# -gt 0 ]]; do\n"
+        '  [[ "$1" == --output ]] && cp "$ANSWER" "$2"\n'
+        "  shift\n"
+        "done\n"
+        "exit 22\n"
+    )
+    return workflow_steps.run_step(
+        tmp_path,
+        "publish-store.yml",
+        "store",
+        step,
+        env={
+            "TAG": "v1.2.3",
+            "ZIP": "dist/demo-1.2.3.zip",
+            "ITEM": "https://chromewebstore.googleapis.com/v2/publishers/p/items/i",
+            "UPLOAD": "https://chromewebstore.googleapis.com/upload",
+            "ANSWER": (tmp_path / "answer.json").as_posix(),
+        },
+        stubs={"curl": curl},
+        workspace=workspace,
+    )
+
+
+@WITH_JQ
+def test_a_submission_without_what_the_dashboard_lacks_says_what_to_fill_in(
+    tmp_path: Path,
+) -> None:
+    result = submit_answer(
+        tmp_path,
+        {
+            "error": {
+                "code": 400,
+                "status": "INVALID_ARGUMENT",
+                "details": [{"reason": "INVALID_ITEM_METADATA"}],
+            }
+        },
+    )
+
+    assert result.returncode == 1
+    assert "(INVALID_ITEM_METADATA): the Developer Dashboard lacks" in result.summary
+    assert "asks for https://example.com/*, storage and speaks de, en" in (
+        result.summary
+    )
+    assert "gh workflow run publish-store.yml -f tag=v1.2.3" in result.summary
+
+
+@WITH_JQ
+def test_a_submission_that_the_store_refuses_names_its_reason(tmp_path: Path) -> None:
+    result = submit_answer(
+        tmp_path, {"error": {"code": 403, "status": "PERMISSION_DENIED"}}
+    )
+
+    assert result.returncode == 1
+    assert "refused to submit v1.2.3 for review (PERMISSION_DENIED)" in result.summary
+    assert "INVALID_ITEM_METADATA" not in result.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("message", "fix"),
+    [
+        (
+            "The version of the package must be higher than the published version.",
+            "the store takes only a version above the one it has",
+        ),
+        ("Invalid manifest.", "run node scripts/check-manifest.mjs"),
+        (
+            "The item is pending review.",
+            "the item takes no new package until Google has decided",
+        ),
+        ("Something else.", "its answer is in the log above"),
+    ],
+    ids=["version", "manifest", "review", "unknown"],
+)
+def test_an_upload_that_the_store_refuses_says_why_and_what_fixes_it(
+    tmp_path: Path, message: str, fix: str
+) -> None:
+    result = submit_answer(
+        tmp_path,
+        {"error": {"code": 400, "status": "FAILED_PRECONDITION", "message": message}},
+        "Upload the zip",
+    )
+
+    assert result.returncode == 1
+    assert "- **Problem:** The store refused dist/demo-1.2.3.zip" in result.summary
+    assert message in result.summary
+    assert fix in result.summary
+    assert "::error title=Chrome Web Store::" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("manifest", "zips", "passes"),
+    [
+        ({"manifest_version": 3, "version": "1.3.0"}, 1, True),
+        ({"manifest_version": 3, "version": "1.2.0"}, 1, False),
+        ({"manifest_version": 2, "version": "1.3.0"}, 1, False),
+        ({"manifest_version": 3, "version": "1.3.0"}, 2, False),
+    ],
+)
+@pytest.mark.parametrize("version", ["1.3.0", "1.3.0-beta.2"])
+def test_the_build_of_a_release_attaches_one_zip_of_its_version(
+    tmp_path: Path, manifest: dict[str, Any], zips: int, passes: bool, version: str
+) -> None:
+    # The package script of the project, in place: it writes the zips to check.
+    writer = "\n".join(
+        f'python3 -c \'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w")'
+        f'.writestr("manifest.json", sys.argv[2])\' "$1/demo-{number}.zip"'
+        f" '{json.dumps(manifest)}'"
+        for number in range(zips)
+    )
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    result = workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        "assets",
+        "Package the Chrome extension",
+        env={"VERSION": version, "ASSETS": assets.as_posix()},
+        stubs={
+            "npm": workflow_steps.recording("npm"),
+            "python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+        },
+        files={"scripts/package-extension.sh": writer + "\n"},
+    )
+
+    assert result.returncode == (0 if passes else 1), result.stderr
+    assert "npm ci --ignore-scripts" in result.stubbed
+    if not passes:
+        assert "The release needs one zip with the manifest.json of Manifest V3" in (
+            result.stdout
+        )
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("manifest", "zips", "weekly", "said"),
+    [
+        (
+            {"manifest_version": 3, "version": "1.3.0"},
+            1,
+            "false",
+            "PASS ./demo-1.3.0-beta.2.zip holds the manifest.json of Manifest V3 and"
+            " the version 1.3.0 at its root",
+        ),
+        (
+            {"manifest_version": 3, "version": "1.2.0"},
+            1,
+            "false",
+            "FAIL ./demo-1.3.0-beta.2.zip has no manifest.json of Manifest V3 and the"
+            " version 1.3.0 at its root",
+        ),
+        (
+            {},
+            0,
+            "false",
+            "FAIL The release has no single zip of the extension for the Chrome Web Store",
+        ),
+        (
+            {},
+            0,
+            "true",
+            "::notice::The release is older than the zip of the extension",
+        ),
+    ],
+)
+def test_the_check_of_a_release_finds_the_zip_of_the_extension(
+    tmp_path: Path, manifest: dict[str, Any], zips: int, weekly: str, said: str
+) -> None:
+    # The part of the verification for the Chrome Web Store, for the beta
+    # 1.3.0-beta.2, whose manifest has the numbers of its version.
+    script = script_of(
+        workflow_steps.workflow("verify-release.yml"),
+        "Verify the release as its users can",
+    )
+    # The runner hands the script over without the indentation of its block.
+    branch = script[script.index("\n  chrome-web-store)\n") + 1 :]
+    branch = branch[: branch.index("\n    ;;\n") + len("\n    ;;\n")]
+    (tmp_path / "check.sh").write_text(
+        'pass() { echo "PASS $1"; }\nfail() { echo "FAIL $1"; }\n'
+        'version="1.3.0-beta.2"\ncase chrome-web-store in\n' + branch + "esac\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    for number in range(zips):
+        with zipfile.ZipFile(
+            tmp_path / f"demo-1.3.0-beta.{number + 2}.zip", "w"
+        ) as zipped:
+            zipped.writestr("manifest.json", json.dumps(manifest))
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "python3").write_text(
+        f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "python3").chmod(0o755)
+
+    result = subprocess.run(
+        in_bash((tmp_path / "check.sh").as_posix()),
+        cwd=tmp_path,
+        env={**os.environ, "STUBS": stubs.as_posix(), "WEEKLY": weekly},
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert said in result.stdout
 
 
 def gh_answers(answers: Mapping[str, object]) -> list[Answer]:
@@ -12940,7 +14269,7 @@ def test_the_newest_node_checks_main_and_every_week(
     flows = workflows(root)
     # The blueprint keeps the source of the workflow, whose check it skips, as it
     # skips that of the CI of Node.
-    node = project in ("blueprint", "node-package")
+    node = project in ("blueprint", *NODE)
     assert ("newest-node.yml" in flows) == node
     for name, text in flows.items():
         if name != "newest-node.yml":
@@ -14620,6 +15949,96 @@ def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> N
     assert "\nWait /\\(Y.n\\)$/\n" in tape
 
 
+def test_the_recording_answers_each_question_that_copier_asks(tmp_path: Path) -> None:
+    # The tape presses one Enter for each question, in the order of copier.yml. A
+    # question without its key keeps Copier waiting while the tape waits for the prompt,
+    # and the recording times out on an empty line; only the run after the next release
+    # showed that test_marker had none (#507). A key in the wrong place waits for what
+    # another question shows. So a new question needs its key in the tape, and Copier
+    # itself says which questions the answers of the tape lead to: those it stores.
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    start = tape.index("\nWait+Screen@60s /The name of the project/\n")
+    keys = tape[start : tape.index("\nWait@60s /^\\$$/\n")].split("\nEnter\n")
+    # What follows the last key waits for the prompt.
+    keys.pop()
+    typed = re.findall(r'^Type "(.+)"$', "\n".join(keys), flags=re.MULTILINE)
+    assert len(typed) == 3
+    down = re.search(r"^Down@\S+ (\d+)$", "\n".join(keys), flags=re.MULTILINE)
+    assert down
+    kind = list(copier["project_type"]["choices"].values())[int(down[1])]
+    # The tape says that it copies a Python package, which asks for python_package.
+    assert kind == "python-package"
+    project = render(
+        tmp_path,
+        project_name=typed[0],
+        description=typed[1],
+        owner=typed[2],
+        project_type=kind,
+    )
+    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    asked = [name for name in copier if name in answers]
+    assert len(keys) == len(asked), (
+        f"The tape has {len(keys)} keys, Copier asks {len(asked)} questions: {asked}"
+    )
+    # Each key waits only for what its question shows: its help, or the line of the
+    # cursor, which holds its default, the help of a choice or (Y/n).
+    for name, key in zip(asked, keys, strict=True):
+        question = copier[name]
+        if question.get("multiselect"):
+            cursor = "(Use arrow keys to move, <space> to select, <i> to invert)"
+        elif "choices" in question:
+            cursor = "(Use arrow keys)"
+        elif question["type"] == "bool":
+            cursor = "(Y/n)" if answers[name] else "(y/N)"
+        else:
+            cursor = str(answers[name])
+        waits = re.findall(r"^Wait\S* /(.+)/$", key, flags=re.MULTILINE)
+        for wait in waits:
+            assert re.search(wait, question["help"]) or re.search(wait, cursor), (
+                f"The key of {name} waits for /{wait}/"
+            )
+
+
+def test_the_dry_run_of_the_recording_passes_the_preflight(tmp_path: Path) -> None:
+    # The recording ends with create --dry-run, which shows its commands only after a
+    # preflight that nothing stops. Without a Git identity and a signed-in GitHub CLI,
+    # which a recording without secrets lacks, it would end on the marks of the problems
+    # and not on the commands that the README describes, so the image brings both (#507).
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    command = "cd paperless-sync && python3 .github/blueprint.py create --dry-run"
+    assert f'\nType "{command}"\n' in tape
+    image = (ROOT / ".github/docs-pictures/Dockerfile").read_text(encoding="utf-8")
+    assert "\nCOPY --chmod=755 .github/docs-pictures/gh.sh /usr/local/bin/gh\n" in image
+    assert 'git config --system user.name "' in image
+    assert 'git config --system user.email "' in image
+    repo = "Dennis-Otto/paperless-sync"
+    gh = (ROOT / ".github/docs-pictures/gh.sh").as_posix()
+    bash = BASH
+    assert bash
+
+    def run(arguments: Sequence[str], folder: Path) -> subprocess.CompletedProcess[str]:
+        if arguments[0] == "gh":
+            return subprocess.run(
+                [bash, gh, *arguments[1:]],
+                cwd=folder,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(
+            arguments, 0, preflight.answers(repo)[" ".join(arguments)][1], ""
+        )
+
+    findings, plan = bootstrap.preflight(tmp_path, repo, run, (3, 13))
+    shown = bootstrap.describe(repo, findings)
+    assert all(finding.ok is True for finding in findings), shown
+    assert f"{repo} is free on GitHub" in shown
+    assert "gh is signed in to github.com as Dennis-Otto" in shown
+    assert plan.commits
+    assert not plan.resume
+
+
 def test_the_tools_of_the_website_install_on_windows() -> None:
     # The plugin for the dates requires tzdata on Windows alone. pip-compile on Linux
     # left it out of the lock, and with --require-hashes pip refused all of it there.
@@ -15791,6 +17210,7 @@ def test_the_build_stops_at_assets_that_the_release_cannot_ship(
         ("pypi", "docs-1.2.3.tar.gz", False),
         ("pypi", "extra-1.2.3-py3-none-any.whl", False),
         ("npm", "extra-1.2.3.tgz", False),
+        ("chrome-web-store", "extra-1.2.3.zip", False),
         ("nextcloud-appstore", "demo.tar.gz", False),
     ],
 )
@@ -15853,14 +17273,45 @@ def test_contributing_explains_the_assets_that_a_project_builds_itself(
     assert "the verification of the release fails for an asset without" in text
 
 
-def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
+def test_a_release_left_as_a_draft_is_finished_by_hand_or_by_a_second_try() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "release-please")
     step = step_in(job, "resume")
-    assert "github.event_name == 'workflow_dispatch'" in condition_of(step)
+    # A job that hung after it created the release gets a second try, in which
+    # release-please has nothing left to create; without this it would end green.
+    assert condition_of(step) == (
+        "(github.event_name == 'workflow_dispatch' || github.run_attempt > 1)"
+        " && steps.release.outputs.release_created != 'true'"
+    )
     assert "--json isDraft" in step["run"]
     for output in ("created", "tag", "sha", "version", "major"):
         assert "steps.resume.outputs." in job["outputs"][output], output
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_second_try_of_a_release_takes_up_its_draft(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        "Take up a release that an earlier run left as a draft",
+        answers=[
+            Answer(
+                r"release view v1\.2\.3 --repo o/r --json isDraft --jq \.isDraft",
+                "true\n",
+            ),
+            Answer(r"api repos/o/r/commits\?path=.+ --jq .+", "abc1234def\n"),
+        ],
+        env={"GITHUB_SHA": "fed4321cba"},
+        # The version in the manifest, as jq reads it, also on a machine without jq.
+        stubs={"jq": "echo 1.2.3"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.outputs["tag"] == "v1.2.3"
+    assert done.outputs["sha"] == "abc1234def"
+    assert done.outputs["version"] == "1.2.3"
+    assert done.outputs["major"] == "1"
 
 
 # What each kind of release ships, which its SBOMs describe: the files of its package,
@@ -17368,7 +18819,7 @@ def test_a_release_of_a_scheduled_run_is_verified_in_full() -> None:
     weekly = "github.event_name == 'schedule' && inputs.tag == ''"
     assert f"          WEEKLY: ${{{{ {weekly} }}}}\n" in verify
     assert "GITHUB_EVENT_NAME" not in verify
-    assert verify.count('[[ "$WEEKLY" == true ]]') == 5
+    assert verify.count('[[ "$WEEKLY" == true ]]') == 6
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "verify")
     assert job["uses"] == "./.github/workflows/verify-release.yml"
@@ -18102,3 +19553,56 @@ def test_a_test_can_stay_out_of_the_mutation_tests(
 
     assert marker(ROOT / "pyproject.toml")
     assert marker(projects[kind] / "pyproject.toml") == marker(ROOT / "pyproject.toml")
+
+
+DEPENDABOT_LACKS = "Say what the app lacks"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_dependabot_alert_bot_asks_for_the_alerts_alone(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # The token of a workflow can't read the Dependabot alerts: the settings app, or
+    # the release app without it, closes them, with that permission alone.
+    root = ROOT if project == "blueprint" else projects[project]
+    job = workflow_steps.job("osv-scanner.yml", "dependabot", root)
+    tokens = steps_using(job, "actions/create-github-app-token")
+
+    assert [token["id"] for token in tokens] == ["settings-token", "release-token"]
+    for token in tokens:
+        assert app_permissions({"steps": [token]}) == {"vulnerability-alerts": "write"}
+        # A refused token is the next step's to explain, not a failure of the step.
+        assert token["continue-on-error"] is True
+    assert "pull_request" in job["if"]
+    assert "fork" in job["if"]
+    # The blueprint's owner, whose apps have the permission, fails the check.
+    lacks = workflow_steps.step_in(job, DEPENDABOT_LACKS)
+    assert lacks["env"]["STRICT"] == "true"
+    run = workflow_steps.step_in(job, "Close the alerts that osv-scanner.toml accepts")
+    assert "advisories --dependabot" in run["run"]
+    assert run["env"]["DRY_RUN"] == "${{ inputs.dry_run || false }}"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("strict", "code", "level"), [("true", 1, "error"), ("false", 0, "notice")]
+)
+def test_the_dependabot_alert_bot_says_what_the_app_lacks(
+    tmp_path: Path, strict: str, code: int, level: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "osv-scanner.yml",
+        "dependabot",
+        DEPENDABOT_LACKS,
+        env={"APP": "settings", "STRICT": strict},
+    )
+
+    assert done.returncode == code
+    [said] = done.stdout.splitlines()
+    assert said.startswith(f"::{level}::GitHub refused a token of the settings app")
+    assert "Dependabot alerts (read and write)" in said
+    assert done.summary.startswith(
+        "### The settings app may not close the Dependabot alerts\n\n"
+    )
+    assert "set *Dependabot alerts* to *Read and write*" in done.summary

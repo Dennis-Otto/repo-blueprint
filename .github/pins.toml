@@ -12,8 +12,8 @@ sha256 = "69213a8a0813a151e5a47d0060862952ff833a845d57309dff76f7ba6600abae"
 
 [download."infection/infection"]
 url = "https://github.com/infection/infection/releases/download/{version}/infection.phar"
-version = "0.35.6"
-sha256 = "3fd4216875260b8e47c48ec1a92473f500d88bd36d8ffec21cc0d24e18d7f0ea"
+version = "0.35.8"
+sha256 = "b2049ae1bff43d9dc82831c2833005005eb62d5180cd518892af93fc8e23ddc5"
 
 [download."ChristophWurst/krankerl"]
 url = "https://github.com/ChristophWurst/krankerl/releases/download/v{version}/krankerl_{version}_amd64.deb"
@@ -22,10 +22,10 @@ sha256 = "9bee5a756a83c5a6b1f040e9a2ade9e902e4a57211afc174cd8ac5c4f913958f"
 
 [download."nextcloud/server"]
 url = "https://download.nextcloud.com/server/releases/nextcloud-{version}.zip"
-version = "35.0.1"
-sha256 = "3c5c1798002167b70421898f820f709a40b0393de463a0f32f023b0c74e5a45d"
+version = "35.0.2"
+sha256 = "2f1dcec6a7cdab70346e80a823ccaaa2001a6085013d9f2ae0a2606fa38c2835"
 
 [download."anchore/syft"]
 url = "https://github.com/anchore/syft/releases/download/v{version}/syft_{version}_linux_amd64.tar.gz"
-version = "1.54.1"
-sha256 = "c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47"
+version = "1.55.0"
+sha256 = "bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d"

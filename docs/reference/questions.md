@@ -85,6 +85,7 @@ The kind of project.
 | `github-action` | GitHub Action (Python, composite) |
 | `python-package` | Python package (PyPI) |
 | `node-package` | Node package (TypeScript, npm) |
+| `chrome-extension` | Chrome extension (Manifest V3, Chrome Web Store) |
 | `container` | Container image (GHCR) |
 | `generic` | Repository without a build (docs, configuration, scripts) |
 
@@ -197,7 +198,7 @@ The languages of the code, which CodeQL analyzes (it has no PHP).
 
 ```text
 [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
-[%- elif project_type in ['node-package', 'nextcloud-app'] -%][javascript-typescript]
+[%- elif project_type in ['node-package', 'chrome-extension', 'nextcloud-app'] -%][javascript-typescript]
 [%- else -%][]
 [%- endif -%]
 ```
@@ -261,6 +262,7 @@ The topics of the repository on GitHub, with those of each kind by default: HACS
 [%- elif project_type == 'github-action' -%]github-actions, github-action
 [%- elif project_type == 'python-package' -%]python, pypi
 [%- elif project_type == 'node-package' -%]typescript, nodejs, npm
+[%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
 [%- elif project_type == 'container' -%]docker, container, ghcr
 [%- endif -%]
 ```
@@ -409,7 +411,7 @@ release_app_id: '4739928'
 [%- if project_type == 'home-assistant' -%]home-assistant
 [%- elif project_type == 'nextcloud-app' -%]php
 [%- elif project_type in ['github-action', 'python-package'] -%]python
-[%- elif project_type == 'node-package' -%]node
+[%- elif project_type in ['node-package', 'chrome-extension'] -%]node
 [%- elif project_type == 'container' -%]container
 [%- else -%]generic
 [%- endif -%]
@@ -426,6 +428,7 @@ release_app_id: '4739928'
 [%- elif project_type == 'github-action' -%]github-action
 [%- elif project_type == 'python-package' -%]pypi
 [%- elif project_type == 'node-package' -%]npm
+[%- elif project_type == 'chrome-extension' -%]chrome-web-store
 [%- elif project_type == 'container' -%]ghcr
 [%- else -%]none
 [%- endif -%]
@@ -511,7 +514,7 @@ The slot of the schedules of this repository, so that the scheduled workflows of
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.
 
 <details markdown>
-<summary>The 56 patterns of the files of a project</summary>
+<summary>The 59 patterns of the files of a project</summary>
 
 - `/README.md`
 - `/CHANGELOG.md`
@@ -520,6 +523,7 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/mkdocs.yml`
 - `/docs/index.md`
 - `/docs/security.md`
+- `/docs/releases.md`
 - `.github/issue-assistant/project.md`
 - `.github/agents.project.md`
 - `/docs/decisions`
@@ -557,6 +561,8 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/composer.lock`
 - `/package.json`
 - `/package-lock.json`
+- `/extension`
+- `/store`
 - `/Dockerfile`
 - `/action.yml`
 - `/hacs.json`

@@ -31,6 +31,13 @@
       "extra-files": [
         { "type": "xml", "path": "appinfo/info.xml", "xpath": "//info/version" },
         { "type": "generic", "path": "appinfo/info.xml" }
+      ][% elif project_type == 'chrome-extension' %],
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "extension/manifest.json",
+          "jsonpath": "$.version"
+        }
       ][% elif project_type == 'container' %],
       "extra-files": [
         { "type": "generic", "path": "Dockerfile" }

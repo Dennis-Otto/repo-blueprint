@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": {= project_name | truncate(75, False, '…', 0) | to_json(ensure_ascii=False) =},
+    "description": "The name of the extension, at most 75 characters, as the Chrome Web Store takes it."
+  },
+  "extDescription": {
+    "message": {= description | truncate(132, False, '…', 0) | to_json(ensure_ascii=False) =},
+    "description": "What the extension does, at most 132 characters, as the Chrome Web Store takes it."
+  }
+}

@@ -33,12 +33,13 @@ RELEASE_APP_PERMISSIONS = (
     ("Checks", "checks", "write"),
     ("Commit statuses", "statuses", "write"),
     ("Contents", "contents", "write"),
+    # The OSV-Scanner workflow closes the alerts of the accepted advisories with it.
+    ("Dependabot alerts", "vulnerability_alerts", "write"),
     ("Issues", "issues", "write"),
     ("Pages", "pages", "write"),
     ("Pull requests", "pull_requests", "write"),
     ("Variables", "", "write"),
     ("Workflows", "workflows", "write"),
-    ("Dependabot alerts", "vulnerability_alerts", "read"),
     ("Environments", "environments", "read"),
     ("Secrets", "secrets", "read"),
 )
@@ -315,6 +316,22 @@ def code_security_step(repo: str, plan: Plan) -> Step:
     )
 
 
+# The OSV-Scanner workflow closes the Dependabot alerts that an osv-scanner.toml
+# accepts as the settings app, or as the release app without one; no API tells the
+# permissions of an app to its repository (decision 0086).
+DEPENDABOT_ALERTS = Step(
+    "The settings app, or the release app without one, may write the Dependabot alerts,"
+    " so that the OSV-Scanner workflow closes those that osv-scanner.toml accepts",
+    None,
+    "On the settings page of the app, under Permissions & events -> Repository"
+    " permissions, set Dependabot alerts to Read and write and save; then accept the new"
+    " permission on its installation: Settings -> Applications -> Installed GitHub Apps,"
+    " Configure, Review request.\n"
+    "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md"
+    "#8-the-settings-app-optional",
+)
+
+
 def checklist(
     api: Api,
     repo: str,
@@ -356,6 +373,7 @@ def checklist(
             "\n".join(item.manual for item in community),
         ),
         installed,
+        DEPENDABOT_ALERTS,
         renovate(api, repo, settings, root),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
@@ -414,7 +432,45 @@ def checklist(
     if target in delivery:
         text, how = delivery[target]
         steps.append(Step(text, None, how))
+    if target == "chrome-web-store":
+        steps += chrome_web_store(api, repo)
     return steps
+
+
+# The variables of the workflow Chrome Web Store, publish-store.yml, which only a
+# person can find (decision 0085): the IDs of the item and of its publisher in the
+# Developer Dashboard, and the provider of the workload identity pool and the service
+# account of the sign-in without a stored secret.
+CHROME_WEB_STORE_ITEM = ("CWS_EXTENSION_ID", "CWS_PUBLISHER_ID")
+CHROME_WEB_STORE_SIGN_IN = ("CWS_WORKLOAD_IDENTITY_PROVIDER", "CWS_SERVICE_ACCOUNT")
+
+
+def chrome_web_store(api: Api, repo: str) -> list[Step]:
+    """The Chrome Web Store creates an item only from a first upload by hand, and
+    Google trusts the OIDC token of GitHub only after the one-time set-up of
+    docs/releases.md; each is done once its variables are set."""
+
+    def named(variables: tuple[str, ...]) -> bool:
+        return all(
+            api.get(f"repos/{repo}/actions/variables/{name}") for name in variables
+        )
+
+    docs = f"https://github.com/{repo}/blob/main/docs/releases.md"
+    return [
+        Step(
+            "Chrome Web Store: the first version uploaded by hand in the Developer"
+            " Dashboard, its listing and privacy practices filled in, and the variables"
+            " CWS_EXTENSION_ID and CWS_PUBLISHER_ID set",
+            named(CHROME_WEB_STORE_ITEM),
+            f"{docs}#the-first-listing",
+        ),
+        Step(
+            "Chrome Web Store: the sign-in without a stored secret set up, with the"
+            " variables CWS_WORKLOAD_IDENTITY_PROVIDER and CWS_SERVICE_ACCOUNT",
+            named(CHROME_WEB_STORE_SIGN_IN),
+            f"{docs}#sign-in-without-a-stored-secret",
+        ),
+    ]
 
 
 def listing(settings: Settings, drift: list[Drift]) -> Step:

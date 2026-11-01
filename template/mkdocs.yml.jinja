@@ -42,6 +42,9 @@ copyright: {= ('© ' ~ copyright) | to_json(ensure_ascii=False) =}
 # .github/workflows/ at every build; a page docs/automation.md of your own replaces it.
 nav:
   - Home: index.md
+[%- if project_type == 'chrome-extension' %]
+  - Releases and the Chrome Web Store: releases.md
+[%- endif %]
   - Security design: security.md
   - automation.md
   - Decisions: decisions/README.md

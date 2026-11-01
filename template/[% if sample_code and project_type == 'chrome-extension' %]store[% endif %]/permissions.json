@@ -1,0 +1,8 @@
+{
+  "about": "The reason of everything that extension/manifest.json asks the browser for: its permissions, its hosts, which host_permissions and the matches of content_scripts name, and its web-accessible resources. scripts/check-manifest.mjs fails when the manifest asks for more or for less, and when a store listing doesn't justify a permission or a host. Chrome disables an installed extension after an update that asks for a new permission or host until its user accepts it, and the Chrome Web Store wants a justification of each under the privacy practices of the Developer Dashboard before it takes the version: add an entry here only with its justification in every store listing and a note in the changelog that the update asks for it.",
+  "permissions": {
+    "storage": "Keeps the reason of the latest start of the extension on this computer."
+  },
+  "host_permissions": {},
+  "web_accessible_resources": {}
+}

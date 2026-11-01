@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "version": "0.0.0",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
+  "minimum_chrome_version": "120",
+  "homepage_url": "{= homepage or ('https://github.com/' ~ owner ~ '/' ~ project_slug) =}",
+  "action": {
+    "default_title": "__MSG_extName__"
+  },
+  "background": {
+    "service_worker": "lib/background.js",
+    "type": "module"
+  },
+  "permissions": ["storage"]
+}

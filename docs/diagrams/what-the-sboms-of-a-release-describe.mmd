@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: What the SBOMs of a release describe
-    accDescr: The build unpacks what the release ships into a folder of its own: the zip of HACS, the wheel, the npm package or the signed Nextcloud app, and for an action, an image or a project without a package the files of its tag without those that only check, test and document it. syft, checked by its sha256, lists the components that a package installs, or that the sources declare, under the name of the repository and the version of the release, as SPDX and as CycloneDX. The build and the release verification check that both name the release, and a scanner of a user applies the OpenVEX document of the release to the SPDX SBOM.
+    accDescr: The build unpacks what the release ships into a folder of its own: the zip of HACS, the wheel, the npm package, the zip of the Chrome extension or the signed Nextcloud app, and for an action, an image or a project without a package the files of its tag without those that only check, test and document it. syft, checked by its sha256, lists the components that a package installs, or that the sources declare, under the name of the repository and the version of the release, as SPDX and as CycloneDX. The build and the release verification check that both name the release, and a scanner of a user applies the OpenVEX document of the release to the SPDX SBOM.
 
     package(["The package of the release<br>zip · wheel · npm · Nextcloud app"])
     sources(["The files of its tag<br>without checks, tests and docs"])

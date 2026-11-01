@@ -1,2 +1,6 @@
 [%- from "includes/replace.jinja" import replaced with context -%]
-{= replaced(".github/workflows/osv-scanner.yml", []) -=}
+[#- A refused token of the Dependabot alert bot fails its check only in the
+    repositories of the blueprint's owner, whose apps have the permission, and leaves a
+    notice in those of every other owner (decision 0086). -#]
+[%- set strict = '          STRICT: "true"' -%]
+{= replaced(".github/workflows/osv-scanner.yml", [[strict, '          STRICT: "' ~ ('true' if owner == blueprint_owner.account else 'false') ~ '"']]) -=}

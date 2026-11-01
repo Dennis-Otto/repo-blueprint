@@ -1,3 +1,0 @@
-### Performance
-
-- **The tests of a Home Assistant integration run on all four cores of a runner, not two:** `scripts/check.sh` started the tests with `pytest -n auto`, which counts only the physical cores once psutil is installed, as the test tools of Home Assistant install it, so the check ran its tests in two processes. Now `pytest -n logical` starts a process for each logical core, with or without psutil, and at most eight, so that a large machine that checks several repositories at once doesn't run out of memory; `PYTEST_XDIST_AUTO_NUM_WORKERS` still sets the number of processes, also above eight.
