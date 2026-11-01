@@ -490,6 +490,101 @@ def test_runs_of_pull_requests_and_other_branches_change_nothing(
     assert writes(github) == []
 
 
+def test_the_verification_of_a_published_release_opens_the_issue(
+    github: FakeGitHub,
+) -> None:
+    # It runs for the tag of the release, and GitHub mails its failure only to whoever
+    # published it, who may be the one that the verification is about.
+    github.runs[1] = run_of(
+        1, name="Release verification", event="release", branch="v1.2.3", attempt=2
+    )
+    github.jobs[(1, 2)] = [job_of_a_run(11, "verify the release", "failure")]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result.startswith("Release verification: ")
+    assert github.issues[1]["title"] == "Release verification fails on v1.2.3"
+    assert "fails on `v1.2.3` since" in github.issues[1]["body"]
+    assert "started by a published release." in github.issues[1]["body"]
+    assert "Only a run for `v1.2.3` closes this issue" in github.issues[1]["body"]
+
+
+def test_only_a_run_for_its_tag_closes_the_issue_of_a_published_release(
+    github: FakeGitHub,
+) -> None:
+    # The weekly run checks the latest release, which a prerelease is not.
+    name = "Release verification"
+    github.runs[1] = run_of(
+        1, name=name, event="release", branch="v1.2.3-rc.1", attempt=2
+    )
+    github.jobs[(1, 2)] = [job_of_a_run(11, "verify the release", "failure")]
+    watch_run(api_of(github), REPO, 1, NOW)
+
+    github.runs[2] = run_of(2, name=name, conclusion="success")
+    assert watch_run(api_of(github), REPO, 2, NOW) == f"{name}: passes."
+    assert github.issues[1]["state"] == "open"
+
+    github.runs[3] = run_of(
+        3, name=name, event="release", branch="v1.2.4", conclusion="success"
+    )
+    assert watch_run(api_of(github), REPO, 3, NOW) == f"{name}: passes."
+    assert github.issues[1]["state"] == "open"
+
+    # The same run again, once what was wrong is fixed; its id is that of the failure.
+    github.runs[1] = run_of(
+        1,
+        name=name,
+        event="release",
+        branch="v1.2.3-rc.1",
+        conclusion="success",
+        attempt=3,
+    )
+    result = watch_run(api_of(github), REPO, 1, NOW)
+    assert result == f"{name}: passes again: closed #1."
+    assert github.issues[1]["state"] == "closed"
+
+
+def test_a_failing_release_opens_an_issue_beside_that_of_the_weekly_run(
+    github: FakeGitHub,
+) -> None:
+    # An update of an open issue notifies nobody, and the release is news.
+    name = "Release verification"
+    github.runs[1] = run_of(1, name=name, attempt=2)
+    github.jobs[(1, 2)] = [job_of_a_run(11, "verify the release", "failure")]
+    watch_run(api_of(github), REPO, 1, NOW)
+
+    github.runs[2] = run_of(2, name=name, event="release", branch="v1.2.3", attempt=2)
+    github.jobs[(2, 2)] = [job_of_a_run(21, "verify the release", "failure")]
+    watch_run(api_of(github), REPO, 2, NOW)
+
+    assert github.issues[1]["title"] == f"{name} fails on main"
+    assert github.issues[1]["state"] == "open"
+    assert github.issues[2]["title"] == f"{name} fails on v1.2.3"
+    assert github.issues[2]["state"] == "open"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        # Any other workflow that a release starts is no check of the release.
+        {"name": "Release", "event": "release"},
+        # The name of the workflow on another branch counts as little as any other.
+        {"name": "Release verification", "event": "push"},
+        # A fork's release doesn't reach this repository's issues.
+        {"name": "Release verification", "event": "release", "head": "someone/demo"},
+    ],
+)
+def test_no_other_run_of_a_tag_counts(
+    github: FakeGitHub, changes: dict[str, str]
+) -> None:
+    github.runs[1] = run_of(1, branch="v1.2.3", attempt=2, **changes)  # type: ignore[arg-type]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result.endswith("not a run of `main`, nothing to do.")
+    assert writes(github) == []
+
+
 def test_a_run_that_runs_again_counts_at_its_next_end(github: FakeGitHub) -> None:
     github.runs[1] = run_of(1, status="in_progress", conclusion=None, attempt=2)
 

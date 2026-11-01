@@ -476,7 +476,8 @@ jobs:
           [[ ${#zips[@]} -eq 1 ]] || fail "The release $TAG has ${#zips[@]} zips; the store takes one."
           zip="${zips[0]}"
           gh attestation verify "$zip" --repo "$GH_REPO" \
-            --signer-workflow "$GH_REPO/.github/workflows/build-release.yml" >/dev/null ||
+            --signer-workflow "$GH_REPO/.github/workflows/build-release.yml" \
+            --source-ref refs/heads/main --deny-self-hosted-runners >/dev/null ||
             fail "$zip of the release $TAG carries no valid provenance of the isolated build of the release, so it stays off the store."
           version="${TAG#v}"
           packaged="$(unzip -p "$zip" manifest.json | jq -r .version)"
