@@ -2379,19 +2379,22 @@ def test_biome_passes_what_the_tools_of_a_node_package_write(
             encoding="utf-8",
             newline="\n",
         )
+    # A stylesheet of the project, which Biome formats by the indentation of its scripts.
+    stylesheet = project / "style.css"
+    stylesheet.write_text("a {\n  color: red;\n}\n", encoding="utf-8", newline="\n")
 
     lint = [NPX, "--no", "--", "biome", "ci", "--error-on-warnings", "."]
     done = subprocess.run(
         lint, cwd=project, capture_output=True, encoding="utf-8", check=False
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    # Biome still checks a stylesheet of the project, in the indentation of its scripts.
-    (project / "wrong.css").write_text("a {\n    color: red;\n}\n", encoding="utf-8")
+    # It still checks that stylesheet, so the exceptions don't hide the files around them.
+    stylesheet.write_text("a {\n    color: red;\n}\n", encoding="utf-8", newline="\n")
     done = subprocess.run(
         lint, cwd=project, capture_output=True, encoding="utf-8", check=False
     )
     assert done.returncode != 0
-    assert "wrong.css" in done.stdout + done.stderr
+    assert "style.css" in done.stdout + done.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
