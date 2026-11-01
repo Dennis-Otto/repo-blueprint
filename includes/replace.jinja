@@ -4,15 +4,27 @@
     render stops when the file no longer holds one of the old texts, such as after a
     change of the comment or the step that the template looks for: without the check,
     the template left the file as it was, and every repository got the blueprint's
-    own text. Each schedule of the file moves into the slot of the project, as moved()
-    says. Import it with context, so that the file sees the answers:
+    own text. cuts are the parts of the file that a project doesn't get, such as a job
+    with pinned actions, whose text would go out of date here: each as [start, end], the
+    text from start up to end, which stays, or up to the end of the file with none. They
+    go first, in their order, and stop the render in the same way. Each schedule of the
+    file moves into the slot of the project, as moved() says. Import it with context, so
+    that the file sees the answers:
 
         [%- from "includes/replace.jinja" import replaced with context -%]
         {= replaced(".github/workflows/docs.yml", [["old", "new"]]) -=}
 -#]
-[%- macro replaced(path, pairs) -%]
+[%- macro replaced(path, pairs, cuts=[]) -%]
 [%- set text -%][% include path %][%- endset -%]
 [%- set result = namespace(text=text) -%]
+[%- for cut in cuts -%]
+[%- set before = result.text.split(cut[0], 1) -%]
+[%- set after = before[1].split(cut[1], 1) if before | length > 1 and cut[1] else [] -%]
+[%- if before | length < 2 or (cut[1] and after | length < 2) -%]
+{= the_replaced_text | mandatory(path ~ " no longer holds the text that its template replaces, " ~ (cut | to_json) ~ ": change the template in template/ together with the file.") =}
+[%- endif -%]
+[%- set result.text = before[0] ~ (cut[1] ~ after[1] if cut[1] else "") -%]
+[%- endfor -%]
 [%- for pair in pairs -%]
 [%- if pair[0] not in result.text -%]
 {= the_replaced_text | mandatory(path ~ " no longer holds the text that its template replaces, " ~ (pair[0] | to_json) ~ ": change the template in template/ together with the file.") =}

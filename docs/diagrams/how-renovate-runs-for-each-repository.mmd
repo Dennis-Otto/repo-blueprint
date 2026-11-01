@@ -1,0 +1,23 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How Renovate runs for each repository
+    accDescr: In the blueprint, a job with a token that only reads lists the repositories of the release app that may have rules for Renovate. Renovate then runs once for each of them, two at a time, each run with a token for its one repository, which the run looks at before Renovate starts. A last job, without the private key of the app, brings the log of every run into the one issue of Renovate's problems.
+
+    list["`**repositories of Renovate**<br>a token that only reads<br>lists the repositories of the release app`"]
+    first["`**renovate app**<br>a token for app alone,<br>looked at before Renovate starts`"]
+    second["`**renovate other**<br>a token for other alone,<br>looked at before Renovate starts`"]
+    report["`**problems of Renovate**<br>no private key: the log of every run<br>in the one issue of its problems`"]
+    updates["Pull requests with the updates,<br>in each repository"]
+
+    list -->|"two at a time"| first & second
+    first & second --> report
+    first & second --> updates
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class list,first,second,report bot
+    class updates done
