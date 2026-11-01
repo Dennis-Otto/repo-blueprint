@@ -47,7 +47,8 @@ autofix of its own."""
 title = "The linters"
 problem = """A step of the check failed before its linters ran, such as the checkout of
 the pull request. When a linter fails, the PR coach explains that linter instead:
-the workflows, the licenses, the Markdown, the issue assistant or the sign-off."""
+the workflows, the licenses, the Markdown, the issue assistant, the sign-off or the
+files of the blueprint."""
 why = """The linters run in one job, which takes one runner instead of one each; they
 report only once the job got that far."""
 fix = """Run the check again; if it fails at the same step, the log of the check says
@@ -216,6 +217,29 @@ commands = [
 docs = "CONTRIBUTING.md#requirements-for-changes"
 autofix = """Only the author of a commit can certify the Developer Certificate of
 Origin; no bot signs off for them."""
+
+[check.ownership]
+title = "The files of the blueprint"
+problem = """The pull request changes files that the blueprint keeps current, and the
+repository variable `BLUEPRINT_OWNERSHIP` is set to `fail`, so the check stops it. The
+annotations name each file, and `.github/blueprint/owned.txt` lists them all."""
+why = """The next update of the blueprint merges these files line by line and marks a
+conflict where both changed the same lines. An update with conflicts waits for a person,
+and so the updates of this repository stop until someone resolves them."""
+fix = """Make the change beside these files: settings in
+`.github/repository.project.toml`, a check in `scripts/check-project.sh` with its
+explanation in `.github/checks.project.toml`, notes for coding agents in
+`.github/agents.project.md`, text about the releases of this project between the two
+marked lines of `CONTRIBUTING.md`, and a workflow in a file of its own. What every
+repository needs belongs in the blueprint: the report of the PR coach links a new issue there,
+filled in with these files. Then undo the change of each file:"""
+commands = [
+  "git fetch https://github.com/{repo}.git main",
+  "git checkout FETCH_HEAD -- FILE",
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/faq.md#which-files-may-a-project-change"
+autofix = """Only the author knows where the change belongs instead; undoing it by
+itself would lose what the pull request is for."""
 
 [check.issue-assistant]
 title = "The set-up of the issue assistant"
@@ -726,6 +750,28 @@ commands = ["gh workflow run sync-issue-assistant.yml -f dry_run=true"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/updates.md#the-issue-assistant"
 autofix = """Whether a release of the issue assistant may reach the blueprint is decided
 by its verification, never by a command of the pull request."""
+
+[check."assets of the project"]
+title = "The assets of the project"
+problem = """`scripts/release-assets.sh` failed in the build of the release, or what runs
+before it, such as `npm ci --ignore-scripts`; or it wrote no asset into the folder of
+its first argument, or one that the release can't ship: a folder, a link, a name that
+GitHub would change, or a name that the release keeps for its own files or its
+registry. An annotation or the log of the job says which."""
+why = """The release stays a draft with its signed tag until each of its assets is built
+and attested, so nobody gets this version, and no registry does either."""
+fix = """When the log shows a hiccup of GitHub or npm, re-run the failed jobs of this run,
+which finishes the draft of a release or of a beta. Otherwise fix the script in a pull
+request with a `fix:` title, which makes a release: the fix ships with the next release,
+as the build runs at the commit of the release. Once that is out, delete the old draft
+by hand with `gh release delete vX.Y.Z --yes`, which keeps the signed tag. The job has no `sudo` and
+no Docker and reaches only GitHub, Node.js and npm, and the summary of Harden-Runner
+names a call that it blocked. Try the script on your machine, after
+`npm ci --ignore-scripts` where the project has a `package.json`:"""
+commands = ['bash scripts/release-assets.sh "$(mktemp -d)" 1.2.3']
+docs = "CONTRIBUTING.md#releases"
+autofix = """What the script builds is for the project to decide, and the build runs at
+a tag that doesn't change, so no command of a pull request repairs this release."""
 
 # ---------------------------------------------------------------- the steps of scripts/check.sh
 

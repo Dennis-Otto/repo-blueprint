@@ -11,14 +11,16 @@ say of it. ABOUT below says what each one is for, since many have no comment.
 .github/fleet.toml names the repositories that follow the blueprint, and from it come
 the showcase of README.md and README.de.md, the section "A real repository" of each
 page of docs/kinds/, the order of the Rollout and the canaries of the Variants.
+template/.github/blueprint/owned.txt.jinja lists the files of template/ that belong to
+the blueprint in the repository that it makes, with the condition of each.
 
     python3 reference.py           writes the pages and the parts of the files
     python3 reference.py --check   names each one that differs from its sources;
                                    tests/test_reference.py fails on it as well
 
-So a change of copier.yml, of a workflow, of template/.github/repository.toml.jinja or
-of .github/fleet.toml runs the first and commits the files with it, and neither the
-website nor a workflow can drift from them.
+So a change of copier.yml, of a workflow, of template/.github/repository.toml.jinja, of
+.github/fleet.toml or of the files of template/ runs the first and commits the files
+with it, and neither the website nor a workflow can drift from them.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -30,6 +32,7 @@ import sys
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +44,20 @@ TEMPLATE_WORKFLOWS = Path("template/.github/workflows")
 SETTINGS = Path("template/.github/repository.toml.jinja")
 QUESTIONS = Path("docs/reference/questions.md")
 VARIABLES = Path("docs/reference/variables.md")
+TEMPLATE = Path("template")
+OWNED = TEMPLATE / ".github/blueprint/owned.txt.jinja"
+# What a name of a file or a folder of the template renders to, when its condition holds.
+CONDITIONAL = re.compile(r"\[% if (?P<condition>[^%]+) %\](?P<name>.*?)\[% endif %\]")
+OWNED_HEAD = """\
+# The files that the blueprint keeps current in this repository: all that it renders,
+# other than those that belong to the project. A pull request that changes one gets a
+# notice from the check lint and in the report of the PR coach, because the next update
+# that changes the same lines conflicts with it. reference.py of the blueprint writes
+# this list: https://github.com/Dennis-Otto/repo-blueprint
+"""
+# A file of the blueprint that says in its first lines that a project changes it there,
+# which AGENTS.md of a project names as the exception, so it gets no notice.
+OWNED_EXCEPTIONS = frozenset({".vale.ini"})
 # The address of a file of the blueprint on GitHub, which the website links.
 BLOB = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/"
 # The token that GitHub gives every run, which nobody sets.
@@ -122,6 +139,14 @@ ABOUT: dict[str, str] = {
         " settings bot never deletes a variable, so removing its line from"
         " `.github/repository.project.toml` leaves `off` in place."
     ),
+    "BLUEPRINT_OWNERSHIP": (
+        "`fail` makes the check *lint* fail on a pull request of a person that changes"
+        " a file of the blueprint outside the marked lines of `CONTRIBUTING.md`, where"
+        " it leaves a notice with any other value or none. The report of the PR coach"
+        " says where the change belongs instead."
+        " Bots stay out of it: the update of the blueprint and the pull requests of"
+        " the other bots."
+    ),
     "CLAUDE_CODE_OAUTH_TOKEN": (
         "The token of a Claude subscription, which `claude setup-token` of Claude Code"
         " creates, with which the issue assistant analyzes each new issue with Claude."
@@ -186,8 +211,12 @@ ABOUT: dict[str, str] = {
     "PUBLISH_TO": (
         "Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`,"
         " `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the"
-        " kind of project."
-        " The build, the release and the check of the latest release follow it."
+        " kind of project and, for a package of npm or PyPI, the answer"
+        " `publish_package`."
+        " The build, the release and the check of the latest release follow it. A value"
+        " in `.github/repository.project.toml` changes only the delivery: the documents"
+        " follow the answer, so a package that publishes nowhere answers"
+        " `publish_package` with no."
     ),
     "RELEASE_APP": (
         "The name of the release app, as its address says: github.com/apps/NAME. No"
@@ -206,11 +235,12 @@ ABOUT: dict[str, str] = {
         " request starts no checks."
     ),
     "RELEASE_AUTOMATION_PRIVATE_KEY": (
-        "The private key of the release app, the file that its settings page"
-        " generates. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the"
+        "The private key of the release app, which `app register` sets without a file."
+        " With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the"
         " app: they open and merge the release and update pull requests, so that their"
-        " checks run, create the release tags and apply the settings. The file goes in"
-        " with `< key.pem` after the command below."
+        " checks run, create the release tags and apply the settings. For an app that"
+        " exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it"
+        " from the file that the settings page of the app generates."
     ),
     "SETTINGS_APP_CLIENT_ID": (
         "The Client ID of the settings app, an optional second GitHub App of the owner"
@@ -1262,13 +1292,78 @@ def pages(root: Path) -> dict[Path, str]:
         for path in sorted((root / WORKFLOWS).glob("*.yml"))
     ]
     answers = [question.name for question in questions(copier)]
-    template_files = [path.name for path in (root / TEMPLATE_WORKFLOWS).glob("*.jinja")]
+    template_flows = [path.name for path in (root / TEMPLATE_WORKFLOWS).glob("*.jinja")]
     settings = (root / SETTINGS).read_text(encoding="utf-8")
     return {
         QUESTIONS: questions_page(copier),
-        VARIABLES: variables_page(flows, settings, template_files, answers),
+        VARIABLES: variables_page(flows, settings, template_flows, answers),
+        OWNED: owned_list(copier, template_files(root)),
         **fleet_pages(root),
     }
+
+
+def owned_line(template_file: str) -> tuple[str, str]:
+    """The path that a file of the template renders to, as far as its conditions
+    leave it to Copier, and the lines of the list that name it: within its conditions,
+    whose tags take the line break before them, so that a file that the project doesn't
+    get leaves no empty line."""
+    conditions: list[str] = []
+
+    def name_of(match: re.Match[str]) -> str:
+        conditions.append(match["condition"])
+        return str(match["name"])
+
+    path = CONDITIONAL.sub(name_of, template_file.removesuffix(".jinja"))
+    if not conditions:
+        return path, f"{path}\n"
+    opening = "".join(f"[% if {condition} %]" for condition in conditions)
+    closing = "[% endif %]" * len(conditions)
+    return (
+        path,
+        f"[%-{opening.removeprefix('[%')}\n{path}\n[%-{closing.removeprefix('[%')}\n",
+    )
+
+
+def left_to_project(path: str, patterns: Iterable[str]) -> bool:
+    """Whether a pattern of _skip_if_exists holds path. Copier reads them like .gitignore
+    with a library that the Issue assistant sync doesn't have, as it runs this script on
+    the Python of the runner. Every pattern of the blueprint has a slash, so it counts
+    from the root, its * stays within a name, and a folder holds all that is below it;
+    tests/test_template.py compares the result with that library for each kind."""
+    parts = path.split("/")
+    for pattern in patterns:
+        wanted = pattern.removeprefix("/").split("/")
+        if len(parts) >= len(wanted) and all(map(fnmatchcase, parts, wanted)):
+            return True
+    return False
+
+
+def owned_list(copier: str, template_files: Iterable[str]) -> str:
+    """The template of .github/blueprint/owned.txt: each file of the template, other
+    than those that _skip_if_exists leaves to the project, its answers, which belong to
+    a command rather than to the blueprint or a person, and the files that say that a
+    project changes them."""
+    settings = yaml.safe_load(copier)
+    project = settings["_skip_if_exists"]
+    left_out = {settings.get("_answers_file", ".copier-answers.yml"), *OWNED_EXCEPTIONS}
+    lines = sorted(owned_line(name) for name in template_files)
+    return OWNED_HEAD + "".join(
+        line
+        for path, line in lines
+        if path not in left_out and not left_to_project(path, project)
+    )
+
+
+def template_files(root: Path) -> list[str]:
+    """Every file of the template, by its path in the template, and the list itself,
+    which the first run is about to write."""
+    folder = root / TEMPLATE
+    found = {
+        path.relative_to(folder).as_posix()
+        for path in folder.rglob("*")
+        if path.is_file()
+    }
+    return sorted({*found, OWNED.relative_to(TEMPLATE).as_posix()})
 
 
 def stale(root: Path, written: Mapping[Path, str]) -> list[Path]:

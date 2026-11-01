@@ -1,6 +1,6 @@
 # Every website is accessible and quick on a phone, and a check proves it
 
-- Status: accepted, amended by [0092](0092-a-pull-request-checks-the-accessibility-of-the-pages-that-it-changes-and-a-new-violation-fails.md), by which a pull request opens only the pages that it changes and a new violation fails the check
+- Status: accepted, amended by [0097](0097-a-pull-request-checks-the-accessibility-of-the-pages-that-it-changes-and-a-new-violation-fails.md), by which a pull request opens only the pages that it changes and a new violation fails the check
 - Date: 2026-10-18
 
 ## Context
