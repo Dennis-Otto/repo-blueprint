@@ -46,7 +46,7 @@ php occ app:install {= nextcloud_app_id =}
 ```
 
 Pin the action to the commit hash of a [release](https://github.com/{= repo =}/releases); Dependabot or Renovate then keeps it current.
-[% elif project_type == 'python-package' %]
+[% elif publish_to == 'pypi' %]
 ```sh
 pip install {= project_slug =}
 ```

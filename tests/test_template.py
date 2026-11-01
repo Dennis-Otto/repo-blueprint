@@ -5713,6 +5713,21 @@ AGENT_COMMANDS = {
 }
 
 
+def test_an_import_in_a_test_leaves_no_bytecode_next_to_the_file(
+    tmp_path: Path,
+) -> None:
+    # The tests share the rendered projects, and some import the hooks of a website
+    # from there: a __pycache__ beside them would count as a file of the project.
+    (tmp_path / "hooks.py").write_text("LOADED = True\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("hooks", tmp_path / "hooks.py")
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    assert hooks.LOADED
+    assert not (tmp_path / "__pycache__").exists()
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
     projects: dict[str, Path], kind: str
@@ -6617,6 +6632,154 @@ def test_a_successor_alone_cannot_release_in_a_store(tmp_path: Path) -> None:
     assert (
         "Psalm's taint analysis"
         in answers["static_analysis_common_vulnerabilities_justification"]
+    )
+
+
+def package_that_publishes_nowhere(folder: Path, kind: str) -> Path:
+    """The project of the kind, as Projects renders it, that answers no."""
+    return render(
+        folder,
+        project_name="Demo Project",
+        description=f'A {kind} of the tests, with "quotes" and Ümlauts.',
+        project_type=kind,
+        publish_package=False,
+    )
+
+
+def what_a_project_says_of_its_delivery(project: Path) -> str:
+    return "\n".join(
+        (project / name).read_text(encoding="utf-8")
+        for name in (
+            "README.md",
+            "SECURITY.md",
+            "GOVERNANCE.md",
+            "CONTRIBUTING.md",
+            ".bestpractices.json",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "registry", "words"),
+    [
+        (
+            "node-package",
+            "npm",
+            (
+                "npm install demo-project",
+                "--pattern '*.tgz'",
+                "gh attestation verify ./*.tgz",
+                "npm audit signatures",
+                "the package on npm",
+                "from npm",
+                "to npm",
+                "the package that you install",
+            ),
+        ),
+        (
+            "python-package",
+            "pypi",
+            (
+                "pip install demo-project",
+                "--pattern '*.whl'",
+                "gh attestation verify ./*.whl",
+                "the project on PyPI",
+                "from PyPI",
+                "to PyPI",
+                "the package that you install",
+            ),
+        ),
+    ],
+)
+def test_a_package_that_publishes_nowhere_speaks_of_no_registry(
+    tmp_path: Path,
+    projects: dict[str, Path],
+    kind: str,
+    registry: str,
+    words: tuple[str, ...],
+) -> None:
+    # What a repository tells its users follows its real target: a *.tgz that its
+    # releases don't have can't be verified (issue 446).
+    published = projects[kind]
+    nowhere = package_that_publishes_nowhere(tmp_path / "nowhere", kind)
+
+    for word in words:
+        assert word in what_a_project_says_of_its_delivery(published), word
+        assert word not in what_a_project_says_of_its_delivery(nowhere), word
+    # The commands that hold for any asset, as for a project that has no package.
+    security = (nowhere / "SECURITY.md").read_text(encoding="utf-8")
+    assert "--pattern '<asset>'" in security
+    assert "gh attestation verify <asset> --repo" in security
+    contributing = (nowhere / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "creates the release with its SBOM and signed provenance." in contributing
+
+    # The release and the settings say the same, and the update keeps the answer.
+    def settings(project: Path) -> dict[str, Any]:
+        text = (project / ".github/repository.toml").read_text(encoding="utf-8")
+        return tomllib.loads(text)
+
+    assert settings(published)["variables"]["PUBLISH_TO"] == registry
+    assert registry in settings(published)["environments"]
+    assert registry in settings(published)["repository"]["topics"]
+    assert settings(nowhere)["variables"]["PUBLISH_TO"] == "none"
+    assert registry not in settings(nowhere)["environments"]
+    assert registry not in settings(nowhere)["repository"]["topics"]
+    answers = (nowhere / ".copier-answers.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(answers)["publish_package"] is False
+
+
+def test_a_node_package_that_publishes_nowhere_is_private(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    def manifest(project: Path) -> dict[str, Any]:
+        text = (project / "package.json").read_text(encoding="utf-8")
+        found: dict[str, Any] = json.loads(text)
+        return found
+
+    assert "private" not in manifest(projects["node-package"])
+    nowhere = package_that_publishes_nowhere(tmp_path, "node-package")
+    assert manifest(nowhere)["private"] is True
+    # npm refuses to publish it, not to pack it, which scripts/check.sh does.
+    assert "npm pack --dry-run" in (nowhere / "scripts/check.sh").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_a_python_package_that_publishes_nowhere_is_one_that_pypi_refuses(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    def classifiers(project: Path) -> list[str]:
+        text = (project / "pyproject.toml").read_text(encoding="utf-8")
+        found: list[str] = tomllib.loads(text)["project"]["classifiers"]
+        return found
+
+    refused = "Private :: Do Not Upload"
+    assert refused not in classifiers(projects["python-package"])
+    nowhere = package_that_publishes_nowhere(tmp_path, "python-package")
+    assert refused in classifiers(nowhere)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_a_package_of_a_registry_answers_whether_it_publishes(
+    projects: dict[str, Path], kind: str
+) -> None:
+    answers = (projects[kind] / ".copier-answers.yml").read_text(encoding="utf-8")
+    asked = kind in {"node-package", "python-package"}
+    assert yaml.safe_load(answers).get("publish_package") is (True if asked else None)
+
+
+def test_the_answer_changes_nothing_of_a_kind_that_it_doesnt_ask(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    # An extension delivers to its store, whatever an answer of another kind says.
+    kind = "chrome-extension"
+    project = package_that_publishes_nowhere(tmp_path, kind)
+    for name in (".github/repository.toml", "SECURITY.md", "package.json"):
+        assert (project / name).read_text(encoding="utf-8") == (
+            projects[kind] / name
+        ).read_text(encoding="utf-8"), name
+    assert "publish_package" not in (project / ".copier-answers.yml").read_text(
+        encoding="utf-8"
     )
 
 
@@ -18203,7 +18366,7 @@ def test_a_node_package_that_no_registry_takes_says_so_everywhere(
         project_name="Demo Project",
         description="A package that stays off npm.",
         project_type="node-package",
-        publish_to_npm=False,
+        publish_package=False,
     )
     settings = private / ".github/repository.toml"
     for name, said in (
@@ -18224,15 +18387,7 @@ def test_a_node_package_that_no_registry_takes_says_so_everywhere(
         (published / "package.json").read_text(encoding="utf-8")
     )
     answers = (private / ".copier-answers.yml").read_text(encoding="utf-8")
-    assert "publish_to_npm: false\n" in answers
-
-
-@pytest.mark.parametrize("kind", KINDS)
-def test_only_a_node_package_stores_the_answer_about_npm(
-    projects: dict[str, Path], kind: str
-) -> None:
-    answers = (projects[kind] / ".copier-answers.yml").read_text(encoding="utf-8")
-    assert ("publish_to_npm: true\n" in answers) == (kind == "node-package")
+    assert "publish_package: false\n" in answers
 
 
 def test_a_release_left_as_a_draft_is_finished_by_hand_or_by_a_second_try() -> None:
