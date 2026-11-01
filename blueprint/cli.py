@@ -84,6 +84,7 @@ from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
 from blueprint.notices import third_party_notices
 from blueprint.overrides import write_overrides
+from blueprint.ownership import check as ownership_check
 from blueprint.pages import (
     CELL_WORDS,
     Layout,
@@ -211,6 +212,24 @@ def read_coverage(head: str, base: str) -> tuple[Coverage, Coverage | None] | No
     except (OSError, ElementTree.ParseError, ValueError):
         return None
     return found, before
+
+
+def ownership_command(arguments: argparse.Namespace, root: Path) -> int:
+    """The step of the check lint, which needs neither the API nor the settings."""
+    try:
+        listing = arguments.changed.read_bytes()
+    except OSError as error:
+        print(f"blueprint.py: {error}", file=sys.stderr)
+        return 2
+    return ownership_check(
+        root,
+        listing,
+        branch=arguments.branch,
+        head_repo=arguments.head_repo,
+        repo=arguments.repo or "",
+        author_type=arguments.author_type,
+        mode=arguments.mode,
+    )
 
 
 def explain_command(arguments: argparse.Namespace, root: Path) -> int:
@@ -1178,6 +1197,28 @@ def add_update_parsers(
     )
 
 
+def add_ownership_parser(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """The notice for a pull request that changes a file of the blueprint."""
+    parser = commands.add_parser(
+        "ownership",
+        help="annotate each changed file of a pull request that belongs to the "
+        "blueprint, for the check lint",
+    )
+    parser.add_argument(
+        "changed", type=Path, help="the file with the output of git diff -z --name-only"
+    )
+    parser.add_argument("--branch", default="", help="the head branch")
+    parser.add_argument("--head-repo", default="", help="the repository of the branch")
+    parser.add_argument("--author-type", default="", help="the type of the author")
+    parser.add_argument(
+        "--mode",
+        default="",
+        help="fail makes each file a failure; anything else leaves a notice",
+    )
+
+
 def add_coach_parsers(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -1677,6 +1718,7 @@ def parser() -> argparse.ArgumentParser:
         add_changelog_parsers,
         add_update_parsers,
         add_coach_parsers,
+        add_ownership_parser,
         add_bot_health_parsers,
         add_diagrams_parsers,
         add_screenshots_parsers,
@@ -1704,6 +1746,8 @@ def standalone_command(
             return 2
     if arguments.command == "annotate":
         return annotate_command(arguments, root)
+    if arguments.command == "ownership":
+        return ownership_command(arguments, root)
     if arguments.command == "doctor":
         # Git and gh only answer, and the settings play no part in it.
         try:

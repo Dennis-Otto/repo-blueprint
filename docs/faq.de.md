@@ -70,6 +70,8 @@ Jede Datei, und jede Änderung übersteht die Updates:
 
 Damit Updates selten Konflikte haben, ergänzt ein Projekt seines neben den Dateien des Blueprints statt in ihnen: seine Einstellungen in `.github/repository.project.toml`, seine Prüfungen in `scripts/check-project.sh` und `scripts/check-site.sh`, deren Erklärungen in `.github/checks.project.toml`, seine Hinweise für Coding-Agents in `.github/agents.project.md` und Workflows in eigenen Dateien. Ein Fix, den jedes Repository braucht, gehört in den Blueprint, dessen nächstes Release ihn zu allen bringt.
 
+Ein Pull Request erfährt das, wenn es passiert. Der Check *lint* annotiert jede geänderte Datei des Blueprints, wie `.github/blueprint/owned.txt` sie auflistet, und der Bericht des PR-Coachs nennt sie mit den Orten oben, verlinkt ein neues Issue im Blueprint, das mit den Dateien ausgefüllt ist, und setzt das Label `blueprint-file`. Es bleibt ein Hinweis und lässt nichts scheitern, denn so eine Änderung kann richtig sein; setze die Repository-Variable [`BLUEPRINT_OWNERSHIP`](reference/variables.md#blueprint_ownership) (englisch) auf `fail`, um daraus einen Fehlschlag zu machen. Das Update des Blueprints und die Pull Requests der anderen Bots bekommen keinen Hinweis.
+
 ## Wie ändere ich später eine Antwort?
 
 Führe `copier update` mit der neuen Antwort aus und committe das Update, etwa für die Topics:
