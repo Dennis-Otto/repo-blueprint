@@ -107,8 +107,11 @@ jobs:
               --jq '"\(.tagName) \(.publishedAt)"')" || return
             publish=""
             if [[ -n "$RUN_ID" ]]; then
-              publish="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" \
-                --jq '.jobs[] | select(.name == "publish the release") | "\(.conclusion) \(.started_at)"')"
+              # All jobs of all attempts, of which the last attempt's counts: the list of the
+              # latest attempt leaves out a job that GitHub dates before the start of the
+              # run, as it did in the hour that repeats when the clocks of the US go back.
+              publish="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
+                --jq '[.jobs[] | select(.name == "publish the release")] | max_by(.run_attempt) // empty | "\(.conclusion) \(.started_at)"')"
             fi
           }
           # GitHub fails for a moment now and then, so it asks three times.
