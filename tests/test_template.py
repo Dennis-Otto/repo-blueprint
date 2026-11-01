@@ -87,6 +87,7 @@ from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import PERMISSIONS, Settings, allows
+from blueprint.site_check import check as check_site
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
 from blueprint.versions import fix as fix_versions
@@ -15798,11 +15799,15 @@ def test_the_check_docs_checks_the_website_that_it_built(
     promises = step_in(job, "Check what the hooks of the website promise")
     address = step_in(job, "Lay out the address of the website")
     lychee = step_in(job, "Check the links and anchors of the website")
+    website_map = step_in(job, "Check the links of the map of the website")
     project = step_in(job, "Check the website as this project does")
     [accessible] = steps_using(job, "actions/setup-node")
     publish = step_in(job, "Hand the website to GitHub Pages")
     steps = job["steps"]
-    order = [steps.index(step) for step in (build, promises, address, lychee, project)]
+    order = [
+        steps.index(step)
+        for step in (build, promises, address, lychee, website_map, project)
+    ]
     assert order == sorted(order)
     assert order[-1] < steps.index(accessible) < steps.index(publish)
     # Each check of the built website runs once the build passed, also when the
@@ -15837,6 +15842,18 @@ def test_the_check_docs_checks_the_website_that_it_built(
         " ${{ runner.temp }}/address --no-progress '**/*.html'"
     )
     assert "fail" not in lychee["with"]
+    # llms.txt links full addresses, which lychee leaves out with --offline, so the
+    # rule of site-check leads them to the files, unless the website has none.
+    assert condition_of(website_map) == (
+        f"${{{{ {built} && steps.promises.outputs.map != '' }}}}"
+    )
+    assert website_map["uses"] == lychee["uses"]
+    assert website_map["with"]["workingDirectory"] == "site"
+    assert website_map["with"]["args"] == (
+        "--offline --no-progress --remap '${{ steps.promises.outputs.map }}' llms.txt"
+    )
+    assert "fail" not in website_map["with"]
+    assert website_map["with"]["output"] != lychee["with"]["output"]
     # The checks of the project alone, in a file that the blueprint never writes.
     assert project["run"] == "bash scripts/check-site.sh site"
     assert not (folder / "scripts/check-site.sh").exists()
@@ -16219,6 +16236,79 @@ def test_every_project_has_a_website(projects: dict[str, Path], kind: str) -> No
         for target in re.findall(r"\]\(([^)\s#]+)", text):
             if "://" not in target:
                 assert (page.parent / target).resolve().is_relative_to(pages), target
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_website_serves_a_map_of_its_pages(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    project = projects[kind]
+    spec = importlib.util.spec_from_file_location(
+        f"map_of_{kind.replace('-', '_')}", project / ".github/mkdocs_blueprint.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    assert "\n  - .github/mkdocs_blueprint.py\n" in (
+        project / ".github/mkdocs-blueprint.yml"
+    ).read_text(encoding="utf-8")
+    settings = yaml.safe_load((project / "mkdocs.yml").read_text(encoding="utf-8"))
+    address = settings["site_url"]
+    site = tmp_path / "site"
+    pages: list[str] = []
+
+    def item(entry: str | dict[str, Any]) -> SimpleNamespace:
+        """An item of the menu of the website, as MkDocs makes it of an entry of its
+        nav, and the file that MkDocs builds for a page."""
+        title, value = (
+            next(iter(entry.items())) if isinstance(entry, dict) else ("", entry)
+        )
+        if isinstance(value, list):
+            children = [item(child) for child in value]
+            return SimpleNamespace(
+                title=title, children=children, is_page=False, is_section=True
+            )
+        url = str(value).removesuffix(".md") + ".html"
+        built = site / url
+        built.parent.mkdir(parents=True, exist_ok=True)
+        built.write_text(
+            f'<html lang="en"><head><link rel="canonical" href="{address}{url}">'
+            '<meta name="generator" content="mkdocs-1.6.1"></head></html>',
+            encoding="utf-8",
+        )
+        pages.append(url)
+        return SimpleNamespace(
+            title=title or Path(url).stem,
+            url=url,
+            canonical_url=address + url,
+            meta={},
+            is_page=True,
+            is_section=False,
+        )
+
+    config = SimpleNamespace(
+        site_dir=str(site),
+        site_url=address,
+        site_name=settings["site_name"],
+        site_description=settings["site_description"],
+        plugins={},
+    )
+    nav = SimpleNamespace(items=[item(entry) for entry in settings["nav"]])
+
+    hooks.on_nav(nav, config, [])
+    hooks.on_post_build(config)
+
+    written = (site / "llms.txt").read_text(encoding="utf-8")
+    assert written.startswith(f"# {settings['site_name']}\n\n> ")
+    assert set(pages) == {
+        *(page for page in pages if f"]({address}{page})" in written),
+        *(page for page in pages if page.startswith("decisions/")),
+    }
+    assert "decisions/" not in written
+    assert [
+        finding for finding in check_site(site).findings if finding.path == "llms.txt"
+    ] == []
 
 
 @pytest.mark.parametrize("kind", KINDS)
