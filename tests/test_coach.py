@@ -32,6 +32,7 @@ from blueprint.coach import (
     Part,
     ReportEntry,
     Run,
+    Unverified,
     annotation,
     check_steps,
     code,
@@ -47,8 +48,9 @@ from blueprint.coach import (
     suggest_title,
     summary,
     undeclared,
+    unverified_commits,
 )
-from blueprint.github import Api
+from blueprint.github import Api, GitHubError
 
 ROOT = Path(__file__).parents[1]
 REPO = "Dennis-Otto/demo"
@@ -957,6 +959,11 @@ class FakeGitHub:
             "author": {"login": "contributor", "type": "User"},
             "files": [{"filename": "src/app.py"}],
         }
+        # The rules of the base branch, and the commits of the pull request.
+        self.rules: list[dict[str, Any]] = []
+        self.pull_commits: list[dict[str, Any]] = []
+        # What GitHub answers instead of the rules, when it refuses them.
+        self.refused: str = ""
         self.calls: list[tuple[str, str]] = []
         self.waits: list[float] = []
         # What happens while the coach waits for the checks of other apps.
@@ -1009,6 +1016,12 @@ class FakeGitHub:
             return 200, self.page(self.comments, *found.groups())
         if found := re.fullmatch(rf"pulls/42/files\?{paged}", path):
             return 200, self.page(self.files, *found.groups())
+        if found := re.fullmatch(rf"pulls/42/commits\?{paged}", path):
+            return 200, self.page(self.pull_commits, *found.groups())
+        if found := re.fullmatch(rf"rules/branches/[^?]+\?{paged}", path):
+            if self.refused:
+                return 403, {"message": self.refused}
+            return 200, self.page(self.rules, *found.groups())
         if path == "actions/artifacts?name=website&per_page=100":
             return 200, {"artifacts": self.artifacts}
         if found := re.fullmatch(
@@ -1465,6 +1478,393 @@ def test_a_variant_keeps_its_own_explanation_with_the_step() -> None:
     assert "python -m pytest tests/test_template.py" in part
     assert "ruff format ." not in part
     assert "Then run every check on your machine" not in part
+
+
+# ---------------------------------------------------------------- signed commits
+
+SIGNATURES = [{"type": "pull_request"}, {"type": "required_signatures"}]
+RELEASE_PART = Part(
+    "\U0001f4e6 Merging this pull request makes it.", True, after_merge=True
+)
+COVERAGE_PART = Part("The coverage of the tests.", True)
+
+
+def pull_commit(sha: str, reason: str = "valid") -> dict[str, Any]:
+    """A commit of the pull request, as the API lists it."""
+    verification = {"verified": reason == "valid", "reason": reason}
+    return {"sha": sha * 40, "commit": {"verification": verification}}
+
+
+def green(*commits: dict[str, Any], rules: Any = SIGNATURES) -> FakeGitHub:
+    """A pull request whose checks have all passed, with these commits."""
+    github = FakeGitHub()
+    github.annotations = {}
+    github.finish()
+    github.rules = list(rules)
+    github.pull_commits = list(commits)
+    return github
+
+
+def check_run(name: str, **fields: Any) -> dict[str, Any]:
+    """A check run of the workflows, by the shape of the recorded ones."""
+    run = {
+        "id": 61000000000,
+        "name": name,
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": f"https://github.com/{REPO}/actions/runs/7/job/8",
+        "output": {"annotations_count": 0},
+        "app": {"slug": "github-actions"},
+    }
+    return run | fields
+
+
+def test_an_unsigned_commit_of_a_fork_is_no_all_clear() -> None:
+    # As on homedarts-for-autodarts#541: one commit of the author, unsigned, under the
+    # merges of "Update branch", which GitHub signs itself.
+    github = green(pull_commit("a", "unsigned"), pull_commit("b"))
+
+    run_report(github, about=lambda pull: [RELEASE_PART, COVERAGE_PART])
+
+    body = body_of(github)
+    assert "Every check passed" not in body
+    assert body.startswith(
+        f"{MARKER}\n### PR coach\n\n"
+        "⛔ **GitHub blocks the merge until every commit is signed:** 1 commit of "
+        "this pull request has no verified signature.\n\n**1 check failed.**"
+    )
+    part = sections(body)["signed commits"]
+    assert "**What the check found:**\n\n- `aaaaaaa: unsigned`\n" in part
+    assert "bbbbbbb" not in body
+    # Why, and how, with the name of this repository.
+    assert "**Why it matters:** GitHub blocks the merge" in part
+    assert (
+        "git fetch origin\n"
+        f"git fetch https://github.com/{REPO}.git main\n"
+        "git switch your-branch\n"
+        "git rebase -S FETCH_HEAD\n"
+        "git push --force-with-lease\n"
+    ) in part
+    assert "git config gpg.format ssh\n" in part
+    assert "git config user.signingkey ~/.ssh/id_ed25519.pub\n" in part
+    assert "*signing key*" in part
+    assert "verified on your account" in part
+    assert "https://docs.github.com/en/authentication/" in part
+    # It says nothing of a merge that GitHub doesn't allow, and the rest stays.
+    assert "Merging this pull request" not in body
+    assert "The coverage of the tests." in body
+
+
+def test_the_commits_of_a_repository_without_the_rule_block_nothing() -> None:
+    github = green(pull_commit("a", "unsigned"), rules=[{"type": "pull_request"}])
+
+    said = run_report(github, about=lambda pull: [RELEASE_PART])
+
+    # What it says of the release is news, and nothing holds the merge back.
+    assert "✅ **Every check passed.** Thank you!" in said
+    assert "Merging this pull request" in said
+    assert "signed commits" not in said
+    # With no rule, it doesn't even ask for the commits.
+    assert not any("/commits?" in path for _, path in github.calls)
+
+
+def test_a_private_repository_on_a_plan_without_rulesets_has_no_rule() -> None:
+    # As GitHub answers for a private repository on the free plan.
+    github = green(pull_commit("a", "unsigned"))
+    github.refused = (
+        "Upgrade to GitHub Pro or make this repository public to enable this feature."
+    )
+
+    said = run_report(github)
+
+    assert said == "No check of #42 failed; it needs no report.\n"
+    assert github.comments == []
+
+
+def test_any_other_refusal_of_the_rules_gives_no_all_clear() -> None:
+    github = green(pull_commit("a"))
+    github.refused = "Resource not accessible by integration"
+
+    with pytest.raises(GitHubError, match="Resource not accessible"):
+        run_report(github)
+
+    assert github.comments == []
+
+
+def test_the_commits_of_the_pull_request_of_a_bot_block_as_well() -> None:
+    github = green(pull_commit("a", "unsigned"))
+    github.pulls[0]["user"]["type"] = "Bot"
+
+    run_report(github)
+
+    assert "- `aaaaaaa: unsigned`" in sections(body_of(github))["signed commits"]
+
+
+def test_a_pull_request_without_commits_that_block_needs_no_report() -> None:
+    # Every commit verified: a person's, a merge of "Update branch" and a bot's through
+    # the API.
+    bot = pull_commit("c") | {"author": {"login": "fix[bot]", "type": "Bot"}}
+    github = green(pull_commit("a"), pull_commit("b"), bot)
+
+    said = run_report(github)
+
+    assert said == "No check of #42 failed; it needs no report.\n"
+    assert github.comments == []
+
+
+@pytest.mark.parametrize("reason", ["unknown_key", "bad_email", "expired_key"])
+def test_a_signature_that_github_does_not_verify_blocks_with_its_reason(
+    reason: str,
+) -> None:
+    github = green(pull_commit("a"), pull_commit("c", reason))
+
+    run_report(github)
+
+    part = sections(body_of(github))["signed commits"]
+    assert f"- `ccccccc: {reason}`\n" in part
+    assert "aaaaaaa" not in part
+
+
+def test_several_commits_that_block_are_counted_and_listed_within_bounds() -> None:
+    github = green(*[pull_commit(f"{index:x}", "unsigned") for index in range(14)])
+
+    run_report(github)
+
+    body = body_of(github)
+    assert "14 commits of this pull request have no verified signature" in body
+    assert "- `0000000: unsigned`" in body
+    assert "- `aaaaaaa" not in body
+    assert "… and 4 more in the log of the check" in body
+
+
+def test_a_verification_without_a_reason_blocks_as_well() -> None:
+    github = green({"sha": "d" * 40, "commit": {}})
+
+    run_report(github)
+
+    assert "- `ddddddd: unknown`\n" in sections(body_of(github))["signed commits"]
+
+
+def test_what_a_fork_writes_of_a_commit_shows_only_as_code() -> None:
+    github = green(
+        {
+            "sha": "`@a[x](y)",
+            "commit": {"verification": {"verified": False, "reason": "<b>@you</b>`"}},
+        }
+    )
+
+    run_report(github)
+
+    body = body_of(github)
+    # The whole text within one span of code, whose marks none of its backticks ends.
+    assert re.search(r"^- `` `@a\[x\]\(: <b>@you</b>` ``$", body, re.M)
+
+
+def test_the_coach_says_so_before_the_check_has_ended() -> None:
+    # The coach of another workflow ran first: the check still runs, or has no run yet.
+    for runs in ([], [check_run("signed commits", status="in_progress")]):
+        github = green(pull_commit("a", "unsigned"))
+        github.runs += runs
+
+        run_report(github)
+
+        body = body_of(github)
+        assert "⛔ **GitHub blocks the merge" in body
+        assert "**1 check failed.**" in body
+        # The check counts as failed, not as one that is still running.
+        assert "still running" not in body
+        assert "No check has failed so far" not in body
+        assert "Every check passed" not in body
+
+
+def test_a_check_that_github_started_late_does_not_turn_it_back() -> None:
+    github = green(pull_commit("a", "unsigned"))
+    run_report(github, about=lambda pull: [RELEASE_PART])
+    assert "Every check passed" not in body_of(github)
+
+    # A run that passed comes in after the report, and another workflow starts the
+    # coach again.
+    github.runs.append(check_run("signed commits"))
+    github.runs.append(check_run("late check", id=61000000001))
+    run_report(github, about=lambda pull: [RELEASE_PART])
+
+    body = body_of(github)
+    assert "Every check passed" not in body
+    assert "Merging this pull request" not in body
+    assert body.count("<code>signed commits</code>") == 1
+    # The section leads to the log of the check that ran.
+    assert (
+        f"[The log of the check](https://github.com/{REPO}/actions/runs/7/job/8)"
+    ) in sections(body)["signed commits"]
+
+
+def test_the_check_of_another_app_with_the_same_name_stays_as_it_is() -> None:
+    github = green(pull_commit("a", "unsigned"))
+    github.runs.append(
+        check_run("signed commits", app={"slug": "other-app"}, status="queued")
+    )
+    # It starts no coach when it ends, so the coach waits for it a while.
+    github.meanwhile = lambda github: github.runs[-1].update(status="completed")
+
+    run_report(github)
+
+    assert body_of(github).count("<code>signed commits</code>") == 1
+    assert github.waits
+
+
+def test_signing_the_commits_brings_the_all_clear() -> None:
+    github = green(pull_commit("a", "unsigned"))
+    run_report(github)
+    assert "⛔" in body_of(github)
+
+    github.pull_commits = [pull_commit("a")]
+    run_report(github, about=lambda pull: [RELEASE_PART])
+
+    body = body_of(github)
+    assert "⛔" not in body
+    assert "✅ **Every check passed.** Thank you!" in body
+    assert "Merging this pull request" in body
+
+
+def test_the_commits_that_block_come_before_every_other_check() -> None:
+    # However many other checks fail, the report keeps a place for this one.
+    github = FakeGitHub()
+    markdown = github.runs[1]
+    github.runs = [
+        markdown | {"id": 60000000000 + index, "name": f"leg ({index:03})"}
+        for index in range(30)
+    ]
+    github.rules = SIGNATURES
+    github.pull_commits = [pull_commit("a", "unsigned")]
+
+    run_report(github)
+
+    body = body_of(github)
+    assert "**31 checks failed.**" in body
+    assert body.index("<code>signed commits</code>") < body.index("leg (000)")
+    assert "- `aaaaaaa: unsigned`" in body
+
+
+def test_the_commands_name_the_branch_that_the_pull_request_goes_into() -> None:
+    github = green(pull_commit("a", "unsigned"))
+    github.pulls[0]["base"]["ref"] = "release/1.x"
+
+    run_report(github)
+
+    asked = f"repos/{REPO}/rules/branches/release/1.x?per_page=100&page=1"
+    assert ("GET", asked) in github.calls
+    part = sections(body_of(github))["signed commits"]
+    assert f"git fetch https://github.com/{REPO}.git release/1.x\n" in part
+
+
+def test_a_branch_with_a_character_of_the_shell_stays_one_word() -> None:
+    entry = catalog().check("signed commits")
+    assert entry is not None
+
+    commands = entry.within(REPO, "x;y").commands
+    assert f"git fetch https://github.com/{REPO}.git 'x;y'" in commands
+    # Without a pull request, as in the terminal of a person.
+    commands = entry.within(None).commands
+    assert "git fetch https://github.com/OWNER/NAME.git main" in commands
+
+
+def test_the_explanation_of_a_project_wins_for_the_commits_that_block(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path, ".github/checks.toml", '[check."signed commits"]' + ENTRY)
+    project = ENTRY.replace("The thing", "Our own rule")
+    write(tmp_path, ".github/checks.project.toml", '[check."signed commits"]' + project)
+    github = green(pull_commit("a", "unsigned"))
+
+    report(Api(runner=github), REPO, SHA, None, Catalog.load(tmp_path), github.wait)
+
+    body = body_of(github)
+    assert "<b>Our own rule</b>" in body
+    assert "- `aaaaaaa: unsigned`" in sections(body)["signed commits"]
+
+
+def test_the_explanation_keeps_the_signature_and_the_sign_off_apart() -> None:
+    entry = catalog().check("signed commits")
+    assert entry is not None
+
+    assert "`-S`" in entry.fix
+    assert "`-s`" in entry.fix
+    assert "sign-off" in entry.fix
+    # Only the key of the author can sign, so no bot does it for them.
+    assert entry.manual
+    assert not entry.autofix
+
+
+def test_the_check_names_each_commit_that_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(target))
+    github = green(pull_commit("a", "unknown_key"), pull_commit("b"))
+    command = ["--repo", REPO, "coach", "signatures", "42", "--base", "main"]
+
+    assert cli.main(command, api=Api(runner=github), root=tmp_path) == 1
+
+    out = capsys.readouterr().out
+    assert out == "::error title=No verified signature::aaaaaaa: unknown_key\n"
+    assert target.read_text(encoding="utf-8") == "- `aaaaaaa: unknown_key`\n"
+    # It only reads, as the token of its job can't write.
+    assert github.writes() == []
+
+
+def test_the_check_passes_without_a_commit_that_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(target))
+    command = ["--repo", REPO, "coach", "signatures", "42", "--base", "main"]
+    # A repository without the rule, and one whose commits are all verified.
+    for github in (
+        green(pull_commit("a", "unsigned"), rules=[]),
+        green(pull_commit("a"), pull_commit("b")),
+    ):
+        assert cli.main(command, api=Api(runner=github), root=tmp_path) == 0
+        assert capsys.readouterr().out == "No commit of #42 blocks its merge.\n"
+    assert not target.exists()
+
+
+def test_an_annotation_of_a_commit_cannot_end_the_command_of_the_runner() -> None:
+    commit = Unverified("a" * 40, "bad\n::error::%")
+
+    assert commit.annotation() == (
+        "::error title=No verified signature::aaaaaaa: bad%0A::error::%25"
+    )
+
+
+def test_the_check_tells_a_commit_by_what_github_says() -> None:
+    github = green(pull_commit("a", "unsigned"), pull_commit("b"))
+
+    found = unverified_commits(Api(runner=github), REPO, 42, "main")
+
+    assert found == [Unverified("a" * 40, "unsigned")]
+
+
+def test_explain_fills_in_the_branch_of_the_pull_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    write(
+        tmp_path,
+        ".github/checks.toml",
+        (ROOT / ".github/checks.toml").read_text(encoding="utf-8"),
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
+    monkeypatch.setenv("GITHUB_BASE_REF", "develop")
+
+    assert cli.main(["coach", "explain", "signed commits"], root=tmp_path) == 0
+
+    out = capsys.readouterr().out
+    assert f"git fetch https://github.com/{REPO}.git develop" in out
 
 
 def test_the_fix_rebases_onto_the_main_of_the_repository() -> None:

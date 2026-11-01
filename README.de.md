@@ -132,7 +132,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 - **Lint:** Die Workflows, die Lizenz jeder Datei, das Markdown, und die Rechtschreibung und der Stil der geänderten Dokumente.
 - **Abdeckung:** Der Bericht eines Pull Requests vergleicht die Abdeckung jeder Datei mit der von `main`.
 - **Schnelle Prüfungen:** Ein Scanner läuft nur in den Pull Requests, die ändern, was er liest, und die übrigen Scans jede Woche.
-- **PR-Coach:** Jede Prüfung, die scheitert, sagt, was sie gefunden hat, warum das wichtig ist und wie man es behebt, in einem Kommentar, der jedem Push folgt, auch bei Forks.
+- **PR-Coach:** Gescheiterte Prüfungen und unsignierte Commits sagen, was falsch ist, warum das wichtig ist und wie man es behebt, in einem Kommentar, der jedem Push folgt, auch bei Forks.
 
 ### [Fix-Bot und Selbstheilung](docs/features/self-healing.de.md)
 

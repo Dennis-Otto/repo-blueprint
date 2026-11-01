@@ -335,7 +335,8 @@ def release_part(
     entry = entry_lines(lines, large)
     if entry:
         text += ["", *entry]
-    return Part("\n".join(text), news=bool(forced or level or lines or large))
+    news = bool(forced or level or lines or large)
+    return Part("\n".join(text), news=news, after_merge=True)
 
 
 # ---------------------------------------------------------------- coverage

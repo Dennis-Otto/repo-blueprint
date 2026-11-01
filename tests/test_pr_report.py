@@ -323,6 +323,8 @@ def test_a_release_without_an_entry_lists_the_title() -> None:
 
     assert part is not None
     assert part.news
+    # It says what the merge does, which a pull request that can't merge doesn't hear.
+    assert part.after_merge
     assert part.text.endswith(
         "\n\nIt adds no entry to the changelog, so the notes of the release list its "
         "title."

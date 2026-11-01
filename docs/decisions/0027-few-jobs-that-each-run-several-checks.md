@@ -24,7 +24,7 @@ Option 2. One job, *lint*, runs every linter: actionlint, REUSE from its pinned 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-jobs-of-a-pull-request.dark.svg">
-  <img src="../images/diagrams/the-jobs-of-a-pull-request.svg" alt="The jobs of a pull request: Each job of a push waits for a runner of its own, and the account runs about 20 jobs at once. So the quick checks share their jobs: lint runs every linter, the title job checks the title and the entry in the changelog, codeql analyzes every language under the category of its alerts, and home-assistant runs HACS and hassfest. Each step runs also when one before it failed, and the PR coach explains each check of a job that failed.">
+  <img src="../images/diagrams/the-jobs-of-a-pull-request.svg" alt="The jobs of a pull request: Each job of a push waits for a runner of its own, and the account runs about 20 jobs at once. So the quick checks share their jobs: lint runs every linter, the title job checks the title and the entry in the changelog, codeql analyzes every language under the category of its alerts, and home-assistant runs HACS and hassfest. signed commits stands apart, outside the required checks, as GitHub's own rule blocks the merge already. Each step runs also when one before it failed, and the PR coach explains each check of a job that failed.">
 </picture>
 
 The new jobs replace the old ones in the required checks of `.github/repository.toml` in two releases, so that no pull request waits for a check that no longer runs:
