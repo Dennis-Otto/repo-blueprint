@@ -1019,11 +1019,15 @@ def problems_text(problems: Mapping[Problem, int], hidden: int, run: str) -> str
     return "\n".join(lines) + "\n"
 
 
-def renovate_report(api: Api, repo: str, log: Path, run: str) -> str:
-    """Keeps the one issue with Renovate's problems current from the log of a run."""
-    if not log.is_file():
+def renovate_report(api: Api, repo: str, logs: Iterable[Path], run: str) -> str:
+    """Keeps the one issue with Renovate's problems current from the logs of a run, one
+    for each repository where the blueprint runs Renovate for several."""
+    written = [log for log in logs if log.is_file()]
+    if not written:
         return "Renovate wrote no log of problems; the issue stays as it is.\n"
-    problems = renovate_problems(log.read_text(encoding="utf-8").splitlines())
+    problems = renovate_problems(
+        line for log in written for line in log.read_text("utf-8").splitlines()
+    )
     known: dict[str, bool] = {}
     shown = {
         problem: count

@@ -1642,7 +1642,7 @@ def test_renovate_keeps_one_issue_of_its_problems(
         "Dennis-Otto/flaky": 502,
     }
 
-    summary = renovate_report(api, REPO, log, RUN)
+    summary = renovate_report(api, REPO, [log], RUN)
 
     issue = github.issues[1]
     assert issue["title"] == RENOVATE_TITLE
@@ -1676,7 +1676,7 @@ def test_renovate_keeps_one_issue_of_its_problems(
     number = github.add_issue(RENOVATE, quiet=2)
     github.issues[1]["state"] = "closed"
 
-    summary = renovate_report(api, REPO, log, RUN)
+    summary = renovate_report(api, REPO, [log], RUN)
 
     assert summary.endswith(f"\nUpdated #{number}.\n")
     assert github.state_of(number) == {"key": RENOVATE, "quiet": 0}
@@ -1693,7 +1693,7 @@ def test_the_issue_of_renovate_closes_after_quiet_runs(
     text = github.issues[number]["body"].split("\n", 1)[1]
 
     for quiet in range(1, QUIET_RUNS):
-        summary = renovate_report(api, REPO, log, RUN)
+        summary = renovate_report(api, REPO, [log], RUN)
 
         assert summary == (
             f"Renovate logged no problem; #{number} closes after "
@@ -1702,7 +1702,7 @@ def test_the_issue_of_renovate_closes_after_quiet_runs(
         assert github.state_of(number)["quiet"] == quiet
         assert github.issues[number]["body"].split("\n", 1)[1] == text
 
-    summary = renovate_report(api, REPO, log, RUN)
+    summary = renovate_report(api, REPO, [log], RUN)
 
     assert summary == f"Renovate logged no problem: closed #{number}.\n"
     assert github.issues[number]["state"] == "closed"
@@ -1710,7 +1710,7 @@ def test_the_issue_of_renovate_closes_after_quiet_runs(
         f"Renovate logged no problem in {QUIET_RUNS} runs in a row, the latest "
         f"[this one]({RUN})."
     ]
-    assert renovate_report(api, REPO, log, RUN) == (
+    assert renovate_report(api, REPO, [log], RUN) == (
         "Renovate logged no warning and no error.\n"
     )
 
@@ -1720,10 +1720,48 @@ def test_without_a_log_the_issue_of_renovate_stays(
 ) -> None:
     github.add_issue(RENOVATE, quiet=0)
 
-    summary = renovate_report(api_of(github), REPO, tmp_path / "missing.json", RUN)
+    summary = renovate_report(api_of(github), REPO, [tmp_path / "missing.json"], RUN)
 
     assert summary == "Renovate wrote no log of problems; the issue stays as it is.\n"
     assert writes(github) == []
+
+
+def test_the_issue_of_renovate_lists_the_problems_of_every_repository(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The blueprint runs Renovate once for each repository, with a token for it alone,
+    # and one issue still tells them all; a run that ended before Renovate wrote its
+    # log, or wrote none, takes nothing from the others.
+    first = tmp_path / "first.json"
+    first.write_text(
+        log_line(40, "Base branch is missing", repository="Dennis-Otto/app") + "\n",
+        encoding="utf-8",
+    )
+    second = tmp_path / "second.json"
+    second.write_text(
+        log_line(50, "Repository has unknown error", repository="Dennis-Otto/other")
+        + "\n"
+        + log_line(40, "A rule of the bot", branch="renovate/x")
+        + "\n",
+        encoding="utf-8",
+    )
+    empty = tmp_path / "empty.json"
+    empty.write_text("", encoding="utf-8")
+    github.others = {
+        "Dennis-Otto/app": {"private": False},
+        "Dennis-Otto/other": {"private": False},
+    }
+
+    summary = renovate_report(
+        api_of(github), REPO, [first, tmp_path / "missing.json", second, empty], RUN
+    )
+
+    assert "### Dennis-Otto/app\n" in summary
+    assert "`Base branch is missing`" in summary
+    assert "### Dennis-Otto/other\n" in summary
+    assert "`Repository has unknown error`" in summary
+    assert "### Renovate itself\n" in summary
+    assert github.issues[1]["body"].split("\n", 1)[1] + "\nOpened #1.\n" == summary
 
 
 def test_the_issue_of_renovate_lists_a_few_problems(
@@ -1735,7 +1773,7 @@ def test_the_issue_of_renovate_lists_a_few_problems(
         encoding="utf-8",
     )
 
-    summary = renovate_report(api_of(github), REPO, log, RUN)
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
 
     assert summary.count("| WARN |") == MOST_PROBLEMS
     assert "\nAnd 5 more in the log of the run.\n" in summary
@@ -1777,6 +1815,16 @@ def test_the_command_line_of_the_bot(
     command = [*arguments, "renovate", str(log), "--run", RUN]
     assert cli.main(command, Api(github), tmp_path) == 0
     assert capsys.readouterr().out == "Renovate logged no warning and no error.\n"
+    # Every log of a run, as the job of the blueprint names them with a pattern, which
+    # stays as it is without a file that matches.
+    other = tmp_path / "other.json"
+    other.write_text(log_line(40, "In the second log"), encoding="utf-8")
+    command = [*arguments, "renovate", str(log), str(other), "--run", RUN]
+    assert cli.main(command, Api(github), tmp_path) == 0
+    assert "`In the second log`" in capsys.readouterr().out
+    command = [*arguments, "renovate", str(tmp_path / "*/problems.json"), "--run", RUN]
+    assert cli.main(command, Api(github), tmp_path) == 0
+    assert capsys.readouterr().out.startswith("Renovate wrote no log of problems;")
 
     # An error of GitHub ends the command as every other one.
     github.known = False
