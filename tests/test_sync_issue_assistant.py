@@ -256,6 +256,35 @@ def test_adopt_takes_the_release_over(
 
 
 @needs_git
+def test_adopt_starts_a_release_that_is_a_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = blueprint(tmp_path / "blueprint")
+    tool = release(tmp_path / "release")
+    (tool / "issue_assistant.py").unlink()
+    written(
+        tool,
+        {
+            "issue_assistant/__init__.py": "",
+            "issue_assistant/__main__.py": INSTALL.replace(
+                "resolve().parent", "resolve().parents[1]"
+            ),
+        },
+    )
+    # A json.py in the folder of the job doesn't reach the imports of the release.
+    job = tmp_path / "job"
+    written(job, {"json.py": 'raise SystemExit("ran the code of the job")'})
+    monkeypatch.chdir(job)
+
+    changed = sync.adopt(root, tool, NEW, "v1.3.1")
+
+    assert ".github/workflows/issue-assistant.yml" in changed
+    assert sync.pinned(root) == [f"{NEW} v1.3.1"]
+    assert "wrote .github/workflows/labels.yml" in capsys.readouterr().err
+
+
 def test_adopt_renders_no_workflow_that_install_left_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
