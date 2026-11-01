@@ -56,6 +56,7 @@ Every file here is the blueprint's own. A change of `template/`, or of a file of
 - **The files of the blueprint** in such a repository are all that the template renders, other than those that `_skip_if_exists` in [`copier.yml`](copier.yml) lists: an update brings their changes, so they change here, never there.
 - **The files of the project** are those that `_skip_if_exists` lists: an update never overwrites them, and a change of their template reaches only new repositories. Such a change says in the changelog how an existing repository makes it.
 - **The list of the files of a project** is in `_skip_if_exists` and, for coding agents, in `template/AGENTS.md.jinja`; a test keeps both equal, so a new pattern goes into both.
+- **The list of the files of the blueprint,** from which a pull request of such a repository hears that it changes one, is `template/.github/blueprint/owned.txt.jinja`: after a new file of the template or a new pattern, `python3 reference.py` writes it anew, and a test fails until it has.
 
 ## Project notes
 

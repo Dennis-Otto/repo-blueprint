@@ -59,7 +59,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap
+from blueprint import bootstrap, ownership
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -1765,7 +1765,9 @@ def test_every_repository_gets_the_settings_tool(
     copies = sorted(
         path.relative_to(github).as_posix()
         for path in [github / "blueprint.py", *(github / "blueprint").iterdir()]
-        if path.is_file()
+        # The list of the files of the blueprint is no part of the tool: it is data of
+        # this kind of project, not a copy of a file of the blueprint.
+        if path.is_file() and path != projects[kind] / ownership.LIST
     )
 
     assert copies == TOOL
@@ -5676,6 +5678,100 @@ AGENT_COMMANDS = {
     "container": ["docker run --rm demo-project:check --self-test"],
     "generic": ["no build and no tests of its own"],
 }
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    owned = ownership.load(project)
+    assert owned is not None
+    # A file that the project doesn't get leaves no empty line, and the end is a line
+    # break as in every other file.
+    text = (project / ownership.LIST).read_text(encoding="utf-8")
+    assert "\n\n" not in text
+    assert text.endswith("\n")
+    # The patterns as Copier reads them.
+    matcher = pathspec.PathSpec.from_lines("gitignore", files_of_the_project())
+    rendered = {
+        path.relative_to(project).as_posix()
+        for path in project.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(project).parts
+    }
+    assert owned == {
+        path
+        for path in rendered
+        if path != ".copier-answers.yml" and not matcher.match_file(path)
+    }
+    # The list names itself, and what the pull requests of player-switch changed.
+    assert {
+        ownership.LIST.as_posix(),
+        ".github/workflows/lint.yml",
+        ".github/workflows/codeql.yml",
+        "scripts/check.sh",
+        "CONTRIBUTING.md",
+    } <= owned
+    # The file of a project is on no list, and neither is a workflow of its own.
+    assert (
+        not {
+            "README.md",
+            ".github/repository.project.toml",
+            ".github/workflows/e2e.yml",
+            "scripts/check-project.sh",
+        }
+        & owned
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("mode", "code", "level"), [("", 0, "notice"), ("fail", 1, "error")]
+)
+def test_the_step_of_a_project_annotates_what_the_pull_request_changes(
+    tmp_path: Path,
+    projects: dict[str, Path],
+    mode: str,
+    code: int,
+    level: str,
+) -> None:
+    # The step as it is, with the command of a project, in a repository whose pull
+    # request changes a document and a file of the blueprint and moves another one.
+    changes: dict[str, str | None] = {
+        "lychee.toml": "changed\n",
+        "docs/guide.md": "->docs/moved.md",
+        "docs/own.md": "new\n",
+    }
+    repository = a_pull_request_on_a_newer_main(tmp_path, changes, True).repository
+    made = projects["python-package"] / ".github"
+    shutil.copytree(made / "blueprint", repository / ".github/blueprint")
+    shutil.copy(made / "blueprint.py", repository / ".github/blueprint.py")
+    (repository / ownership.LIST).write_text(
+        "lychee.toml\ndocs/guide.md\nCHANGELOG.md\n", encoding="utf-8"
+    )
+    result = workflow_steps.run_step(
+        tmp_path,
+        "lint.yml",
+        "lint",
+        "Find the changed files of the blueprint",
+        env={
+            "BASE_REF": "main",
+            "BRANCH": "topic",
+            "HEAD_REPO": "o/r",
+            "AUTHOR_TYPE": "User",
+            "BLUEPRINT_OWNERSHIP": mode,
+            "GITHUB_REPOSITORY": "o/r",
+        },
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"'},
+        workspace=repository,
+    )
+    assert result.returncode == code, result.stderr
+    # Both paths of the move and the changed file, and neither the document of the
+    # project nor a file of the blueprint that only main changed.
+    assert re.findall(r"^::(\w+) file=([^,]+),", result.stdout, re.MULTILINE) == [
+        (level, "docs/guide.md"),
+        (level, "lychee.toml"),
+    ]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10662,6 +10758,7 @@ PARTS = {
         "markdown",
         "issue-assistant",
         "dco",
+        "ownership",
     ],
     "conventional title": ["conventional title", "changelog"],
     "home-assistant": ["hacs", "hassfest"],
