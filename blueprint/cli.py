@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tomllib
+import webbrowser
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from blueprint import (
     screenshots,
     versions,
 )
+from blueprint.app import TIMEOUT, connect, register
 from blueprint.bootstrap import CreateError, create, doctor
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -1012,6 +1014,35 @@ def create_command(api: Api, arguments: argparse.Namespace, root: Path) -> int:
     return 2 if applied == 2 else 0
 
 
+def app_command(arguments: argparse.Namespace, root: Path) -> int:
+    """blueprint.py app: the release app of the owner, from its manifest or as one that
+    exists. Git and gh do the work, and the settings play no part in it."""
+    try:
+        if arguments.action == "register":
+            register(
+                root,
+                repo=arguments.repo,
+                org=arguments.org,
+                update=not arguments.no_update,
+                browser=None if arguments.no_browser else webbrowser.open,
+                timeout=arguments.timeout,
+            )
+        else:
+            connect(
+                root,
+                arguments.key_file,
+                repo=arguments.repo,
+                name=arguments.name,
+                client_id=arguments.client_id,
+                app_id=arguments.app_id,
+                update=not arguments.no_update,
+            )
+    except (CreateError, OSError) as error:
+        print(f"blueprint.py: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def utf8_output() -> None:
     """Windows consoles default to a code page without the marks of the checklist, and
     to CRLF, which a file of the repository written from the output must not get."""
@@ -1040,6 +1071,61 @@ def add_settings_parsers(
     commands.add_parser(
         "checklist", help="the steps outside the API, and which are done"
     )
+    app_parser = commands.add_parser(
+        "app",
+        help="the release app of the owner: register one from GitHub's manifest, or "
+        "connect one that exists",
+    )
+    app_actions = app_parser.add_subparsers(dest="action", required=True)
+    register_parser = app_actions.add_parser(
+        "register",
+        help="register the app on one page of GitHub, set its private key without "
+        "a file, and open the pull request that names it",
+    )
+    register_parser.add_argument(
+        "--org",
+        metavar="ORG",
+        help="the organization that owns the repository, which GitHub otherwise tells",
+    )
+    register_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="only print the address of the page",
+    )
+    register_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=TIMEOUT,
+        metavar="SECONDS",
+        help=f"how long to wait for the page of GitHub; {TIMEOUT} by default",
+    )
+    connect_parser = app_actions.add_parser(
+        "connect",
+        help="set the private key of an app that exists from a file, and name the app "
+        "unless the answers of the blueprint do",
+    )
+    connect_parser.add_argument(
+        "--key-file",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="the private key that GitHub gave you",
+    )
+    connect_parser.add_argument(
+        "--name", default="", help="the name in the address of the app"
+    )
+    connect_parser.add_argument(
+        "--client-id", default="", help="the Client ID on the settings page of the app"
+    )
+    connect_parser.add_argument(
+        "--app-id", default="", help="the App ID on the settings page of the app"
+    )
+    for action_parser in (register_parser, connect_parser):
+        action_parser.add_argument(
+            "--no-update",
+            action="store_true",
+            help="print the commands that name the app, and run none of them",
+        )
     create_parser = commands.add_parser(
         "create",
         help="the repository on GitHub of a new copy: git init, the first commit, "
@@ -1748,6 +1834,8 @@ def standalone_command(
         return annotate_command(arguments, root)
     if arguments.command == "ownership":
         return ownership_command(arguments, root)
+    if arguments.command == "app":
+        return app_command(arguments, root)
     if arguments.command == "doctor":
         # Git and gh only answer, and the settings play no part in it.
         try:

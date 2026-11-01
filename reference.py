@@ -230,11 +230,12 @@ ABOUT: dict[str, str] = {
         " request starts no checks."
     ),
     "RELEASE_AUTOMATION_PRIVATE_KEY": (
-        "The private key of the release app, the file that its settings page"
-        " generates. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the"
+        "The private key of the release app, which `app register` sets without a file."
+        " With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the"
         " app: they open and merge the release and update pull requests, so that their"
-        " checks run, create the release tags and apply the settings. The file goes in"
-        " with `< key.pem` after the command below."
+        " checks run, create the release tags and apply the settings. For an app that"
+        " exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it"
+        " from the file that the settings page of the app generates."
     ),
     "SETTINGS_APP_CLIENT_ID": (
         "The Client ID of the settings app, an optional second GitHub App of the owner"
