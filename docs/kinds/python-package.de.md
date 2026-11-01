@@ -35,6 +35,8 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 Der Merge des Release-Pull-Requests baut das Paket einmal, veröffentlicht es auf PyPI per Trusted Publishing aus dem Environment `pypi`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3.
 
+Ein Paket, das niemand von PyPI installiert, etwa ein privates, beantwortet `publish_package` mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `pyproject.toml` eines neuen Repositorys hat den Classifier `Private :: Do Not Upload`, den PyPI ablehnt, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von PyPI oder einem `*.whl`.
+
 ## Einmal von Hand
 
 `python3 .github/blueprint.py checklist` hakt jeden Schritt ab, den es sehen kann, und nennt den Rest, jeweils mit seinem Link: die Release-App des Eigentümers mit ihrem privaten Schlüssel, wie [dein eigenes Konto](../own-account.md) zeigt, das Token des Issue-Assistenten, außer seine KI ist aus, OpenSSF Best Practices, die REUSE-API und die Social Preview.

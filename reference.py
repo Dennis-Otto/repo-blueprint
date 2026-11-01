@@ -210,8 +210,12 @@ ABOUT: dict[str, str] = {
     "PUBLISH_TO": (
         "Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`,"
         " `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the"
-        " kind of project."
-        " The build, the release and the check of the latest release follow it."
+        " kind of project and, for a package of npm or PyPI, the answer"
+        " `publish_package`."
+        " The build, the release and the check of the latest release follow it. A value"
+        " in `.github/repository.project.toml` changes only the delivery: the documents"
+        " follow the answer, so a package that publishes nowhere answers"
+        " `publish_package` with no."
     ),
     "RELEASE_APP": (
         "The name of the release app, as its address says: github.com/apps/NAME. No"

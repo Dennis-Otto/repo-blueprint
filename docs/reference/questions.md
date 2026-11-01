@@ -6,7 +6,7 @@ description: Every question of the Copier template of Repo Blueprint, with its d
 
 <!-- reference.py writes this page from copier.yml: change copier.yml and run python3 reference.py. -->
 
-Copier asks these 26 questions when it copies the blueprint, in this order, and keeps the answers in `.copier-answers.yml`, so that `copier update` asks only a new question. `--data name=value` gives an answer without the question, also later: `copier update --defaults --vcs-ref=:current: --data name=value` changes an answer of an existing repository, and the defaults of Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) answer the questions that stay the same for all of your repositories, as [your own account](../own-account.md) shows. A default that is a template of Copier comes from the answers before it, in the delimiters of the blueprint: `{= … =}` for a value and `[% … %]` for a block.
+Copier asks these 27 questions when it copies the blueprint, in this order, and keeps the answers in `.copier-answers.yml`, so that `copier update` asks only a new question. `--data name=value` gives an answer without the question, also later: `copier update --defaults --vcs-ref=:current: --data name=value` changes an answer of an existing repository, and the defaults of Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) answer the questions that stay the same for all of your repositories, as [your own account](../own-account.md) shows. A default that is a template of Copier comes from the answers before it, in the delimiters of the blueprint: `{= … =}` for a value and `[% … %]` for a block.
 
 - [`project_name`](#project_name): The name of the project, such as "Paperless Sync"
 - [`project_slug`](#project_slug): The name of the repository; owner.github.io, such as dennis-otto.github.io, for the website of the owner itself
@@ -20,6 +20,7 @@ Copier asks these 26 questions when it copies the blueprint, in this order, and 
 - [`ha_domain`](#ha_domain): The domain of the integration in Home Assistant
 - [`nextcloud_app_id`](#nextcloud_app_id): The id of the Nextcloud app, 32 characters at most
 - [`nextcloud_namespace`](#nextcloud_namespace): The PHP namespace of the app, under OCA
+- [`publish_package`](#publish_package): Publish the package on the registry of its kind, npm or PyPI, with every release; no for a package that nobody installs from there, such as a private one
 - [`languages`](#languages): The languages of the code, which CodeQL analyzes (it has no PHP)
 - [`discussions`](#discussions): Use GitHub Discussions for questions, ideas and the announcements of releases
 - [`successor`](#successor): The owner has designated a successor through GitHub's account successor setting, who can take over the repository
@@ -188,6 +189,16 @@ The PHP namespace of the app, under OCA.
 {= project_name | regex_replace('[^A-Za-z0-9]+', ' ') | title | replace(' ', '') =}
 ```
 
+### `publish_package`
+
+Publish the package on the registry of its kind, npm or PyPI, with every release; no for a package that nobody installs from there, such as a private one.
+
+A package goes to the registry of its kind, unless nobody installs it from there, such as a private one that only its releases carry. publish\_to follows this answer, and with it the variable PUBLISH\_TO and every document that speaks of the delivery (decision 0093).
+
+- **Type:** yes or no
+- **Asked:** only when `project_type in ['node-package', 'python-package']`
+- **Default:** yes
+
 ### `languages`
 
 The languages of the code, which CodeQL analyzes (it has no PHP).
@@ -260,8 +271,8 @@ The topics of the repository on GitHub, with those of each kind by default: HACS
 [%- if project_type == 'home-assistant' -%]home-assistant, hacs, hacs-integration, home-assistant-integration, home-assistant-custom-component, homeassistant
 [%- elif project_type == 'nextcloud-app' -%]nextcloud, nextcloud-app
 [%- elif project_type == 'github-action' -%]github-actions, github-action
-[%- elif project_type == 'python-package' -%]python, pypi
-[%- elif project_type == 'node-package' -%]typescript, nodejs, npm
+[%- elif project_type == 'python-package' -%]{= 'python, pypi' if publish_package else 'python' =}
+[%- elif project_type == 'node-package' -%]{= 'typescript, nodejs, npm' if publish_package else 'typescript, nodejs' =}
 [%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
 [%- elif project_type == 'container' -%]docker, container, ghcr
 [%- endif -%]
@@ -423,7 +434,8 @@ release_app_id: '4739928'
 - **Default:** a template of Copier, from the answers before it:
 
 ```text
-[%- if project_type == 'home-assistant' -%]hacs
+[%- if project_type in ['node-package', 'python-package'] and not publish_package -%]none
+[%- elif project_type == 'home-assistant' -%]hacs
 [%- elif project_type == 'nextcloud-app' -%]nextcloud-appstore
 [%- elif project_type == 'github-action' -%]github-action
 [%- elif project_type == 'python-package' -%]pypi

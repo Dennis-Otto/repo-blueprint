@@ -35,6 +35,8 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request publishes the package on npm with provenance, by trusted publishing from the environment `npm`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
 
+A package that nobody installs from npm, such as a private one, answers `publish_package` with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `package.json` of a new repository is `private`, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of npm or of a `*.tgz`.
+
 ## Once by hand
 
 `python3 .github/blueprint.py checklist` ticks off each step that it can see and names the rest, each with its link: the release app of the owner with its private key, as [your own account](../own-account.md) shows, the token of the issue assistant unless its AI is off, OpenSSF Best Practices, the REUSE API and the social preview.
