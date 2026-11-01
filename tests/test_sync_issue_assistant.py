@@ -285,6 +285,7 @@ def test_adopt_starts_a_release_that_is_a_package(
     assert "wrote .github/workflows/labels.yml" in capsys.readouterr().err
 
 
+@needs_git
 def test_adopt_renders_no_workflow_that_install_left_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
