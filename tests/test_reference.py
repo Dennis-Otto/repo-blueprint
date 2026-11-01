@@ -184,7 +184,6 @@ def test_the_committed_pages_say_what_their_sources_say() -> None:
         *reference.READMES.values(),
         *kinds,
         reference.ROLLOUT,
-        reference.VARIANTS,
     }
     assert reference.stale(ROOT, written) == [], (
         "python3 reference.py writes the reference pages anew"
@@ -973,8 +972,9 @@ def test_the_real_repositories_of_a_kind() -> None:
         "- **[Alpha](https://github.com/Octo-Org/alpha)**: the pages of Alpha.\n"
         "- **[Alpha](https://github.com/Octo-Org/gamma)**: the pages of Alpha.\n"
         "\n"
-        "The Variants workflow tries every pull request of the blueprint on the"
-        " answers of Alpha and Alpha, before it merges.\n"
+        "The Variants workflow tries every pull request of the blueprint that"
+        " changes what the answers of Alpha and Alpha render on them, before it"
+        " merges.\n"
     )
     german = reference.real_repositories(registry, "node-package", "de")
     assert german.startswith(
@@ -982,8 +982,9 @@ def test_the_real_repositories_of_a_kind() -> None:
         " entstanden:\n\n- **[Alpha](https://github.com/Octo-Org/beta)**: die Seiten"
     )
     assert german.endswith(
-        "\n\nDer Workflow Variants probiert jeden Pull Request des Blueprints mit den"
-        " Antworten von Alpha aus, bevor er merged.\n"
+        "\n\nDer Workflow Variants probiert jeden Pull Request des Blueprints, der"
+        " ändert, was die Antworten von Alpha rendern, mit ihnen aus, bevor er"
+        " merged.\n"
     )
 
 
@@ -1006,7 +1007,7 @@ def test_a_part_between_its_marks() -> None:
         )
 
 
-def test_the_order_of_the_rollout_and_the_legs_of_the_canaries() -> None:
+def test_the_order_of_the_rollout() -> None:
     registry = reference.fleet(REGISTRY)
     text = "env:\n          ORDER: old names\n          TAG: v1\n"
     assert reference.rollout_order(text, registry) == (
@@ -1015,14 +1016,6 @@ def test_the_order_of_the_rollout_and_the_legs_of_the_canaries() -> None:
     for broken in ("env:\n", text + text, "  ORDER: old\n"):
         with pytest.raises(reference.PageError, match="no one line ORDER:"):
             reference.rollout_order(broken, registry)
-    # Only the canaries, by name.
-    assert reference.canary_legs(
-        fleet_of(one("zeta", "node-package"), one("beta", canary=False), one("alpha"))
-    ) == (
-        "          - { kind: generic, start: adopted, answers: alpha }\n"
-        "          - { kind: node-package, start: adopted, answers: zeta }\n"
-    )
-    assert reference.canary_legs(fleet_of(one("beta", canary=False))) == ""
 
 
 def fleet_repository(root: Path) -> None:
@@ -1034,10 +1027,6 @@ def fleet_repository(root: Path) -> None:
         "README.md": readme.format(*reference.snippet("made-with")),
         "README.de.md": readme.format(*reference.snippet("made-with")),
         ".github/workflows/rollout.yml": "env:\n          ORDER: old\n",
-        ".github/workflows/variants.yml": (
-            "include:\n          - { kind: generic, start: new }\n"
-            + "".join(reference.CANARIES)
-        ),
     }
     for kind in ("generic", "node-package", "python-package"):
         for suffix in (".md", ".de.md"):
@@ -1065,13 +1054,7 @@ def test_the_files_that_name_the_repositories_of_the_registry(tmp_path: Path) ->
     )
     assert "Noch folgt kein" in written[Path("docs/kinds/python-package.de.md")]
     assert written[reference.ROLLOUT] == "env:\n          ORDER: beta.io alpha\n"
-    assert written[reference.VARIANTS] == (
-        "include:\n          - { kind: generic, start: new }\n"
-        + reference.CANARIES[0]
-        + "          - { kind: generic, start: adopted, answers: alpha }\n"
-        + reference.CANARIES[1]
-    )
-    assert len(written) == 10
+    assert len(written) == 9
     # Written once, they say what the registry says.
     for path, text in written.items():
         (tmp_path / path).write_text(text, encoding="utf-8")
@@ -1096,7 +1079,7 @@ def test_the_command_writes_the_files_of_the_registry(
     assert reference.main([], repository) == 0
     out = capsys.readouterr().out
     assert "reference.py: wrote README.md\n" in out
-    assert "reference.py: wrote .github/workflows/variants.yml\n" in out
+    assert "reference.py: wrote .github/workflows/rollout.yml\n" in out
     assert reference.main(["--check"], repository) == 0
     # A registry that names no fleet stops it, as a page that it can't write.
     (repository / ".github/fleet.toml").write_text("owner = 'o'\n", encoding="utf-8")

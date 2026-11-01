@@ -90,6 +90,7 @@ from blueprint.settings import PERMISSIONS, Settings, allows
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
 from blueprint.versions import fix as fix_versions
+from variants import legs_of
 
 ROOT = Path(__file__).parents[1]
 KINDS = [
@@ -14926,7 +14927,8 @@ def test_the_release_pull_request_runs_nothing_that_its_change_cannot_fail() -> 
     # It changes the changelog and the version, which no kind of project renders and
     # no scanner reads, and the pull requests it releases ran every check already.
     flows = workflows(ROOT)
-    skipped = {"variants.yml": "variant", **SCANNERS}
+    # The legs of the Variants wait for their plan, which it skips.
+    skipped = {"variants.yml": "plan", **SCANNERS}
     for name, job in skipped.items():
         assert RELEASE_PULL_REQUEST in condition_of(job_in(flows[name], job)), name
     # Every tool of the rule of code scanning analyzes it, or its merge would wait.
@@ -14941,7 +14943,7 @@ def test_one_check_stands_for_every_variant() -> None:
     variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
     gate = job_in(variants, "variants")
     assert gate["name"] == "variants"
-    assert gate["needs"] == ["variant", "pictures"]
+    assert gate["needs"] == ["plan", "variant", "pictures"]
     # Also after a variant failed, so that the check reports the failure.
     assert condition_of(gate) == "always()"
     settings = tomllib.loads(
@@ -14976,6 +14978,93 @@ def test_the_check_variants_passes_when_every_variant_passed_or_none_ran(
     )
 
     assert (done.returncode == 0) == passes, done.stderr
+
+
+def test_the_check_variants_fails_with_its_plan() -> None:
+    # A plan that fails skips the legs, which alone would look like none had to run.
+    step = workflow_steps.step(
+        "variants.yml", "variants", "Require every variant to pass, or none to run"
+    )
+    assert step["env"]["RESULT"] == (
+        "${{ needs.plan.result }} ${{ needs.variant.result }}"
+        " ${{ needs.pictures.result }}"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("results", "passes"),
+    [
+        ("success success success", True),
+        # Nothing that a project gets changes, and the release pull request.
+        ("success skipped success", True),
+        ("skipped skipped skipped", True),
+        ("failure skipped success", False),
+        ("success failure success", False),
+        ("success success failure", False),
+    ],
+)
+def test_the_check_variants_needs_the_plan_and_each_leg(
+    tmp_path: Path, results: str, passes: bool
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "variants.yml",
+        "variants",
+        "Require every variant to pass, or none to run",
+        env={"RESULT": results},
+    )
+    assert (done.returncode == 0) == passes, done.stderr
+
+
+def test_the_legs_of_the_variants_come_from_their_plan() -> None:
+    variants = workflow_steps.workflow("variants.yml")
+    job = job_in(variants, "variant")
+    # Only the legs that the pull request changes, and a matrix that has a leg: GitHub
+    # stops at one without.
+    assert job["needs"] == "plan"
+    assert condition_of(job) == "needs.plan.outputs.run == 'true'"
+    assert job["strategy"] == {
+        "fail-fast": False,
+        "matrix": "${{ fromJSON(needs.plan.outputs.matrix) }}",
+    }
+    plan = job_in(variants, "plan")
+    # Its name is the check that the PR coach explains, with both outputs of the step.
+    assert plan["name"] == "variants plan"
+    assert plan["steps"][-1] == explain_step("variants plan")
+    assert plan["outputs"] == {
+        "matrix": "${{ steps.legs.outputs.matrix }}",
+        "run": "${{ steps.legs.outputs.run }}",
+    }
+    assert step_in(plan, "Find the legs whose project the pull request changes")[
+        "id"
+    ] == ("legs")
+    # The merge commit of the pull request and the main it merges into, nothing more.
+    assert steps_using(plan, "actions/checkout")[0]["with"]["fetch-depth"] == 2
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(("base", "arguments"), [("HEAD^1", "--base HEAD^1"), ("", "")])
+def test_only_a_pull_request_names_a_base_for_the_plan(
+    tmp_path: Path, base: str, arguments: str
+) -> None:
+    name = "Find the legs whose project the pull request changes"
+    # Neither a schedule nor a run by hand, nor the Next runner workflow, which names
+    # a runner, whichever event started it.
+    assert workflow_steps.step("variants.yml", "plan", name)["env"]["BASE"] == (
+        "${{ github.event_name == 'pull_request' && !inputs.runner && 'HEAD^1' || '' }}"
+    )
+    done = workflow_steps.run_step(
+        tmp_path,
+        "variants.yml",
+        "plan",
+        name,
+        env={"BASE": base},
+        stubs={"python3": workflow_steps.recording("python3")},
+    )
+    assert done.returncode == 0, done.stderr
+    call = f"python3 variants.py {arguments}".strip()
+    assert done.stubbed == [call]
 
 
 @pytest.mark.parametrize("targets", [1, 2, 5])
@@ -17171,7 +17260,7 @@ def test_a_hung_download_of_uv_gives_way_to_a_second_attempt() -> None:
                     "download-from-astral-mirror": False,
                 }
                 retried.append(f"{name}: {job_name}")
-    assert retried == ["variants.yml: variant"]
+    assert retried == ["variants.yml: plan", "variants.yml: variant"]
 
 
 @pytest.fixture
@@ -17543,12 +17632,7 @@ def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
         # Never Copier's own, which name the version of the repository and the source.
         assert not {"_commit", "_src_path"} & set(answers), name
     # A leg of the Variants for each, with the kind of project of its answers.
-    variants = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
-    legs = re.findall(
-        r"^          - \{ kind: ([\w-]+), start: adopted, answers: ([\w.-]+) \}$",
-        variants,
-        re.M,
-    )
+    legs = [(leg.kind, leg.answers) for leg in legs_of(ROOT) if leg.start == "adopted"]
     assert legs == [
         (answers["project_type"], name) for name, answers in ANSWERS.items()
     ]

@@ -55,7 +55,7 @@ Diese Art bringt diese Schritte dazu:
 
 [HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts) ist aus dem Blueprint entstanden: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, ohne Cloud-Konto.
 
-Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von HomeDarts for Autodarts aus, bevor er merged.
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von HomeDarts for Autodarts rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 

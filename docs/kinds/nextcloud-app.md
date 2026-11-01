@@ -54,7 +54,7 @@ These public repositories of this kind are made from the blueprint:
 - **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**: the documents of Paperless-ngx in Nextcloud Files, by correspondent, type and year.
 - **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**: the full-text search of Paperless-ngx in the unified search of Nextcloud.
 
-The Variants workflow tries every pull request of the blueprint on the answers of Paperless Sync and Paperless Unified Search, before it merges.
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Paperless Sync and Paperless Unified Search render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 

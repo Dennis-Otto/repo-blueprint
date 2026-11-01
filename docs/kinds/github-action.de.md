@@ -48,7 +48,7 @@ Diese Art bringt keinen eigenen Schritt dazu.
 
 [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) ist aus dem Blueprint entstanden: eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, geprüft von einem Job ohne KI, bevor sie erscheint.
 
-Der Workflow Variants probiert jeden Pull Request des Blueprints mit den Antworten von Issue-Assistent aus, bevor er merged.
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Issue-Assistent rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 

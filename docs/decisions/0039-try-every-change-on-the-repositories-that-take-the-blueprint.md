@@ -1,6 +1,6 @@
 # Try every change of the template on the answers and the files of the repositories that take the blueprint, before its release
 
-- Status: accepted
+- Status: accepted, amended by [0099](0099-a-pull-request-runs-only-the-variants-whose-project-it-changes.md), by which a pull request runs only the adopted legs whose project it changes
 - Date: 2026-10-18
 
 ## Context

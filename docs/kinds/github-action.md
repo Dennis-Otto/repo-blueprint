@@ -48,7 +48,7 @@ This kind adds no step of its own.
 
 [Issue assistant](https://github.com/Dennis-Otto/issue-assistant) is made from the blueprint: a first analysis of every new issue by an AI that only reads, checked by a job without AI before it posts.
 
-The Variants workflow tries every pull request of the blueprint on the answers of Issue assistant, before it merges.
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Issue assistant render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 

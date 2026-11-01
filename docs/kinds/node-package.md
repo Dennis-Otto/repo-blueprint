@@ -51,7 +51,7 @@ This kind adds these steps:
 
 [Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) is made from the blueprint: a shared Autodarts display where everyone plays under their own account and a tap on a tile switches players, without signing in again.
 
-The Variants workflow tries every pull request of the blueprint on the answers of Player Switch for Autodarts, before it merges.
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Player Switch for Autodarts render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 
