@@ -12,7 +12,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 
 - [`BETA_CHANNEL`](#beta_channel): `true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases.
 - [`BLUEPRINT_AUTOMERGE`](#blueprint_automerge): `off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way.
-- [`BLUEPRINT_OWNERSHIP`](#blueprint_ownership): `fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint, where it leaves a notice with any other value or none.
+- [`BLUEPRINT_OWNERSHIP`](#blueprint_ownership): `fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint outside the marked lines of `CONTRIBUTING.md`, where it leaves a notice with any other value or none.
 - [`CODE_SCANNING`](#code_scanning): `off` keeps every finding out of code scanning, which GitHub offers a private repository only with GitHub Code Security: CodeQL doesn't analyze, since its terms allow it on private code only with GitHub Code Security or Advanced Security, and its check passes with a notice; zizmor fails on every finding; OSV-Scanner and the Scorecard keep theirs in their checks.
 - [`CWS_EXTENSION_ID`](#cws_extension_id): The ID of the item of a Chrome extension in the Chrome Web Store, from the address of the item in the Developer Dashboard, to which the workflow *Chrome Web Store* delivers every release.
 - [`CWS_PUBLISHER_ID`](#cws_publisher_id): The ID of the publisher of a Chrome extension, under *Account* in the Developer Dashboard of the Chrome Web Store; the API of the store names the item by it and `CWS_EXTENSION_ID`.
@@ -21,7 +21,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 - [`DEPENDENCY_REVIEW`](#dependency_review): `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security.
 - [`ISSUE_ASSISTANT_AI`](#issue_assistant_ai): `off` makes the issue assistant label the issues and answer the commands of their comments without an AI engine, which then needs no secret; `on` lets the engine analyze each new issue as well.
 - [`MUTATION_PARTS`](#mutation_parts): The number of parts in which the mutation tests run, one job each, in place of the estimate from the number of mutants: more parts for a project whose parts run out of the six hours of a job.
-- [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project.
+- [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project and, for a Node package, the answer `publish_to_npm`.
 - [`RELEASE_APP`](#release_app): The name of the release app, as its address says: github.com/apps/NAME.
 - [`RELEASE_AUTOMATION_APP_ID`](#release_automation_app_id): The App ID of the release app, the number on its settings page.
 - [`RELEASE_AUTOMATION_CLIENT_ID`](#release_automation_client_id): The Client ID of the release app, with which each bot asks for a token of the app, together with the private key `RELEASE_AUTOMATION_PRIVATE_KEY`.
@@ -52,7 +52,7 @@ What the workflows say of it:
 
 ### `BLUEPRINT_OWNERSHIP`
 
-`fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint, where it leaves a notice with any other value or none. The report of the PR coach says where the change belongs instead. Bots stay out of it: the update of the blueprint and the pull requests of the other bots.
+`fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint outside the marked lines of `CONTRIBUTING.md`, where it leaves a notice with any other value or none. The report of the PR coach says where the change belongs instead. Bots stay out of it: the update of the blueprint and the pull requests of the other bots.
 
 - **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
 - **Read by:** [`lint.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/lint.yml) (Lint, every repository)
@@ -143,7 +143,7 @@ The number of parts in which the mutation tests run, one job each, in place of t
 
 ### `PUBLISH_TO`
 
-Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project. The build, the release and the check of the latest release follow it.
+Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project and, for a Node package, the answer `publish_to_npm`. The build, the release and the check of the latest release follow it.
 
 - **Set by:** the settings as code: `.github/repository.toml` sets it, from [`publish_to`](questions.md#publish_to), and the settings bot applies it; `.github/repository.project.toml` can set another value
 - **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`verify-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/verify-release.yml) (Release verification, every repository)

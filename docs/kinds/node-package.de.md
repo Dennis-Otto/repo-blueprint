@@ -41,7 +41,7 @@ Der Merge des Release-Pull-Requests veröffentlicht das Paket auf npm mit Proven
 
 Diese Art bringt diese Schritte dazu:
 
-- Den Trusted Publisher auf npm eintragen, mit dem Workflow `release.yml` und dem Environment `npm`: <https://www.npmjs.com/settings/~/packages>.
+- Den Trusted Publisher auf npm eintragen, mit dem Workflow `release.yml` und dem Environment `npm`, außer das Paket antwortet bei `publish_to_npm` mit Nein: <https://www.npmjs.com/settings/~/packages>.
 
 ## Ein echtes Repository
 

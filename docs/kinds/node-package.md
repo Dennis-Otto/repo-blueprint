@@ -41,7 +41,7 @@ Merging the release pull request publishes the package on npm with provenance, b
 
 This kind adds these steps:
 
-- Add the trusted publisher on npm, with the workflow `release.yml` and the environment `npm`: <https://www.npmjs.com/settings/~/packages>.
+- Add the trusted publisher on npm, with the workflow `release.yml` and the environment `npm`, unless the package answers no to `publish_to_npm`: <https://www.npmjs.com/settings/~/packages>.
 
 ## A real repository
 
