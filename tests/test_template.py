@@ -17085,8 +17085,8 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert node["with"]["node-version-file"] == (
         "${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}"
     )
-    # Without the hook, the job only checks out.
-    for step in job["steps"][2:-1]:
+    # Without the hook, the job only waits for its hosts and checks out.
+    for step in job["steps"][3:-1]:
         assert HOOK in step["if"], step
     (upload,) = steps_using(job, "actions/upload-artifact")
     assert upload["with"]["if-no-files-found"] == "error"
