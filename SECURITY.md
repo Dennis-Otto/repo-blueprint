@@ -41,7 +41,11 @@ A release is immutable once it is published, and GitHub signs an attestation of 
 
 ```sh
 gh release verify vX.Y.Z --repo Dennis-Otto/repo-blueprint
+gh release download vX.Y.Z --repo Dennis-Otto/repo-blueprint --pattern '<asset>'
+gh attestation verify <asset> --repo Dennis-Otto/repo-blueprint --signer-workflow Dennis-Otto/repo-blueprint/.github/workflows/build-release.yml
 ```
+
+Every asset of a release carries this provenance, those that the project builds itself with `scripts/release-assets.sh`, such as the zip of a browser extension, too.
 
 Copier renders a repository from the tag of a release, so the tag must be the one the release workflow made. Only the release app may create a release tag, and the release workflow signs every tag without a key ([gitsign](https://github.com/sigstore/gitsign)). Before every update, the blueprint bot of each repository checks that the release is immutable, that its tag points at a commit of `main` no older than the version the repository has, and that the release workflow of the blueprint signed the tag under the name of that release; it refuses any other release. You check a tag the same way with git and gitsign, where `vA.B.C` is the version your repository has, the `_commit` of its `.copier-answers.yml`; `gh release verify` above holds only for an immutable release:
 
@@ -57,7 +61,7 @@ gitsign verify-tag vX.Y.Z \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Every release describes what it ships in an SBOM, as SPDX in `repo-blueprint.spdx.json` and as CycloneDX in `repo-blueprint.cdx.json`: the files of its tag, without those that only check, test and document the project, under the name `repo-blueprint` and the version of the release. A scanner such as [Grype](https://github.com/anchore/grype) checks it against the advisories it knows. When the project accepts an advisory in `osv-scanner.toml`, with its reason, the release carries the OpenVEX document `repo-blueprint.openvex.json` too, which tells the scanner that the advisory doesn't affect the release; without that document, leave out `--vex`:
+Every release describes what it ships in an SBOM, as SPDX in `repo-blueprint.spdx.json` and as CycloneDX in `repo-blueprint.cdx.json`: the files of its tag, without those that only check, test and document the project, or, where the project builds assets of its own with `scripts/release-assets.sh`, the zips and tarballs of that script, under the name `repo-blueprint` and the version of the release. A scanner such as [Grype](https://github.com/anchore/grype) checks it against the advisories it knows. When the project accepts an advisory in `osv-scanner.toml`, with its reason, the release carries the OpenVEX document `repo-blueprint.openvex.json` too, which tells the scanner that the advisory doesn't affect the release; without that document, leave out `--vex`:
 
 ```sh
 gh release download vX.Y.Z --repo Dennis-Otto/repo-blueprint --pattern 'repo-blueprint.*.json'
