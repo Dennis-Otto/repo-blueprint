@@ -62,12 +62,19 @@ Every bot starts from an event, such as a merge into `main`, a pull request or t
 
 | Workflow | Schedule, in UTC | Runs a week |
 | --- | --- | --- |
-| Update branches | every six hours, at ten past | 28, before 336 |
-| Release | every day at 05:25 | 7, before 168 |
+| Update branches | every six hours | 28, before 336 |
+| Release | every day, between 05:00 and 06:00 | 7, before 168 |
 | Bot health, Findings, Issue lifecycle | every day | 21 |
 | Property tests, in Python and Home Assistant projects | every day | 7 |
 | The scanners, the SBOM, the mutation tests, the check of the latest release, the clean-up, the settings, the blueprint bot and the other weekly bots | once a week each | 12 to 15 |
 | Together | | 68 to 78, before about 540 |
+
+- **Times of their own:** the repositories of an owner share the runners of the account, 20 at once on GitHub Free. With the times of the blueprint in each, the weekly jobs of all of them arrived together: on 24 October 2026 the mutation tests of five repositories started within seven minutes, and the pull requests of every repository waited up to 41 minutes for a runner. So each repository has a slot of its own: the blueprint 0, each repository of [the registry](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/fleet.toml) its place in the Rollout, and any other one a slot from the hash of its name. The template moves each weekly schedule of the blueprint's workflows by as many days, and every schedule by 8 minutes for each, within its hour, so that the heavy weekly jobs, CodeQL, the SBOM, the mutation tests, the links, OSV-Scanner and the Scorecard, of two repositories whose slots lie within a week of each other (slots 0 to 6: the blueprint and the first six repositories of the registry) never run in the same hour of a day, and each job keeps its hour, so that the scanners still finish before the daily sweep of the findings. The weekly run of the mutation tests takes two runners at once, a pull request four. The templates of the issue assistant keep their times, which change in the issue assistant (decision 0083).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/when-the-schedules-of-a-repository-run.dark.svg">
+  <img src="../images/diagrams/when-the-schedules-of-a-repository-run.svg" alt="When the schedules of a repository run: The blueprint has slot 0, a repository of the registry its place in the Rollout, any other repository a slot from the hash of its owner and name. Each weekly schedule moves by as many days, every schedule by 8 minutes for each within its hour, so the heavy weekly jobs of two repositories in slots 0 to 6 never share an hour of a day.">
+</picture>
 
 - **The blueprint:** its own schedules come to 259 runs a week, with Renovate for every repository (84) and the dashboard (84), which cost nothing in a public repository.
 - **Private repositories:** public repositories run Actions for free. A private one on GitHub Free has 2,000 minutes a month, and GitHub rounds every job up to a whole minute. Each run of a bot starts a short run of the bot-health bot after it, and each run of the release bot one of Issue lifecycle, which now skips the scheduled ones, so the schedules of every hour and every half hour came to close to 200 runs a day, about 6,000 a month had GitHub run them all, three times the free minutes. All the schedules of a project and the runs that they start now come to about 20 a day, about 600 a month. The checks of the pull requests cost more; decisions 0009 and 0027 keep their jobs few.

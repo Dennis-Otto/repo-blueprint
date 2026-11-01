@@ -259,7 +259,9 @@ Dennis-Otto/repo-blueprint#429; the words for users stay the author's."""
 title = "The CodeQL analysis"
 problem = """CodeQL couldn't analyze the code, or couldn't upload what it found. Its
 findings are a check of their own, CodeQL; this one fails when the analysis itself
-breaks."""
+breaks. A private repository without code scanning, where `CODE_SCANNING` is `off`,
+doesn't run CodeQL, whose terms allow it on private code only with GitHub Code
+Security or Advanced Security: there this check passes with a notice."""
 why = """The rules of `main` require that every language is analyzed, so that no security
 problem goes unseen."""
 fix = """Read the log of the check. A failure of the analysis is rarely caused by the
@@ -403,7 +405,9 @@ severity; an alert that `main` has already doesn't."""
 fix = """Open the finding from the details of the check; the documentation of each audit
 of zizmor shows the fix. A finding in a workflow of the project that it accepts on
 purpose is ignored at its line with `# zizmor: ignore[<audit>]` and the reason;
-`.github/zizmor.yml` belongs to the blueprint and holds only what it accepts. Only an
+`.github/zizmor.yml` belongs to the blueprint and holds only what it accepts. On a
+private repository without code scanning, where `CODE_SCANNING` is `off`, every
+finding fails the check *zizmor*, with an annotation at its line. Otherwise only an
 error fails the check *zizmor*: a warning or a note stops the merge while the check is
 green, and shows in the merge box and as an annotation at its line. If the job *zizmor*
 of *Workflow security* failed, rather than the check of code scanning, the analysis
@@ -412,7 +416,11 @@ it fails again. In a pull request that changes no workflow, no
 action and not `.github/zizmor.yml`, an alert comes from an advisory of an action
 published since the last analysis of `main`: a maintainer starts the workflow
 *Workflow security* on `main`, which gives `main` the alert, and runs the checks
-again. zizmor runs on your machine as well:"""
+again. The fix of such an alert, `known-vulnerable-actions`, is the pin: move the commit
+and the version in its comment to the release that the advisory names as fixed. Renovate
+moves it in its next weekly window once that release is a week old, and a workflow that
+belongs to the blueprint moves with the update of the blueprint. zizmor runs on your
+machine as well:"""
 commands = ["pipx run zizmor .github/workflows"]
 docs = "https://docs.zizmor.sh/audits/"
 autofix = """A weakness of a workflow needs a person, and the bot never writes a
@@ -460,6 +468,32 @@ to fix it."""
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#osv-scanner-reports-a-version-that-another-package-pins"
 autofix = """Which version fixes an advisory, and whether it affects the project, is
 the decision of a person."""
+
+[check."dependabot alerts"]
+title = "The Dependabot alerts of the accepted advisories"
+problem = """The job closes each Dependabot alert of an advisory that an `osv-scanner.toml`
+accepts, with its reason and its end, and opens again each one that it closed once the
+acceptance is gone, and it couldn't: GitHub refused the app a token with the
+permission *Dependabot alerts* (read and write), or refused the alerts to its token.
+The summary of the run names the app: the settings app once the variable
+`SETTINGS_APP_CLIENT_ID` names it, the release app until then."""
+why = """The token of a workflow can't read the Dependabot alerts, so only an app of the
+owner can close them. Until it may, Dependabot keeps an alert open for every advisory
+that the project accepts, such as each of the Pillow that Home Assistant pins for the
+tests, and a new alert that matters hides among them."""
+fix = """On the settings page of the app that the summary names, under *Permissions &
+events*, set *Dependabot alerts* to *Read and write* and save. GitHub then asks the
+owner to accept the new permission on the installation of the app (*Settings →
+Applications → Configure*, *Review request*); accept it, and run the workflow
+*OSV-Scanner* again. With the GitHub CLI of a maintainer, this shows which alerts the
+job would close or open again (in the blueprint itself, the tool is `blueprint.py`
+without `.github/`):"""
+commands = [
+  "python3 .github/blueprint.py --repo {repo} advisories --dependabot --dry-run",
+]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md#8-the-settings-app-optional"
+autofix = """Only the owner of the app can grant it a permission, on the settings page of
+the app; no command of a pull request can."""
 
 [check."renovate rules"]
 title = "The rules of Renovate"
@@ -1086,6 +1120,25 @@ line, branch and function that the report lists as missing:"""
 commands = ["npm test"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """A test that fails, or code without a test, needs a person, who knows what the code should do."""
+
+[step.Extension]
+problem = """The manifest of the extension, `extension/manifest.json`, doesn't fit the
+Chrome Web Store, or its store files don't agree with it: the log lists each problem of
+`scripts/check-manifest.mjs`, such as a permission or host without its reason in
+`store/permissions.json` or its justification in a listing, a language without its
+`store/listing.<language>.md`, a name or a description over the limit of the store, or
+a version other than that of `package.json`. Or the build, or the zip of the store,
+fails."""
+why = """The store takes a version only with a justification of each permission and
+host, and Chrome disables an installed extension after an update that asks for a new
+one until its user accepts it: what the check finds here would stop the release in the
+review of the store, or the users after it."""
+fix = """Do what each line of the log says: give a new permission or host its reason in
+`store/permissions.json` and its justification under `## Permission justifications` of
+every listing, or remove it from the manifest; then check again:"""
+commands = ["node scripts/check-manifest.mjs", "bash scripts/package-extension.sh"]
+docs = "CONTRIBUTING.md#checks"
+autofix = """A permission and its reason need a person, who knows why the extension asks for it."""
 
 [step.Dockerfile]
 problem = """hadolint flags a line of the Dockerfile, such as a package without a pinned

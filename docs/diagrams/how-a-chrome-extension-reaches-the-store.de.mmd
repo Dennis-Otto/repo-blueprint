@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie eine Chrome-Erweiterung in den Chrome Web Store kommt
+    accDescr: Das Mergen des Release-Pull-Requests veröffentlicht das Release, dessen isolierter Build die Erweiterung aus dem signierten Tag zippt und bezeugt. Der Workflow Chrome Web Store fragt den Store nach dem Stand des Eintrags, nimmt das Zip nur mit seiner Provenance, meldet sich mit dem OIDC-Token von GitHub ohne gespeichertes Geheimnis bei Google an, lädt es hoch und reicht es zur Prüfung ein. Google prüft es und veröffentlicht es für die Nutzer; der tägliche Lauf liefert ein Release nach, dessen Prüfung warten musste, und meldet eine Ablehnung.
+
+    merge["Du mergst den Release-Pull-Request"]
+    build["`Der isolierte Build zippt **extension/** aus dem signierten Tag und bezeugt es`"]
+    status["`*Stand des Stores*: keine Prüfung offen, dem Store fehlt das Release`"]
+    package["`*Paket des Releases*: das Zip, nur mit seiner Provenance`"]
+    signin["Bei Google angemeldet mit dem OIDC-Token von GitHub, ohne gespeichertes Geheimnis"]
+    store["`*Lieferung*: hochladen und zur Prüfung einreichen`"]
+    review["Google prüft die Version"]
+    users["Die Nutzer bekommen die neue Version"]
+    daily["Jeden Tag: eine Prüfung, die warten musste, eine Ablehnung, eine Warnung"]
+
+    merge --> build --> status --> package --> store --> review --> users
+    signin --> status
+    signin --> store
+    daily --> status
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge you
+    class build,status,package,signin,store,daily bot
+    class review,users done

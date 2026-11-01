@@ -15,7 +15,15 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import blueprint
-from blueprint import advisories, annotate, locks, mutation, screenshots, versions
+from blueprint import (
+    advisories,
+    annotate,
+    dependabot,
+    locks,
+    mutation,
+    screenshots,
+    versions,
+)
 from blueprint.bootstrap import CreateError, create, doctor
 from blueprint.bot_health import renovate_report, sweep, watch_run
 from blueprint.branches import next_branch
@@ -94,8 +102,11 @@ from blueprint.settings import (
     apply,
     check,
     describe,
+    fitted,
     kept,
     line_of,
+    offered_only,
+    read_plan,
     unlisted_actions,
     widen_selected_actions,
 )
@@ -742,6 +753,36 @@ def advisories_command(arguments: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def dependabot_command(
+    api: Api, repo: str, arguments: argparse.Namespace, root: Path
+) -> int:
+    """Closes the Dependabot alerts that an osv-scanner.toml accepts and opens again
+    those that it closed once the acceptance ends; with --dry-run, only says so."""
+    try:
+        outcome = dependabot.sync(api, repo, root, dry_run=arguments.dry_run)
+    except GitHubError as error:
+        if error.status == 403 and "disabled" in error.message.lower():
+            print(
+                f"Dependabot alerts are off in {repo}, so no alert is there to close "
+                "or to open again."
+            )
+            return 0
+        if error.status not in (401, 403, 404):
+            raise
+        print(
+            f"blueprint.py: GitHub refused the Dependabot alerts of {repo} ({error}). "
+            "The token needs the permission Dependabot alerts (read and write) of an "
+            "app installed on the repository: grant it on the settings page of the "
+            "app, under Permissions & events, accept it on the installation, and run "
+            "it again. The PR coach explains the check dependabot alerts.",
+            file=sys.stderr,
+        )
+        return 1
+    for line in outcome.report(repo, arguments.dry_run):
+        print(line)
+    return 0
+
+
 def locks_command(arguments: argparse.Namespace, root: Path) -> int:
     """Whether Renovate can compile each lock file of pip-compile again with the
     command in its header; with --fix, it puts the = between each option and its
@@ -816,14 +857,20 @@ def settings_command(
 ) -> int:
     """settings check or apply: 0 when GitHub matches the settings, 1 when it differs,
     2 when GitHub refused a part of them. What GitHub doesn't do for the repository,
-    such as a switch that its plan lacks, is named after them and fails nothing."""
-    drift = check(api, repo, settings)
+    such as a switch that its plan lacks, is named after them and fails nothing, and
+    what a private repository lacks on its plan the settings leave to the workflows,
+    by the variables of PLAN_VARIABLES."""
+    plan = read_plan(api, repo)
+    settings = fitted(api, repo, settings, plan)
+    drift = check(api, repo, settings, plan.private)
     refused: dict[str, str] = {}
     if action == "apply" and drift:
-        refused = apply(api, repo, settings, drift)
-        after = check(api, repo, settings)
+        refused, unoffered = apply(api, repo, settings, drift, plan.private)
+        after = check(api, repo, settings, plan.private)
         # A refused write shows nothing about what GitHub keeps.
-        drift = after if "security" in refused else kept(repo, drift, after)
+        if "security" not in {*refused, *unoffered}:
+            after = kept(repo, drift, after, plan.private)
+        drift = offered_only(repo, after, unoffered)
     for reason in refused.values():
         print(f"blueprint.py: {reason}", file=sys.stderr)
     # The path as the documentation writes it, with slashes on Windows too.
@@ -1540,6 +1587,17 @@ def add_advisories_parsers(
         action="store_true",
         help=f"write {advisories.PRESET} from the osv-scanner.toml files first",
     )
+    advisories_parser.add_argument(
+        "--dependabot",
+        action="store_true",
+        help="close the Dependabot alerts that an osv-scanner.toml accepts, with its "
+        "reason, and open again those that it closed once the acceptance ends",
+    )
+    advisories_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --dependabot: only say which alerts it would close or open again",
+    )
 
 
 def add_locks_parsers(
@@ -1718,7 +1776,17 @@ def standalone_command(
         except OSError as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
-    if arguments.command == "advisories":
+    if arguments.command == "advisories" and (
+        (arguments.dependabot and arguments.fix)
+        or (arguments.dry_run and not arguments.dependabot)
+    ):
+        print(
+            "blueprint.py: --dry-run goes with --dependabot, and --fix without it: "
+            "the one writes the rules of Renovate, the other closes Dependabot alerts",
+            file=sys.stderr,
+        )
+        return 2
+    if arguments.command == "advisories" and not arguments.dependabot:
         try:
             return advisories_command(arguments, root)
         except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
@@ -1811,6 +1879,8 @@ def main(
             return 1 if outcome.warnings and not arguments.warnings_only else 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments)
+        if arguments.command == "advisories":
+            return dependabot_command(api, repo, arguments, root)
         if arguments.command == "commit-overrides":
             print(write_overrides(api, repo), end="")
             return 0

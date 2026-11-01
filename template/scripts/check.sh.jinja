@@ -284,6 +284,9 @@ version_in pyproject.toml '^version = "[^"]+"'
 [%- elif stack == 'node' %]
 version_in package.json '"version": "[^"]+"'
 version_in package-lock.json '"version": "[^"]+"'
+[%- if project_type == 'chrome-extension' %]
+version_in extension/manifest.json '"version": "[^"]+"'
+[%- endif %]
 [%- elif project_type == 'home-assistant' %]
 version_in custom_components/{= ha_domain =}/manifest.json '"version": "[^"]+"'
 [%- elif stack == 'php' %]
@@ -565,9 +568,20 @@ else
   npm test
 fi
 
+[%- if project_type == 'chrome-extension' %]
+
+step "Extension"
+# The manifest against what the Chrome Web Store refuses or holds up in its review, as
+# scripts/check-manifest.mjs lists it, and the zip of the store from the build, as the
+# release builds it.
+node scripts/check-manifest.mjs
+bash scripts/package-extension.sh
+[%- else %]
+
 step "Package"
 npm run --silent build
 npm pack --dry-run
+[%- endif %]
 [%- endif %]
 [%- if stack == 'container' %]
 

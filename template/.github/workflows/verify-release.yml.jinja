@@ -1,1 +1,2 @@
-[% include ".github/workflows/verify-release.yml" -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+{= replaced(".github/workflows/verify-release.yml", []) -=}

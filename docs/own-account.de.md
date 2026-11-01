@@ -69,7 +69,7 @@ Bis die App genannt ist und ihren privaten Schlüssel hat, sagt jeder Bot, der a
 python3 ../repo-blueprint/blueprint.py settings apply
 ```
 
-Es setzt alles, was die API setzen kann: die Rulesets, die Variablen, die die App nennen, die Environments, die Sicherheitsfunktionen und die Actions, die laufen dürfen.
+Es setzt alles, was die API setzen kann: die Rulesets, die Variablen, die die App nennen, die Environments, die Sicherheitsfunktionen und die Actions, die laufen dürfen. Ein privates Repository geht auch, mit `--private` für `gh repo create`: Was GitHub ihm in seinem Plan nicht bietet, etwa Code Scanning oder die Rulesets bei GitHub Free, nennen die Einstellungen als Hinweis und überlassen es den Workflows, über die Variablen `CODE_SCANNING` und `DEPENDENCY_REVIEW`. Die [FAQ](faq.md#kann-ein-repository-privat-sein-und-was-kostet-es) zeigt, was mit welchem Plan geht.
 
 ## 5. Renovate
 
@@ -95,25 +95,27 @@ Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Cla
 python3 ../repo-blueprint/blueprint.py checklist
 ```
 
-Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview und die Badges. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
+Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview und die Badges. Ein privates Repository bekommt dazu den Schritt *GitHub Code Security on*, neutral ohne sie, da der Plan seines Besitzers sie vielleicht nicht bietet. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
 
 ## 8. Die Settings-App (optional)
 
 Die Release-App kann alles, was die Bots brauchen, auch die Verwaltung jedes Repositorys: seine Rulesets, Environments, Variablen und die Actions, die laufen dürfen. Eine zweite App, die **Settings-App**, kann die Verwaltung übernehmen, damit die Release-App, die die meisten Workflows nutzen, sie abgeben kann: Ein gestohlener Schlüssel der Release-App kann dann kein Ruleset mehr ändern und keine neue Action zulassen.
 
 - **Der Settings-Bot** wendet die Einstellungen als Settings-App an, jede Woche und nach jeder Änderung an ihnen.
+- **Der OSV-Scanner-Workflow** schließt die Dependabot-Alerts der Advisories, die eine `osv-scanner.toml` akzeptiert, mit dem Grund und dem Ende der Akzeptanz, und öffnet jeden, den er geschlossen hat, wieder, sobald die Akzeptanz weg ist: Das Token eines Workflows kann die Dependabot-Alerts nicht lesen.
 - **Der Blueprint-Bot** lässt die Actions eines neuen Releases des Blueprints starten, bevor er das Update pusht: Er ergänzt die Liste der erlaubten Actions auf GitHub um die Muster aus `[actions.selected]` des Releases und nimmt keines weg, sodass die Checks des Update-Pull-Requests ohne ein `settings apply` von seinem Branch starten. Der Settings-Bot verengt die Liste nach dem Merge auf die Einstellungen.
 - **Die Release-App** braucht dann kein *Administration*, *Pages*, *Variables*, *Environments* und *Secrets* mehr.
 
-Ohne Settings-App funktioniert alles wie bisher: Die Release-App wendet die Einstellungen an, und ein Update, das eine neue Action bringt, wartet auf `settings apply` von seinem Branch. Ist nur die Variable oder nur das Secret gesetzt, warnen beide Bots und machen mit der Release-App weiter.
+Ohne Settings-App funktioniert alles wie bisher: Die Release-App wendet die Einstellungen an und schließt die akzeptierten Dependabot-Alerts, und ein Update, das eine neue Action bringt, wartet auf `settings apply` von seinem Branch. Ist nur die Variable oder nur das Secret gesetzt, warnen beide Bots und machen mit der Release-App weiter.
 
-1. **Registriere die App** auf deinem Konto, mit ausgefüllten Berechtigungen und ohne Webhook, über [diesen Link](https://github.com/settings/apps/new?description=Applies+the+settings+as+code+of+the+repositories+made+from+Repo+Blueprint.&public=false&webhook_active=false&administration=write&issues=write&pages=write&actions=read&contents=read&environments=read), oder für eine Organisation unter derselben Adresse mit `https://github.com/organizations/ORG/settings/apps/new`. Gib ihr einen Namen, etwa `octo-org-settings`, und diese Repository-Berechtigungen, keine anderen:
+1. **Registriere die App** auf deinem Konto, mit ausgefüllten Berechtigungen und ohne Webhook, über [diesen Link](https://github.com/settings/apps/new?description=Applies+the+settings+as+code+of+the+repositories+made+from+Repo+Blueprint.&public=false&webhook_active=false&administration=write&issues=write&pages=write&vulnerability_alerts=write&actions=read&contents=read&environments=read), oder für eine Organisation unter derselben Adresse mit `https://github.com/organizations/ORG/settings/apps/new`. Gib ihr einen Namen, etwa `octo-org-settings`, und diese Repository-Berechtigungen, keine anderen:
 
     | Berechtigung | Zugriff | Wofür |
     | --- | --- | --- |
     | Administration | Read and write | Rulesets, die Schalter der Sicherheit, die erlaubten Actions, Environments |
     | Issues | Read and write | die Labels |
     | Pages | Read and write | die Einstellungen der Website |
+    | Dependabot alerts | Read and write | die Dependabot-Alerts der Advisories, die eine `osv-scanner.toml` akzeptiert, die der OSV-Scanner-Workflow schließt und wieder öffnet |
     | Variables | Read and write | die Variablen aus `[variables]`; von Hand setzen, der Link kann es nicht |
     | Actions | Read-only | die Einstellungen der Workflows |
     | Contents | Read-only | die Dateien des Community-Profils |
@@ -136,6 +138,7 @@ Ohne Settings-App funktioniert alles wie bisher: Die Release-App wendet die Eins
     Die Variable kann auch in den Einstellungen als Code stehen, als `SETTINGS_APP_CLIENT_ID = "CLIENT_ID"` unter `[variables]` in `.github/repository.project.toml`, die der Settings-Bot zuerst noch mit der Release-App anwendet.
 
 5. **Prüf es:** *Actions → Settings → Run workflow*. Der Lauf nimmt den Schritt *Create a token of the settings app* und überspringt *Check that the release app is set up*. Verweigert GitHub das Token, einer App, die nicht auf dem Repository installiert ist oder der eine Berechtigung fehlt, sagt es die Zusammenfassung des Laufs, und keine Einstellung ändert sich.
-6. **Nimm der Release-App die Berechtigungen,** sobald der Settings-Bot in jedem Repository als Settings-App gelaufen ist: auf der Einstellungsseite der Release-App unter *Permissions & events* *Administration*, *Pages*, *Variables*, *Environments* und *Secrets* auf *No access*. Ihre übrigen Berechtigungen bleiben, für den Release-Bot, Renovate, den Blueprint-Bot und die anderen.
+6. **Einer App, die vor dem Schließen der Dependabot-Alerts registriert wurde,** fehlt deren Berechtigung, und der Job *dependabot alerts* dieses Workflows schlägt fehl oder hinterlässt, in einem Repository eines anderen Eigentümers als dem des Blueprints, einen Hinweis: auf der Einstellungsseite der App, die die Zusammenfassung des Laufs nennt, der Settings-App oder ohne sie der Release-App, unter *Permissions & events* → *Repository permissions* *Dependabot alerts* auf *Read and write* setzen und *Save changes* drücken. GitHub bittet dann darum, die neue Berechtigung auf der Installation zu akzeptieren: *Settings → Applications → Installed GitHub Apps*, *Configure* neben der App, *Review request*, *Accept new permissions*. Danach *Actions → OSV-Scanner → Run workflow*, zuerst mit *dry_run*, um zu sehen, was er schließen würde.
+7. **Nimm der Release-App die Berechtigungen,** sobald der Settings-Bot in jedem Repository als Settings-App gelaufen ist: auf der Einstellungsseite der Release-App unter *Permissions & events* *Administration*, *Pages*, *Variables*, *Environments* und *Secrets* auf *No access* und *Dependabot alerts* auf *Read-only*. Ihre übrigen Berechtigungen bleiben, für den Release-Bot, Renovate, den Blueprint-Bot und die anderen.
 
 `gh variable delete SETTINGS_APP_CLIENT_ID` gibt die Einstellungen an die Release-App zurück, die dann ihre Berechtigungen wieder braucht.

@@ -38,6 +38,7 @@ from blueprint.settings import (
     MAIN_ONLY,
     ConfigError,
     Drift,
+    Plan,
     Settings,
     actions_that_run,
     allows,
@@ -51,10 +52,12 @@ from blueprint.settings import (
     check_pages,
     check_security,
     code_scanning_tools,
+    fitted,
     line_of,
     load_labels,
     main_ruleset,
     merge,
+    read_plan,
     references,
     ruleset_differences,
     run_by,
@@ -1268,6 +1271,287 @@ def test_a_tool_of_code_scanning_without_its_thresholds_stops_the_run(
 
     assert "high_or_higher, medium_or_higher" in str(error.value)
     assert repr(tool) in str(error.value)
+
+
+# --------------------------------------------------------------------------- plan
+
+# How GitHub refuses what the plan of a private repository lacks.
+RULESETS_REFUSAL = (
+    "Upgrade to GitHub Pro or make this repository public to enable this feature."
+)
+PAGES_REFUSAL = "Your current plan does not support GitHub Pages for this repository."
+
+
+def with_code_scanning(root: Path, extra: str = "") -> None:
+    """The settings with the rule of code scanning for CodeQL, and extra variables."""
+    config = CONFIG.replace(
+        'required_checks = ["check (python)", "reuse"]\n',
+        'required_checks = ["check (python)", "reuse"]\ncode_scanning_tools = [\n'
+        '  { tool = "CodeQL", alerts_threshold = "errors",'
+        ' security_alerts_threshold = "high_or_higher" },\n]\n',
+    ).replace('PUBLISH_TO = "pypi"\n', f'PUBLISH_TO = "pypi"\n{extra}')
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+
+
+def main_rules(github: FakeGitHub) -> list[str]:
+    main = next(
+        item for item in github.rulesets.values() if item["name"] == "Protect main"
+    )
+    return [rule["type"] for rule in main["rules"]]
+
+
+def test_a_private_repository_without_code_security_switches_the_workflows_over(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_code_scanning(root)
+    github.repo["private"] = True
+
+    run(github, root, "settings", "apply")
+
+    # The workflows keep what they find out of code scanning, which GitHub doesn't
+    # offer here, and the rule of main waits for no analysis of it.
+    assert github.variables["CODE_SCANNING"] == "off"
+    assert github.variables["DEPENDENCY_REVIEW"] == "off"
+    assert "code_scanning" not in main_rules(github)
+    # Their checks stay required: they still run, and pass without code scanning.
+    assert "required_status_checks" in main_rules(github)
+    set_secrets(github)
+    capsys.readouterr()
+    assert run(github, root, "settings", "apply") == 0
+    assert f"The settings of {REPO} match" in capsys.readouterr().out
+
+
+def test_a_public_repository_keeps_code_scanning_and_gets_no_variable_of_the_plan(
+    github: FakeGitHub, root: Path
+) -> None:
+    with_code_scanning(root)
+    github.repo["private"] = False
+
+    run(github, root, "settings", "apply")
+
+    assert "CODE_SCANNING" not in github.variables
+    assert "DEPENDENCY_REVIEW" not in github.variables
+    assert main_rules(github)[-1] == "code_scanning"
+
+
+@pytest.mark.parametrize("product", ["advanced_security", "code_security"])
+def test_a_private_repository_with_code_security_keeps_code_scanning(
+    github: FakeGitHub, root: Path, product: str
+) -> None:
+    with_code_scanning(root)
+    github.repo["private"] = True
+    github.repo["security_and_analysis"][product] = {"status": "enabled"}
+
+    run(github, root, "settings", "apply")
+
+    assert "CODE_SCANNING" not in github.variables
+    assert main_rules(github)[-1] == "code_scanning"
+
+
+def test_the_variables_of_the_plan_turn_on_again_once_github_offers_it(
+    github: FakeGitHub, root: Path
+) -> None:
+    # A repository that was private on GitHub Free, now public.
+    github.variables.update(CODE_SCANNING="off", DEPENDENCY_REVIEW="on")
+
+    run(github, root, "settings", "apply")
+
+    assert github.variables["CODE_SCANNING"] == "on"
+    assert github.variables["DEPENDENCY_REVIEW"] == "on"
+    written = f"repos/{REPO}/actions/variables/DEPENDENCY_REVIEW"
+    assert ("PATCH", written) not in github.calls
+
+
+def test_a_variable_of_the_settings_as_code_wins_over_the_plan(
+    github: FakeGitHub, root: Path
+) -> None:
+    with_code_scanning(root, 'CODE_SCANNING = "on"\n')
+    github.repo["private"] = True
+
+    run(github, root, "settings", "apply")
+
+    assert github.variables["CODE_SCANNING"] == "on"
+    assert github.variables["DEPENDENCY_REVIEW"] == "off"
+    assert main_rules(github)[-1] == "code_scanning"
+
+
+def test_a_token_that_may_not_read_the_security_decides_nothing(
+    github: FakeGitHub, root: Path
+) -> None:
+    github.repo.update(private=True, security_and_analysis=None)
+    with_code_scanning(root)
+    settings = Settings.load(root / ".github/repository.toml", root)
+
+    plan = read_plan(Api(github), REPO)
+
+    assert plan == Plan(private=True, code_security=None)
+    assert plan.offers_code_security is None
+    assert fitted(Api(github), REPO, settings, plan) == settings
+    assert Plan(private=False, code_security=None).offers_code_security is True
+
+
+def test_what_the_plan_of_a_private_repository_lacks_fails_no_run(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["private"] = True
+    github.fail[("POST", f"repos/{REPO}/rulesets")] = (403, RULESETS_REFUSAL)
+    github.fail[("POST", f"repos/{REPO}/pages")] = (422, PAGES_REFUSAL)
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert f"The settings of {REPO} match .github/repository.toml." in captured.out
+    assert "GitHub doesn't do this for the repository, which fails nothing:" in (
+        captured.out
+    )
+    assert (
+        'ruleset Protect main: GitHub has "missing", the configuration wants "present"'
+    ) in captured.out
+    assert 'pages: GitHub has "off", the configuration wants "on"' in captured.out
+    assert (
+        f"GitHub doesn't offer it to the private repository {REPO} on its plan and"
+        f' answered "{PAGES_REFUSAL}"; the next run of the settings sets it once the'
+        " repository is public or on a plan that offers it"
+    ) in captured.out
+    # The other parts are applied all the same.
+    assert github.labels["release"]["color"] == "5319e7"
+
+
+def test_rulesets_that_a_private_repository_cannot_read_are_a_notice(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["private"] = True
+    listing = f"repos/{REPO}/rulesets?per_page=100"
+    github.fail[("GET", listing)] = (403, RULESETS_REFUSAL)
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 0
+
+    out = capsys.readouterr().out
+    assert (
+        'rulesets: GitHub has "not offered", the configuration wants "present"'
+    ) in out
+    assert f'answered "{RULESETS_REFUSAL}"' in out
+
+
+def test_a_refusal_of_the_rulesets_that_is_not_the_plan_still_fails(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["private"] = True
+    github.fail[("GET", f"repos/{REPO}/rulesets?per_page=100")] = 403
+
+    assert run(github, root, "settings", "check") == 2
+
+    assert "GitHub answered 403: simulated failure" in capsys.readouterr().err
+
+
+def test_a_public_repository_fails_on_a_refusal_that_names_advanced_security(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Such as a policy of an organization: a public repository has every part.
+    refusal = "Advanced Security is disabled by a policy of the enterprise."
+    github.fail[("POST", f"repos/{REPO}/rulesets")] = (422, refusal)
+    github.fail[("GET", f"repos/{REPO}/rulesets?per_page=100")] = (403, refusal)
+
+    assert run(github, root, "settings", "check") == 2
+    assert run(github, root, "settings", "apply") == 2
+
+    assert refusal in capsys.readouterr().err
+
+
+def test_the_checklist_of_a_private_repository_on_github_free(
+    github: FakeGitHub,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github.repo["private"] = True
+    github.fail[("POST", f"repos/{REPO}/rulesets")] = (403, RULESETS_REFUSAL)
+    github.fail[("POST", f"repos/{REPO}/pages")] = (422, PAGES_REFUSAL)
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
+    capsys.readouterr()
+
+    run(github, root, "checklist")
+
+    out = capsys.readouterr().out
+    # Only a write shows whether the plan lacks the rulesets and the website.
+    assert "  · Settings as code applied" in out
+    assert "it tells whether GitHub keeps ruleset Protect main, " in out
+    assert (
+        "  · Private repository: GitHub Code Security on, for code scanning and the"
+        " dependency review"
+    ) in out
+    assert f"https://github.com/{REPO}/settings/security_analysis" in out
+
+    github.repo["security_and_analysis"]["code_security"] = {"status": "enabled"}
+    run(github, root, "checklist")
+    assert "  ✔ Private repository: GitHub Code Security on" in (
+        capsys.readouterr().out
+    )
+
+
+def test_secret_scanning_that_github_keeps_off_a_private_repository_fails_no_run(
+    github: FakeGitHub,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # GitHub offers secret scanning to a private repository only with GitHub Secret
+    # Protection, and keeps it off without, as it keeps a public one's on.
+    github.repo["private"] = True
+    github.kept_off.update({"secret_scanning", "secret_scanning_push_protection"})
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "GitHub accepted secret_scanning_push_protection = true for"
+        f" {REPO} but keeps it off, likely because the plan of the repository lacks"
+    ) in out
+    monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
+    run(github, root, "checklist")
+    assert "  · Settings as code applied" in capsys.readouterr().out
+
+
+def test_secret_scanning_that_github_refuses_a_private_repository_is_a_notice(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["private"] = True
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    github.repo["security_and_analysis"]["secret_scanning"] = {"status": "disabled"}
+    refusal = (
+        "Advanced Security must be enabled for this repository to use secret scanning."
+    )
+    github.fail[("PATCH", f"repos/{REPO}")] = (422, refusal)
+    capsys.readouterr()
+
+    assert run(github, root, "settings", "apply") == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "security.secret_scanning: GitHub has false, the configuration wants true"
+    ) in out
+    assert f'answered "{refusal}"' in out
+
+
+def test_the_checklist_of_a_public_repository_has_no_step_of_the_plan(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(github, root, "checklist")
+
+    assert "GitHub Code Security" not in capsys.readouterr().out
 
 
 def generic_patterns(root: Path) -> str:
@@ -3220,9 +3504,37 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 11
+        assert len(texts) == 12
     else:
         assert any(text in step for step in texts)
+
+
+def test_the_checklist_of_an_extension_asks_for_the_item_and_the_sign_in_of_the_store(
+    github: FakeGitHub, root: Path
+) -> None:
+    settings = Settings.load(root / ".github/repository.toml")
+    settings.variables["PUBLISH_TO"] = "chrome-web-store"
+
+    def store() -> list[Step]:
+        steps = checklist(Api(github), REPO, settings, root, reuse=lambda repo: False)
+        return [step for step in steps if step.text.startswith("Chrome Web Store:")]
+
+    item, sign_in = store()
+    assert "uploaded by hand" in item.text
+    assert "CWS_EXTENSION_ID and CWS_PUBLISHER_ID" in item.text
+    assert item.how.endswith("/docs/releases.md#the-first-listing")
+    assert "CWS_WORKLOAD_IDENTITY_PROVIDER and CWS_SERVICE_ACCOUNT" in sign_in.text
+    assert sign_in.how.endswith("/docs/releases.md#sign-in-without-a-stored-secret")
+    assert (item.done, sign_in.done) == (False, False)
+
+    # One of the two variables of a step leaves it open.
+    github.variables["CWS_EXTENSION_ID"] = "abcdefghijklmnopabcdefghijklmnop"
+    assert [step.done for step in store()] == [False, False]
+    github.variables["CWS_PUBLISHER_ID"] = "publisher"
+    assert [step.done for step in store()] == [True, False]
+    github.variables["CWS_WORKLOAD_IDENTITY_PROVIDER"] = "projects/1/locations/global"
+    github.variables["CWS_SERVICE_ACCOUNT"] = "store@demo.iam.gserviceaccount.com"
+    assert [step.done for step in store()] == [True, True]
 
 
 def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
@@ -3319,14 +3631,14 @@ def test_the_checklist_registers_a_release_app_of_the_owner(
         "pages": "write",
         "pull_requests": "write",
         "workflows": "write",
-        "vulnerability_alerts": "read",
+        "vulnerability_alerts": "write",
         "environments": "read",
         "secrets": "read",
     }
     assert lines[2] == (
         "It needs read and write access to Actions, Administration, Checks, Commit"
-        " statuses, Contents, Issues, Pages, Pull requests, Variables and Workflows,"
-        " and read access to Dependabot alerts, Environments and Secrets; set"
+        " statuses, Contents, Dependabot alerts, Issues, Pages, Pull requests,"
+        " Variables and Workflows, and read access to Environments and Secrets; set"
         " Variables by hand, which the link can't fill in."
     )
     assert lines[-1] == (
@@ -3394,6 +3706,14 @@ def test_the_checklist_of_a_named_release_app_links_its_installation(
     assert lines[installed + 1] == (
         "      https://github.com/apps/demo-release-automation/installations/new"
     )
+    # Which app the OSV-Scanner workflow closes the accepted Dependabot alerts as, and
+    # the permission that it needs, which no API tells.
+    assert lines[installed + 2] == (
+        "  · The settings app, or the release app without one, may write the Dependabot"
+        " alerts, so that the OSV-Scanner workflow closes those that osv-scanner.toml"
+        " accepts"
+    )
+    assert "set Dependabot alerts to Read and write" in lines[installed + 3]
     # Its owner is no question once it is named.
     assert ("GET", "users/Dennis-Otto") not in github.calls
 

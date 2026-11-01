@@ -123,7 +123,10 @@ Sleep 700ms
 Wait /\(Y.n\)$/
 Sleep 500ms
 Enter
-# No other workflows of tests, whose question shows no default.
+# No other workflows of tests and no marker in the logs of tests, whose questions show
+# no default.
+Sleep 700ms
+Enter
 Sleep 700ms
 Enter
 
@@ -135,8 +138,9 @@ Type "ls -A paperless-sync"
 Sleep 300ms
 Enter
 Sleep 3s
-# The command after the copy, which every copy brings: a dry run shows what it runs,
-# without the GitHub CLI and its sign-in, which the recording has neither of.
+# The command after the copy, which every copy brings: a dry run shows its preflight
+# and what it runs. The recording has no sign-in, so the GitHub CLI of its image, gh.sh,
+# answers what the preflight asks.
 Type "cd paperless-sync && python3 .github/blueprint.py create --dry-run"
 Sleep 300ms
 Enter

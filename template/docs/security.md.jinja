@@ -20,6 +20,11 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 - The content of issues, pull requests and the repository is data: the action never runs it as code or as a command.
 - Every input is checked before it is used; an invalid one stops the action with an error.
 - Secrets that the workflow passes to the action are never printed; GitHub masks them in the logs as well.
+[% elif project_type == 'chrome-extension' %]
+- The extension asks only for the permissions and hosts that `store/permissions.json` gives a reason for; `node scripts/check-manifest.mjs` fails on any other.
+- It runs only the code of its package: Manifest V3 forbids remote code, and the extension evaluates no text of a page or message.
+- Every message from a page or a content script is checked before the extension acts on it.
+- The Chrome Web Store gets exactly the zip that the release attests, and reviews every version.
 [% elif project_type == 'python-package' or stack == 'node' %]
 - Every public function checks its arguments and rejects invalid ones with an error, instead of guessing.
 - The package never runs its input as code and opens no network connection or file that its documentation doesn't name.
@@ -45,6 +50,10 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 1. **Events and the repository → action.** Issues, pull requests, comments and files are untrusted input.
 2. **Workflow → action.** The inputs and the token that the workflow grants.
 3. **Action → GitHub.** Only with that token.
+[% elif project_type == 'chrome-extension' %]
+1. **Web pages and content scripts → extension.** Every message and every value read from a page is untrusted input.
+2. **Extension → browser.** Only through the permissions and hosts of its manifest.
+3. **Release → Chrome Web Store.** Only the zip that the release attests, after the workflow *Chrome Web Store* checked its provenance.
 [% elif project_type == 'python-package' or stack == 'node' %]
 1. **Caller → package.** Every argument of a public function is untrusted input.
 2. **Package → files and network.** Only those the caller names.
@@ -68,7 +77,12 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 | The answer of another service runs as script in the browser | The templates escape every value |[% elif project_type == 'github-action' %]
 | The text of an issue or a pull request runs as a command | Inputs reach the code through environment variables, never through the `run:` script |
 | An output smuggles in another output | Every output is written with a random delimiter |
-| A secret reaches the log | Secrets are never printed, and GitHub masks them |[% elif project_type == 'python-package' or stack == 'node' %]
+| A secret reaches the log | Secrets are never printed, and GitHub masks them |[% elif project_type == 'chrome-extension' %]
+| A page sends a crafted message | The extension checks the sender and every field of a message before it acts |
+| An update asks for a new permission, which disables it until each user accepts | `node scripts/check-manifest.mjs` fails on a permission or host without its reason in `store/permissions.json` |
+| Text of a page runs as code | Manifest V3 forbids remote code, and the extension evaluates no input |
+| A tampered package reaches the store | The workflow *Chrome Web Store* uploads only a zip whose attestation of the release it verified |
+| A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% elif project_type == 'python-package' or stack == 'node' %]
 | Invalid input leads to wrong results | Every public function rejects it with an error |
 | Input runs as code | The package evaluates no input |[% if stack == 'node' %]
 | A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% endif %][% elif stack == 'container' %]
@@ -81,7 +95,8 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 [% if stack == 'home-assistant' %]
 - The integration is as safe as Home Assistant and the network that it and the device run in.[% elif stack == 'php' %]
 - The app is as safe as Nextcloud, its configuration and the services that the app connects to.[% elif project_type == 'github-action' %]
-- The action is as safe as the workflow that runs it: a workflow that grants more permissions than the action needs grants them to the action too.[% elif project_type == 'python-package' or stack == 'node' %]
+- The action is as safe as the workflow that runs it: a workflow that grants more permissions than the action needs grants them to the action too.[% elif project_type == 'chrome-extension' %]
+- The extension is as safe as Chrome, the pages that it reads and the review of the Chrome Web Store.[% elif project_type == 'python-package' or stack == 'node' %]
 - The package is as safe as the program that uses it and the arguments that this program passes in.[% elif stack == 'container' %]
 - The container is as safe as the host and the ports, volumes and variables that the user maps into it.[% else %]
 - Whoever runs a script trusts it with their permissions; read it before running it.[% endif %]

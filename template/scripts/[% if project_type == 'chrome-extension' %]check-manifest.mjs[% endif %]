@@ -1,0 +1,301 @@
+// Checks the manifest of the extension, extension/manifest.json, against what the
+// Chrome Web Store refuses or holds up in its review, before a release finds it:
+//
+// - Manifest V3, with the version of package.json, which the release bot writes into
+//   both, and none of the keys that the store refuses or that take the updates from
+//   elsewhere;
+// - the name and the description in every language of extension/_locales/, within the
+//   limits of the store, and a default_locale of those languages;
+// - every permission, host and web-accessible resource that the manifest asks for has
+//   its reason in store/permissions.json, and nothing more: Chrome disables an
+//   installed extension after an update that asks for a new permission until its user
+//   accepts it, and the store wants a justification of each before it takes a version;
+// - each language of the extension has its store listing, store/listing.<code>.md,
+//   and each listing a language, with a short description within the limit and a
+//   justification of each permission and each host.
+//
+//   node scripts/check-manifest.mjs [ROOT]
+//
+// prints every problem with its fix and exits with 1 when it finds one. scripts/check.sh
+// runs it in the step "Extension". No dependencies.
+//
+// The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** The limits of the Chrome Web Store for the name and for the descriptions. */
+export const NAME_MAX = 75;
+export const DESCRIPTION_MAX = 132;
+
+/** Keys of a manifest that the store refuses, or that make it the wrong source. */
+const FORBIDDEN = {
+  key: "pins the ID of an unpacked extension; the store gives the item its own ID and refuses a package with a key",
+  update_url:
+    "takes the updates from somewhere other than the Chrome Web Store",
+};
+
+/** The headings of a listing that the checks read: the fields of the Developer Dashboard. */
+export const SHORT_DESCRIPTION = "## Short description";
+export const JUSTIFICATIONS = "## Permission justifications";
+
+const LISTING = /^listing\.([A-Za-z0-9_-]+)\.md$/;
+
+/** The text of a section of a listing, from its heading to the next one; null without it. */
+function section(text, heading) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === heading);
+  if (start === -1) {
+    return null;
+  }
+  const end = lines.findIndex(
+    (line, index) => index > start && line.startsWith("## "),
+  );
+  return lines.slice(start + 1, end === -1 ? undefined : end).join("\n");
+}
+
+/** The text of a message of the manifest, such as __MSG_extName__, in one language. */
+function message(value, messages) {
+  const key = /^__MSG_(\w+)__$/.exec(value ?? "")?.[1];
+  if (key === undefined) {
+    return value;
+  }
+  const found = Object.entries(messages).find(
+    ([name]) => name.toLowerCase() === key.toLowerCase(),
+  );
+  return found?.[1]?.message;
+}
+
+/** What the manifest asks for, by the table of store/permissions.json that allows it. */
+export function asked(manifest) {
+  const hosts = [
+    ...(manifest.host_permissions ?? []),
+    ...(manifest.optional_host_permissions ?? []),
+    ...(manifest.content_scripts ?? []).flatMap(
+      (script) => script.matches ?? [],
+    ),
+  ];
+  return {
+    permissions: [
+      ...new Set([
+        ...(manifest.permissions ?? []),
+        ...(manifest.optional_permissions ?? []),
+      ]),
+    ],
+    host_permissions: [...new Set(hosts)],
+    web_accessible_resources: [
+      ...new Set(
+        (manifest.web_accessible_resources ?? []).flatMap(
+          (entry) => entry.resources ?? [],
+        ),
+      ),
+    ],
+  };
+}
+
+/**
+ * The problems of the extension; none when its manifest, its languages, the
+ * allowlist and the listings agree and fit the store.
+ *
+ * @param {object} input
+ * @param {Record<string, any>} input.manifest the parsed extension/manifest.json
+ * @param {string | undefined} input.packageVersion the version of package.json
+ * @param {Record<string, Record<string, {message?: string}>>} input.locales the messages of each language
+ * @param {Record<string, any> | null} input.allowed the parsed store/permissions.json
+ * @param {Record<string, string>} input.listings the text of each listing, by its language
+ * @returns {string[]}
+ */
+export function checkManifest({
+  manifest,
+  packageVersion,
+  locales,
+  allowed,
+  listings,
+}) {
+  const problems = [];
+  if (manifest.manifest_version !== 3) {
+    problems.push(
+      `extension/manifest.json has manifest_version ${manifest.manifest_version ?? "none"}; the Chrome Web Store takes new versions only of Manifest V3: set it to 3.`,
+    );
+  }
+  if (/^\d+(\.\d+){0,3}-/.test(manifest.version ?? "")) {
+    problems.push(
+      `extension/manifest.json has the version ${manifest.version}, a prerelease, which Chrome refuses: a Chrome extension makes its prereleases only on the beta channel (the variable BETA_CHANNEL=true), never with Release-As: x.y.z-beta.n. Remove the Release-As line of the release PR, and set the version of the manifest, package.json and .release-please-manifest.json back to the last release.`,
+    );
+  } else if (!/^\d+(\.\d+){0,3}$/.test(manifest.version ?? "")) {
+    problems.push(
+      `extension/manifest.json has the version ${manifest.version ?? "none"}; Chrome takes one to four numbers separated by dots, such as 1.2.3.`,
+    );
+  } else if (manifest.version !== packageVersion) {
+    problems.push(
+      `extension/manifest.json has the version ${manifest.version}, package.json ${packageVersion ?? "none"}: the release bot writes the same version into both, so set the one of the manifest to ${packageVersion ?? "that of package.json"}.`,
+    );
+  }
+  for (const [key, why] of Object.entries(FORBIDDEN)) {
+    if (key in manifest) {
+      problems.push(
+        `extension/manifest.json has the key ${key}, which ${why}: remove it.`,
+      );
+    }
+  }
+
+  // The languages, and what the store shows of the manifest in each.
+  const languages = Object.keys(locales);
+  if (languages.length > 0 && !languages.includes(manifest.default_locale)) {
+    problems.push(
+      `extension/manifest.json names the default_locale ${manifest.default_locale ?? "none"}, but extension/_locales/ has ${languages.join(", ")}: name one of them.`,
+    );
+  }
+  for (const language of languages.length > 0 ? languages : [undefined]) {
+    const messages = language === undefined ? {} : locales[language];
+    const where = language === undefined ? "" : ` in ${language}`;
+    for (const [field, max] of [
+      ["name", NAME_MAX],
+      ["description", DESCRIPTION_MAX],
+    ]) {
+      const text = message(manifest[field], messages);
+      if (typeof text !== "string" || text.trim() === "") {
+        problems.push(
+          `The ${field} of extension/manifest.json has no text${where}; the store shows it.`,
+        );
+      } else if (text.length > max) {
+        problems.push(
+          `The ${field} of extension/manifest.json has ${text.length} characters${where}; the store takes ${max} at most.`,
+        );
+      }
+    }
+  }
+
+  // What the manifest asks for, and the reason of each in store/permissions.json.
+  const wanted = asked(manifest);
+  if (allowed === null) {
+    problems.push(
+      "store/permissions.json is missing, which names the reason of each permission, host and web-accessible resource of the manifest, for the privacy practices of the store.",
+    );
+  } else {
+    for (const [table, entries] of Object.entries(wanted)) {
+      const reasons = allowed[table] ?? {};
+      for (const entry of entries) {
+        if (
+          typeof reasons[entry] !== "string" ||
+          reasons[entry].trim() === ""
+        ) {
+          problems.push(
+            `extension/manifest.json asks for ${entry}, which ${table} of store/permissions.json gives no reason: add it with its reason, and justify it in every store listing; an update that asks for a new permission or host stays disabled until its users accept it.`,
+          );
+        }
+      }
+      for (const entry of Object.keys(reasons)) {
+        if (!entries.includes(entry)) {
+          problems.push(
+            `${table} of store/permissions.json names ${entry}, which extension/manifest.json doesn't ask for: remove it there and from the store listings.`,
+          );
+        }
+      }
+    }
+  }
+
+  // A listing for each language, and each listing for a language.
+  const expected = languages.length > 0 ? languages : Object.keys(listings);
+  if (expected.length === 0) {
+    problems.push(
+      "store/ has no listing, store/listing.<language>.md, such as store/listing.en.md: its text goes into the Developer Dashboard.",
+    );
+  }
+  for (const language of expected) {
+    if (!(language in listings)) {
+      problems.push(
+        `The extension speaks ${language}, but store/listing.${language}.md is missing; the store would show the listing of another language to its users.`,
+      );
+    }
+  }
+  for (const [language, text] of Object.entries(listings)) {
+    const file = `store/listing.${language}.md`;
+    if (!expected.includes(language)) {
+      problems.push(
+        `${file} is the listing of a language that the extension doesn't speak; add extension/_locales/${language}/messages.json or remove the listing.`,
+      );
+      continue;
+    }
+    const short = section(text, SHORT_DESCRIPTION)?.trim();
+    if (!short) {
+      problems.push(`${file} has no text under "${SHORT_DESCRIPTION}".`);
+    } else if (short.length > DESCRIPTION_MAX) {
+      problems.push(
+        `The short description of ${file} has ${short.length} characters; the store takes ${DESCRIPTION_MAX} at most.`,
+      );
+    }
+    const justified = section(text, JUSTIFICATIONS);
+    if (justified === null) {
+      problems.push(
+        `${file} has no section "${JUSTIFICATIONS}", whose text goes into the privacy practices of the store.`,
+      );
+      continue;
+    }
+    for (const entry of [...wanted.permissions, ...wanted.host_permissions]) {
+      if (!justified.includes(entry)) {
+        problems.push(
+          `${file} doesn't justify ${entry}: name it under "${JUSTIFICATIONS}" with its reason.`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/** Reads the extension of the repository at root and checks it. */
+export function checkRepository(root) {
+  const read = (path) => readFileSync(join(root, path), "utf8");
+  const json = (path) =>
+    existsSync(join(root, path)) ? JSON.parse(read(path)) : null;
+  const manifest = json("extension/manifest.json");
+  if (manifest === null) {
+    return [
+      "extension/manifest.json is missing: the blueprint builds the extension from the folder extension/, with its manifest at the top.",
+    ];
+  }
+  const folder = join(root, "extension/_locales");
+  const locales = existsSync(folder)
+    ? Object.fromEntries(
+        readdirSync(folder)
+          .filter((code) => existsSync(join(folder, code, "messages.json")))
+          .map((code) => [
+            code,
+            json(`extension/_locales/${code}/messages.json`),
+          ]),
+      )
+    : {};
+  const store = join(root, "store");
+  const listings = existsSync(store)
+    ? Object.fromEntries(
+        readdirSync(store)
+          .map((name) => [LISTING.exec(name)?.[1], name])
+          .filter(([language]) => language !== undefined)
+          .map(([language, name]) => [language, read(`store/${name}`)]),
+      )
+    : {};
+  return checkManifest({
+    manifest,
+    packageVersion: json("package.json")?.version,
+    locales,
+    allowed: json("store/permissions.json"),
+    listings,
+  });
+}
+
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  const problems = checkRepository(resolve(process.argv[2] ?? "."));
+  for (const problem of problems) {
+    console.log(`- ${problem}`);
+  }
+  if (problems.length > 0) {
+    process.exitCode = 1;
+  } else {
+    console.log(
+      "extension/manifest.json fits the Chrome Web Store, and store/ justifies everything that it asks for.",
+    );
+  }
+}

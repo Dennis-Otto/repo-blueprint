@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+[%- if project_type == 'chrome-extension' %]
+    "outDir": "extension/lib"
+[%- else %]
+    "outDir": "dist",
+    "declaration": true
+[%- endif %]
+  },
+  "include": ["src"]
+}

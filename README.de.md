@@ -16,7 +16,7 @@
 
 **GitHub-Repositories, die sich selbst testen, veröffentlichen, absichern und aktualisieren — mit einem `copier copy`.**
 
-Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für sieben Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Container-Images und Repositories ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
+Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für acht Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Chrome-Erweiterungen, Container-Images und Repositories ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
 
 - **Getestet bei jeder Änderung.** `scripts/check.sh` führt dieselben Prüfungen auf deinem Rechner und in der CI aus, mit voller Abdeckung des Codes. Der PR-Coach erklärt jede Prüfung, die scheitert, und der Fix-Bot committet, was ein Befehl beheben kann.
 - **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3 und prüft es danach so, wie seine Nutzer es können.
@@ -36,18 +36,18 @@ Die [Website des Blueprints](https://dennis-otto.github.io/repo-blueprint/de/) z
 Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator des Kontos oder der Organisation, der das Repository gehören soll (`gh auth login`):
 
 ```sh
-uvx --from copier==9.19.0 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
+uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
 cd mein-projekt
 python3 .github/blueprint.py create
 ```
 
 ![copier copy im Terminal: Copier klont den Blueprint und fragt nach dem Namen Paperless Sync, dem Repository, einer Beschreibung, der Art des Projekts, Python-Paket, und dem Eigentümer Dennis-Otto, übernimmt für den Rest die Vorgaben, auch die Release-App, schreibt die Dateien und nennt den einen Befehl danach; das neue Repository hat seine Community-Dateien, seine Prüfungen und seine Workflows, und ein Probelauf von python3 .github/blueprint.py create zeigt die Befehle, die daraus das Repository auf GitHub machen](docs/images/copier-copy.gif)
 
-Mit pipx statt uv lautet die erste Zeile `pipx run --spec copier==9.19.0 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt`, und ein eigenes Copier, Copier ab 9.8, führt `copier copy gh:Dennis-Otto/repo-blueprint mein-projekt` aus; unter Windows startet `py -3` Python statt `python3`. Das Kopieren führt keinen Code des Blueprints aus: Das Template hat keine Tasks, Migrationen oder Jinja-Erweiterungen, also braucht Copier kein `--trust`.
+Mit pipx statt uv lautet die erste Zeile `pipx run --spec copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt`, und ein eigenes Copier, Copier ab 9.8, führt `copier copy gh:Dennis-Otto/repo-blueprint mein-projekt` aus; unter Windows startet `py -3` Python statt `python3`. Das Kopieren führt keinen Code des Blueprints aus: Das Template hat keine Tasks, Migrationen oder Jinja-Erweiterungen, also braucht Copier kein `--trust`.
 
 Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, dem GitHub-Konto oder der Organisation, der es gehört, der Lizenz (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later oder AGPL-3.0-or-later), ein paar Details der Art und der Release-App des Eigentümers, die leer bleiben darf, bis die Checkliste sie registriert hat. Die Homepage ist die Website, die der Docs-Workflow auf GitHub Pages veröffentlicht, wenn du keine andere oder keine nennst, und README, About-Box, Issue-Formulare, das Manifest einer Integration und `appinfo/info.xml` einer App verlinken sie; jede Art beginnt mit eigenen Topics, etwa `home-assistant, hacs` für eine Integration, die HACS braucht, um sie aufzulisten. Copier lehnt eine Antwort ab, die eine Datei kaputt machen würde: eine Beschreibung oder einen Namen mit `"""`, `*/`, `]]>` oder einem Backslash, die einen Docstring von Python, einen Kommentar von TypeScript oder das CDATA von `appinfo/info.xml` beenden würden, eine Nextcloud-App-ID, die der App Store nicht nimmt, und Topics, die GitHub nicht nimmt.
 
-`create` macht aus der Kopie das Repository, ohne Checkout des Blueprints: Jede Kopie bringt `blueprint.py` in `.github/` mit. Es nimmt den Eigentümer und den Namen aus den Antworten von Copier, und seine Vorabprüfung (*preflight*) prüft zuerst Python, Git, die GitHub CLI und ihre Anmeldung, den Eigentümer und den Namen; ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt. Dann führt `create` `git init --initial-branch=main` aus, committet die Dateien mit Sign-off, legt das Repository mit `gh repo create` an und pusht dorthin, öffentlich, außer du gibst `--private` an, wendet dann die Einstellungen als Code an und zeigt die Checkliste: was noch eine Person erledigen muss, etwa die Release-App und die Secrets, und welche Schritte schon erledigt sind. `--dry-run` zeigt die Vorabprüfung und die Befehle und führt keinen aus. Ein Lauf, der mittendrin aufgehört hat, macht dort weiter, wenn du `create` noch einmal startest. Ein Ordner, der zu einem anderen Repository pusht, ist keine neue Kopie, und `create` lehnt ihn ab. Die [Fehlerbehebung](https://dennis-otto.github.io/repo-blueprint/de/troubleshooting.html) erklärt jeden Befund der Vorabprüfung. Jeder Workflow läuft auf `main`, deshalb nennt `settings check` ein Repository, dessen Standard-Branch anders heißt.
+`create` macht aus der Kopie das Repository, ohne Checkout des Blueprints: Jede Kopie bringt `blueprint.py` in `.github/` mit. Es nimmt den Eigentümer und den Namen aus den Antworten von Copier, und seine Vorabprüfung (*preflight*) prüft zuerst Python, Git, die GitHub CLI und ihre Anmeldung, den Eigentümer und den Namen; ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt. Dann führt `create` `git init --initial-branch=main` aus, committet die Dateien mit Sign-off, legt das Repository mit `gh repo create` an und pusht dorthin, öffentlich, außer du gibst `--private` an ([grün auch bei GitHub Free](https://dennis-otto.github.io/repo-blueprint/de/faq.html#kann-ein-repository-privat-sein-und-was-kostet-es)), wendet dann die Einstellungen als Code an und zeigt die Checkliste: was noch eine Person erledigen muss, etwa die Release-App und die Secrets, und welche Schritte schon erledigt sind. `--dry-run` zeigt die Vorabprüfung und die Befehle und führt keinen aus. Ein Lauf, der mittendrin aufgehört hat, macht dort weiter, wenn du `create` noch einmal startest. Ein Ordner, der zu einem anderen Repository pusht, ist keine neue Kopie, und `create` lehnt ihn ab. Die [Fehlerbehebung](https://dennis-otto.github.io/repo-blueprint/de/troubleshooting.html) erklärt jeden Befund der Vorabprüfung. Jeder Workflow läuft auf `main`, deshalb nennt `settings check` ein Repository, dessen Standard-Branch anders heißt.
 
 <!-- --8<-- [end:quick-start] -->
 
@@ -93,18 +93,19 @@ Sechs öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und
 | Art | Stack | Prüfungen | Auslieferung |
 | --- | --- | --- | --- |
 | [Home-Assistant-Integration](https://dennis-otto.github.io/repo-blueprint/de/kinds/home-assistant.html) | Python 3.14, pytest-homeassistant-custom-component | Ruff, mypy, Tests, HACS, hassfest | ein Zip-Asset für HACS, geprüft, wie HACS es installiert |
-| [Nextcloud-App](https://dennis-otto.github.io/repo-blueprint/de/kinds/nextcloud-app.html) | PHP 8.2 und neuer, die Werkzeuge auf PHP 8.3, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, der Code und seine Pakete auf PHP 8.2, PHPUnit in zufälliger Reihenfolge mit jeder Zeile abgedeckt | signiertes Paket in den App Store |
+| [Nextcloud-App](https://dennis-otto.github.io/repo-blueprint/de/kinds/nextcloud-app.html) | PHP 8.2 und neuer, die Werkzeuge auf PHP 8.3, Composer | php-cs-fixer, Psalm mit seiner Taint-Analyse, PHP 8.2 für den Code und seine Pakete, PHPUnit in zufälliger Reihenfolge mit voller Abdeckung | signiertes Paket in den App Store |
 | [GitHub Action](https://dennis-otto.github.io/repo-blueprint/de/kinds/github-action.html) | Python 3.12 des Runners, Composite Action | Ruff, mypy, Tests, ein Lauf der Action | Release-Tags und ein mitwandernder Major-Tag |
 | [Python-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, Tests, Build | PyPI, Trusted Publishing |
-| [Node-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/node-package.html) | Node 24, TypeScript | Biome für Lint und Format, tsc, node:test mit voller Abdeckung und ihrem Bericht im PR-Coach, Pack; npm installiert ohne die Skripte der Pakete | npm mit Provenance |
+| [Node-Paket](https://dennis-otto.github.io/repo-blueprint/de/kinds/node-package.html) | Node 24, TypeScript | Biome, tsc, node:test mit voller Abdeckung, Pack; npm ohne Installationsskripte | npm mit Provenance |
+| [Chrome-Erweiterung](https://dennis-otto.github.io/repo-blueprint/de/kinds/chrome-extension.html) | Manifest V3, TypeScript | die von Node, das Manifest, Chrome for Testing | Chrome Web Store, ohne gespeichertes Geheimnis |
 | [Container-Image](https://dennis-otto.github.io/repo-blueprint/de/kinds/container.html) | Alpine per Digest | Hadolint, Build, Selbsttest | GHCR, Multi-Arch, mit SBOM und Provenance |
 | [Repository ohne Build](https://dennis-otto.github.io/repo-blueprint/de/kinds/generic.html) | | Textdateien, Shell-Skripte | nur Releases |
 
-Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das durch den echten Code ersetzt wird. Jede Art hat eine eigene Seite auf der Website: was sie bekommt, die Prüfungen, die ihre Pull Requests brauchen, ihre Auslieferung, die Schritte ihrer Checkliste und die eine Zeile, die sie kopiert.
+Jede Art startet mit einem kleinen, funktionierenden Beispiel samt Tests, das durch den echten Code ersetzt wird, und hat eine eigene Seite auf der Website: was sie bekommt, die Prüfungen, die ihre Pull Requests brauchen, ihre Auslieferung, ihre Checkliste und die eine Zeile, die sie kopiert.
 
 <!-- --8<-- [end:kinds] -->
 
-![Repo Blueprint für GitHub-Repositories: sieben Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](docs/images/social-preview.webp)
+![Repo Blueprint für GitHub-Repositories: acht Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](docs/images/social-preview.webp)
 
 ## Wie sich ein Repository selbst pflegt
 
@@ -137,9 +138,9 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 
 - **Fix-Bot:** Eine Prüfung, die scheitert, behebt, was ein Befehl beheben kann, etwa das Format des Codes, und committet es auf den Branch.
 - **Wackelige Tests:** Gescheiterte Test-Jobs laufen noch einmal, und ein Job, der dann besteht, wird in einem Issue gemeldet.
-- **Abgebrochene Prüfungen:** Eine Pflichtprüfung, die ein später Lauf für einen älteren Commit abgebrochen hat, startet von selbst neu.
+- **Abgebrochene Prüfungen:** Eine Pflichtprüfung, die ein später Lauf oder ihr Zeitlimit abgebrochen hat, startet von selbst neu.
 - **Gescheiterte Releases:** Das Release eines Merges, das für einen Moment scheitert, führt seine gescheiterten Jobs noch einmal aus.
-- **Zustand der Bots:** Ein Bot, der auf `main` fehlschlägt, versucht es noch einmal, wo das helfen kann, und hält sonst ein Issue pro Workflow offen.
+- **Zustand der Bots:** Ein Bot, der auf `main` fehlschlägt, versucht es noch einmal, wo das helfen kann, und hält sonst ein Issue pro Workflow offen, außer der Workflow hält ein eigenes.
 
 ### [Mutationstests, Fuzzing und Property-Tests](docs/features/tests.de.md)
 

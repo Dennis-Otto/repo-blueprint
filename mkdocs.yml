@@ -66,6 +66,7 @@ plugins:
           Nextcloud app: Nextcloud-App
           Python package: Python-Paket
           Node package: Node-Paket
+          Chrome extension: Chrome-Erweiterung
           Container image: Container-Image
           Repository without a build: Repository ohne Build
           Your own account: Dein eigenes Konto
@@ -108,6 +109,7 @@ nav:
       - GitHub Action: kinds/github-action.md
       - Python package: kinds/python-package.md
       - Node package: kinds/node-package.md
+      - Chrome extension: kinds/chrome-extension.md
       - Container image: kinds/container.md
       - Repository without a build: kinds/generic.md
   - Your own account: own-account.md

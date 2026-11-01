@@ -85,6 +85,7 @@ The kind of project.
 | `github-action` | GitHub Action (Python, composite) |
 | `python-package` | Python package (PyPI) |
 | `node-package` | Node package (TypeScript, npm) |
+| `chrome-extension` | Chrome extension (Manifest V3, Chrome Web Store) |
 | `container` | Container image (GHCR) |
 | `generic` | Repository without a build (docs, configuration, scripts) |
 
@@ -197,7 +198,7 @@ The languages of the code, which CodeQL analyzes (it has no PHP).
 
 ```text
 [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
-[%- elif project_type in ['node-package', 'nextcloud-app'] -%][javascript-typescript]
+[%- elif project_type in ['node-package', 'chrome-extension', 'nextcloud-app'] -%][javascript-typescript]
 [%- else -%][]
 [%- endif -%]
 ```
@@ -261,6 +262,7 @@ The topics of the repository on GitHub, with those of each kind by default: HACS
 [%- elif project_type == 'github-action' -%]github-actions, github-action
 [%- elif project_type == 'python-package' -%]python, pypi
 [%- elif project_type == 'node-package' -%]typescript, nodejs, npm
+[%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
 [%- elif project_type == 'container' -%]docker, container, ghcr
 [%- endif -%]
 ```
@@ -409,7 +411,7 @@ release_app_id: '4739928'
 [%- if project_type == 'home-assistant' -%]home-assistant
 [%- elif project_type == 'nextcloud-app' -%]php
 [%- elif project_type in ['github-action', 'python-package'] -%]python
-[%- elif project_type == 'node-package' -%]node
+[%- elif project_type in ['node-package', 'chrome-extension'] -%]node
 [%- elif project_type == 'container' -%]container
 [%- else -%]generic
 [%- endif -%]
@@ -426,6 +428,7 @@ release_app_id: '4739928'
 [%- elif project_type == 'github-action' -%]github-action
 [%- elif project_type == 'python-package' -%]pypi
 [%- elif project_type == 'node-package' -%]npm
+[%- elif project_type == 'chrome-extension' -%]chrome-web-store
 [%- elif project_type == 'container' -%]ghcr
 [%- else -%]none
 [%- endif -%]
@@ -485,12 +488,33 @@ How the release bot finds the version: Python and Node in their manifests, the o
 [%- endif -%]
 ```
 
+### `schedule_slot`
+
+The slot of the schedules of this repository, so that the scheduled workflows of the repositories of one owner don't all start in the same minute and wait for the same runners (decision 0083): includes/replace.jinja moves each weekly schedule of a workflow of the blueprint by as many days, and every one by 8 minutes for each. The blueprint keeps its own times, slot 0; a repository of .github/fleet.toml takes its place in the Rollout, so that each has a day of its own; any other one a slot from the hash of its name.
+
+- **Type:** a number
+- **Default:** a template of Copier, from the answers before it:
+
+```text
+[%- set fleet -%]
+[% include ".github/fleet.toml" %]
+[%- endset -%]
+[%- set slot = namespace(value=((owner ~ '/' ~ project_slug) | hash('md5'))[:8] | int(base=16) % 28) -%]
+[%- if owner == blueprint_owner.account and project_slug == 'repo-blueprint' -%]
+[%- set slot.value = 0 -%]
+[%- elif ('\nowner = "' ~ owner ~ '"\n') in fleet -%]
+[%- for entry in fleet.split('[[repository]]')[1:] if ('\nname = "' ~ project_slug ~ '"\n') in entry -%]
+[%- set slot.value = entry | regex_search('\nrollout = [0-9]+\n') | trim | replace('rollout = ', '') | int -%]
+[%- endfor -%]
+[%- endif -%] {= slot.value =}
+```
+
 ## The files of a project
 
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.
 
 <details markdown>
-<summary>The 55 patterns of the files of a project</summary>
+<summary>The 58 patterns of the files of a project</summary>
 
 - `/README.md`
 - `/CHANGELOG.md`
@@ -499,6 +523,7 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/mkdocs.yml`
 - `/docs/index.md`
 - `/docs/security.md`
+- `/docs/releases.md`
 - `.github/issue-assistant/project.md`
 - `.github/agents.project.md`
 - `/docs/decisions`
@@ -535,6 +560,8 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/composer.lock`
 - `/package.json`
 - `/package-lock.json`
+- `/extension`
+- `/store`
 - `/Dockerfile`
 - `/action.yml`
 - `/hacs.json`

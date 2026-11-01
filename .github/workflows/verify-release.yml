@@ -41,7 +41,7 @@ jobs:
       contents: read
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
           disable-sudo-and-containers: true
@@ -57,6 +57,38 @@ jobs:
             ${{ vars.PUBLISH_TO == 'npm' && 'registry.npmjs.org:443' || '' }}
             ${{ vars.PUBLISH_TO == 'ghcr' && 'ghcr.io:443 pkg-containers.githubusercontent.com:443' || '' }}
             ${{ vars.PUBLISH_TO == 'nextcloud-appstore' && 'apps.nextcloud.com:443' || '' }}
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+            release-assets.githubusercontent.com:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            tuf-repo.github.com:443
+            tmaproduction.blob.core.windows.net:443
+            ${{ vars.PUBLISH_TO == 'pypi' && 'pypi.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'npm' && 'registry.npmjs.org:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'ghcr' && 'ghcr.io:443 pkg-containers.githubusercontent.com:443' || '' }}
+            ${{ vars.PUBLISH_TO == 'nextcloud-appstore' && 'apps.nextcloud.com:443' || '' }}
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
       - name: Verify the release as its users can
         env:
           GH_TOKEN: ${{ github.token }}
@@ -296,6 +328,29 @@ jobs:
                 pass "HACS offers the newer release $latest; $TAG stays for those who choose it."
               else
                 fail "The latest release is ${latest:-none}, not $TAG, so HACS doesn't offer it."
+              fi
+              ;;
+            chrome-web-store)
+              # publish-store.yml uploads this zip to the Chrome Web Store, which reads
+              # the manifest.json at its root; a manifest takes only the numbers of a
+              # version, so a beta, such as 1.3.0-beta.2, has 1.3.0.
+              numbers="$(grep -oE '^[0-9]+([.][0-9]+)*' <<<"$version")"
+              zips=(./*.zip)
+              if [[ ${#zips[@]} -ne 1 || ! -f "${zips[0]}" ]]; then
+                if [[ "$WEEKLY" == true ]]; then
+                  echo "::notice::The release is older than the zip of the extension for the Chrome Web Store."
+                else
+                  fail "The release has no single zip of the extension for the Chrome Web Store."
+                fi
+              else
+                manifest="$(python3 -c 'import sys, zipfile; print(zipfile.ZipFile(sys.argv[1]).read("manifest.json").decode())' \
+                  "${zips[0]}" 2>/dev/null || true)"
+                zipped="$(jq -r '"\(.manifest_version) \(.version)"' <<<"$manifest" 2>/dev/null || true)"
+                if [[ "$zipped" == "3 $numbers" ]]; then
+                  pass "${zips[0]} holds the manifest.json of Manifest V3 and the version $numbers at its root, as the Chrome Web Store takes it."
+                else
+                  fail "${zips[0]} has no manifest.json of Manifest V3 and the version $numbers at its root."
+                fi
               fi
               ;;
             nextcloud-appstore)

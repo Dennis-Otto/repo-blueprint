@@ -347,9 +347,67 @@ def copies_code(function: ast.FunctionDef, code: Sequence[str]) -> bool:
     return False
 
 
+# The tool of a project that the template makes is a copy of the code as well: the
+# template takes .github/blueprint.py and .github/blueprint/ from the modules of
+# mutants/, and a process of its own finds no configuration of mutmut there either. A
+# test that starts it, or hands its path to the steps of scripts/check.sh, broke every
+# part of the Mutation workflow again (#508), so the same test asks for the marker here.
+TOOL = ".github/blueprint.py"
+
+
+def is_the_tool(node: ast.expr) -> bool:
+    """Whether node names the tool of a project, as ".github/blueprint.py" or
+    project / ".github/blueprint.py"."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        node = node.right
+    return isinstance(node, ast.Constant) and node.value == TOOL
+
+
+def starts_the_tool(node: ast.AST) -> bool:
+    """Whether node is the command that starts the tool with the Python of the tests, as
+    [sys.executable, ".github/blueprint.py", "--help"]."""
+    return (
+        isinstance(node, ast.List)
+        and len(node.elts) > 1
+        and ast.unparse(node.elts[0]) == "sys.executable"
+        and is_the_tool(node.elts[1])
+    )
+
+
+def is_the_text_of_the_tool(node: ast.AST) -> bool:
+    """Whether node makes the text of the path of the tool, which only a script needs,
+    as (project / ".github/blueprint.py").as_posix() or str(project / ...)."""
+    if not isinstance(node, ast.Call):
+        return False
+    called = node.func
+    if isinstance(called, ast.Attribute):
+        return called.attr == "as_posix" and is_the_tool(called.value)
+    return ast.unparse(called) == "str" and any(map(is_the_tool, node.args))
+
+
+def runs_the_step_of_the_tool(function: ast.FunctionDef) -> bool:
+    """Whether the function runs the step "Pages in one column" of scripts/check.sh, which
+    finds the tool itself, and whose text pages_step of test_template.py cuts out.
+
+    A test that only reads the text of the step runs no mutant."""
+    names = {node.id for node in ast.walk(function) if isinstance(node, ast.Name)}
+    return "pages_step" in names and bool(names & {"BASH", "run_the_steps"})
+
+
+def runs_the_tool(function: ast.FunctionDef) -> bool:
+    """Whether the function starts the tool of a project or hands its path to a script.
+
+    A test that only reads the tool, or writes one of its own there, runs no mutant."""
+    return runs_the_step_of_the_tool(function) or any(
+        starts_the_tool(node) or is_the_text_of_the_tool(node)
+        for node in ast.walk(function)
+    )
+
+
 def unmarked_copies(source: str, code: Sequence[str]) -> list[str]:
-    """The tests of a module that copy the code, themselves or through a helper or a
-    fixture of the module, without the marker mutation_unsafe."""
+    """The tests of a module that copy the code or run the tool of a project,
+    themselves or through a helper or a fixture of the module, without the marker
+    mutation_unsafe."""
     tree = ast.parse(source)
     functions = {
         node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -371,7 +429,9 @@ def unmarked_copies(source: str, code: Sequence[str]) -> list[str]:
         for name, function in functions.items()
     }
     copying = {
-        name for name, function in functions.items() if copies_code(function, code)
+        name
+        for name, function in functions.items()
+        if copies_code(function, code) or runs_the_tool(function)
     }
     while grown := {
         name for name in functions if name not in copying and uses[name] & copying
@@ -460,14 +520,88 @@ def test_of_other_files(tmp_path):
     shutil.copy(tmp_path / ROOT, tmp_path)
     shutil.rmtree(tmp_path)
     print(len("tool.py"))
+
+
+def steps_with_the_tool(project):
+    return f"tool={(project / '.github/blueprint.py').as_posix()}"
+
+
+def test_that_starts_the_tool_of_a_project(project):
+    subprocess.run([sys.executable, ".github/blueprint.py", "--help"], cwd=project)
+
+
+def test_that_starts_it_by_its_path(project):
+    subprocess.run([sys.executable, project / ".github/blueprint.py"])
+
+
+def test_with_the_text_of_its_path(project):
+    script = str(project / ".github/blueprint.py")
+
+
+def test_through_the_steps_with_the_tool(project):
+    steps_with_the_tool(project)
+
+
+@pytest.mark.mutation_unsafe
+def test_marked_that_starts_the_tool_of_a_project(project):
+    subprocess.run([sys.executable, ".github/blueprint.py", "--help"], cwd=project)
+
+
+@runs_the_tool
+def test_marked_through_the_steps_with_the_tool(project):
+    steps_with_the_tool(project)
+
+
+def test_that_reads_the_tool_of_a_project(project):
+    assert (project / ".github/blueprint.py").read_text()
+    assert (project / ".github/blueprint.py").is_file()
+    assert (project / "scripts/check.sh").as_posix()
+    assert str(project / "README.md")
+    assert str()
+
+
+def test_that_runs_the_step_of_the_tool(check):
+    subprocess.run([BASH, "-c", pages_step(check)])
+
+
+def test_that_runs_the_steps_of_the_tool(project, check):
+    run_the_steps(project, pages_step(check))
+
+
+def test_that_reads_the_step_of_the_tool(check):
+    assert '"$tool" pages' in pages_step(check)
+
+
+def test_with_other_steps_in_bash(project, check):
+    subprocess.run([BASH, "-c", fragments_step(check)])
+    run_the_steps(project, check)
+
+
+def test_with_a_tool_of_its_own(tmp_path):
+    (tmp_path / ".github/blueprint.py").write_text("print()")
+    (tmp_path / ".github/blueprint.py").unlink()
+
+
+def test_that_lists_the_tool_of_a_project(project):
+    assert project in [".github/blueprint.py", "blueprint.py"]
+    assert project in [sys.executable, "blueprint.py"]
+    assert project in [sys.executable]
+    assert project in [".github/blueprint.py", sys.executable]
+    assert project in []
 """
     code = ["tool.py", "package"]
 
     assert unmarked_copies(source, code) == [
+        "test_that_runs_the_step_of_the_tool",
+        "test_that_runs_the_steps_of_the_tool",
+        "test_that_starts_it_by_its_path",
+        "test_that_starts_the_tool_of_a_project",
         "test_through_a_fixture",
         "test_through_a_helper",
+        "test_through_the_steps_with_the_tool",
         "test_with_a_package",
         "test_with_its_bytes",
+        "test_with_the_text_of_its_path",
     ]
     # The marker of every test of the module.
     everywhere = "pytestmark = [pytest.mark.mutation_unsafe]\n"

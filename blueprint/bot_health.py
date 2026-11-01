@@ -20,7 +20,7 @@ import json
 import re
 import urllib.parse
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,13 +37,23 @@ LABEL_DESCRIPTION = (
 TYPE = "maintenance"
 PULL_REQUESTS = frozenset({"pull_request", "pull_request_target"})
 FAILED = frozenset({"failure", "timed_out", "startup_failure"})
+OUT_OF_TIME = "The job has exceeded the maximum execution time"
 PASSED = "success"
 # A second try only hides or repeats their failure: Findings fails while an alert is
 # open, Mutation takes hours to measure the same again, and the property tests and the
 # fuzzing failed on an input that they found.
 ONE_TRY = frozenset({"Findings", "Mutation", "Property tests", "Fuzzing"})
-# Workflows that keep an issue of their own about their failures.
+# Workflows that keep an issue of their own about their failures; a workflow of the
+# project says so in a comment line of its own, `# bot-health: own-issue`. The daily
+# look still starts one whose schedule GitHub missed or switched off.
 OWN_ISSUE = frozenset({"Diagrams", "Newest Node", "Newest Python", "Next runner"})
+OWN_ISSUE_LINE = re.compile(r"^[ \t]*#[ \t]*bot-health:[ \t]*own-issue\b", re.MULTILINE)
+# The runs that do what a schedule does. A push may start the same workflow, but its
+# run may leave out what only the schedule does, such as the tests of the coming
+# release, so it doesn't count as the run of a schedule.
+SCHEDULED = frozenset({"schedule", "workflow_dispatch"})
+# The runs of a workflow that one request lists, the newest first.
+PAGE = 50
 # A failure that ended this recently may still get its second try from the run that
 # its end started; the daily look leaves it to that run.
 SECOND_TRY_TIME = timedelta(hours=1)
@@ -261,14 +271,17 @@ class Failure:
     error: str
 
 
-def first_error(api: Api, repo: str, job: int) -> str:
+def annotations_of(api: Api, repo: str, job: int) -> list[Json]:
     try:
-        annotations = api.get(f"repos/{repo}/check-runs/{job}/annotations?per_page=50")
+        return api.get(f"repos/{repo}/check-runs/{job}/annotations?per_page=50") or []
     except GitHubError:
-        return ""
+        return []
+
+
+def first_error(api: Api, repo: str, job: int) -> str:
     errors = [
         str(annotation.get("message") or "")
-        for annotation in annotations or []
+        for annotation in annotations_of(api, repo, job)
         if annotation.get("annotation_level") == "failure"
     ]
     telling = [error for error in errors if not GENERIC.fullmatch(error.strip())]
@@ -396,6 +409,20 @@ def report(api: Api, repo: str, branch: str, run: Run, issue: Issue | None) -> s
     return f"fails in another place: updated #{issue.number}"
 
 
+def ran_out_of_time(api: Api, repo: str, run: Run) -> bool:
+    """Whether GitHub cancelled a job of the run at its time limit, as it says on the
+    job, and not a person or a newer run."""
+    data = api.get(
+        f"repos/{repo}/actions/runs/{run.id}/attempts/{run.attempt}/jobs?per_page=100"
+    )
+    return any(
+        OUT_OF_TIME in str(annotation.get("message"))
+        for job in (data or {}).get("jobs", [])
+        if job.get("conclusion") == "cancelled"
+        for annotation in annotations_of(api, repo, int(job["id"]))
+    )
+
+
 def run_again(api: Api, repo: str, run: Run) -> str | None:
     """Runs the failed jobs once more; None when GitHub refuses and no one else did."""
     try:
@@ -439,6 +466,10 @@ def look_at(
             f"Passes again in {run.link()}, after {runs}.",
         )
         return f"passes again: closed #{issue.number}"
+    # A job that hangs until its time limit, as one behind Harden-Runner can, even after
+    # its last step, ends as cancelled; it failed like one that GitHub calls timed out.
+    if run.conclusion == "cancelled" and ran_out_of_time(api, repo, run):
+        run = replace(run, conclusion="timed_out")
     if run.conclusion not in FAILED:
         return f"ended as {run.conclusion or run.status}: no failure"
     note = ""
@@ -664,6 +695,76 @@ def after_pull_requests(texts: Iterable[tuple[str, str]]) -> frozenset[str]:
     return frozenset(found)
 
 
+def own_issue(text: str) -> bool:
+    """Whether the text of a workflow says that it keeps an issue of its own."""
+    return OWN_ISSUE_LINE.search(text) is not None
+
+
+def leave_to_its_own(
+    api: Api, repo: str, workflow: Json, issues: Mapping[str, Issue]
+) -> str:
+    """What the daily look does for a workflow that keeps an issue of its own: the
+    issue that the bot opened for it before it said so closes, as continued there."""
+    issue = issues.get(str(workflow["path"]))
+    if issue is None:
+        return "keeps an issue of its own"
+    close_issue(
+        api,
+        repo,
+        issue.number,
+        f"{code(str(workflow['name']))} keeps an issue of its own about its failures "
+        "now, so this one closes.",
+        reason="not_planned",
+    )
+    return f"keeps an issue of its own: closed #{issue.number}"
+
+
+def runs_of(
+    api: Api, repo: str, branch: str, workflow: Json, *, event: str = "", most: int
+) -> list[Run]:
+    """A page of the runs of a workflow on the branch, the newest first; with event,
+    only those that it started. GitHub lists the runs of a pull request from a branch
+    of the same name too, such as main of a fork."""
+    of_event = f"&event={event}" if event else ""
+    listed = api.get(
+        f"repos/{repo}/actions/workflows/{workflow['id']}/runs"
+        f"?branch={urllib.parse.quote(branch)}{of_event}"
+        f"&exclude_pull_requests=true&per_page={most}"
+    )
+    return [Run.of(item) for item in (listed or {}).get("workflow_runs", [])]
+
+
+def scheduled_since(runs: Iterable[Run], repo: str, branch: str, due: datetime) -> bool:
+    """Whether one of the runs is one of the branch that its schedule or a hand
+    started, as the daily look starts one, at the time due or after it."""
+    return any(
+        run.of_branch(repo, branch) and run.event in SCHEDULED and run.created >= due
+        for run in runs
+    )
+
+
+def ran_as_scheduled(
+    api: Api,
+    repo: str,
+    branch: str,
+    workflow: Json,
+    listed: Sequence[Run],
+    due: datetime,
+) -> bool:
+    """Whether the schedule's work ran since the time due. Where a full page of runs,
+    listed, all began after it, GitHub names the latest run of each such event too."""
+    if scheduled_since(listed, repo, branch, due):
+        return True
+    if len(listed) < PAGE or min(run.created for run in listed) < due:
+        return False
+    return any(
+        scheduled_since(
+            runs_of(api, repo, branch, workflow, event=event, most=1), repo, branch, due
+        )
+        for event in sorted(SCHEDULED)
+    )
+
+
 def look_after(
     api: Api,
     repo: str,
@@ -675,31 +776,28 @@ def look_after(
     *,
     start: bool,
     after_checks: bool,
+    own: bool,
 ) -> tuple[str, bool]:
     """What the daily look does for one workflow, and whether it started it. With
-    after_checks, a run that the end of another workflow started doesn't count."""
-    listed = api.get(
-        f"repos/{repo}/actions/workflows/{workflow['id']}/runs"
-        f"?branch={urllib.parse.quote(branch)}&exclude_pull_requests=true&per_page=50"
-    )
-    runs = [Run.of(item) for item in (listed or {}).get("workflow_runs", [])]
-    runs = [
-        run
-        for run in runs
-        if run.of_branch(repo, branch)
-        and not (after_checks and run.event == "workflow_run")
-    ]
+    after_checks, a run that the end of another workflow started doesn't count. With
+    own, the workflow keeps an issue of its own: its runs open and close none here,
+    and only an issue of the bot from before it said so closes."""
+    listed = runs_of(api, repo, branch, workflow, most=PAGE)
+    runs = [run for run in listed if run.of_branch(repo, branch)]
     finished = next(
         (
             run
             for run in runs
             if run.status == "completed"
             and (run.conclusion == PASSED or run.conclusion in FAILED)
+            and not (after_checks and run.event == "workflow_run")
         ),
         None,
     )
     notes = []
-    if finished is None:
+    if own:
+        notes.append(leave_to_its_own(api, repo, workflow, issues))
+    elif finished is None:
         notes.append(f"no finished run on `{branch}`")
     else:
         notes.append(
@@ -712,7 +810,9 @@ def look_after(
     if not readable:
         notes.append("a schedule that can't be read")
     started = False
-    if due is not None and (not runs or runs[0].created < due):
+    if due is not None and not ran_as_scheduled(
+        api, repo, branch, workflow, listed, due
+    ):
         inputs = dispatch_inputs(text)
         missed = f"missed its run of {moment(due)}"
         if inputs is None:
@@ -761,12 +861,12 @@ def sweep(api: Api, repo: str, root: Path, now: datetime) -> tuple[str, bool]:
     healthy = True
     for workflow in workflows:
         name = str(workflow["name"])
-        if (
-            str(workflow["path"]).startswith("dynamic/")
-            or name in OWN_ISSUE
-            or workflow["state"] not in ("active", "disabled_inactivity")
+        if str(workflow["path"]).startswith("dynamic/") or workflow["state"] not in (
+            "active",
+            "disabled_inactivity",
         ):
             continue
+        text = texts[str(workflow["path"])]
         try:
             state, started = look_after(
                 api,
@@ -774,10 +874,11 @@ def sweep(api: Api, repo: str, root: Path, now: datetime) -> tuple[str, bool]:
                 branch,
                 workflow,
                 issues,
-                texts[str(workflow["path"])],
+                text,
                 now,
                 start=starts < MOST_STARTS,
                 after_checks=name in after_checks,
+                own=name in OWN_ISSUE or own_issue(text),
             )
         except GitHubError as error:
             state, started, healthy = f"couldn't look: {code(str(error))}", False, False

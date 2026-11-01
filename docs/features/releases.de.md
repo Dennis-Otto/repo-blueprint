@@ -4,7 +4,7 @@ Wie aus einer Änderung ein signiertes Release wird, und die Sicherheitsprüfung
 
 ## Releases
 
-Ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major, unter 1.0.0 ein Minor), und dem Text der Fragmente in `changelog.d/` und von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und der signierten Provenance eines isolierten Builds (SLSA Build Level 3), liefert es aus und prüft es danach so, wie es seine Nutzer können, auch jede Woche; wo die Repository-Variable `BETA_CHANNEL` auf true steht, wird außerdem jede Änderung für Nutzer zu einer Beta des nächsten Releases, einem Prerelease für Tester.
+Ein Pull Request mit der nächsten Version, bestimmt aus den Titeln der gemergten Pull Requests (`fix` ein Patch, `feat` ein Minor, `!` ein Major, unter 1.0.0 ein Minor), und dem Text der Fragmente in `changelog.d/` und von *Unreleased* im Changelog als Notes; sein Merge veröffentlicht das Release mit Paket, SBOM und der signierten Provenance eines isolierten Builds (SLSA Build Level 3), liefert es aus und prüft es danach so, wie es seine Nutzer können, auch jede Woche; ein Release, das nur Abhängigkeiten aktualisiert, merged sich einmal am Tag selbst, damit die Updates eines Tages ein Release ergeben, und sofort, wenn es eine Schwachstelle behebt; wo die Repository-Variable `BETA_CHANNEL` auf true steht, wird außerdem jede Änderung für Nutzer zu einer Beta des nächsten Releases, einem Prerelease für Tester.
 
 **Womit:** Release-please, die Release-App, unveränderliche Releases, `verify-release.yml`.
 
@@ -30,7 +30,7 @@ Jedes Release beschreibt in seinen SBOMs, als SPDX und als CycloneDX, was es aus
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-the-sboms-of-a-release-describe.de.dark.svg">
-  <img src="../images/diagrams/what-the-sboms-of-a-release-describe.de.svg" alt="Was die SBOMs eines Releases beschreiben: Der Build entpackt, was das Release ausliefert, in einen eigenen Ordner: das Zip von HACS, das Wheel, das npm-Paket oder die signierte Nextcloud-App, und für eine Action, ein Image oder ein Projekt ohne Paket die Dateien seines Tags ohne die, die das Projekt nur prüfen, testen und dokumentieren. syft, geprüft an seinem sha256, listet die Komponenten, die ein Paket installiert oder die die Quellen deklarieren, unter dem Namen des Repositorys und der Version des Releases, als SPDX und als CycloneDX. Der Build und die Release-Prüfung prüfen, dass beide das Release nennen, und ein Scanner eines Nutzers wendet das OpenVEX-Dokument des Releases auf die SPDX-SBOM an.">
+  <img src="../images/diagrams/what-the-sboms-of-a-release-describe.de.svg" alt="Was die SBOMs eines Releases beschreiben: Der Build entpackt, was das Release ausliefert, in einen eigenen Ordner: das Zip von HACS, das Wheel, das npm-Paket, das Zip der Chrome-Erweiterung oder die signierte Nextcloud-App, und für eine Action, ein Image oder ein Projekt ohne Paket die Dateien seines Tags ohne die, die das Projekt nur prüfen, testen und dokumentieren. syft, geprüft an seinem sha256, listet die Komponenten, die ein Paket installiert oder die die Quellen deklarieren, unter dem Namen des Repositorys und der Version des Releases, als SPDX und als CycloneDX. Der Build und die Release-Prüfung prüfen, dass beide das Release nennen, und ein Scanner eines Nutzers wendet das OpenVEX-Dokument des Releases auf die SPDX-SBOM an.">
 </picture>
 
 Ein Release von paperless-sync, wie GitHub seine Assets zeigt: die signierte App, ihre Signatur, ihre SBOMs als CycloneDX und SPDX, die Provenance ihres Builds mit ihrem Sigstore-Bundle, die Hinweise zu ihren Abhängigkeiten und die Attestation des Releases:
@@ -51,3 +51,9 @@ CodeQL, und für das PHP einer Nextcloud-App die Taint-Analyse von Psalm, die di
 Für eine Nextcloud-App: die Registrierung ihrer ID mit ihrem Zertifikat, einmal, von Hand.
 
 **Womit:** `register-app.yml`.
+
+## Chrome Web Store
+
+Für eine Chrome-Erweiterung: jedes Release kommt in den Chrome Web Store, als das Zip, das das Release bezeugt, nach einer Prüfung seiner Provenance, bei Google angemeldet mit dem OIDC-Token von GitHub und ohne gespeichertes Geheimnis. Ein täglicher Lauf liefert ein Release nach, dessen Prüfung warten musste, und meldet eine Ablehnung oder eine Warnung von Google mit der Lösung.
+
+**Womit:** `publish-store.yml`, `scripts/store-status.mjs`, [die Seite der Art](../kinds/chrome-extension.md).

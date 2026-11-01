@@ -4,7 +4,7 @@ How a change becomes a signed release, and the security checks of every reposito
 
 ## Releases
 
-A pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version, or a minor one while the version is below 1.0.0), and the text of the fragments in `changelog.d/` and of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers.
+A pull request with the next version, decided from the titles of the merged pull requests (`fix` a patch, `feat` a minor, `!` a major version, or a minor one while the version is below 1.0.0), and the text of the fragments in `changelog.d/` and of *Unreleased* in the changelog as its notes; merging it publishes the release with its package, SBOM and the signed provenance of an isolated build (SLSA Build Level 3), delivers it, and then verifies it as its users can, also every week; a release of nothing but dependency updates merges itself once a day, so that the updates of a day make one release, and at once when it fixes a vulnerability; where the repository variable `BETA_CHANNEL` is true, every change for users also becomes a beta of the next release, a prerelease for testers.
 
 **How:** Release-please, the release app, immutable releases, `verify-release.yml`.
 
@@ -30,7 +30,7 @@ Each release describes what it ships in its SBOMs, as SPDX and as CycloneDX: the
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/what-the-sboms-of-a-release-describe.dark.svg">
-  <img src="../images/diagrams/what-the-sboms-of-a-release-describe.svg" alt="What the SBOMs of a release describe: The build unpacks what the release ships into a folder of its own: the zip of HACS, the wheel, the npm package or the signed Nextcloud app, and for an action, an image or a project without a package the files of its tag without those that only check, test and document it. syft, checked by its sha256, lists the components that a package installs, or that the sources declare, under the name of the repository and the version of the release, as SPDX and as CycloneDX. The build and the release verification check that both name the release, and a scanner of a user applies the OpenVEX document of the release to the SPDX SBOM.">
+  <img src="../images/diagrams/what-the-sboms-of-a-release-describe.svg" alt="What the SBOMs of a release describe: The build unpacks what the release ships into a folder of its own: the zip of HACS, the wheel, the npm package, the zip of the Chrome extension or the signed Nextcloud app, and for an action, an image or a project without a package the files of its tag without those that only check, test and document it. syft, checked by its sha256, lists the components that a package installs, or that the sources declare, under the name of the repository and the version of the release, as SPDX and as CycloneDX. The build and the release verification check that both name the release, and a scanner of a user applies the OpenVEX document of the release to the SPDX SBOM.">
 </picture>
 
 A release of paperless-sync, as GitHub shows its assets: the signed app, its signature, its SBOMs as CycloneDX and SPDX, the provenance of its build with its Sigstore bundle, the notices of its dependencies, and the attestation of the release:
@@ -51,3 +51,9 @@ CodeQL, and for the PHP of a Nextcloud app the taint analysis of Psalm, which kn
 For a Nextcloud app: the registration of its id with its certificate, once, by hand.
 
 **How:** `register-app.yml`.
+
+## Chrome Web Store
+
+For a Chrome extension: every release goes to the Chrome Web Store as the zip that the release attests, after a check of its provenance, signed in to Google with the OIDC token of GitHub and no stored secret. A daily run delivers a release whose review had to wait, and reports a rejection or a warning of Google with the fix.
+
+**How:** `publish-store.yml`, `scripts/store-status.mjs`, [the page of the kind](../kinds/chrome-extension.md).
