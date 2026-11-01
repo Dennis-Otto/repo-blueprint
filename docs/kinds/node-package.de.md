@@ -35,7 +35,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 Der Merge des Release-Pull-Requests veröffentlicht das Paket auf npm mit Provenance, per Trusted Publishing aus dem Environment `npm`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3.
 
-Ein Paket, das niemand von npm installiert, etwa ein privates, beantwortet `publish_package` mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data "topics=typescript, nodejs"` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `package.json` eines neuen Repositorys ist `private`, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von npm oder einem `*.tgz`.
+Ein Paket, das niemand von npm installiert, etwa ein privates oder eine Browser-Erweiterung, die man aus einem Zip lädt, beantwortet [`publish_package`](../reference/questions.md#publish_package) mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data "topics=typescript, nodejs"` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `package.json` eines neuen Repositorys ist `private`, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von npm oder einem `*.tgz`.
 
 ## Einmal von Hand
 
@@ -43,7 +43,7 @@ Ein Paket, das niemand von npm installiert, etwa ein privates, beantwortet `publ
 
 Diese Art bringt diese Schritte dazu:
 
-- Den Trusted Publisher auf npm eintragen, mit dem Workflow `release.yml` und dem Environment `npm`: <https://www.npmjs.com/settings/~/packages>.
+- Den Trusted Publisher auf npm eintragen, mit dem Workflow `release.yml` und dem Environment `npm`, außer das Paket antwortet bei `publish_package` mit Nein: <https://www.npmjs.com/settings/~/packages>.
 
 ## Ein echtes Repository
 

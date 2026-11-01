@@ -15,12 +15,17 @@ for this kind of project, without those of the project and without a workflow of
 project alone. reference.py of the blueprint writes the template of the list. The
 blueprint itself has no list, so it gets no notice. The bots that bring these files
 get none either: the blueprint bot's update and the pull requests of the other bots.
+
+One file of the list has lines of the project: an update keeps the text between the two
+marked lines of CONTRIBUTING.md, so a change that stays between them gets no notice.
 """
 
 from __future__ import annotations
 
+import base64
+import re
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -30,6 +35,17 @@ from blueprint.update import BRANCH as UPDATE_BRANCH
 from blueprint.update import SOURCE
 
 LIST = Path(".github/blueprint/owned.txt")
+# The file of the blueprint with a part of the project, and the two lines around that
+# part, as template/CONTRIBUTING.md.jinja writes them.
+PART_FILE = "CONTRIBUTING.md"
+PART_START = (
+    "<!-- The text of this project about its releases starts below this line, "
+    "and every update of the blueprint keeps it. -->"
+)
+PART_END = "<!-- The text of this project about its releases ends above this line. -->"
+# The line of a diff that starts a hunk, with the number of its first line in the new
+# file.
+HUNK = re.compile(r"@@ -\S+ \+(\d+)")
 # The branches of the bots in this repository: the fix bot's bot/self-heal, those of the
 # diagrams and of the pictures. A fork may name a branch the same, and gets the notice.
 BOT_BRANCHES = "bot/"
@@ -56,6 +72,8 @@ INSTEAD = (
     "`scripts/check-site.sh`; their explanations go into "
     "`.github/checks.project.toml`.",
     "**Notes for coding agents** go into `.github/agents.project.md`.",
+    f"**Text about the releases of this project** goes between the two marked lines "
+    f"of `## Releases` in `{PART_FILE}`, which an update keeps.",
     "**A workflow** of this project alone goes into a file of its own in "
     "`.github/workflows/`.",
 )
@@ -87,6 +105,56 @@ def of_the_blueprint(paths: Iterable[str], owned: frozenset[str]) -> list[str]:
     return sorted(set(paths) & owned)
 
 
+def changed_lines(diff: str) -> Iterator[tuple[str, int]]:
+    """Each line that a diff adds or removes: its sign, and its place in the new file,
+    for a removed line that of the line after it."""
+    place = 0
+    for row in diff.split("\n"):
+        if hunk := HUNK.match(row):
+            place = int(hunk[1])
+        elif not place:
+            # The lines above the first hunk, which name the file, and a hunk of a file
+            # that the diff deletes, which leaves no place.
+            continue
+        elif row.startswith("+"):
+            yield "+", place
+            place += 1
+        elif row.startswith("-"):
+            yield "-", place
+        elif row.startswith(" "):
+            place += 1
+
+
+def stays_in_the_part(text: str, diff: str) -> bool:
+    """Whether all that a diff of CONTRIBUTING.md adds or removes lies between its two
+    marked lines, in text, the file as the diff leaves it. A marked line that the diff
+    changes counts as outside, and so does a diff without a line, such as one that
+    GitHub finds too long to show."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if PART_START not in lines or PART_END not in lines:
+        return False
+    start = lines.index(PART_START) + 1
+    end = lines.index(PART_END) + 1
+    changes = list(changed_lines(diff))
+    return bool(changes) and all(
+        start < place < end or (sign == "-" and place == end) for sign, place in changes
+    )
+
+
+def part_on_github(api: Api, repo: str, sha: str, item: Json) -> bool:
+    """Whether the change of a file of a pull request stays in the part of the project,
+    by the file at the head of the pull request. A file that GitHub doesn't give counts
+    as changed: the report then names one file too many."""
+    if item.get("filename") != PART_FILE or item.get("status") != "modified":
+        return False
+    try:
+        answer = api.get(f"repos/{repo}/contents/{PART_FILE}?ref={sha}") or {}
+    except GitHubError:
+        return False
+    text = base64.b64decode(answer.get("content") or "").decode(errors="replace")
+    return stays_in_the_part(text, str(item.get("patch") or ""))
+
+
 def workflow_commands(changed: Sequence[str], fail: bool) -> list[str]:
     """The workflow command for each file, which the files of the pull request show."""
     level = "error" if fail else "notice"
@@ -98,6 +166,16 @@ def workflow_commands(changed: Sequence[str], fail: bool) -> list[str]:
     ]
 
 
+def part_stays(root: Path, diff: str) -> bool:
+    """Whether the diff of CONTRIBUTING.md stays in its part, in the checkout at root,
+    where a pull request may have deleted the file."""
+    try:
+        text = (root / PART_FILE).read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return False
+    return stays_in_the_part(text, diff)
+
+
 def check(
     root: Path,
     listing: bytes,
@@ -107,10 +185,11 @@ def check(
     repo: str,
     author_type: str,
     mode: str,
+    part_diff: str = "",
 ) -> int:
     """The step of the check lint: listing holds the paths that the pull request
-    changes, each ending with a NUL byte, as git diff -z writes them. The exit code
-    fails only in the mode fail."""
+    changes, each ending with a NUL byte, as git diff -z writes them, and part_diff
+    the diff of CONTRIBUTING.md. The exit code fails only in the mode fail."""
     owned = load(root)
     if owned is None:
         print(f"No {LIST.as_posix()} here, so no file belongs to a blueprint.")
@@ -120,6 +199,8 @@ def check(
         return 0
     paths = listing.decode(errors="replace").split("\0")
     changed = of_the_blueprint(paths, owned)
+    if PART_FILE in changed and part_stays(root, part_diff):
+        changed.remove(PART_FILE)
     if not changed:
         print("This pull request changes no file of the blueprint.")
         return 0
@@ -218,7 +299,14 @@ def report_part(
     changed = (
         []
         if exempt(str(head["ref"]), head_repo, repo, author_type)
-        else of_the_blueprint(changed_names(files), owned)
+        else of_the_blueprint(
+            changed_names(
+                item
+                for item in files
+                if not part_on_github(api, repo, str(head["sha"]), item)
+            ),
+            owned,
+        )
     )
     keep_label(api, repo, pull, bool(changed))
     return Part(report_text(repo, changed), news=True) if changed else None

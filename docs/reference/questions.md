@@ -193,7 +193,7 @@ The PHP namespace of the app, under OCA.
 
 Publish the package on the registry of its kind, npm or PyPI, with every release; no for a package that nobody installs from there, such as a private one.
 
-A package goes to the registry of its kind, unless nobody installs it from there, such as a private one that only its releases carry. publish\_to follows this answer, and with it the variable PUBLISH\_TO and every document that speaks of the delivery (decision 0095).
+A package goes to the registry of its kind, unless nobody installs it from there, such as a private one that only its releases carry. publish\_to follows this answer, and with it the variable PUBLISH\_TO and every document that speaks of the delivery (decision 0096).
 
 - **Type:** yes or no
 - **Asked:** only when `project_type in ['node-package', 'python-package']`

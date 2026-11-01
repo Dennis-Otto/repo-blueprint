@@ -141,8 +141,9 @@ ABOUT: dict[str, str] = {
     ),
     "BLUEPRINT_OWNERSHIP": (
         "`fail` makes the check *lint* fail on a pull request of a person that changes"
-        " a file of the blueprint, where it leaves a notice with any other value or"
-        " none. The report of the PR coach says where the change belongs instead."
+        " a file of the blueprint outside the marked lines of `CONTRIBUTING.md`, where"
+        " it leaves a notice with any other value or none. The report of the PR coach"
+        " says where the change belongs instead."
         " Bots stay out of it: the update of the blueprint and the pull requests of"
         " the other bots."
     ),
