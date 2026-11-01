@@ -9,21 +9,20 @@ requests when there is none.
 
 ## [1.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.4.0...v1.5.0) (2026-11-01)
 
-
 ### Features
 
-* check unsigned commits and tell the contributor how to sign them ([#564](https://github.com/Dennis-Otto/repo-blueprint/issues/564)) ([2d8fff6](https://github.com/Dennis-Otto/repo-blueprint/commit/2d8fff6a25f33d1c2d39f45d56f1c4e0d832411c))
-* let the branch bot bring pull requests from forks up to date ([#566](https://github.com/Dennis-Otto/repo-blueprint/issues/566)) ([ff4d0b5](https://github.com/Dennis-Otto/repo-blueprint/commit/ff4d0b58386ec2548441663f2aebbca4cd1f3a61))
-
+- **The branch bot brings pull requests from forks up to date too:** a pull request from a fork takes its place in the line once auto-merge is on and its author allows edits by maintainers, so nobody has to press *Update branch* after every merge. Without that permission, or with a commit that the rules of `main` refuse for its signature, it waits outside the line, and the summary of the run says why. GitHub holds the runs of each new head of a fork for an approval, so such a head leaves its place to the next pull request and isn't updated again until someone approved. The bot approves the runs itself only for a head that it made on top of commits that a person approved, in a pull request that changes nothing that decides what a workflow runs, since nothing new from the fork runs then; each approval is in the summary of the run. The job gets `actions: write` for it and the release app no new right, so an existing repository has nothing to do.
+- **Unsigned commits show before they block a merge:** where the rules of `main` require signed commits, the new check *signed commits* names each commit of a pull request without a verified signature, by its short SHA and the reason that GitHub gives, also from a fork and on every push. The PR coach says first that GitHub blocks the merge and how to sign the commits again, and while they block it, it says neither that every check passed nor what a merge would do to the next release. `CONTRIBUTING.md`, `AGENTS.md`, the template of a pull request and the comment on a first pull request now ask for a signature as well as the sign-off. The check is no required check, so no repository changes its settings for it.
 
 ### Bug fixes
 
-* **release:** explain a failing scripts/release-assets.sh in the run of the release ([#553](https://github.com/Dennis-Otto/repo-blueprint/issues/553)) ([06a2904](https://github.com/Dennis-Otto/repo-blueprint/commit/06a29046a19d20977b0743f6c1681228ee08229a))
-
+- **A failing `scripts/release-assets.sh` explains itself:** when the script of a project failed, wrote no asset or named one as the release names its own, the release stayed a draft and only the log of the run told why. The summary of the run and an annotation now say what failed, why it matters and how to fix it: re-run the failed jobs after a hiccup, or fix the script for the next release, as the build runs at the commit of the release, and delete the old draft by hand.
+- **A new accessibility violation fails the check *docs* again:** for one release the check was only to report, and it had gone on reporting ever since. Now a serious or critical violation fails it. A violation that has to stay goes into the new `.github/a11y-accepted.toml`, a file of the project, with its page, its rule and the reason, and an entry without a reason stops the check. The update brings the file with a line `baseline = true`: the first run on `main` writes what the website has there and passes, so that no repository turns red, and the fix bot brings that in a pull request. A new repository starts without the line. Without the fix bot, for example without the release app, run `node .github/a11y/check.mjs site` after a build and commit the file.
+- **No annotation of the accessibility check lands on the folder `.github`:** a page without a Markdown source, such as one that a hook writes, now has its annotation at `mkdocs.yml`, with the page in its title.
 
 ### Performance
 
-* **docs:** check the accessibility of the pages a pull request changes, and fail on new violations ([#547](https://github.com/Dennis-Otto/repo-blueprint/issues/547)) ([80aae96](https://github.com/Dennis-Otto/repo-blueprint/commit/80aae969f5fa5085262ba75e447138e404ad5e1b))
+- **The check *docs* opens only the pages that a pull request changes:** the accessibility check took about two thirds of a required check in every repository, because it opened every page in two schemes. A push to `main` now keeps a digest of the website in the cache, and a pull request opens only the pages that differ from it, which takes seconds instead of minutes, and none at all when no page differs. It opens every page when there is no digest yet or when a stylesheet, a script, `mkdocs.yml`, the accepted violations or the tools of the check differ, and so do a push to `main` and a new run each week.
 
 ## [1.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.3.0...v1.4.0) (2026-11-01)
 
