@@ -115,8 +115,9 @@ _message_after_copy: |
   [%- if not release_app %]
 
   The checklist starts with the release app of {= owner =}, which opens the release and
-  update pull requests and runs the bots: it registers one with a link that fills in
-  its permissions, and copier update names it in .github/repository.toml.
+  update pull requests and runs the bots: python3 .github/blueprint.py app register
+  registers one, sets its private key and opens the pull request that names it in
+  .github/repository.toml.
   [%- endif %]
 
 # The name and the description stand as they are in a docstring of Python, a comment
@@ -297,7 +298,7 @@ sponsor:
 
 # The GitHub App of the release and update pull requests, whose token starts their
 # checks, signs the release tags and runs the bots. Empty for none yet: the checklist
-# then shows how to register one, and copier update with these answers names it.
+# then points to app register, which registers one and names it in a pull request.
 release_app:
   type: str
   help: >-

@@ -127,11 +127,26 @@ On Windows, create the environment with `py -3 -m venv %USERPROFILE%\.venvs\copi
 
 **What to do:**
 
-1. Register the release app and name it, as the page [Your own account](own-account.md#3-register-the-release-app) shows; the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) then names it.
-2. Install the app on the repository, and set its private key as the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release`: `python3 .github/blueprint.py checklist` prints the command.
+1. Run `python3 .github/blueprint.py app register`, as the page [Your own account](own-account.md#3-register-the-release-app) shows. It registers the release app, sets its private key and opens the pull request that names it, or `app connect --key-file FILE` does so for an app that exists; the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) then names it, and the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release` holds the key.
+2. Install the app on the repository, and merge the pull request.
 3. Start the Release workflow under *Actions → Release → Run workflow*, or merge the next pull request. It updates the release pull request as the app, and its checks start.
 
 When the token of the app fails, as for an app that isn't installed on the repository or a key that doesn't belong to it, the step that asks for the token fails, and the bot-health bot keeps an issue open until a run passes. A pull request whose checks didn't start for another reason starts them when a person closes and reopens it.
+
+## app register doesn't go on
+
+**What you see:** `python3 .github/blueprint.py app register` waits at *confirm the page at*, or ends with *GitHub didn't come back*, *The page was cancelled* or *Refused an answer whose state doesn't belong to this run*.
+
+**Why:** the command waits for GitHub to come back to a server on a free port of `127.0.0.1`, which only this machine reaches, and for ten minutes at most. It sets nothing before that. GitHub sends the browser back only after you press *Create GitHub App*, and the form carries a random state, so an answer without it is refused and the wait goes on.
+
+**What to do:**
+
+- **The page didn't open:** open the address that the command printed, in a browser on the same machine. For a browser on another machine, run with `--no-browser` and forward the port.
+- **GitHub shows a form without the name and the permissions:** the manifest may not have survived a sign-in on the way. Sign in to GitHub first, then run the command again.
+- **The name is taken:** change it on the page of GitHub; the command takes the name that GitHub made.
+- **It says that GitHub made the app on another account:** the browser was signed in as someone other than the owner, and a private app installs only on the account that owns it. Delete that app at the address that the command names, sign in as the owner, and run it again.
+- **GitHub refused the private key:** the app exists and no file holds its key. Make a new key on the settings page of the app and run the `app connect` command that the error shows.
+- **A step of the pull request failed:** the private key is set, and the error lists the commands that are left, starting with the one that failed. Fix its cause and run them.
 
 ## A bot says that it needs the release app
 
@@ -144,7 +159,7 @@ When the token of the app fails, as for an app that isn't installed on the repos
   <img src="images/diagrams/the-check-of-the-release-app.svg" alt="The check of the release app: Before a bot asks for a token of the release app, it checks that the repository names the app in the variable RELEASE_AUTOMATION_CLIENT_ID and has its private key in the environment release. With both, it asks for the token and does its work. Without one, it says in an annotation and in its summary which one is missing and that the checklist sets it up. A bot whose work is what the app does, such as the blueprint bot, the settings bot or Renovate, then fails; one that only helps a pull request along, such as the fix bot or the branch bot, warns and goes on without the token.">
 </picture>
 
-**What to do:** take the steps of the release app that `python3 .github/blueprint.py checklist` shows, as the page [Your own account](own-account.md#3-register-the-release-app) does: register the app and name it, so that the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id) names it, install it on the repository and set its private key as the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release`. The next run of each bot does its work.
+**What to do:** run `python3 .github/blueprint.py app register`, as the page [Your own account](own-account.md#3-register-the-release-app) shows, or `app connect --key-file FILE` for an app that exists. It sets the secret [`RELEASE_AUTOMATION_PRIVATE_KEY`](reference/variables.md#release_automation_private_key) of the environment `release` and opens the pull request that names the app in the variable [`RELEASE_AUTOMATION_CLIENT_ID`](reference/variables.md#release_automation_client_id). Install the app on the repository and merge the pull request; `python3 .github/blueprint.py checklist` shows what is left. The next run of each bot does its work.
 
 ## Renovate opens no updates
 

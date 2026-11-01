@@ -60,6 +60,7 @@ import downstream
 import pins
 import reference
 from blueprint import bootstrap, ownership
+from blueprint.app import App, answered_app
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -1819,8 +1820,19 @@ def test_the_settings_tool_runs_in_every_repository(
     assert result.stdout.startswith("usage: blueprint.py")
     assert "The settings of a repository as code" in result.stdout
     # Every copy brings create and its preflight alone, for the folder that copier
-    # copy wrote.
-    assert ",create,doctor," in result.stdout
+    # copy wrote, and what registers its release app after them.
+    assert ",app,create,doctor," in result.stdout
+    for action in ("register", "connect"):
+        command = subprocess.run(
+            [sys.executable, ".github/blueprint.py", "app", action, "--help"],
+            cwd=project,
+            capture_output=True,
+            encoding="utf-8",
+            env=without_bytecode_prefix(os.environ),
+            check=False,
+        )
+        assert command.returncode == 0, command.stderr
+        assert "--no-update" in command.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
     assert not (project / ".github/blueprint/__pycache__").exists()
 
@@ -6024,6 +6036,17 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
+    # The zip of a Chrome extension, which its users load by hand and the store gets
+    # only after the same check; no other kind verifies its package by the glob ./*.zip.
+    extension = security("chrome-extension")
+    assert (
+        "gh release download vX.Y.Z --repo Dennis-Otto/demo-project --pattern '*.zip'\n"
+        "gh attestation verify ./*.zip --repo Dennis-Otto/demo-project"
+    ) in extension
+    assert "The Chrome Web Store gets exactly this zip" in extension
+    for kind in KINDS:
+        zipped = "gh attestation verify ./*.zip" in security(kind)
+        assert zipped == (kind == "chrome-extension"), kind
     # A project that no registry delivers verifies each asset, those of its own
     # scripts/release-assets.sh too, such as the zip of a browser extension.
     generic = security("generic")
@@ -8841,7 +8864,6 @@ def test_the_settings_bot_asks_for_a_token_with_only_what_it_needs(
         assert not {"owner", "repositories"} & set(token["with"])
     # The token may write what each part of the settings writes with.
     names = {name: key for name, key, _ in RELEASE_APP_PERMISSIONS}
-    names["Variables"] = "actions_variables"
     for part, needed in PERMISSIONS.items():
         for name in needed:
             key = names[name].replace("_", "-")
@@ -8908,7 +8930,9 @@ def test_each_bot_says_that_it_needs_the_release_app(
         f"### {bot[0].upper()}{bot[1:]} needs the release app of the owner\n\n"
         f"{sentence} The release app is a GitHub App of the owner, "
     )
-    assert "`python3 .github/blueprint.py checklist` shows the steps" in done.summary
+    assert (
+        "`python3 .github/blueprint.py app register` registers the app" in done.summary
+    )
     assert done.summary.endswith(
         f" Once they are done, {bot} can {env['TASK']} in its next run.\n"
     )
@@ -8966,10 +8990,10 @@ def test_the_blueprint_bot_says_what_its_release_app_lacks(tmp_path: Path) -> No
         " GitHub App of the owner, whose token may do what the token of a job can't:"
         " start the checks of a pull request, change a workflow and apply the"
         " settings.\n\n"
-        "`python3 .github/blueprint.py checklist` shows the steps: a link that registers"
-        " the app with its permissions filled in, the update of the answers of the"
-        " blueprint that names it in `.github/repository.toml`, the settings and its"
-        " private key. Once they are done, the blueprint bot can push an update and"
+        "`python3 .github/blueprint.py app register` registers the app, sets its private"
+        " key and opens the pull request that names it in `.github/repository.toml`;"
+        " `python3 .github/blueprint.py checklist` shows what is left, such as its"
+        " installation and the settings. Once they are done, the blueprint bot can push an update and"
         " open its pull request in its next run.\n"
     )
 
@@ -9405,7 +9429,8 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
         not in (settings.environments["release"]["secrets"])
     )
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
-    assert "`python3 .github/blueprint.py checklist` shows how to register" in toml
+    assert "`python3 .github/blueprint.py app register` registers one" in toml
+    assert answered_app(project) == App()
     # Renovate runs in the repository itself, and the issue assistant with its AI.
     assert answers["renovate_runner"] == "self"
     assert answers["issue_assistant_ai"] is True
@@ -9641,6 +9666,10 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "https://github.com/apps/octo-org-release-automation" in toml
     assert "maintained by Octo Org" in (project / "GOVERNANCE.md").read_text("utf-8")
+    # app connect reads the answers as Copier writes them, with the App ID as text.
+    assert answered_app(project) == App(
+        "octo-org-release-automation", "Iv23liOcto", "12345"
+    )
 
 
 @pytest.mark.parametrize(
@@ -10286,6 +10315,8 @@ def test_copier_names_what_the_copy_needs_and_the_one_command_after_it(
     assert "gh repo create --" not in after
     # Only an owner without a release app is told that the checklist registers one.
     assert ("The checklist starts with the release app of" in after) is (owner != OWNER)
+    assert ("blueprint.py app register" in after) is (owner != OWNER)
+    assert "a link" not in after
 
 
 def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
@@ -10321,7 +10352,13 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
     for name in ("docs/own-account.md", "docs/own-account.de.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
         found = [match.groupdict() for match in re.finditer(pattern, text)]
-        assert [item["currentValue"] for item in found] == [version] * 4, name
+        assert [item["currentValue"] for item in found] == [version] * 3, name
+    # So does app register, which names the release app with it: one line, for uv and
+    # for pipx.
+    assert '"/^blueprint/app\\\\.py$/"' in renovate
+    text = (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
+    found = [match.groupdict() for match in re.finditer(pattern, text)]
+    assert [item["currentValue"] for item in found] == [version]
 
 
 # The pages of the kinds, in English and in German: the heading of the section of
@@ -17854,12 +17891,14 @@ PACKAGES: dict[str, dict[str, dict[str, str] | None]] = {
         "demo.tar.gz": {"demo/appinfo/info.xml": "<info/>\n"},
         "demo.tar.gz.sig": None,
     },
+    "chrome-web-store": {"demo-1.2.3.zip": {"manifest.json": "{}\n", "lib/sw.js": ""}},
 }
 SHIPPED = {
     "hacs": ["manifest.json", "sensor.py"],
     "pypi": ["demo-1.2.3.dist-info/METADATA", "demo/__init__.py"],
     "npm": ["package/package.json"],
     "nextcloud-appstore": ["demo/appinfo/info.xml"],
+    "chrome-web-store": ["lib/sw.js", "manifest.json"],
 }
 # The tree of the tag of a project that ships its sources, with what only checks,
 # tests and documents it, the tools of the blueprint among them.
@@ -18113,6 +18152,7 @@ def describe_the_release(
         ("pypi", "image"),
         ("npm", "image"),
         ("nextcloud-appstore", "image"),
+        ("chrome-web-store", "image"),
         ("github-action", "directory"),
         ("ghcr", "directory"),
         ("none", "directory"),
@@ -18449,6 +18489,34 @@ def test_the_verification_fails_for_an_asset_of_the_project_without_its_provenan
     assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
     assert (attested in done.summary) is (unattested is None), done.summary
     assert (missing in done.summary) is (unattested is not None), done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("unattested", [None, "demo-extension-1.2.3.zip"])
+def test_the_verification_of_a_chrome_extension_needs_the_provenance_of_its_zip(
+    tmp_path: Path, unattested: str | None
+) -> None:
+    # The whole step: the right manifest in the zip doesn't make up for a zip without
+    # the signed provenance of the isolated build, the one that the store then gets.
+    done = verify_a_hacs_release(
+        tmp_path,
+        publish_to="chrome-web-store",
+        zip_name="demo-extension-1.2.3.zip",
+        zipped={
+            "manifest.json": json.dumps({"manifest_version": 3, "version": "1.2.3"})
+        },
+        unattested=unattested,
+    )
+
+    assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
+    assert (
+        "- ✔ ./demo-extension-1.2.3.zip holds the manifest.json of Manifest V3 and the"
+        " version 1.2.3 at its root"
+    ) in done.summary
+    attested = "demo-extension-1.2.3.zip carries the signed provenance of the isolated"
+    missing = "demo-extension-1.2.3.zip has no valid provenance of the isolated build."
+    assert (f"- ✔ {attested}" in done.summary) is (unattested is None), done.summary
+    assert (f"- ✘ {missing}" in done.summary) is (unattested is not None), done.summary
 
 
 @WITH_JQ
