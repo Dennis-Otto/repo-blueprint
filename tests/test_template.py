@@ -17155,8 +17155,7 @@ def test_the_hook_runs_only_at_the_commit_of_the_release(
         "project-assets",
         "Check that the tag stands at the commit of the release",
         env={"SHA": "abc"},
-        stubs={"git": f"echo {commit}
-"},
+        stubs={"git": f"echo {commit}\n"},
     )
 
     assert (step.returncode == 0) is passes, step.stdout + step.stderr
