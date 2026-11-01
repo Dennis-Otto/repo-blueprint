@@ -44,7 +44,10 @@ name: After the checks
 # .github/checks.project.toml. It works for a pull request from a fork as well, whose
 # own runs can't write to it. The comment follows every push and turns into a short
 # all-clear once every check passes. A check that was cancelled, as a job that ran out
-# of time is, hasn't passed either. It reads the check runs and their annotations from
+# of time is, hasn't passed either, and commits that block the merge, because the rules
+# of its base branch require a verified signature that they lack, allow no all-clear
+# and no word about the merge, also before their check signed commits has ended: the
+# coach asks GitHub for them itself. It reads the check runs and their annotations from
 # the API and shows their text only as code, and waits up to three minutes for the
 # checks of other apps, such as the alerts of code scanning, which end after the last
 # workflow. The scanners, which run in the pull requests that change what they read,

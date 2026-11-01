@@ -11043,7 +11043,7 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     )
     # The token of the job handles the runs of forks, with the one right that takes, so
     # that the release app needs none: the merges of the account that it names are the
-    # ones whose runs the bot may approve (decision 0098).
+    # ones whose runs the bot may approve (decision 0099).
     assert job["permissions"] == {"actions": "write", "contents": "read"}
     bot = next(step for step in job["steps"] if "next-branch" in step.get("run", ""))
     assert bot["env"] == {
@@ -11651,6 +11651,50 @@ def test_a_pull_request_fails_that_runs_an_action_that_the_list_lacks() -> None:
         assert names.index(render) < names.index(name)
 
 
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    workflow = parse(
+        (root / ".github/workflows/pull-request-title.yml").read_text(encoding="utf-8")
+    )
+    # This event needs no approval of a maintainer, also for a fork, and runs the code
+    # of the default branch.
+    assert workflow["on"]["pull_request_target"]["types"] == [
+        "opened",
+        "edited",
+        "reopened",
+        "synchronize",
+    ]
+    job = workflow["jobs"]["signatures"]
+    assert job["name"] == "signed commits"
+    assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
+    [checkout] = steps_using(job, "actions/checkout")
+    assert "ref" not in checkout["with"]
+    assert checkout["with"]["persist-credentials"] is False
+    check = next(
+        step
+        for step in job["steps"]
+        if step.get("name") == "Check the signature of every commit"
+    )
+    assert check["env"]["BASE"] == "${{ github.event.pull_request.base.ref }}"
+    assert 'coach signatures "$NUMBER" --base "$BASE"' in check["run"]
+    # GitHub's own rule blocks the merge: no repository changes its settings for it.
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert "signed commits" not in settings["branch"]["required_checks"]
+    # The coach starts after it, and explains it.
+    assert job["steps"][-1] == explain_step("signed commits")
+    assert Catalog.load(root).check("signed commits")
+    # A contributor learns it before the first push, apart from the sign-off.
+    for name in ("CONTRIBUTING.md", ".github/pull_request_template.md", "AGENTS.md"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "`git commit -s`" in text, name
+        assert "`git commit -S`" in text, name
+
+
 def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
     workflow = (ROOT / ".github/workflows/pull-request-title.yml").read_text(
         encoding="utf-8"
@@ -11661,8 +11705,9 @@ def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
     assert condition_of(step_in(title, "fragments")).startswith("${{ !cancelled() &&")
     # It reads the files of the pull request through the API and sets its labels.
     assert title["permissions"]["pull-requests"] == "write"
-    # One job, which no runner of a job changelog waits beside any more (#447).
-    assert list(parse(workflow)["jobs"]) == ["title"]
+    # One job for both, which no runner of a job changelog waits beside any more
+    # (#447); the signatures of the commits are no part of the required title.
+    assert list(parse(workflow)["jobs"]) == ["title", "signatures"]
 
 
 @pytest.mark.parametrize("kind", KINDS)

@@ -26,7 +26,7 @@ hide:
 
     ---
 
-    `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, on every core in Python projects, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit and the title of every pull request are checked as well. A passing error of a download fails no run: every download tries again.
+    `scripts/check.sh` on every change, the same locally and in the CI: tests with full coverage, on every core in Python projects, types, lint and packaging. The workflows, the license of every file, the Markdown, the sign-off of every commit, the signature of every commit where the rules require one and the title of every pull request are checked as well. A passing error of a download fails no run: every download tries again.
 
 - :material-lightbulb-on-outline:{ .lg .middle } **PR coach**
 

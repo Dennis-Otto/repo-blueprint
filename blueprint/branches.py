@@ -27,7 +27,7 @@ so such a head isn't in flight: it waits for a person and leaves its place to th
 one, and the bot doesn't bring it up to date again until someone has approved, or every
 merge would start its runs anew for nothing. The one exception is a head that the bot
 made itself on top of commits that a person approved: nothing new from the fork runs,
-so the bot approves those runs (decision 0098). Anything unclear means no approval.
+so the bot approves those runs (decision 0099). Anything unclear means no approval.
 """
 
 from __future__ import annotations
@@ -556,7 +556,7 @@ class Line:
         """Why a person has to approve the runs of this head, or nothing when the bot
         may: it made the head itself, a person approved every commit of the pull request
         below it, and the pull request changes nothing that decides what a workflow
-        runs (decision 0098). All of it comes from the API each time, so that a run of
+        runs (decision 0099). All of it comes from the API each time, so that a run of
         the bot needs no memory, and whatever is unclear is a reason."""
         if self.job is None:
             return "only a run of the workflow may approve them"

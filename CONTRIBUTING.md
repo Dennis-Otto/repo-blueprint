@@ -11,6 +11,7 @@ Coding agents find these rules in short in [AGENTS.md](AGENTS.md), with what a c
 
 - Changes need tests, and the checks of `scripts/check.sh` pass.
 - Every commit carries a [Developer Certificate of Origin](https://developercertificate.org/) sign-off, `Signed-off-by: Your Name <you@example.com>`, which `git commit -s` adds.
+- Every commit also has a signature that GitHub verifies, as the rules of `main` require; without one, GitHub blocks the merge, and the check *signed commits* and the PR coach name the commit and how to sign it again. `git commit -S` signs, while `git commit -s` only adds the sign-off, so a commit needs both. To sign every commit with an SSH key, run `git config gpg.format ssh`, `git config user.signingkey ~/.ssh/id_ed25519.pub` and `git config commit.gpgsign true`. The same key goes on your account on GitHub as a *signing key*, and the email of the commit must be verified on your account, as [GitHub's guide](https://docs.github.com/en/authentication/managing-commit-signature-verification) explains.
 - Keep *Allow edits by maintainers* on for a pull request from a fork. Without it the branch bot can't bring the pull request up to date, and a person has to.
 - Name the issue that a pull request fixes with `Fixes #123` in its description. The issue stays open until a release ships the fix and then closes with a link to the release.
 
@@ -44,7 +45,7 @@ A new check runs only where it can change a result, as [decision 0009](docs/deci
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/the-way-of-a-contribution.dark.svg">
-  <img src="docs/images/diagrams/the-way-of-a-contribution.svg" alt="The way of a contribution: An issue first for anything larger, a branch from main, the change with its tests and an entry in a new file of changelog.d, every commit signed off, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.">
+  <img src="docs/images/diagrams/the-way-of-a-contribution.svg" alt="The way of a contribution: An issue first for anything larger, a branch from main, the change with its tests and an entry in a new file of changelog.d, every commit signed off and signed, and a pull request with a Conventional Commit title. Once every required check passes, it is squashed into main, and its title decides the next version.">
 </picture>
 
 1. Open an issue first for anything larger than a small fix, so we can agree on the approach.

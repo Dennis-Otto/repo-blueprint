@@ -1,6 +1,6 @@
 # Bring one pull request at a time up to date, in the order of its auto-merge
 
-- Status: accepted, amended by [0098](0098-the-branch-bot-takes-forks-into-its-line-and-approves-only-its-own-heads.md), which takes pull requests from forks into the line
+- Status: accepted, amended by [0099](0099-the-branch-bot-takes-forks-into-its-line-and-approves-only-its-own-heads.md), which takes pull requests from forks into the line
 - Date: 2026-10-17
 
 ## Context

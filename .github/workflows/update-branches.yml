@@ -25,7 +25,7 @@ name: Update branches
 # for a person and leaves its place to the next one, and the bot doesn't update it again
 # until someone approved. Only a head that the bot made itself, on top of commits that a
 # person approved, gets its runs approved by the bot, in the summary of the run, since
-# nothing new from the fork runs then (decision 0098).
+# nothing new from the fork runs then (decision 0099).
 # The bot checks out main alone, for blueprint.py, which holds the logic, and runs
 # nothing of a pull request. https://github.com/Dennis-Otto/repo-blueprint
 

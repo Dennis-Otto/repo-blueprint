@@ -323,6 +323,8 @@ def test_a_release_without_an_entry_lists_the_title() -> None:
 
     assert part is not None
     assert part.news
+    # It says what the merge does, which a pull request that can't merge doesn't hear.
+    assert part.after_merge
     assert part.text.endswith(
         "\n\nIt adds no entry to the changelog, so the notes of the release list its "
         "title."
@@ -532,7 +534,7 @@ def test_the_website_of_a_pull_request() -> None:
         f"🌐 [The website of this pull request]({link}), as the check *docs* built "
         "it, stays for 7 days: unzip the artifact `website` into a folder, run "
         "`python3 -m http.server --directory website` and open http://localhost:8000."
-        "\n\nThe pages that it changes, at their address after the merge:\n\n"
+        "\n\nThe pages that it changes, at the address each has on the website:\n\n"
         "- [`docs/guide.md`](https://x.example/guide/)\n"
         "- [`docs/guide.de.md`](https://x.example/de/guide/)"
     )

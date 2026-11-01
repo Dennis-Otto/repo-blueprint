@@ -1,0 +1,3 @@
+### Features
+
+- **Unsigned commits show before they block a merge:** where the rules of `main` require signed commits, the new check *signed commits* names each commit of a pull request without a verified signature, by its short SHA and the reason that GitHub gives, also from a fork and on every push. The PR coach says first that GitHub blocks the merge and how to sign the commits again, and while they block it, it says neither that every check passed nor what a merge would do to the next release. `CONTRIBUTING.md`, `AGENTS.md`, the template of a pull request and the comment on a first pull request now ask for a signature as well as the sign-off. The check is no required check, so no repository changes its settings for it.
