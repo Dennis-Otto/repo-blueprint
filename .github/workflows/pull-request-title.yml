@@ -13,7 +13,7 @@ name: Pull request title
 # fails for each commit of the pull request without a signature that GitHub verified,
 # as GitHub then blocks the merge. It stays out of the required checks: GitHub's own
 # rule already blocks that merge, and a required check would change the settings of
-# every repository for nothing (decision 0097).
+# every repository for nothing (decision 0098).
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:

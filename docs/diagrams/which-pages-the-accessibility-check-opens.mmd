@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Which pages the accessibility check opens
+    accDescr: A push to main and the run of each week open every page and keep a digest of the website in the cache. A pull request restores that digest. Without one, or when a stylesheet, a script, mkdocs.yml, the accepted violations or the tools differ, it opens every page, and otherwise only the pages that differ. A serious or critical violation that .github/a11y-accepted.toml doesn't accept fails the check docs.
+
+    main["A push to main, or the run of each week"]
+    pull["A pull request"]
+    restore["Restores the digest of main"]
+    shared{"A digest, and the same stylesheets,<br>scripts, mkdocs.yml, accepted<br>violations and tools?"}
+    every["Opens every page"]
+    digest["Keeps the digest for the pull requests"]
+    changed["Opens only the pages that differ:<br>seconds instead of minutes"]
+    gate{"A serious or critical violation that<br>.github/a11y-accepted.toml doesn't accept?"}
+    fails["The check docs fails, and the PR coach<br>says what it found and how to fix it"]
+    passes["The check docs passes"]
+
+    main --> every
+    every --> digest
+    pull --> restore
+    restore --> shared
+    shared -->|no| every
+    shared -->|yes| changed
+    every --> gate
+    changed --> gate
+    gate -->|yes| fails
+    gate -->|no| passes
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class restore,shared,every,digest,changed,gate bot
+    class main,pull,fails person
+    class passes done
