@@ -146,8 +146,8 @@ def test_the_walkthrough_takes_the_copier_of_the_quick_start(
         for line in commands(read(page))
         if re.search(r"\bcopier (?:copy|update)\b", line)
     ]
-    # Copying, naming the release app, and the two answers to change later.
-    assert len(runs) == 4
+    # Copying, and the two answers to change later: app register names the release app.
+    assert len(runs) == 3
     assert not [line for line in runs if not line.startswith(f"{pinned[1]} ")]
 
 
@@ -158,6 +158,8 @@ def test_the_walkthrough_uses_only_the_tool_of_the_copy(_: str, page: str) -> No
     tool = [line for line in commands(text) if "blueprint.py" in line]
     assert tool == [
         "python3 .github/blueprint.py create",
+        "python3 .github/blueprint.py app register",
+        "python3 .github/blueprint.py app connect --key-file private-key.pem",
         "python3 .github/blueprint.py settings apply",
         "python3 .github/blueprint.py checklist",
     ]
@@ -184,12 +186,26 @@ def test_a_command_that_only_one_shell_takes_comes_for_both(_: str, page: str) -
     assert "Git Bash" in text
     assert "PowerShell" in text
     secrets = [block for block in blocks(text) if "gh secret set" in block]
-    # Each of the two keys, for Git Bash and for PowerShell.
-    assert len(secrets) == 4
-    for key in ("private-key.pem", "settings-private-key.pem"):
-        assert sum(f"< {key}" in block for block in secrets) == 1, key
-        assert sum(f"Get-Content -Raw {key} |" in block for block in secrets) == 1, key
-    assert len(re.findall(r"^ *```powershell$", text, re.MULTILINE)) == 2
+    # The key of the settings app, for Git Bash and for PowerShell; app register and
+    # app connect set the key of the release app in every shell.
+    assert len(secrets) == 2
+    key = "settings-private-key.pem"
+    assert sum(f"< {key}" in block for block in secrets) == 1
+    assert sum(f"Get-Content -Raw {key} |" in block for block in secrets) == 1
+    assert len(re.findall(r"^ *```powershell$", text, re.MULTILINE)) == 1
+
+
+@pytest.mark.parametrize(("_", "page"), WALKTHROUGHS)
+def test_the_walkthrough_keeps_no_step_of_the_old_registration(
+    _: str, page: str
+) -> None:
+    step = read(page).partition("## 3. ")[2].partition("## 4. ")[0]
+    # The values that the owner copied, and the file that stayed in the downloads.
+    lines = commands(step)
+    assert not [line for line in lines if "--data release_app=" in line]
+    assert not [line for line in lines if "gh secret set" in line]
+    assert "*Variables*" not in step
+    assert "python3 .github/blueprint.py app register" in lines
 
 
 def shape(text: str) -> dict[str, list[str]]:

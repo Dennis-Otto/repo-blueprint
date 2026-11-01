@@ -291,7 +291,7 @@ The GitHub Sponsors account of the sponsor button; empty for none.
 
 The GitHub App of the owner that opens the release and update pull requests, by the name in its address (github.com/apps/NAME); empty to register one after the copy, as the checklist shows.
 
-The GitHub App of the release and update pull requests, whose token starts their checks, signs the release tags and runs the bots. Empty for none yet: the checklist then shows how to register one, and copier update with these answers names it.
+The GitHub App of the release and update pull requests, whose token starts their checks, signs the release tags and runs the bots. Empty for none yet: the checklist then points to app register, which registers one and names it in a pull request.
 
 - **Type:** text
 - **Asked:** always
