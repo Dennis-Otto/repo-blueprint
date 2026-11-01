@@ -16,7 +16,7 @@ A dev container for VS Code and GitHub Codespaces with the tools of the checks a
 
 ## Coding agents
 
-The rules of the repository for Claude Code, Codex, GitHub Copilot and Cursor: the commands of the checks and tests of its kind, the titles of pull requests and the versions they make, the changelog, the sign-off, and which files belong to the project and which to the blueprint, a list that a test of the blueprint keeps equal to the files an update never overwrites; the notes of the project join them from a file of its own.
+The rules of the repository for Claude Code, Codex, GitHub Copilot and Cursor: the commands of the checks and tests of its kind, the titles of pull requests and the versions they make, the changelog, the sign-off and the signature, and which files belong to the project and which to the blueprint, a list that a test of the blueprint keeps equal to the files an update never overwrites; the notes of the project join them from a file of its own.
 
 **How:** `AGENTS.md`, `CLAUDE.md`, `.github/agents.project.md`.
 

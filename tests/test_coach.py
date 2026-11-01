@@ -1568,12 +1568,19 @@ def test_the_commits_of_a_repository_without_the_rule_block_nothing() -> None:
     assert not any("/commits?" in path for _, path in github.calls)
 
 
-def test_a_private_repository_on_a_plan_without_rulesets_has_no_rule() -> None:
-    # As GitHub answers for a private repository on the free plan.
+@pytest.mark.parametrize(
+    "answer",
+    [
+        # As GitHub answers for a private repository on the free plan.
+        "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+        "Upgrade to GitHub Team to enable this feature.",
+    ],
+)
+def test_a_private_repository_on_a_plan_without_rulesets_has_no_rule(
+    answer: str,
+) -> None:
     github = green(pull_commit("a", "unsigned"))
-    github.refused = (
-        "Upgrade to GitHub Pro or make this repository public to enable this feature."
-    )
+    github.refused = answer
 
     said = run_report(github)
 

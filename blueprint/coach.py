@@ -107,8 +107,8 @@ SIGNATURE_CHECK = "signed commits"
 SIGNATURE_RULE = "required_signatures"
 SIGNATURE_RUN = 0
 # What GitHub answers for the rules of a private repository on a plan without rulesets,
-# which so has none.
-NO_RULESETS = "upgrade to github pro"
+# which so has none: it names the plan to upgrade to, Pro or Team, by the owner's kind.
+NO_RULESETS = "upgrade to github"
 # The annotation that GitHub adds to every job that fails, which says nothing more.
 GENERIC = re.compile(r"Process completed with exit code \d+\.")
 # What the report shows of a pull request at most: GitHub takes 65536 characters.
