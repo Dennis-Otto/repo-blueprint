@@ -70,6 +70,8 @@ Every file, and each change survives the updates:
 
 So that updates rarely conflict, a project adds its own beside the blueprint's files rather than in them: its settings in `.github/repository.project.toml`, its checks in `scripts/check-project.sh` and `scripts/check-site.sh`, their explanations in `.github/checks.project.toml`, its notes for coding agents in `.github/agents.project.md`, and workflows in files of their own. A fix that every repository needs belongs in the blueprint, whose next release brings it to all of them.
 
+A pull request hears about this when it happens. The check *lint* annotates each changed file of the blueprint, as `.github/blueprint/owned.txt` lists them, and the report of the PR coach names them with the places above, links a new issue in the blueprint filled in with the files and adds the label `blueprint-file`. It stays a notice and fails nothing, since such a change can be right; set the repository variable [`BLUEPRINT_OWNERSHIP`](reference/variables.md#blueprint_ownership) to `fail` to make it a failure. The update of the blueprint and the pull requests of the other bots get no notice.
+
 ## How do I change an answer later?
 
 Run `copier update` with the new answer and commit the update, such as for the topics:

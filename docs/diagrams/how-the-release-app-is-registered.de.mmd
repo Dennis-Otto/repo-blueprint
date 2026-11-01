@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie die Release-App registriert wird
+    accDescr: python3 .github/blueprint.py app register prüft zuerst, was es braucht, und nichts geschieht, solange etwas es aufhalten würde. Ein Formular auf einem freien Port von 127.0.0.1 schickt das Manifest der App an GitHub, und du drückst auf der Seite von GitHub auf Create GitHub App. GitHub kommt zu diesem Port zurück, mit einem Code und dem State des Formulars; ein falscher State wird abgewiesen, und das Warten geht weiter. gh tauscht den Code gegen die App ID, die Client ID und den privaten Schlüssel. gh secret set nimmt den Schlüssel auf seiner Standardeingabe, sodass keine Datei ihn hält, und Copier nennt die App in einem Pull Request. Du installierst die App und mergst den Pull Request, und die Checkliste hakt die App ab.
+
+    start["`**app register**<br>prüft zuerst, was es braucht`"]
+    form["`**Ein Formular auf 127.0.0.1**<br>schickt das Manifest an GitHub`"]
+    you(["Du drückst auf<br>Create GitHub App"])
+    back{"`**GitHub kommt zurück**<br>mit einem Code: Ist sein State<br>der dieses Laufs?`"}
+    refused["Abgewiesen, und<br>das Warten geht weiter"]
+    trade["`**gh api**<br>tauscht den Code gegen die<br>IDs und den privaten Schlüssel`"]
+    key["`**gh secret set**<br>nimmt den Schlüssel über stdin,<br>und keine Datei hält ihn`"]
+    pull["`**copier update**<br>nennt die App<br>in einem Pull Request`"]
+    install(["Du installierst die App und<br>mergst den Pull Request"])
+    done["Die Checkliste hakt<br>die App ab"]
+
+    start --> form --> you --> back
+    back -- nein --> refused --> back
+    back -- ja --> trade --> key --> pull --> install --> done
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class start,form,back,refused,trade,key,pull bot
+    class you,install person
+    class done done

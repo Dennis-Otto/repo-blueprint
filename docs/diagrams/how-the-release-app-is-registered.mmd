@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How the release app is registered
+    accDescr: python3 .github/blueprint.py app register first checks what it needs, and nothing happens while something would stop it. A form on a free port of 127.0.0.1 sends the manifest of the app to GitHub, and you press Create GitHub App on the page of GitHub. GitHub comes back to that port with a code and the state of the form; a wrong state is refused, and the wait goes on. gh trades the code for the App ID, the Client ID and the private key. gh secret set takes the key on its stdin, so no file holds it, and Copier names the app in a pull request. You install the app and merge the pull request, and the checklist ticks the app off.
+
+    start["`**app register**<br>checks first what it needs`"]
+    form["`**A form on 127.0.0.1**<br>sends the manifest to GitHub`"]
+    you(["You press<br>Create GitHub App"])
+    back{"`**GitHub comes back**<br>with a code: is its state<br>the one of this run?`"}
+    refused["Refused, and<br>the wait goes on"]
+    trade["`**gh api**<br>trades the code for the<br>IDs and the private key`"]
+    key["`**gh secret set**<br>takes the key on stdin,<br>and no file holds it`"]
+    pull["`**copier update**<br>names the app<br>in a pull request`"]
+    install(["You install the app and<br>merge the pull request"])
+    done["The checklist ticks<br>the app off"]
+
+    start --> form --> you --> back
+    back -- no --> refused --> back
+    back -- yes --> trade --> key --> pull --> install --> done
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class start,form,back,refused,trade,key,pull bot
+    class you,install person
+    class done done
