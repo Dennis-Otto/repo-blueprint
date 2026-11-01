@@ -416,7 +416,11 @@ it fails again. In a pull request that changes no workflow, no
 action and not `.github/zizmor.yml`, an alert comes from an advisory of an action
 published since the last analysis of `main`: a maintainer starts the workflow
 *Workflow security* on `main`, which gives `main` the alert, and runs the checks
-again. zizmor runs on your machine as well:"""
+again. The fix of such an alert, `known-vulnerable-actions`, is the pin: move the commit
+and the version in its comment to the release that the advisory names as fixed. Renovate
+moves it in its next weekly window once that release is a week old, and a workflow that
+belongs to the blueprint moves with the update of the blueprint. zizmor runs on your
+machine as well:"""
 commands = ["pipx run zizmor .github/workflows"]
 docs = "https://docs.zizmor.sh/audits/"
 autofix = """A weakness of a workflow needs a person, and the bot never writes a
