@@ -738,6 +738,28 @@ docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/up
 autofix = """Whether a release of the issue assistant may reach the blueprint is decided
 by its verification, never by a command of the pull request."""
 
+[check."assets of the project"]
+title = "The assets of the project"
+problem = """`scripts/release-assets.sh` failed in the build of the release, or what runs
+before it, such as `npm ci --ignore-scripts`; or it wrote no asset into the folder of
+its first argument, or one that the release can't ship: a folder, a link, a name that
+GitHub would change, or a name that the release keeps for its own files or its
+registry. An annotation or the log of the job says which."""
+why = """The release stays a draft with its signed tag until each of its assets is built
+and attested, so nobody gets this version, and no registry does either."""
+fix = """When the log shows a hiccup of GitHub or npm, re-run the failed jobs of this run,
+which finishes the draft of a release or of a beta. Otherwise fix the script in a pull
+request with a `fix:` title, which makes a release: the fix ships with the next release,
+as the build runs at the commit of the release. Once that is out, delete the old draft
+by hand with `gh release delete vX.Y.Z --yes`, which keeps the signed tag. The job has no `sudo` and
+no Docker and reaches only GitHub, Node.js and npm, and the summary of Harden-Runner
+names a call that it blocked. Try the script on your machine, after
+`npm ci --ignore-scripts` where the project has a `package.json`:"""
+commands = ['bash scripts/release-assets.sh "$(mktemp -d)" 1.2.3']
+docs = "CONTRIBUTING.md#releases"
+autofix = """What the script builds is for the project to decide, and the build runs at
+a tag that doesn't change, so no command of a pull request repairs this release."""
+
 # ---------------------------------------------------------------- the steps of scripts/check.sh
 
 [step."Text files"]
