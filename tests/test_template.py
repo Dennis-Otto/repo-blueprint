@@ -18002,8 +18002,9 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert node["with"]["node-version-file"] == (
         "${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}"
     )
-    # Without the hook, the job only waits for its hosts and checks out.
-    for step in job["steps"][3:-1]:
+    # Without the hook, the job only waits for its hosts and checks out; after these
+    # steps come the explanation of a failure of the script and the wait for Docker.
+    for step in job["steps"][3:-2]:
         assert HOOK in step["if"], step
     (upload,) = steps_using(job, "actions/upload-artifact")
     assert upload["with"]["if-no-files-found"] == "error"
@@ -18018,6 +18019,12 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert download["if"] == HOOK
     assert download["with"] == {name: upload["with"][name] for name in ("name", "path")}
     assert step_named(assets, "Add the assets of the project")["if"] == HOOK
+    assert step_named(assets, "Add the assets of the project")["id"] == (
+        "add-project-assets"
+    )
+    assert step_named(job, "Build the assets of the project")["id"] == (
+        "build-project-assets"
+    )
     order = [
         "Verify the tag before building",
         "Take the assets of the project",
@@ -18127,6 +18134,81 @@ def test_the_build_stops_at_assets_that_the_release_cannot_ship(
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
+    ("job", "name", "condition"),
+    [
+        # The script, the packages before it or a wrong asset; the other steps of the
+        # job, such as the check of a tag that moved, are no fault of the script, and
+        # without the script this step is skipped, so nothing of it can fail.
+        (
+            "project-assets",
+            "Explain a failure of the script",
+            "failure() && steps.build-project-assets.outcome == 'failure'",
+        ),
+        # A name that the release keeps for itself; the other failures of this job
+        # are no fault of the script.
+        (
+            "assets",
+            "Explain a refused asset of the project",
+            "failure() && steps.add-project-assets.outcome == 'failure'",
+        ),
+    ],
+)
+def test_the_assets_of_a_project_explain_their_failure(
+    projects: dict[str, Path], tmp_path: Path, job: str, name: str, condition: str
+) -> None:
+    # The PR coach of a check that no pull request runs: the summary of the run and an
+    # annotation say what failed and how to fix it, from the catalog of a real project.
+    rendered = projects["node-package"]
+    workspace = tmp_path / "checkout"
+    shutil.copytree(rendered, workspace, ignore=shutil.ignore_patterns(".git"))
+    settings = workflow_steps.step("build-release.yml", job, name, rendered)
+    assert settings["if"] == condition
+    assert settings["env"] == {"CHECK": "assets of the project"}
+
+    step = workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        job,
+        name,
+        env={**settings["env"], "GITHUB_ACTIONS": "true"},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        files={"scripts/release-assets.sh": "exit 3\n"},
+        root=rendered,
+        workspace=workspace,
+    )
+
+    assert step.returncode == 0, step.stdout + step.stderr
+    assert (
+        "::error title=PR coach%3A The assets of the project::`scripts/release-assets.sh`"
+        in step.stdout
+    )
+    assert "The assets of the project" in step.summary
+    assert "scripts/release-assets.sh" in step.summary
+    assert 'bash scripts/release-assets.sh "$(mktemp -d)" 1.2.3' in step.summary
+
+
+def test_the_coach_explains_a_failure_of_the_assets_of_a_project() -> None:
+    entry = Catalog.load(ROOT).check("assets of the project")
+    assert entry is not None
+    # What the steps of the two jobs refuse, and what the job can't reach.
+    for text in ("wrote no asset", "npm ci", "the release keeps for"):
+        assert text in entry.problem
+    assert "stays a draft" in entry.why
+    for text in (
+        "re-run the failed jobs",
+        "`fix:` title",
+        "only GitHub, Node.js and npm",
+        "next release",
+        "gh release delete vX.Y.Z --yes",
+    ):
+        assert text in entry.fix
+    assert entry.docs == "CONTRIBUTING.md#releases"
+    assert entry.manual
+    assert not entry.autofix
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
     ("publish_to", "name", "added"),
     [
         ("none", "demo-extension-1.2.3.zip", True),
@@ -18206,6 +18288,10 @@ def test_contributing_explains_the_assets_that_a_project_builds_itself(
     text = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/release-assets.sh FOLDER VERSION`" in text
     assert "the verification of the release fails for an asset without" in text
+    # When it fails, the run says why, from the catalog of each kind.
+    assert "the job explains in the summary of its run what failed" in text
+    assert "re-run the failed jobs of that run" in text
+    assert Catalog.load(projects[kind]).check("assets of the project") is not None
 
 
 def releases_of(guide: str) -> str:
