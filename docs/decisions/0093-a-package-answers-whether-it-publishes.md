@@ -24,7 +24,7 @@ Option 4, because it can't name a target that doesn't fit the kind and leaves `p
 
 ## Consequences
 
-An existing repository gets the default yes with its next update, and nothing changes for it. One that set `PUBLISH_TO = "none"` itself answers no once, with `copier update --defaults --vcs-ref=:current: --data publish_package=false`, and removes that line.
+An existing repository gets the default yes with its next update, and nothing changes for it. One that set `PUBLISH_TO = "none"` itself answers no once, on the branch of that update, with `copier update --defaults --vcs-ref=:current: --data publish_package=false`, and removes that line. Before that update the command changes nothing and reports nothing, because `:current:` is a release without the question. The topics are a stored answer too, so a repository with the default ones also passes the new topics in a `--data`.
 
 `README.md`, `package.json` and `pyproject.toml` belong to the project, so an update doesn't change them; the changelog says so.
 

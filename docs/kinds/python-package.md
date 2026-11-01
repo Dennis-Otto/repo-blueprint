@@ -35,7 +35,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request builds the package once, publishes it on PyPI by trusted publishing from the environment `pypi`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
 
-A package that nobody installs from PyPI, such as a private one, answers `publish_package` with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `pyproject.toml` of a new repository has the classifier `Private :: Do Not Upload`, which PyPI refuses, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of PyPI or of a `*.whl`.
+A package that nobody installs from PyPI, such as a private one, answers `publish_package` with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data topics=python`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `pyproject.toml` of a new repository has the classifier `Private :: Do Not Upload`, which PyPI refuses, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of PyPI or of a `*.whl`.
 
 ## Once by hand
 

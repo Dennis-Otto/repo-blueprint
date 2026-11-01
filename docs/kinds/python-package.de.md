@@ -35,7 +35,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 Der Merge des Release-Pull-Requests baut das Paket einmal, veröffentlicht es auf PyPI per Trusted Publishing aus dem Environment `pypi`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3.
 
-Ein Paket, das niemand von PyPI installiert, etwa ein privates, beantwortet `publish_package` mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `pyproject.toml` eines neuen Repositorys hat den Classifier `Private :: Do Not Upload`, den PyPI ablehnt, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von PyPI oder einem `*.whl`.
+Ein Paket, das niemand von PyPI installiert, etwa ein privates, beantwortet `publish_package` mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data topics=python` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `pyproject.toml` eines neuen Repositorys hat den Classifier `Private :: Do Not Upload`, den PyPI ablehnt, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von PyPI oder einem `*.whl`.
 
 ## Einmal von Hand
 

@@ -35,7 +35,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request publishes the package on npm with provenance, by trusted publishing from the environment `npm`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
 
-A package that nobody installs from npm, such as a private one, answers `publish_package` with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `package.json` of a new repository is `private`, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of npm or of a `*.tgz`.
+A package that nobody installs from npm, such as a private one, answers `publish_package` with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data "topics=typescript, nodejs"`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `package.json` of a new repository is `private`, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of npm or of a `*.tgz`.
 
 ## Once by hand
 
