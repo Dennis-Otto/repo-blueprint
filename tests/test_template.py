@@ -25,7 +25,7 @@ import time
 import tomllib
 import warnings
 import zipfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple
@@ -33,6 +33,7 @@ from unittest import mock
 from xml.etree import ElementTree
 
 import pathspec
+import preflight
 import pytest
 import workflow_steps
 import yaml
@@ -58,6 +59,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
+from blueprint import bootstrap
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -903,6 +905,124 @@ def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
     assert ("::warning::Harden-Runner still removes Docker" in result.stdout) == (
         busy > 120
     )
+
+
+WARM_UP = "Wait until Harden-Runner lets the hosts through"
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
+    projects: dict[str, Path], project: str
+) -> None:
+    # An address that the runner asked for past Harden-Runner stays in the cache of
+    # systemd-resolved for up to a minute, and Harden-Runner blocks it until then, so
+    # the first step that needs a host would fail (step-security/harden-runner#708).
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            where = f"{name}: {job_id}"
+            steps = job.get("steps") or []
+            hardening = steps_using(job, "step-security/harden-runner")
+            if not hardening or hardening[0]["with"]["egress-policy"] != "block":
+                assert WARM_UP not in [step.get("name") for step in steps], where
+                continue
+            # Before every step that could need a host, and for just the hosts that the
+            # job allows, by the same words, so that they can't drift apart.
+            warm_up = steps[steps.index(hardening[0]) + 1]
+            assert warm_up["name"] == WARM_UP, where
+            allowed = hardening[0]["with"]["allowed-endpoints"]
+            assert warm_up["env"] == {"HOSTS": allowed}, where
+            # Two minutes, and a last try of 5 s for each host, of a job of 5 minutes.
+            assert warm_up["timeout-minutes"] == 4, where
+            scripts.add(warm_up["run"])
+    assert len(scripts) <= 1, scripts
+
+
+def warm_up(
+    tmp_path: Path, blocked: int
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    script = step_named(job_in(workflows(ROOT)["welcome.yml"], "welcome"), WARM_UP)[
+        "run"
+    ]
+    # curl fails the first times that it is asked, and each look at the clock takes 3 s.
+    tries = tmp_path / "tries"
+    tries.write_text("0", encoding="utf-8")
+    clock = tmp_path / "clock"
+    clock.write_text("1000", encoding="utf-8")
+    return run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "curl": (
+                f'n=$(( $(cat "{tries.as_posix()}") + 1 ))\n'
+                f'echo "$n" > "{tries.as_posix()}"\n'
+                f"(( n > {blocked} ))\n"
+            ),
+            "date": (
+                f'now=$(cat "{clock.as_posix()}")\n'
+                f'echo "$((now + 3))" > "{clock.as_posix()}"\n'
+                'echo "$now"\n'
+            ),
+            "sleep": "",
+        },
+        HOSTS="api.github.com:443 *.actions.githubusercontent.com:443 github.com:443",
+    )
+
+
+PROBE = "curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_asks_each_host_once_when_harden_runner_lets_it_through(
+    tmp_path: Path,
+) -> None:
+    result, calls = warm_up(tmp_path, 0)
+
+    assert result.returncode == 0, result.stderr
+    # The wildcard names no host to ask.
+    assert [call for call in calls if call.startswith("curl")] == [
+        f"{PROBE}https://api.github.com/",
+        f"{PROBE}https://github.com/",
+    ]
+    assert not any(call.startswith("sleep") for call in calls)
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_asks_again_until_harden_runner_lets_the_host_through(
+    tmp_path: Path,
+) -> None:
+    result, calls = warm_up(tmp_path, 3)
+
+    assert result.returncode == 0, result.stderr
+    assert calls.count(f"{PROBE}https://api.github.com/") == 4
+    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert calls.count("sleep 3") == 3
+    assert result.stdout.count("Harden-Runner still blocks api.github.com") == 3
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
+    tmp_path: Path,
+) -> None:
+    # A host that doesn't answer may be one that this run doesn't need.
+    result, calls = warm_up(tmp_path, 10_000)
+
+    assert result.returncode == 0, result.stderr
+    # At most 40 tries of 3 s for the first host, and then one for each other host.
+    assert calls.count(f"{PROBE}https://api.github.com/") == 40
+    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert calls.count("sleep 3") == 39
+    for host in ("api.github.com", "github.com"):
+        assert (
+            f"::warning::Harden-Runner still blocks {host} after two minutes"
+            in result.stdout
+        )
 
 
 def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:
@@ -2954,6 +3074,9 @@ def the_ci_steps(project: Path, *steps: Callable[[str], str]) -> str:
     )
 
 
+# In the copy of the mutation tests, the annotations come from the tool of the project,
+# which is the code with the mutants and fails in the process that the step starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_ci_shows_each_finding_of_shellcheck_at_its_line(
     projects: dict[str, Path], tmp_path: Path
@@ -4441,6 +4564,10 @@ def test_every_download_tries_again_after_a_passing_error(
                 # An upload retries only where its API takes a second one without
                 # harm, as the release in the App Store does.
                 if "--request POST" in command:
+                    continue
+                # The warm-up after Harden-Runner downloads nothing: it only asks
+                # whether a host answers, and asks again by itself.
+                if "--head" in command:
                     continue
                 # A request for a status that is an error, such as the 404 of an
                 # address that leads nowhere, tries again only after an error of the
@@ -6499,13 +6626,13 @@ def test_dependabot_merges_as_the_release_app(
     assert len(parse(text)["jobs"]) == 1
     assert not steps_using(job, "actions/checkout")
     # The check of the release app, the explanation of a token that failed and the
-    # merge, besides the wait until Harden-Runner has removed Docker.
+    # merge, besides the waits for Harden-Runner.
     assert (
         len(
             [
                 step
                 for step in job["steps"]
-                if "run" in step and step["name"] != WAIT_FOR_DOCKER
+                if "run" in step and step["name"] not in {WARM_UP, WAIT_FOR_DOCKER}
             ]
         )
         == 3
@@ -10972,10 +11099,11 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     }
     steps = cancelled["steps"]
     assert not any("actions/checkout" in found.get("uses", "") for found in steps)
-    # Every job of the run starts again, so that each of its checks reports.
+    # Every job of a run that lost a race starts again, so that each of its checks
+    # reports; of a run that ran out of time, only the jobs that it cancelled.
     script = workflow_steps.step("after-checks.yml", "cancelled", CANCELLED_STEP)["run"]
-    assert 'gh run rerun "$RUN"\n' in script
-    assert "--failed" not in script
+    assert script.count('gh run rerun "$RUN"\n') == 1
+    assert script.count('gh run rerun "$RUN" --failed 2>&1') == 1
     # The values of the event reach the scripts as variables only.
     assert not any("${{" in found.get("run", "") for found in steps)
 
@@ -10984,7 +11112,16 @@ CANCELLED_STEP = "Run the checks of the head of a pull request or of main again"
 
 
 def run_the_bot_for_cancelled_checks(
-    tmp_path: Path, pull: str, newer: str, message: str, head: str | None = None
+    tmp_path: Path,
+    pull: str,
+    newer: str,
+    message: str,
+    head: str | None = None,
+    *,
+    attempt: int = 1,
+    tests: str = "false",
+    state: str = "completed 1",
+    rerun: Answer | None = None,
 ) -> tuple[list[str], str]:
     # gh answers as the API does, after the filters of jq. With the head of main, the
     # run is one of a push to main.
@@ -11002,7 +11139,7 @@ def run_the_bot_for_cancelled_checks(
                 f"{newer}\n",
             ),
             Answer(
-                r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+",
+                rf"api repos/o/r/actions/runs/5/attempts/{attempt}/jobs --paginate --jq .+",
                 "11\n12\n",
             ),
             Answer(
@@ -11010,11 +11147,14 @@ def run_the_bot_for_cancelled_checks(
                 r" --jq \.\[\]\.message",
                 f"{message}\n",
             ),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", f"{state}\n"),
             exact("run rerun 5"),
+            rerun or exact("run rerun 5 --failed"),
         ],
         env={
             "RUN": "5",
-            "ATTEMPT": "1",
+            "ATTEMPT": str(attempt),
+            "TESTS": tests,
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
@@ -11080,6 +11220,96 @@ def test_the_bot_for_cancelled_checks_starts_the_run_of_the_head_of_main_again(
     assert not any("/pulls" in call for call in calls)
 
 
+OUT_OF_TIME = "The job has exceeded the maximum execution time of 5m0s"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("head", [None, "abc1234def"])
+def test_the_bot_for_cancelled_checks_tries_a_job_that_ran_out_of_time_once_more(
+    tmp_path: Path, head: str | None
+) -> None:
+    # A job can hang behind Harden-Runner until its time limit, even after its last
+    # step, and a required check such as the title of a pull request stays cancelled.
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, head=head
+    )
+
+    place = "#136" if head is None else "main"
+    assert f"A job of CodeQL for the head of {place} ran out of time" in written
+    assert "run rerun 5 --failed" in calls
+    assert "run rerun 5" not in calls
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("attempt", "tests"),
+    [
+        # Once, not again and again.
+        (2, "false"),
+        # The flaky-test bot runs the jobs of the tests again.
+        (1, "true"),
+    ],
+)
+def test_the_bot_for_cancelled_checks_leaves_other_jobs_that_ran_out_of_time(
+    tmp_path: Path, attempt: int, tests: str
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, attempt=attempt, tests=tests
+    )
+
+    assert "it stays cancelled" in written
+    assert not any(call.startswith("run rerun") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("state", ["in_progress 2", "completed 2"])
+def test_the_bot_for_cancelled_checks_leaves_a_run_that_ran_again_already(
+    tmp_path: Path, state: str
+) -> None:
+    # The bot-health bot was first, and its second try still runs or has ended: a third
+    # attempt would break the promise of one more try.
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path, "136", "", OUT_OF_TIME, state=state
+    )
+
+    assert "ran again already" in written
+    assert not any(call.startswith("run rerun") for call in calls)
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_tolerates_losing_the_race_to_another_bot(
+    tmp_path: Path,
+) -> None:
+    calls, written = run_the_bot_for_cancelled_checks(
+        tmp_path,
+        "136",
+        "",
+        OUT_OF_TIME,
+        rerun=exact(
+            "run rerun 5 --failed",
+            code=1,
+            err="run 5 cannot be rerun; it is already running\n",
+        ),
+    )
+
+    assert "run rerun 5 --failed" in calls
+    assert "runs again already" in written
+
+
+def test_the_bot_for_cancelled_checks_knows_the_workflows_of_the_flaky_test_bot() -> (
+    None
+):
+    text = workflows(ROOT)["after-checks.yml"]
+    left = re.search(
+        r"!contains\(fromJSON\('([^']+)'\)", condition_of(job_in(text, "rerun"))
+    )
+    assert left
+    step = step_named(job_in(text, "cancelled"), CANCELLED_STEP)
+    assert step["env"]["TESTS"] == (
+        f"${{{{ !contains(fromJSON('{left[1]}'), github.event.workflow_run.name) }}}}"
+    )
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
     tmp_path: Path,
@@ -11101,6 +11331,7 @@ def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
         env={
             "RUN": "5",
             "ATTEMPT": "1",
+            "TESTS": "false",
             "WORKFLOW": "3",
             "NAME": "CodeQL",
             "SHA": "abc1234def",
@@ -11223,7 +11454,7 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
         condition,
     )
     assert ends
-    assert set(json.loads(ends[1])) == FAILED | {"success"}
+    assert set(json.loads(ends[1])) == FAILED | {"success", "cancelled"}
     assert "github.event_name != 'workflow_run'" in condition_of(job_in(text, "sweep"))
     # One run at a time per workflow, set on the job: a run that skips, for a pull
     # request, never replaces the waiting one for the default branch.
@@ -15670,6 +15901,96 @@ def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> N
     assert "\nWait /\\(Y.n\\)$/\n" in tape
 
 
+def test_the_recording_answers_each_question_that_copier_asks(tmp_path: Path) -> None:
+    # The tape presses one Enter for each question, in the order of copier.yml. A
+    # question without its key keeps Copier waiting while the tape waits for the prompt,
+    # and the recording times out on an empty line; only the run after the next release
+    # showed that test_marker had none (#507). A key in the wrong place waits for what
+    # another question shows. So a new question needs its key in the tape, and Copier
+    # itself says which questions the answers of the tape lead to: those it stores.
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    start = tape.index("\nWait+Screen@60s /The name of the project/\n")
+    keys = tape[start : tape.index("\nWait@60s /^\\$$/\n")].split("\nEnter\n")
+    # What follows the last key waits for the prompt.
+    keys.pop()
+    typed = re.findall(r'^Type "(.+)"$', "\n".join(keys), flags=re.MULTILINE)
+    assert len(typed) == 3
+    down = re.search(r"^Down@\S+ (\d+)$", "\n".join(keys), flags=re.MULTILINE)
+    assert down
+    kind = list(copier["project_type"]["choices"].values())[int(down[1])]
+    # The tape says that it copies a Python package, which asks for python_package.
+    assert kind == "python-package"
+    project = render(
+        tmp_path,
+        project_name=typed[0],
+        description=typed[1],
+        owner=typed[2],
+        project_type=kind,
+    )
+    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    asked = [name for name in copier if name in answers]
+    assert len(keys) == len(asked), (
+        f"The tape has {len(keys)} keys, Copier asks {len(asked)} questions: {asked}"
+    )
+    # Each key waits only for what its question shows: its help, or the line of the
+    # cursor, which holds its default, the help of a choice or (Y/n).
+    for name, key in zip(asked, keys, strict=True):
+        question = copier[name]
+        if question.get("multiselect"):
+            cursor = "(Use arrow keys to move, <space> to select, <i> to invert)"
+        elif "choices" in question:
+            cursor = "(Use arrow keys)"
+        elif question["type"] == "bool":
+            cursor = "(Y/n)" if answers[name] else "(y/N)"
+        else:
+            cursor = str(answers[name])
+        waits = re.findall(r"^Wait\S* /(.+)/$", key, flags=re.MULTILINE)
+        for wait in waits:
+            assert re.search(wait, question["help"]) or re.search(wait, cursor), (
+                f"The key of {name} waits for /{wait}/"
+            )
+
+
+def test_the_dry_run_of_the_recording_passes_the_preflight(tmp_path: Path) -> None:
+    # The recording ends with create --dry-run, which shows its commands only after a
+    # preflight that nothing stops. Without a Git identity and a signed-in GitHub CLI,
+    # which a recording without secrets lacks, it would end on the marks of the problems
+    # and not on the commands that the README describes, so the image brings both (#507).
+    tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
+    command = "cd paperless-sync && python3 .github/blueprint.py create --dry-run"
+    assert f'\nType "{command}"\n' in tape
+    image = (ROOT / ".github/docs-pictures/Dockerfile").read_text(encoding="utf-8")
+    assert "\nCOPY --chmod=755 .github/docs-pictures/gh.sh /usr/local/bin/gh\n" in image
+    assert 'git config --system user.name "' in image
+    assert 'git config --system user.email "' in image
+    repo = "Dennis-Otto/paperless-sync"
+    gh = (ROOT / ".github/docs-pictures/gh.sh").as_posix()
+    bash = BASH
+    assert bash
+
+    def run(arguments: Sequence[str], folder: Path) -> subprocess.CompletedProcess[str]:
+        if arguments[0] == "gh":
+            return subprocess.run(
+                [bash, gh, *arguments[1:]],
+                cwd=folder,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(
+            arguments, 0, preflight.answers(repo)[" ".join(arguments)][1], ""
+        )
+
+    findings, plan = bootstrap.preflight(tmp_path, repo, run, (3, 13))
+    shown = bootstrap.describe(repo, findings)
+    assert all(finding.ok is True for finding in findings), shown
+    assert f"{repo} is free on GitHub" in shown
+    assert "gh is signed in to github.com as Dennis-Otto" in shown
+    assert plan.commits
+    assert not plan.resume
+
+
 def test_the_tools_of_the_website_install_on_windows() -> None:
     # The plugin for the dates requires tzdata on Windows alone. pip-compile on Linux
     # left it out of the lock, and with --require-hashes pip refused all of it there.
@@ -16683,14 +17004,45 @@ def test_a_release_is_built_in_isolation() -> None:
     assert job_in(build, "assets")["environment"]["name"] == "release"
 
 
-def test_a_release_left_as_a_draft_is_finished_by_hand() -> None:
+def test_a_release_left_as_a_draft_is_finished_by_hand_or_by_a_second_try() -> None:
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "release-please")
     step = step_in(job, "resume")
-    assert "github.event_name == 'workflow_dispatch'" in condition_of(step)
+    # A job that hung after it created the release gets a second try, in which
+    # release-please has nothing left to create; without this it would end green.
+    assert condition_of(step) == (
+        "(github.event_name == 'workflow_dispatch' || github.run_attempt > 1)"
+        " && steps.release.outputs.release_created != 'true'"
+    )
     assert "--json isDraft" in step["run"]
     for output in ("created", "tag", "sha", "version", "major"):
         assert "steps.resume.outputs." in job["outputs"][output], output
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_a_second_try_of_a_release_takes_up_its_draft(tmp_path: Path) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "release.yml",
+        "release-please",
+        "Take up a release that an earlier run left as a draft",
+        answers=[
+            Answer(
+                r"release view v1\.2\.3 --repo o/r --json isDraft --jq \.isDraft",
+                "true\n",
+            ),
+            Answer(r"api repos/o/r/commits\?path=.+ --jq .+", "abc1234def\n"),
+        ],
+        env={"GITHUB_SHA": "fed4321cba"},
+        # The version in the manifest, as jq reads it, also on a machine without jq.
+        stubs={"jq": "echo 1.2.3"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.outputs["tag"] == "v1.2.3"
+    assert done.outputs["sha"] == "abc1234def"
+    assert done.outputs["version"] == "1.2.3"
+    assert done.outputs["major"] == "1"
 
 
 # What each kind of release ships, which its SBOMs describe: the files of its package,

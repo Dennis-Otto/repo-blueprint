@@ -136,7 +136,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 
 - **Fix bot:** A check that fails fixes what a command can fix, such as the format of the code, and commits it onto the branch.
 - **Flaky tests:** Failed test jobs run once more, and a job that passes then is reported in one issue.
-- **Cancelled checks:** A required check that a late run for an older commit cancelled starts again by itself.
+- **Cancelled checks:** A required check that a late run or its time limit cancelled starts again by itself.
 - **Failed releases:** The release of a merge that fails for a moment runs its failed jobs once more.
 - **Bot health:** A bot that fails on `main` tries once more where that can help, and otherwise keeps one issue per workflow open, unless the workflow keeps its own.
 
