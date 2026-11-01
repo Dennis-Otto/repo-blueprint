@@ -203,18 +203,27 @@ def render(tree: Path, answers: Answers, folder: Path) -> Files:
     """The project with these answers from the copy of the blueprint in tree, in a
     folder of the name that the job gives it. Without --trust: it runs no code."""
     project = folder / "variant"
-    run(
-        tree,
-        sys.executable,
-        "-m",
-        "copier",
-        "copy",
-        "--quiet",
-        "--defaults",
-        *answers,
-        tree.as_posix(),
-        project.as_posix(),
-    )
+    try:
+        run(
+            tree,
+            sys.executable,
+            "-m",
+            "copier",
+            "copy",
+            "--quiet",
+            "--defaults",
+            *answers,
+            tree.as_posix(),
+            project.as_posix(),
+        )
+    except Failed as error:
+        # The last line of Copier's error names neither: the log has to place it.
+        names = [
+            answer
+            for answer in answers
+            if answer.endswith(".yml") or answer.startswith("project_type=")
+        ]
+        raise Failed(f"{names[0]} from the {tree.name} commit: {error}") from error
     return files_of(project)
 
 

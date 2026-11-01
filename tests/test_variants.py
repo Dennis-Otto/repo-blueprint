@@ -349,6 +349,7 @@ def test_a_project_that_fails_to_render_runs_every_leg(
     assert running(decisions) == list(EVERY)
     why = decisions["update (generic)"].why
     assert why.startswith("a project failed to render, so nothing shows which legs")
+    assert f"project_type=home-assistant from the {broken} commit: " in why
     assert f"::warning title=Variants plan::Every leg runs: {why}\n" in (
         capsys.readouterr().out
     )

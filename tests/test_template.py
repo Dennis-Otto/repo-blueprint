@@ -11029,13 +11029,31 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     assert "often hours late" in text
     job = job_in(text, "update")
     condition = condition_of(job)
-    assert "github.event.pull_request.head.repo.full_name == github.repository" in (
-        condition
+    # A pull request from a fork takes its place in the line, and its failed checks move
+    # the line on as well: the bot only reads them from the API. Only those that a person
+    # approved: GitHub holds no check of a fork on pull_request_target, so an edit of a
+    # title every few seconds could keep cancelling the bot.
+    assert "head.repo.full_name" not in condition
+    assert (
+        "(github.event.workflow_run.head_repository.full_name == github.repository || "
+        "github.event.workflow_run.event == 'pull_request')" in condition
     )
     assert (
         "github.event.pull_request.base.ref == github.event.repository.default_branch"
         in condition
     )
+    # The token of the job handles the runs of forks, with the one right that takes, so
+    # that the release app needs none: the merges of the account that it names are the
+    # ones whose runs the bot may approve (decision 0099).
+    assert job["permissions"] == {"actions": "write", "contents": "read"}
+    bot = next(step for step in job["steps"] if "next-branch" in step.get("run", ""))
+    assert bot["env"] == {
+        "GH_TOKEN": "${{ steps.app.outputs.token }}",
+        "ACTIONS_TOKEN": "${{ github.token }}",
+        "BOT_ACCOUNT": "${{ steps.app.outputs.app-slug }}[bot]",
+    }
+    assert "actions" not in app_permissions(job)
+    assert "workflow_dispatch" in events
     # The title's check runs on pull_request_target.
     assert (
         """contains(fromJSON('["pull_request", "pull_request_target"]'), """

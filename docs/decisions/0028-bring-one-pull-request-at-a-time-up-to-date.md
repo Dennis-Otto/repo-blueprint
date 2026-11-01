@@ -1,6 +1,6 @@
 # Bring one pull request at a time up to date, in the order of its auto-merge
 
-- Status: accepted
+- Status: accepted, amended by [0099](0099-the-branch-bot-takes-forks-into-its-line-and-approves-only-its-own-heads.md), which takes pull requests from forks into the line
 - Date: 2026-10-17
 
 ## Context
@@ -30,7 +30,7 @@ Option 3, with the logic in `blueprint.py next-branch` (`blueprint/branches.py`)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-line-of-the-branch-bot.dark.svg">
-  <img src="../images/diagrams/the-line-of-the-branch-bot.svg" alt="The line of the branch bot: A merge into main, auto-merge turned on or off, or a required check of a pull request that fails starts the branch bot. It takes the pull requests that wait for auto-merge in the order in which it was turned on. One that conflicts with main gets the label merge-conflict and one comment. While the checks of one that is up to date run, the others wait in line. Otherwise one whose required check failed waits for a fix, and the bot brings the first other one that is behind up to date, as the release app. Its checks run, and once they pass it merges, which starts the bot again for the next one.">
+  <img src="../images/diagrams/the-line-of-the-branch-bot.svg" alt="The line of the branch bot: A merge into main, auto-merge turned on or off, or a required check of a pull request that fails starts the branch bot. It takes the pull requests that wait for auto-merge in the order in which it was turned on. One that conflicts with main gets the label merge-conflict and one comment. One from a fork stays out of the line while its author allows no edits by maintainers, a commit of it has no verified signature, or its runs wait for a person; the bot approves them only for a head that it made itself on top of commits that a person approved. While the checks of one that is up to date run, the others wait in line. Otherwise one whose required check failed waits for a fix, and the bot brings the first other one that is behind up to date, as the release app. Its checks run, and once they pass it merges, which starts the bot again for the next one.">
 </picture>
 
 ## Consequences

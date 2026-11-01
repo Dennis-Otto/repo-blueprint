@@ -5,10 +5,10 @@ config:
 ---
 flowchart TB
     accTitle: Wie eine Änderung der Vorlage die Repositories vor ihrem Release trifft
-    accDescr: Ein Pull Request ändert, was die Repositories vom Blueprint bekommen. Der Variants-Workflow erzeugt ein neues Repository jeder Art, bringt eines jeder Art vom letzten Release auf den Stand und eines mit den Antworten jedes Repositorys aus tests/answers, das jede Datei so bekommen muss wie ein neues Repository mit diesen Antworten und den Bau seiner Website und den Lint seiner Workflows und seines Markdowns bestehen muss. Der Downstream-Workflow klont jedes Repository und aktualisiert es wie sein Blueprint-Bot, auf main und auf den Pull Request, und nennt die Dateien, deren Update der Pull Request ändert, und jeden Konflikt; ein Konflikt, den der Pull Request in einen Workflow oder ein Skript bringt, lässt ihn scheitern. Dann wird der Pull Request gemergt, und das Release und der Rollout bringen ihn in jedes Repository.
+    accDescr: Ein Pull Request ändert, was die Repositories vom Blueprint bekommen. Der Variants-Workflow erzeugt ein neues Repository jeder Art, deren Dateien der Pull Request ändert, bringt jeweils eines davon vom letzten Release auf den Stand und eines mit den Antworten jedes Repositorys aus tests/answers, dessen Dateien er ändert, das jede Datei so bekommen muss wie ein neues Repository mit diesen Antworten und den Bau seiner Website und den Lint seiner Workflows und seines Markdowns bestehen muss. Der Downstream-Workflow klont jedes Repository und aktualisiert es wie sein Blueprint-Bot, auf main und auf den Pull Request, und nennt die Dateien, deren Update der Pull Request ändert, und jeden Konflikt; ein Konflikt, den der Pull Request in einen Workflow oder ein Skript bringt, lässt ihn scheitern. Dann wird der Pull Request gemergt, und das Release und der Rollout bringen ihn in jedes Repository.
 
     change(["Ein Pull Request ändert die Vorlage"])
-    variants["Variants: ein neues Repository jeder Art,<br>eines vom letzten Release aktualisiert<br>und eines mit den Antworten jedes Repositorys<br>aus tests/answers/"]
+    variants["Variants: für jede Art, deren Dateien er ändert,<br>ein neues Repository und eines vom letzten Release aktualisiert,<br>und eines mit den Antworten jedes Repositorys<br>aus tests/answers/, dessen Dateien er ändert"]
     downstream["Downstream: jedes Repository geklont<br>und wie von seinem Blueprint-Bot aktualisiert,<br>auf main und auf den Pull Request"]
     summary["Die Zusammenfassung: die Dateien, deren Update<br>der Pull Request ändert, und jeder Konflikt"]
     conflict{"Ein Konflikt, den der Pull Request<br>in einen Workflow oder ein Skript bringt?"}
@@ -20,7 +20,7 @@ flowchart TB
     downstream --> summary --> conflict
     conflict -- "ja: die Prüfung scheitert" --> fix --> change
     conflict -- "nein" --> merge
-    variants -- "jede Variante besteht" --> merge
+    variants -- "jede laufende Variante besteht" --> merge
     merge --> rollout
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px

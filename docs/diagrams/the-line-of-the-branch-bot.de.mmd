@@ -5,11 +5,12 @@ config:
 ---
 flowchart TB
     accTitle: Die Reihe des Branch-Bots
-    accDescr: Ein Merge in main, ein an- oder ausgeschaltetes Auto-Merge oder eine vorgeschriebene Prüfung eines Pull Requests, die scheitert, startet den Branch-Bot. Er nimmt die Pull Requests, die auf Auto-Merge warten, in der Reihenfolge, in der es angeschaltet wurde. Einer mit Konflikten zu main bekommt das Label merge-conflict und einen Kommentar. Solange die Prüfungen eines aktuellen laufen, warten die anderen in der Reihe. Sonst wartet einer, dessen vorgeschriebene Prüfung gescheitert ist, auf eine Korrektur, und der Bot bringt den ersten anderen, der zurückliegt, als Release-App auf den neuesten Stand. Seine Prüfungen laufen, und sobald sie grün sind, merged er, was den Bot für den nächsten erneut startet.
+    accDescr: Ein Merge in main, ein an- oder ausgeschaltetes Auto-Merge oder eine vorgeschriebene Prüfung eines Pull Requests, die scheitert, startet den Branch-Bot. Er nimmt die Pull Requests, die auf Auto-Merge warten, in der Reihenfolge, in der es angeschaltet wurde. Einer mit Konflikten zu main bekommt das Label merge-conflict und einen Kommentar. Einer aus einem Fork bleibt außerhalb der Reihe, solange sein Autor keine Änderungen durch Maintainer erlaubt, ein Commit keine geprüfte Signatur hat oder seine Läufe auf eine Person warten; der Bot gibt sie nur für einen Stand frei, den er selbst auf Commits gemacht hat, die eine Person freigegeben hat. Solange die Prüfungen eines aktuellen laufen, warten die anderen in der Reihe. Sonst wartet einer, dessen vorgeschriebene Prüfung gescheitert ist, auf eine Korrektur, und der Bot bringt den ersten anderen, der zurückliegt, als Release-App auf den neuesten Stand. Seine Prüfungen laufen, und sobald sie grün sind, merged er, was den Bot für den nächsten erneut startet.
 
     start["Ein Merge in main · Auto-Merge an oder aus<br>eine vorgeschriebene Prüfung scheitert<br>der Zeitplan"]
     line["Die Pull Requests, die auf Auto-Merge warten,<br>in der Reihenfolge, in der es angeschaltet wurde"]
     conflict["Jeder mit Konflikten zu main bekommt<br>das Label merge-conflict und einen Kommentar"]
+    fork["Einer aus einem Fork bleibt draußen, solange er<br>nichts erlaubt, die Signatur fehlt oder er auf<br>eine Person wartet; der Bot gibt nur einen<br>Stand frei, den er selbst gemacht hat"]
     flight["Solange einer, der aktuell ist, seine Prüfungen<br>laufen lässt, warten die anderen in der Reihe"]
     failed["Sonst wartet einer, dessen vorgeschriebene<br>Prüfung gescheitert ist, auf eine Korrektur<br>und macht Platz"]
     update["Der erste andere, der zurückliegt, kommt<br>als Release-App auf den neuesten Stand"]
@@ -17,7 +18,8 @@ flowchart TB
 
     start --> line
     line --> conflict
-    conflict --> flight
+    conflict --> fork
+    fork --> flight
     flight --> failed
     failed --> update
     update --> merge
@@ -26,5 +28,5 @@ flowchart TB
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     class line,flight,update bot
-    class conflict,failed person
+    class conflict,fork,failed person
     class merge done
