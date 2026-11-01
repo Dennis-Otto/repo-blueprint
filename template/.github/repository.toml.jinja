@@ -132,8 +132,8 @@ RELEASE_AUTOMATION_CLIENT_ID = "{= release_app_client_id =}"
 RELEASE_AUTOMATION_APP_ID = "{= release_app_id =}"
 [%- else %]
 # No release app yet, which opens the release pull requests, signs the release tags
-# and runs the bots: `python3 .github/blueprint.py checklist` shows how to register
-# one, and `copier update` with its answers names it here.
+# and runs the bots: `python3 .github/blueprint.py app register` registers one, sets
+# its private key and opens the pull request that names it here.
 [%- endif %]
 # Whether the issue assistant analyzes each new issue with its AI engine, by the
 # answer issue_assistant_ai of the blueprint. "off" labels the issues and answers

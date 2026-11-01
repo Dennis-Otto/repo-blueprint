@@ -3585,20 +3585,9 @@ def without_release_app(root: Path) -> Settings:
     return Settings.load(path)
 
 
-@pytest.mark.parametrize(
-    ("account", "page"),
-    [
-        ("User", "https://github.com/settings/apps/new"),
-        (
-            "Organization",
-            "https://github.com/organizations/Dennis-Otto/settings/apps/new",
-        ),
-    ],
-)
-def test_the_checklist_registers_a_release_app_of_the_owner(
-    github: FakeGitHub, root: Path, account: str, page: str
+def test_the_checklist_names_the_command_that_registers_a_release_app(
+    github: FakeGitHub, root: Path
 ) -> None:
-    github.account = account
     settings = without_release_app(root)
     assert "RELEASE_AUTOMATION_CLIENT_ID" not in settings.variables
 
@@ -3611,47 +3600,24 @@ def test_the_checklist_registers_a_release_app_of_the_owner(
     )
     assert registered.done is False
     lines = registered.how.splitlines()
-    link = urllib.parse.urlsplit(lines[1])
-    assert f"{link.scheme}://{link.netloc}{link.path}" == page
-    query = dict(urllib.parse.parse_qsl(link.query, strict_parsing=True))
-    # The name is the owner's, never that of the blueprint owner's app on its own.
-    assert query.pop("name") == "dennis-otto-release-automation"
-    assert query.pop("url") == "https://github.com/Dennis-Otto"
-    assert "Repo Blueprint" in query.pop("description")
-    # Only for the account of the owner, which has the private key, and no webhook.
-    assert query.pop("public") == "false"
-    assert query.pop("webhook_active") == "false"
-    assert query == {
-        "actions": "write",
-        "administration": "write",
-        "checks": "write",
-        "statuses": "write",
-        "contents": "write",
-        "issues": "write",
-        "pages": "write",
-        "pull_requests": "write",
-        "workflows": "write",
-        "vulnerability_alerts": "write",
-        "environments": "read",
-        "secrets": "read",
-    }
+    assert lines[1] == "python3 .github/blueprint.py app register"
     assert lines[2] == (
-        "It needs read and write access to Actions, Administration, Checks, Commit"
+        "The app gets read and write access to Actions, Administration, Checks, Commit"
         " statuses, Contents, Dependabot alerts, Issues, Pages, Pull requests,"
-        " Variables and Workflows, and read access to Environments and Secrets; set"
-        " Variables by hand, which the link can't fill in."
+        " Variables and Workflows, read access to Environments and Secrets, and no"
+        " webhook. For an app that exists, such as for a further repository:"
+        " python3 .github/blueprint.py app connect --key-file FILE"
     )
-    assert lines[-1] == (
-        "copier update --defaults --vcs-ref=:current: --data release_app=NAME"
-        " --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID"
-    )
+    # Neither the long link nor a value to copy by hand.
+    assert "settings/apps/new" not in registered.how
+    assert "copier update" not in registered.how
     installed = next(
         step for step in steps if step.text.endswith("installed on the repository")
     )
     assert installed.how == (
         "Install App on the settings page of the app, for this repository"
     )
-    assert ("GET", "users/Dennis-Otto") in github.calls
+    assert installed.done is None
 
 
 @pytest.mark.parametrize(
@@ -3673,9 +3639,11 @@ def test_the_suggested_release_app_name_fits_the_limit_of_github(
 
 
 def test_the_template_asks_for_the_copier_that_knows_the_current_ref() -> None:
-    # `--vcs-ref=:current:`, which the checklist and the READMEs name, came with 9.8.
+    # `--vcs-ref=:current:`, which app register, the checklist and the READMEs name,
+    # came with 9.8.
     command = "--vcs-ref=:current:"
     assert command in (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
+    assert command in (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
     copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
     minimum = re.search(r'^_min_copier_version: "(\d+)\.(\d+)"$', copier, re.M)
     assert minimum is not None
@@ -3862,11 +3830,7 @@ def test_the_checklist_links_the_mend_app_and_the_author_it_takes_for_its_own(
 
 
 def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:
-    granted = {key: access for _, key, access in RELEASE_APP_PERMISSIONS if key}
-    # The link that registers the app has no name for Variables; GitHub's token has.
-    granted["actions_variables"] = next(
-        access for name, _, access in RELEASE_APP_PERMISSIONS if name == "Variables"
-    )
+    granted = {key: access for _, key, access in RELEASE_APP_PERMISSIONS}
     rank = {"read": 1, "write": 2}
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         text = path.read_text(encoding="utf-8")

@@ -28,6 +28,7 @@
         "/^README(\\.de)?\\.md$/",
         "/^docs/kinds/[a-z-]+(\\.de)?\\.md$/",
         "/^docs/own-account(\\.de)?\\.md$/",
+        "/^blueprint/app\\.py$/",
       ],
       matchStrings: [
         "(?<depName>copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+) copier (?:copy|update)",

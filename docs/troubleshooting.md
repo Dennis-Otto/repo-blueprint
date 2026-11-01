@@ -133,6 +133,21 @@ On Windows, create the environment with `py -3 -m venv %USERPROFILE%\.venvs\copi
 
 When the token of the app fails, as for an app that isn't installed on the repository or a key that doesn't belong to it, the step that asks for the token fails, and the bot-health bot keeps an issue open until a run passes. A pull request whose checks didn't start for another reason starts them when a person closes and reopens it.
 
+## app register doesn't go on
+
+**What you see:** `python3 .github/blueprint.py app register` waits at *confirm the page at*, or ends with *GitHub didn't come back*, *The page was cancelled* or *Refused an answer whose state doesn't belong to this run*.
+
+**Why:** the command waits for GitHub to come back to a server on a free port of `127.0.0.1`, which only this machine reaches, and for ten minutes at most. It sets nothing before that. GitHub sends the browser back only after you press *Create GitHub App*, and the form carries a random state, so an answer without it is refused and the wait goes on.
+
+**What to do:**
+
+- **The page didn't open:** open the address that the command printed, in a browser on the same machine. For a browser on another machine, run with `--no-browser` and forward the port.
+- **GitHub shows a form without the name and the permissions:** the manifest may not have survived a sign-in on the way. Sign in to GitHub first, then run the command again.
+- **The name is taken:** change it on the page of GitHub; the command takes the name that GitHub made.
+- **It says that GitHub made the app on another account:** the browser was signed in as someone other than the owner, and a private app installs only on the account that owns it. Delete that app at the address that the command names, sign in as the owner, and run it again.
+- **GitHub refused the private key:** the app exists and no file holds its key. Make a new key on the settings page of the app and run the `app connect` command that the error shows.
+- **A step of the pull request failed:** the private key is set, and the error lists the commands that are left, starting with the one that failed. Fix its cause and run them.
+
 ## A bot says that it needs the release app
 
 **What you see:** a run of a bot, such as Settings, the blueprint bot, the branch bot or the fix bot, shows the annotation *This repository names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID* or *has no private key of its release app*, and its summary starts with *… needs the release app of the owner*.

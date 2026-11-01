@@ -133,6 +133,21 @@ Unter Windows legst du die Umgebung mit `py -3 -m venv %USERPROFILE%\.venvs\copi
 
 Scheitert das Token der App, etwa bei einer App, die im Repository nicht installiert ist, oder einem Schlüssel, der nicht zu ihr gehört, scheitert der Schritt, der das Token anfordert, und der Bot-Health-Bot hält ein Issue offen, bis ein Lauf besteht. Ein Pull Request, dessen Prüfungen aus einem anderen Grund nicht gestartet sind, startet sie, wenn eine Person ihn schließt und wieder öffnet.
 
+## app register geht nicht weiter
+
+**Was du siehst:** `python3 .github/blueprint.py app register` wartet bei *confirm the page at* oder endet mit *GitHub didn't come back*, *The page was cancelled* oder *Refused an answer whose state doesn't belong to this run*.
+
+**Warum:** Der Befehl wartet darauf, dass GitHub zu einem Server auf einem freien Port von `127.0.0.1` zurückkommt, den nur dieser Rechner erreicht, und das höchstens zehn Minuten lang. Vorher setzt er nichts. GitHub schickt den Browser erst zurück, wenn du auf *Create GitHub App* drückst, und das Formular trägt einen zufälligen State, deshalb wird eine Antwort ohne ihn abgewiesen, und das Warten geht weiter.
+
+**Was zu tun ist:**
+
+- **Die Seite hat sich nicht geöffnet:** Öffne die Adresse, die der Befehl ausgegeben hat, in einem Browser auf demselben Rechner. Für einen Browser auf einem anderen Rechner starte ihn mit `--no-browser` und leite den Port weiter.
+- **GitHub zeigt ein Formular ohne Name und Berechtigungen:** Das Manifest hat eine Anmeldung auf dem Weg vielleicht nicht überstanden. Melde dich zuerst bei GitHub an und starte den Befehl dann erneut.
+- **Der Name ist vergeben:** Ändere ihn auf der Seite von GitHub; der Befehl nimmt den Namen, den GitHub vergeben hat.
+- **Er sagt, dass GitHub die App auf einem anderen Konto angelegt hat:** Der Browser war als jemand anderes als der Eigentümer angemeldet, und eine private App lässt sich nur auf dem Konto installieren, dem sie gehört. Lösche diese App unter der Adresse, die der Befehl nennt, melde dich als Eigentümer an und starte ihn erneut.
+- **GitHub hat den privaten Schlüssel abgewiesen:** Die App gibt es, und keine Datei hält ihren Schlüssel. Erzeuge auf der Einstellungsseite der App einen neuen Schlüssel und führe den Befehl `app connect` aus, den der Fehler zeigt.
+- **Ein Schritt des Pull Requests ist gescheitert:** Der private Schlüssel ist gesetzt, und der Fehler listet die Befehle, die übrig sind, beginnend mit dem gescheiterten. Behebe seine Ursache und führe sie aus.
+
 ## Ein Bot sagt, dass er die Release-App braucht
 
 **Was du siehst:** Ein Lauf eines Bots, etwa Settings, der Blueprint-Bot, der Branch-Bot oder der Fix-Bot, zeigt die Annotation *This repository names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID* oder *has no private key of its release app*, und seine Zusammenfassung beginnt mit *… needs the release app of the owner*.
