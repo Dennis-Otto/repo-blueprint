@@ -27,6 +27,7 @@ import {
   launch,
   main,
   parseAccepted,
+  readAccepted,
   readDigest,
   sorted,
   sourceOf,
@@ -296,6 +297,18 @@ test("an entry without its reason, or a file that isn't one, stops the check", a
     assert.match(seen.summary, message);
     assert.match(seen.summary, /How to fix it/);
   }
+});
+
+test("a repository without the file of accepted violations has none, and a file that can't be read stops the check", async (t) => {
+  const repo = await repository(t);
+  const file = path.join(repo.root, ".github", "a11y-accepted.toml");
+  assert.equal(await readAccepted(file), "");
+  await writeFile(file, "baseline = true\n");
+  assert.equal(await readAccepted(file), "baseline = true\n");
+  // A folder at that place is no missing file: it isn't to pass as nothing accepted.
+  await rm(file);
+  await mkdir(file);
+  await assert.rejects(readAccepted(file), { code: "EISDIR" });
 });
 
 test("the line baseline accepts what a run of every page finds, once", async (t) => {
