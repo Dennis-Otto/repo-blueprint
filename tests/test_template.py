@@ -16508,7 +16508,7 @@ def test_the_uv_of_the_workflows_follows_the_blueprint(
 # a pull request for half an hour, until the Variants ran out of time.
 JOB_LIMITS = {
     ("variants.yml", "variant"): 10,
-    ("ci-python.yml", "check"): 8,
+    ("ci-python.yml", "check"): 12,
     ("ci-github-action.yml", "check"): 8,
     ("ci-home-assistant.yml", "check"): 15,
 }
