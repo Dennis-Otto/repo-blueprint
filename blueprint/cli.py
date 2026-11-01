@@ -28,7 +28,7 @@ from blueprint import (
 from blueprint.app import TIMEOUT, connect, register
 from blueprint.bootstrap import CreateError, create, doctor
 from blueprint.bot_health import renovate_report, sweep, watch_run
-from blueprint.branches import next_branch
+from blueprint.branches import job_from, next_branch
 from blueprint.changelog import (
     FRAGMENTS,
     FragmentError,
@@ -2026,7 +2026,7 @@ def main(
         if arguments.command == "bot-health":
             return bot_health_command(api, repo, arguments, root)
         if arguments.command == "next-branch":
-            outcome = next_branch(api, repo)
+            outcome = next_branch(api, repo, job_from(os.environ))
             for warning in outcome.warnings:
                 print(warning, file=sys.stderr)
             print(outcome.summary, end="")
