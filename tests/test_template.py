@@ -5954,7 +5954,7 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
     # The zip of a Chrome extension, which its users load by hand and the store gets
-    # only after the same check, and which no other kind ships as its package.
+    # only after the same check; no other kind verifies its package by the glob ./*.zip.
     extension = security("chrome-extension")
     assert (
         "gh release download vX.Y.Z --repo Dennis-Otto/demo-project --pattern '*.zip'\n"
