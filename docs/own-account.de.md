@@ -16,13 +16,13 @@ Der Blueprint funktioniert für jedes Konto und jede Organisation auf GitHub. Ei
 
 ## 1. Den Blueprint kopieren
 
-Du brauchst, was [die Anleitung](guide.md#ein-repository-anlegen) nennt: Git, Python, uv und die GitHub CLI, angemeldet als Administrator deines Kontos oder deiner Organisation (`gh auth login`), und keinen Checkout des Blueprints.
+Du brauchst Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator deines Kontos oder deiner Organisation (`gh auth login`), und keinen Checkout des Blueprints.
 
 ```sh
 uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
 ```
 
-Die Anleitung zeigt diesen Befehl auch mit pipx und mit einem eigenen Copier; die anderen `uvx`-Befehle dieser Seite ändern sich genauso.
+[Die Anleitung](https://dennis-otto.github.io/repo-blueprint/de/guide.html#ein-repository-anlegen) zeigt diesen Befehl auch mit pipx und mit einem eigenen Copier; die anderen `uvx`-Befehle dieser Seite ändern sich genauso.
 
 Copier fragt nach deinem Konto oder deiner Organisation, `owner`, und nimmt es als Maintainer. Lass die Frage nach der Release-App leer und beantworte zwei weitere:
 
@@ -67,6 +67,8 @@ git commit --all --signoff --message "chore: name the release app"
 git push --set-upstream origin HEAD
 gh pr create --fill
 ```
+
+Fragt Git beim Push nach einem Passwort, meldet `gh auth setup-git` es mit der GitHub CLI an.
 
 Merge den Pull Request, sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`.
 
