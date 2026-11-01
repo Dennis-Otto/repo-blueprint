@@ -26,7 +26,7 @@ hide:
 
     ---
 
-    `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, in Python-Projekten auf jedem Kern, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits und der Titel jedes Pull Requests geprüft. Ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern: Jeder Download versucht es erneut.
+    `scripts/check.sh` bei jeder Änderung, lokal wie in der CI: Tests mit voller Abdeckung, in Python-Projekten auf jedem Kern, Typen, Lint und Paketbau. Dazu werden die Workflows, die Lizenz jeder Datei, das Markdown, der Sign-off jedes Commits, die Signatur jedes Commits, wo die Regeln sie verlangen, und der Titel jedes Pull Requests geprüft. Ein vorübergehender Fehler eines Downloads lässt keinen Lauf scheitern: Jeder Download versucht es erneut.
 
 - :material-lightbulb-on-outline:{ .lg .middle } **PR-Coach**
 

@@ -10,7 +10,7 @@ Eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Dupl
 
 ## Willkommen
 
-Der erste Pull Request einer Person bekommt einen Kommentar mit dem, was ihm weiterhilft: ein Titel, der ein Conventional Commit ist, der Sign-off jedes Commits und `scripts/check.sh`; neue Issues bekommen stattdessen die Analyse des Issue-Assistenten.
+Der erste Pull Request einer Person bekommt einen Kommentar mit dem, was ihm weiterhilft: ein Titel, der ein Conventional Commit ist, der Sign-off und die Signatur jedes Commits und `scripts/check.sh`; neue Issues bekommen stattdessen die Analyse des Issue-Assistenten.
 
 **Womit:** `welcome.yml`.
 

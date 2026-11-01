@@ -10,7 +10,7 @@ A first analysis of every new issue by an AI that only reads, labels, duplicates
 
 ## Welcome
 
-A person's first pull request gets a comment with what helps it along: a title that is a Conventional Commit, the sign-off of every commit and `scripts/check.sh`; new issues get the analysis of the issue assistant instead.
+A person's first pull request gets a comment with what helps it along: a title that is a Conventional Commit, the sign-off and the signature of every commit and `scripts/check.sh`; new issues get the analysis of the issue assistant instead.
 
 **How:** `welcome.yml`.
 
