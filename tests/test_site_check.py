@@ -25,6 +25,7 @@ from blueprint.site_check import (
     built_from,
     check,
     layout,
+    map_rule,
     name_of,
     pictures_in,
     resolved,
@@ -128,8 +129,24 @@ def hooks() -> ModuleType:
     return module
 
 
-def built(tmp_path: Path, files: dict[str, str]) -> Path:
+def website_map(files: dict[str, str]) -> str:
+    """The map of a website, as the hooks write it, with a link to each of its home
+    pages that search engines may list."""
+    homes = [
+        name
+        for name, text in files.items()
+        if re.fullmatch(r"(?:[\w-]+/)?index\.html", name) and NOINDEX not in text
+    ]
+    items = "".join(f"- [{name}]({BASE}{name})\n" for name in homes)
+    return f"# Demo\n\n> A demo.\n\nThe pages.\n\n## Pages\n\n{items}"
+
+
+def built(tmp_path: Path, files: dict[str, str], *, mapped: bool = True) -> Path:
+    """The folder that MkDocs built the website into, with the map of the website
+    unless files have theirs, or it is to be missing."""
     site = tmp_path / "site"
+    if mapped:
+        files = {"llms.txt": website_map(files), **files}
     for name, text in files.items():
         (site / name).parent.mkdir(parents=True, exist_ok=True)
         (site / name).write_text(text, encoding="utf-8", newline="\n")
@@ -528,7 +545,7 @@ def test_an_annotation_names_the_file_on_one_line() -> None:
 def test_the_command_passes_a_website_that_keeps_its_promises(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    built(tmp_path, two_languages())
+    site = built(tmp_path, two_languages())
     output = tmp_path / "output"
     output.write_text("before=1\n", encoding="utf-8")
 
@@ -537,9 +554,11 @@ def test_the_command_passes_a_website_that_keeps_its_promises(
     assert capsys.readouterr().out == (
         "The website in site keeps what its hooks promise (en de).\n"
     )
-    # The further languages and the path of the address, for the steps that follow.
+    # The further languages, the path of the address and the rule of lychee for the
+    # links of the map, for the steps that follow.
+    rule = f"^https://owner\\.github\\.io/demo/(.*)$ {site.resolve().as_uri()}/$1"
     assert output.read_text(encoding="utf-8") == (
-        "before=1\nlanguages=de\nroot=/demo/\n"
+        f"before=1\nlanguages=de\nroot=/demo/\nmap={rule}\n"
     )
 
 
@@ -1173,3 +1192,238 @@ def test_an_empty_paragraph_quotes_the_start_of_the_block_before_it(
         'for the reporter in view…": a plugin or a hook took out what it held, '
         "such as a picture"
     ]
+
+
+# ------------------------------------------------------------ the map of the website
+
+
+def one_language(**more: str) -> dict[str, str]:
+    """A website in one language, with an address."""
+    return {
+        "index.html": page("en", canonical=BASE + "index.html"),
+        "guide.html": page("en", canonical=BASE + "guide.html"),
+        **more,
+    }
+
+
+def with_map(body: str) -> dict[str, str]:
+    return one_language(**{"llms.txt": body})
+
+
+GOOD_MAP = f"""# Demo
+
+> A demo.
+
+The pages of [this website]({BASE}).
+
+## Pages
+
+- [Home]({BASE}): Welcome.
+- [Guide]({BASE}guide.html#start?): How it works.
+  - [Further](https://elsewhere.example/decisions/page.html)
+"""
+
+
+def test_a_good_map_passes(tmp_path: Path) -> None:
+    assert messages(built(tmp_path, with_map(GOOD_MAP))) == []
+
+
+def test_a_website_with_an_address_needs_its_map(tmp_path: Path) -> None:
+    site = built(tmp_path, one_language(), mapped=False)
+
+    [message] = messages(site)
+
+    assert message.startswith("llms.txt: is missing: on_post_build of")
+
+
+def test_a_website_without_an_address_needs_no_map(tmp_path: Path) -> None:
+    site = built(tmp_path, {"index.html": page("en")}, mapped=False)
+
+    assert messages(site) == []
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("", "doesn't start with a title, which llmstxt.org asks for"),
+        (
+            f"The pages\n\n## Pages\n\n- [Home]({BASE})\n",
+            "doesn't start with a title, which llmstxt.org asks for",
+        ),
+        (
+            f"# Demo\n\n## Pages\n\n- [Home]({BASE})\nNo item\n",
+            "has a line in its sections that is no item with a link: 'No item'",
+        ),
+        (
+            f"# Demo\n\n## Pages\n\n- [Home]({BASE}): Fine\n- Home\n",
+            "has a line in its sections that is no item with a link: '- Home'",
+        ),
+        (
+            f"# Demo\n\n## Pages\n\n- [Gone]({BASE}gone.html)\n",
+            f"links a page that the website lacks: {BASE}gone.html",
+        ),
+        (
+            f"# Demo\n\n## Pages\n\n- [Gone]({BASE}gone/)\n",
+            f"links a page that the website lacks: {BASE}gone/",
+        ),
+        (
+            f"# Demo\n\n## Pages\n\n- [Record]({BASE}decisions/0001-a.html)\n",
+            "links a decision record, which is for maintainers: "
+            f"{BASE}decisions/0001-a.html",
+        ),
+    ],
+)
+def test_a_map_that_breaks_a_promise_fails(
+    tmp_path: Path, body: str, message: str
+) -> None:
+    site = built(tmp_path, with_map(body))
+
+    assert f"llms.txt: {message}" in messages(site)
+
+
+def test_a_map_without_a_link_fails(tmp_path: Path) -> None:
+    site = built(tmp_path, with_map("# Demo\n\n> A demo.\n"))
+
+    assert messages(site) == ["llms.txt: links no page"]
+
+
+def test_a_map_finds_a_page_with_a_space_in_its_address(tmp_path: Path) -> None:
+    files = with_map(f"# Demo\n\n## Pages\n\n- [A page]({BASE}a%20page.html)\n")
+    files["a page.html"] = page("en", canonical=BASE + "a page.html")
+
+    assert not [
+        message for message in messages(built(tmp_path, files)) if "llms" in message
+    ]
+
+
+def test_a_map_lists_no_page_that_search_engines_leave_out(tmp_path: Path) -> None:
+    files = two_languages()
+    files["llms.txt"] = (
+        f"# Demo\n\n## Pages\n\n- [Home]({BASE}): "
+        f"Deutsch: [Start]({BASE}de/)\n- [Record]({BASE}de/record.html)\n"
+    )
+
+    assert messages(built(tmp_path, files)) == [
+        f"llms.txt: links a page that no search engine may list: {BASE}de/record.html"
+    ]
+
+
+def test_a_map_names_a_further_language_with_a_home_page_of_its_own(
+    tmp_path: Path,
+) -> None:
+    files = two_languages()
+    files["llms.txt"] = f"# Demo\n\n## Pages\n\n- [Home]({BASE})\n"
+
+    assert messages(built(tmp_path, files)) == [
+        'llms.txt: links no page in "de", which has a home page of its own'
+    ]
+
+
+def test_a_further_language_without_a_home_page_of_its_own_needs_no_link(
+    tmp_path: Path,
+) -> None:
+    files = two_languages()
+    files["de/index.html"] = page(
+        "de",
+        canonical=BASE + "index.html",
+        alternates=versions("index.html"),
+        head=GENERATOR + NOINDEX,
+    )
+    files["llms.txt"] = f"# Demo\n\n## Pages\n\n- [Home]({BASE})\n"
+
+    assert not [
+        message for message in messages(built(tmp_path, files)) if "llms" in message
+    ]
+
+
+OWNER = "https://owner.github.io/"
+
+
+def owner_website(**more: str) -> dict[str, str]:
+    """The website at the root of an address, with a guide in a folder."""
+    return {
+        "index.html": page("en", canonical=OWNER + "index.html"),
+        "guides/one.html": page("en", canonical=OWNER + "guides/one.html"),
+        **more,
+    }
+
+
+def test_the_map_at_the_root_of_an_address_may_link_other_websites(
+    tmp_path: Path,
+) -> None:
+    # As that of the website of an address does, with its own items in a list, each
+    # with the projects below it, whose pages this website lacks.
+    body = (
+        f"# Owner\n\n> Projects.\n\nThe [search]({OWNER}) finds them.\n\n"
+        f"## Projects\n\n- [Demo]({OWNER}demo/): A demo.\n"
+        f"  - [Start]({OWNER}demo/decisions/start.html): In German: "
+        f"[Los]({OWNER}demo/de/start.html)\n"
+        f"- [One]({OWNER}guides/one.html)\n"
+    )
+    site = built(tmp_path, owner_website(**{"llms.txt": body}))
+
+    assert messages(site) == []
+
+
+@pytest.mark.parametrize("gone", ["gone.html", "guides/gone.html"])
+def test_the_map_at_the_root_of_an_address_needs_its_own_pages(
+    tmp_path: Path, gone: str
+) -> None:
+    body = f"# Owner\n\n## Pages\n\n- [Gone]({OWNER}{gone})\n"
+    site = built(tmp_path, owner_website(**{"llms.txt": body}))
+
+    assert messages(site) == [
+        f"llms.txt: links a page that the website lacks: {OWNER}{gone}"
+    ]
+
+
+def rule_of(rule: str) -> tuple[re.Pattern[str], str]:
+    """The regular expression of a rule of --remap, and what it makes of a match."""
+    pattern, _, replacement = rule.partition(" ")
+    return re.compile(pattern), replacement.replace("$1", r"\1")
+
+
+def test_the_rule_leads_the_map_of_a_project_website_to_its_files(
+    tmp_path: Path,
+) -> None:
+    site = built(tmp_path, one_language())
+
+    pattern, replacement = rule_of(map_rule(check(site), site))
+
+    folder = site.resolve().as_uri()
+    for address, file in (
+        (f"{BASE}guide.html", f"{folder}/guide.html"),
+        (BASE, f"{folder}/"),
+        (f"{BASE}de/guide.html", f"{folder}/de/guide.html"),
+    ):
+        assert pattern.sub(replacement, address) == file
+    # Nothing else: not another site, and not one that only looks like it.
+    for address in (
+        "https://elsewhere.example/page.html",
+        "https://ownerxgithub.io/demo/page.html",
+        "https://example.org/?to=https://owner.github.io/demo/",
+    ):
+        assert not pattern.search(address)
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        # At the root of an address, where other websites have addresses as well.
+        owner_website(),
+        # No address.
+        {"index.html": page("en")},
+    ],
+)
+def test_no_rule_at_the_root_of_an_address_or_without_an_address(
+    tmp_path: Path, files: dict[str, str]
+) -> None:
+    site = built(tmp_path, files)
+
+    assert map_rule(check(site), site) == ""
+
+
+def test_no_rule_without_a_map(tmp_path: Path) -> None:
+    site = built(tmp_path, one_language(), mapped=False)
+
+    assert map_rule(check(site), site) == ""

@@ -41,11 +41,13 @@ def config(
 ) -> SimpleNamespace:
     """The parts of a MkDocs configuration that the hooks read: the i18n plugin with
     its languages as (locale, default, build) and the language it builds, the default
-    one unless named, or no such plugin."""
+    one unless named, or no such plugin, and no address."""
     plugins: dict[str, SimpleNamespace] = {}
     if locales:
         languages = [
-            SimpleNamespace(locale=locale, default=default, build=build)
+            SimpleNamespace(
+                locale=locale, name=locale.title(), default=default, build=build
+            )
             for locale, default, build in locales
         ]
         default = next(language.locale for language in languages if language.default)
@@ -54,7 +56,7 @@ def config(
             is_default_language_build=building in ("", default),
             current_language=building or default,
         )
-    return SimpleNamespace(site_dir=str(site), plugins=plugins)
+    return SimpleNamespace(site_dir=str(site), site_url=None, plugins=plugins)
 
 
 def mkdocs_config(root: Path = Path("demo"), **more: Any) -> SimpleNamespace:
@@ -2805,6 +2807,7 @@ def website(root: Path, *locales: str, **more: Any) -> Any:
             "site_dir": str(root / "site"),
             "use_directory_urls": False,
             "site_name": 'Demo "Project"',
+            "site_description": "A project.",
             "repo_url": "https://github.com/owner/demo/",
             "edit_uri": None,
             "site_url": None,
@@ -3478,3 +3481,216 @@ def test_a_group_without_workflows_has_no_heading(tmp_path: Path) -> None:
         "### draft {#draft}",
     ]
     assert "\n<p>A draft, of a bot.</p>\n" in page
+
+
+# ------------------------------------------------------------ the map of the website
+
+ADDRESS = "https://owner.github.io/demo/"
+
+
+def menu_page(title: str, url: str, description: str | None = None) -> SimpleNamespace:
+    """A page of a menu, as it is once MkDocs has read it."""
+    return SimpleNamespace(
+        title=title,
+        url=url,
+        canonical_url=ADDRESS + url,
+        meta={"description": description} if description else {},
+        is_page=True,
+        is_section=False,
+    )
+
+
+def menu_section(title: str, *children: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(
+        title=title, children=list(children), is_page=False, is_section=True
+    )
+
+
+def menu_link(title: str, url: str) -> SimpleNamespace:
+    """A link of a menu to something that is no page of the website."""
+    return SimpleNamespace(title=title, url=url, is_page=False, is_section=False)
+
+
+def built_map(
+    site: Path, build: SimpleNamespace, menu: list[SimpleNamespace], module: ModuleType
+) -> None:
+    """What the build of a language does for the map: on_nav keeps its menu, and
+    on_post_build comes at its end."""
+    module.on_nav(SimpleNamespace(items=menu), build, [])
+    module.on_post_build(build)
+    assert site.is_dir()
+
+
+def map_config(site: Path, *locales: tuple[str, bool, bool], building: str = "") -> Any:
+    """The configuration of a website with an address."""
+    found = config(site, *locales, building=building)
+    found.site_url = ADDRESS
+    found.site_name = "Demo [beta]"
+    found.site_description = "A\n  project."
+    return found
+
+
+def test_a_website_in_one_language_gets_a_map_of_its_menu(tmp_path: Path) -> None:
+    module = hooks()
+    build = map_config(tmp_path)
+    module.BUILT.unlisted.add(ADDRESS + "hidden.html")
+
+    built_map(
+        tmp_path,
+        build,
+        [
+            menu_page("Home", "index.html"),
+            menu_page("Guide", "guide.html", "How it\nworks"),
+            menu_section(
+                "Features",
+                menu_page("Checks [all]", "features/checks(new).html", "All of them."),
+                menu_section("More", menu_page("Tests", "features/tests.html", "Ok…")),
+                menu_link("Elsewhere", "https://example.org/"),
+            ),
+            # A part with nothing to show has no heading.
+            menu_section("Records", menu_page("A record", "decisions/0001-a.html")),
+            menu_page("Decisions", "decisions/README.html"),
+            menu_page("A nested record", "en/decisions/0001-a.html"),
+            menu_page("Hidden", "hidden.html"),
+            menu_page("Decisions of a page", "decisions-of-a-page.html"),
+            menu_link("Dashboard", ADDRESS + "dashboard/"),
+        ],
+        module,
+    )
+
+    assert (tmp_path / "llms.txt").read_bytes().decode("utf-8") == (
+        "# Demo (beta)\n"
+        "\n"
+        "> A project.\n"
+        "\n"
+        "The pages of this website, in the order of its menu.\n"
+        "\n"
+        "## Pages\n"
+        "\n"
+        f"- [Home]({ADDRESS}index.html)\n"
+        f"- [Guide]({ADDRESS}guide.html): How it works.\n"
+        f"- [Decisions of a page]({ADDRESS}decisions-of-a-page.html)\n"
+        "\n"
+        "## Features\n"
+        "\n"
+        f"- [Checks (all)]({ADDRESS}features/checks%28new%29.html): All of them.\n"
+        f"- [Tests]({ADDRESS}features/tests.html): Ok…\n"
+    )
+
+
+def test_a_map_has_no_summary_without_a_description(tmp_path: Path) -> None:
+    module = hooks()
+    build = map_config(tmp_path)
+    build.site_description = None
+
+    built_map(tmp_path, build, [menu_page("Home", "index.html")], module)
+
+    assert (
+        (tmp_path / "llms.txt")
+        .read_text(encoding="utf-8")
+        .startswith("# Demo (beta)\n\nThe pages of this website")
+    )
+
+
+def test_the_map_names_the_page_of_every_further_language(tmp_path: Path) -> None:
+    module = hooks()
+    locales = (("en", True, True), ("de", False, True), ("fr", False, True))
+    default = map_config(tmp_path, *locales)
+    german = map_config(tmp_path, *locales, building="de")
+    german.site_description = "Ein Projekt."
+    french = map_config(tmp_path, *locales, building="fr")
+    # A language that shows the page untranslated has no page of its own, and a
+    # translation with noindex in its front matter is left out as well.
+    module.BUILT.unlisted.add(ADDRESS + "de/roadmap.html")
+    module.BUILT.unlisted.add(ADDRESS + "fr/guide.html")
+    module.on_nav(
+        SimpleNamespace(
+            items=[
+                menu_page("Home", "index.html", "Welcome."),
+                menu_page("Guide", "guide.html", "How it works."),
+                menu_page("Roadmap", "roadmap.html"),
+            ]
+        ),
+        default,
+        [],
+    )
+    # In the order of the plugin: every further language, within the default one.
+    built_map(
+        tmp_path,
+        german,
+        [
+            menu_page("Start", "de/index.html"),
+            menu_section("Teil", menu_page("Anleitung", "de/guide.html")),
+            menu_page("Roadmap", "de/roadmap.html"),
+        ],
+        module,
+    )
+    assert not (tmp_path / "llms.txt").exists()
+    built_map(
+        tmp_path,
+        french,
+        [
+            menu_page("Accueil", "fr/index.html"),
+            menu_page("Guide privé", "fr/guide.html"),
+        ],
+        module,
+    )
+    written = (tmp_path / "llms.txt").read_text(encoding="utf-8")
+    assert written == (
+        "# Demo (beta)\n"
+        "\n"
+        "> A project.\n"
+        "\n"
+        "The pages of this website, in the order of its menu, each with its page in "
+        "De and Fr where there is one.\n"
+        "\n"
+        "## Pages\n"
+        "\n"
+        f"- [Home]({ADDRESS}index.html): Welcome. De: [Start]({ADDRESS}de/index.html). "
+        f"Fr: [Accueil]({ADDRESS}fr/index.html)\n"
+        f"- [Guide]({ADDRESS}guide.html): How it works. De: "
+        f"[Anleitung]({ADDRESS}de/guide.html)\n"
+        f"- [Roadmap]({ADDRESS}roadmap.html)\n"
+    )
+    # The build of the default language ends last and leaves the map as it is.
+    (tmp_path / "llms.txt").write_text("written before\n", encoding="utf-8")
+    module.on_post_build(default)
+    assert (tmp_path / "llms.txt").read_text(encoding="utf-8") == "written before\n"
+
+
+def test_a_language_that_is_not_built_asks_nothing_of_the_map(tmp_path: Path) -> None:
+    module = hooks()
+    build = map_config(tmp_path, ("en", True, True), ("de", False, False))
+
+    built_map(tmp_path, build, [menu_page("Home", "index.html")], module)
+
+    written = (tmp_path / "llms.txt").read_text(encoding="utf-8")
+    assert "- [Home](https://owner.github.io/demo/index.html)\n" in written
+    assert "where there is one" not in written
+
+
+def test_a_map_of_the_project_stays(tmp_path: Path) -> None:
+    # From docs/llms.txt, or a hook of its own, as the website of an address has.
+    module = hooks()
+    (tmp_path / "llms.txt").write_text("# The project's own\n", encoding="utf-8")
+
+    built_map(tmp_path, map_config(tmp_path), [menu_page("Home", "index.html")], module)
+
+    assert (tmp_path / "llms.txt").read_text(
+        encoding="utf-8"
+    ) == "# The project's own\n"
+
+
+def test_a_website_without_an_address_has_no_map(tmp_path: Path) -> None:
+    module = hooks()
+    build = map_config(tmp_path)
+    build.site_url = None
+
+    built_map(tmp_path, build, [menu_page("Home", "index.html")], module)
+
+    assert not (tmp_path / "llms.txt").exists()
+
+
+def test_the_menu_for_the_map_comes_after_the_plugin_changed_it() -> None:
+    # The i18n plugin translates the menu with -100 and can make a new one.
+    assert hooks().on_nav.mkdocs_priority == -110
