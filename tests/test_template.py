@@ -6085,6 +6085,15 @@ def test_the_issue_assistant_shows_its_limits_of_the_ai_runs(
         }
 
 
+def test_actionlint_knows_the_next_runner() -> None:
+    # A project may test on it before the jobs move, as the Action test of the issue
+    # assistant does in a matrix, and actionlint 1.7.12 doesn't know the label yet.
+    config = yaml.safe_load(
+        (ROOT / ".github/actionlint.yaml").read_text(encoding="utf-8")
+    )
+    assert NEXT_RUNNER in config["self-hosted-runner"]["labels"]
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_actionlint_ignores_only_the_queue_of_the_issue_assistant(
     projects: dict[str, Path], kind: str
