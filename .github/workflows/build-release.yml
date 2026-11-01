@@ -115,6 +115,7 @@ jobs:
           # change them.
           package-manager-cache: false
       - name: Build the assets of the project
+        id: build-project-assets
         if: hashFiles('scripts/release-assets.sh') != ''
         timeout-minutes: 15
         env:
@@ -159,6 +160,18 @@ jobs:
           if-no-files-found: error
           # Long enough to re-run only the failed job assets after a weekend.
           retention-days: 7
+      # The PR coach: what failed, why it matters and how to fix it, in the summary
+      # of the check and as its annotation, from .github/checks.toml. Only for the step
+      # of the script: a tag that moved, say, is no fault of the script, and its own
+      # annotation names it.
+      - name: Explain a failure of the script
+        if: failure() && steps.build-project-assets.outcome == 'failure'
+        env:
+          CHECK: assets of the project
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" coach explain "$CHECK"
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
         # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
@@ -169,18 +182,6 @@ jobs:
             sleep 1
           done
           echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
-      # The PR coach: what failed, why it matters and how to fix it, in the summary
-      # of the check and as its annotation, from .github/checks.toml.
-      - name: Explain the failure
-        if: failure()
-        env:
-          CHECK: assets of the project
-        run: |
-          # Without the script, nothing of it failed.
-          [[ -f scripts/release-assets.sh ]] || exit 0
-          script=.github/blueprint.py
-          [[ -f "$script" ]] || script=blueprint.py
-          python3 "$script" coach explain "$CHECK"
 
   assets:
     name: release assets

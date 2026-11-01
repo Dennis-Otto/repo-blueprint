@@ -17276,7 +17276,7 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
         "${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}"
     )
     # Without the hook, the job only waits for its hosts and checks out; after these
-    # steps come the wait for Docker and the explanation of a failure.
+    # steps come the explanation of a failure of the script and the wait for Docker.
     for step in job["steps"][3:-2]:
         assert HOOK in step["if"], step
     (upload,) = steps_using(job, "actions/upload-artifact")
@@ -17294,6 +17294,9 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert step_named(assets, "Add the assets of the project")["if"] == HOOK
     assert step_named(assets, "Add the assets of the project")["id"] == (
         "add-project-assets"
+    )
+    assert step_named(job, "Build the assets of the project")["id"] == (
+        "build-project-assets"
     )
     order = [
         "Verify the tag before building",
@@ -17406,8 +17409,14 @@ def test_the_build_stops_at_assets_that_the_release_cannot_ship(
 @pytest.mark.parametrize(
     ("job", "name", "condition"),
     [
-        # Whatever stops the job: the script, the packages before it or a wrong asset.
-        ("project-assets", "Explain the failure", "failure()"),
+        # The script, the packages before it or a wrong asset; the other steps of the
+        # job, such as the check of a tag that moved, are no fault of the script, and
+        # without the script this step is skipped, so nothing of it can fail.
+        (
+            "project-assets",
+            "Explain a failure of the script",
+            "failure() && steps.build-project-assets.outcome == 'failure'",
+        ),
         # A name that the release keeps for itself; the other failures of this job
         # are no fault of the script.
         (
@@ -17442,29 +17451,13 @@ def test_the_assets_of_a_project_explain_their_failure(
     )
 
     assert step.returncode == 0, step.stdout + step.stderr
-    assert "::error" in step.stdout
+    assert (
+        "::error title=PR coach%3A The assets of the project::`scripts/release-assets.sh`"
+        in step.stdout
+    )
     assert "The assets of the project" in step.summary
     assert "scripts/release-assets.sh" in step.summary
     assert 'bash scripts/release-assets.sh "$(mktemp -d)" 1.2.3' in step.summary
-
-
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-def test_a_project_without_the_hook_gets_no_explanation_of_its_assets(
-    tmp_path: Path,
-) -> None:
-    # A checkout that fails is no fault of a script that the project doesn't have.
-    step = workflow_steps.run_step(
-        tmp_path,
-        "build-release.yml",
-        "project-assets",
-        "Explain the failure",
-        env={"CHECK": "assets of the project"},
-        stubs={"python3": workflow_steps.recording("python3")},
-    )
-
-    assert step.returncode == 0, step.stdout + step.stderr
-    assert step.stubbed == []
-    assert step.summary == ""
 
 
 def test_the_coach_explains_a_failure_of_the_assets_of_a_project() -> None:
@@ -17474,7 +17467,13 @@ def test_the_coach_explains_a_failure_of_the_assets_of_a_project() -> None:
     for text in ("wrote no asset", "npm ci", "the release keeps for"):
         assert text in entry.problem
     assert "stays a draft" in entry.why
-    for text in ("Release", "only GitHub, Node.js and npm", "next release"):
+    for text in (
+        "re-run the failed jobs",
+        "`fix:` title",
+        "only GitHub, Node.js and npm",
+        "next release",
+        "gh release delete vX.Y.Z --yes",
+    ):
         assert text in entry.fix
     assert entry.docs == "CONTRIBUTING.md#releases"
     assert entry.manual
@@ -17563,7 +17562,8 @@ def test_contributing_explains_the_assets_that_a_project_builds_itself(
     assert "`bash scripts/release-assets.sh FOLDER VERSION`" in text
     assert "the verification of the release fails for an asset without" in text
     # When it fails, the run says why, from the catalog of each kind.
-    assert "The job explains in the summary of its run what failed" in text
+    assert "the job explains in the summary of its run what failed" in text
+    assert "re-run the failed jobs of that run" in text
     assert Catalog.load(projects[kind]).check("assets of the project") is not None
 
 
