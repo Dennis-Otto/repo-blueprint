@@ -55,7 +55,8 @@ jobs:
   docs:
     name: docs
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # The accessibility check, with its limit below, and five minutes for the rest.
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: read # whether GitHub Pages publishes from this workflow
@@ -254,8 +255,10 @@ jobs:
       - name: Check the accessibility of the website
         id: a11y
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        # Every page in two schemes takes a few minutes where nothing else is left to do.
-        timeout-minutes: 8
+        # Every page in two schemes, on a runner: 7 minutes 17 seconds on homedarts, the
+        # slowest website, with 243 pages (2026-11-01), and 5 minutes 32 seconds on the
+        # blueprint. The limit is about twice the slowest, for a slow runner and new pages.
+        timeout-minutes: 15
         env:
           EVENT: ${{ github.event_name }}
         run: |

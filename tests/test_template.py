@@ -15416,6 +15416,10 @@ def test_every_website_is_checked_for_its_accessibility(
     step = step_named(docs, "Check the accessibility of the website")
     assert "continue-on-error" not in step
     assert "REPORT_ONLY" not in docs
+    # A timeout fails the check now, and every page took 437 seconds on homedarts, the
+    # slowest website, so the limit is about twice that, and the job has room for it.
+    assert step["timeout-minutes"] == 15
+    assert job_with(docs, step["name"])["timeout-minutes"] == 20
     assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
     assert step["run"] == (
         'if [[ "$EVENT" == pull_request ]]; then\n'
