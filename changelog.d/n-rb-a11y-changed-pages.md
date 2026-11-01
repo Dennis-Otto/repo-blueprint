@@ -1,0 +1,8 @@
+### Performance
+
+- **The check *docs* opens only the pages that a pull request changes:** the accessibility check took about two thirds of a required check in every repository, because it opened every page in two schemes. A push to `main` now keeps a digest of the website in the cache, and a pull request opens only the pages that differ from it, which takes seconds instead of minutes, and none at all when no page differs. It opens every page when there is no digest yet or when a stylesheet, a script, `mkdocs.yml`, the accepted violations or the tools of the check differ, and so do a push to `main` and a new run each week.
+
+### Bug fixes
+
+- **A new accessibility violation fails the check *docs* again:** for one release the check was only to report, and it had gone on reporting ever since. Now a serious or critical violation fails it. A violation that has to stay goes into the new `.github/a11y-accepted.toml`, a file of the project, with its page, its rule and the reason, and an entry without a reason stops the check. The update brings the file with a line `baseline = true`: the first run on `main` writes what the website has there and passes, so that no repository turns red, and the fix bot brings that in a pull request. A new repository starts without the line. Without the fix bot, for example without the release app, run `node .github/a11y/check.mjs site` after a build and commit the file.
+- **No annotation of the accessibility check lands on the folder `.github`:** a page without a Markdown source, such as one that a hook writes, now has its annotation at `mkdocs.yml`, with the page in its title.

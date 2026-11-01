@@ -21,7 +21,7 @@ On Windows, run them in Git Bash, with `py -3` in place of `python3` and `.venv/
 - `ruff format . && ruff check --fix .`: the format of the code, and the fixes that Ruff can make.
 - `python3 blueprint.py fix run`: every fix that a command makes for a step of `scripts/check.sh`, such as those of the text files, the pages and Ruff, as the fix bot makes them in a pull request.
 - `mypy`: the types, in the strict mode of mypy.
-- `npm ci --prefix .github/a11y --ignore-scripts && node .github/a11y/check.mjs site`: the accessibility of the website after a build, as the check *docs* checks it, with Google Chrome or the Chrome named in `CHROME`.
+- `npm ci --prefix .github/a11y --ignore-scripts && node .github/a11y/check.mjs site`: the accessibility of the website after a build, as the check *docs* checks it on `main`, with Google Chrome or the Chrome named in `CHROME`; `node --test .github/a11y/check.test.mjs` tests the check itself, as `scripts/check.sh` does with every line and branch covered, when Node 24 and a Chrome are there.
 
 With the tools of the website in `.venv-docs`, as CONTRIBUTING.md sets them up, `scripts/check.sh` builds the website strictly as well. Turn on the hook of the repository once with `git config core.hooksPath .githooks`, and it runs the checks before every push.
 
