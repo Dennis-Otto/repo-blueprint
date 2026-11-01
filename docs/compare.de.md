@@ -32,7 +32,7 @@ Ein Strich heißt, dass das Werkzeug es nicht tut; *die Vorlage* heißt, dass es
 | Code, der beim Kopieren läuft | keiner; danach `blueprint.py create` aus der Kopie, das du selbst startest | keiner | die Hooks der Vorlage, falls es welche gibt | die Tasks, Migrationen und Erweiterungen der Vorlage, falls es welche gibt, mit `--trust` | `.projenrc` bei jedem Lauf |
 | Was ein neues Repository braucht | Git, Python, uv und die GitHub CLI | einen Knopf auf GitHub | Python und `cookiecutter` | Python und `copier` | Node und `npx projen new` |
 | Einstellungen des Repositorys | als Code, mit einem Bot gegen Abweichungen | — | die Vorlage | die Vorlage | — |
-| Releases | release-please, signierte Tags, SLSA Build Level 3, SBOM, VEX, geprüft | die Vorlage | die Vorlage | die Vorlage | nach npm, und mit jsii nach PyPI, Maven, NuGet und Go |
+| Releases | release-please, signierte Tags, SLSA Build Level 3 (Container-Images: Level 2), SBOM, VEX, geprüft | die Vorlage | die Vorlage | die Vorlage | nach npm, und mit jsii nach PyPI, Maven, NuGet und Go |
 | Sicherheitsprüfungen | CodeQL, Scorecard, zizmor, OSV-Scanner, Harden-Runner, ein Secret-Scan, Actions auf Commits festgelegt | die Vorlage | die Vorlage | die Vorlage | die Vorlage |
 | Updates der Abhängigkeiten | Renovate, mit Regeln für den Merge und einem Dashboard | die Vorlage | die Vorlage | die Vorlage | ein Workflow, der sie aktualisiert |
 | Arten von Projekten | acht, von Home Assistant bis zu Chrome-Erweiterungen und Containern | eine je Vorlage | Tausende Vorlagen, je ein Stack | copier-uv: Python; cookie: Python mit vielen Build-Backends | TypeScript, AWS CDK, jsii, Python, Java und mehr |

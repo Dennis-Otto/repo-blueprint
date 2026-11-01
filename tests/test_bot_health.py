@@ -503,7 +503,64 @@ def test_the_verification_of_a_published_release_opens_the_issue(
     result = watch_run(api_of(github), REPO, 1, NOW)
 
     assert result.startswith("Release verification: ")
+    assert github.issues[1]["title"] == "Release verification fails on v1.2.3"
+    assert "fails on `v1.2.3` since" in github.issues[1]["body"]
     assert "started by a published release." in github.issues[1]["body"]
+    assert "Only a run for `v1.2.3` closes this issue" in github.issues[1]["body"]
+
+
+def test_only_a_run_for_its_tag_closes_the_issue_of_a_published_release(
+    github: FakeGitHub,
+) -> None:
+    # The weekly run checks the latest release, which a prerelease is not.
+    name = "Release verification"
+    github.runs[1] = run_of(
+        1, name=name, event="release", branch="v1.2.3-rc.1", attempt=2
+    )
+    github.jobs[(1, 2)] = [job_of_a_run(11, "verify the release", "failure")]
+    watch_run(api_of(github), REPO, 1, NOW)
+
+    github.runs[2] = run_of(2, name=name, conclusion="success")
+    assert watch_run(api_of(github), REPO, 2, NOW) == f"{name}: passes."
+    assert github.issues[1]["state"] == "open"
+
+    github.runs[3] = run_of(
+        3, name=name, event="release", branch="v1.2.4", conclusion="success"
+    )
+    assert watch_run(api_of(github), REPO, 3, NOW) == f"{name}: passes."
+    assert github.issues[1]["state"] == "open"
+
+    # The same run again, once what was wrong is fixed; its id is that of the failure.
+    github.runs[1] = run_of(
+        1,
+        name=name,
+        event="release",
+        branch="v1.2.3-rc.1",
+        conclusion="success",
+        attempt=3,
+    )
+    result = watch_run(api_of(github), REPO, 1, NOW)
+    assert result == f"{name}: passes again: closed #1."
+    assert github.issues[1]["state"] == "closed"
+
+
+def test_a_failing_release_opens_an_issue_beside_that_of_the_weekly_run(
+    github: FakeGitHub,
+) -> None:
+    # An update of an open issue notifies nobody, and the release is news.
+    name = "Release verification"
+    github.runs[1] = run_of(1, name=name, attempt=2)
+    github.jobs[(1, 2)] = [job_of_a_run(11, "verify the release", "failure")]
+    watch_run(api_of(github), REPO, 1, NOW)
+
+    github.runs[2] = run_of(2, name=name, event="release", branch="v1.2.3", attempt=2)
+    github.jobs[(2, 2)] = [job_of_a_run(21, "verify the release", "failure")]
+    watch_run(api_of(github), REPO, 2, NOW)
+
+    assert github.issues[1]["title"] == f"{name} fails on main"
+    assert github.issues[1]["state"] == "open"
+    assert github.issues[2]["title"] == f"{name} fails on v1.2.3"
+    assert github.issues[2]["state"] == "open"
 
 
 @pytest.mark.parametrize(

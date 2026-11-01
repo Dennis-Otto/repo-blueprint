@@ -22,8 +22,8 @@ on:
   # The release workflow publishes its releases with the token of its job, whose
   # events start no workflow: a published release starts this one only when someone
   # else published it, outside the release workflow. That run takes the workflow of
-  # the commit of its tag, and the weekly run checks the release again with that of
-  # main.
+  # the commit of its tag, and the weekly run checks the latest release again with
+  # that of main.
   release:
     types: [published]
   workflow_dispatch:

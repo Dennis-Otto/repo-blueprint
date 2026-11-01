@@ -32,7 +32,7 @@ A dash means that the tool doesn't do it; *the template* means that it depends o
 | Code that runs at the copy | none; then `blueprint.py create` from the copy, which you start yourself | none | the hooks of the template, if any | the tasks, migrations and extensions of the template, if any, with `--trust` | `.projenrc` at every run |
 | What a new repository needs | Git, Python, uv and the GitHub CLI | a button on GitHub | Python and `cookiecutter` | Python and `copier` | Node and `npx projen new` |
 | Settings of the repository | as code, with a bot against drift | — | the template | the template | — |
-| Releases | release-please, signed tags, SLSA Build Level 3, SBOM, VEX, verified | the template | the template | the template | to npm, and with jsii to PyPI, Maven, NuGet and Go |
+| Releases | release-please, signed tags, SLSA Build Level 3 (container images: Level 2), SBOM, VEX, verified | the template | the template | the template | to npm, and with jsii to PyPI, Maven, NuGet and Go |
 | Security checks | CodeQL, Scorecard, zizmor, OSV-Scanner, Harden-Runner, a secret scan, actions pinned to commits | the template | the template | the template | the template |
 | Dependency updates | Renovate, with merge rules and a dashboard | the template | the template | the template | a workflow that upgrades them |
 | Kinds of projects | eight, from Home Assistant to Chrome extensions and containers | one for each template | thousands of templates, one stack each | copier-uv: Python; cookie: Python with many build backends | TypeScript, AWS CDK, jsii, Python, Java and more |

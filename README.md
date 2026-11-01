@@ -17,7 +17,7 @@
 Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for eight kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python and Node packages, Chrome extensions, container images and repositories without a build. A new repository starts with more than 30 workflows, and a bot brings it up to every new release of the blueprint.
 
 - **Tested on every change.** `scripts/check.sh` runs the same checks on your machine and in the CI, with full coverage of the code. The PR coach explains every check that fails, and the fix bot commits what a command can fix.
-- **Released and signed by a bot.** Merging the release pull request publishes it with SBOM and signed provenance of SLSA Build Level 3 (container images: Level 2), then verifies it as its users can.
+- **Released and signed by a bot.** Merging the release pull request publishes the release with SBOM and signed provenance of SLSA Build Level 3 (container images: Level 2), then verifies it as users can.
 - **Secure from the first commit.** CodeQL, OpenSSF Scorecard, a secret scan and an audit of the workflows run from the start, every action is pinned to a commit hash, and about 90 to 100 answers of OpenSSF Best Practices are filled in.
 - **Up to date by itself.** Renovate updates the dependencies, the settings bot keeps the settings as code, and the blueprint bot brings every release of the blueprint as a pull request that its checks test before it merges; each public repository [made with the blueprint](#made-with-the-blueprint) takes every release this way.
 
@@ -77,7 +77,7 @@ Six public repositories follow the blueprint, each with code of its own and the 
 
 - **Rather than a template repository of GitHub:** *Use this template* copies the files once, without the settings, and nothing follows them later. The blueprint sets the rulesets, the security and the environments as code, and brings every improvement as a pull request.
 - **Rather than Cookiecutter and cruft:** the hooks of a Cookiecutter template run code on your machine, and `cruft update` waits until someone runs it. Copier runs none of the blueprint's code, so it needs no `--trust`; `blueprint.py create`, which you run next, is a file of the copy that you can read first. And the bot of the blueprint updates every repository by itself.
-- **Rather than another Copier template,** such as copier-uv or scientific-python/cookie, which serve Python projects well: the blueprint brings one standard to Home Assistant, Nextcloud, GitHub Actions, Node and containers too, with signed releases of SLSA Build Level 3, SBOMs and VEX, and tests each release on every kind and on the real repositories before it rolls out.
+- **Rather than another Copier template,** such as copier-uv or scientific-python/cookie, which serve Python projects well: the blueprint brings one standard to Home Assistant, Nextcloud, GitHub Actions, Node and containers too, with signed releases of SLSA Build Level 3 (images: Level 2), SBOMs and VEX, and tests each release on every kind and the real repositories before rollout.
 - **Rather than projen:** projen writes the files of a project from code that runs at every synthesis, above all for TypeScript, AWS CDK and jsii. The blueprint needs no code of its own in the project: it keeps its own files current and leaves those of the project to you.
 
 [The comparison](https://dennis-otto.github.io/repo-blueprint/compare.html) puts them side by side, also where another tool fits better.
