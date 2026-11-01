@@ -1052,6 +1052,36 @@ def test_the_bot_waits_only_a_while(tmp_path: Path) -> None:
     assert found == [tmp_path / "1-fixes-markdown"]
 
 
+def test_docs_keeps_the_fixes_of_main_alone_also_when_it_passes(
+    tmp_path: Path,
+) -> None:
+    # The first run of the accessibility check on main accepts what the website has,
+    # passes, and keeps the file for the fix bot. On a pull request, the bot doesn't
+    # wait for Docs, which keeps nothing there.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Docs", conclusion="success"),
+        run_of(2, "CI (python)", conclusion="success"),
+    ]
+    github.artifacts = {
+        1: [{"name": "fixes-docs"}],
+        2: [{"name": "fixes-old"}],
+    }
+    github.downloads = {
+        (1, "fixes-docs"): {".github/a11y-accepted.toml": b"# Accepted\n"}
+    }
+
+    api = api_of(github)
+    assert [run.name for run in runs_of(api, REPO, SHA, "pull_request")] == [
+        "CI (python)"
+    ]
+    found = collect(api, REPO, 1, SHA, "push", tmp_path, downloader(api, REPO))
+
+    # Another check that passed keeps nothing that counts, such as what an earlier
+    # attempt of it kept.
+    assert found == [tmp_path / "1-fixes-docs"]
+
+
 def test_main_looks_at_its_checks_also_when_the_run_kept_nothing(
     tmp_path: Path,
 ) -> None:

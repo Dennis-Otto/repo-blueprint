@@ -210,6 +210,8 @@ class FakeGitHub:
         self.runs: dict[str, list[dict[str, Any]]] = {}
         self.approved: list[int] = []
         self.dispatched: list[Any] = []
+        # How often GitHub still shows the old head after it took an update.
+        self.looks_until_moved: dict[int, int] = {}
         # The token of the job may read the runs, and so may a person. The token of the
         # release app may not.
         self.by_job = False
@@ -267,6 +269,17 @@ class FakeGitHub:
             "data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}
         }
         return subprocess.CompletedProcess(arguments, 0, json.dumps(data), "")
+
+    def head_after_update(self, number: int) -> str:
+        """The head of a pull request when asked again: GitHub makes the merge of an
+        update some looks later, or never."""
+        if not any(updated == number for updated, _ in self.updated):
+            return head_of(number)
+        looks = self.looks_until_moved.get(number, 0)
+        if looks:
+            self.looks_until_moved[number] = looks - 1
+            return head_of(number)
+        return sha_of(0xFEED)
 
     def actions(self, method: str, path: str, body: Any) -> tuple[int, Any]:
         own = f"repos/{REPO}"
@@ -343,7 +356,11 @@ class FakeGitHub:
             return 202, {"message": "Updating pull request branch."}
         found = re.fullmatch(rf"{own}/pulls/(\d+)", path)
         if method == "GET" and found:
-            return 200, {"mergeable": self.mergeable.get(int(found[1]))}
+            number = int(found[1])
+            return 200, {
+                "mergeable": self.mergeable.get(number),
+                "head": {"sha": self.head_after_update(number)},
+            }
         found = re.fullmatch(rf"{own}/issues/(\d+)/labels", path)
         if method == "POST" and found:
             assert body == {"labels": [LABEL]}
@@ -366,13 +383,13 @@ class FakeGitHub:
 
 def bot(github: FakeGitHub) -> tuple[str, list[str]]:
     outcome = next_branch(Api(github), REPO)
-    return outcome.summary, outcome.warnings
+    return outcome.summary, [*outcome.warnings, *outcome.notices]
 
 
 def with_job(github: FakeGitHub) -> tuple[str, list[str]]:
     """A run of the bot in the workflow, with the token of its job."""
     outcome = next_branch(Api(github), REPO, Job(Api(github.as_job), ACCOUNT))
-    return outcome.summary, outcome.warnings
+    return outcome.summary, [*outcome.warnings, *outcome.notices]
 
 
 def forked() -> FakeGitHub:
@@ -1291,7 +1308,75 @@ def test_the_bot_approves_the_runs_of_a_head_that_it_made_itself() -> None:
     )
     # It is in flight now.
     assert said[8] == "waits in line."
+
+
+def test_an_update_of_a_fork_that_github_took_starts_the_next_run_once_the_head_moved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pauses: list[float] = []
+    monkeypatch.setattr("blueprint.branches.time.sleep", pauses.append)
+    github = FakeGitHub(pull(7, cross=True, editable=True))
+    github.behind = {7: 1}
+    github.looks_until_moved[7] = 2
+
+    summary, warnings = with_job(github)
+
+    assert len(pauses) == 2
+    assert warnings == []
+    assert "which the next run of the bot looks at" in notes(summary)[7]
+    assert github.dispatched == [{"ref": "main"}]
+
+
+def test_an_update_of_a_fork_whose_head_stays_starts_no_further_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Otherwise the next run would find it behind again, and update it, without end.
+    monkeypatch.setattr("blueprint.branches.time.sleep", lambda _: None)
+    github = FakeGitHub(pull(7, cross=True, editable=True))
+    github.behind = {7: 1}
+    github.looks_until_moved[7] = 1000
+
+    summary, warnings = with_job(github)
+
     assert github.dispatched == []
+    assert "Its head hasn't moved yet" in notes(summary)[7]
+    assert warnings == [
+        "::warning::GitHub took the update of #7, but its head hasn't moved, so the "
+        "bot starts no further run for it."
+    ]
+
+
+def test_a_failed_look_at_the_head_of_a_fork_starts_no_further_run() -> None:
+    github = FakeGitHub(pull(7, cross=True, editable=True))
+    github.behind = {7: 1}
+    github.fail[("GET", f"repos/{REPO}/pulls/7")] = 500
+
+    summary, warnings = with_job(github)
+
+    assert github.dispatched == []
+    assert "GitHub refused a request" in notes(summary)[7]
+    assert warnings[0].startswith("::warning::The branch bot couldn't handle #7:")
+
+
+def test_an_approval_starts_one_more_run_for_the_runs_that_came_late() -> None:
+    github = forked()
+
+    with_job(github)
+
+    assert github.approved == [2, 3]
+    assert github.dispatched == [{"ref": "main"}]
+
+    # GitHub made one more run of that head, which the next run approves as well.
+    github.runs[head_of(7)] = [a_run(5, head_of(7))]
+    with_job(github)
+    assert github.approved == [2, 3, 5]
+    assert github.dispatched == [{"ref": "main"}, {"ref": "main"}]
+
+    # With nothing left to approve, it ends.
+    github.runs[head_of(7)] = []
+    with_job(github)
+    assert github.approved == [2, 3, 5]
+    assert len(github.dispatched) == 2
 
 
 def test_the_runs_of_a_new_head_are_for_the_next_run_of_the_bot_to_find() -> None:
@@ -1727,6 +1812,50 @@ def test_the_command_writes_the_summary_and_the_warnings(
     )
     _, err = capsys.readouterr()
     assert err.startswith("::warning::The branch bot couldn't handle #1:")
+
+
+def test_the_command_passes_when_github_refuses_something_about_a_fork(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # It can last as long as the fork waits, so it brings no failed run and no issue of
+    # the bot health for every merge, and a pull request of the repository still does.
+    github = FakeGitHub(pull(7, cross=True, editable=True), pull(1, enabled=LATER))
+    github.behind = {7: 1, 1: 1}
+    path = ("PUT", f"repos/{REPO}/pulls/7/update-branch")
+    github.fail[path] = 403
+    github.messages[path] = (
+        "refusing to allow a GitHub App to create or update workflow"
+    )
+
+    assert cli.main(["--repo", REPO, "next-branch"], api=Api(github)) == 0
+    out, err = capsys.readouterr()
+    assert "GitHub refused a request" in notes(out)[7]
+    assert err.startswith("::warning::The branch bot couldn't handle #7:")
+    assert [number for number, _ in github.updated] == [1]
+
+    # Refused for both, the one of the repository fails the run.
+    github = FakeGitHub(pull(7, cross=True, editable=True), pull(1, enabled=LATER))
+    github.behind = {7: 1, 1: 1}
+    github.fail[path] = 403
+    github.fail[("PUT", f"repos/{REPO}/pulls/1/update-branch")] = 403
+    assert cli.main(["--repo", REPO, "next-branch"], api=Api(github)) == 1
+    _, err = capsys.readouterr()
+    assert "#7" in err
+    assert "#1" in err
+
+
+def test_a_refused_start_of_the_next_run_fails_nothing() -> None:
+    github = FakeGitHub(pull(7, cross=True, editable=True))
+    github.behind = {7: 1}
+    path = f"repos/{REPO}/actions/workflows/update-branches.yml/dispatches"
+    github.fail[("POST", path)] = 403
+
+    outcome = next_branch(Api(github), REPO, Job(Api(github.as_job), ACCOUNT))
+
+    assert outcome.warnings == []
+    assert outcome.notices[0].startswith(
+        "::warning::The branch bot couldn't start its next run"
+    )
 
 
 def test_the_command_fails_when_github_lists_nothing(

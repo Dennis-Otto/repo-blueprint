@@ -6344,6 +6344,15 @@ def test_the_issue_assistant_shows_its_limits_of_the_ai_runs(
         }
 
 
+def test_actionlint_knows_the_next_runner() -> None:
+    # A project may test on it before the jobs move, as the Action test of the issue
+    # assistant does in a matrix, and actionlint 1.7.12 doesn't know the label yet.
+    config = yaml.safe_load(
+        (ROOT / ".github/actionlint.yaml").read_text(encoding="utf-8")
+    )
+    assert NEXT_RUNNER in config["self-hosted-runner"]["labels"]
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_actionlint_ignores_only_the_queue_of_the_issue_assistant(
     projects: dict[str, Path], kind: str
@@ -11020,9 +11029,14 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     job = job_in(text, "update")
     condition = condition_of(job)
     # A pull request from a fork takes its place in the line, and its failed checks move
-    # the line on as well: the bot only reads them from the API.
+    # the line on as well: the bot only reads them from the API. Only those that a person
+    # approved: GitHub holds no check of a fork on pull_request_target, so an edit of a
+    # title every few seconds could keep cancelling the bot.
     assert "head.repo.full_name" not in condition
-    assert "head_repository.full_name" not in condition
+    assert (
+        "(github.event.workflow_run.head_repository.full_name == github.repository || "
+        "github.event.workflow_run.event == 'pull_request')" in condition
+    )
     assert (
         "github.event.pull_request.base.ref == github.event.repository.default_branch"
         in condition
@@ -14693,6 +14707,13 @@ def test_a_quick_check_never_cancels_the_run_for_another_commit(name: str) -> No
     assert group.endswith("-${{ github.event.pull_request.head.sha }}")
 
 
+def test_the_weekly_docs_run_never_takes_the_place_of_a_waiting_push() -> None:
+    # GitHub keeps one waiting run for each group. The run of the schedule publishes
+    # nothing, so in the group of main it could leave the latest commit unpublished.
+    group = concurrency_of("docs.yml")
+    assert "github.event_name == 'schedule' && 'weekly-' || ''" in group
+
+
 @pytest.mark.parametrize("name", LONG_CHECKS)
 def test_a_long_check_cancels_the_runs_for_older_commits(name: str) -> None:
     # Their runners are worth more than the race, which the bot for cancelled checks
@@ -15584,13 +15605,9 @@ def test_the_check_docs_checks_the_website_that_it_built(
     # check before it failed, so that one run names everything to fix.
     built = "!cancelled() && steps.build.outcome == 'success'"
     node = step_in(job, "Set up the accessibility check")
-    a11y_tests = step_in(job, "Test the accessibility check")
     a11y = step_in(job, "Check the accessibility of the website")
     for step in (promises, address, lychee, accessible, node, a11y):
         assert condition_of(step) == f"${{{{ {built} }}}}", step
-    assert condition_of(a11y_tests) == (
-        f"${{{{ {built} && hashFiles('.github/a11y/check.test.mjs') != '' }}}}"
-    )
     assert condition_of(project) == (
         f"${{{{ {built} && hashFiles('scripts/check-site.sh') != '' }}}}"
     )
@@ -16182,7 +16199,7 @@ def test_every_website_is_checked_for_its_accessibility(
     package = json.loads((root / ".github/a11y/package.json").read_text("utf-8"))
     lock = json.loads((root / ".github/a11y/package-lock.json").read_text("utf-8"))
     tools = package["devDependencies"]
-    assert set(tools) == {"@axe-core/playwright", "playwright-core"}
+    assert set(tools) == {"@axe-core/playwright", "playwright-core", "smol-toml"}
     assert lock["packages"][""]["devDependencies"] == tools
     for name, version in tools.items():
         assert re.fullmatch(r"\d+\.\d+\.\d+", version), name
@@ -16191,32 +16208,59 @@ def test_every_website_is_checked_for_its_accessibility(
         assert not name or locked["integrity"].startswith("sha512-"), name
     ignored = (root / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/.github/a11y/node_modules/" in ignored
-    # The check docs runs it after the build, and reports for one release before
-    # it fails the check.
+    # The check docs runs it after the build and fails on what it finds: a pull
+    # request on the pages that differ from the digest of main, main and the weekly
+    # run on every page, which keep that digest for the pull requests.
     docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     step = step_named(docs, "Check the accessibility of the website")
-    assert step == {
-        "name": "Check the accessibility of the website",
-        "if": "${{ !cancelled() && steps.build.outcome == 'success' }}",
-        "continue-on-error": True,
-        "timeout-minutes": 5,
-        "env": {"REPORT_ONLY": "true"},
-        "run": "node .github/a11y/check.mjs site",
-    }
+    assert "continue-on-error" not in step
+    assert "REPORT_ONLY" not in docs
+    # A timeout fails the check now, and every page took 437 seconds on homedarts, the
+    # slowest website, so the limit is about twice that, and the job has room for it.
+    assert step["timeout-minutes"] == 15
+    assert job_with(docs, step["name"])["timeout-minutes"] == 20
+    assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
+    assert step["run"] == (
+        'if [[ "$EVENT" == pull_request ]]; then\n'
+        "  node .github/a11y/check.mjs site --changed-since site-digest.json\n"
+        "else\n"
+        "  node .github/a11y/check.mjs site --write-digest site-digest.json\n"
+        "fi\n"
+    )
     steps = job_with(docs, "Check the accessibility of the website")["steps"]
     runs = [each.get("run") for each in steps]
     built = runs.index("mkdocs build --strict")
     tools = runs.index(
         "npm ci --prefix .github/a11y --ignore-scripts --no-audit --no-fund"
     )
-    # The tests of the check run where the blueprint keeps them, before the check.
-    tests = runs.index("node --test .github/a11y/check.test.mjs")
-    assert built < tools < tests < steps.index(step)
-    assert "hashFiles('.github/a11y/check.test.mjs') != ''" in condition_of(
-        steps[tests]
+    digest = step_named(docs, "Restore the digest of the website of main")
+    assert built < tools < steps.index(digest) < steps.index(step)
+    assert "github.event_name == 'pull_request'" in digest["if"]
+    assert digest["with"]["path"] == "site-digest.json"
+    assert digest["with"]["key"] == (
+        "website-digest-${{ github.event.pull_request.base.sha }}-"
+    )
+    assert digest["with"]["restore-keys"] == "website-digest-"
+    keep = step_named(docs, "Keep the digest of the website for the pull requests")
+    assert steps.index(step) < steps.index(keep)
+    assert keep["uses"].startswith("actions/cache/save@")
+    assert "github.event_name != 'pull_request'" in keep["if"]
+    assert "github.ref == 'refs/heads/main'" in keep["if"]
+    assert keep["with"]["path"] == "site-digest.json"
+    assert (
+        keep["with"]["key"] == "website-digest-${{ github.sha }}-${{ github.run_id }}"
+    )
+    assert "/site-digest.json" in ignored
+    # Every page each week, which publishes nothing.
+    on = yaml.safe_load(docs)[True]
+    assert "schedule" in on
+    assert '"$EVENT" != schedule' in step_named(docs, "Look for the website")["run"]
+    # The tests of the check are a step of scripts/check.sh, not of the check docs.
+    assert not any(
+        "check.test.mjs" in str(each.get("run")) + str(each.get("if")) for each in steps
     )
     assert (root / ".github/a11y/check.test.mjs").is_file() == (kind == "blueprint")
-    setup = [each for each in steps[: steps.index(step)] if "uses" in each][-1]
+    setup = [each for each in steps[: steps.index(step)] if "uses" in each][-2]
     assert setup["uses"].startswith("actions/setup-node@")
     assert setup["with"]["node-version"] == 24
     if kind == "blueprint":
@@ -16229,6 +16273,57 @@ def test_every_website_is_checked_for_its_accessibility(
         )
         for path in (".github/a11y/**", ".github/mkdocs-blueprint.css"):
             assert f"\n      - {path}\n" in dashboard, path
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_project_accepts_what_its_website_has_once_through_the_update(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # The file is the project's: the update brings it once, with the line that makes
+    # the first run of every page on main write what the website has there, and passes.
+    root = projects[kind]
+    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    assert ".github/a11y-accepted.toml" in questions["_skip_if_exists"]
+    accepted = tomllib.loads(
+        (root / ".github/a11y-accepted.toml").read_text(encoding="utf-8")
+    )
+    assert accepted == {"baseline": True}
+    docs = (root / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    keep = step_named(docs, "Keep the violations that this run accepted")
+    assert "steps.a11y.outputs.written == 'true'" in keep["if"]
+    assert "github.event_name == 'push'" in keep["if"]
+    assert keep["run"].endswith(
+        'python3 "$script" fix keep "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"\n'
+    )
+    artifact = step_named(docs, "Keep the fixes for the fix bot")
+    assert artifact["with"]["name"] == "fixes-docs"
+    assert artifact["with"]["include-hidden-files"] is True
+    # The fix bot looks at Docs on main alone, and the bot's commit needs the file.
+    after = (root / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    assert (
+        "(github.event.workflow_run.name == 'Lint' || "
+        "github.event.workflow_run.name == 'Docs' || "
+        "startsWith(github.event.workflow_run.name, 'CI ('))"
+    ) in after
+
+
+def test_the_blueprint_accepts_no_violation_and_tests_its_check_with_coverage() -> None:
+    accepted = (ROOT / ".github/a11y-accepted.toml").read_text(encoding="utf-8")
+    assert tomllib.loads(accepted) == {}
+    check = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+    assert '  step "Accessibility check"\n' in check
+    assert "--test-coverage-lines=100 --test-coverage-branches=100" in check
+    # Where the tests are: a repository made from the blueprint has none to run.
+    assert "if [[ -f .github/a11y/check.test.mjs ]]; then\n" in check
+    # The check of the CI that runs scripts/check.sh has the Node of those limits.
+    ci = (ROOT / ".github/workflows/ci-python.yml").read_text(encoding="utf-8")
+    setup = next(
+        each
+        for each in job_with(ci, "Run the checks")["steps"]
+        if str(each.get("uses")).startswith("actions/setup-node@")
+    )
+    assert setup["if"] == "hashFiles('.github/a11y/check.test.mjs') != ''"
+    assert setup["with"]["node-version"] == 24
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -17230,7 +17325,7 @@ def test_the_uv_of_the_workflows_follows_the_blueprint(
 # a pull request for half an hour, until the Variants ran out of time.
 JOB_LIMITS = {
     ("variants.yml", "variant"): 10,
-    ("ci-python.yml", "check"): 8,
+    ("ci-python.yml", "check"): 12,
     ("ci-github-action.yml", "check"): 8,
     ("ci-home-assistant.yml", "check"): 15,
 }
@@ -17961,8 +18056,9 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert node["with"]["node-version-file"] == (
         "${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}"
     )
-    # Without the hook, the job only waits for its hosts and checks out.
-    for step in job["steps"][3:-1]:
+    # Without the hook, the job only waits for its hosts and checks out; after these
+    # steps come the explanation of a failure of the script and the wait for Docker.
+    for step in job["steps"][3:-2]:
         assert HOOK in step["if"], step
     (upload,) = steps_using(job, "actions/upload-artifact")
     assert upload["with"]["if-no-files-found"] == "error"
@@ -17977,6 +18073,12 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert download["if"] == HOOK
     assert download["with"] == {name: upload["with"][name] for name in ("name", "path")}
     assert step_named(assets, "Add the assets of the project")["if"] == HOOK
+    assert step_named(assets, "Add the assets of the project")["id"] == (
+        "add-project-assets"
+    )
+    assert step_named(job, "Build the assets of the project")["id"] == (
+        "build-project-assets"
+    )
     order = [
         "Verify the tag before building",
         "Take the assets of the project",
@@ -18086,6 +18188,81 @@ def test_the_build_stops_at_assets_that_the_release_cannot_ship(
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
+    ("job", "name", "condition"),
+    [
+        # The script, the packages before it or a wrong asset; the other steps of the
+        # job, such as the check of a tag that moved, are no fault of the script, and
+        # without the script this step is skipped, so nothing of it can fail.
+        (
+            "project-assets",
+            "Explain a failure of the script",
+            "failure() && steps.build-project-assets.outcome == 'failure'",
+        ),
+        # A name that the release keeps for itself; the other failures of this job
+        # are no fault of the script.
+        (
+            "assets",
+            "Explain a refused asset of the project",
+            "failure() && steps.add-project-assets.outcome == 'failure'",
+        ),
+    ],
+)
+def test_the_assets_of_a_project_explain_their_failure(
+    projects: dict[str, Path], tmp_path: Path, job: str, name: str, condition: str
+) -> None:
+    # The PR coach of a check that no pull request runs: the summary of the run and an
+    # annotation say what failed and how to fix it, from the catalog of a real project.
+    rendered = projects["node-package"]
+    workspace = tmp_path / "checkout"
+    shutil.copytree(rendered, workspace, ignore=shutil.ignore_patterns(".git"))
+    settings = workflow_steps.step("build-release.yml", job, name, rendered)
+    assert settings["if"] == condition
+    assert settings["env"] == {"CHECK": "assets of the project"}
+
+    step = workflow_steps.run_step(
+        tmp_path,
+        "build-release.yml",
+        job,
+        name,
+        env={**settings["env"], "GITHUB_ACTIONS": "true"},
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'},
+        files={"scripts/release-assets.sh": "exit 3\n"},
+        root=rendered,
+        workspace=workspace,
+    )
+
+    assert step.returncode == 0, step.stdout + step.stderr
+    assert (
+        "::error title=PR coach%3A The assets of the project::`scripts/release-assets.sh`"
+        in step.stdout
+    )
+    assert "The assets of the project" in step.summary
+    assert "scripts/release-assets.sh" in step.summary
+    assert 'bash scripts/release-assets.sh "$(mktemp -d)" 1.2.3' in step.summary
+
+
+def test_the_coach_explains_a_failure_of_the_assets_of_a_project() -> None:
+    entry = Catalog.load(ROOT).check("assets of the project")
+    assert entry is not None
+    # What the steps of the two jobs refuse, and what the job can't reach.
+    for text in ("wrote no asset", "npm ci", "the release keeps for"):
+        assert text in entry.problem
+    assert "stays a draft" in entry.why
+    for text in (
+        "re-run the failed jobs",
+        "`fix:` title",
+        "only GitHub, Node.js and npm",
+        "next release",
+        "gh release delete vX.Y.Z --yes",
+    ):
+        assert text in entry.fix
+    assert entry.docs == "CONTRIBUTING.md#releases"
+    assert entry.manual
+    assert not entry.autofix
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
     ("publish_to", "name", "added"),
     [
         ("none", "demo-extension-1.2.3.zip", True),
@@ -18165,6 +18342,10 @@ def test_contributing_explains_the_assets_that_a_project_builds_itself(
     text = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/release-assets.sh FOLDER VERSION`" in text
     assert "the verification of the release fails for an asset without" in text
+    # When it fails, the run says why, from the catalog of each kind.
+    assert "the job explains in the summary of its run what failed" in text
+    assert "re-run the failed jobs of that run" in text
+    assert Catalog.load(projects[kind]).check("assets of the project") is not None
 
 
 def releases_of(guide: str) -> str:

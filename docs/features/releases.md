@@ -40,6 +40,8 @@ A project that ships something that no registry builds, such as the zip of a bro
   <img src="../images/diagrams/how-a-project-adds-its-own-release-assets.svg" alt="How a project adds its own release assets: The project's scripts/release-assets.sh builds its own assets, such as the zip of a browser extension, at the commit of the release, in a job that may write nothing, holds no secret and reaches only GitHub, Node.js and npm. The job checks that each asset is a file with a name that GitHub keeps and hands the files on as an artifact. The job of the release takes them, after it checked the signed tag, refuses a name that one of its own assets has, and attests them with the package, the SBOMs and the notices. All of them go to the draft before it is published, and the verification of the release fails for an asset without its signed provenance.">
 </picture>
 
+When the script fails, the release stays a draft, and the job explains in the summary of its run what failed and how to fix it. After a hiccup, re-run the failed jobs of that run, which finishes the draft. A fix of the script ships with the next release, as the build runs at the commit of the release, so give its pull request a `fix:` title, and once that release is out, delete the old draft by hand with `gh release delete vX.Y.Z --yes`, which keeps the signed tag.
+
 A release of paperless-sync, as GitHub shows its assets: the signed app, its signature, its SBOMs as CycloneDX and SPDX, the provenance of its build with its Sigstore bundle, the notices of its dependencies, and the attestation of the release:
 
 <picture>

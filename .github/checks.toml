@@ -154,15 +154,21 @@ promise, such as a sitemap in every folder of pages and the 404 page in the defa
 language, that no page loads more than 1,200 KB at once, as it names a page that
 does with what it loads the most, and that every page shows each picture of its
 Markdown, the parts of the README included, with no empty paragraph where a plugin
-took one out; `scripts/check-site.sh` adds the checks of the project. When the log
-names a font or a script that Material couldn't download, its server had a hiccup: that
-usually passes when the job runs again, and a build that finds them in the cache of
-the week, which a push to `main` saves, downloads nothing."""
+took one out; `scripts/check-site.sh` adds the checks of the project. axe-core opens
+the pages that differ from `main` in Chrome, and every page when a stylesheet, a script
+or `mkdocs.yml` differs, and names each serious or critical violation of WCAG 2.2 A or
+AA that `.github/a11y-accepted.toml` doesn't accept, at the Markdown of its page, or at
+`mkdocs.yml` for a page without one. When the log names a font or a script that Material
+couldn't download, its server had a hiccup: that usually passes when the job runs again,
+and a build that finds them in the cache of the week, which a push to `main` saves,
+downloads nothing."""
 why = """A strict build keeps every link of the documentation working; a warning
 today is a broken page for a reader tomorrow. The checks of the built website see what
 the build doesn't: the links that a page writes in HTML, what a new version of
 Material or of its plugins changes in the pages, and a page that takes a phone on a
-slow network more than a few seconds to load."""
+slow network more than a few seconds to load. A reader with a screen reader, the
+keyboard alone or a larger contrast can't use what axe-core finds: text too faint to
+read, a link told apart by its color alone, a control without a name."""
 fix = """Fix what the log of the check names: the page and the link that leads nowhere,
 or the file of the website that breaks a promise of its hooks. A picture that a page
 shows from `main`, which the website serves from the checkout, needs its file
@@ -172,17 +178,24 @@ block, which loads Mermaid, about 1 MB: `bash scripts/diagrams.sh --extract` mak
 them. A page that lacks a picture of its Markdown, or has an empty paragraph,
 lost it in the build: build the website with the lock of its tools and look for the
 plugin or the hook that takes it out, as mkdocs-glightbox did with selectolax 1.0.0
-and 1.0.1. Install the tools of the
-website as the section Website of CONTRIBUTING.md shows, and build and check it as the
-check does (in the blueprint itself, the tool is `blueprint.py` without `.github/`);
+and 1.0.1. A violation of accessibility has a link in the summary that explains its
+fix; one that has to stay goes into `.github/a11y-accepted.toml`, with its page, its
+rule and the reason, and an entry without a reason stops the check. Install the tools of
+the website as the section Website of CONTRIBUTING.md shows, and build and check it as
+the check does (in the blueprint itself, the tool is `blueprint.py` without `.github/`);
 with them, `bash scripts/check.sh` builds it as well:"""
 commands = [
   ".venv-docs/bin/mkdocs build --strict",
   "python3 .github/blueprint.py site-check site",
+  "npm ci --prefix .github/a11y --ignore-scripts",
+  "node .github/a11y/check.mjs site",
 ]
 docs = "CONTRIBUTING.md#website"
 autofix = """A link or a page that leads nowhere needs a person, who knows where it
-should lead."""
+should lead, and so does a new violation of accessibility: a person fixes it, or says why
+it stays. Only the first run on `main` after an update, with the line `baseline = true`
+of `.github/a11y-accepted.toml`, writes what the website already has into that file, and
+the fix bot brings it."""
 
 [check.dco]
 title = "The sign-off of every commit"
@@ -738,6 +751,28 @@ docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/up
 autofix = """Whether a release of the issue assistant may reach the blueprint is decided
 by its verification, never by a command of the pull request."""
 
+[check."assets of the project"]
+title = "The assets of the project"
+problem = """`scripts/release-assets.sh` failed in the build of the release, or what runs
+before it, such as `npm ci --ignore-scripts`; or it wrote no asset into the folder of
+its first argument, or one that the release can't ship: a folder, a link, a name that
+GitHub would change, or a name that the release keeps for its own files or its
+registry. An annotation or the log of the job says which."""
+why = """The release stays a draft with its signed tag until each of its assets is built
+and attested, so nobody gets this version, and no registry does either."""
+fix = """When the log shows a hiccup of GitHub or npm, re-run the failed jobs of this run,
+which finishes the draft of a release or of a beta. Otherwise fix the script in a pull
+request with a `fix:` title, which makes a release: the fix ships with the next release,
+as the build runs at the commit of the release. Once that is out, delete the old draft
+by hand with `gh release delete vX.Y.Z --yes`, which keeps the signed tag. The job has no `sudo` and
+no Docker and reaches only GitHub, Node.js and npm, and the summary of Harden-Runner
+names a call that it blocked. Try the script on your machine, after
+`npm ci --ignore-scripts` where the project has a `package.json`:"""
+commands = ['bash scripts/release-assets.sh "$(mktemp -d)" 1.2.3']
+docs = "CONTRIBUTING.md#releases"
+autofix = """What the script builds is for the project to decide, and the build runs at
+a tag that doesn't change, so no command of a pull request repairs this release."""
+
 # ---------------------------------------------------------------- the steps of scripts/check.sh
 
 [step."Text files"]
@@ -1193,6 +1228,23 @@ fix = """Read the output of the self-test in the log, fix the program or the Doc
 and run the checks again with `bash scripts/check.sh`."""
 docs = "CONTRIBUTING.md#checks"
 autofix = """A program that fails its self-test needs a person, who knows what the program should do."""
+
+[step."Accessibility check"]
+problem = """A test of the accessibility check of the website fails, or a line or a
+branch of `.github/a11y/check.mjs` runs in no test; the log names the test, or the
+limit of the coverage that it missed."""
+why = """Every repository takes this check from the blueprint, and its check *docs*
+fails on what it finds: a mistake in it blocks their pull requests, or lets a violation
+through."""
+fix = """Fix the check or its test, and run them as the step does, with Node 24 and a
+Chrome, where `CHROME` names another one than Google Chrome:"""
+commands = [
+  "npm ci --prefix .github/a11y --ignore-scripts",
+  "node --test --experimental-test-coverage --test-coverage-include=.github/a11y/check.mjs --test-coverage-lines=100 --test-coverage-branches=100 .github/a11y/check.test.mjs",
+]
+docs = "CONTRIBUTING.md#accessibility"
+autofix = """What a test finds in the check needs a person, who knows what the check
+should do."""
 
 [step.Website]
 problem = """The website doesn't build strictly: a link or an anchor leads nowhere, a

@@ -2027,7 +2027,7 @@ def main(
             return bot_health_command(api, repo, arguments, root)
         if arguments.command == "next-branch":
             outcome = next_branch(api, repo, job_from(os.environ))
-            for warning in outcome.warnings:
+            for warning in (*outcome.warnings, *outcome.notices):
                 print(warning, file=sys.stderr)
             print(outcome.summary, end="")
             return 1 if outcome.warnings and not arguments.warnings_only else 0

@@ -33,6 +33,7 @@ so the bot approves those runs (decision 0098). Anything unclear means no approv
 from __future__ import annotations
 
 import json
+import time
 import urllib.parse
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -78,6 +79,9 @@ LIMIT = 100
 NO_TIME = "0001-01-01T00:00:00Z"
 # The workflow of the bot, which starts the next run of the bot.
 WORKFLOW = "update-branches.yml"
+# How often the bot looks at the head of a fork after an update, and the seconds between.
+HEAD_LOOKS = 5
+HEAD_PAUSE = 3
 # The account of the commits that GitHub makes and signs itself, such as the merge of
 # an update: nobody else can get a commit verified under it.
 GITHUB_COMMITTER = "web-flow"
@@ -372,11 +376,14 @@ class Line:
     job: Job | None = None
     notes: dict[int, list[str]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # Warnings about a pull request from a fork, which fail no run: a refusal can last as
+    # long as the pull request waits, and it is about that pull request alone.
+    notices: list[str] = field(default_factory=list)
     compared: dict[int, Mapping[str, Json]] = field(default_factory=dict)
     # The runs of the head of each pull request from a fork that the bot may approve.
     approvable: dict[int, list[Mapping[str, Json]]] = field(default_factory=dict)
-    # Whether the bot brought a fork's pull request up to date in this run.
-    updated_fork: bool = False
+    # Whether this run made new runs of a fork's head likely, for the next run to find.
+    look_again_wanted: bool = False
 
     @property
     def actions(self) -> Api:
@@ -389,7 +396,7 @@ class Line:
 
     def refused(self, pull: Pull, error: GitHubError) -> None:
         self.note(pull, f"GitHub refused a request: {code(str(error))}.")
-        self.warnings.append(
+        (self.notices if pull.fork else self.warnings).append(
             f"::warning::The branch bot couldn't handle #{pull.number}: "
             + escape_data(str(error))
         )
@@ -647,6 +654,9 @@ class Line:
             "Its head is a merge of the bot on top of commits that a person approved, "
             "so nothing new from the fork runs: its checks run now, and it merges next.",
         )
+        # GitHub may make further runs of this head a moment later. The next run approves
+        # them, and one with nothing to approve starts no further run.
+        self.look_again_wanted = True
 
     def in_flight(self, line: list[Pull]) -> Pull | None:
         """The pull request whose checks run while it is up to date: it merges next,
@@ -758,13 +768,11 @@ class Line:
                 continue
             front = pull
             if pull.fork:
-                self.updated_fork = True
                 self.note(
                     pull,
-                    f"was {plural(behind, 'commit')} behind {base}: brought up to date. "
-                    "GitHub may hold its runs for an approval, which the next run of "
-                    "the bot looks at.",
+                    f"was {plural(behind, 'commit')} behind {base}: brought up to date.",
                 )
+                self.follow_update(pull)
                 continue
             self.note(
                 pull,
@@ -772,12 +780,50 @@ class Line:
                 "its checks run now.",
             )
 
+    def follow_update(self, pull: Pull) -> None:
+        """Have the next run of the bot look at the new head of a fork, once there is
+        one: GitHub answers an update before it makes the merge, and a run that starts
+        again for a head that stays would update it again, without end."""
+        try:
+            moved = self.head_moved(pull)
+        except GitHubError as error:
+            self.refused(pull, error)
+            return
+        if moved:
+            self.look_again_wanted = True
+            self.note(
+                pull,
+                "GitHub may hold its runs for an approval, which the next run of the "
+                "bot looks at.",
+            )
+            return
+        self.note(
+            pull,
+            "Its head hasn't moved yet, so the next merge or the schedule looks at it "
+            "again.",
+        )
+        self.notices.append(
+            f"::warning::GitHub took the update of #{pull.number}, but its head hasn't "
+            "moved, so the bot starts no further run for it."
+        )
+
+    def head_moved(self, pull: Pull) -> bool:
+        """Whether its head is another one than in the list, within a few seconds."""
+        for _ in range(HEAD_LOOKS):
+            data = self.api.get(f"repos/{self.repo}/pulls/{pull.number}")
+            head = (data.get("head") or {}) if isinstance(data, dict) else {}
+            if head.get("sha") not in (None, pull.head):
+                return True
+            time.sleep(HEAD_PAUSE)
+        return False
+
     def look_again(self) -> None:
-        """Start the next run of the bot after an update of a fork's branch: the runs of
-        its new head wait for an approval, and a run that GitHub holds doesn't report as
-        completed, so no event tells the bot of them. A run of the workflow starts late
-        enough to find them, and the token of a job may start one by hand."""
-        if not self.updated_fork or self.job is None:
+        """Start the next run of the bot after an update of a fork's branch or an
+        approval: the runs of a new head wait for an approval, and a run that GitHub
+        holds doesn't report as completed, so no event tells the bot of them. A run of
+        the workflow starts late enough to find them, and the token of a job may start
+        one by hand."""
+        if not self.look_again_wanted or self.job is None:
             return
         try:
             self.job.api.post(
@@ -785,7 +831,7 @@ class Line:
                 {"ref": self.base},
             )
         except GitHubError as error:
-            self.warnings.append(
+            self.notices.append(
                 "::warning::The branch bot couldn't start its next run, so the next "
                 "merge or its schedule looks at the runs of the pull request from a "
                 "fork: " + escape_data(str(error))
@@ -813,7 +859,10 @@ class Line:
 @dataclass(frozen=True)
 class Outcome:
     summary: str
+    # What fails the run, unless it shows as a check of a pull request.
     warnings: list[str]
+    # What only shows as an annotation.
+    notices: list[str]
 
 
 def next_branch(api: Api, repo: str, job: Job | None = None) -> Outcome:
@@ -825,4 +874,4 @@ def next_branch(api: Api, repo: str, job: Job | None = None) -> Outcome:
     pulls = waiting(api, repo, base)
     line.move_on(line.sort_out(pulls))
     line.look_again()
-    return Outcome(line.summary(pulls), line.warnings)
+    return Outcome(line.summary(pulls), line.warnings, line.notices)
