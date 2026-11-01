@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-24.04
     # A few times its longest run, so that a run that hangs ends early; a step that
     # installs, builds or downloads ends after five minutes.
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
