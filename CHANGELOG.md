@@ -7,6 +7,24 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.4.0...v1.5.0) (2026-11-01)
+
+
+### Features
+
+* check unsigned commits and tell the contributor how to sign them ([#564](https://github.com/Dennis-Otto/repo-blueprint/issues/564)) ([2d8fff6](https://github.com/Dennis-Otto/repo-blueprint/commit/2d8fff6a25f33d1c2d39f45d56f1c4e0d832411c))
+* let the branch bot bring pull requests from forks up to date ([#566](https://github.com/Dennis-Otto/repo-blueprint/issues/566)) ([ff4d0b5](https://github.com/Dennis-Otto/repo-blueprint/commit/ff4d0b58386ec2548441663f2aebbca4cd1f3a61))
+
+
+### Bug fixes
+
+* **release:** explain a failing scripts/release-assets.sh in the run of the release ([#553](https://github.com/Dennis-Otto/repo-blueprint/issues/553)) ([06a2904](https://github.com/Dennis-Otto/repo-blueprint/commit/06a29046a19d20977b0743f6c1681228ee08229a))
+
+
+### Performance
+
+* **docs:** check the accessibility of the pages a pull request changes, and fail on new violations ([#547](https://github.com/Dennis-Otto/repo-blueprint/issues/547)) ([80aae96](https://github.com/Dennis-Otto/repo-blueprint/commit/80aae969f5fa5085262ba75e447138e404ad5e1b))
+
 ## [1.4.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.3.0...v1.4.0) (2026-11-01)
 
 ### Features
