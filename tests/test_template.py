@@ -2230,11 +2230,18 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     # Locked with its hash, as every package of the lock.
     biome = lock["packages"]["node_modules/@biomejs/biome"]
     assert biome["integrity"].startswith("sha512-")
-    # The settings: the files of the blueprint in .github/ keep its format, and the
+    # The settings: the files of the blueprint in .github/ keep its format, Biome 2.6
+    # stays out of the Markdown and the YAML that the blueprint renders, and the
     # indentation comes from .editorconfig, which has it for JSONC too.
     settings = (project / "biome.jsonc").read_text(encoding="utf-8")
     config = json.loads(re.sub(r"^//.*\n", "", settings, flags=re.MULTILINE))
-    assert config["files"]["includes"] == ["**", "!.github"]
+    assert config["files"]["includes"] == [
+        "**",
+        "!.github",
+        "!**/*.md",
+        "!**/*.yml",
+        "!**/*.yaml",
+    ]
     assert config["formatter"]["useEditorconfig"] is True
     assert config["linter"]["rules"]["preset"] == "recommended"
     assert config["vcs"]["useIgnoreFile"] is True
