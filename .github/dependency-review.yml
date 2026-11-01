@@ -43,8 +43,8 @@ allow-licenses:
 # public API of Nextcloud and the cloud parts of Home Assistant's test base.
 allow-dependencies-licenses:
   # The tools of the blueprint bot: Copier's Jinja filters (GPL-3.0-only),
-  # typing-extensions, whose license the review reads wrongly, and wcwidth, which
-  # Copier's prompts bring in and which declares HPND-Markus-Kuhn AND MIT.
+  # typing-extensions, whose license the review reads wrongly, and wcwidth, whose
+  # tables fall under a permissive license: HPND-Markus-Kuhn AND MIT.
   - pkg:pypi/jinja2-ansible-filters
   - pkg:pypi/typing-extensions
   - pkg:pypi/wcwidth
