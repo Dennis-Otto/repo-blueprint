@@ -16,9 +16,13 @@ Der Blueprint funktioniert für jedes Konto und jede Organisation auf GitHub. Ei
 
 ## 1. Den Blueprint kopieren
 
+Du brauchst Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator deines Kontos oder deiner Organisation (`gh auth login`), und keinen Checkout des Blueprints.
+
 ```sh
-copier copy gh:Dennis-Otto/repo-blueprint my-project
+uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
 ```
+
+[Die Anleitung](https://dennis-otto.github.io/repo-blueprint/de/guide.html#ein-repository-anlegen) zeigt diesen Befehl auch mit pipx und mit einem eigenen Copier; die anderen `uvx`-Befehle dieser Seite ändern sich genauso.
 
 Copier fragt nach deinem Konto oder deiner Organisation, `owner`, und nimmt es als Maintainer. Lass die Frage nach der Release-App leer und beantworte zwei weitere:
 
@@ -38,38 +42,68 @@ defaults:
 
 ## 2. Das Repository anlegen
 
+Jede Kopie bringt das Werkzeug des Blueprints in `.github/` mit, deshalb laufen dieser und jeder spätere Befehl im Ordner der Kopie; unter Windows startet `py -3` Python statt `python3`:
+
 ```sh
-cd my-project
-git init && git add --all && git commit --signoff --message "chore: start from the blueprint"
-gh repo create octo-org/my-project --public --source . --push
-python3 ../repo-blueprint/blueprint.py checklist
+cd mein-projekt
+python3 .github/blueprint.py create
 ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-a-new-repository-starts.de.dark.svg">
+  <img src="images/diagrams/how-a-new-repository-starts.de.svg" alt="Wie ein neues Repository beginnt: copier copy schreibt die Dateien des Projekts und führt keinen Code des Blueprints aus. python3 .github/blueprint.py create, das jede Kopie mitbringt, macht den ersten Commit auf dem Branch main mit Sign-off, legt das Repository mit gh repo create an und pusht dorthin, wendet die Einstellungen als Code an und zeigt die Checkliste. Du erledigst die Schritte, die nur eine Person erledigen kann, etwa die Release-App und die Secrets, und dann laufen die Prüfungen und die Bots.">
+</picture>
+
+`create` nimmt den Eigentümer und den Namen aus deinen Antworten. Es prüft zuerst, was es braucht, und ein Befund mit ✘ hält es an, bevor etwas entsteht, und nennt den Befehl, der ihn behebt, wie [die Fehlerbehebung](troubleshooting.md#create-hält-bei-seiner-vorabprüfung-an) erklärt. Dann macht es den ersten Commit mit Sign-off auf dem Branch `main`, auf dem jeder Workflow läuft, legt das Repository an und pusht dorthin, öffentlich, außer du gibst `--private` an, wendet die Einstellungen als Code an und zeigt die Checkliste. `--dry-run` zeigt die Vorabprüfung und die Befehle und führt keinen aus, und ein Lauf, der mittendrin aufgehört hat, macht dort weiter, wenn du `create` noch einmal startest.
 
 ## 3. Die Release-App registrieren
 
-Die Checkliste beginnt mit einem Link, der die App auf deinem Konto oder deiner Organisation registriert, mit Name und Berechtigungen vorausgefüllt und ohne Webhook; *Variables* setzt du von Hand, das kann der Link nicht. Leg die App an, erzeuge auf ihrer Einstellungsseite einen privaten Schlüssel und nenne die App in den Antworten des Blueprints, mit dem Namen in ihrer Adresse und der Client ID und App ID dieser Seite:
+Ein Befehl registriert die App auf deinem Konto oder deiner Organisation, mit Name und allen Berechtigungen vorausgefüllt und ohne Webhook, setzt ihren privaten Schlüssel und öffnet den Pull Request, der sie nennt:
 
 ```sh
-copier update --defaults --vcs-ref=:current: --data release_app=NAME --data release_app_client_id=CLIENT_ID --data release_app_id=APP_ID
-git commit --all --signoff --message "chore: name the release app"
-git push
+python3 .github/blueprint.py app register
 ```
 
-Installiere die App auf dem Repository, unter `https://github.com/apps/NAME/installations/new`, und setze ihren privaten Schlüssel aus der Datei, die GitHub dir gegeben hat; die GitHub CLI liest ihn und zeigt ihn nirgends:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-the-release-app-is-registered.de.dark.svg">
+  <img src="images/diagrams/how-the-release-app-is-registered.de.svg" alt="Wie die Release-App registriert wird: python3 .github/blueprint.py app register prüft zuerst, was es braucht, und nichts geschieht, solange etwas es aufhalten würde. Ein Formular auf einem freien Port von 127.0.0.1 schickt das Manifest der App an GitHub, und du drückst auf der Seite von GitHub auf Create GitHub App. GitHub kommt zu diesem Port zurück, mit einem Code und dem State des Formulars; ein falscher State wird abgewiesen, und das Warten geht weiter. gh tauscht den Code gegen die App ID, die Client ID und den privaten Schlüssel. gh secret set nimmt den Schlüssel auf seiner Standardeingabe, sodass keine Datei ihn hält, und Copier nennt die App in einem Pull Request. Du installierst die App und mergst den Pull Request, und die Checkliste hakt die App ab.">
+</picture>
+
+Wie `create` prüft er zuerst, was er braucht, und ein mit ✘ markierter Befund hält ihn an, bevor etwas entsteht. Dann öffnet er in deinem Browser eine Seite, die das [Manifest der App](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) an GitHub schickt. Sei dort bei GitHub als Eigentümer des Repositorys oder als Eigentümer seiner Organisation angemeldet und drücke auf *Create GitHub App*. GitHub übergibt dann den Namen, die Client ID und die App ID der App, sodass nichts von Hand kopiert wird, und ihren privaten Schlüssel, dieses eine Mal:
+
+- **Der private Schlüssel** geht über die Standardeingabe der GitHub CLI in das Secret `RELEASE_AUTOMATION_PRIVATE_KEY` der Umgebung `release`. Keine Datei hält ihn, nichts gibt ihn aus, und kein Download bleibt liegen.
+- **Die Antworten des Blueprints** nennen die App auf einem eigenen Branch, in einem Pull Request, weil `create` `main` schon geschützt hat. `--no-update` gibt diese Befehle aus, statt sie auszuführen.
+
+Zwei Dinge bleiben dir, und den Link des ersten gibt der Befehl aus:
+
+1. **Installiere die App** auf dem Repository, unter `https://github.com/apps/NAME/installations/new`.
+2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`.
+
+Die Checkliste erkennt die Installation an der Check Suite, die GitHub für eine installierte App bei jedem Push öffnet. Sie hakt die App also nach dem Merge ab, wenn du zuerst installierst, und sonst nach dem nächsten Push.
+
+Der Browser muss auf demselben Rechner laufen, denn nur dieser Rechner erreicht die Seite. Auf einem anderen Rechner gibt `--no-browser` die Adresse der Seite aus: Leite ihren Port weiter, etwa mit `ssh -L`, und öffne sie dort. Eine Organisation, die GitHub nicht als Eigentümer nennt, nimmt `--org ORG`. [Die Fehlerbehebung](troubleshooting.md#app-register-geht-nicht-weiter) zeigt, was zu tun ist, wenn der Befehl wartet oder anhält.
+
+**Ein weiteres Repository** nimmt dieselbe App, registriere sie also einmal. Behalte die drei Zeilen, die der Befehl ausgegeben hat, in [der Einstellungsdatei von Copier](guide.md#dein-eigenes-konto), dann nennt jede neue Kopie die App. Jedes Repository braucht trotzdem den privaten Schlüssel: Drück auf der Einstellungsseite der App im Tab *Credentials* unter *Key pairs* auf *New key*; dein Browser speichert ihn als Datei, die du dem Befehl der Kopie gibst und danach löschst:
 
 ```sh
-gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release --repo octo-org/my-project < private-key.pem
+python3 .github/blueprint.py app connect --key-file private-key.pem
 ```
+
+Derselbe Befehl nimmt eine App, die du von Hand registriert hast, mit den Berechtigungen, die [die Anleitung](guide.md#einmal-pro-repository) aufzählt, oder eine vorhandene Kopie, die die App noch nicht nennt: Ergänze `--name NAME --client-id CLIENT_ID --app-id APP_ID` von ihrer Einstellungsseite. Sie können nicht von GitHub kommen, das eine private App keinem Token der GitHub CLI zeigt. Der Befehl prüft sie wie die Fragen von Copier und nennt die App in einem Pull Request wie `app register`.
 
 Bis die App genannt ist und ihren privaten Schlüssel hat, sagt jeder Bot, der als sie handelt, in seiner Zusammenfassung, was fehlt, statt an seinem Token zu scheitern: Einer, dessen Arbeit die der App ist, schlägt fehl, und einer, der einem Pull Request nur weiterhilft, warnt, wie die [Fehlerbehebung](troubleshooting.md#ein-bot-sagt-dass-er-die-release-app-braucht) zeigt. Eine App, die nicht auf dem Repository installiert ist, scheitert weiterhin an ihrem Token.
 
 ## 4. Die Einstellungen anwenden
 
+`create` hat die Einstellungen angewendet, bevor die App einen Namen hatte. Sobald der Pull Request gemergt ist, wende sie noch einmal an:
+
 ```sh
-python3 ../repo-blueprint/blueprint.py settings apply
+git switch main
+git pull
+python3 .github/blueprint.py settings apply
 ```
 
-Es setzt alles, was die API setzen kann: die Rulesets, die Variablen, die die App nennen, die Environments, die Sicherheitsfunktionen und die Actions, die laufen dürfen. Ein privates Repository geht auch, mit `--private` für `gh repo create`: Was GitHub ihm in seinem Plan nicht bietet, etwa Code Scanning oder die Rulesets bei GitHub Free, nennen die Einstellungen als Hinweis und überlassen es den Workflows, über die Variablen `CODE_SCANNING` und `DEPENDENCY_REVIEW`. Die [FAQ](faq.md#kann-ein-repository-privat-sein-und-was-kostet-es) zeigt, was mit welchem Plan geht.
+Es setzt alles, was die API setzen kann: die Rulesets, die Variablen, die die App nennen, die Environments, die Sicherheitsfunktionen und die Actions, die laufen dürfen. Ein privates Repository geht auch, mit `--private` für `create`: Was GitHub ihm in seinem Plan nicht bietet, etwa Code Scanning oder die Rulesets bei GitHub Free, nennen die Einstellungen als Hinweis und überlassen es den Workflows, über die Variablen `CODE_SCANNING` und `DEPENDENCY_REVIEW`. Die [FAQ](faq.md#kann-ein-repository-privat-sein-und-was-kostet-es) zeigt, was mit welchem Plan geht.
 
 ## 5. Renovate
 
@@ -83,16 +117,16 @@ Jeder Weg liest dieselben Regeln, die des Blueprints in `.github/renovate-bluepr
 - **`self`, ein Workflow des Repositorys:** `.github/workflows/renovate.yml` führt Renovate alle zwei Stunden als deine Release-App aus, mit einem Token nur für dieses Repository und ohne *Administration*. Es ist der Workflow des Hubs des Blueprints, mit demselben Renovate, gepinnt auf seinen Digest, das jedes Update des Blueprints weiterbewegt, und `.github/renovate-global.json5` hält die Einstellungen des Bots: Commits über die API, die GitHub signiert, und keine Skripte der Paketmanager. Der Bot-Benutzer deiner App ist der Autor, nach dem der Workflow GitHub fragt. Sein erster Lauf startet von selbst; *Actions → Renovate → Run workflow* startet sofort einen. Ein Lauf ohne die Release-App sagt in seiner Zusammenfassung, was fehlt, und ein Pull Request, der die Regeln oder eine Lock-Datei ändert, zeigt, ob Renovate sie weiter annimmt und liest; der PR-Coach erklärt ein Scheitern dieser Prüfung, *renovate rules*, auch bei einem Pull Request aus einem Fork, wie es [die Fehlerbehebung](troubleshooting.md#die-prüfung-renovate-rules-scheitert) tut.
 - **`mend`, die Mend-Renovate-App:** Installiere die [Mend-Renovate-App](https://github.com/apps/renovate) auf dem Repository. Sie liest dieselben Regeln, kommt bei jedem Push statt nach einem Zeitplan und braucht keinen Workflow und kein Token von dir. Der Branch-Bot und der Fix-Bot aktualisieren ihre Branches als deine Release-App, also trag den Bot-Benutzer der App in `gitIgnoredAuthors` in `.github/renovate.json5` ein, sonst hält Renovate die Branches für bearbeitet und rebased sie nicht mehr; die Checkliste gibt die Zeile mit der Nummer des Bot-Benutzers deiner App aus.
 
-Um die Antwort später zu ändern, führ `copier update --defaults --vcs-ref=:current: --data renovate_runner=mend` aus und committe das Update.
+Um die Antwort später zu ändern, führ `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data renovate_runner=mend` auf einem Branch aus und merge das Update mit einem Pull Request, wie in [Schritt 3](#3-die-release-app-registrieren).
 
 ## 6. Der Issue-Assistent
 
-Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Claude, und die Checkliste fragt nach seinem Token, als Secret `CLAUDE_CODE_OAUTH_TOKEN` des Environments `issue-assistant`. Ohne sie setzt `.github/repository.toml` die Variable `ISSUE_ASSISTANT_AI` auf `off`, das Environment fragt nach keinem Secret, und `SUPPORT.md` sagt den Meldenden, dass keine KI ihre Issues liest; Labels, Erinnerungen, Schließen und die Befehle des Maintainers funktionieren wie bisher. `copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=true` schaltet die KI später ein.
+Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Claude, und die Checkliste fragt nach seinem Token, als Secret `CLAUDE_CODE_OAUTH_TOKEN` des Environments `issue-assistant`. Ohne sie setzt `.github/repository.toml` die Variable `ISSUE_ASSISTANT_AI` auf `off`, das Environment fragt nach keinem Secret, und `SUPPORT.md` sagt den Meldenden, dass keine KI ihre Issues liest; Labels, Erinnerungen, Schließen und die Befehle des Maintainers funktionieren wie bisher. `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=true`, auf einem Branch wie in [Schritt 3](#3-die-release-app-registrieren), schaltet die KI später ein.
 
 ## 7. Die Checkliste
 
 ```sh
-python3 ../repo-blueprint/blueprint.py checklist
+python3 .github/blueprint.py checklist
 ```
 
 Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview und die Badges. Ein privates Repository bekommt dazu den Schritt *GitHub Code Security on*, neutral ohne sie, da der Plan seines Besitzers sie vielleicht nicht bietet. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
@@ -124,15 +158,24 @@ Ohne Settings-App funktioniert alles wie bisher: Die Release-App wendet die Eins
 
     Lass *Where can this GitHub App be installed?* auf *Only on this account* und lege die App an.
 
-2. **Notiere ihre Client ID** auf der Einstellungsseite der App und drück *Generate a private key*; dein Browser speichert den Schlüssel als Datei, etwa `octo-org-settings.2026-10-25.private-key.pem`, die die Befehle unten `settings-private-key.pem` nennen.
+2. **Notiere ihre Client ID** auf der Einstellungsseite der App und drück in ihrem Tab *Credentials* unter *Key pairs* auf *New key*; dein Browser speichert den Schlüssel als Datei, etwa `octo-org-settings.2026-10-25.private-key.pem`, die die Befehle unten `settings-private-key.pem` nennen.
 3. **Installiere die App** auf jedem Repository aus dem Blueprint, denselben wie die Release-App: *Install App* auf der Einstellungsseite der App, dann *Only select repositories*.
-4. **Nenne sie in jedem Repository,** mit ihrer Client ID als Variable und ihrem Schlüssel als Secret des Environments `release`, das nur `main` nutzen darf. Die GitHub CLI liest die Datei und zeigt den Schlüssel nirgends; lösch die Datei danach.
+4. **Nenne sie in jedem Repository,** mit ihrer Client ID als Variable und ihrem Schlüssel als Secret des Environments `release`, das nur `main` nutzen darf. Die GitHub CLI liest die Datei und zeigt den Schlüssel nirgends; lösch die Datei danach. In Git Bash oder einer anderen POSIX-Shell:
 
     ```sh
-    for repo in octo-org/my-project octo-org/another; do
+    for repo in octo-org/mein-projekt octo-org/another; do
       gh variable set SETTINGS_APP_CLIENT_ID --repo "$repo" --body CLIENT_ID
       gh secret set SETTINGS_APP_PRIVATE_KEY --env release --repo "$repo" < settings-private-key.pem
     done
+    ```
+
+    In PowerShell, die weder dieses `for` noch ein `<` kennt, das eine Datei liest:
+
+    ```powershell
+    foreach ($repo in 'octo-org/mein-projekt', 'octo-org/another') {
+      gh variable set SETTINGS_APP_CLIENT_ID --repo $repo --body CLIENT_ID
+      Get-Content -Raw settings-private-key.pem | gh secret set SETTINGS_APP_PRIVATE_KEY --env release --repo $repo
+    }
     ```
 
     Die Variable kann auch in den Einstellungen als Code stehen, als `SETTINGS_APP_CLIENT_ID = "CLIENT_ID"` unter `[variables]` in `.github/repository.project.toml`, die der Settings-Bot zuerst noch mit der Release-App anwendet.

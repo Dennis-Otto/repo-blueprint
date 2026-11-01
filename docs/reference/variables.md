@@ -12,6 +12,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 
 - [`BETA_CHANNEL`](#beta_channel): `true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases.
 - [`BLUEPRINT_AUTOMERGE`](#blueprint_automerge): `off` makes every update of the blueprint wait for the maintainer, where its pull request would merge itself once every check passes; an update with conflicts waits either way.
+- [`BLUEPRINT_OWNERSHIP`](#blueprint_ownership): `fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint, where it leaves a notice with any other value or none.
 - [`CODE_SCANNING`](#code_scanning): `off` keeps every finding out of code scanning, which GitHub offers a private repository only with GitHub Code Security: CodeQL doesn't analyze, since its terms allow it on private code only with GitHub Code Security or Advanced Security, and its check passes with a notice; zizmor fails on every finding; OSV-Scanner and the Scorecard keep theirs in their checks.
 - [`CWS_EXTENSION_ID`](#cws_extension_id): The ID of the item of a Chrome extension in the Chrome Web Store, from the address of the item in the Developer Dashboard, to which the workflow *Chrome Web Store* delivers every release.
 - [`CWS_PUBLISHER_ID`](#cws_publisher_id): The ID of the publisher of a Chrome extension, under *Account* in the Developer Dashboard of the Chrome Web Store; the API of the store names the item by it and `CWS_EXTENSION_ID`.
@@ -48,6 +49,17 @@ What the workflows say of it:
 What the workflows say of it:
 
 - `blueprint-update.yml`: The repository variable `BLUEPRINT_AUTOMERGE` set to off makes every update wait.
+
+### `BLUEPRINT_OWNERSHIP`
+
+`fail` makes the check *lint* fail on a pull request of a person that changes a file of the blueprint, where it leaves a notice with any other value or none. The report of the PR coach says where the change belongs instead. Bots stay out of it: the update of the blueprint and the pull requests of the other bots.
+
+- **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
+- **Read by:** [`lint.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/lint.yml) (Lint, every repository)
+
+What the workflows say of it:
+
+- `lint.yml`: A failure only with the repository variable `BLUEPRINT_OWNERSHIP` set to fail.
 
 ### `CODE_SCANNING`
 
@@ -200,7 +212,7 @@ What the workflows say of it:
 - [`GEMINI_API_KEY`](#gemini_api_key): An API key of Google AI Studio, with which the issue assistant analyzes each new issue with Gemini, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `gemini`; free within the daily limits of the free tier of the Gemini API.
 - [`GITHUB_TOKEN`](#github_token): The token that GitHub gives every run of a workflow, for its repository alone and with the permissions that its `permissions:` grant.
 - [`OPENAI_API_KEY`](#openai_api_key): An API key of OpenAI, with which the issue assistant analyzes each new issue with Codex, once `name` under `[engine]` of `.github/issue-assistant/config.toml` is `codex`, at the prices of OpenAI's API.
-- [`RELEASE_AUTOMATION_PRIVATE_KEY`](#release_automation_private_key): The private key of the release app, the file that its settings page generates.
+- [`RELEASE_AUTOMATION_PRIVATE_KEY`](#release_automation_private_key): The private key of the release app, which `app register` sets without a file.
 - [`SETTINGS_APP_PRIVATE_KEY`](#settings_app_private_key): The private key of the settings app, the file that its settings page generates.
 
 ### `ANTHROPIC_API_KEY`
@@ -286,7 +298,7 @@ An API key of OpenAI, with which the issue assistant analyzes each new issue wit
 
 ### `RELEASE_AUTOMATION_PRIVATE_KEY`
 
-The private key of the release app, the file that its settings page generates. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the app: they open and merge the release and update pull requests, so that their checks run, create the release tags and apply the settings. The file goes in with `< key.pem` after the command below.
+The private key of the release app, which `app register` sets without a file. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the app: they open and merge the release and update pull requests, so that their checks run, create the release tags and apply the settings. For an app that exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it from the file that the settings page of the app generates.
 
 - **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release`, as the checklist shows
 - **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository); [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`dependabot-automerge.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependabot-automerge.yml) (Dependabot maintenance, every repository); [`diagrams.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/diagrams.yml) (Diagrams, every repository); [`docs-pictures.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/docs-pictures.yml) (Docs pictures, the blueprint alone); [`osv-scanner.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/osv-scanner.yml) (OSV-Scanner, every repository); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`renovate.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/renovate.yml) (Renovate, where `renovate_runner == 'self'`); [`rollout.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/rollout.yml) (Rollout, the blueprint alone); [`screenshot-bot.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/screenshot-bot.yml) (Screenshots, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository); [`sync-issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/sync-issue-assistant.yml) (Issue assistant sync, the blueprint alone); [`update-branches.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/update-branches.yml) (Update branches, every repository); [`upstream.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/upstream.yml) (Upstream, where `project_type == 'nextcloud-app'`)
