@@ -1,0 +1,25 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a card waited for a layer that nobody finishes
+    accDescr: The social plugin of Material draws the layers of its preview cards in threads. The first card that needs a layer puts an empty placeholder under its key, and then replaces it with the job. A second card that asks in between waits for the placeholder. Nothing ever finished that, so the build hung until the five minutes of its step ended. Now the job also finishes the placeholder that it replaces, and both cards get the picture of the layer.
+
+    first["The first card puts a placeholder<br>under the key of the layer"]
+    second["A second card asks for the layer<br>and waits for the placeholder"]
+    job["The first card puts the job<br>in place of the placeholder"]
+    before["Before: nothing finishes the placeholder<br>the build hangs until its step ends"]
+    now["Now: the job finishes the placeholder too<br>both cards get the picture and the build ends"]
+
+    first --> second --> job
+    job -.->|before| before
+    job -->|now| now
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef warn fill:#dc26262e,stroke:#dc2626,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class first,second,job bot
+    class before warn
+    class now done

@@ -35,3 +35,5 @@ Option 3.
 ## Consequences
 
 A font server that stops answering costs a build of the website about two minutes at most instead of its step, and what fails all its attempts still fails the step, with the error of the last one, for the flaky-test bot. A hang of the download of uv costs two minutes instead of the job. A container that Docker couldn't start for another reason, such as a wrong option, also starts three times before its step fails, 30 seconds later. The other workflows that set uv up keep one attempt; they adopt the second one when a hang of uv shows up there as well. The pre-step of harden-runner stays bounded only by the time limit of its job.
+
+The build of the website went on hanging after this, for another reason: [0089](0089-a-card-of-the-website-waits-for-the-job-of-its-layer.md) found the cause in the threads of the social plugin. The time limits stay, for a server that does stop answering.
