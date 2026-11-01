@@ -3,7 +3,7 @@
 {
   "name": "{= project_slug =}",
   "version": "0.0.0",
-[%- if project_type == 'chrome-extension' %]
+[%- if publish_to != 'npm' %]
   "private": true,
 [%- endif %]
   "description": {= description | to_json(ensure_ascii=False) =},

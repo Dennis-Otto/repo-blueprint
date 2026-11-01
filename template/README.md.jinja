@@ -46,11 +46,11 @@ php occ app:install {= nextcloud_app_id =}
 ```
 
 Pin the action to the commit hash of a [release](https://github.com/{= repo =}/releases); Dependabot or Renovate then keeps it current.
-[% elif project_type == 'python-package' %]
+[% elif publish_to == 'pypi' %]
 ```sh
 pip install {= project_slug =}
 ```
-[% elif project_type == 'node-package' %]
+[% elif publish_to == 'npm' %]
 ```sh
 npm install {= project_slug =}
 ```
@@ -63,10 +63,10 @@ To try it unpacked, build it with `npm ci --ignore-scripts && npm run build`, op
 docker run --rm ghcr.io/{= repo | lower =}:latest
 ```
 
-Every image carries its SBOM and a signed provenance attestation:
+Every image carries its SBOM and the signed provenance of the release workflow, which builds it on a runner of GitHub for `main`:
 
 ```sh
-gh attestation verify oci://ghcr.io/{= repo | lower =}:latest --owner {= owner =}
+gh attestation verify oci://ghcr.io/{= repo | lower =}:latest --repo {= repo =} --signer-workflow {= repo =}/.github/workflows/release.yml --source-ref refs/heads/main --deny-self-hosted-runners
 ```
 [% else %]
 Describe here how to use the project.

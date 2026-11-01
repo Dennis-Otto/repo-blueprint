@@ -1,1 +1,7 @@
-[% include ".github/workflows/build-release.yml" -%]
+[%- from "includes/replace.jinja" import replaced with context -%]
+[#- Only a Nextcloud app needs a secret in its build, the key that signs it, so only
+    its build enters the environment of that key; every other build holds no secret
+    but the token of its job. -#]
+[%- set nothing = "    # No environment and no secret but the token of the job, so that no action of\n    # the build can reach the private key of the release app.\n" -%]
+[%- set signing = "    # The key that signs a Nextcloud app is a secret of this environment, which the\n    # build of no other kind of project enters.\n    environment:\n      name: release\n      deployment: false\n" -%]
+{= replaced(".github/workflows/build-release.yml", [[nothing, signing if publish_to == 'nextcloud-appstore' else nothing]]) -=}

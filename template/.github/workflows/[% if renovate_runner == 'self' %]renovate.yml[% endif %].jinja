@@ -1,9 +1,25 @@
-[#- The Renovate workflow of the blueprint, for this repository alone: the job runs
-    without the name of the blueprint, with a token of the release app for this
-    repository, and for this repository in place of every one of the owner. -#]
+[#- The Renovate workflow of the blueprint, for this repository alone: one job, without
+    the list of the repositories and without the job that brings their logs together,
+    which would only cost minutes here. Its token of the release app is for this
+    repository by default, and the job keeps the issue of Renovate's problems itself. -#]
 [%- from "includes/replace.jinja" import replaced with context -%]
-[%- set guard = " && github.repository == 'Dennis-Otto/repo-blueprint'\n" -%]
-[%- set installation = "          # In the blueprint, every repository of the installation, on purpose: the\n          # app is installed on exactly the repositories that Renovate keeps current.\n          owner: ${{ github.repository_owner }} # zizmor: ignore[github-app]\n" -%]
-[%- set everyone = "          # In the blueprint, every repository of the owner on which the app is\n          # installed and that has a .github/renovate.json5.\n          RENOVATE_AUTODISCOVER: \"true\"\n          RENOVATE_AUTODISCOVER_FILTER: ${{ github.repository_owner }}/*\n" -%]
-[%- set alone = "          # This repository alone, by its name, also after a rename.\n          RENOVATE_REPOSITORIES: ${{ github.repository }}\n" -%]
-{= replaced(".github/workflows/renovate.yml", [[guard, "\n"], [installation, ""], [everyone, alone]]) -=}
+[%- set list_of_repositories = ["  repositories:\n    name: repositories of Renovate\n", "  renovate:\n    name: renovate\n"] -%]
+[%- set log_and_report = ["      # The job problems brings the log of each repository into the one issue.\n", "      # A warning, such as a lock file that Renovate can't read, ends no run with a\n"] -%]
+[%- set end_of_report = ["      - name: Wait until Harden-Runner has removed Docker\n", none] -%]
+[%- set matrix = "    needs: repositories\n    if: needs.repositories.outputs.repositories != ''\n" -%]
+[%- set alone = "    if: github.event_name != 'pull_request'\n" -%]
+[%- set strategy = "    strategy:\n      # Two at a time, as the owner has about 20 jobs at once for all of its\n      # repositories, and every repository, also after one that failed.\n      max-parallel: 2\n      fail-fast: false\n      matrix:\n        repo: ${{ fromJSON(needs.repositories.outputs.repositories) }}\n" -%]
+[%- set permissions = "      deployment: false\n    permissions:\n      contents: read\n" -%]
+[%- set issue = permissions ~ "      # The one issue with the warnings and errors of Renovate.\n      issues: write\n" -%]
+[%- set token = "          # For this repository alone: a package manager that runs code of a dependency\n          # while it writes a lock file can't push to another repository of the owner.\n          owner: ${{ github.repository_owner }}\n          repositories: ${{ matrix.repo }}\n" -%]
+{= replaced(".github/workflows/renovate.yml", [
+  [matrix, alone],
+  ["      group: renovate-${{ matrix.repo }}\n", "      group: renovate\n"],
+  [strategy, ""],
+  [permissions, issue],
+  [token, ""],
+  ["${{ github.repository_owner }}/${{ matrix.repo }}", "${{ github.repository }}"],
+  ["          # A repository that didn't finish wrote no log, so the run isn't a quiet one.\n          RESULT: ${{ needs.renovate.result }}\n", ""],
+  ["          # download-artifact puts the files of a single artifact straight into its path,\n          # so with one leg's log there is no folder of the artifact.\n", ""],
+  [' \\\n            "$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json \\\n            --result "$RESULT" --run "$RUN_URL" |', ' /tmp/renovate/problems.json --run "$RUN_URL" |'],
+], [list_of_repositories, log_and_report, end_of_report]) -=}

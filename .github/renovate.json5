@@ -20,15 +20,18 @@
       datasourceTemplate: "npm",
     },
     {
-      // The Copier of the quick start in the READMEs, with uv and with pipx, and
-      // that of the one-liner on the page of each kind.
+      // The Copier of the quick start in the READMEs, with uv and with pipx, that of
+      // the one-liner on the page of each kind, and those of the walkthrough for an
+      // owner's own account, which GitHub shows too, so it takes no snippet.
       customType: "regex",
       managerFilePatterns: [
         "/^README(\\.de)?\\.md$/",
         "/^docs/kinds/[a-z-]+(\\.de)?\\.md$/",
+        "/^docs/own-account(\\.de)?\\.md$/",
+        "/^blueprint/app\\.py$/",
       ],
       matchStrings: [
-        "(?<depName>copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+) copier copy",
+        "(?<depName>copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+) copier (?:copy|update)",
       ],
       datasourceTemplate: "pypi",
     },

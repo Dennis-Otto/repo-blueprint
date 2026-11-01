@@ -82,6 +82,10 @@ Enter
 Wait /paperless_sync$/
 Sleep 500ms
 Enter
+# It publishes on the registry of its kind, yes.
+Wait /\(Y.n\)$/
+Sleep 500ms
+Enter
 # The languages of the code, of which Python is selected, and GitHub Discussions, yes.
 Wait /to invert\)$/
 Sleep 500ms
