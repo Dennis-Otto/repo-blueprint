@@ -82,7 +82,7 @@ from blueprint.checklist import (
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers
 from blueprint.locks import why_renovate_skips
-from blueprint.mutation import default_paths
+from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import PERMISSIONS, Settings, allows
@@ -18572,6 +18572,9 @@ def mutmut_list(config: configparser.ConfigParser, key: str) -> list[str]:
     return [item for item in value.split("\n") if item] if "\n" in value else [value]
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("files", "paths"),
@@ -18601,12 +18604,17 @@ def test_mutmut_mutates_the_code_of_every_kind_of_project(
     tmp_path: Path, files: list[str], paths: list[str]
 ) -> None:
     project = tmp_path / "project"
+    with_the_tool(project)
     others = ["pyproject.toml", "docs/index.md", ".github/workflows/mutation.yml"]
     for name in [*files, *others, ".git/HEAD"]:
         (project / name).parent.mkdir(parents=True, exist_ok=True)
         (project / name).touch()
     calls = tmp_path / "calls"
 
+    code, _ = run_mutation_step(
+        tmp_path, "Write the configuration of mutmut", "python", {"python3": PYTHON}
+    )
+    assert code == 0
     code, _ = run_mutation_step(
         tmp_path,
         "Run the mutants against the tests",
@@ -18654,6 +18662,9 @@ def test_a_part_runs_the_mutants_of_its_code(tmp_path: Path) -> None:
     ]
 
 
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("name", "text"),
@@ -18666,16 +18677,136 @@ def test_mutmut_keeps_the_configuration_of_a_project(
     tmp_path: Path, name: str, text: str
 ) -> None:
     project = tmp_path / "project"
-    project.mkdir()
+    with_the_tool(project)
     (project / name).write_text(text, encoding="utf-8")
 
     code, _ = run_mutation_step(
-        tmp_path, "Run the mutants against the tests", "python", {"mutmut": "true\n"}
+        tmp_path, "Write the configuration of mutmut", "python", {"python3": PYTHON}
     )
 
     assert code == 0
     assert (project / name).read_text(encoding="utf-8") == text
     assert (project / "setup.cfg").exists() == (name == "setup.cfg")
+
+
+def mutation_job(job_id: str) -> dict[str, Any]:
+    return workflow_steps.job("mutation.yml", job_id)
+
+
+def named_steps(job: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """The steps of a job by their names, or the actions they use."""
+    return {
+        str(step.get("name") or step["uses"].partition("@")[0]): step
+        for step in job["steps"]
+    }
+
+
+def test_the_stats_of_mutmut_run_once_for_every_part() -> None:
+    stats, part, report = (mutation_job(i) for i in ("stats", "mutation", "report"))
+    assert stats["needs"] == "plan"
+    assert condition_of(stats) == "needs.plan.outputs.kind == 'python'"
+    # A part waits for the stats; Infection, which has none, doesn't.
+    assert part["needs"] == ["plan", "stats"]
+    assert "(needs.stats.result == 'success' || needs.stats.result == 'skipped')" in (
+        condition_of(part)
+    )
+    # Stats that failed have said why, in one job: no part runs, and no report.
+    assert "stats" in report["needs"]
+    assert "needs.stats.result == 'success'" in condition_of(report)
+    stats_steps, part_steps = named_steps(stats), named_steps(part)
+    # The same tools and the same configuration, or mutmut collects the stats again.
+    for name in (
+        "actions/setup-python",
+        "astral-sh/setup-uv",
+        "Install the tools of the tests and mutmut",
+        "Write the configuration of mutmut",
+    ):
+        assert stats_steps[name] == part_steps[name], name
+    handed = stats_steps["Hand the stats to every part"]["with"]
+    fetched = part_steps["Fetch the stats of mutmut"]["with"]
+    assert handed["name"] == fetched["name"] == "mutation-stats"
+    assert handed["path"] == f"{fetched['path']}/mutmut-stats.json"
+    assert handed["if-no-files-found"] == "error"
+    names = list(part_steps)
+    assert names.index("Write the configuration of mutmut") < names.index(
+        "Fetch the stats of mutmut"
+    )
+    assert names.index("Fetch the stats of mutmut") < names.index(
+        "Run the mutants against the tests"
+    )
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("passed", [True, False])
+def test_the_stats_run_without_any_mutant(tmp_path: Path, passed: bool) -> None:
+    project = tmp_path / "project"
+    with_the_tool(project)
+    calls = tmp_path / "calls"
+    # A stand-in for mutmut: stats that pass are saved, then nothing matches.
+    stats = json.dumps({"duration_by_test": {"tests/test_a.py::test_one": 0.1}})
+    output = (
+        f"mkdir -p mutants && echo '{stats}' > mutants/mutmut-stats.json\n"
+        f"echo 'AssertionError: {NOTHING_MATCHES}'\n"
+        if passed
+        else f"printf '%s' '{FAILING}'\n"
+    )
+
+    code, summary = run_mutation_step(
+        tmp_path,
+        "Run the tests once and record which tests reach each function",
+        "",
+        {"python3": PYTHON, "mutmut": f'echo "$*" > "$CALLS"\n{output}exit 1\n'},
+        CALLS=calls.as_posix(),
+    )
+
+    assert re.fullmatch(
+        r"run --max-children \d+ stats-only\n", calls.read_text(encoding="utf-8")
+    )
+    assert summary.startswith("### The stats of mutmut\n")
+    if passed:
+        assert code == 0
+        assert "1 tests reach 0 functions" in summary
+    else:
+        assert code == 1
+        assert "No part runs." in summary
+        assert "- `tests/test_fixes.py::test_one`\n" in summary
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(("event", "parts"), [("pull_request", 1), ("schedule", 2)])
+def test_a_pull_request_tries_a_sample_of_the_mutants(
+    tmp_path: Path, event: str, parts: int
+) -> None:
+    project = tmp_path / "project"
+    with_the_tool(project)
+    for name, text in {
+        ".python-version": "3.12\n",
+        ".github/mutation-requirements.txt": "mutmut==3.8.0\n",
+        "demo.py": "def add(a, b):\n    return a + b\n",
+        "other.py": "def sub(a, b):\n    return a - b\n",
+    }.items():
+        (project / name).write_text(text, encoding="utf-8")
+    output = tmp_path / "output"
+
+    code, _ = run_mutation_step(
+        tmp_path,
+        "Split the code into parts of about the same number of mutants",
+        "",
+        {"python3": PYTHON},
+        GITHUB_OUTPUT=output.as_posix(),
+        PARTS="2",
+        EVENT=event,
+    )
+
+    assert code == 0
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert len(json.loads(lines[1].removeprefix("parts="))) == parts
 
 
 MUTANTS = """\
@@ -18907,7 +19038,11 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
 
     # The plan gives the matrix of the parts, one job each.
     assert plan["outputs"]["parts"] == "${{ steps.plan.outputs.parts }}"
-    assert {"PARTS": "${{ vars.MUTATION_PARTS }}"} in variables(plan)
+    # A pull request tries a sample, in one part.
+    assert {
+        "PARTS": "${{ vars.MUTATION_PARTS }}",
+        "EVENT": "${{ github.event_name }}",
+    } in variables(plan)
     assert mutation["strategy"]["matrix"]["include"] == (
         "${{ fromJSON(needs.plan.outputs.parts) }}"
     )
@@ -18921,9 +19056,10 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
     assert "mutation-part-${{ matrix.part }}" in [
         found.get("name") for found in inputs(mutation)
     ]
-    assert report["needs"] == ["plan", "mutation"]
+    assert report["needs"] == ["plan", "stats", "mutation"]
     assert condition_of(report) == (
-        "${{ !cancelled() && needs.plan.outputs.kind == 'python' }}"
+        "${{ !cancelled() && needs.plan.outputs.kind == 'python' && "
+        "needs.stats.result == 'success' }}"
     )
     assert any(
         found.get("pattern") == "mutation-part-*"
@@ -18942,7 +19078,7 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
     )
     # Only the job of the issue writes, the one issue of the default branch, and never
     # on a pull request, whose code the report runs.
-    for job in (plan, mutation, report):
+    for job in (plan, job_in(workflow, "stats"), mutation, report):
         assert job["permissions"]["contents"] == "read"
         assert "write" not in values_of(job)
     assert report["permissions"] == {"actions": "read", "contents": "read"}
@@ -19181,18 +19317,19 @@ def test_a_pull_request_that_changes_how_the_mutants_run_tries_them() -> None:
         "stacks/mutation/requirements.txt",
     ):
         assert f"      - {path}\n" in events, path
-    # mutmut for 25 minutes in each part, every week for hours; it keeps the mutants
-    # it reached. Each part first copies the code and runs every test, which took
-    # 13 minutes of the 15 that a part of the blueprint had. Infection reports at its
-    # end only.
-    limit = re.search(r"\n      MUTMUT_LIMIT: \$\{\{ (.+) \}\}\n", workflow)
-    assert limit
-    assert limit[1] == "github.event_name == 'pull_request' && '25m' || '320m'"
-    assert workflow.count('timeout "$MUTMUT_LIMIT" mutmut run ') == 1
-    assert (
-        "timeout-minutes: ${{ github.event_name == 'pull_request' && 40 || 350 }}"
-        in workflow
-    )
+    # The stats of a pull request take up to 25 minutes, its sample 12 more; every
+    # week each takes hours. mutmut keeps the mutants it reached; Infection reports at
+    # its end only, within the time of the job.
+    parsed = workflow_steps.workflow("mutation.yml")
+    for key, limit, minutes in (("stats", "25m", 40), ("mutation", "12m", 25)):
+        job = job_in(parsed, key)
+        assert job["env"]["MUTMUT_LIMIT"] == (
+            f"${{{{ github.event_name == 'pull_request' && '{limit}' || '320m' }}}}"
+        )
+        assert job["timeout-minutes"] == (
+            f"${{{{ github.event_name == 'pull_request' && {minutes} || 350 }}}}"
+        )
+        assert scripts_of(job).count('timeout "$MUTMUT_LIMIT" mutmut run ') == 1
 
 
 @pytest.mark.parametrize("kind", ["home-assistant", "github-action", "python-package"])

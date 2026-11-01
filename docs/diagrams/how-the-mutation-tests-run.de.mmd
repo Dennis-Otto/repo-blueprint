@@ -5,10 +5,11 @@ config:
 ---
 flowchart TB
     accTitle: Wie die Mutationstests laufen
-    accDescr: Einmal pro Woche, auf Abruf und für einen Pull Request, der ändert, wie sie laufen, führt der Mutation-Workflow die Mutanten aus. Für Python teilt der Plan den Code in Teile mit etwa gleich vielen Mutanten, und mutmut führt jeden Teil in einem eigenen Job aus, in einer Kopie des Repositorys und ohne die Tests mit der Markierung mutation_unsafe; Infection ändert das PHP einer Nextcloud-App, mit dem Bootstrap ihrer Tests. Die Zusammenfassung zeigt einen Wert und zuerst die Überlebenden, die die Logik ändern, mit ihren Änderungen, das Artefakt bewahrt sie auf und das Dashboard zeigt den Wert. Fällt der Wert des Standard-Branches unter den des Laufs davor, öffnet sich ein Issue, das sich schließt, sobald ein Lauf wieder dort ist. Ein Lauf, der nichts gemessen hat, schlägt fehl und nennt die Tests, die ohne jeden Mutanten fehlschlugen.
+    accDescr: Einmal pro Woche, auf Abruf und für einen Pull Request, der ändert, wie sie laufen, führt der Mutation-Workflow die Mutanten aus. Für Python teilt der Plan den Code in Teile mit etwa gleich vielen Mutanten, ein Pull Request probiert eine Stichprobe davon in einem Teil aus, und ein Job führt die Tests einmal aus und zeichnet auf, welche Tests jede Funktion erreichen: die Stats von mutmut, die jeder Teil lädt. mutmut führt jeden Teil in einem eigenen Job aus, in einer Kopie des Repositorys und ohne die Tests mit der Markierung mutation_unsafe; Infection ändert das PHP einer Nextcloud-App, mit dem Bootstrap ihrer Tests. Die Zusammenfassung zeigt einen Wert und zuerst die Überlebenden, die die Logik ändern, mit ihren Änderungen, das Artefakt bewahrt sie auf und das Dashboard zeigt den Wert. Fällt der Wert des Standard-Branches unter den des Laufs davor, öffnet sich ein Issue, das sich schließt, sobald ein Lauf wieder dort ist. Ein Lauf, der nichts gemessen hat, schlägt fehl und nennt die Tests, die ohne jeden Mutanten fehlschlugen; schlagen sie in den Stats fehl, startet kein Teil.
 
     start["Einmal pro Woche · auf Abruf<br>ein Pull Request, der<br>mutation.yml oder mutmut ändert"]
     plan["Der Plan<br>das Python in Teilen mit<br>etwa gleich vielen Mutanten"]
+    stats["Die Stats von mutmut, ein Job<br>die Tests einmal: welche Tests<br>jede Funktion erreichen"]
     python["mutmut, ein Job je Teil<br>in einer Kopie in mutants/<br>ohne die Tests mit mutation_unsafe"]
     php["Infection<br>das PHP einer Nextcloud-App<br>mit tests/bootstrap.php"]
     score["Zusammenfassung und Artefakt<br>ein Wert · zuerst die Überlebenden,<br>die die Logik ändern"]
@@ -17,18 +18,20 @@ flowchart TB
     fail["Der Lauf schlägt fehl<br>mit den Tests, die ohne<br>jeden Mutanten fehlschlagen"]
 
     start --> plan
-    plan --> python
+    plan --> stats
+    stats -- "jeder Teil lädt sie" --> python
     start --> php
     python -- "Mutanten liefen" --> score
     php -- "Mutanten liefen" --> score
     score --> dashboard
     score -. "der Wert von main fiel" .-> issue
+    stats -. "ein Test schlägt fehl" .-> fail
     python -. "nichts gemessen" .-> fail
     php -. "nichts gemessen" .-> fail
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
-    class plan,python,php bot
+    class plan,stats,python,php bot
     class score,dashboard done
     class issue person
