@@ -12,7 +12,7 @@ flowchart TB
     subgraph repo ["Dein Repository"]
         theirs["`**Die Dateien des Blueprints**<br>Workflows · scripts/check.sh<br>.github/repository.toml<br>Community-Dateien · AGENTS.md`"]
         mine["`**Die Dateien des Projekts**<br>README · CHANGELOG · docs/<br>Code und Tests<br>Manifeste und Lock-Dateien<br>Issue-Formulare · Labels`"]
-        adds["`**Was das Projekt ergänzt**<br>scripts/check-project.sh<br>.github/repository.project.toml<br>.github/agents.project.md<br>.github/checks.project.toml<br>eigene Workflows`"]
+        adds["`**Was das Projekt ergänzt**<br>scripts/check-project.sh<br>.github/repository.project.toml<br>.github/agents.project.md<br>.github/checks.project.toml<br>die markierten Zeilen von CONTRIBUTING.md<br>eigene Workflows`"]
     end
 
     blueprint -- "copier update<br>Zeile für Zeile zusammengeführt" --> theirs

@@ -3,6 +3,7 @@ files, the step of the check lint, and the part and the label of the report."""
 
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 from collections.abc import Sequence
@@ -27,6 +28,10 @@ from blueprint.ownership import (
     LABEL_DESCRIPTION,
     LIST,
     MOST_NAMED,
+    PART_END,
+    PART_FILE,
+    PART_START,
+    changed_lines,
     changed_names,
     check,
     exempt,
@@ -36,6 +41,7 @@ from blueprint.ownership import (
     proposal_link,
     report_part,
     report_text,
+    stays_in_the_part,
     workflow_commands,
 )
 from blueprint.pr_report import about
@@ -69,11 +75,19 @@ class Github:
     """GitHub with the labels that it knows, and each request that changes something."""
 
     def __init__(
-        self, *known: str, refuse: bool = False, files: Sequence[Any] = ()
+        self,
+        *known: str,
+        refuse: bool = False,
+        files: Sequence[Any] = (),
+        guide: str | None = None,
+        guide_status: int = 200,
     ) -> None:
         self.known = set(known)
         self.refuse = refuse
         self.files = list(files)
+        self.guide = guide
+        self.guide_status = guide_status
+        self.reads: list[str] = []
         self.changes: list[tuple[str, str, Any]] = []
 
     def __call__(
@@ -89,6 +103,12 @@ class Github:
         if method == "GET":
             if path.startswith("pulls/"):
                 return 200, self.files
+            if path.startswith("contents/"):
+                self.reads.append(path)
+                if self.guide is None:
+                    return 404, {}
+                content = base64.b64encode(self.guide.encode()).decode()
+                return self.guide_status, {"content": content, "message": "no"}
             name = path.removeprefix("labels/")
             return (200, {}) if name in self.known else (404, {})
         if self.refuse:
@@ -398,6 +418,270 @@ def test_the_command_says_when_it_has_no_listing(
     assert capsys.readouterr().err.startswith("blueprint.py: ")
 
 
+# ---------------------------------------------------------------- the part of a project
+
+
+def guide(*part: str, before: str = "One.", after: str = "Two.") -> str:
+    """CONTRIBUTING.md with the part of the project, between sentences of the blueprint."""
+    lines = ["# Guide", "", before, "", PART_START, *part, PART_END, "", after, ""]
+    return "\n".join(lines)
+
+
+def git_diff(tmp_path: Path, old: str, new: str) -> str:
+    """What git diff writes for the change of a file from old to new."""
+    before, after = tmp_path / "before", tmp_path / "after"
+    before.write_text(old, encoding="utf-8", newline="")
+    after.write_text(new, encoding="utf-8", newline="")
+    result = subprocess.run(
+        ["git", "diff", "--no-index", "--no-renames", str(before), str(after)],
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return result.stdout
+
+
+def as_github_gives_it(diff: str) -> str:
+    """The field patch of a file of a pull request: the hunks alone."""
+    return diff[diff.index("@@") :]
+
+
+LONG_PART = [f"Line {number}." for number in range(20)]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "stays"),
+    [
+        pytest.param(guide(), guide("Ours."), True, id="a first text"),
+        pytest.param(guide(), guide("Ours.", "", "More."), True, id="several lines"),
+        pytest.param(guide("Ours."), guide("Theirs."), True, id="a changed text"),
+        pytest.param(
+            guide("Ours.", "More."), guide(), True, id="the whole text removed"
+        ),
+        pytest.param(
+            guide(*LONG_PART),
+            guide(*LONG_PART[:10], "Changed.", *LONG_PART[11:]),
+            True,
+            id="in a part so long that the hunk shows neither mark",
+        ),
+        pytest.param(guide(), guide(before="Changed."), False, id="above the part"),
+        pytest.param(guide(), guide(after="Changed."), False, id="below the part"),
+        pytest.param(
+            guide(),
+            guide("Ours.", before="Changed."),
+            False,
+            id="in and above the part",
+        ),
+        pytest.param(
+            guide("Ours."),
+            guide("Ours.").replace(f"{PART_END}\n\nTwo.\n", f"\nTwo.\n{PART_END}\n"),
+            False,
+            id="the last mark moved past a sentence of the blueprint",
+        ),
+        pytest.param(
+            guide(),
+            guide().replace(f"One.\n\n{PART_START}\n", f"{PART_START}\nOne.\n\n"),
+            False,
+            id="the first mark moved before a sentence of the blueprint",
+        ),
+        pytest.param(
+            guide("Ours."),
+            guide("Ours.").replace(f"{PART_END}\n", ""),
+            False,
+            id="the last mark deleted",
+        ),
+        pytest.param(
+            guide("Ours."),
+            guide("Ours.").replace(f"{PART_START}\n", ""),
+            False,
+            id="the first mark deleted",
+        ),
+        pytest.param(
+            guide(),
+            guide().replace(PART_END, "<!-- The end. -->"),
+            False,
+            id="a mark reworded",
+        ),
+        pytest.param(
+            guide(),
+            guide().replace(f"\n\n{PART_START}", f"\n{PART_START}"),
+            False,
+            id="the line above the first mark removed",
+        ),
+        pytest.param(
+            guide(),
+            guide().replace(f"{PART_END}\n\n", f"{PART_END}\n"),
+            False,
+            id="the line below the last mark removed",
+        ),
+    ],
+)
+def test_a_change_stays_in_the_part_only_between_the_marks(
+    tmp_path: Path, old: str, new: str, stays: bool
+) -> None:
+    diff = git_diff(tmp_path, old, new)
+    assert stays_in_the_part(new, diff) is stays
+    assert stays_in_the_part(new, as_github_gives_it(diff)) is stays
+
+
+def test_the_marks_hold_in_a_file_with_the_line_ends_of_windows(tmp_path: Path) -> None:
+    old, new = guide().replace("\n", "\r\n"), guide("Ours.").replace("\n", "\r\n")
+    assert stays_in_the_part(new, git_diff(tmp_path, old, new))
+
+
+@pytest.mark.parametrize(
+    ("text", "diff"),
+    [
+        pytest.param(guide("Ours."), "", id="no diff, such as one too long for GitHub"),
+        pytest.param("# Guide\n", "@@ -1 +1 @@\n-# Old\n+# Guide\n", id="no marks"),
+        pytest.param("", "@@ -1,2 +0,0 @@\n-# Old\n-One.\n", id="a deleted file"),
+    ],
+)
+def test_what_nobody_can_tell_is_no_change_of_the_part(text: str, diff: str) -> None:
+    assert not stays_in_the_part(text, diff)
+
+
+def test_the_places_of_the_changed_lines() -> None:
+    diff = (
+        "--- a/CONTRIBUTING.md\n"
+        "+++ b/CONTRIBUTING.md\n"
+        "@@ -3,3 +3,3 @@\n"
+        " three\n"
+        "-four\n"
+        "+vier\n"
+        " five\n"
+        "@@ -9,2 +9 @@\n"
+        " nine\n"
+        "-ten\n"
+        "\\ No newline at end of file\n"
+    )
+    assert list(changed_lines(diff)) == [("-", 4), ("+", 4), ("-", 10)]
+
+
+def test_a_change_in_the_part_passes_even_in_the_mode_that_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = a_repository(tmp_path / "repository", PART_FILE)
+    new = guide("Ours.")
+    (root / PART_FILE).write_text(new, encoding="utf-8")
+    listing = f"{PART_FILE}\0".encode()
+    diff = git_diff(tmp_path, guide(), new)
+    assert checked(root, listing, mode=FAIL, part_diff=diff) == 0
+    assert "::" not in capsys.readouterr().out
+
+
+def test_another_file_of_the_blueprint_still_counts_beside_the_part(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = a_repository(tmp_path / "repository", PART_FILE, "a.yml")
+    new = guide("Ours.")
+    (root / PART_FILE).write_text(new, encoding="utf-8")
+    listing = f"a.yml\0{PART_FILE}\0".encode()
+    assert checked(root, listing, part_diff=git_diff(tmp_path, guide(), new)) == 0
+    out = capsys.readouterr().out
+    assert "file=a.yml" in out
+    assert f"file={PART_FILE}" not in out
+
+
+@pytest.mark.parametrize(
+    ("write", "diff"),
+    [
+        pytest.param(True, "", id="a step without the diff"),
+        pytest.param(True, "@@ -1 +1 @@\n-# Old\n+# Guide\n", id="outside the part"),
+        pytest.param(False, "@@ -1 +0,0 @@\n-# Guide\n", id="the file deleted"),
+    ],
+)
+def test_any_other_change_of_the_guide_is_a_notice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], write: bool, diff: str
+) -> None:
+    root = a_repository(tmp_path, PART_FILE)
+    if write:
+        (root / PART_FILE).write_text(guide(), encoding="utf-8")
+    assert checked(root, f"{PART_FILE}\0".encode(), part_diff=diff) == 0
+    assert f"::notice file={PART_FILE}," in capsys.readouterr().out
+
+
+def test_the_command_reads_the_diff_of_the_guide(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = a_repository(tmp_path / "repository", PART_FILE)
+    new = guide("Ours.")
+    (root / PART_FILE).write_text(new, encoding="utf-8")
+    listing = tmp_path / "changed"
+    listing.write_bytes(f"{PART_FILE}\0".encode())
+    diff = tmp_path / "contributing.diff"
+    diff.write_text(git_diff(tmp_path, guide(), new), encoding="utf-8")
+    arguments = ["ownership", str(listing), "--branch=topic", f"--mode={FAIL}"]
+    assert cli.main([*arguments, f"--contributing-diff={diff}"], root=root) == 0
+    assert "::" not in capsys.readouterr().out
+    assert cli.main(arguments, root=root) == 1
+    assert f"::error file={PART_FILE}," in capsys.readouterr().out
+    missing = f"--contributing-diff={tmp_path / 'none'}"
+    assert cli.main([*arguments, missing], root=root) == 2
+    assert capsys.readouterr().err.startswith("blueprint.py: ")
+
+
+def changed_guide(tmp_path: Path, new: str, **fields: str) -> dict[str, str]:
+    """The guide as an item of the files of a pull request, changed from guide()."""
+    patch = as_github_gives_it(git_diff(tmp_path, guide(), new))
+    return {"filename": PART_FILE, "status": "modified", "patch": patch, **fields}
+
+
+def test_a_change_in_the_part_is_no_news_and_loses_the_label(tmp_path: Path) -> None:
+    root = a_repository(tmp_path / "repository", PART_FILE)
+    new = guide("Ours.")
+    github = Github(LABEL, guide=new)
+    files = [changed_guide(tmp_path, new)]
+    assert report_part(Api(github), REPO, a_pull(LABEL), files, root) is None
+    assert github.reads == [f"contents/{PART_FILE}?ref={'a' * 40}"]
+    assert github.changes == [("DELETE", f"issues/7/labels/{LABEL}", None)]
+
+
+@pytest.mark.parametrize(
+    ("github", "fields"),
+    [
+        pytest.param(
+            Github(LABEL, guide=guide(before="Changed.")), {}, id="outside the part"
+        ),
+        pytest.param(Github(LABEL), {}, id="GitHub doesn't know the file"),
+        pytest.param(
+            Github(LABEL, guide=guide("Ours."), guide_status=403),
+            {},
+            id="GitHub refuses the file",
+        ),
+        pytest.param(
+            Github(LABEL, guide=guide("Ours.")),
+            {"patch": ""},
+            id="a diff too long to show",
+        ),
+    ],
+)
+def test_any_other_change_of_the_guide_is_news(
+    tmp_path: Path, github: Github, fields: dict[str, str]
+) -> None:
+    root = a_repository(tmp_path / "repository", PART_FILE)
+    new = guide(before="Changed.")
+    files = [changed_guide(tmp_path, new, **fields)]
+    part = report_part(Api(github), REPO, a_pull(), files, root)
+    assert part is not None
+    assert f"- `{PART_FILE}`" in part.text
+
+
+def test_a_file_renamed_to_the_guide_is_news_without_a_look_at_it(
+    tmp_path: Path,
+) -> None:
+    root = a_repository(tmp_path / "repository", PART_FILE)
+    github = Github(LABEL, guide=guide("Ours."))
+    files = [
+        changed_guide(
+            tmp_path, guide("Ours."), status="renamed", previous_filename="old.md"
+        )
+    ]
+    part = report_part(Api(github), REPO, a_pull(), files, root)
+    assert part is not None
+    assert github.reads == []
+
+
 # ---------------------------------------------------------------- the report
 
 
@@ -411,6 +695,7 @@ def test_the_report_names_the_files_and_the_way_out() -> None:
         ".github/checks.project.toml",
         ".github/agents.project.md",
         ".github/workflows/",
+        "## Releases",
     ):
         assert f"`{place}`" in text
     assert (
@@ -588,3 +873,4 @@ def test_the_faq_mentions_the_notice(page: str) -> None:
     text = (ROOT / page).read_text(encoding="utf-8")
     assert "BLUEPRINT_OWNERSHIP" in text
     assert "`.github/blueprint/owned.txt`" in text
+    assert f"`## Releases` in `{PART_FILE}`" in text

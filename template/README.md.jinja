@@ -50,7 +50,7 @@ Pin the action to the commit hash of a [release](https://github.com/{= repo =}/r
 ```sh
 pip install {= project_slug =}
 ```
-[% elif project_type == 'node-package' %]
+[% elif publish_to == 'npm' %]
 ```sh
 npm install {= project_slug =}
 ```

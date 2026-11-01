@@ -146,7 +146,9 @@ jobs:
       # may conflict with the change; the report of the PR coach says where the change
       # belongs instead. A failure only with the repository variable BLUEPRINT_OWNERSHIP
       # set to fail. The old path of a rename counts too. The blueprint itself has no
-      # list of its files, and a bot that brings them gets no notice.
+      # list of its files, and a bot that brings them gets no notice. A change between
+      # the two marked lines of CONTRIBUTING.md belongs to the project, and an update
+      # keeps it, so the diff of that file goes along.
       - name: Find the changed files of the blueprint
         id: ownership
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' && github.event_name == 'pull_request' }}
@@ -161,9 +163,11 @@ jobs:
         run: |
           # The changes since the merge base: those of the pull request alone.
           git diff -z --no-renames --name-only "origin/$BASE_REF...HEAD" > "$RUNNER_TEMP/changed"
+          git diff --no-renames "origin/$BASE_REF...HEAD" -- CONTRIBUTING.md > "$RUNNER_TEMP/contributing.diff"
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" --repo "$GITHUB_REPOSITORY" ownership "$RUNNER_TEMP/changed" \
+            --contributing-diff="$RUNNER_TEMP/contributing.diff" \
             --branch="$BRANCH" --head-repo="$HEAD_REPO" --author-type="$AUTHOR_TYPE" \
             --mode="$BLUEPRINT_OWNERSHIP"
       # Hints at the spelling (cspell, English and German) and the style of the English

@@ -38,7 +38,7 @@ import pytest
 import workflow_steps
 import yaml
 from copier import _main as copier_main
-from copier import run_copy
+from copier import run_copy, run_update
 from copier._jinja_ext import YieldExtension, get_yield_context
 from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
@@ -5807,6 +5807,77 @@ def test_the_step_of_a_project_annotates_what_the_pull_request_changes(
         (level, "docs/guide.md"),
         (level, "lychee.toml"),
     ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("project_part", "code", "annotations"),
+    [
+        (True, 0, []),
+        (False, 1, [("error", "CONTRIBUTING.md")]),
+    ],
+)
+def test_the_step_of_a_project_leaves_its_part_of_the_guide_alone(
+    tmp_path: Path,
+    projects: dict[str, Path],
+    project_part: bool,
+    code: int,
+    annotations: list[tuple[str, str]],
+) -> None:
+    # The step as it is, with the command of a project and the guide of a project: a
+    # pull request that writes between the two marked lines changes nothing that an
+    # update can conflict with, even in the mode that fails.
+    made = projects["python-package"]
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    shutil.copytree(made / ".github/blueprint", repository / ".github/blueprint")
+    shutil.copy(made / ".github/blueprint.py", repository / ".github/blueprint.py")
+    guide = (made / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    (repository / "CONTRIBUTING.md").write_text(guide, encoding="utf-8", newline="\n")
+
+    def git(*arguments: str) -> None:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        subprocess.run(
+            ["git", *identity, "-c", "commit.gpgsign=false", *arguments],
+            cwd=repository,
+            capture_output=True,
+            check=True,
+        )
+
+    git("init", "--quiet", "--initial-branch=main")
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "main")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    changed = (
+        guide.replace(ownership.PART_END, f"Ours.\n{ownership.PART_END}")
+        if project_part
+        else guide.replace("## Releases\n", "## Releases\n\nOurs.\n")
+    )
+    assert changed != guide
+    (repository / "CONTRIBUTING.md").write_text(changed, encoding="utf-8", newline="\n")
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "pull request")
+    result = workflow_steps.run_step(
+        tmp_path,
+        "lint.yml",
+        "lint",
+        "Find the changed files of the blueprint",
+        env={
+            "BASE_REF": "main",
+            "BRANCH": "topic",
+            "HEAD_REPO": "o/r",
+            "AUTHOR_TYPE": "User",
+            "BLUEPRINT_OWNERSHIP": "fail",
+            "GITHUB_REPOSITORY": "o/r",
+        },
+        stubs={"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"'},
+        workspace=repository,
+    )
+    assert result.returncode == code, result.stderr
+    assert (
+        re.findall(r"^::(\w+) file=([^,]+),", result.stdout, re.MULTILINE)
+        == annotations
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -17918,6 +17989,250 @@ def test_contributing_explains_the_assets_that_a_project_builds_itself(
     text = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/release-assets.sh FOLDER VERSION`" in text
     assert "the verification of the release fails for an asset without" in text
+
+
+def releases_of(guide: str) -> str:
+    """The section of the contributing guide about releases."""
+    return guide.split("\n## Releases\n", 1)[1]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_guide_leaves_a_project_a_part_of_its_section_about_releases(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Two marked lines, right under each other and empty in a new project, with a line
+    # of their own on each side: an update merges line by line, so the lines around
+    # the text of a project must be ones that no change of a sentence touches.
+    guide = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    marks = f"\n\n{ownership.PART_START}\n{ownership.PART_END}\n\n"
+    assert guide.count(marks) == 1
+    assert marks in releases_of(guide)
+    # The step that gives a pull request its notice reads the same lines.
+    template = (ROOT / "template/CONTRIBUTING.md.jinja").read_text(encoding="utf-8")
+    assert marks in template
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_the_guide_of_an_action_names_the_pull_request_of_its_users(
+    projects: dict[str, Path], kind: str
+) -> None:
+    guide = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    said = "Repositories that use the action receive the release as a Dependabot"
+    assert (said in releases_of(guide)) == (kind == "github-action")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_rules_for_agents_name_the_part_of_the_guide(
+    projects: dict[str, Path], kind: str
+) -> None:
+    agents = (projects[kind] / "AGENTS.md").read_text(encoding="utf-8")
+    assert "the two marked lines of `## Releases` in `CONTRIBUTING.md`" in agents
+
+
+class GuideReleases:
+    """The questions and the guide of the blueprint with releases, whose guide a test
+    writes, and a repository made from it: Copier in full, as the blueprint bot runs it,
+    on the one file that it merges here, as the others take seconds to render."""
+
+    MARKS = f"{ownership.PART_START}\n{ownership.PART_END}\n\n"
+
+    def __init__(self, folder: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # What the update step of the bot sets, for Git in the background and Copier.
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+        self.blueprint = folder / "blueprint"
+        self.project = folder / "project"
+        self.project.mkdir()
+        self.template = self.blueprint / "template/CONTRIBUTING.md.jinja"
+        self.template.parent.mkdir(parents=True)
+        (self.blueprint / ".github").mkdir()
+        shutil.copy(ROOT / "copier.yml", self.blueprint)
+        shutil.copy(ROOT / ".github/fleet.toml", self.blueprint / ".github")
+        # Line ends of Git on Windows that merge a whole file into one conflict.
+        shutil.copy(ROOT / ".gitattributes", self.blueprint)
+        shutil.copy(ROOT / ".gitattributes", self.template.parent)
+        shutil.copy(ROOT / "template/CONTRIBUTING.md.jinja", self.template)
+        shutil.copy(ROOT / "template/.copier-answers.yml.jinja", self.template.parent)
+        self.target = self.project / "CONTRIBUTING.md"
+        self.current = self.template.read_text(encoding="utf-8")
+        self.git(self.blueprint, "init", "--quiet", "--initial-branch=main")
+
+    def git(self, where: Path, *arguments: str) -> None:
+        identity = ["-c", "user.name=Dev", "-c", "user.email=dev@example.com"]
+        unsigned = ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+        subprocess.run(
+            ["git", *identity, *unsigned, *arguments],
+            cwd=where,
+            capture_output=True,
+            check=True,
+        )
+
+    def commit(self, where: Path) -> None:
+        self.git(where, "add", "--all")
+        self.git(where, "commit", "--quiet", "--allow-empty", "-m", "next")
+
+    def release(self, tag: str, guide: str) -> None:
+        self.template.write_text(guide, encoding="utf-8", newline="\n")
+        self.commit(self.blueprint)
+        self.git(self.blueprint, "tag", tag)
+
+    def copy(self, tag: str, kind: str) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            run_copy(
+                str(self.blueprint),
+                self.project,
+                data={
+                    "owner": OWNER,
+                    "project_name": "Demo",
+                    "project_slug": "demo",
+                    "description": "A demo",
+                    "project_type": kind,
+                    "sample_code": False,
+                },
+                defaults=True,
+                vcs_ref=tag,
+                quiet=True,
+            )
+        self.git(self.project, "init", "--quiet", "--initial-branch=main")
+        self.commit(self.project)
+
+    def write_guide(self, old: str, new: str) -> None:
+        """A change of the guide of the repository, committed."""
+        guide = self.target.read_text(encoding="utf-8")
+        assert guide.count(old) == 1, old
+        self.target.write_text(guide.replace(old, new), encoding="utf-8", newline="\n")
+        self.commit(self.project)
+
+    def update(self, tag: str) -> str:
+        """The guide after the update, which must leave no conflict."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            run_update(
+                self.project,
+                vcs_ref=tag,
+                defaults=True,
+                overwrite=True,
+                conflict="inline",
+                quiet=True,
+            )
+        guide = self.target.read_text(encoding="utf-8")
+        assert "<<<<<<<" not in guide
+        assert not list(self.project.rglob("*.rej"))
+        self.commit(self.project)
+        return guide
+
+
+VULNERABILITY = "or at once when it fixes a vulnerability."
+
+
+def test_a_real_update_brings_the_sentence_of_an_action_and_merges_around_the_part(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reason for the part: a repository that wrote in the paragraphs of `## Releases`
+    # conflicted with every update that changed them, as issue-assistant did.
+    releases = GuideReleases(tmp_path, monkeypatch)
+    current = releases.current
+    sentence = (
+        " Repositories that use the action receive the release as a Dependabot"
+        " pull request."
+    )
+    kept = f"[% if publish_to == 'github-action' %]{sentence}[% endif %]"
+    assert kept in current
+    # A release from before the part and the sentence of the kind of project, and a
+    # repository that writes the sentence into the paragraph.
+    releases.release("v1.0.0", current.replace(kept, "").replace(releases.MARKS, ""))
+    releases.copy("v1.0.0", "github-action")
+    releases.write_guide(VULNERABILITY, f"{VULNERABILITY}{sentence}")
+
+    # The release that brings them both merges without a conflict, and the sentence is
+    # then the blueprint's. A part right after the paragraph would conflict here: a
+    # merge marks lines added right after a line that both sides changed.
+    releases.release("v2.0.0", current)
+    guide = releases.update("v2.0.0")
+    assert guide.count(sentence) == 1
+    assert f"\n\n{releases.MARKS}" in guide
+
+    # The repository writes its text into the part. A release that changes the
+    # paragraphs on both sides of the part keeps the text and brings the new sentences,
+    # without a conflict.
+    own = "The [release guide](docs/releases.md) describes every step."
+    releases.write_guide(ownership.PART_END, f"{own}\n{ownership.PART_END}")
+    changes = {
+        "The release bot keeps a pull request": "The release bot holds a pull request",
+        "A file that the release ships beside": "A file that a release ships beside",
+        "By contributing, you agree": "By contributing, you accept",
+    }
+    next_guide = current
+    for old, new in changes.items():
+        assert old in next_guide
+        next_guide = next_guide.replace(old, new)
+    releases.release("v3.0.0", next_guide)
+    guide = releases.update("v3.0.0")
+    assert f"\n{ownership.PART_START}\n{own}\n{ownership.PART_END}\n" in guide
+    for old, new in changes.items():
+        assert new in guide
+        assert old not in guide
+
+
+def test_a_real_update_brings_the_part_to_a_repository_with_its_own_sentence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As homedarts-for-autodarts and player-switch-for-autodarts wrote it: a sentence
+    # that the blueprint doesn't have stays until the repository moves it, and stops no
+    # update.
+    releases = GuideReleases(tmp_path, monkeypatch)
+    releases.release("v1.0.0", releases.current.replace(releases.MARKS, ""))
+    releases.copy("v1.0.0", "home-assistant")
+    own = "The [release guide](docs/releases.md) describes every step."
+    releases.write_guide(", and delivers it to HACS.", f"; {own}")
+    releases.release("v2.0.0", releases.current)
+    guide = releases.update("v2.0.0")
+    assert f"; {own}" in guide
+    assert ", and delivers it to HACS." not in guide
+    assert f"\n\n{releases.MARKS}" in guide
+
+
+def test_a_node_package_that_no_registry_takes_says_so_everywhere(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    published = projects["node-package"]
+    private = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A package that stays off npm.",
+        project_type="node-package",
+        publish_to_npm=False,
+    )
+    settings = private / ".github/repository.toml"
+    for name, said in (
+        ("CONTRIBUTING.md", "delivers it to npm"),
+        ("CONTRIBUTING.md", "`*.tgz` for what it publishes on npm"),
+        (".github/repository.toml", 'PUBLISH_TO = "npm"'),
+        (".github/repository.toml", "[environments.npm]"),
+        ("SECURITY.md", "gh attestation verify ./*.tgz"),
+        (".bestpractices.json", "and from npm"),
+        ("README.md", "npm install"),
+    ):
+        assert said in (published / name).read_text(encoding="utf-8"), said
+        assert said not in (private / name).read_text(encoding="utf-8"), said
+    assert 'PUBLISH_TO = "none"' in settings.read_text(encoding="utf-8")
+    manifest = (private / "package.json").read_text(encoding="utf-8")
+    assert json.loads(manifest)["private"] is True
+    assert "private" not in json.loads(
+        (published / "package.json").read_text(encoding="utf-8")
+    )
+    answers = (private / ".copier-answers.yml").read_text(encoding="utf-8")
+    assert "publish_to_npm: false\n" in answers
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_a_node_package_stores_the_answer_about_npm(
+    projects: dict[str, Path], kind: str
+) -> None:
+    answers = (projects[kind] / ".copier-answers.yml").read_text(encoding="utf-8")
+    assert ("publish_to_npm: true\n" in answers) == (kind == "node-package")
 
 
 def test_a_release_left_as_a_draft_is_finished_by_hand_or_by_a_second_try() -> None:
