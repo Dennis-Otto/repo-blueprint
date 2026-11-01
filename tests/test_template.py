@@ -5953,6 +5953,17 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
+    # The zip of a Chrome extension, which its users load by hand and the store gets
+    # only after the same check, and which no other kind ships as its package.
+    extension = security("chrome-extension")
+    assert (
+        "gh release download vX.Y.Z --repo Dennis-Otto/demo-project --pattern '*.zip'\n"
+        "gh attestation verify ./*.zip --repo Dennis-Otto/demo-project"
+    ) in extension
+    assert "The Chrome Web Store gets exactly this zip" in extension
+    for kind in KINDS:
+        zipped = "gh attestation verify ./*.zip" in security(kind)
+        assert zipped == (kind == "chrome-extension"), kind
     # A project that no registry delivers verifies each asset, those of its own
     # scripts/release-assets.sh too, such as the zip of a browser extension.
     generic = security("generic")
@@ -17539,12 +17550,14 @@ PACKAGES: dict[str, dict[str, dict[str, str] | None]] = {
         "demo.tar.gz": {"demo/appinfo/info.xml": "<info/>\n"},
         "demo.tar.gz.sig": None,
     },
+    "chrome-web-store": {"demo-1.2.3.zip": {"manifest.json": "{}\n", "lib/sw.js": ""}},
 }
 SHIPPED = {
     "hacs": ["manifest.json", "sensor.py"],
     "pypi": ["demo-1.2.3.dist-info/METADATA", "demo/__init__.py"],
     "npm": ["package/package.json"],
     "nextcloud-appstore": ["demo/appinfo/info.xml"],
+    "chrome-web-store": ["lib/sw.js", "manifest.json"],
 }
 # The tree of the tag of a project that ships its sources, with what only checks,
 # tests and documents it, the tools of the blueprint among them.
@@ -17798,6 +17811,7 @@ def describe_the_release(
         ("pypi", "image"),
         ("npm", "image"),
         ("nextcloud-appstore", "image"),
+        ("chrome-web-store", "image"),
         ("github-action", "directory"),
         ("ghcr", "directory"),
         ("none", "directory"),
@@ -18134,6 +18148,34 @@ def test_the_verification_fails_for_an_asset_of_the_project_without_its_provenan
     assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
     assert (attested in done.summary) is (unattested is None), done.summary
     assert (missing in done.summary) is (unattested is not None), done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("unattested", [None, "demo-extension-1.2.3.zip"])
+def test_the_verification_of_a_chrome_extension_needs_the_provenance_of_its_zip(
+    tmp_path: Path, unattested: str | None
+) -> None:
+    # The whole step: the right manifest in the zip doesn't make up for a zip without
+    # the signed provenance of the isolated build, the one that the store then gets.
+    done = verify_a_hacs_release(
+        tmp_path,
+        publish_to="chrome-web-store",
+        zip_name="demo-extension-1.2.3.zip",
+        zipped={
+            "manifest.json": json.dumps({"manifest_version": 3, "version": "1.2.3"})
+        },
+        unattested=unattested,
+    )
+
+    assert (done.returncode == 0) is (unattested is None), done.stdout + done.stderr
+    assert (
+        "- ✔ ./demo-extension-1.2.3.zip holds the manifest.json of Manifest V3 and the"
+        " version 1.2.3 at its root"
+    ) in done.summary
+    attested = "demo-extension-1.2.3.zip carries the signed provenance of the isolated"
+    missing = "demo-extension-1.2.3.zip has no valid provenance of the isolated build."
+    assert (f"- ✔ {attested}" in done.summary) is (unattested is None), done.summary
+    assert (f"- ✘ {missing}" in done.summary) is (unattested is not None), done.summary
 
 
 @WITH_JQ
