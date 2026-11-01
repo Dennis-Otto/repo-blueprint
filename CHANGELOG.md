@@ -7,6 +7,29 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.3.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.2...v1.3.0) (2026-11-01)
+
+
+### Features
+
+* **release:** let a project add its own release assets, attested and described like the rest ([#471](https://github.com/Dennis-Otto/repo-blueprint/issues/471)) ([c8c3795](https://github.com/Dennis-Otto/repo-blueprint/commit/c8c37950e6430b04b619f085316a17a13f791ab1))
+
+
+### Bug fixes
+
+* **deps:** lock file maintenance ([#487](https://github.com/Dennis-Otto/repo-blueprint/issues/487)) ([7f57ae1](https://github.com/Dennis-Otto/repo-blueprint/commit/7f57ae14175f189cb97abef147dcd162841d2f05))
+* **deps:** refresh pip-compile outputs ([#499](https://github.com/Dennis-Otto/repo-blueprint/issues/499)) ([d41a2fe](https://github.com/Dennis-Otto/repo-blueprint/commit/d41a2fe258693da33cb86ef4ab574951370ce5be))
+* **deps:** update dependency playwright to v1.64.1 ([#483](https://github.com/Dennis-Otto/repo-blueprint/issues/483)) ([a9a574c](https://github.com/Dennis-Otto/repo-blueprint/commit/a9a574c7ba533799faecd82bfecd1834057e65f3))
+* end the random hang of the website build in the social plugin ([#524](https://github.com/Dennis-Otto/repo-blueprint/issues/524)) ([aedbbb1](https://github.com/Dennis-Otto/repo-blueprint/commit/aedbbb148ae0c368c785e95198902ad4ab029c2e))
+* keep Harden-Runner's block mode from failing and hanging jobs on stale DNS ([#521](https://github.com/Dennis-Otto/repo-blueprint/issues/521)) ([78ef64c](https://github.com/Dennis-Otto/repo-blueprint/commit/78ef64c9770bc44ce8d780bbfbff76d9ef746a1f))
+* make the Docs pictures workflow pass on main ([#520](https://github.com/Dennis-Otto/repo-blueprint/issues/520)) ([edd69a5](https://github.com/Dennis-Otto/repo-blueprint/commit/edd69a50ea3549f5cbe3ce428adece10a505df6d))
+* update the action in release.yml that zizmor reports as known vulnerable ([#526](https://github.com/Dennis-Otto/repo-blueprint/issues/526)) ([8301520](https://github.com/Dennis-Otto/repo-blueprint/commit/83015207405f2d8636847377bf27f6d7fc94e863))
+
+
+### Performance
+
+* **mutation:** collect mutmut's stats once and share them with every part ([#469](https://github.com/Dennis-Otto/repo-blueprint/issues/469)) ([7af387b](https://github.com/Dennis-Otto/repo-blueprint/commit/7af387b31f447b8f723b2a23672c9feaae6c646e))
+
 ## [1.2.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.2.1...v1.2.2) (2026-10-27)
 
 ### Bug fixes
