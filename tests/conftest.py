@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 
 import pytest
@@ -29,10 +30,15 @@ def bytecode_apart(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Each Python that a test starts keeps its bytecode in a folder of the run, not
     next to the code. The processes of pytest-xdist share the projects that the tests
     of the template render, and a test that copies a project would otherwise meet a
-    file of __pycache__ that the Python of another test is writing there."""
+    file of __pycache__ that the Python of another test is writing there. The processes
+    of pytest themselves write none at all: the variable reaches only the Python that
+    starts after it, and a test that imports the hooks of such a project would leave a
+    file there that the test of the list of the blueprint's files then finds."""
     before = os.environ.get("PYTHONPYCACHEPREFIX")
     os.environ["PYTHONPYCACHEPREFIX"] = str(tmp_path_factory.mktemp("pycache"))
-    yield
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sys, "dont_write_bytecode", True)
+        yield
     if before is None:
         del os.environ["PYTHONPYCACHEPREFIX"]
     else:

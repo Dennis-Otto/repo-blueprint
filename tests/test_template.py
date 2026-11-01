@@ -5713,6 +5713,21 @@ AGENT_COMMANDS = {
 }
 
 
+def test_an_import_in_a_test_leaves_no_bytecode_next_to_the_file(
+    tmp_path: Path,
+) -> None:
+    # The tests share the rendered projects, and some import the hooks of a website
+    # from there: a __pycache__ beside them would count as a file of the project.
+    (tmp_path / "hooks.py").write_text("LOADED = True\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("hooks", tmp_path / "hooks.py")
+    assert spec is not None
+    assert spec.loader is not None
+    hooks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hooks)
+    assert hooks.LOADED
+    assert not (tmp_path / "__pycache__").exists()
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
     projects: dict[str, Path], kind: str
