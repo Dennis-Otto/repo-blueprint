@@ -1,6 +1,6 @@
 # A pull request checks the accessibility of the pages that it changes, and a new violation fails
 
-- Status: accepted
+- Status: accepted, amended by [0113](0113-the-accessibility-check-opens-every-page-as-a-phone-shows-it.md), which doubles the time of a run of every page and raises its limits
 - Date: 2026-11-01
 
 ## Context
