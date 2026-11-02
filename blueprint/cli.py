@@ -92,6 +92,7 @@ from blueprint.fixes import (
 )
 from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
+from blueprint.migrate import migrate
 from blueprint.notices import third_party_notices
 from blueprint.overrides import write_overrides
 from blueprint.ownership import check as ownership_check
@@ -745,6 +746,33 @@ def fix_bot_command(
         )
     sys.stdout.write(said)
     return 0
+
+
+def migrate_command(arguments: argparse.Namespace, root: Path) -> int:
+    """What the releases of the blueprint move in the files of the project, one on each
+    line, and in the CI also as annotations of those files; with --fix, it moves them."""
+    found = migrate(root, arguments.fix)
+    for migration in found:
+        print(f"{migration.path}: {migration.summary}")
+    if arguments.fix or not found:
+        print(
+            f"{len(found)} move(s) of a release done in the files of the project."
+            if found
+            else "The files of the project have what the releases of the blueprint moved."
+        )
+        return 0
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for migration in found:
+            print(
+                f"::error file={migration.path},title=Files of the project::"
+                f"{migration.summary}"
+            )
+    print(
+        f"{command(root)} migrate --fix moves what these lines name: an update of the "
+        "blueprint leaves the files of the project alone, so a release moves them "
+        "through this check. docs/troubleshooting.md says how a project declines."
+    )
+    return 1
 
 
 def pages_command(arguments: argparse.Namespace, root: Path) -> int:
@@ -1955,6 +1983,16 @@ def add_pages_parsers(
         help="put the cells of a layout table one below the other, the text before "
         "its picture, and leave out the widths of cells, first",
     )
+    migrate_parser = commands.add_parser(
+        "migrate",
+        help="what the releases of the blueprint move in the files of the project, "
+        "which an update leaves alone",
+    )
+    migrate_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="move it in those files",
+    )
     site_check_parser = commands.add_parser(
         "site-check",
         help="what the website that MkDocs built promises: a sitemap in every folder "
@@ -2129,6 +2167,12 @@ def standalone_command(
         try:
             return locks_command(arguments, root)
         except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
+            print(f"blueprint.py: {error}", file=sys.stderr)
+            return 2
+    if arguments.command == "migrate":
+        try:
+            return migrate_command(arguments, root)
+        except (OSError, UnicodeDecodeError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command == "pages":

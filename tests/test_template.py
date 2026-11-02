@@ -85,6 +85,7 @@ from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers, signed_off, watched
 from blueprint.github import Api
 from blueprint.locks import why_renovate_skips
+from blueprint.migrate import contribution_labels, migrate
 from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
@@ -6549,6 +6550,76 @@ def test_adopting_a_nextcloud_app_keeps_its_own_tests(tmp_path: Path) -> None:
     ]
 
 
+def test_the_digest_of_the_issue_assistant_has_its_labels(
+    projects: dict[str, Path],
+) -> None:
+    # The first label of the group is the one that the digest tells the maintainer to add.
+    for project in (ROOT, *projects.values()):
+        labels = tomllib.loads(
+            (project / ".github/labels.toml").read_text(encoding="utf-8")
+        )["label"]
+        names = [label["name"] for label in labels if label["group"] == "contribution"]
+        assert names == ["good first issue", "help wanted"], project
+
+
+def test_the_check_of_the_issue_assistant_accepts_the_group_contribution() -> None:
+    # check of a release before 1.9.0 refuses the group, and it runs from this pin.
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    pin = re.search(r"Dennis-Otto/issue-assistant@[0-9a-f]{40} # v(\d+)\.(\d+)\.", lint)
+    assert pin is not None
+    assert (int(pin[1]), int(pin[2])) >= (1, 9)
+
+
+def test_a_new_repository_has_nothing_left_to_move(projects: dict[str, Path]) -> None:
+    for project in (ROOT, *projects.values()):
+        assert not migrate(project, fix=False), project
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_move_of_the_labels_gives_what_a_new_repository_has(
+    projects: dict[str, Path], kind: str
+) -> None:
+    new = (projects[kind] / ".github/labels.toml").read_text(encoding="utf-8")
+    section = re.search(r"# Contribution: .*?(?=# Release: )", new, re.DOTALL)
+    assert section is not None
+    wanted = re.findall(r"\[\[label\]\]\n(?:.+\n)+", section[0])
+    # As a repository has the file up to that release: the labels in the decisions,
+    # help wanted first, and no word of the group in the comment at the top.
+    old = new.replace(section[0], "")
+    old = re.sub(r"#   contribution .*\n", "", old)
+    old = old.replace(
+        '[[label]]\nname = "no-bot-fixes"',
+        "\n".join(reversed(wanted)).replace("contribution", "decision")
+        + '\n[[label]]\nname = "no-bot-fixes"',
+    )
+    assert 'group = "contribution"' not in old
+    assert contribution_labels(old) == new
+
+
+def test_the_update_of_every_kind_finishes_as_the_fix_bot_does() -> None:
+    # The update keeps the files of the project, and the step of scripts/check.sh then
+    # asks for what a release moves in them, which the fix bot brings to a real update.
+    script = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    update = script.index(
+        'copier update --defaults --conflict inline --vcs-ref "$commit"'
+    )
+    move = script.index('(cd "$PROJECT" && python3 .github/blueprint.py migrate --fix)')
+    assert update < move < script.index('git -C "$PROJECT" add --all', update)
+
+
+def test_the_check_moves_what_a_release_moves() -> None:
+    for name in ("scripts/check.sh", "template/scripts/check.sh.jinja"):
+        script = (ROOT / name).read_text(encoding="utf-8")
+        step = script.split('step "Files of the project"\n', 1)[1].split('\nstep "', 1)[
+            0
+        ]
+        assert '"$python" "$tool" migrate\n' in step, name
+    checks = tomllib.loads((ROOT / ".github/checks.toml").read_text(encoding="utf-8"))
+    assert checks["step"]["Files of the project"]["autofix"] == [
+        "{blueprint} migrate --fix"
+    ]
+
+
 def test_the_area_labels_of_pull_requests_exist() -> None:
     labels = tomllib.loads((ROOT / ".github/labels.toml").read_text(encoding="utf-8"))
     defined = {label["name"] for label in labels["label"]}
@@ -12432,6 +12503,7 @@ def test_every_project_fixes_what_a_command_can_fix(
     expected = [
         "Text files",
         "Pages in one column",
+        "Files of the project",
         "Changelog fragments",
         "Accepted advisories",
         "Lock files",

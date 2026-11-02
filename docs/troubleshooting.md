@@ -282,6 +282,20 @@ The last command takes the presets of the blueprint out of the rules, since Reno
 
 **What to do:** commit the picture, such as with `git add screenshots/settings.png`, or correct its address in the README. Without git, such as in a folder without its history, the website downloads the picture from `main` as before.
 
+## A release moves a file of the project
+
+**What you see:** the step *Files of the project* of `scripts/check.sh` fails, usually on the pull request of a blueprint update, and names the file and what moves, such as `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`.
+
+**Why:** an update never overwrites a file of the project, so a release that needs such a file changed brings the change as a migration of `blueprint.py`, which this step checks. On a branch of the repository, the fix bot commits the move by itself within minutes.
+
+**What to do:** where no fix bot runs, such as with the label `no-bot-fixes`, run the command and commit what changes:
+
+```sh
+python3 .github/blueprint.py migrate --fix
+```
+
+**To decline the move of a label,** write a comment behind its line, such as `group = "decision" # no candidates of the issue assistant`, and the step leaves that label alone. A label that the file doesn't have moves nowhere either.
+
 ## A scheduled workflow didn't run
 
 GitHub runs schedules as it can, often hours late and sometimes not at all, so the blueprint starts its bots from events, such as a merge into `main` or the end of a check, and keeps the schedules only as a safety net ([decision 0033](decisions/0033-schedules-are-only-a-safety-net.md)). Every night, the bot-health bot looks at the latest run of every workflow and starts one whose schedule GitHub missed or switched off, also when a push ran it since, because only a run of its schedule or one started by hand counts. The column *Schedule delay* of the [dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) shows how late GitHub started the scheduled runs of each repository in the last 7 days, in the median. A workflow with *Run workflow* under *Actions* starts at once by hand.

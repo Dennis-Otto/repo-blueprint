@@ -282,6 +282,20 @@ Der letzte Befehl nimmt die Presets des Blueprints aus den Regeln, da Renovate a
 
 **Was zu tun ist:** Committe das Bild, etwa mit `git add screenshots/settings.png`, oder korrigiere seine Adresse in der README. Ohne Git, etwa in einem Ordner ohne seine Historie, lädt die Website das Bild wie bisher von `main` herunter.
 
+## Ein Release ändert eine Datei des Projekts
+
+**Was du siehst:** Der Schritt *Files of the project* von `scripts/check.sh` scheitert, meist am Pull Request eines Blueprint-Updates, und nennt die Datei und die Änderung, etwa `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`.
+
+**Warum:** Ein Update überschreibt nie eine Datei des Projekts. Ein Release, das so eine Datei ändern muss, bringt die Änderung deshalb als Migration von `blueprint.py` mit, die dieser Schritt prüft. Auf einem Branch des Repositorys committet der Fix-Bot die Änderung innerhalb von Minuten selbst.
+
+**Was zu tun ist:** Wo kein Fix-Bot läuft, etwa mit dem Label `no-bot-fixes`, führe den Befehl aus und committe, was sich ändert:
+
+```sh
+python3 .github/blueprint.py migrate --fix
+```
+
+**Um die Änderung eines Labels abzulehnen,** schreibe einen Kommentar hinter seine Zeile, etwa `group = "decision" # keine Kandidaten des Issue-Assistenten`, dann lässt der Schritt dieses Label in Ruhe. Ein Label, das die Datei nicht hat, ändert sich ebenfalls nicht.
+
 ## Ein geplanter Workflow ist nicht gelaufen
 
 GitHub führt Zeitpläne aus, wie es kann, oft Stunden zu spät und manchmal gar nicht; deshalb startet der Blueprint seine Bots durch Ereignisse, etwa einen Merge in `main` oder das Ende einer Prüfung, und behält die Zeitpläne nur als Sicherheitsnetz ([Entscheidung 0033](decisions/0033-schedules-are-only-a-safety-net.md), englisch). Jede Nacht sieht der Bot-Health-Bot den neuesten Lauf jedes Workflows an und startet einen, dessen Zeitplan GitHub verpasst oder abgeschaltet hat, auch wenn ihn seitdem ein Push ausgeführt hat, denn nur ein Lauf seines Zeitplans oder einer von Hand zählt. Wie spät GitHub die geplanten Läufe jedes Repositorys in den letzten 7 Tagen im Median startete, zeigt die Spalte *Schedule delay* des [Dashboards](https://dennis-otto.github.io/repo-blueprint/dashboard/). Ein Workflow mit *Run workflow* unter *Actions* startet von Hand sofort.

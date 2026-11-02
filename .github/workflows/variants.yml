@@ -277,6 +277,9 @@ jobs:
             commit --quiet --message "chore: start from the blueprint $latest"
           # As the blueprint bot does it, without --trust: updating runs no code of the blueprint.
           (cd "$PROJECT" && copier update --defaults --conflict inline --vcs-ref "$commit")
+          # What the fix bot commits onto the pull request of an update: what a release
+          # moves in the files of the project, which the step of scripts/check.sh checks.
+          (cd "$PROJECT" && python3 .github/blueprint.py migrate --fix)
           git -C "$PROJECT" add --all
           echo "The ${ANSWERS:-$KIND} from $latest, updated to ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
 
@@ -343,7 +346,7 @@ jobs:
                   summary.write(
                       "\nThese files belong to the project: the update keeps them as the latest release made "
                       "them, and a new repository gets them otherwise. If the files of the blueprint need a "
-                      "change of them, the changelog says how an existing project makes it.\n\n"
+                      "change of them, a migration of blueprint/migrate.py makes it.\n\n"
                   )
                   summary.writelines(f"- `{name}`\n" for name in kept)
           for problem in problems:
