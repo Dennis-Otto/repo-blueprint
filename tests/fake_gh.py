@@ -17,8 +17,6 @@ import itertools
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -58,6 +56,11 @@ def filtered(answer: Any, arguments: list[str]) -> tuple[str, str, int]:
     flags = [index for index, word in enumerate(arguments) if word in ("--jq", "-q")]
     if not flags or flags[-1] + 1 >= len(arguments):
         return json.dumps(answer) + "\n", "", 0
+    # Only here: gh starts about 1600 times in a run of the tests, and most of its
+    # calls need neither module, whose import takes a quarter of its start.
+    import shutil
+    import subprocess
+
     jq = shutil.which("jq")
     if jq is None:
         return "", "fake gh: an answer through --jq needs jq\n", 127
