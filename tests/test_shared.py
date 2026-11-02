@@ -47,11 +47,17 @@ def test_a_python_of_a_test_reads_the_bytecode_that_another_one_wrote(
     module = tmp_path / "written_once.py"
     module.write_text("VALUE = 1\n", encoding="utf-8")
     command = [sys.executable, "-c", "import written_once"]
+    # A machine may set the variable that writes no bytecode at all.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name != "PYTHONDONTWRITEBYTECODE"
+    }
 
-    subprocess.run(command, cwd=tmp_path, check=True)
+    subprocess.run(command, cwd=tmp_path, env=environment, check=True)
     written = Path(cache_from_source(str(module)))
     before = written.stat().st_mtime_ns
-    subprocess.run(command, cwd=tmp_path, check=True)
+    subprocess.run(command, cwd=tmp_path, env=environment, check=True)
 
     assert written.stat().st_mtime_ns == before
     assert not (tmp_path / "__pycache__").exists()

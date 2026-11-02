@@ -3760,9 +3760,10 @@ def test_the_tests_keep_their_temporary_folders_in_memory_on_a_linux_runner(
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     seen = tmp_path / "seen"
+    later = tmp_path / "later"
     for name, script in {
         "python": f'printf %s "${{TMPDIR:-none}}" > "{seen.as_posix()}"',
-        "coverage": "exit 0",
+        "coverage": f'printf %s "${{TMPDIR:-none}}" > "{later.as_posix()}"',
         "uname": f"echo {system}",
         "df": f"echo Avail; echo {free}" if free else "exit 1",
     }.items():
@@ -3794,6 +3795,9 @@ def test_the_tests_keep_their_temporary_folders_in_memory_on_a_linux_runner(
     # Git Bash writes the path of its own folder in its own way.
     found = seen.read_text(encoding="utf-8")
     assert (Path(found).name if own else found) == folder
+    # What runs after the tests stays on the disk, or in the folder of the project.
+    after = later.read_text(encoding="utf-8")
+    assert (Path(after).name if own else after) == (own or "none")
 
 
 @pytest.mark.parametrize("plugins", [True, False])
@@ -14896,6 +14900,7 @@ ON_PUSH_TO_MAIN = {
         "codeql.yml",
         "links.yml",
         "osv-scanner.yml",
+        "windows.yml",
         "zizmor.yml",
     },
     # The bots whose newest run does all the work of an older one, in one group.
@@ -15017,6 +15022,9 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     assert "  schedule:\n    - cron: " in windows
     paths = re.search(r"  pull_request:\n    paths:\n((?:      - .+\n)+)", windows)
     assert paths
+    # The same paths on main: a red run there is what opens an issue, and a pull request
+    # doesn't wait for this check.
+    assert f"  push:\n    branches: [main]\n    paths:\n{paths[1]}" in windows
     assert {line[8:].strip('"') for line in paths[1].splitlines()} >= {
         "**.py",
         "blueprint/**",

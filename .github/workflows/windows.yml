@@ -2,13 +2,31 @@ name: Windows
 
 # The checks of scripts/check.sh on Windows, in Git Bash, as a contributor on Windows
 # runs them before a push; the other workflows run on Linux only. Every week, and for
-# a pull request that changes the code, the tests, the template they render (whose
-# paths must be valid on Windows too) or what they run with. Not a required check.
+# a pull request or a push to main that changes the code, the tests, the template they
+# render (whose paths must be valid on Windows too) or what they run with. Not a
+# required check, so a pull request can merge before it ends: a red run on main is the
+# one that the daily look of the bot-health bot opens an issue for, as this is the only
+# full run on the oldest Python.
 # This workflow belongs to the blueprint alone.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
   pull_request:
+    paths:
+      - "**.py"
+      - "blueprint/**"
+      - "tests/**"
+      - "template/**"
+      - "includes/**"
+      - copier.yml
+      - pyproject.toml
+      - requirements-dev.txt
+      - .gitattributes
+      - scripts/check.sh
+      - scripts/diagrams.sh
+      - .github/workflows/windows.yml
+  push:
+    branches: [main]
     paths:
       - "**.py"
       - "blueprint/**"
@@ -30,8 +48,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 defaults:
   run:

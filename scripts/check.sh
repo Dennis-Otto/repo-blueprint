@@ -338,8 +338,10 @@ fi
 # On a Linux runner, the temporary folders of the tests live in memory when at least
 # 4 GB are free there: tests that make many folders and start many processes take less
 # time than on the disk of the runner. Not in a job in a container, whose /dev/shm has
-# 64 MB, not on the machine of a contributor, and not where a TMPDIR is set already, as
-# a project does whose tests write more than that.
+# 64 MB, not on the machine of a contributor, and not where a TMPDIR is set already. A
+# project whose tests write more than that names a folder on the disk with --basetemp
+# in the addopts of pytest in pyproject.toml, which is its own file. Only for the tests:
+# what a later step writes stays on the disk.
 memory=""
 if [[ "${GITHUB_ACTIONS:-}" == true && -z "${TMPDIR:-}" && "$(uname -s)" == Linux ]]; then
   memory="$(df -k --output=avail /dev/shm 2>/dev/null | tail -n 1 || true)"
@@ -353,6 +355,9 @@ if python -c 'import pytest, pytest_cov, xdist' 2>/dev/null; then
     ${junit[@]+"${junit[@]}"} --cov --cov-report= --cov-fail-under=0 || status=$?
 else
   coverage run -m pytest ${junit[@]+"${junit[@]}"} || status=$?
+fi
+if ((${memory:-0} >= 4194304)); then
+  unset TMPDIR
 fi
 if ((status != 0)); then
   if [[ -n "$report" ]]; then
