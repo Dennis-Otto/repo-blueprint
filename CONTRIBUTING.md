@@ -126,7 +126,7 @@ The hook of every website, `.github/mkdocs_blueprint.py`, keeps each page in its
 - **The date of a page** is that of the newest file it is made of: the guide, which includes `README.md` with a line `--8<--`, changes with the README. The sitemap gives search engines the same date.
 - **The badges** of a README stay on GitHub: the website would show them as the build downloaded them. Buttons such as those of My Home Assistant, `…/badges/hacs_repository.svg`, show no status and stay.
 - **The switch between light and dark** names itself in German on the German pages.
-- **Further languages beside German** work the same way, such as `docs/faq.nl.md` once `mkdocs.yml` names `nl`: the report of a pull request links each changed page at its address, `nl/faq/`, for every locale of the i18n plugin. The hints at the spelling, in English and German, and at the style, in English, leave out a page in any other language; `.vale.ini` and `.github/prose/cspell.json` know it by the ending of its name, two letters such as `.nl.md` or a region such as `.pt-BR.md`.
+- **Further languages beside German** work the same way, such as `docs/faq.nl.md` once `mkdocs.yml` names `nl`: the report of a pull request links each changed page at its address, `nl/faq.html`, for every locale of the i18n plugin. The hints at the spelling, in English and German, and at the style, in English, leave out a page in any other language; `.vale.ini` and `.github/prose/cspell.json` know it by the ending of its name, two letters such as `.nl.md`, a region such as `.pt-BR.md` or a script such as `.zh-Hans.md`.
 
 ### Accessibility
 

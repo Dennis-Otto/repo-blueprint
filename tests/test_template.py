@@ -4710,6 +4710,8 @@ def test_the_prose_hints_read_only_the_languages_they_know(
         "docs/games.es.md",
         "docs/guide.pt-BR.md",
         "docs/guide.zh_TW.md",
+        "docs/guide.zh-Hans.md",
+        "docs/guide.zh-Hans-CN.md",
     )
 
     assert cspell["language"] == "en,de"

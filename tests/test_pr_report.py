@@ -525,22 +525,25 @@ def test_the_website_of_a_repository(
     ("name", "address"),
     [
         ("docs/index.md", ""),
-        ("docs/guide.md", "guide/"),
+        ("docs/guide.md", "guide.html"),
         ("docs/decisions/README.md", "decisions/"),
-        ("docs/decisions/0001-x.md", "decisions/0001-x/"),
-        ("docs/guide.de.md", "de/guide/"),
+        ("docs/decisions/0001-x.md", "decisions/0001-x.html"),
+        ("docs/guide.de.md", "de/guide.html"),
         ("docs/index.de.md", "de/"),
         # Every further language, not only German.
-        ("docs/faq.nl.md", "nl/faq/"),
+        ("docs/faq.nl.md", "nl/faq.html"),
         ("docs/index.fr.md", "fr/"),
         ("docs/decisions/README.es.md", "es/decisions/"),
-        ("docs/guide.pt-BR.md", "pt-BR/guide/"),
+        ("docs/guide.pt-BR.md", "pt-BR/guide.html"),
         # The default language has no folder of its own.
-        ("docs/guide.en.md", "guide/"),
+        ("docs/guide.en.md", "guide.html"),
         ("docs/index.en.md", ""),
         # An ending that is no language of the website is part of the name.
-        ("docs/guide.it.md", "guide.it/"),
-        ("docs/release-2.10.md", "release-2.10/"),
+        ("docs/guide.it.md", "guide.it.html"),
+        ("docs/release-2.10.md", "release-2.10.html"),
+        # A page named like a language is no page of that language.
+        ("docs/de.md", "de.html"),
+        ("docs/en.md", "en.html"),
     ],
 )
 def test_the_address_of_a_page(name: str, address: str) -> None:
@@ -549,11 +552,46 @@ def test_the_address_of_a_page(name: str, address: str) -> None:
     assert website.page(name) == f"https://x.example/{address}"
 
 
+@pytest.mark.parametrize(
+    ("name", "address"),
+    [
+        ("docs/index.md", ""),
+        ("docs/guide.md", "guide/"),
+        ("docs/decisions/README.md", "decisions/"),
+        ("docs/decisions/0001-x.md", "decisions/0001-x/"),
+        ("docs/faq.nl.md", "nl/faq/"),
+        ("docs/index.nl.md", "nl/"),
+    ],
+)
+def test_the_address_of_a_page_with_directory_addresses(
+    name: str, address: str
+) -> None:
+    website = Website("https://x.example/", ("en", "nl"), directory_urls=True)
+
+    assert website.page(name) == f"https://x.example/{address}"
+
+
+@pytest.mark.parametrize(
+    ("text", "directory_urls"),
+    [
+        ("site_name: x\n", False),
+        ("use_directory_urls: false\n", False),
+        ("use_directory_urls: true\n", True),
+    ],
+)
+def test_a_project_can_turn_on_directory_addresses(
+    tmp_path: Path, text: str, directory_urls: bool
+) -> None:
+    (tmp_path / "mkdocs.yml").write_text(text, encoding="utf-8")
+
+    assert Website.load(tmp_path) == Website("", (), directory_urls)
+
+
 def test_a_website_in_one_language_has_no_folders_of_languages() -> None:
     website = Website("https://x.example/")
 
-    assert website.page("docs/guide.de.md") == "https://x.example/guide.de/"
-    assert website.page("docs/guide.md") == "https://x.example/guide/"
+    assert website.page("docs/guide.de.md") == "https://x.example/guide.de.html"
+    assert website.page("docs/guide.md") == "https://x.example/guide.html"
 
 
 def changed(*names: str, status: str = "modified") -> list[dict[str, Any]]:
@@ -579,8 +617,8 @@ def test_the_website_of_a_pull_request() -> None:
         "it, stays for 7 days: unzip the artifact `website` into a folder, run "
         "`python3 -m http.server --directory website` and open http://localhost:8000."
         "\n\nThe pages that it changes, at the address each has on the website:\n\n"
-        "- [`docs/guide.md`](https://x.example/guide/)\n"
-        "- [`docs/guide.de.md`](https://x.example/de/guide/)"
+        "- [`docs/guide.md`](https://x.example/guide.html)\n"
+        "- [`docs/guide.de.md`](https://x.example/de/guide.html)"
     )
 
 

@@ -30,7 +30,9 @@
     {
       "filename": [
         "**/*.[a-z][a-z].md",
-        "**/*.[a-z][a-z][-_][A-Z][A-Z].md"
+        "**/*.[a-z][a-z][-_][A-Z][A-Z].md",
+        "**/*.[a-z][a-z]-[A-Z][a-z][a-z][a-z].md",
+        "**/*.[a-z][a-z]-[A-Z][a-z][a-z][a-z]-[A-Z][A-Z].md"
       ],
       "enabled": false
     },
