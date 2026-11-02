@@ -81,7 +81,7 @@ TOOL = "{blueprint}"
 # In a command of autofix, the Python that runs the bot, for a script of the repository.
 PYTHON = "{python}"
 # The first line of the body of each commit of the bot, before the run of the checks.
-MADE_BY = "Made by the commands of .github/checks.toml in the checks of"
+MADE_BY = "Made by the commands of autofix in the checks of"
 # How often the commands run at most, until they change nothing more.
 ROUNDS = 3
 # What one commit of the bot holds at most.
@@ -440,16 +440,46 @@ def runs_of(
     return sorted(latest.values(), key=lambda found: found.id)
 
 
+def fixes_of(api: Api, repo: str, run_id: int) -> list[Json]:
+    """The artifacts of the fixes of a run, also those that have expired."""
+    data = api.get(f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100") or {}
+    return [
+        item
+        for item in data.get("artifacts", [])
+        if str(item.get("name") or "").startswith(ARTIFACT)
+    ]
+
+
 def artifacts_of(api: Api, repo: str, run_id: int) -> list[str]:
     """The names of the fixes that a run kept."""
-    data = api.get(f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100") or {}
     return sorted(
         {
             str(item.get("name"))
-            for item in data.get("artifacts", [])
-            if str(item.get("name") or "").startswith(ARTIFACT)
-            and not item.get("expired")
+            for item in fixes_of(api, repo, run_id)
+            if not item.get("expired")
         }
+    )
+
+
+def failed(runs: Iterable[WorkflowRun]) -> list[int]:
+    """The ids of the runs that ended by failing."""
+    return [
+        found.id
+        for found in runs
+        if found.status == "completed" and found.conclusion == "failure"
+    ]
+
+
+def fixes_expired(
+    api: Api, repo: str, sha: str, event: str, branch: str, listed: frozenset[str]
+) -> bool:
+    """Whether a failed run of a commit of main kept fixes that have expired since. The
+    commit may still need them, so only the next run of that check, by the week at the
+    latest, can say that it doesn't."""
+    return any(
+        item.get("expired")
+        for run_id in failed(runs_of(api, repo, sha, event, branch, listed))
+        for item in fixes_of(api, repo, run_id)
     )
 
 
@@ -501,11 +531,15 @@ def collect(
 ) -> list[Path]:
     """Downloads the fixes of every workflow of the list for a commit into folder, one
     folder for each, once those that keep fixes have ended, so that one commit holds
-    them all. A pull request whose run kept no fix has nothing for the bot."""
-    if event not in MAIN_EVENTS and not artifacts_of(api, repo, run_id):
-        return []
+    them all. A pull request whose commit has no failed run with a fix has nothing for
+    the bot. The commit decides that, not the run that started this job: GitHub keeps
+    one pending job of a branch, so a run with no fix can replace the job of one with."""
     awaited = workflows.awaited(event)
     runs = runs_of(api, repo, sha, event, branch, workflows.listed)
+    if event not in MAIN_EVENTS and not any(
+        artifacts_of(api, repo, each) for each in dict.fromkeys((run_id, *failed(runs)))
+    ):
+        return []
     for _ in range(WAITS):
         if all(found.status == "completed" for found in runs if found.name in awaited):
             break
@@ -554,8 +588,10 @@ def plan(
     branch: str,
     number: int | None,
     fixes: Fixes,
+    listed: frozenset[str] = frozenset(),
 ) -> Plan:
-    """Decides what the bot does with the fixes of a commit."""
+    """Decides what the bot does with the fixes of a commit; listed names the workflows
+    that it reads."""
     if event in MAIN_EVENTS:
         ref = api.get(f"repos/{repo}/git/ref/heads/{branch}") or {}
         if (ref.get("object") or {}).get("sha") != sha:
@@ -567,6 +603,12 @@ def plan(
         pull = open_pull_of_main(api, repo)
         if pull is None:
             return Plan("", f"{branch} needs no fix that a command makes.\n")
+        if fixes_expired(api, repo, sha, event, branch, listed):
+            return Plan(
+                "",
+                f"A failed check of {sha[:7]} kept fixes that have expired, so "
+                f"#{pull['number']} stays open until that check runs again.\n",
+            )
         return Plan(
             "close", f"{branch} needs the fixes of #{pull['number']} no more.\n"
         )
@@ -841,8 +883,9 @@ def pull_request_body(fixes: Fixes, base: str, url: str) -> str:
     return "\n".join(
         [
             f"`{base}` has findings of its checks that a command fixes. This pull "
-            "request holds what the commands of `.github/checks.toml` made of these "
-            "files, and merges itself once every check passes:",
+            "request holds what the commands of `autofix` in `.github/checks.toml` "
+            "and `.github/checks.project.toml` made of these files, and merges itself "
+            "once every check passes:",
             "",
             *listing(fixes),
             "",

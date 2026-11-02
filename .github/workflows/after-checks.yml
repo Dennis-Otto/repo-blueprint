@@ -907,8 +907,8 @@ jobs:
     name: the fix bot
     # After a run of any workflow of the list above that failed, for a pull request,
     # also one from a fork, or on main, by a push, its schedule or by hand: on a pull
-    # request, a run that kept no fix ends it at once, and a quiet week starts no job of
-    # it. After every run of Lint and of the CI that a push to main started as well,
+    # request, a commit whose failed runs kept no fix ends it at once, and a quiet week
+    # starts no job of it. After every run of Lint and of the CI that a push to main started as well,
     # which also closes the pull request of the fixes of main once main needs none, and
     # after Docs, whose first run of the accessibility check keeps the violations that it
     # accepted.

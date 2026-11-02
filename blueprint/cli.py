@@ -610,7 +610,7 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
     lines = [
         "### Fixed by a command",
         "",
-        f"The commands that fix what {what} found, from `.github/checks.toml`:",
+        f"The commands that fix what {what} found, from `autofix` of the explanations:",
         "",
         *run_until_done(commands, root),
         "",
@@ -663,6 +663,7 @@ def fix_bot_command(
     if arguments.action == "collect":
         number = int(arguments.pull) if arguments.pull else None
         try:
+            workflows = watched(root)
             folders = collect(
                 api,
                 repo,
@@ -672,7 +673,7 @@ def fix_bot_command(
                 arguments.branch,
                 arguments.folder,
                 downloader(api, repo),
-                watched(root),
+                workflows,
             )
             decided = plan(
                 api,
@@ -682,6 +683,7 @@ def fix_bot_command(
                 arguments.branch,
                 number,
                 load(folders),
+                workflows.listed,
             )
         except (FixLoop, NoList) as error:
             # The annotation in the log, the reason in the summary as well.

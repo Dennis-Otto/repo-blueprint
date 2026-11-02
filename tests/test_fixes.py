@@ -1141,7 +1141,64 @@ def test_a_pull_request_whose_run_kept_no_fix_has_nothing_to_wait_for(
     )
 
     assert found == []
-    assert github.calls == [f"GET repos/{REPO}/actions/runs/1/artifacts?per_page=100"]
+    assert github.calls == [
+        f"GET repos/{REPO}/actions/runs?head_sha={SHA}&event=pull_request&per_page=100",
+        f"GET repos/{REPO}/actions/runs/1/artifacts?per_page=100",
+    ]
+
+
+def test_a_run_with_no_fix_takes_the_fix_of_the_run_whose_job_it_replaced(
+    tmp_path: Path,
+) -> None:
+    # GitHub keeps one pending job of a branch, so the job of a failed Lint can give way
+    # to that of a failed Links, which kept nothing; the fix of Lint isn't lost for it.
+    github = FakeGitHub()
+    github.runs = [run_of(1, "Lint"), run_of(2, "Links")]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    github.downloads = {(1, "fixes-lint"): {"README.md": b"# Fixed\n"}}
+    api = api_of(github)
+
+    found = collect(
+        api,
+        REPO,
+        2,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path,
+        downloader(api, REPO),
+        Watched(frozenset({"Lint", "Links"}), frozenset({"Lint"})),
+    )
+
+    assert load(found).files == {"README.md": b"# Fixed\n"}
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "name: fixes-e2e",
+        "name: fixes-e2e-${{ strategy.job-index }}",
+        "name: fixes-paperless-ngx-${{ matrix.line }}",
+        "name: 'fixes-e2e'",
+    ],
+)
+def test_a_workflow_keeps_fixes_by_every_form_of_the_name(
+    tmp_path: Path, line: str
+) -> None:
+    # A matrix job names one artifact for each leg, or its second upload fails.
+    root = tmp_path / "main"
+    write(
+        root,
+        ".github/workflows/after-checks.yml",
+        "on:\n  workflow_run:\n    workflows: [Docker E2E]\n",
+    )
+    write(
+        root,
+        ".github/workflows/e2e.yml",
+        f"name: Docker E2E\n\njobs:\n  e2e:\n    steps:\n      - with:\n          {line}\n",
+    )
+
+    assert watched(root).keeping == {"Docker E2E"}
 
 
 def test_the_bot_waits_for_the_other_checks_that_fix_and_takes_all_their_fixes(
@@ -1686,6 +1743,29 @@ def test_main_without_fixes_closes_the_pull_request_of_its_fixes(event: str) -> 
         "close",
         "main needs the fixes of #9 no more.\n",
     )
+
+
+def test_main_keeps_the_pull_request_of_fixes_that_expired() -> None:
+    # A scanner fails on a main that stood still for days, with Lint still red: its
+    # fixes are gone, which doesn't say that main needs them no more.
+    github = FakeGitHub()
+    github.pulls.append({"number": 9, "state": "open", "head": {"ref": BRANCH}})
+    github.runs = [run_of(1, "Lint"), run_of(2, "CodeQL")]
+    github.artifacts = {1: [{"name": "fixes-lint", "expired": True}]}
+
+    decided = plan(
+        api_of(github),
+        REPO,
+        SHA,
+        "schedule",
+        "main",
+        None,
+        Fixes({}),
+        WATCHED.listed,
+    )
+
+    assert decided.action == ""
+    assert "#9 stays open" in decided.text
 
 
 # ---------------------------------------------------------------- a commit onto the branch
@@ -2243,6 +2323,42 @@ def test_fix_collect_takes_the_weekly_run_of_main(
     assert capsys.readouterr().out == "main needs fixes that a command makes.\n"
 
 
+def test_fix_collect_leaves_open_the_pull_request_of_fixes_that_expired(
+    tmp_path: Path,
+) -> None:
+    # A failed scanner starts the bot on main, where Lint's fixes of days ago are gone.
+    github = FakeGitHub()
+    github.pulls.append({"number": 9, "state": "open", "head": {"ref": BRANCH}})
+    github.runs = [run_of(1, "Lint"), run_of(2, "CodeQL")]
+    github.artifacts = {1: [{"name": "fixes-lint", "expired": True}]}
+    output = tmp_path / "output"
+
+    code = cli.main(
+        [
+            "--repo",
+            REPO,
+            "fix",
+            "collect",
+            "2",
+            "--sha",
+            SHA,
+            "--event",
+            "schedule",
+            "--branch",
+            "main",
+            "--folder",
+            str(tmp_path / "fixes"),
+            "--output",
+            str(output),
+        ],
+        api=api_of(github),
+        root=homedarts(tmp_path / "main"),
+    )
+
+    assert code == 0
+    assert output.read_text(encoding="utf-8") == "action=\npull=\n"
+
+
 def test_fix_collect_without_an_output_only_says_what_it_decided(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2588,6 +2704,8 @@ def test_the_check_of_each_kind_of_project_keeps_its_fixes(path: Path) -> None:
     assert WEEKLY_RUN.search(path.read_text(encoding="utf-8"))
     assert fix["env"]["CHECK"] == name
     assert "git checkout --quiet --force --detach HEAD^2" in fix["run"]
+    # On main too, only what the commands change is a fix.
+    assert "git checkout --quiet --force HEAD -- ." in fix["run"]
     assert 'fix run "$CHECK" --keep "$RUNNER_TEMP/fixes"' in fix["run"]
     assert condition_of(keep_step) == "failure() && steps.fix.outcome == 'success'"
     assert keep_step["with"]["name"] == "fixes-check"

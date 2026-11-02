@@ -15,7 +15,9 @@
 # commits the fixes of every workflow of the list of after-checks.yml, also of one of
 # the project's own that the answer test_workflows names: with the steps "Fix what a
 # command can fix" and "Keep the fixes for the fix bot" of ci.yml at the end of the job
-# of its check, an artifact fixes-<name> of its own and fetch-depth: 2 in its checkout:
+# of its check, an artifact fixes-<name> of its own, which in a matrix job also holds
+# strategy.job-index, since each leg needs its own, and fetch-depth: 2 in its checkout.
+# A check that only a person can fix says why:
 # [check."e2e (*)"]
 # title = "The end-to-end tests"
 # problem = """A test of the whole app in a real browser failed; the summary of the
