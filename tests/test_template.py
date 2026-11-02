@@ -107,6 +107,8 @@ KINDS = [
 # The kinds of the stack of Node: a package of npm, and a Chrome extension, which the
 # same tools build and check.
 NODE = ("node-package", "chrome-extension")
+NPM = shutil.which("npm")
+NPX = shutil.which("npx")
 # The languages that CodeQL analyzes in each kind of project by default, besides the
 # workflows: a Nextcloud app has its PHP, which CodeQL doesn't know, and the
 # JavaScript of its pages.
@@ -2296,8 +2298,9 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     biome = lock["packages"]["node_modules/@biomejs/biome"]
     assert biome["integrity"].startswith("sha512-")
     # The settings: the files of the blueprint in .github/ keep its format, Biome 2.6
-    # stays out of the Markdown and the YAML that the blueprint renders, and the
-    # indentation comes from .editorconfig, which has it for JSONC too.
+    # stays out of the Markdown and the YAML that the blueprint renders and out of the
+    # pictures that Mermaid draws, and the indentation comes from .editorconfig, which
+    # has it for JSONC, and for the stylesheets beside the scripts, too.
     settings = (project / "biome.jsonc").read_text(encoding="utf-8")
     config = json.loads(re.sub(r"^//.*\n", "", settings, flags=re.MULTILINE))
     assert config["files"]["includes"] == [
@@ -2306,6 +2309,7 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
         "!**/*.md",
         "!**/*.yml",
         "!**/*.yaml",
+        "!docs/images/diagrams",
     ]
     assert config["formatter"]["useEditorconfig"] is True
     assert config["linter"]["rules"]["preset"] == "recommended"
@@ -2314,7 +2318,8 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     editorconfig.read_string(
         "[top]\n" + (project / ".editorconfig").read_text(encoding="utf-8")
     )
-    assert editorconfig["*.{json,jsonc,toml,yml,yaml,ts,js,mjs}"]["indent_size"] == "2"
+    two_spaces = editorconfig["*.{json,jsonc,toml,yml,yaml,ts,js,mjs,css,html}"]
+    assert two_spaces["indent_size"] == "2"
     # The coverage of the tests as the LCOV report that the CI keeps, which git and
     # the package leave out.
     assert "--test-reporter-destination=lcov.info" in manifest["scripts"]["test"]
@@ -2326,6 +2331,83 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     assert "/lcov.info" in ignored
     # A package of npm holds its build; a Chrome extension reaches no registry.
     assert manifest.get("files") == (["dist"] if kind == "node-package" else None)
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(
+    NPM is None or NPX is None, reason="Biome installs and runs with the tools of Node"
+)
+@pytest.mark.parametrize("kind", NODE)
+def test_biome_passes_what_the_tools_of_a_node_package_write(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # The real Biome of the lock file, as the step Lint and format runs it, on what
+    # nobody can fix by hand because a tool writes it again.
+    assert NPM
+    assert NPX
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(
+        [NPM, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--silent"],
+        cwd=project,
+        check=True,
+    )
+    # A picture as scripts/diagrams.sh draws it, whose role and styles Mermaid chooses.
+    script = (project / "scripts/diagrams.sh").read_text(encoding="utf-8")
+    pictures = re.search(r"^pictures=(.+)$", script, re.MULTILINE)
+    assert pictures
+    drawn = min((ROOT / "docs/images/diagrams").glob("*.svg"))
+    code = drawn.read_text(encoding="utf-8")
+    assert 'role="graphics-document document"' in code
+    assert "!important" in code
+    folder = project / pictures[1]
+    folder.mkdir(parents=True, exist_ok=True)
+    shutil.copy(drawn, folder)
+    # The JSON of a release pull request, as release-please writes it: every item of
+    # an array on a line of its own, where Biome would keep a short one on one line.
+    config = json.loads(
+        (project / "release-please-config.json").read_text(encoding="utf-8")
+    )
+    rewritten = [".release-please-manifest.json", "package.json"] + [
+        extra["path"]
+        for extra in config["packages"]["."].get("extra-files", [])
+        if extra["type"] == "json"
+    ]
+    assert ("extension/manifest.json" in rewritten) == (kind == "chrome-extension")
+    for name in rewritten:
+        data = json.loads((project / name).read_text(encoding="utf-8"))
+        (project / name).write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    # A stylesheet of the project, which Biome formats by the indentation of its scripts.
+    stylesheet = project / "style.css"
+    stylesheet.write_text("a {\n  color: red;\n}\n", encoding="utf-8", newline="\n")
+
+    lint = [NPX, "--no", "--", "biome", "ci", "--error-on-warnings", "."]
+    done = subprocess.run(
+        lint, cwd=project, capture_output=True, encoding="utf-8", check=False
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    if kind == "chrome-extension":
+        # The manifest as an update of the blueprint keeps it, which is the project's:
+        # a release of the blueprint wrote a short array on one line.
+        manifest = project / "extension/manifest.json"
+        written = manifest.read_text(encoding="utf-8")
+        collapsed = re.sub(r'\[\s*("storage")\s*\]', r"[\1]", written)
+        assert collapsed != written
+        manifest.write_text(collapsed, encoding="utf-8", newline="\n")
+        done = subprocess.run(
+            lint, cwd=project, capture_output=True, encoding="utf-8", check=False
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
+    # It still checks that stylesheet, so the exceptions don't hide the files around them.
+    stylesheet.write_text("a {\n    color: red;\n}\n", encoding="utf-8", newline="\n")
+    done = subprocess.run(
+        lint, cwd=project, capture_output=True, encoding="utf-8", check=False
+    )
+    assert done.returncode != 0
+    assert "style.css" in done.stdout + done.stderr
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
