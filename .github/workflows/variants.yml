@@ -96,29 +96,29 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         timeout-minutes: 5
         with:
           python-version-file: .python-version
       # No leg runs without the plan, so a download of uv that hangs gives way to a
       # second attempt here too, as in the legs below.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         id: uv
         continue-on-error: true
         timeout-minutes: 2
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: requirements-dev.txt
           cache-suffix: plan
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         if: steps.uv.outcome == 'failure'
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: requirements-dev.txt
@@ -184,7 +184,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         timeout-minutes: 5
         with:
           python-version-file: .python-version
@@ -197,25 +197,25 @@ jobs:
       # step ran out of its five minutes, in two legs at once (#179). So an attempt
       # that doesn't end within two minutes gives way to a second one, which takes
       # uv from its releases on GitHub instead; the job passes with either.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         id: uv
         continue-on-error: true
         timeout-minutes: 2
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: |
             requirements-dev.txt
             stacks/**/requirements*.txt
           cache-suffix: ${{ matrix.kind }}
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         if: steps.uv.outcome == 'failure'
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: |
@@ -370,7 +370,7 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/docs/bin/python" --require-hashes -r .github/docs-requirements.txt
           "$RUNNER_TEMP/docs/bin/mkdocs" build --strict --site-dir "$RUNNER_TEMP/site"
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: matrix.start != 'adopted' && contains(fromJSON('["home-assistant", "github-action", "python-package"]'), matrix.kind)
         timeout-minutes: 5
         with:
@@ -523,7 +523,7 @@ jobs:
         timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/workdir" \
-            davidanson/markdownlint-cli2:v0.23.3@sha256:d5f3f3f04b2e285dcbcdcd13b4454d119e273e3c393a9dabd163dba4abad526d \
+            davidanson/markdownlint-cli2:v0.24.0@sha256:70ead7c0352d22d04bbe612cd96b54ec591538d8f4626cafe391bb2ecf3639ca \
             "**/*.md"
       # The Renovate of the Renovate workflow, which reads the rules of every project.
       # In a new repository only: an update gives every file of the blueprint as a new
@@ -606,17 +606,17 @@ jobs:
             echo "The pull request changes nothing that the pictures depend on." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "due=$due" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: steps.due.outputs.due == 'true'
         timeout-minutes: 5
         with:
           python-version-file: .python-version
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         if: steps.due.outputs.due == 'true'
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: |
