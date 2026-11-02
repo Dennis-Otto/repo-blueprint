@@ -7,6 +7,16 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.5.0...v1.6.0) (2026-11-01)
+
+### Features
+
+- **Every website has a map for AI assistants:** a website made from the blueprint now serves `/llms.txt`, as [llmstxt.org](https://llmstxt.org/) asks for it: its name and description, and a section for each part of its menu, with each page, its description and its page in every further language, but no decision record. The check *docs* checks the file, and that every link of it leads to a page of the website. A `docs/llms.txt` of your own stays in its place.
+
+### Bug fixes
+
+- **The accessibility check no longer trips CodeQL in a project with JavaScript:** the check looked whether `.github/a11y-accepted.toml` exists before it read the file and later wrote it, which CodeQL reports as a high file system race (`js/file-system-race`) and which blocks the merge of the update wherever code scanning is a rule of `main`. The check now just reads the file, and a missing file still means that it accepts nothing.
+
 ## [1.5.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.4.0...v1.5.0) (2026-11-01)
 
 ### Features
