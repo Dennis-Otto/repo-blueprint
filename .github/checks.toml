@@ -931,6 +931,24 @@ commands = ["python3 .github/blueprint.py locks --fix"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#renovate-skips-a-lock-file"
 autofix = ["{blueprint} locks --fix"]
 
+[step."Lock files match their sources"]
+problem = """A lock file of pip-compile, such as `requirements-dev.txt`, no longer pins
+what its source, such as `requirements-dev.in`, asks for: compiled again with the
+command in its header, for its Python and on the versions that it pins, it comes out with
+other pins or with a hash missing, or the sources have no solution; the log names each
+file and each pin."""
+why = """pip installs a lock file as it is: a package that a source adds, or a bound that
+it moves, reaches no install until someone compiles the file again, and a package that a
+source drops stays installed. Nothing else fails. A new release upstream doesn't trigger
+this check: only a change of the sources moves a pin."""
+fix = """Where uv finds no solution, the sources contradict themselves or a pin that they
+name: correct them first. Then compile the file again and commit it; its header stays,
+with its Python and its tool (in the blueprint itself, the tool is `blueprint.py` without
+`.github/`):"""
+commands = ["python3 .github/blueprint.py locks --compile --fix"]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#a-lock-file-no-longer-matches-its-source"
+autofix = ["{blueprint} locks --compile --fix"]
+
 [step."Explanations of the checks"]
 problem = """A required check of `.github/repository.toml` or
 `.github/repository.project.toml`, or a step of `scripts/check.sh`, has no explanation

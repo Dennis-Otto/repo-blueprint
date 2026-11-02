@@ -59,6 +59,14 @@ jobs:
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo \
             ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
             hadolint --no-color Dockerfile
+      # uv compiles the lock files of pip-compile again for the step Lock files match
+      # their sources. A project without one needs it not.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        if: hashFiles('**/requirements*.txt') != ''
+        timeout-minutes: 5
+        with:
+          # renovate: datasource=pypi depName=uv
+          version: "0.13.5"
       - name: Build the image and run its self-test
         run: bash scripts/check.sh
       # The fix bot: the commands of autofix in .github/checks.toml fix what they
