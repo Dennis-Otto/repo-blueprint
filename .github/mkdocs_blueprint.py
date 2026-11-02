@@ -94,6 +94,9 @@ SVG_LENGTHS = tuple(
 )
 # The pictures beside a video, NAME.webp or NAME.png, that show until it plays.
 POSTERS = (".webp", ".png")
+# The width that an <img> names, as a browser reads it: a number, which with a % is a
+# part of the column, and nothing of what follows, such as the px of 396px.
+NAMED_WIDTH = re.compile(r"\s*(?P<number>\d+(?:\.\d+)?)(?P<percent>%?)")
 # A picture of the repository that a page shows from main, as a README names it so
 # that it shows wherever the README does, such as on PyPI or in the store of an app:
 # github.com/OWNER/NAME/raw/main/PATH, its blob/main/PATH?raw=true, and
@@ -1261,17 +1264,23 @@ def video(tag: str, where: Where) -> str:
     while it is in view, muted and in a loop as the GIF, and the reader can pause it.
     NAME.webp or NAME.png beside it shows until it plays, and the text of the GIF
     names it.
+
+    The video stands where the GIF stood: in the scheme alone that its address names,
+    which the stylesheet of the blueprint hides in the other one, and as wide as the
+    width that its <img> names; the size of the file gives its shape until it loads.
     """
     attrs = attributes(tag)
-    target = where.find(attrs.get("src") or "")
+    src = attrs.get("src") or ""
+    target = where.find(src)
     folder, found = where.folder, where.found
     if target is None or not target.lower().endswith(".gif"):
         return tag
     stem = target[: -len(".gif")]
     if f"{stem}.mp4" not in found:
         return tag
+    only = next((ending[1:] for ending in SCHEMES if src.endswith(ending)), None)
     shown: dict[str, str | None] = {
-        "class": "blueprint-video",
+        "class": f"blueprint-video blueprint-{only}" if only else "blueprint-video",
         "src": relative(f"{stem}.mp4", folder),
     }
     poster = next((f"{stem}{end}" for end in POSTERS if f"{stem}{end}" in found), None)
@@ -1280,6 +1289,9 @@ def video(tag: str, where: Where) -> str:
     dimensions = size(found[target].abs_src_path)
     if dimensions is not None:
         shown["width"], shown["height"] = map(str, dimensions)
+    named = NAMED_WIDTH.match(attrs.get("width") or "")
+    if named is not None:
+        shown["style"] = f"width:{named['number']}{named['percent'] or 'px'}"
     for flag in ("controls", "muted", "loop", "playsinline"):
         shown[flag] = None
     shown["preload"] = "none"
