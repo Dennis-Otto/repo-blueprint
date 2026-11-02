@@ -1,6 +1,6 @@
 # The branch bot takes forks into its line, and approves only the runs of a head that it made itself
 
-- Status: accepted
+- Status: accepted, amended by [0108](0108-the-runs-of-a-replaced-commit-give-their-runner-back.md), with which the job also cancels the runs of a replaced commit
 - Date: 2026-11-01
 
 ## Context

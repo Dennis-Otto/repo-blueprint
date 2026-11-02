@@ -367,7 +367,7 @@ sample_code:
 # repository whose other workflows run tests, such as visual tests, names them here.
 test_workflows:
   type: str
-  help: Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more and whose fixes the fix bot commits; empty for none
+  help: Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more, whose fixes the fix bot commits and whose runs of a replaced commit the bot for replaced commits cancels; empty for none
   default: ""
   validator: >-
     [% if test_workflows and not (test_workflows | regex_search('^[A-Za-z0-9 ()._/,-]+$')) %]Name each workflow as the name: line of its file does, with letters, digits, spaces and ( ) . _ / - only, and separate them by commas.[% endif %]

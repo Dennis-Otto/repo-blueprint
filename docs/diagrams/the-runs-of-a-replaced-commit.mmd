@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The runs of a replaced commit
+    accDescr: A new commit on a pull request starts the job signed commits, and a merge or an update of a branch starts the branch bot, both of which run anyway. Each takes the runs that wait or run, then the heads of the open pull requests. The head of an open pull request, a run of main, a release, a workflow that is no check, a second attempt and a run younger than 20 seconds stay. A second list of GitHub looks at the commit of each other run, and when it agrees, the bot cancels the run, which gives its runner back. After the checks, no job starts for it, as the event names the heads of the open pull requests.
+
+    push["A new commit on a pull request:<br>a step of the job signed commits"]
+    merge["A merge or an update of a branch:<br>the branch bot, after its line"]
+    list["The runs that wait or run,<br>then the heads of the open pull requests"]
+    stay["These stay: the head of an open pull request · main<br>a release · a workflow that is no check<br>a second attempt · a run younger than 20 seconds"]
+    look["A second list of GitHub<br>looks at the commit of each other run"]
+    cancel["The bot cancels the run,<br>which gives its runner back"]
+    after["After the checks, no job starts for it:<br>the event names the heads"]
+
+    push --> list
+    merge --> list
+    list --> stay
+    stay --> look
+    look --> cancel
+    cancel --> after
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class push,merge,list,look bot
+    class stay person
+    class cancel,after done

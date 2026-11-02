@@ -90,6 +90,7 @@ from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import PERMISSIONS, Settings, allows
 from blueprint.site_check import check as check_site
+from blueprint.stale_runs import checks_of
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
 from blueprint.versions import fix as fix_versions
@@ -11375,7 +11376,13 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     # The token of the job handles the runs of forks, with the one right that takes, so
     # that the release app needs none: the merges of the account that it names are the
     # ones whose runs the bot may approve (decision 0099).
-    assert job["permissions"] == {"actions": "write", "contents": "read"}
+    # The pull requests for their heads, whose replaced commits the bot cancels the runs
+    # of (decision 0108).
+    assert job["permissions"] == {
+        "actions": "write",
+        "contents": "read",
+        "pull-requests": "read",
+    }
     bot = next(step for step in job["steps"] if "next-branch" in step.get("run", ""))
     assert bot["env"] == {
         "GH_TOKEN": "${{ steps.app.outputs.token }}",
@@ -12016,7 +12023,7 @@ def test_a_pull_request_fails_that_runs_an_action_that_the_list_lacks() -> None:
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
+def test_the_check_of_the_signatures_starts_on_every_push_and_runs_nothing_of_the_pull_request(
     projects: dict[str, Path], project: str
 ) -> None:
     root = ROOT if project == "blueprint" else projects[project]
@@ -12033,7 +12040,12 @@ def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
     ]
     job = workflow["jobs"]["signatures"]
     assert job["name"] == "signed commits"
-    assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
+    # It writes nothing but the cancel of the runs of the commits that a push replaced.
+    assert job["permissions"] == {
+        "actions": "write",
+        "contents": "read",
+        "pull-requests": "read",
+    }
     [checkout] = steps_using(job, "actions/checkout")
     assert "ref" not in checkout["with"]
     assert checkout["with"]["persist-credentials"] is False
@@ -12057,6 +12069,131 @@ def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
         text = (root / name).read_text(encoding="utf-8")
         assert "`git commit -s`" in text, name
         assert "`git commit -S`" in text, name
+
+
+def job_expression(condition: str) -> Callable[[dict[str, Any]], bool]:
+    """The if of a job as a function of the fields of the run of its event: the few
+    operators that the conditions after the checks use, read as GitHub reads them. A list
+    of fromJSON and the heads of the open pull requests are lists in Python as well."""
+    python = condition.replace("github.event.repository.fork", "False")
+    python = re.sub(
+        r"contains\(fromJSON\('(\[[^\]]*\])'\), ([\w.]+)\)",
+        lambda found: f"({found[2]} in {found[1]})",
+        python,
+    )
+    python = re.sub(
+        r"contains\(github\.event\.workflow_run\.pull_requests\.\*\.head\.sha, ([\w.]+)\)",
+        lambda found: f"({found[1]} in run['heads'])",
+        python,
+    )
+    python = python.replace("github.event.repository.default_branch", "'main'")
+    python = python.replace("github.repository", "'owner/repo'")
+    python = re.sub(
+        r"github\.event\.workflow_run\.([\w.]+)",
+        lambda found: f"run[{found[1]!r}]",
+        python,
+    )
+    python = python.replace("&&", " and ").replace("||", " or ")
+    python = re.sub(r"!(?!=)", " not ", python)
+
+    def evaluate(run: dict[str, Any]) -> bool:
+        return bool(eval(python, {"run": run}))
+
+    return evaluate
+
+
+def run_of_a_check(**fields: Any) -> dict[str, Any]:
+    """A run of a check of a pull request of the repository, of the head of it, that a
+    newer run cancelled at its first attempt."""
+    return {
+        "name": "CI (python)",
+        "event": "pull_request",
+        "conclusion": "cancelled",
+        "run_attempt": 1,
+        "head_sha": "new",
+        "head_branch": "feat/x",
+        "head_repository.full_name": "owner/repo",
+        "heads": ["new"],
+    } | fields
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+@pytest.mark.parametrize("name", ["rerun", "cancelled", "coach"])
+def test_a_run_of_a_replaced_commit_starts_no_job_after_the_checks(
+    projects: dict[str, Path], project: str, name: str
+) -> None:
+    # The concurrency of the checks and the bot for replaced commits cancel such runs by
+    # the hundred on a busy day, so each job that only finds out takes a runner for
+    # nothing. The heads of the open pull requests of its branch are in the event.
+    root = ROOT if project == "blueprint" else projects[project]
+    runs = job_expression(
+        condition_of(workflow_steps.job("after-checks.yml", name, root))
+    )
+    # The head of a pull request.
+    assert runs(run_of_a_check())
+    assert runs(run_of_a_check(event="pull_request_target"))
+    # A commit that a newer push replaced, and a pull request that closed.
+    assert not runs(run_of_a_check(heads=["newer"]))
+    assert not runs(run_of_a_check(heads=[]))
+    assert not runs(run_of_a_check(event="pull_request_target", heads=["newer"]))
+    # A second pull request with the same head still has it.
+    assert runs(run_of_a_check(heads=["newer", "new"]))
+    # GitHub names no pull request for a run of a fork, whose jobs ask GitHub themselves.
+    fork = run_of_a_check(heads=[], **{"head_repository.full_name": "someone/repo"})
+    assert runs(fork)
+    if name == "coach":
+        assert not runs(run_of_a_check(event="push", heads=[]))
+    else:
+        # A run of main names no pull request either, and it stays as it was.
+        assert runs(run_of_a_check(event="push", head_branch="main", heads=[]))
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_for_replaced_commits_needs_no_runner_of_its_own(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    # On every new commit of a pull request: a step of a job that runs anyway on every
+    # push, also from a fork, that is no required check and runs nothing of the pull
+    # request, whatever its check of the signatures found.
+    title = parse(
+        (root / ".github/workflows/pull-request-title.yml").read_text("utf-8")
+    )
+    job = title["jobs"]["signatures"]
+    step = next(s for s in job["steps"] if "stale-runs" in s.get("run", ""))
+    assert condition_of(step) == (
+        "${{ !cancelled() && github.event.action == 'synchronize' }}"
+    )
+    assert "${{" not in step["run"]
+    assert job["permissions"]["actions"] == "write"
+    assert not steps_using(job, "actions/labeler")
+    names = [s.get("name", "") for s in job["steps"]]
+    assert names.index(step["name"]) > names.index(
+        "Check the signature of every commit"
+    )
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert job["name"] not in settings["branch"]["required_checks"]
+    # On every merge: the branch bot, with the token of its job.
+    update = workflow_steps.job("update-branches.yml", "update", root)
+    assert update["permissions"]["actions"] == "write"
+    assert update["permissions"]["pull-requests"] == "read"
+    # Neither has a job of its own, and neither workflow starts for it.
+    assert list(title["jobs"]) == ["title", "signatures"]
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_for_replaced_commits_cancels_only_the_checks(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    checks = checks_of(root)
+    # Every kind of project has the checks of its pull requests in the list...
+    assert {"Lint", "Pull request title", "Secret scan", "CodeQL"} <= checks
+    assert any(name.startswith("CI (") for name in checks) or project == "blueprint"
+    # ...and no bot that does something when a pull request closes, and no release.
+    assert checks.isdisjoint(UNWATCHED - {"Mutation"} | {"Release", "After the checks"})
 
 
 def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
@@ -12102,7 +12239,9 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     assert job["name"] == "PR coach"
     assert condition_of(job) == (
         "!github.event.repository.fork && "
-        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
+        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) && """
+        "(github.event.workflow_run.head_repository.full_name != github.repository || "
+        "contains(github.event.workflow_run.pull_requests.*.head.sha, github.event.workflow_run.head_sha))"
     )
     # One report at a time for each commit, the newest last, and none cancelled.
     assert job["concurrency"] == {
@@ -12326,7 +12465,13 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
         " github.event.workflow_run.head_branch == github.event.repository.default_branch &&"
         " github.event.workflow_run.head_repository.full_name == github.repository)"
     )
-    assert f"({events} || {main})" in cancelled["if"]
+    # A run for the head of a pull request; a run for a commit that a newer one replaced
+    # starts no job at all, and a run from a fork asks GitHub in the step.
+    head = (
+        "(github.event.workflow_run.head_repository.full_name != github.repository ||"
+        " contains(github.event.workflow_run.pull_requests.*.head.sha, github.event.workflow_run.head_sha))"
+    )
+    assert f"(({events} && {head}) || {main})" in condition_of(cancelled)
     # Twice at most, whatever cancels the run again.
     assert "github.event.workflow_run.run_attempt < 3" in cancelled["if"]
     # It reads the runs, their checks, pull requests and the head of main and starts a

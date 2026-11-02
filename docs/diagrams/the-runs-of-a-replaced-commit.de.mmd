@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Die Läufe eines ersetzten Commits
+    accDescr: Ein neuer Commit in einem Pull Request startet den Job signed commits, und ein Merge oder eine Aktualisierung eines Branches startet den Branch-Bot, die beide ohnehin laufen. Jeder nimmt die Läufe, die warten oder laufen, und danach die Heads der offenen Pull Requests. Der Head eines offenen Pull Requests, ein Lauf von main, ein Release, ein Workflow, der keine Prüfung ist, ein zweiter Versuch und ein Lauf, der jünger als 20 Sekunden ist, bleiben. Eine zweite Liste von GitHub prüft den Commit jedes anderen Laufs, und wenn sie zustimmt, bricht der Bot den Lauf ab, der damit seinen Runner freigibt. Nach den Prüfungen startet für ihn kein Job, denn das Ereignis nennt die Heads der offenen Pull Requests.
+
+    push["Ein neuer Commit in einem Pull Request:<br>ein Schritt des Jobs signed commits"]
+    merge["Ein Merge oder die Aktualisierung eines Branches:<br>der Branch-Bot, nach seiner Reihe"]
+    list["Die Läufe, die warten oder laufen,<br>danach die Heads der offenen Pull Requests"]
+    stay["Diese bleiben: der Head eines offenen Pull Requests · main<br>ein Release · ein Workflow, der keine Prüfung ist<br>ein zweiter Versuch · ein Lauf, jünger als 20 Sekunden"]
+    look["Eine zweite Liste von GitHub<br>prüft den Commit jedes anderen Laufs"]
+    cancel["Der Bot bricht den Lauf ab,<br>der damit seinen Runner freigibt"]
+    after["Nach den Prüfungen startet für ihn kein Job:<br>das Ereignis nennt die Heads"]
+
+    push --> list
+    merge --> list
+    list --> stay
+    stay --> look
+    look --> cancel
+    cancel --> after
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class push,merge,list,look bot
+    class stay person
+    class cancel,after done

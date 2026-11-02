@@ -122,6 +122,7 @@ from blueprint.settings import (
 from blueprint.site_check import annotation as site_annotation
 from blueprint.site_check import check as check_site
 from blueprint.site_check import map_rule
+from blueprint.stale_runs import cancel_stale_runs
 from blueprint.update import SOURCE, Outdated, update_pull_request
 from blueprint.vex import openvex
 
@@ -1394,6 +1395,16 @@ def add_update_parsers(
         help="pass even when GitHub refused a request, with the warnings alone, as "
         "in a run that shows as a check of a pull request",
     )
+    stale_runs_parser = commands.add_parser(
+        "stale-runs",
+        help="cancel the runs of the checks of commits that no open pull request has "
+        "as its head any more",
+    )
+    stale_runs_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="only say which runs the bot would cancel",
+    )
 
 
 def add_ownership_parser(
@@ -2161,11 +2172,23 @@ def main(
         if arguments.command == "bot-health":
             return bot_health_command(api, repo, arguments, root)
         if arguments.command == "next-branch":
-            outcome = next_branch(api, repo, job_from(os.environ))
+            outcome = next_branch(api, repo, job_from(os.environ), root)
             for warning in (*outcome.warnings, *outcome.notices):
                 print(warning, file=sys.stderr)
             print(outcome.summary, end="")
             return 1 if outcome.warnings and not arguments.warnings_only else 0
+        if arguments.command == "stale-runs":
+            stale = cancel_stale_runs(
+                api,
+                repo,
+                root,
+                own_run=os.environ.get("GITHUB_RUN_ID", ""),
+                dry_run=arguments.dry_run,
+            )
+            for warning in stale.warnings:
+                print(warning, file=sys.stderr)
+            print(stale.summary, end="")
+            return 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments, root)
         if arguments.command == "advisories":
