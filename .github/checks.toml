@@ -647,7 +647,8 @@ itself."""
 why = """The blueprint bot brings every release to every repository; an update that
 fails there holds up all of them."""
 fix = """Read the log of the check: it shows the conflict or the step that failed. Fix
-the template, or describe in the changelog what an existing project changes by hand.
+the template; for a file of the project, which an update keeps, add a migration to
+`blueprint/migrate.py`.
 The tests of the template update a project of every kind as well:"""
 commands = ["python -m pytest tests/test_template.py"]
 docs = "CONTRIBUTING.md#tests"
@@ -889,6 +890,21 @@ without `.github/`):"""
 commands = ["python3 .github/blueprint.py pages --fix"]
 docs = "CONTRIBUTING.md#pages-in-one-column"
 autofix = ["{blueprint} pages --fix"]
+
+[step."Files of the project"]
+problem = """A file that belongs to this project, which an update of the blueprint leaves
+as it is, lacks what a release of the blueprint moved, such as the labels `good first
+issue` and `help wanted` in the group `contribution` of `.github/labels.toml`; the log
+names each file and what moves."""
+why = """The files of the blueprint in the update count on that move, and an update never
+overwrites a file of the project. Without it the repository stays behind every new one,
+and a feature of the release stays off without a word."""
+fix = """Move it with the command, then commit what changed (in the blueprint itself, the
+tool is `blueprint.py` without `.github/`). A project that declines the move of a label
+writes a comment behind its line `group = "decision"`:"""
+commands = ["python3 .github/blueprint.py migrate --fix"]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#a-release-moves-a-file-of-the-project"
+autofix = ["{blueprint} migrate --fix"]
 
 [step."Changelog fragments"]
 problem = """A fragment in `changelog.d/` is one that the release can't take in: a name

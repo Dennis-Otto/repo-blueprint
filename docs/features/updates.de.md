@@ -39,6 +39,17 @@ Sobald du auf den Branch des Pull Requests committest, etwa um die Markierungen 
 
 Dem Blueprint gehören die Workflows, `scripts/check.sh` und die Community-Dateien: ihre Änderungen kommen mit den Updates. Dateien des Projekts werden nie überschrieben: README, Changelog, das Sicherheitsdesign in `docs/security.md`, Manifeste und Lock-Dateien der Abhängigkeiten (die hält Renovate aktuell), Code und Tests, `mkdocs.yml` und die Seiten der Website, Issue-Formulare, Labels, akzeptierte Findings und die Notizen für Coding-Agents. Prüfungen, die nur ein Projekt braucht, gehören in `scripts/check-project.sh`, das `scripts/check.sh` zuletzt ausführt.
 
+### Was ein Release in einer Datei des Projekts ändert
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-release-moves-a-file-of-the-project.de.dark.svg">
+  <img src="../images/diagrams/a-release-moves-a-file-of-the-project.de.svg" alt="Wie ein Release eine Datei des Projekts ändert: Ein Update des Blueprints lässt die Dateien des Projekts, wie die Labels, unverändert. Sein Pull Request bringt den Schritt Files of the project von scripts/check.sh mit, der fragt, ob ein Release noch etwas zu ändern hat. Ist nichts offen oder lehnt die Datei die Änderung ab, merged sich der Pull Request selbst. Sonst führt die Prüfung migrate --fix aus, und der Fix-Bot committet die Änderung auf den Pull Request, dessen Prüfungen erneut laufen.">
+</picture>
+
+Ein Update überschreibt nie eine Datei des Projekts. Ein Release, das so eine Datei ändern muss, nennt die Änderung deshalb in `blueprint/migrate.py`. Der Pull Request des Updates scheitert am Schritt *Files of the project* von `scripts/check.sh`, seine Prüfung führt `python3 .github/blueprint.py migrate --fix` aus, und der Fix-Bot committet das Ergebnis auf den Pull Request, der sich dann wie jedes andere Update selbst merged ([Entscheidung 0111](../decisions/0111-a-release-moves-a-file-of-the-project-through-a-check-that-fixes-itself.md)).
+
+Die erste solche Änderung bringt die Labels `good first issue` und `help wanted` in die Gruppe `contribution`, für die der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant) in seinem Morgen-Digest Kandidaten nennt. Ein Projekt, das das nicht möchte, schreibt einen Kommentar hinter die Zeile `group = "decision"` des Labels, und der Schritt lässt es in Ruhe.
+
 ### Der Issue-Assistent
 
 <picture>

@@ -141,6 +141,7 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
     assert found == [
         ("Text files", "{blueprint} fix text"),
         ("Pages in one column", "{blueprint} pages --fix"),
+        ("Files of the project", "{blueprint} migrate --fix"),
         ("Changelog fragments", "{blueprint} fragments --fix"),
         ("Accepted advisories", "{blueprint} advisories --fix"),
         ("Lock files", "{blueprint} locks --fix"),
