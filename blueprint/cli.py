@@ -6,11 +6,13 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
 import webbrowser
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree
@@ -838,7 +840,9 @@ def dependabot_command(
 def locks_command(arguments: argparse.Namespace, root: Path) -> int:
     """Whether Renovate can compile each lock file of pip-compile again with the
     command in its header; with --fix, it puts the = between each option and its
-    value first."""
+    value first. With --compile, whether each one still pins what its sources ask for."""
+    if arguments.compile:
+        return locks_compile_command(arguments, root)
     names, skipped = locks.check(root)
     if arguments.fix and skipped:
         for name in locks.fix(root, skipped):
@@ -864,6 +868,64 @@ def locks_command(arguments: argparse.Namespace, root: Path) -> int:
         )
     else:
         print("No file here is a lock file of pip-compile, which Renovate compiles.")
+    return 0
+
+
+def locks_compile_command(arguments: argparse.Namespace, root: Path) -> int:
+    """Whether each lock file of pip-compile, compiled again with the command in its
+    header, keeps its pins; with --fix, it keeps the result of those that don't."""
+    names = locks.lock_files(root)
+    if not names:
+        print("No file here is a lock file of pip-compile.")
+        return 0
+    uv = shutil.which("uv")
+    if uv is None:
+        print(
+            "uv is not installed here, so nothing compiled the lock files of "
+            "pip-compile again; the CI does."
+        )
+        return 0
+    failed = False
+    compared = 0
+    written = 0
+    with ThreadPoolExecutor() as pool:
+        results = list(pool.map(lambda name: locks.compare(root, name, uv), names))
+    for found in results:
+        if found.note:
+            print(f"{found.name}: not compared, for {found.note}.")
+            continue
+        compared += 1
+        if found.failure:
+            failed = True
+            print(f"{found.name}: uv can't compile its sources:\n{found.failure}")
+        elif found.differences and arguments.fix:
+            (root / found.name).write_bytes(found.content)
+            written += 1
+            print(f"{found.name}: compiled again with the command in its header.")
+        elif found.differences:
+            failed = True
+            print(
+                f"{found.name}: no longer matches its sources: "
+                f"{'; '.join(found.differences)}."
+            )
+    if failed:
+        print(
+            "pip installs a lock file as it is: what its sources ask for reaches no "
+            f"install until the file is compiled again. {command(root)} locks --compile "
+            "--fix compiles each one with the command in its header, on the versions "
+            "that it pins; sources that uv can't compile need a fix of their own."
+        )
+        return 1
+    if written:
+        print(
+            f"Compiled {written} of the {compared} compared lock file(s) of pip-compile "
+            "again; the others keep their pins."
+        )
+        return 0
+    print(
+        "Compiled again with the command in its header, each of the "
+        f"{compared} compared lock file(s) of pip-compile keeps its pins."
+    )
     return 0
 
 
@@ -1800,7 +1862,15 @@ def add_locks_parsers(
     locks_parser.add_argument(
         "--fix",
         action="store_true",
-        help="put the = between each option of the command and its value first",
+        help="put the = between each option of the command and its value first; "
+        "with --compile, keep the result of the compile",
+    )
+    locks_parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="compile each lock file again with the command in its header, for its "
+        "Python and on the versions that it pins, and say which no longer matches "
+        "its sources",
     )
 
 

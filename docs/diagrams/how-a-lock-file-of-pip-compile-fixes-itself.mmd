@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a lock file of pip-compile fixes itself
+    accDescr: A pull request changes a source, such as requirements-dev.in. The step Lock files match their sources has uv compile each lock file again, on a copy, for the Python of its header and on the versions that it pins, and compares the pins. Without a difference, the file stays as it is, also after a new release upstream. With one, the check fails, and the autofix keeps the result below the header of the file; the fix bot commits it, and the checks run again. When uv finds no solution, nothing changes, and the log says why.
+
+    change(["A pull request changes a source,<br>such as requirements-dev.in"])
+    compile["uv compiles each lock file again, on a copy:<br>for the Python of its header,<br>on the versions that it pins"]
+    differs{"Do the pins differ?"}
+    solution{"Did uv find a solution?"}
+    kept(["The file stays as it is,<br>also after a new release upstream"])
+    failed["The check fails, and the autofix keeps the result<br>below the header of the file"]
+    bot["The fix bot commits it,<br>and the checks run again"]
+    green(["Every check passes"])
+    person(["Nothing changes, and the log says why:<br>a person corrects the sources"])
+
+    change --> compile --> solution
+    solution -- "yes" --> differs
+    solution -- "no" --> person
+    differs -- "no" --> kept
+    differs -- "yes" --> failed --> bot --> green
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class compile,differs,solution,failed,bot bot
+    class change,person person
+    class kept,green done
