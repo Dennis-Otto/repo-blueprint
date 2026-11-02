@@ -274,6 +274,13 @@ test("an entry of a page that this run didn't check says nothing", () => {
   assert.deepEqual(sorted([], entries, ["index.html"], ["index.html", "other.html"]).gone, []);
 });
 
+test("the error about a file that isn't TOML keeps the error of the parser as its cause", () => {
+  assert.throws(
+    () => parseAccepted("[[accepted]\n"),
+    (error) => error.cause instanceof Error,
+  );
+});
+
 test("an entry without its reason, or a file that isn't one, stops the check", async (t) => {
   for (const [text, message] of [
     ['[[accepted]]\npage = "a.html"\nrule = "b"\n', /entry 1 has no reason/],
