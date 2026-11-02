@@ -14,8 +14,10 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 # How long a process waits for a folder that another one makes; a render takes
 # seconds, and pytest-timeout ends the test long before.
@@ -39,6 +41,17 @@ GIT_REPOSITORY_VARIABLES = subprocess.run(
 OWN_REPOSITORY = {
     name: os.environ[name] for name in GIT_REPOSITORY_VARIABLES if name in os.environ
 }
+
+
+# The parser of libyaml, which the wheels of PyYAML bring, with the same results: ten
+# times as fast as that of Python, and the tests parse each workflow of each kind of
+# project. A PyYAML without it, built from source, takes the one of Python.
+YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def load_yaml(text: str) -> Any:
+    """What yaml.safe_load reads, with the fastest parser that PyYAML has."""
+    return yaml.load(text, Loader=YAML_LOADER)
 
 
 def git_environment(repository: Path) -> dict[str, str]:
