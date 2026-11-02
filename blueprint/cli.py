@@ -74,6 +74,7 @@ from blueprint.fixes import (
     MAIN_EVENTS,
     Fixes,
     FixLoop,
+    NoList,
     collect,
     commit_onto_branch,
     downloader,
@@ -85,6 +86,7 @@ from blueprint.fixes import (
     report_kept,
     run_until_done,
     suggest,
+    watched,
 )
 from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
@@ -608,7 +610,7 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
     lines = [
         "### Fixed by a command",
         "",
-        f"The commands that fix what {what} found, from `.github/checks.toml`:",
+        f"The commands that fix what {what} found, from `autofix` of the explanations:",
         "",
         *run_until_done(commands, root),
         "",
@@ -653,23 +655,26 @@ def kept_fixes(folder: Path) -> Fixes:
     return load(sorted(path for path in folder.iterdir() if path.is_dir()))
 
 
-def fix_bot_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
+def fix_bot_command(
+    api: Api, repo: str, arguments: argparse.Namespace, root: Path
+) -> int:
     """The fix bot after the checks: collect the fixes of a commit and decide, then
     commit them, suggest them or keep the pull request of main."""
     if arguments.action == "collect":
-        folders = collect(
-            api,
-            repo,
-            arguments.run,
-            arguments.sha,
-            arguments.event,
-            arguments.branch,
-            arguments.folder,
-            downloader(api, repo),
-        )
-        fixes = load(folders)
         number = int(arguments.pull) if arguments.pull else None
         try:
+            workflows = watched(root)
+            folders = collect(
+                api,
+                repo,
+                arguments.run,
+                arguments.sha,
+                arguments.event,
+                arguments.branch,
+                arguments.folder,
+                downloader(api, repo),
+                workflows,
+            )
             decided = plan(
                 api,
                 repo,
@@ -677,9 +682,10 @@ def fix_bot_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
                 arguments.event,
                 arguments.branch,
                 number,
-                fixes,
+                load(folders),
+                workflows.listed,
             )
-        except FixLoop as error:
+        except (FixLoop, NoList) as error:
             # The annotation in the log, the reason in the summary as well.
             print(f"::error::{error}", file=sys.stderr)
             print(error)
@@ -2161,7 +2167,7 @@ def main(
             print(outcome.summary, end="")
             return 1 if outcome.warnings and not arguments.warnings_only else 0
         if arguments.command == "fix":
-            return fix_bot_command(api, repo, arguments)
+            return fix_bot_command(api, repo, arguments, root)
         if arguments.command == "advisories":
             return dependabot_command(api, repo, arguments, root)
         if arguments.command == "commit-overrides":
