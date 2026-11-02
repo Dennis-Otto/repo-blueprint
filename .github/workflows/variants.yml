@@ -523,7 +523,7 @@ jobs:
         timeout-minutes: 5
         run: |
           docker run --rm --volume "$PWD/$PROJECT:/workdir" \
-            davidanson/markdownlint-cli2:v0.23.3@sha256:d5f3f3f04b2e285dcbcdcd13b4454d119e273e3c393a9dabd163dba4abad526d \
+            davidanson/markdownlint-cli2:v0.24.0@sha256:70ead7c0352d22d04bbe612cd96b54ec591538d8f4626cafe391bb2ecf3639ca \
             "**/*.md"
       # The Renovate of the Renovate workflow, which reads the rules of every project.
       # In a new repository only: an update gives every file of the blueprint as a new
