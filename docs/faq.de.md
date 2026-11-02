@@ -77,13 +77,16 @@ Ein Pull Request erfährt das, wenn es passiert. Der Check *lint* annotiert jede
 Führe das Update mit der neuen Antwort auf einem Branch aus und merge es mit einem Pull Request, wie es `app register` in [Schritt 3 der Anleitung](own-account.md#3-die-release-app-registrieren) tut, denn die Regeln von `main` lehnen einen direkten Push ab. Mit dem Copier des Schnellstarts, etwa für die Topics:
 
 ```sh
-git switch --create change-the-answers
+git fetch origin main
+git switch --force-create change-the-answers FETCH_HEAD
 uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data 'topics=python, pypi, cli'
 git add --all
 git commit --signoff --message 'chore: change the answers of the blueprint'
 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
 gh pr create --fill
 ```
+
+Mit pipx statt uv beginnt die Copier-Zeile mit `pipx run --spec copier==9.19.1 copier update`, und mit einem eigenen Copier mit `copier update`. Die ersten beiden Zeilen starten den Branch beim aktuellen `main` von GitHub, auch wenn eine frühere Änderung ihren Branch zurückgelassen hat.
 
 `--vcs-ref=:current:` behält das Release des Blueprints, auf dem das Repository steht, und `--defaults` nimmt jede andere Antwort aus `.copier-answers.yml`. Der Push läuft über GitHub CLI, deren Anmeldung Workflows ändern darf. Die Regeln von `main` verlangen außerdem eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Was die Antwort in `.github/repository.toml` ändert, etwa eine Variable oder die Topics, wendet der Einstellungs-Bot nach dem Merge an.
 

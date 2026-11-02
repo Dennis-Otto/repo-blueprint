@@ -159,7 +159,8 @@ def test_the_faq_changes_an_answer_as_the_checklist_says(page: str) -> None:
 def test_the_checklist_changes_an_answer_on_a_branch_with_the_quick_start() -> None:
     copier = f"uvx --from {PINNED} --defaults --vcs-ref=:current: --data a=b"
     assert answer_commands("a=b") == [
-        "git switch --create change-the-answers",
+        "git fetch origin main",
+        "git switch --force-create change-the-answers FETCH_HEAD",
         copier,
         "git add --all",
         "git commit --signoff --message 'chore: change the answers of the blueprint'",
@@ -169,8 +170,10 @@ def test_the_checklist_changes_an_answer_on_a_branch_with_the_quick_start() -> N
     # The title of the pull request comes from the commit, and what it says is checked.
     assert re.match(r"chore: ", ANSWER_MESSAGE)
     # The reader learns before the commit that main takes signed commits only.
-    (why, *rest) = change_answer("a=b")
+    (why, *rest, other) = change_answer("a=b")
     assert rest == answer_commands("a=b")
+    # The quick start offers pipx and a Copier of your own too, so the line fits them.
+    assert f"pipx run --spec {PINNED}" in other
     assert "--gpg-sign" in why
     assert "pull requests" in why
 

@@ -58,7 +58,7 @@ python3 .github/blueprint.py create
 
 ## 3. Die Release-App registrieren
 
-Ein Befehl registriert die App auf deinem Konto oder deiner Organisation, mit Name und allen Berechtigungen vorausgefüllt und ohne Webhook, setzt ihren privaten Schlüssel und öffnet den Pull Request, der sie nennt:
+Ein Befehl registriert die App auf deinem Konto oder deiner Organisation, mit Name und allen Berechtigungen vorausgefüllt und ohne Webhook, setzt ihren privaten Schlüssel und öffnet den Pull Request, der sie nennt. Schalte vorher `commit.gpgsign` ein: Die Regeln von `main` verlangen eine Signatur auf jedem Commit, auch auf dem, der die App nennt.
 
 ```sh
 python3 .github/blueprint.py app register
@@ -77,7 +77,7 @@ Wie `create` prüft er zuerst, was er braucht, und ein mit ✘ markierter Befund
 Zwei Dinge bleiben dir, und den Link des ersten gibt der Befehl aus:
 
 1. **Installiere die App** auf dem Repository, unter `https://github.com/apps/NAME/installations/new`.
-2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`. Die Regeln von `main` verlangen eine Signatur auf jedem Commit, auch auf diesem, schalte also vorher `commit.gpgsign` ein; der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst.
+2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`. Der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst.
 
 Die Checkliste erkennt die Installation an der Check Suite, die GitHub für eine installierte App bei jedem Push öffnet. Sie hakt die App also nach dem Merge ab, wenn du zuerst installierst, und sonst nach dem nächsten Push.
 

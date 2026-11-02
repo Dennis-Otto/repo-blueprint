@@ -82,7 +82,8 @@ DATA = (
 COPIER_UPDATE = f"{COPIERS[0]} --defaults --vcs-ref=:current: {DATA}"
 PUSH = shlex.join([*PUSH_AS_GH, "push", "--set-upstream", "origin", "HEAD"])
 NAMING = [
-    f"git switch --create {BRANCH}",
+    "git fetch origin main",
+    f"git switch --force-create {BRANCH} FETCH_HEAD",
     COPIER_UPDATE,
     "git add --all",
     f"git commit --signoff --message {shlex.quote(MESSAGE)}",
@@ -682,7 +683,7 @@ def test_a_refused_key_says_how_to_go_on_without_showing_it(
 
 @pytest.mark.parametrize(
     ("step", "place"),
-    [(COPIER_UPDATE, 1), (PUSH, 4), ("gh pr create --fill", 5)],
+    [(COPIER_UPDATE, 2), (PUSH, 5), ("gh pr create --fill", 6)],
 )
 def test_a_step_that_fails_leaves_the_steps_to_run_by_hand(
     copy: Path, shell: Shell, step: str, place: int

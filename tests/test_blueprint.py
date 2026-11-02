@@ -3566,7 +3566,7 @@ def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
     # A branch and the copier of the quick start: main refuses the push of a commit,
     # and the quick start puts no copier on the PATH.
     assert rest == change_answer("topics=home-assistant, hacs")
-    assert "uvx --from copier==" in rest[2]
+    assert "uvx --from copier==" in rest[3]
     assert "python3 .github/blueprint.py settings apply" in why
 
 
@@ -3596,6 +3596,7 @@ def test_the_checklist_names_the_command_that_registers_a_release_app(
     )
     assert registered.done is False
     lines = registered.how.splitlines()
+    assert "commit.gpgsign" in lines[0]
     assert lines[1] == "python3 .github/blueprint.py app register"
     assert lines[2] == (
         "The app gets read and write access to Actions, Administration, Checks, Commit"

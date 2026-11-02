@@ -159,7 +159,8 @@ def release_app(api: Api, repo: str, settings: Settings) -> tuple[Step, Step]:
         return Step(named, True), installed
     how = [
         "Register it with one command: you confirm one page on GitHub, and it sets the"
-        " private key and opens the pull request that names the app:",
+        " private key and opens the pull request that names the app. Turn"
+        " commit.gpgsign on first: main takes signed commits only, also this one:",
         "python3 .github/blueprint.py app register",
         f"The app gets read and write access to {listed('write')}, read access to"
         f" {listed('read')}, and no webhook. For an app that exists, such as for a"
@@ -216,9 +217,12 @@ def answer_steps(
     message: str = ANSWER_MESSAGE,
 ) -> list[list[str]]:
     """The steps that change answers of Copier, on a branch of their own: Copier writes
-    .github/repository.toml from them, and main takes pull requests only."""
+    .github/repository.toml from them, and main takes pull requests only. The branch
+    starts at the main of GitHub, so that the pull request holds this one commit, also
+    when a merged branch of the same name is left, or another branch is checked out."""
     return [
-        ["git", "switch", "--create", branch],
+        ["git", "fetch", "origin", "main"],
+        ["git", "switch", "--force-create", branch, "FETCH_HEAD"],
         [*copier, "--defaults", "--vcs-ref=:current:", *data],
         ["git", "add", "--all"],
         ["git", "commit", "--signoff", "--message", message],
@@ -240,6 +244,8 @@ def change_answer(data: str) -> list[str]:
         "main takes only pull requests of signed commits, so run this on a branch, with"
         " commit.gpgsign on or --gpg-sign added to the commit:",
         *answer_commands(data),
+        f"With pipx in place of uv, the Copier line starts pipx run --spec {PINNED};"
+        " a Copier of your own, copier update.",
     ]
 
 

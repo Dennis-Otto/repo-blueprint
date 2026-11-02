@@ -77,13 +77,16 @@ A pull request hears about this when it happens. The check *lint* annotates each
 Run the update with the new answer on a branch and merge it in a pull request, as `app register` does in [step 3 of the walkthrough](own-account.md#3-register-the-release-app), because the rules of `main` refuse a direct push. With the Copier of the quick start, such as for the topics:
 
 ```sh
-git switch --create change-the-answers
+git fetch origin main
+git switch --force-create change-the-answers FETCH_HEAD
 uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data 'topics=python, pypi, cli'
 git add --all
 git commit --signoff --message 'chore: change the answers of the blueprint'
 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
 gh pr create --fill
 ```
+
+With pipx in place of uv, the Copier line starts `pipx run --spec copier==9.19.1 copier update`, and with a Copier of your own, `copier update`. The first two lines start the branch from the current `main` of GitHub, also when an earlier change left its branch behind.
 
 `--vcs-ref=:current:` keeps the release of the blueprint that the repository is on, and `--defaults` takes every other answer from `.copier-answers.yml`. The push goes through GitHub CLI, whose sign-in may change workflows. The rules of `main` also ask for a signature on every commit: turn `commit.gpgsign` on or add `--gpg-sign` to the commit, and the check *signed commits* names a commit without one and how to sign it again. The settings bot applies what the answer changes in `.github/repository.toml`, such as a variable or the topics, after the merge.
 

@@ -595,7 +595,7 @@ def questions_page(text: str) -> str:
         " asks only a new question. `--data name=value` gives an answer without the"
         " question, also later: `uvx --from copier==9.19.1 copier update --defaults"
         " --vcs-ref=:current: --data name=value`, on a branch and merged in a pull"
-        " request as [the FAQ](../faq.md#how-do-i-change-an-answer-later) shows, changes"
+        " request as [the FAQ](../faq.md) shows, changes"
         " an answer of an existing repository, and the defaults of"
         " Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/)"
         " answer the questions that stay the same for all of your repositories, as"
