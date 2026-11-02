@@ -42,7 +42,7 @@ from blueprint.changelog import (
     release_notes,
     released_fragments,
 )
-from blueprint.checklist import checklist, describe_steps
+from blueprint.checklist import SETTINGS_APPLY, checklist, describe_steps
 from blueprint.coach import (
     PROJECT_CATALOG,
     Catalog,
@@ -1039,7 +1039,7 @@ def settings_command(
         print(f"The settings of {repo} differ from {config}:")
         print(describe(drift))
         if action == "check":
-            print("python3 blueprint.py settings apply sets what the API can set.")
+            print(f"{SETTINGS_APPLY} sets what the API can set.")
     else:
         print(f"The settings of {repo} match {config}.")
     if notices:

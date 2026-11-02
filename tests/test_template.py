@@ -11187,7 +11187,8 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
     for page in sorted((ROOT / "docs/kinds").glob("*.md")):
         text = page.read_text(encoding="utf-8")
         found = [match.groupdict() for match in re.finditer(pattern, text)]
-        assert [item["currentValue"] for item in found] == [version], page.name
+        # A page may also change an answer with it, such as a package that publishes nowhere.
+        assert {item["currentValue"] for item in found} == {version}, page.name
         assert f"uvx --from copier=={version} copier copy --data project_type=" in text
     # The walkthrough for an owner's own account copies and updates with the same
     # release: GitHub shows the page too, where a snippet of the website stays a line.
@@ -11196,10 +11197,10 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
         text = (ROOT / name).read_text(encoding="utf-8")
         found = [match.groupdict() for match in re.finditer(pattern, text)]
         assert [item["currentValue"] for item in found] == [version] * 3, name
-    # So does app register, which names the release app with it: one line, for uv and
-    # for pipx.
-    assert '"/^blueprint/app\\\\.py$/"' in renovate
-    text = (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
+    # So do app register, which names the release app with it, and the checklist, which
+    # tells how to change an answer: one line, for uv and for pipx.
+    assert '"/^blueprint/checklist\\\\.py$/"' in renovate
+    text = (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
     found = [match.groupdict() for match in re.finditer(pattern, text)]
     assert [item["currentValue"] for item in found] == [version]
 

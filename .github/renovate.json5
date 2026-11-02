@@ -22,13 +22,20 @@
     {
       // The Copier of the quick start in the READMEs, with uv and with pipx, that of
       // the one-liner on the page of each kind, and those of the walkthrough for an
-      // owner's own account, which GitHub shows too, so it takes no snippet.
+      // owner's own account, which GitHub shows too, so it takes no snippet. The other
+      // pages and the checklist run the same one to change an answer, and
+      // tests/test_docs_commands.py fails on a command in a file that isn't listed.
       customType: "regex",
       managerFilePatterns: [
         "/^README(\\.de)?\\.md$/",
         "/^docs/kinds/[a-z-]+(\\.de)?\\.md$/",
         "/^docs/own-account(\\.de)?\\.md$/",
-        "/^blueprint/app\\.py$/",
+        "/^docs/faq(\\.de)?\\.md$/",
+        "/^docs/guide(\\.de)?\\.md$/",
+        "/^docs/features/self-healing(\\.de)?\\.md$/",
+        "/^docs/reference/questions\\.md$/",
+        "/^reference\\.py$/",
+        "/^blueprint/checklist\\.py$/",
       ],
       matchStrings: [
         "(?<depName>copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+) copier (?:copy|update)",
