@@ -28,7 +28,7 @@ import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import CodeType, SimpleNamespace
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 from unittest import mock
 from xml.etree import ElementTree
 
@@ -81,7 +81,8 @@ from blueprint.checklist import (
     RELEASE_APP_PERMISSIONS,
 )
 from blueprint.coach import Catalog, missing, undeclared
-from blueprint.fixes import fixers
+from blueprint.fixes import fixers, signed_off
+from blueprint.github import Api
 from blueprint.locks import why_renovate_skips
 from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
@@ -9777,6 +9778,14 @@ def test_renovate_commits_as_the_bot_user_of_its_release_app(tmp_path: Path) -> 
     run = workflow_steps.step("renovate.yml", "renovate", "Run Renovate")
     assert run["env"]["RENOVATE_USERNAME"] == "${{ steps.bot.outputs.username }}"
     assert run["env"]["RENOVATE_GIT_AUTHOR"] == "${{ steps.bot.outputs.git-author }}"
+    # The author that GitHub gives a commit of the fix bot: Renovate that runs as the
+    # release app takes it for its own and goes on rebasing, with no rule for it.
+    fix_bot = signed_off(
+        cast(Api, SimpleNamespace(get=lambda _path: {"id": 321826887})),
+        "dennis-otto-release-automation",
+        "",
+    ).rpartition("<")[2]
+    assert done.outputs["git-author"].endswith(f"<{fix_bot}")
     # The settings of the bot name no owner, no app and no repository: the workflow
     # does, from the token, so that they serve every owner.
     bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
@@ -10283,6 +10292,79 @@ def test_the_hub_of_the_blueprint_runs_renovate_for_its_owner(
         (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     )
     assert "Renovate" not in health[True]["workflow_run"]["workflows"]
+
+
+# An app with its name and two numbers, as a foreign owner answers them.
+OCTO_APP: dict[str, Any] = {
+    "release_app": "octo-org-release-automation",
+    "release_app_client_id": "Iv23liOcto",
+    "release_app_id": "12345",
+}
+
+
+def test_the_mend_app_takes_the_commits_of_the_release_app_for_its_own(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner="mend",
+        **OCTO_APP,
+    )
+
+    rules = renovate_rules(
+        (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    # One pattern, as Renovate writes one, from the name of the app alone: the number
+    # of its bot user is known to GitHub only, and differs for every owner.
+    [rule] = rules["gitIgnoredAuthors"]
+    assert rule.startswith("/^")
+    assert rule.endswith("$/")
+    pattern = re.compile(rule[1:-1])
+    # The address of the fix bot and the branch bot, whatever its number.
+    bot = "octo-org-release-automation[bot]@users.noreply.github.com"
+    assert pattern.search(f"321826887+{bot}")
+    assert pattern.search(f"7+{bot}")
+    # No one else, whose commits stay an edit that Renovate leaves alone.
+    for author in (
+        "29139614+renovate[bot]@users.noreply.github.com",
+        "61191244+Octo-Org@users.noreply.github.com",
+        "321826887+another-release-automation[bot]@users.noreply.github.com",
+        f"321826887+not-{bot}",
+        f"number+{bot}",
+        bot,
+        f"321826887+{bot}.example.com",
+        f"someone-321826887+{bot}",
+        "321826887+octo-org-release-automationXbot]@users.noreply.github.com",
+        "321826887+octo-org-release-automation[bot]@usersXnoreply.github.com",
+    ):
+        assert not pattern.search(author), author
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [{"renovate_runner": "mend"}, {"renovate_runner": "self", **OCTO_APP}],
+    ids=["mend without an app", "self, which runs as the app"],
+)
+def test_renovate_ignores_no_author_where_it_needs_no_such_rule(
+    tmp_path: Path, answers: dict[str, Any]
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        **answers,
+    )
+
+    rules = renovate_rules(
+        (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    assert "gitIgnoredAuthors" not in rules
 
 
 def test_a_foreign_owner_may_take_the_mend_app_and_leave_out_the_ai(

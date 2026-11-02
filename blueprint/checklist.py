@@ -185,17 +185,38 @@ BRANCHES = "renovate/"
 LATEST = 100
 
 
-def renovate_runner(root: Path) -> str:
-    """Who runs Renovate for the repository in root."""
+def answer(root: Path, name: str) -> str:
+    """An answer of Copier for the repository in root, empty without one."""
     answers = root / ".copier-answers.yml"
     text = answers.read_text(encoding="utf-8") if answers.exists() else ""
-    match = re.search(r"^renovate_runner: *['\"]?(\w+)", text, re.MULTILINE)
-    return match.group(1) if match and match.group(1) in RENOVATE_RUNNERS else "hub"
+    match = re.search(rf"^{name}: *['\"]?([\w-]+)", text, re.MULTILINE)
+    return match.group(1) if match else ""
 
 
-def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
+def renovate_runner(root: Path) -> str:
+    """Who runs Renovate for the repository in root."""
+    runner = answer(root, "renovate_runner")
+    return runner if runner in RENOVATE_RUNNERS else "hub"
+
+
+def unanswered_app(app: str, root: Path) -> list[str]:
+    """What to do when the settings as code name a release app that the answers of
+    Copier don't: the rule that lets the Mend Renovate app take its commits for its own
+    follows the answer alone."""
+    if not app or app == answer(root, "release_app"):
+        return []
+    return [
+        f"The settings as code name the release app {app} and the answers of Copier"
+        " don't, whose name the rule gitIgnoredAuthors comes from; so that Renovate"
+        " goes on rebasing the branches that its bots commit to, update on a branch:",
+        "uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current:"
+        f" --data release_app={app}",
+    ]
+
+
+def renovate(api: Api, repo: str, root: Path, app: str = "") -> Step:
     """Renovate, which runs once it has opened a pull request, and how it comes to
-    run."""
+    run; app is the release app by the settings as code."""
     pulls = api.get(f"repos/{repo}/pulls?state=all&per_page={LATEST}")
     running = isinstance(pulls, list) and any(
         isinstance(pull, dict)
@@ -215,7 +236,7 @@ def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
             "Install the Mend Renovate app on this repository; it reads"
             " .github/renovate.json5 and opens its pull requests from its first run:",
             f"{MEND_APP}/installations/new",
-            *ignored_author(api, settings),
+            *unanswered_app(app, root),
         ]
     else:
         how = [
@@ -224,32 +245,6 @@ def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
             " run after the installation opens its pull requests."
         ]
     return Step("Renovate runs: it has opened a pull request", running, "\n".join(how))
-
-
-def ignored_author(api: Api, settings: Settings) -> list[str]:
-    """The rule that lets the Mend Renovate app take the commits of the release app,
-    with which the branch bot and the fix bot update its branches, for none of
-    someone else, which would stop it from rebasing them."""
-    name = str(settings.variables.get("RELEASE_APP", "")).strip()
-    user = api.get(f"users/{name}%5Bbot%5D") if name else None
-    number = user.get("id") if isinstance(user, dict) else None
-    known = number is not None
-    address = (
-        f"{number}+{name}[bot]" if known else "ID+NAME[bot]"
-    ) + "@users.noreply.github.com"
-    return [
-        "The branch bot and the fix bot commit to its branches as the release app;"
-        " so that Renovate goes on rebasing them, add to .github/renovate.json5:",
-        f'gitIgnoredAuthors: ["{address}"]',
-        *(
-            []
-            if known
-            else [
-                "with the name of the release app for NAME, and for ID the number of"
-                " its bot user: gh api users/NAME%5Bbot%5D --jq .id"
-            ]
-        ),
-    ]
 
 
 def listed(access: str) -> str:
@@ -366,7 +361,9 @@ def checklist(
         ),
         installed,
         DEPENDABOT_ALERTS,
-        renovate(api, repo, settings, root),
+        renovate(
+            api, repo, root, str(settings.variables.get("RELEASE_APP", "")).strip()
+        ),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
             "(the issue assistant closes them with the release)",
