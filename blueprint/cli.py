@@ -770,7 +770,9 @@ def migrate_command(arguments: argparse.Namespace, root: Path) -> int:
     print(
         f"{command(root)} migrate --fix moves what these lines name: an update of the "
         "blueprint leaves the files of the project alone, so a release moves them "
-        "through this check. docs/troubleshooting.md says how a project declines."
+        "through this check. How a project declines: "
+        "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/"
+        "troubleshooting.md#a-release-moves-a-file-of-the-project"
     )
     return 1
 
