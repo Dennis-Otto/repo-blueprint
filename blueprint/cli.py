@@ -78,10 +78,12 @@ from blueprint.fixes import (
     collect,
     commit_onto_branch,
     downloader,
+    fix_own,
     fix_text,
     fixers,
     heal_main,
     load,
+    own_fix,
     plan,
     report_kept,
     run_until_done,
@@ -656,11 +658,32 @@ def kept_fixes(folder: Path) -> Fixes:
     return load(sorted(path for path in folder.iterdir() if path.is_dir()))
 
 
+def fix_own_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
+    """The title and the entry of a pull request from a branch of this repository: what
+    the bot fixes of them, and with --app also the fixes, as that app."""
+    number = int(arguments.pull) if arguments.pull else None
+    if arguments.app:
+        sys.stdout.write(
+            fix_own(api, repo, arguments.sha, number, arguments.app, arguments.url)
+        )
+        return 0
+    found = own_fix(api, repo, arguments.sha, number)
+    if arguments.output:
+        to_fix = found.title or found.path
+        with Path(arguments.output).open("a", encoding="utf-8") as file:
+            file.write(f"action={'fix' if to_fix else ''}\n")
+            file.write(f"pull={found.number or ''}\n")
+    sys.stdout.write(found.text)
+    return 0
+
+
 def fix_bot_command(
     api: Api, repo: str, arguments: argparse.Namespace, root: Path
 ) -> int:
     """The fix bot after the checks: collect the fixes of a commit and decide, then
     commit them, suggest them or keep the pull request of main."""
+    if arguments.action == "own":
+        return fix_own_command(api, repo, arguments)
     if arguments.action == "collect":
         number = int(arguments.pull) if arguments.pull else None
         try:
@@ -1731,6 +1754,18 @@ def add_fix_parsers(
         "decide what the fix bot does with them",
     )
     collect_parser.add_argument("run", type=int, help="the run that ended")
+    own_parser = fix_actions.add_parser(
+        "own",
+        help="say what the bot fixes of the title and the entry of the changelog of a "
+        "pull request from a branch of this repository, and with --app fix them",
+    )
+    own_parser.add_argument("--sha", required=True, help="the commit of the checks")
+    own_parser.add_argument("--pull", default="", help="the pull request, if named")
+    own_parser.add_argument(
+        "--output", help="the file of the outputs of the step, $GITHUB_OUTPUT"
+    )
+    own_parser.add_argument("--app", help="the slug of the release app, which fixes")
+    own_parser.add_argument("--url", default="", help="the run of the checks")
     commit_fixes_parser = fix_actions.add_parser(
         "commit",
         help="commit the fixes onto the branch of a pull request, as the release app",

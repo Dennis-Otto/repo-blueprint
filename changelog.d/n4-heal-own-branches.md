@@ -1,0 +1,3 @@
+### Features
+
+- **A pull request corrects its title and drafts its entry by itself:** on a branch of the repository, the fix bot now sets the title that the PR coach suggests when only its form is wrong, such as `Feat: add a dark mode`, and commits a draft of a missing entry of the changelog from the title, as one new file of `changelog.d/`. The type and the breaking mark decide the version, so a title whose type is unclear stays a suggestion, and every title on a pull request from a fork. The draft comes once for each pull request, so read it and say in its place what changes for users; the label `no-bot-fixes` turns both off.

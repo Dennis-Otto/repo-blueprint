@@ -92,6 +92,14 @@ name: After the checks
 # and leaves a pull request with the label no-bot-fixes alone. When the bot fails, it
 # says so on the pull request; on main, it keeps one issue open until it passes again.
 #
+# The title and the entry of the changelog fix themselves in a job of their own, after a
+# failed run of the check of the title, on a branch of this repository: the bot sets the
+# title that the PR coach suggests when only its form differs, as the type and the
+# breaking mark decide the version, and commits one draft of the missing entry from that
+# title, once for each pull request. The draft is the one new file that a bot of the
+# fixes adds, which blueprint.py of main names and writes itself in changelog.d/. No
+# artifact and nothing of the code of a pull request reaches this job.
+#
 # The diagram bot: when the check diagrams of Lint finds a ```mermaid block, which
 # the GitHub app shows as code, or pictures of diagrams that differ from their sources
 # in docs/diagrams/, in a pull request from a branch of this repository, it commits
@@ -1151,6 +1159,172 @@ jobs:
             gh issue edit "$number" --body "$body"
           else
             gh issue create --title "$title" --label maintenance --body "$body"
+          fi
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
+
+  own-branch:
+    name: the fix bot of the title and the entry
+    # After a run of the check of the title that failed, for a pull request from a branch
+    # of this repository: that check runs nothing of a pull request, so no job of it can
+    # fix, and what the bot needs comes from the API. A fork is no place for this bot, and
+    # a commit that is no longer the head has nothing to fix.
+    if: >-
+      !github.event.repository.fork &&
+      github.event.workflow_run.event == 'pull_request_target' &&
+      github.event.workflow_run.name == 'Pull request title' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      contains(github.event.workflow_run.pull_requests.*.head.sha, github.event.workflow_run.head_sha)
+    # A group of its own, so that it takes the place of no pending job of the fixes; a
+    # commit names the head that it goes onto, and the later one looks at the new head.
+    concurrency:
+      group: ${{ github.workflow }}-own-branch-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # The environment holds the private key of the release app; only main may use it.
+    environment:
+      name: release
+      deployment: false
+    permissions:
+      contents: read # blueprint.py of main, and the files of the commit
+      pull-requests: write # the title, the files and the commits of the pull request, and the comment when the bot fails
+    steps:
+      - name: Block every host that the job doesn't need
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            # A wildcard names no host to ask.
+            [[ "$host" == '*.'* ]] && continue
+            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $host, waiting 3 s."
+              sleep 3
+            done
+          done
+      # The tool of main, never the code of the pull request; its title is data.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            blueprint
+      - name: Decide what the bot fixes of the title and the entry
+        id: own
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          tool=.github/blueprint.py
+          [[ -f "$tool" ]] || tool=blueprint.py
+          python3 "$tool" --repo "$GH_REPO" fix own --sha "$SHA" --pull "$NUMBER" \
+            --output "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+      # Without the release app of the owner, the run names what is missing rather than
+      # fail at the token; every workflow has this step, the same but for its variables.
+      - name: Check that the release app is set up
+        id: release-app
+        if: steps.own.outputs.action == 'fix'
+        env:
+          CLIENT_ID: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          KEY_SET: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY != '' }}
+          # Who needs the app and for what, what happens without it, and whether the
+          # run fails then.
+          BOT: the fix bot
+          TASK: correct the title and draft the entry of the changelog
+          WITHOUT: the PR coach suggests the title and says what the entry needs
+          REQUIRED: "false"
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            missing="names no release app in the variable RELEASE_AUTOMATION_CLIENT_ID"
+          elif [[ "$KEY_SET" != true ]]; then
+            missing="has no private key of its release app in the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          level=warning
+          if [[ "$REQUIRED" == true ]]; then
+            level=error
+          fi
+          echo "::$level::This repository $missing, which $BOT needs to $TASK; $WITHOUT."
+          {
+            echo "### ${BOT^} needs the release app of the owner"
+            echo
+            echo "This repository $missing, which $BOT needs to $TASK; $WITHOUT. The release app is a GitHub App of the owner, whose token may do what the token of a job can't: start the checks of a pull request, change a workflow and apply the settings."
+            echo
+            echo "\`python3 .github/blueprint.py app register\` registers the app, sets its private key and opens the pull request that names it in \`.github/repository.toml\`; \`python3 .github/blueprint.py checklist\` shows what is left, such as its installation and the settings. Once they are done, $BOT can $TASK in its next run."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$REQUIRED" == true ]]; then
+            exit 1
+          fi
+      - name: Create a token of the release app for the pull request
+        id: app
+        if: steps.release-app.outputs.ready == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          # Only what the title and one commit on the branch need.
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Set the title and commit the draft of the entry
+        if: steps.app.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          PULL: ${{ steps.own.outputs.pull }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          tool=.github/blueprint.py
+          [[ -f "$tool" ]] || tool=blueprint.py
+          # As the release app, an edit of the title starts its check again and a commit
+          # the checks of the branch; GitHub signs the commit.
+          python3 "$tool" --repo "$GH_REPO" fix own --sha "$SHA" --pull "$PULL" \
+            --app "$APP_SLUG" --url "$URL" >> "$GITHUB_STEP_SUMMARY"
+      # The check of the title stays red until someone fixes what it found; when the bot
+      # fails, the pull request learns so.
+      - name: Say on the pull request that the fix bot failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PULL: ${{ steps.own.outputs.pull || github.event.workflow_run.pull_requests[0].number }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ -n "$PULL" ]]; then
+            gh pr comment "$PULL" --body "The fix bot couldn't correct the title or draft the entry of the changelog of this pull request ($URL); its summary says why. The PR coach says what each needs."
           fi
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends

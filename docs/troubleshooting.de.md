@@ -234,6 +234,14 @@ Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --o
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
 
+## Der Titel eines Pull Requests hat sich geändert, oder eine Datei ist in changelog.d aufgetaucht
+
+**Was du siehst:** Die Timeline des Pull Requests zeigt, dass die Release-App seinen Titel geändert hat, oder ein Commit *docs: draft the entry of the changelog from the title* hat eine Datei in `changelog.d/` hinzugefügt.
+
+**Warum:** Die Prüfung des Titels ist gescheitert, und der Fix-Bot hat behoben, was er aus dem Titel beheben konnte: seine Form, wenn der Titel seinen Typ selbst nennt, und einen Entwurf des Eintrags, den ein `feat`, `fix` oder `perf` braucht. Siehe [den Fix-Bot](features/self-healing.de.md#pull-requests-reparieren-sich-selbst) und [Entscheidung 0110](decisions/0110-the-fix-bot-corrects-the-form-of-a-title-and-drafts-one-entry.md).
+
+**Was zu tun ist:** Hole den Branch, bevor du wieder pushst, lies den Entwurf und sage an seiner Stelle, was sich für die Nutzer ändert. Um den Bot von einem Pull Request fernzuhalten, gib ihm das Label `no-bot-fixes`. Ein Entwurf, den du löschst, bleibt gelöscht: Die Prüfung verlangt dann wieder einen Eintrag und erklärt, wie du ihn schreibst.
+
 ## Eine Lock-Datei passt nicht mehr zu ihrer Quelle
 
 **Was du siehst:** Der Schritt *Lock files match their sources* von `scripts/check.sh` scheitert und nennt jede Datei und jede Festlegung, etwa `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
