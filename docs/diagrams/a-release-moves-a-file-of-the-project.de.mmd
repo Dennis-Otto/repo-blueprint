@@ -1,0 +1,24 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie ein Release eine Datei des Projekts ändert
+    accDescr: Ein Update des Blueprints lässt die Dateien des Projekts, wie die Labels, unverändert. Sein Pull Request bringt den Schritt Files of the project von scripts/check.sh mit, der fragt, ob ein Release noch etwas zu ändern hat. Ist nichts offen oder lehnt die Datei die Änderung ab, merged sich der Pull Request selbst. Sonst führt die Prüfung migrate --fix aus, und der Fix-Bot committet die Änderung auf den Pull Request, dessen Prüfungen erneut laufen.
+
+    update(["Der Pull Request<br>eines Blueprint-Updates"])
+    step{"Schritt Files of the project:<br>noch etwas zu ändern?"}
+    fix["Die Prüfung führt<br>migrate --fix aus"]
+    bot["Der Fix-Bot committet<br>die Änderung auf den<br>Pull Request"]
+    merged(["Der Pull Request<br>merged sich selbst"])
+
+    update --> step
+    step -- "nein, oder die Datei<br>lehnt sie ab" --> merged
+    step -- "ja" --> fix --> bot
+    bot -- "die Prüfungen<br>laufen erneut" --> step
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class update,fix,bot bot
+    class merged done

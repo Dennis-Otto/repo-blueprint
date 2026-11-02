@@ -39,6 +39,17 @@ Once you commit to the branch of the pull request, to resolve the markers for ex
 
 The blueprint owns the workflows, `scripts/check.sh` and the community files: their changes arrive with the updates. Files that belong to the project are never overwritten: the README, the changelog, the security design in `docs/security.md`, the dependency manifests and lock files (Renovate keeps them current), the code and the tests, the website's `mkdocs.yml` and pages, the issue forms, the labels and their paths, accepted findings, and the notes for coding agents. Checks of a project alone belong in `scripts/check-project.sh`, which `scripts/check.sh` runs last.
 
+### What a release moves in a file of the project
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-release-moves-a-file-of-the-project.dark.svg">
+  <img src="../images/diagrams/a-release-moves-a-file-of-the-project.svg" alt="How a release moves a file of the project: An update of the blueprint leaves the files of the project as they are, such as the labels. Its pull request brings the step Files of the project of scripts/check.sh, which asks whether a release has left something to move. Where nothing is left, or the file declines the move, the pull request merges itself. Otherwise the check runs migrate --fix, and the fix bot commits the move onto the pull request, whose checks run again.">
+</picture>
+
+An update never overwrites a file of the project, so a release that needs such a file changed names the change in `blueprint/migrate.py`. The pull request of the update fails the step *Files of the project* of `scripts/check.sh`, its check runs `python3 .github/blueprint.py migrate --fix`, and the fix bot commits the result onto the pull request, which then merges itself like any other update ([decision 0111](../decisions/0111-a-release-moves-a-file-of-the-project-through-a-check-that-fixes-itself.md)).
+
+The first such move takes the labels `good first issue` and `help wanted` to the group `contribution`, for which the [issue assistant](https://github.com/Dennis-Otto/issue-assistant) names candidates in its morning digest. A project that doesn't want this writes a comment behind the line `group = "decision"` of the label, and the step leaves it alone.
+
 ### The issue assistant
 
 <picture>

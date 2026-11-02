@@ -9,6 +9,7 @@
 #   topic      cross-cutting topics the assistant may add
 #   lifecycle  set and removed by the issue assistant's rules
 #   decision   set by the maintainer only
+#   contribution set by the maintainer; the assistant's digest names candidates
 #   release    set by the bots: the pull request title check, the release bot, the
 #              branch bot and the bot-health bot; Dependabot sets dependencies too,
 #              Renovate none, as the title check labels its pull requests
@@ -129,22 +130,24 @@ description = "This will not be worked on"
 group = "decision"
 
 [[label]]
-name = "help wanted"
-color = "008672"
-description = "Extra attention is needed"
+name = "no-bot-fixes"
+color = "c5def5"
+description = "The fix bot leaves this pull request alone: no commit, no suggestion"
 group = "decision"
+
+# Contribution: the assistant's digest suggests the first of these labels
 
 [[label]]
 name = "good first issue"
 color = "7057ff"
 description = "Good for newcomers"
-group = "decision"
+group = "contribution"
 
 [[label]]
-name = "no-bot-fixes"
-color = "c5def5"
-description = "The fix bot leaves this pull request alone: no commit, no suggestion"
-group = "decision"
+name = "help wanted"
+color = "008672"
+description = "Extra attention is needed"
+group = "contribution"
 
 # Release: set from the title of a pull request, and by the release bot
 
