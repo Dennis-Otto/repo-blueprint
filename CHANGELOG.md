@@ -7,6 +7,39 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.7.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.1...v1.7.0) (2026-11-02)
+
+
+### Features
+
+* a pull request gets a draft changelog fragment and a corrected title by itself ([#614](https://github.com/Dennis-Otto/repo-blueprint/issues/614)) ([26fee73](https://github.com/Dennis-Otto/repo-blueprint/commit/26fee73cd9ad1ae634154636bb4e8ffab055bdd6))
+* cancel the waiting runs of a commit that a newer push replaced ([#609](https://github.com/Dennis-Otto/repo-blueprint/issues/609)) ([f66447e](https://github.com/Dennis-Otto/repo-blueprint/commit/f66447ed4aac413cfa75e9b16453fdd996e860db))
+* declare separate environments for signing and the app store ([#616](https://github.com/Dennis-Otto/repo-blueprint/issues/616)) ([565f522](https://github.com/Dennis-Otto/repo-blueprint/commit/565f522bf9ab10ffc2271afa3de36fe72d4dfd91))
+* find a lock file of pip-compile that no longer matches and compile it again ([#602](https://github.com/Dennis-Otto/repo-blueprint/issues/602)) ([8368812](https://github.com/Dennis-Otto/repo-blueprint/commit/8368812f223ff3e841e0a1ba2fc2638e136d8ddc))
+* let the fix bot read the fixes of every workflow it watches ([#605](https://github.com/Dennis-Otto/repo-blueprint/issues/605)) ([1f18d3c](https://github.com/Dennis-Otto/repo-blueprint/commit/1f18d3c2380df27e3e199c3ba585e56dd673239e))
+* the fixers run on main every week ([#598](https://github.com/Dennis-Otto/repo-blueprint/issues/598)) ([2f105ca](https://github.com/Dennis-Otto/repo-blueprint/commit/2f105cac925af6715244ec5c028814e176e5daa9))
+* the labels good first issue and help wanted move to the group contribution ([#617](https://github.com/Dennis-Otto/repo-blueprint/issues/617)) ([fbbac31](https://github.com/Dennis-Otto/repo-blueprint/commit/fbbac31f5e798a88d4b8766af98394081cd9d0da))
+* websites with further languages: hreflang on untranslated copies ([#619](https://github.com/Dennis-Otto/repo-blueprint/issues/619)) ([738e579](https://github.com/Dennis-Otto/repo-blueprint/commit/738e5799b25e430b2fd2e216f6f317057d373465))
+
+
+### Bug fixes
+
+* **deps:** lock file maintenance ([#586](https://github.com/Dennis-Otto/repo-blueprint/issues/586)) ([a75130d](https://github.com/Dennis-Otto/repo-blueprint/commit/a75130d873adc80c904663d044a026035ca60b65))
+* **deps:** lock file maintenance ([#587](https://github.com/Dennis-Otto/repo-blueprint/issues/587)) ([ee21d70](https://github.com/Dennis-Otto/repo-blueprint/commit/ee21d70cd0593fc90c3e4652c48e2228a712f332))
+* **deps:** refresh pip-compile outputs ([#588](https://github.com/Dennis-Otto/repo-blueprint/issues/588)) ([8752970](https://github.com/Dennis-Otto/repo-blueprint/commit/8752970a8fbd9b4ab48b85ecf8db66513c98c88b))
+* **deps:** update davidanson/markdownlint-cli2-action action to v25 ([#583](https://github.com/Dennis-Otto/repo-blueprint/issues/583)) ([5cf0a60](https://github.com/Dennis-Otto/repo-blueprint/commit/5cf0a601716a25681352b11a49a3833969476361))
+* **deps:** update dependency @types/node to v26 ([#584](https://github.com/Dennis-Otto/repo-blueprint/issues/584)) ([54963e4](https://github.com/Dennis-Otto/repo-blueprint/commit/54963e412734df72427ba653a428f6bac3721b19))
+* **deps:** update renovatebot/github-action action to v46.3.10 ([#600](https://github.com/Dennis-Otto/repo-blueprint/issues/600)) ([42832ec](https://github.com/Dennis-Otto/repo-blueprint/commit/42832ec3e960de49b825739a48e3c4a310bf871d))
+* fold the section of each workflow on the Automation page ([#615](https://github.com/Dennis-Otto/repo-blueprint/issues/615)) ([9410c0d](https://github.com/Dennis-Otto/repo-blueprint/commit/9410c0d565f7fa857de466cc8cd38b47b5c98769))
+* keep the cause of the accessibility check's error about a broken TOML file ([#593](https://github.com/Dennis-Otto/repo-blueprint/issues/593)) ([95d3bf5](https://github.com/Dennis-Otto/repo-blueprint/commit/95d3bf53a0e61ca6b0d83cf9d3e01e27db1ab1b3))
+* player-switch answers sample_code=false and leaves MADE_NEW ([#611](https://github.com/Dennis-Otto/repo-blueprint/issues/611)) ([f7fd085](https://github.com/Dennis-Otto/repo-blueprint/commit/f7fd085eda135f2bff9c48e85aaa93df8fbc11d2))
+* Renovate keeps rebasing a branch the fix bot committed to ([#599](https://github.com/Dennis-Otto/repo-blueprint/issues/599)) ([2b17ac3](https://github.com/Dennis-Otto/repo-blueprint/commit/2b17ac30cf98a16284a8b005f6fdce0093c9230f))
+* the checklist and the guide name the release app the way that works ([#612](https://github.com/Dennis-Otto/repo-blueprint/issues/612)) ([c984a9b](https://github.com/Dennis-Otto/repo-blueprint/commit/c984a9bf1493d516635f0e10c7180f5326a64333))
+* the fix bot leaves a commit to the run that ends last ([#618](https://github.com/Dennis-Otto/repo-blueprint/issues/618)) ([51a1328](https://github.com/Dennis-Otto/repo-blueprint/commit/51a1328d1aa45c093fb38d6c6ab490eaf17187e7))
+* the release verification says what is wrong when it can't go on ([#607](https://github.com/Dennis-Otto/repo-blueprint/issues/607)) ([7b3a20a](https://github.com/Dennis-Otto/repo-blueprint/commit/7b3a20af34617aa4737efb1f4e91a994f847ec59))
+* the screenshot bot corrects the sizes of the pictures it changes ([#603](https://github.com/Dennis-Otto/repo-blueprint/issues/603)) ([ddd915b](https://github.com/Dennis-Otto/repo-blueprint/commit/ddd915bef1898de58e50195d440561b1c14cda6d))
+* the website shows one video of a GIF with a dark variant ([#606](https://github.com/Dennis-Otto/repo-blueprint/issues/606)) ([3430aaf](https://github.com/Dennis-Otto/repo-blueprint/commit/3430aaf3e19953ddc719f21b63b0bf33646ea309))
+
 ## [1.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.0...v1.6.1) (2026-11-02)
 
 ### Bug fixes
