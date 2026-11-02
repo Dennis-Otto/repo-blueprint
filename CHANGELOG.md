@@ -7,26 +7,19 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.0...v1.6.1) (2026-11-02)
+
 ### Bug fixes
 
 - **`scripts/check.sh` runs the checks of a project's website too:** after its local strict build it checked only what the hooks of the website promise, so a project's `scripts/check-site.sh` failed for the first time in the check *docs* of the pull request, unless its author remembered to run it by hand. Where that script exists, the step *Website* now runs it on the website it built, and fails with what the script found. The script gets that folder as its argument, which is no longer always `site`, so it must read the folder from its argument.
-
-## [1.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.0...v1.6.1) (2026-11-02)
-
-
-### Bug fixes
-
-* Biome of the Node stack skips the diagrams that scripts/diagrams.sh draws ([#574](https://github.com/Dennis-Otto/repo-blueprint/issues/574)) ([b32b6b0](https://github.com/Dennis-Otto/repo-blueprint/commit/b32b6b0a787b24c057b3b0a8702e68f0d4f78a1a))
-* **deps:** update dependency sigstore/gitsign to v0.18.0 ([#581](https://github.com/Dennis-Otto/repo-blueprint/issues/581)) ([2c1d31d](https://github.com/Dennis-Otto/repo-blueprint/commit/2c1d31d54c89d3dae2a1deddd14da4c8fa4f45c5))
-* **deps:** update dependency uv to v0.13.5 ([#580](https://github.com/Dennis-Otto/repo-blueprint/issues/580)) ([e3e3c0a](https://github.com/Dennis-Otto/repo-blueprint/commit/e3e3c0a41690f9041c796c5aa0df334a9b39c0c1))
-* **deps:** update the actions ([#582](https://github.com/Dennis-Otto/repo-blueprint/issues/582)) ([30e5073](https://github.com/Dennis-Otto/repo-blueprint/commit/30e5073726910e674a39546609d66541be3c6070))
-* **deps:** update the images ([#579](https://github.com/Dennis-Otto/repo-blueprint/issues/579)) ([ba4f01a](https://github.com/Dennis-Otto/repo-blueprint/commit/ba4f01ad3c66efabec35f86dd69b394ff01f5b8b))
-* scripts/check.sh runs the project's check-site.sh ([#578](https://github.com/Dennis-Otto/repo-blueprint/issues/578)) ([dc72df6](https://github.com/Dennis-Otto/repo-blueprint/commit/dc72df61af761670869316b1e422fb90e0c96808))
-
+- **Biome of a Node package leaves out the diagrams that `scripts/diagrams.sh` draws:** `biome ci` in the step *Lint and format* failed on every drawn picture, for code that Mermaid writes and that the next drawing writes again. A project can now delete its own `docs/images/diagrams/biome.jsonc` and the line for it in `exclude_docs` of `mkdocs.yml`.
+- **A release pull request of a Chrome extension passes Biome:** release-please puts each item of an array in `extension/manifest.json` on a line of its own, where Biome wanted a short array on one line, so `biome ci` failed on every release pull request. `biome.jsonc` now leaves the format of the manifest alone, and a project can delete an `extension/biome.jsonc` that did only this.
+- **Stylesheets and HTML are indented like the scripts beside them:** `.editorconfig` gave CSS and HTML four spaces and scripts two, and Biome formats CSS with the setting of `.editorconfig`. Both now have two spaces, as the stylesheets of the blueprint have. `npx --no -- biome check --write .`, which the fix bot runs too, brings the stylesheets of a Node package into this format.
 
 ### Performance
 
-* keep the temporary folders of the tests in memory on a runner, and run the blueprint's own tests on Python 3.14 ([#570](https://github.com/Dennis-Otto/repo-blueprint/issues/570)) ([ea700c9](https://github.com/Dennis-Otto/repo-blueprint/commit/ea700c9bd4e70a8961d251f3fb7373b0f1be383b))
+- **The tests of a Python project run faster on a runner:** on Linux in the CI, `scripts/check.sh` keeps their temporary folders in memory when at least 4 GB are free there and no `TMPDIR` is set. Windows, a job in a container and your own machine stay on the disk. Later steps of the script stay on the disk. A project whose tests write several gigabytes to temporary folders names a folder on the disk with `--basetemp` in the `addopts` of pytest in its `pyproject.toml`. Nothing else changes for a repository.
+- **The tests of the blueprint take about a third less time:** its own checks run on Python 3.14, on which coverage measures with `sys.monitoring`, the Pythons that its tests start share their bytecode, and the tests read YAML with the parser of libyaml. The check on Windows keeps running the tests on Python 3.12, which the tool of every repository still runs on, and now also runs on `main`, so that a failure on 3.12 after a merge opens an issue. `blueprint.py` writes bytecode when `PYTHONPYCACHEPREFIX` names a folder for it, and starts faster from then on; without that variable it leaves none, as before.
 
 ## [1.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.5.0...v1.6.0) (2026-11-01)
 
