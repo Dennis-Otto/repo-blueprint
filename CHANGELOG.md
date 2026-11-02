@@ -11,6 +11,15 @@ requests when there is none.
 
 - **`scripts/check.sh` runs the checks of a project's website too:** after its local strict build it checked only what the hooks of the website promise, so a project's `scripts/check-site.sh` failed for the first time in the check *docs* of the pull request, unless its author remembered to run it by hand. Where that script exists, the step *Website* now runs it on the website it built, and fails with what the script found. The script gets that folder as its argument, which is no longer always `site`, so it must read the folder from its argument.
 
+## [1.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.0...v1.6.1) (2026-11-02)
+
+
+### Bug fixes
+
+* Biome of the Node stack skips the diagrams that scripts/diagrams.sh draws ([#574](https://github.com/Dennis-Otto/repo-blueprint/issues/574)) ([b32b6b0](https://github.com/Dennis-Otto/repo-blueprint/commit/b32b6b0a787b24c057b3b0a8702e68f0d4f78a1a))
+* **deps:** update dependency uv to v0.13.5 ([#580](https://github.com/Dennis-Otto/repo-blueprint/issues/580)) ([e3e3c0a](https://github.com/Dennis-Otto/repo-blueprint/commit/e3e3c0a41690f9041c796c5aa0df334a9b39c0c1))
+* scripts/check.sh runs the project's check-site.sh ([#578](https://github.com/Dennis-Otto/repo-blueprint/issues/578)) ([dc72df6](https://github.com/Dennis-Otto/repo-blueprint/commit/dc72df61af761670869316b1e422fb90e0c96808))
+
 ## [1.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.5.0...v1.6.0) (2026-11-01)
 
 ### Features
