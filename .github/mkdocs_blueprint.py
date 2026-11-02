@@ -1460,10 +1460,12 @@ def versions(output: str, page: Any, config: Any, found: Languages) -> str:
     Search engines take only a full address, and x-default for the readers of a
     language that the website lacks. A version that only shows the page of the
     default language, untranslated, is no version of its own: a page with no other
-    version names none, and an untranslated page names the page of the default
-    language as its canonical address.
+    version names none, and an untranslated page names none either, even when
+    another further language has translated the page, and names the page of the
+    default language as its canonical address.
     """
     here = urljoin(config.site_url or "", page.url)
+    copy = untranslated(page, config)
     alternates = getattr(page.file, "alternates", None) or {}
     translated = {
         language for language, file in alternates.items() if file.locale == language
@@ -1474,7 +1476,7 @@ def versions(output: str, page: Any, config: Any, found: Languages) -> str:
         language = attrs.get("hreflang")
         if attrs.get("rel") == "alternate" and language in translated:
             named[str(language)] = urljoin(here, attrs.get("href") or "")
-    if found.default in named and len(named) > 1:
+    if found.default in named and len(named) > 1 and not copy:
         named["x-default"] = named[found.default]
     else:
         named = {}
@@ -1484,7 +1486,7 @@ def versions(output: str, page: Any, config: Any, found: Languages) -> str:
     )
     default = alternates.get(found.default)
     canonical = None
-    if default is not None and untranslated(page, config):
+    if default is not None and copy:
         canonical = urljoin(config.site_url or "", default.url)
 
     def replace(match: re.Match[str]) -> str:
