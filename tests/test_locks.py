@@ -534,7 +534,7 @@ def test_the_compile_asks_uv_for_the_python_and_system_of_the_file(
         "--generate-hashes",
         "--python-version=3.14.8",
         "requirements.in",
-        "--python-platform=linux",
+        "--python-platform=x86_64-manylinux_2_39",
         "--no-header",
         "--quiet",
     ]
@@ -613,7 +613,7 @@ def test_the_compile_of_a_file_of_pip_compile_means_the_same_in_uv(
         "requirements.in",
         "--python-version=3.12.99",
         *of_uv,
-        "--python-platform=linux",
+        "--python-platform=x86_64-manylinux_2_39",
         "--no-header",
         "--quiet",
     ]
@@ -643,9 +643,11 @@ def test_a_lock_file_that_compiles_to_other_pins_fails_and_fixes_itself(
 
     assert main(["locks", "--compile", "--fix"], root=root) == 0
 
-    assert capsys.readouterr().out.splitlines()[0] == (
-        "requirements.txt: compiled again with the command in its header."
-    )
+    assert capsys.readouterr().out.splitlines() == [
+        "requirements.txt: compiled again with the command in its header.",
+        "Compiled 1 of the 1 compared lock file(s) of pip-compile again; the others "
+        "keep their pins.",
+    ]
     # The header stays, with the Python and the tool of the file, above the pins of uv.
     assert (root / "requirements.txt").read_text(encoding="utf-8") == (
         PIP_REQUIREMENTS_HEADER + fake_uv.body
@@ -1097,6 +1099,27 @@ def test_a_lock_file_compiles_for_its_own_python_and_for_linux(
 
     assert after.startswith(header)
     assert re.findall(r"^(\S+==\S+)", after, re.M) == ["alpha==1.0", "linux==1.0"]
+
+
+@needs_git
+@needs_uv
+@pytest.mark.usefixtures("no_uv_cache")
+def test_a_pin_whose_only_wheel_needs_the_glibc_of_the_runners_stays(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # On manylinux_2_28, which uv takes "linux" for, it would fall back to alpha 1.0.
+    wheel(tmp_path, "alpha", "1.0")
+    wheel(tmp_path, "alpha", "2.0", tag="py3-none-manylinux_2_34_x86_64")
+    root = repository(
+        tmp_path, {"requirements.txt": PIP_REQUIREMENTS_HEADER + "alpha==2.0\n"}
+    )
+    sources(root, "alpha")
+    locked = fixed(root, capsys)
+    assert re.findall(r"^(\S+==\S+)", locked, re.M) == ["alpha==2.0"]
+
+    assert main(["locks", "--compile"], root=root) == 0
+    assert capsys.readouterr().out == PASSED.format(1)
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == locked
 
 
 @needs_git

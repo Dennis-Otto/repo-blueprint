@@ -87,8 +87,10 @@ NOT_FOR_PIP = {
 PATCH = ".99"
 # What pip-compile leaves out of a lock file without --allow-unsafe.
 UNSAFE = ("distribute", "pip", "setuptools")
-# The system of Renovate and the CI, for which a lock file holds unless it is universal.
-SYSTEM = "linux"
+# The system of Renovate and the CI, for which a lock file holds unless it is universal:
+# Ubuntu 24.04 with its glibc. For uv, "linux" means manylinux_2_28, where a pin whose
+# only wheels ask for a newer glibc has no wheel, and uv would pick an older version.
+SYSTEM = "x86_64-manylinux_2_39"
 # A line of a lock file that pins a package: name[extras]==version, or name @ address.
 PIN = re.compile(
     r"(?P<name>[A-Za-z0-9][\w.-]*)(?:\[[^\]]*\])?\s*"

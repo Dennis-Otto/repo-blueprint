@@ -885,6 +885,7 @@ def locks_compile_command(arguments: argparse.Namespace, root: Path) -> int:
         return 0
     failed = False
     compared = 0
+    written = 0
     with ThreadPoolExecutor() as pool:
         results = list(pool.map(lambda name: locks.compare(root, name, uv), names))
     for found in results:
@@ -897,6 +898,7 @@ def locks_compile_command(arguments: argparse.Namespace, root: Path) -> int:
             print(f"{found.name}: uv can't compile its sources:\n{found.failure}")
         elif found.differences and arguments.fix:
             (root / found.name).write_bytes(found.content)
+            written += 1
             print(f"{found.name}: compiled again with the command in its header.")
         elif found.differences:
             failed = True
@@ -912,6 +914,12 @@ def locks_compile_command(arguments: argparse.Namespace, root: Path) -> int:
             "that it pins; sources that uv can't compile need a fix of their own."
         )
         return 1
+    if written:
+        print(
+            f"Compiled {written} of the {compared} compared lock file(s) of pip-compile "
+            "again; the others keep their pins."
+        )
+        return 0
     print(
         "Compiled again with the command in its header, each of the "
         f"{compared} compared lock file(s) of pip-compile keeps its pins."
