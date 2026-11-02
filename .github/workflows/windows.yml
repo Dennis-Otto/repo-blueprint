@@ -2,8 +2,11 @@ name: Windows
 
 # The checks of scripts/check.sh on Windows, in Git Bash, as a contributor on Windows
 # runs them before a push; the other workflows run on Linux only. Every week, and for
-# a pull request that changes the code, the tests, the template they render (whose
-# paths must be valid on Windows too) or what they run with. Not a required check.
+# a pull request or a push to main that changes the code, the tests, the template they
+# render (whose paths must be valid on Windows too) or what they run with. Not a
+# required check, so a pull request can merge before it ends: a red run on main is the
+# one that the daily look of the bot-health bot opens an issue for, as this is the only
+# full run on the oldest Python.
 # This workflow belongs to the blueprint alone.
 # https://github.com/Dennis-Otto/repo-blueprint
 
@@ -18,7 +21,21 @@ on:
       - copier.yml
       - pyproject.toml
       - requirements-dev.txt
-      - .python-version
+      - .gitattributes
+      - scripts/check.sh
+      - scripts/diagrams.sh
+      - .github/workflows/windows.yml
+  push:
+    branches: [main]
+    paths:
+      - "**.py"
+      - "blueprint/**"
+      - "tests/**"
+      - "template/**"
+      - "includes/**"
+      - copier.yml
+      - pyproject.toml
+      - requirements-dev.txt
       - .gitattributes
       - scripts/check.sh
       - scripts/diagrams.sh
@@ -31,8 +48,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 defaults:
   run:
@@ -57,9 +74,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The oldest Python that the tool of every repository runs with, as the Python of
+      # the runner: .python-version of the blueprint is the newest one, on which coverage
+      # measures faster, so this check is the one that runs the tests with the oldest.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version-file: .python-version
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - name: Install the hash-pinned tools

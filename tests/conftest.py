@@ -7,7 +7,7 @@ import sys
 from collections.abc import Iterator
 
 import pytest
-from shared import GIT_REPOSITORY_VARIABLES
+from shared import GIT_REPOSITORY_VARIABLES, run_folder
 
 import blueprint.github
 
@@ -31,10 +31,16 @@ def bytecode_apart(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     next to the code. The processes of pytest-xdist share the projects that the tests
     of the template render, and a test that copies a project would otherwise meet a
     file of __pycache__ that the Python of another test is writing there. The same goes
-    for what a test loads into this Python, as a hook of a website."""
+    for what a test loads into this Python, as a hook of a website. They share the
+    folder as well: in such a folder Python finds no bytecode of its standard library
+    and its packages, and compiles what a test imports the first time, as Copier with
+    pydantic, a second of each process otherwise. Python writes a file of bytecode
+    under another name and renames it, so that no process reads half of one."""
     before = os.environ.get("PYTHONPYCACHEPREFIX")
     prefix_before = sys.pycache_prefix
-    folder = str(tmp_path_factory.mktemp("pycache"))
+    shared_folder = run_folder(tmp_path_factory) / "pycache"
+    shared_folder.mkdir(exist_ok=True)
+    folder = str(shared_folder)
     os.environ["PYTHONPYCACHEPREFIX"] = folder
     sys.pycache_prefix = folder
     yield
