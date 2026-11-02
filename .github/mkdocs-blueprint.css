@@ -79,8 +79,23 @@
   display: none;
 }
 
-/* A video in place of a GIF keeps the width of the column, as the GIF did. */
+/* A video in place of a GIF is as wide as the GIF was: the width that its file or its
+   <img> names, and no wider than the column. */
 .md-typeset video.blueprint-video {
   display: block;
+  height: auto;
+  max-width: 100%;
+}
+
+/* The whole column for a GIF whose size the website can't read. */
+.md-typeset video.blueprint-video:not([width]) {
   width: 100%;
+}
+
+/* A video for one scheme alone hides in the other, as Material hides a picture with
+   #only-light or #only-dark, and doesn't play or load there; a browser does load its
+   poster, which is small and which blueprint.py site-check counts. */
+[data-md-color-scheme="default"] .md-typeset video.blueprint-only-dark,
+[data-md-color-scheme="slate"] .md-typeset video.blueprint-only-light {
+  display: none;
 }
