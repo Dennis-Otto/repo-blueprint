@@ -69,6 +69,7 @@ from blueprint.diagrams import (
     report,
 )
 from blueprint.fixes import (
+    MAIN_EVENTS,
     Fixes,
     FixLoop,
     collect,
@@ -1660,7 +1661,7 @@ def add_fix_parsers(
             "--folder", type=Path, required=True, help="the fixes, one folder per check"
         )
     collect_parser.add_argument(
-        "--event", required=True, choices=["pull_request", "push"]
+        "--event", required=True, choices=["pull_request", *MAIN_EVENTS]
     )
     collect_parser.add_argument("--branch", required=True, help="the branch of the run")
     collect_parser.add_argument("--pull", default="", help="the pull request, if named")

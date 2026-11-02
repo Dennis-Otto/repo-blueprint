@@ -8,6 +8,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Each week on main as well, so that what no commit changes, such as a new rule of a
+  # tool, fails here and repairs itself through the fix bot, not in the next pull
+  # request. At the time of Lint, so that one commit of the bot holds what both fix.
+  schedule:
+    - cron: "30 4 * * 3"
   workflow_dispatch:
 
 permissions:
@@ -68,7 +73,11 @@ jobs:
       # pull request with the fixes of main.
       - name: Fix what a command can fix
         id: fix
-        if: failure() && contains(fromJSON('["pull_request", "push"]'), github.event_name)
+        # On a pull request, after a push and in the weekly run on main, by its schedule or
+        # by hand, as bot health starts a schedule that GitHub missed.
+        if: >-
+          failure() && (contains(fromJSON('["pull_request", "push", "schedule"]'), github.event_name) ||
+          (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch))
         env:
           CHECK: "check (container)"
           EVENT: ${{ github.event_name }}

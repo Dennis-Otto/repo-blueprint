@@ -62,6 +62,11 @@ RELEASE = ".github/workflows/release.yml"
 RUN = "https://github.com/Dennis-Otto/repo-blueprint/actions/runs/7"
 
 
+# The newest commit of main, and one that it has left.
+HEAD = "a" * 40
+LEFT = "b" * 40
+
+
 def stamp(when: datetime) -> str:
     return when.isoformat().replace("+00:00", "Z")
 
@@ -78,9 +83,11 @@ def run_of(
     conclusion: str | None = "failure",
     attempt: int = 1,
     created: datetime = NOW - timedelta(hours=3),
+    sha: str = HEAD,
 ) -> dict[str, Any]:
     return {
         "id": number,
+        "head_sha": sha,
         "name": name,
         "path": path,
         "event": event,
@@ -181,6 +188,7 @@ class FakeGitHub:
                 r"&exclude_pull_requests=true&per_page=1",
                 self.runs_of_event,
             ),
+            (r"/git/ref/heads/main", self.head_of_main),
             (r"/actions/workflows/(\d+)/enable", self.enable),
             (r"/actions/workflows/(\d+)/dispatches", self.dispatch),
         ):
@@ -189,6 +197,9 @@ class FakeGitHub:
                 result: tuple[int, Any] = handler(method, body, *match.groups())
                 return result
         raise AssertionError(f"unexpected request {method} {path}")
+
+    def head_of_main(self, method: str, body: Any) -> tuple[int, Any]:
+        return 200, {"object": {"sha": HEAD}}
 
     def repository(self, method: str, body: Any) -> tuple[int, Any]:
         if not self.known:
@@ -943,6 +954,85 @@ def test_the_daily_look_reports_what_the_events_missed(
     ]
     assert github.reruns == []
     assert github.dispatched == []
+
+
+LINT = SCHEDULED.replace("  schedule:", "  pull_request:\n  schedule:")
+
+
+def failed_lint(github: FakeGitHub, tmp_path: Path, sha: str) -> None:
+    """A weekly run of Lint that failed at a commit, in time for its schedule, so that
+    only a stale failure can start it."""
+    write(tmp_path, 1, LINT)
+    github.workflows = [workflow(1, "Lint")]
+    github.workflow_runs[1] = [
+        run_of(
+            10,
+            name="Lint",
+            path=".github/workflows/w1.yml",
+            created=NOW - timedelta(hours=7),
+            sha=sha,
+        )
+    ]
+
+
+def test_the_daily_look_ignores_a_failure_of_lint_at_a_commit_that_main_left(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Lint doesn't run after a push: a pull request reaches main only when it passes.
+    # Its weekly run failed, and the pull request of the fix bot took the fix to main.
+    failed_lint(github, tmp_path, LEFT)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert summary.splitlines()[6:] == [
+        "| `Lint` | failed at bbbbbbb, which `main` has left |"
+    ]
+    assert github.issues == {}
+    assert github.dispatched == []
+
+
+def test_the_daily_look_starts_lint_again_for_its_issue_once_main_left_the_failure(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Only a run on main can close the issue, and without this Lint has none for a week.
+    failed_lint(github, tmp_path, HEAD)
+    sweep(api_of(github), REPO, tmp_path, NOW)
+    assert len(github.issues) == 1
+    failed_lint(github, tmp_path, LEFT)
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert summary.splitlines()[6:] == [
+        "| `Lint` | failed at bbbbbbb, which `main` has left; its issue waits for a "
+        "run of the head of `main`: started |"
+    ]
+    assert github.dispatched == [(1, {"ref": "main", "inputs": {}})]
+
+
+def test_the_daily_look_reports_a_failure_of_lint_at_the_head_of_main(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    failed_lint(github, tmp_path, HEAD)
+
+    sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert len(github.issues) == 1
+    assert github.dispatched == []
+
+
+def test_the_daily_look_reports_a_failure_of_any_other_check_as_ever(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # A run after a push tells the state of main, which its failure may still be.
+    failed_lint(github, tmp_path, LEFT)
+    github.workflows = [workflow(1, "CI (python)")]
+    github.workflow_runs[1][0]["name"] = "CI (python)"
+
+    sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert len(github.issues) == 1
+    assert ("GET", f"repos/{REPO}/git/ref/heads/main") not in github.calls
 
 
 def test_the_daily_look_starts_a_workflow_whose_schedule_github_missed(
