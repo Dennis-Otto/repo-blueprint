@@ -510,6 +510,10 @@ def test_a_repository_without_a_commit_fails(
     assert "HEAD could not be read" in capsys.readouterr().err
 
 
+# In the copy of the mutation tests, variants.py is the code with the mutants, which
+# fails in a process of its own outside of the copy, where mutmut finds no
+# configuration.
+@pytest.mark.mutation_unsafe
 def test_the_plan_runs_as_a_script(blueprint: Path, tmp_path: Path) -> None:
     # As the job runs it, from a checkout, with its own folder on the import path.
     done = subprocess.run(
@@ -523,6 +527,9 @@ def test_the_plan_runs_as_a_script(blueprint: Path, tmp_path: Path) -> None:
     assert "--base" in done.stdout
 
 
+# It asks Git for the files of the blueprint, which the copy of the mutation tests has
+# no Git for.
+@pytest.mark.mutation_unsafe
 def test_the_template_of_the_blueprint_shows_a_lock_file_in_one_kind(
     tmp_path: Path,
 ) -> None:

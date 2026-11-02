@@ -356,6 +356,9 @@ def test_adopt_writes_the_reference_pages_anew(
     )
 
 
+# In the copy of the mutation tests, reference.py is the code with the mutants, and
+# what mutmut puts into it imports mutmut.
+@pytest.mark.mutation_unsafe
 def test_the_job_of_the_sync_can_import_what_the_real_reference_script_needs() -> None:
     # The job adopt runs reference.py on the Python of the runner, with nothing installed
     # but PyYAML of its image; the fake script of the tests above can't show that.
