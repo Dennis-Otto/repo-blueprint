@@ -574,6 +574,11 @@ def test_who_sets_a_name() -> None:
         " may use: `gh secret set KEY --env pypi` and"
         " `gh secret set KEY --env release`"
     )
+    # The prompt of gh reads one line, and a private key has several.
+    key = Name("APP_PRIVATE_KEY", "secrets", environments={"signing"})
+    assert "`gh secret set APP_PRIVATE_KEY --env signing < KEY_FILE`" in (
+        reference.set_by(key, answers)
+    )
 
 
 def test_the_page_of_the_variables(repository: Path) -> None:

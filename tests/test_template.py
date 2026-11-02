@@ -88,7 +88,13 @@ from blueprint.locks import why_renovate_skips
 from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
-from blueprint.settings import PERMISSIONS, Settings, allows
+from blueprint.settings import (
+    PERMISSIONS,
+    Drift,
+    Settings,
+    allows,
+    check_environments,
+)
 from blueprint.site_check import check as check_site
 from blueprint.stale_runs import checks_of
 from blueprint.versions import CONFIG, MANIFEST
@@ -1127,6 +1133,59 @@ def test_the_signing_key_of_a_nextcloud_app_is_only_in_the_step_that_signs() -> 
     # Nothing of the project runs and nothing is downloaded while the key is on disk.
     for command in ("scripts/check-package.sh", "krankerl", "curl"):
         assert command not in sign, command
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_store(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The first step of #530, which moves the signing key out of reach of the key of
+    # the release app. No other kind holds these secrets.
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    if kind != "nextcloud-app":
+        assert not {"signing", "appstore"} & settings.environments.keys()
+        return
+    assert settings.environments["signing"]["secrets"] == ["APP_PRIVATE_KEY"]
+    assert settings.environments["appstore"]["secrets"] == ["APPSTORE_TOKEN"]
+    # On GitHub neither exists yet: the settings bot creates each for main alone, and
+    # the check names the command for each secret, as the steps of #530 give them. The
+    # key comes from its file, because the prompt of gh would store only its first line.
+    repo = "octo-org/demo"
+    nothing_yet = SimpleNamespace(get=lambda _path: None, get_all=lambda _path: [])
+    split = {name: settings.environments[name] for name in ("signing", "appstore")}
+    assert check_environments(cast(Api, nothing_yet), repo, split) == [
+        Drift("environment signing", "main only", "missing"),
+        Drift(
+            "secret APP_PRIVATE_KEY of signing",
+            "set",
+            "missing",
+            manual=f"gh secret set APP_PRIVATE_KEY --env signing --repo {repo} < KEY_FILE",
+        ),
+        Drift("environment appstore", "main only", "missing"),
+        Drift(
+            "secret APPSTORE_TOKEN of appstore",
+            "set",
+            "missing",
+            manual=f"gh secret set APPSTORE_TOKEN --env appstore --repo {repo}",
+        ),
+    ]
+    # Each job that takes one of these secrets enters an environment that the settings
+    # say holds it, so that no release stops while the jobs move, one by one.
+    reading = set()
+    for name, flow in workflows(projects[kind]).items():
+        for job in load_yaml(flow)["jobs"].values():
+            for secret in ("APP_PRIVATE_KEY", "APPSTORE_TOKEN"):
+                if f"secrets.{secret}" in json.dumps(job):
+                    reading.add((name, secret))
+                    environment = reference.environment_of(job)
+                    assert environment, (name, secret)
+                    assert secret in settings.environments[environment]["secrets"]
+    assert reading == {
+        ("build-release.yml", "APP_PRIVATE_KEY"),
+        ("register-app.yml", "APP_PRIVATE_KEY"),
+        ("register-app.yml", "APPSTORE_TOKEN"),
+        ("release.yml", "APPSTORE_TOKEN"),
+    }
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])

@@ -34,7 +34,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 ## Delivery
 
-Merging the release pull request builds the package with krankerl, signs it with the key of the app and publishes it in the App Store, with its SBOM and the signed provenance of SLSA Build Level 3. The environment `release` holds the secrets `APP_PRIVATE_KEY` and `APPSTORE_TOKEN`.
+Merging the release pull request builds the package with krankerl, signs it with the key of the app and publishes it in the App Store, with its SBOM and the signed provenance of SLSA Build Level 3. The environment `release` holds the secrets `APP_PRIVATE_KEY` and `APPSTORE_TOKEN`, from which the workflows take them. The environment `signing` holds a copy of the key and `appstore` a copy of the token, for the day the workflows move there, so that the build can reach only the key that signs the app ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). The settings bot creates both for `main` alone, and until you set the copies, it fails and names the commands, as the checklist does.
 
 ## Once by hand
 
