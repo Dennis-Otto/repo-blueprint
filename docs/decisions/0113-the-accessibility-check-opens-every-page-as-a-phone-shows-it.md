@@ -7,7 +7,7 @@
 
 The check of [decision 0041](0041-every-website-is-accessible-and-quick-and-a-check-proves-it.md) opened every page at 1280 px wide. Nothing looked at the layout that CSS switches to on a narrow screen, and nothing measured whether a page scrolls sideways there, which WCAG 2.2 rules out in its criterion 1.4.10 Reflow. axe-core has no rule for that: it reads the page and doesn't scroll it.
 
-`dennis-otto.github.io` found such a page by hand: the table of its Trust page scrolled sideways at 375 px. Its fix turns each row into a card on a narrow screen. A later change of CSS, of content or of the theme could bring the problem back with every check green, in any repository that uses the blueprint.
+`dennis-otto.github.io` found such a page by hand: the table of its Trust page scrolled sideways at 375 px. Its fix turns each row into a card on a narrow screen. A page that scrolls as a whole can come from any later change of CSS, of content or of the theme, with every check green, in any repository that uses the blueprint.
 
 ## Options
 
@@ -31,4 +31,6 @@ The run of every page on `main` and each week takes about twice as long, and eac
 
 No repository turns red through the update. A sweep of all seven published websites at 375 px found no page that scrolls sideways, and the only finding that depends on the width is the frame of a table, which the script of the update fixes. A later page that scrolls sideways fails the pull request that brings it.
 
-A check of the width is no check of the content: a table that scrolls in its frame passes, although a card may read better on a phone.
+A check of the width is no check of the content: a table that scrolls in its frame passes, although a card may read better on a phone. So the table of that Trust page, which scrolled in its frame, would still pass if it came back: the check guards against a page that scrolls as a whole, and WCAG's exception for tables allows the frame.
+
+The measure has two limits. 375 px is the width of a phone, as the issue asked for, and not the 320 px by which WCAG 1.4.10 measures a page enlarged to 400 %, so a page that overflows only between those two widths passes. And it measures what a page shows when it opens, with only the folds of the page of the automation open: what is too wide in another closed `<details>`, or in a content tab that isn't selected, goes unmeasured.

@@ -2,8 +2,9 @@
 // page that MkDocs built into a folder, such as site/, in Chrome, in the light and in
 // the dark scheme, at the width of a desktop and of a phone, and runs axe-core on each
 // with the rules of WCAG 2.2 at the levels A and AA. At the width of a phone it also
-// measures whether the page reflows, as WCAG 1.4.10 asks: a page that scrolls sideways
-// there is a violation of the rule reflow, which names the widest element that overflows.
+// measures whether the page reflows, the criterion of WCAG 1.4.10, which itself measures
+// at 320 px: a page that scrolls sideways at this width is a violation of the rule
+// reflow, which names the widest element that overflows.
 // A violation whose impact is serious or critical fails it, with the page,
 // the rule, the elements and a link that explains the fix; the lesser ones it counts.
 // Each scheme and width has a browser of its own, whose system shows that scheme, and each page
