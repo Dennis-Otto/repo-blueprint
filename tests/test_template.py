@@ -18312,9 +18312,6 @@ ANSWERS = {
     path.stem: downstream.read(path)
     for path in sorted((ROOT / "tests/answers").glob("*.yml"))
 }
-# The canaries that the blueprint made new, with its sample code, which their own code
-# replaced since: their answers keep the sample code of their first copy.
-MADE_NEW = {"player-switch-for-autodarts"}
 
 
 def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
@@ -18329,10 +18326,12 @@ def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
     assert list(ANSWERS) == sorted(
         item.name for item in registry.members if item.canary
     )
-    assert set(ANSWERS) >= MADE_NEW
+    kinds = {item.name: item.kind for item in registry.members}
     for name, answers in ANSWERS.items():
         assert answers["owner"] == "Dennis-Otto", name
         assert answers["project_slug"] == name
+        # The kind whose page of docs/kinds/ names it, as the repository answers it.
+        assert answers["project_type"] == kinds[name], name
         # Never Copier's own, which name the version of the repository and the source.
         assert not {"_commit", "_src_path"} & set(answers), name
     # A leg of the Variants for each, with the kind of project of its answers.
@@ -18356,10 +18355,10 @@ def test_the_answers_of_each_repository_render_every_file(
     # repository answers each question: a new question gets its answer here too.
     stored = downstream.read(project / ".copier-answers.yml")
     assert {k: v for k, v in stored.items() if not k.startswith("_")} == ANSWERS[name]
-    # A repository that takes the blueprint brings its own code and tests; one that
-    # the blueprint made new started from the sample, whose website it renders.
-    assert stored["sample_code"] == (name in MADE_NEW)
-    assert (project / "docs/index.md").exists() == (name in MADE_NEW)
+    # A repository brings its own code and tests, also one that the blueprint made new
+    # once: an update that still rendered the sample would change them.
+    assert stored["sample_code"] is False
+    assert not (project / "docs/index.md").exists()
 
 
 def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
@@ -19398,7 +19397,7 @@ class GuideReleases:
         self.commit(self.blueprint)
         self.git(self.blueprint, "tag", tag)
 
-    def copy(self, tag: str, kind: str) -> None:
+    def copy(self, tag: str, kind: str, *, sample_code: bool = False) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             run_copy(
@@ -19410,7 +19409,7 @@ class GuideReleases:
                     "project_slug": "demo",
                     "description": "A demo",
                     "project_type": kind,
-                    "sample_code": False,
+                    "sample_code": sample_code,
                 },
                 defaults=True,
                 vcs_ref=tag,
@@ -19446,6 +19445,54 @@ class GuideReleases:
 
 
 VULNERABILITY = "or at once when it fixes a vulnerability."
+
+
+def test_a_repository_made_from_the_sample_answers_no_later_and_keeps_its_own_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As docs/faq.md says: the update takes each file of the sample for the template's,
+    # which the new answer no longer renders, and deletes it, also where the code of the
+    # repository replaced it. So player-switch-for-autodarts brought them back.
+    releases = GuideReleases(tmp_path, monkeypatch)
+    sample = releases.blueprint / "template/[% if sample_code %]sample.md[% endif %]"
+    sample.write_text("The sample.\n", encoding="utf-8", newline="\n")
+    releases.release("v1.0.0", releases.current)
+    releases.copy("v1.0.0", "chrome-extension", sample_code=True)
+    own = releases.project / "sample.md"
+    own.write_text("The code of the repository.\n", encoding="utf-8", newline="\n")
+    releases.commit(releases.project)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        # The release that it is on, as --vcs-ref=:current: of the command line says.
+        run_update(
+            releases.project,
+            vcs_ref="v1.0.0",
+            data={"sample_code": False},
+            defaults=True,
+            overwrite=True,
+            quiet=True,
+        )
+    assert not own.exists()
+    deleted = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=D", "-z"],
+        cwd=releases.project,
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout
+    assert deleted == "sample.md\0"
+    releases.git(releases.project, "restore", "--", *deleted.split("\0")[:-1])
+    releases.commit(releases.project)
+    stored = downstream.read(releases.project / ".copier-answers.yml")
+    assert stored["sample_code"] is False
+    assert own.read_text(encoding="utf-8") == "The code of the repository.\n"
+
+    # From now on, no update touches it, whatever the sample becomes.
+    sample.write_text("Another sample.\n", encoding="utf-8", newline="\n")
+    releases.release("v2.0.0", releases.current)
+    releases.update("v2.0.0")
+    assert own.read_text(encoding="utf-8") == "The code of the repository.\n"
 
 
 def test_a_real_update_brings_the_sentence_of_an_action_and_merges_around_the_part(

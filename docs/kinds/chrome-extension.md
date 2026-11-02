@@ -58,7 +58,9 @@ This kind adds these steps:
 
 <!-- --8<-- [start:real-repository] -->
 
-No public repository of this kind follows the blueprint yet. The Variants workflow of the blueprint makes one from every change of its files and runs its checks with their real tools, and updates one from the latest release as its blueprint bot would.
+[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) is made from the blueprint: a shared Autodarts display where everyone plays under their own account and a tap on a tile switches players, without signing in again.
+
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Player Switch for Autodarts render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 

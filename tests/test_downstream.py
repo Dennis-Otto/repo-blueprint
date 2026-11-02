@@ -556,6 +556,210 @@ def test_the_answer_of_a_new_question_stays_until_the_rollout(
     )
 
 
+def fleet_entry(name: str, *, rollout: int, canary: bool) -> str:
+    """One [[repository]] of .github/fleet.toml, with every field."""
+    return (
+        f'[[repository]]\nname = "{name}"\nkind = "generic"\nrollout = {rollout}\n'
+        f'canary = {str(canary).lower()}\ntitle = "{name}"\nwhat = "a demo"\n'
+        'pitch = "It shows."\n'
+        f'title_de = "{name}"\nwhat_de = "eine Demo"\npitch_de = "Sie zeigt."\n'
+    )
+
+
+def test_a_new_canary_of_the_registry_gets_its_answers(
+    blueprint: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # One entry names the new canary, and the file of its answers comes by itself; a
+    # repository of the registry that is no canary takes none, and the file of a
+    # canary that has one is only written anew.
+    write(
+        blueprint,
+        {
+            ".github/fleet.toml": 'owner = "Dennis-Otto"\n'
+            + fleet_entry("demo", rollout=1, canary=True)
+            + fleet_entry("other", rollout=2, canary=True)
+            + fleet_entry("third", rollout=3, canary=False),
+        },
+    )
+    other = (
+        "https://raw.githubusercontent.com/Dennis-Otto/other/HEAD/.copier-answers.yml"
+    )
+    opener = Opener(
+        {
+            RAW: THEIRS,
+            other: "_commit: v1.2.0\nowner: Dennis-Otto\nproject_slug: other\n",
+        }
+    )
+
+    def fetch(url: str) -> str:
+        return downstream.download(url, opener)
+
+    assert downstream.main(["--answers"], root=blueprint, fetch=fetch) == 0
+    assert capsys.readouterr().out == (
+        "tests/answers/demo.yml: the answers of Dennis-Otto/demo\n"
+        "tests/answers/other.yml: the answers of Dennis-Otto/other\n"
+    )
+    assert (blueprint / "tests/answers/other.yml").read_text(encoding="utf-8") == (
+        downstream.HEADER.format(repository="Dennis-Otto/other")
+        + "owner: Dennis-Otto\nproject_slug: other\n"
+    )
+    assert not (blueprint / "tests/answers/third.yml").exists()
+    # Each once, in the order of their files.
+    assert opener.urls == [RAW, other]
+
+
+def test_a_new_canary_without_answers_stops_the_answers(
+    blueprint: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(
+        blueprint,
+        {
+            "tests/answers/demo.yml": None,
+            ".github/fleet.toml": 'owner = "Dennis-Otto"\n'
+            + fleet_entry("other", rollout=1, canary=True),
+        },
+    )
+
+    assert downstream.main(["--answers"], root=blueprint, fetch=lambda _: "Moved.") == 2
+    assert "holds no answers" in capsys.readouterr().err
+    assert not (blueprint / "tests/answers/other.yml").exists()
+
+
+def test_a_registry_that_cant_be_read_stops_the_answers(
+    blueprint: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write(blueprint, {".github/fleet.toml": "owner = 1\n"})
+
+    assert downstream.main(["--answers"], root=blueprint, fetch=lambda _: THEIRS) == 2
+    assert capsys.readouterr().err == (
+        "downstream.py: .github/fleet.toml names no owner\n"
+    )
+
+
+def test_an_answer_of_the_former_kind_goes_with_it(
+    blueprint: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A question that the template asks only other kinds of projects is no new question
+    # to this repository: Copier stored no answer to it, and never will. It was the
+    # answer publish_package of player-switch-for-autodarts, a Chrome extension since.
+    path = blueprint / "tests/answers/demo.yml"
+    when = "{{ project_type == 'node-package' }}"
+    write(
+        blueprint,
+        {
+            "copier.yml": COPIER
+            + "project_type:\n  type: str\n  default: generic\n"
+            + f'publish_package:\n  type: bool\n  default: true\n  when: "{when}"\n'
+            + "stack: generic\n"
+            + "never:\n  type: str\n  default: x\n  when: false\n",
+            "tests/answers/demo.yml": downstream.text_of(
+                "Dennis-Otto/demo",
+                {
+                    **ANSWERS,
+                    "never": "x",
+                    "project_type": "node-package",
+                    "publish_package": False,
+                    "stack": "node",
+                },
+            ),
+        },
+    )
+    theirs = THEIRS + "project_type: chrome-extension\n"
+
+    assert downstream.main(["--answers"], root=blueprint, fetch=lambda _: theirs) == 0
+    capsys.readouterr()
+    written = downstream.read(path)
+    assert written["project_type"] == "chrome-extension"
+    # A question that it is asked and hasn't answered yet stays until the Rollout, here
+    # in Copier's short form; those of other kinds go.
+    assert written["stack"] == "node"
+    assert "publish_package" not in written
+    assert "never" not in written
+    # And the drift names it, instead of taking it for a new question.
+    answers = downstream.read(path)
+    assert downstream.drift(
+        {**answers, "publish_package": False},
+        answers,
+        downstream.questions(blueprint, answers),
+    ) == ["publish_package"]
+
+
+def test_a_when_sees_what_it_sees_in_copier(blueprint: Path) -> None:
+    # The derived value that is never stored, the default of a question not answered
+    # yet, a yaml default and the filters of Copier: a new question behind any of them
+    # is a new question, not a difference.
+    write(
+        blueprint,
+        {
+            "copier.yml": COPIER
+            + """\
+project_type:
+  type: str
+stack:
+  type: str
+  when: false
+  default: "{{ 'node' if project_type == 'node-package' else 'x' }}"
+pinned:
+  type: yaml
+  when: false
+  default: "[1, 2]"
+count:
+  type: int
+  default: 3
+short: value
+behind_stack:
+  type: bool
+  when: "{{ stack == 'node' }}"
+behind_yaml:
+  type: bool
+  when: "{{ pinned[1] == 2 }}"
+behind_filter:
+  type: bool
+  when: "{{ stack | regex_search('^n') }}"
+behind_other:
+  type: bool
+  when: "{{ stack == 'php' }}"
+""",
+        },
+    )
+
+    asked = downstream.questions(blueprint, {"project_type": "node-package"})
+
+    assert {"behind_stack", "behind_yaml", "behind_filter", "count", "short"} <= asked
+    assert not {"stack", "pinned", "behind_other"} & asked
+    assert downstream.drift({"behind_stack": True}, {}, asked) == []
+
+
+def test_a_when_that_cant_be_rendered_fails_for_this_repository(
+    blueprint: Path,
+) -> None:
+    broken = """\
+broken:
+  type: bool
+  when: "{{ 1 | nothing }}"
+"""
+    write(blueprint, {"copier.yml": COPIER + broken})
+
+    with pytest.raises(downstream.Failed, match=r"copier\.yml can't be rendered"):
+        downstream.questions(blueprint, {})
+
+
+def test_the_real_template_asks_by_its_own_delimiters_and_defaults() -> None:
+    # The fixtures write {{ }}; copier.yml itself writes {= =}, with _envops.
+    root = Path(downstream.__file__).parent
+    answers = downstream.read(root / "tests/answers/player-switch-for-autodarts.yml")
+    assert answers["project_type"] == "chrome-extension"
+
+    asked = downstream.questions(root, answers)
+    assert "publish_package" not in asked
+    assert "stack" not in asked
+    assert "project_name" in asked
+
+    asked = downstream.questions(root, {**answers, "project_type": "node-package"})
+    assert "publish_package" in asked
+    assert "stack" not in asked
+
+
 def test_a_download_tries_three_times(
     blueprint: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
