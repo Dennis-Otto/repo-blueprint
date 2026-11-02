@@ -678,6 +678,13 @@ def fix_own_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
     return 0
 
 
+def job_output(output: str | Path | None, lines: str) -> None:
+    """Adds lines to the outputs of the step, when the job asks for them."""
+    if output:
+        with Path(output).open("a", encoding="utf-8") as file:
+            file.write(lines)
+
+
 def fix_bot_command(
     api: Api, repo: str, arguments: argparse.Namespace, root: Path
 ) -> int:
@@ -689,7 +696,7 @@ def fix_bot_command(
         number = int(arguments.pull) if arguments.pull else None
         try:
             workflows = watched(root)
-            folders = collect(
+            found = collect(
                 api,
                 repo,
                 arguments.run,
@@ -707,18 +714,20 @@ def fix_bot_command(
                 arguments.event,
                 arguments.branch,
                 number,
-                load(folders),
+                load(found.folders),
                 workflows.listed,
+                found.late,
             )
         except (FixLoop, NoList) as error:
             # The annotation in the log, the reason in the summary as well.
             print(f"::error::{error}", file=sys.stderr)
             print(error)
+            job_output(arguments.output, "stopped=true\n")
             return 1
-        if arguments.output:
-            with Path(arguments.output).open("a", encoding="utf-8") as file:
-                file.write(f"action={decided.action}\n")
-                file.write(f"pull={decided.number or ''}\n")
+        job_output(
+            arguments.output,
+            f"action={decided.action}\npull={decided.number or ''}\n",
+        )
         sys.stdout.write(decided.text)
         return 0
     fixes = kept_fixes(arguments.folder)

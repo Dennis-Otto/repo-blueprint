@@ -1109,7 +1109,7 @@ def test_without_a_list_the_bot_takes_nothing(
     assert "::error::" in captured.err
     # It stops before it asks GitHub for anything, and tells no step to commit.
     assert github.calls == []
-    assert not output.exists()
+    assert output.read_text(encoding="utf-8") == "stopped=true\n"
 
 
 def test_without_the_file_of_the_list_the_bot_stops(
@@ -1158,11 +1158,72 @@ def test_a_pull_request_whose_run_kept_no_fix_has_nothing_to_wait_for(
         wait,
     )
 
-    assert found == []
+    assert found.folders == []
     assert github.calls == [
         f"GET repos/{REPO}/actions/runs?head_sha={SHA}&event=pull_request&per_page=100",
         f"GET repos/{REPO}/actions/runs/1/artifacts?per_page=100",
     ]
+
+
+@pytest.mark.parametrize("conclusion", ["success", "cancelled", "timed_out"])
+def test_a_run_that_did_not_fail_holds_no_runner_for_what_it_kept(
+    tmp_path: Path, conclusion: str
+) -> None:
+    # The job now follows a run that passed, which may hold an artifact: a first attempt
+    # that kept a fix and passed the second time, or a fixture bot of a project's own.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Lint", conclusion=conclusion),
+        run_of(2, "CI (python)", status="in_progress", conclusion=""),
+    ]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+
+    def wait(seconds: float) -> None:
+        raise AssertionError("no wait")
+
+    found = collect(
+        api_of(github),
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path,
+        downloader(api_of(github), REPO),
+        WATCHED,
+        wait,
+    )
+
+    assert found.folders == []
+    assert not any("/artifacts" in call for call in github.calls)
+
+
+def test_a_run_that_runs_again_still_holds_its_fix(tmp_path: Path) -> None:
+    # A failed run that started again counts as running, so its artifact keeps the job.
+    github = FakeGitHub()
+    github.runs = [run_of(1, "Lint", status="in_progress", conclusion="")]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    waits = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        github.runs[0].update(status="completed", conclusion="success")
+
+    found = collect(
+        api_of(github),
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path,
+        downloader(api_of(github), REPO),
+        WATCHED,
+        wait,
+    )
+
+    assert waits
+    assert found.folders == []
 
 
 def test_a_run_with_no_fix_takes_the_fix_of_the_run_whose_job_it_replaced(
@@ -1188,7 +1249,7 @@ def test_a_run_with_no_fix_takes_the_fix_of_the_run_whose_job_it_replaced(
         Watched(frozenset({"Lint", "Links"}), frozenset({"Lint"})),
     )
 
-    assert load(found).files == {"README.md": b"# Fixed\n"}
+    assert load(found.folders).files == {"README.md": b"# Fixed\n"}
 
 
 @pytest.mark.parametrize(
@@ -1259,14 +1320,18 @@ def test_the_bot_waits_for_the_other_checks_that_fix_and_takes_all_their_fixes(
     )
 
     assert waits == [30, 30]
-    assert found == [tmp_path / "1-fixes-markdown", tmp_path / "2-fixes-check"]
+    assert found.late == ()
+    assert found.folders == [tmp_path / "1-fixes-markdown", tmp_path / "2-fixes-check"]
     # Only the runs that failed kept fixes.
     downloads = [call for call in github.calls if call.startswith("gh run download")]
     assert downloads == [
         f"gh run download 1 --repo {REPO} --name fixes-markdown --dir {tmp_path / '1-fixes-markdown'}",
         f"gh run download 2 --repo {REPO} --name fixes-check --dir {tmp_path / '2-fixes-check'}",
     ]
-    assert load(found).files == {"README.md": b"# Fixed\n", "app.py": b"x = 2\n"}
+    assert load(found.folders).files == {
+        "README.md": b"# Fixed\n",
+        "app.py": b"x = 2\n",
+    }
 
 
 def test_the_bot_waits_only_a_while(tmp_path: Path) -> None:
@@ -1294,7 +1359,9 @@ def test_the_bot_waits_only_a_while(tmp_path: Path) -> None:
     )
 
     assert len(waits) == blueprint.fixes.WAITS
-    assert found == [tmp_path / "1-fixes-markdown"]
+    assert found.folders == [tmp_path / "1-fixes-markdown"]
+    # It says which one still runs, from the same look as the fixes that it downloaded.
+    assert found.late == ("CI (python)",)
 
 
 def test_a_check_in_a_workflow_of_the_project_waits_with_the_others(
@@ -1337,7 +1404,7 @@ def test_a_check_in_a_workflow_of_the_project_waits_with_the_others(
     )
 
     assert waits == [30]
-    assert load(found).files == {
+    assert load(found.folders).files == {
         "README.md": b"# Fixed\n",
         "tests/e2e/snapshot.txt": b"new\n",
     }
@@ -1372,7 +1439,7 @@ def test_the_bot_waits_for_no_workflow_that_keeps_no_fix(tmp_path: Path) -> None
         wait,
     )
 
-    assert load(found).files == {"README.md": b"# Fixed\n"}
+    assert load(found.folders).files == {"README.md": b"# Fixed\n"}
 
 
 def test_every_workflow_of_the_list_counts_also_without_a_step_on_main(
@@ -1398,7 +1465,7 @@ def test_every_workflow_of_the_list_counts_also_without_a_step_on_main(
         watched(homedarts(tmp_path / "main")),
     )
 
-    assert load(found).files == {"docs/card.md": b"# Card\n"}
+    assert load(found.folders).files == {"docs/card.md": b"# Card\n"}
 
 
 def test_a_workflow_off_the_list_of_main_keeps_nothing_for_the_bot(
@@ -1429,7 +1496,7 @@ def test_a_workflow_off_the_list_of_main_keeps_nothing_for_the_bot(
         watched(homedarts(tmp_path / "main")),
     )
 
-    assert load(found).files == {"README.md": b"# Fixed\n"}
+    assert load(found.folders).files == {"README.md": b"# Fixed\n"}
     assert not any("fixes-mine" in call for call in github.calls)
 
 
@@ -1463,7 +1530,7 @@ def test_only_a_run_that_failed_or_docs_on_main_keeps_fixes(tmp_path: Path) -> N
         watched(homedarts(tmp_path / "main")),
     )
 
-    assert found == [tmp_path / "fixes/1-fixes-lint"]
+    assert found.folders == [tmp_path / "fixes/1-fixes-lint"]
 
 
 def test_docs_keeps_the_fixes_of_main_alone_also_when_it_passes(
@@ -1491,7 +1558,7 @@ def test_docs_keeps_the_fixes_of_main_alone_also_when_it_passes(
 
     # Another check that passed keeps nothing that counts, such as what an earlier
     # attempt of it kept.
-    assert found == [tmp_path / "1-fixes-docs"]
+    assert found.folders == [tmp_path / "1-fixes-docs"]
 
 
 @pytest.mark.parametrize("event", MAIN_EVENTS)
@@ -1505,7 +1572,7 @@ def test_main_looks_at_its_checks_also_when_the_run_kept_nothing(
     assert (
         collect(
             api, REPO, 2, SHA, event, "main", tmp_path, downloader(api, REPO), WATCHED
-        )
+        ).folders
         == []
     )
     assert any("actions/runs?head_sha" in call for call in github.calls)
@@ -1538,8 +1605,11 @@ def test_main_takes_the_fixes_of_a_commit_from_each_event_that_ran_its_checks(
         api, REPO, 2, SHA, "schedule", "main", tmp_path, downloader(api, REPO), WATCHED
     )
 
-    assert found == [tmp_path / "2-fixes-lint", tmp_path / "3-fixes-check"]
-    assert load(found).files == {"README.md": b"# Fixed\n", "app.py": b"x = 2\n"}
+    assert found.folders == [tmp_path / "2-fixes-lint", tmp_path / "3-fixes-check"]
+    assert load(found.folders).files == {
+        "README.md": b"# Fixed\n",
+        "app.py": b"x = 2\n",
+    }
 
 
 def test_a_weekly_run_doesnt_take_up_a_check_that_passed_since(tmp_path: Path) -> None:
@@ -1564,7 +1634,7 @@ def test_a_weekly_run_doesnt_take_up_a_check_that_passed_since(tmp_path: Path) -
             tmp_path,
             downloader(api, REPO),
             WATCHED,
-        )
+        ).folders
         == []
     )
 
@@ -1590,7 +1660,7 @@ def test_docs_keeps_a_fix_of_main_only_in_the_run_of_a_push(tmp_path: Path) -> N
             tmp_path,
             downloader(api, REPO),
             WATCHED,
-        )
+        ).folders
         == []
     )
     assert not any("run download" in call for call in github.calls)
@@ -1617,7 +1687,7 @@ def test_main_takes_the_fix_of_a_workflow_of_the_project_too(tmp_path: Path) -> 
         downloader(api, REPO),
         watched(homedarts(tmp_path / "main")),
     )
-    fixes = load(found)
+    fixes = load(found.folders)
 
     assert fixes.files == {"app.py": b"x = 2\n"}
     assert plan(api, REPO, SHA, "push", "main", None, fixes).action == "pull-request"
@@ -2543,16 +2613,24 @@ def fix_bot_starts(
     branch: str = "feature",
     head: str = REPO,
     fork: bool = False,
+    heads: Sequence[str] = (SHA,),
 ) -> bool:
     """Whether the job of the fix bot starts after a run, by its condition, whose few
-    expressions Python reads alike."""
+    expressions Python reads alike. heads are those of the open pull requests of its
+    branch, which the event names."""
     condition = condition_of(workflow_steps.job("after-checks.yml", "fixes"))
     expression = re.sub(r"!(?!=)", " not ", condition)
     expression = expression.replace("&&", " and ").replace("||", " or ")
+    expression = expression.replace(
+        "contains(github.event.workflow_run.pull_requests.*.head.sha, "
+        "github.event.workflow_run.head_sha)",
+        "github.event.workflow_run.head_sha in heads",
+    )
     run = SimpleNamespace(
         name=name,
         event=event,
         conclusion=conclusion,
+        head_sha=SHA,
         head_branch=branch,
         head_repository=SimpleNamespace(full_name=head),
     )
@@ -2560,6 +2638,7 @@ def fix_bot_starts(
         eval(
             expression,
             {
+                "heads": heads,
                 "github": SimpleNamespace(
                     repository=REPO,
                     event=SimpleNamespace(
@@ -2569,7 +2648,6 @@ def fix_bot_starts(
                 ),
                 "contains": lambda items, item: item in items,
                 "fromJSON": json.loads,
-                "startsWith": str.startswith,
             },
         )
     )
@@ -2582,9 +2660,6 @@ def fix_bot_starts(
 def test_the_fix_bot_starts_after_every_workflow_that_failed(name: str) -> None:
     assert fix_bot_starts(name)
     assert fix_bot_starts(name, "push", branch="main")
-    # Not after one that passed on a pull request, which found nothing, or was cancelled.
-    assert not fix_bot_starts(name, conclusion="success")
-    assert not fix_bot_starts(name, conclusion="cancelled")
     assert not fix_bot_starts(name, "push", "cancelled", "main")
     # Also in a weekly run of main, by its schedule or by hand.
     assert fix_bot_starts(name, "schedule", branch="main")
@@ -2603,9 +2678,12 @@ def test_the_fix_bot_starts_after_every_workflow_that_failed(name: str) -> None:
         ("Lint", True),
         ("Docs", True),
         ("CI (python)", True),
-        # The rest of the list has nothing to say about main when it passes.
-        ("Docker E2E", False),
-        ("Visual check", False),
+        # A project's own check may keep fixes, and a late one has to close their pull
+        # request. Those that never keep one have nothing to say about main.
+        ("Docker E2E", True),
+        ("Visual check", True),
+        ("Windows", False),
+        ("Downstream", False),
         ("CodeQL", False),
         ("Release", False),
     ],
@@ -2614,6 +2692,349 @@ def test_the_fix_bot_looks_at_main_after_its_checks_passed(
     name: str, starts: bool
 ) -> None:
     assert fix_bot_starts(name, "push", "success", "main") is starts
+
+
+def one_job(root: Path, github: FakeGitHub, output: Path, run: str) -> str:
+    """What the job of the fix bot decides after a run, on a runner of its own."""
+    shutil.rmtree(root / "fixes", ignore_errors=True)
+    output.unlink(missing_ok=True)
+    assert fix_collect(root, github, output, run=run) == 0
+    return output.read_text(encoding="utf-8").splitlines()[0].removeprefix("action=")
+
+
+def commit_of_the_job(root: Path, github: FakeGitHub) -> int:
+    """Commits what the job collected, as its next step does."""
+    return cli.main(
+        [
+            "--repo",
+            REPO,
+            "fix",
+            "commit",
+            "--sha",
+            SHA,
+            "--branch",
+            "feature",
+            "--app",
+            "app",
+            "--url",
+            "u",
+            "--folder",
+            str(root / "fixes"),
+        ],
+        api=api_of(github),
+    )
+
+
+def committed_paths(github: FakeGitHub) -> set[str]:
+    changes = github.graphql[0]["variables"]["input"]["fileChanges"]
+    return {item["path"] for item in changes["additions"]}
+
+
+def a_commit_with_a_late_run(fork: bool = False) -> FakeGitHub:
+    """Lint failed and kept a fix, and the end-to-end tests of the commit still run."""
+    github = FakeGitHub()
+    github.pull(fork=fork)
+    github.files = {"README.md": b"# Title \n", "app.py": b"x = 1\n"}
+    github.runs = [
+        run_of(1, "Lint"),
+        run_of(2, "Docker E2E", status="in_progress", conclusion=""),
+    ]
+    github.artifacts = {1: [{"name": "fixes-lint"}], 2: [{"name": "fixes-e2e"}]}
+    github.downloads = {
+        (1, "fixes-lint"): {"README.md": b"# Title\n"},
+        (2, "fixes-e2e"): {"app.py": b"x = 2\n"},
+    }
+    return github
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "paths"),
+    [
+        ("failure", {"README.md", "app.py"}),
+        ("success", {"README.md"}),
+        ("cancelled", {"README.md"}),
+        ("timed_out", {"README.md"}),
+    ],
+)
+def test_the_job_after_the_run_that_ends_last_commits_every_fix_once(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    conclusion: str,
+    paths: set[str],
+) -> None:
+    monkeypatch.setattr(blueprint.fixes, "WAITS", 0)
+    github = a_commit_with_a_late_run()
+    root = homedarts(tmp_path)
+    output = tmp_path / "output"
+
+    # The job after Lint has waited as long as it may, and commits nothing.
+    assert one_job(root, github, output, "1") == ""
+    said = capsys.readouterr().out
+    assert said.startswith(f"Still running after the wait for {SHA[:7]}: `Docker E2E`.")
+    assert github.writes() == [
+        call for call in github.writes() if call.startswith("gh run download")
+    ]
+
+    # However the run ends, its end starts the job, which finds the fix of Lint: none lost.
+    github.runs[1].update(status="completed", conclusion=conclusion)
+    assert fix_bot_starts("Docker E2E", conclusion=conclusion)
+    assert one_job(root, github, output, "2") == "commit"
+    assert commit_of_the_job(root, github) == 0
+    assert len(github.graphql) == 1
+    assert committed_paths(github) == paths
+
+    # A job of the same commit that waited behind it finds the new head: none twice.
+    github.pulls[0]["head"]["sha"] = MADE
+    capsys.readouterr()
+    assert one_job(root, github, output, "2") == ""
+    assert "no longer the head" in capsys.readouterr().out
+    assert len(github.graphql) == 1
+
+
+def test_a_run_that_ends_during_the_wait_needs_no_job_of_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The job that waits sees the end at its last look and commits; the job of that run,
+    # which waited behind it in the group of the branch, then finds the new head.
+    monkeypatch.setattr(blueprint.fixes, "WAITS", 1)
+    github = a_commit_with_a_late_run()
+    root = homedarts(tmp_path)
+    workflows = watched(root)
+    api = api_of(github)
+
+    def wait(_: float) -> None:
+        github.runs[1].update(status="completed", conclusion="failure")
+
+    found = collect(
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        root / "fixes",
+        downloader(api, REPO),
+        workflows,
+        wait,
+    )
+
+    assert found.late == ()
+    decided = plan(
+        api,
+        REPO,
+        SHA,
+        "pull_request",
+        "feature",
+        42,
+        load(found.folders),
+        workflows.listed,
+        found.late,
+    )
+    assert decided.action == "commit"
+    assert commit_of_the_job(root, github) == 0
+    assert committed_paths(github) == {"README.md", "app.py"}
+
+    github.pulls[0]["head"]["sha"] = MADE
+    assert one_job(root, github, tmp_path / "output", "2") == ""
+    assert len(github.graphql) == 1
+
+
+def test_a_commit_of_the_bot_counts_only_once_its_run_has_ended(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The commit before was the bot's as well, so this is its last one in a row: it goes
+    # to all the fixes of the commit, not to a part that leaves none for what ends later,
+    # and a stop waits as well until it is certain that there is something to stop for.
+    monkeypatch.setattr(blueprint.fixes, "WAITS", 0)
+    github = a_commit_with_a_late_run()
+    github.commits[SHA] = bot_commit("b" * 40)
+    github.commits["b" * 40] = bot_commit("c" * 40)
+    root = homedarts(tmp_path)
+    output = tmp_path / "output"
+
+    assert one_job(root, github, output, "1") == ""
+    assert "Still running" in capsys.readouterr().out
+
+    github.runs[1].update(status="completed", conclusion="failure")
+    output.unlink()
+    assert fix_collect(root, github, output, run="2") == 1
+    assert "changed the files of the fix bot" in capsys.readouterr().err
+    # The step that speaks on the pull request knows this from a job that merely failed.
+    assert output.read_text(encoding="utf-8") == "stopped=true\n"
+
+
+def test_a_fork_gets_the_suggestions_of_what_has_ended(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A suggestion starts no checks and comes once, so there is no reason to hold it back;
+    # the run that ends later adds its own when it fails, and starts no job when it passes.
+    monkeypatch.setattr(blueprint.fixes, "WAITS", 0)
+    github = a_commit_with_a_late_run(fork=True)
+
+    assert one_job(homedarts(tmp_path), github, tmp_path / "output", "1") == "suggest"
+    assert capsys.readouterr().out == "#42 comes from a fork.\n"
+    assert (tmp_path / "fixes/1-fixes-lint").is_dir()
+
+
+def fix_collect_of_main(
+    root: Path, github: FakeGitHub, folder: Path, output: Path, event: str
+) -> str:
+    """What fix collect writes for a run of main."""
+    output.unlink(missing_ok=True)
+    assert (
+        cli.main(
+            [
+                "--repo",
+                REPO,
+                "fix",
+                "collect",
+                "1",
+                "--sha",
+                SHA,
+                "--event",
+                event,
+                "--branch",
+                "main",
+                "--folder",
+                str(folder),
+                "--output",
+                str(output),
+            ],
+            api=api_of(github),
+            root=root,
+        )
+        == 0
+    )
+    return output.read_text(encoding="utf-8")
+
+
+def test_a_late_run_on_main_leaves_the_pull_request_of_its_fixes_open(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(blueprint.fixes, "WAITS", 0)
+    github = FakeGitHub()
+    github.pulls = [
+        {"number": 7, "state": "open", "head": {"ref": BRANCH, "repo": {}}},
+    ]
+    github.runs = [
+        run_of(1, "Lint", conclusion="success"),
+        run_of(2, "CI (home-assistant)", status="in_progress", conclusion=""),
+    ]
+    output = tmp_path / "output"
+    root = homedarts(tmp_path / "main")
+    folder = tmp_path / "fixes"
+
+    # Lint passed, and the tests that still run may need these fixes again.
+    assert (
+        fix_collect_of_main(root, github, folder, output, "push") == "action=\npull=\n"
+    )
+    said = capsys.readouterr().out
+    assert said.startswith(
+        f"Still running after the wait for {SHA[:7]}: `CI (home-assistant)`."
+    )
+    assert "#7 stays open" in said
+
+    # They pass as well: main needs the fixes no more.
+    github.runs[1].update(status="completed", conclusion="success")
+    assert fix_bot_starts("CI (home-assistant)", "push", "success", "main")
+    assert fix_bot_starts("Docker E2E", "push", "success", "main")
+    assert (
+        fix_collect_of_main(root, github, folder, output, "push")
+        == "action=close\npull=\n"
+    )
+
+
+def test_a_late_run_on_main_holds_back_no_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pull request of main cancels no run of main, and the job that follows brings it
+    # up to date: unlike a branch, a part of the fixes costs nothing there. And a weekly
+    # run that passes starts no job, so nothing would come after it.
+    monkeypatch.setattr(blueprint.fixes, "WAITS", 0)
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Lint"),
+        run_of(2, "CI (home-assistant)", status="in_progress", conclusion=""),
+    ]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    github.downloads = {(1, "fixes-lint"): {"app.py": b"x = 2\n"}}
+
+    assert (
+        fix_collect_of_main(
+            homedarts(tmp_path / "main"),
+            github,
+            tmp_path / "fixes",
+            tmp_path / "output",
+            "schedule",
+        )
+        == "action=pull-request\npull=\n"
+    )
+    assert not fix_bot_starts("CI (home-assistant)", "schedule", "success", "main")
+
+
+# How a run can end but by failing, as GitHub names it.
+ENDS = ("success", "cancelled", "timed_out", "skipped", "neutral", "startup_failure")
+
+
+@pytest.mark.parametrize("conclusion", ENDS)
+@pytest.mark.parametrize("name", ["Lint", "CI (python)", "Docker E2E", "Visual check"])
+def test_a_run_of_a_check_starts_the_fix_bot_however_it_ends(
+    name: str, conclusion: str
+) -> None:
+    # Whichever run of the commit ends last has to find the fixes of the others, and the
+    # condition of the job can't know which workflows keep fixes.
+    assert fix_bot_starts(name, conclusion=conclusion)
+    # Not for a commit that a newer push replaced, or a pull request that has closed.
+    assert not fix_bot_starts(name, conclusion=conclusion, heads=())
+    assert not fix_bot_starts(name, conclusion=conclusion, heads=("other",))
+    # Nor for a fork, whose suggestions wait for nothing, nor in a fork of the repository.
+    assert not fix_bot_starts(name, conclusion=conclusion, head="someone/r")
+    assert not fix_bot_starts(name, conclusion=conclusion, fork=True)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Variants",
+        "Windows",
+        "Issue assistant sync",
+        "Downstream",
+        "CodeQL",
+        "Dependency review",
+        "Docs",
+        "Pull request title",
+        "Secret scan",
+        "Fuzzing",
+        "Links",
+        "OSV-Scanner",
+        "Workflow security",
+        "Renovate",
+        "Release",
+    ],
+)
+def test_a_workflow_that_keeps_nothing_starts_the_fix_bot_only_when_it_fails(
+    name: str,
+) -> None:
+    assert fix_bot_starts(name)
+    for conclusion in ENDS:
+        assert not fix_bot_starts(name, conclusion=conclusion)
+
+
+def test_the_list_of_those_that_keep_nothing_names_no_workflow_that_does() -> None:
+    condition = condition_of(workflow_steps.job("after-checks.yml", "fixes"))
+    left_out, of_main = re.findall(r"!contains\(fromJSON\('(\[[^']*\])'\)", condition)
+
+    assert left_out == of_main
+    # Docs keeps nothing on a pull request, which is why the bot doesn't wait for it.
+    assert "Docs" in json.loads(left_out)
+    assert not watched(ROOT).awaited("pull_request") & set(json.loads(left_out))
 
 
 def test_fix_commit_suggest_and_main_from_the_command_line(
@@ -3350,6 +3771,7 @@ def permissions_of(step: dict[str, Any]) -> dict[str, str]:
 # gh answers the calls of the steps of the fix bot that write, and python3 runs no
 # tool: each call of it is written down.
 WRITES = Answer(r"(?:pr comment|issue (?:create|edit|close)) .*")
+PR_COMMENTS = Answer(r"pr view \d+ --json comments --jq \.comments\[\]\.body")
 PYTHON3 = {"python3": workflow_steps.recording("python3")}
 
 
@@ -3588,20 +4010,75 @@ def test_the_fix_bot_says_on_the_pull_request_that_it_failed(
     done = run_fix_bot_step(
         tmp_path,
         "Say on the pull request that the fix bot failed",
+        (WRITES, PR_COMMENTS),
         PULL=pull,
+        SHA=SHA,
         URL="https://run/9",
     )
 
     assert done.returncode == 0, done.stderr
     if pull:
-        assert done.commands == [
+        assert done.called("pr comment") == [
             "pr comment 42 --body The fix bot couldn't fix the findings of this pull "
             "request that a command fixes (https://run/9); its summary says why. The PR "
             "coach names the command of each check that failed, which makes the fixes on "
-            "your machine."
+            f"your machine.<!-- the fix bot failed on {SHA} -->"
         ]
     else:
         assert done.calls == []
+
+
+@needs_bash
+def test_the_fix_bot_says_it_failed_once_for_each_commit(tmp_path: Path) -> None:
+    # A job follows every run of a commit, so a stop would repeat itself after each.
+    done = run_fix_bot_step(
+        tmp_path,
+        "Say on the pull request that the fix bot failed",
+        (
+            WRITES,
+            Answer(
+                PR_COMMENTS.args,
+                out=f"Something else\nIt failed.<!-- the fix bot failed on {SHA} -->\n",
+            ),
+        ),
+        PULL="42",
+        SHA=SHA,
+        URL="https://run/9",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("pr comment") == []
+
+    # Another commit of the pull request has its own say.
+    done = run_fix_bot_step(
+        tmp_path,
+        "Say on the pull request that the fix bot failed",
+        (
+            WRITES,
+            Answer(
+                PR_COMMENTS.args, out="It failed.<!-- the fix bot failed on old -->\n"
+            ),
+        ),
+        PULL="42",
+        SHA=SHA,
+        URL="https://run/9",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called("pr comment")) == 1
+
+
+def test_a_failed_job_after_a_run_that_did_not_fail_says_nothing_without_a_finding() -> (
+    None
+):
+    bot = workflow_steps.job("after-checks.yml", "fixes")
+    step = step_in(bot, "Say on the pull request that the fix bot failed")
+    assert condition_of(step) == (
+        "failure() && github.event.workflow_run.event == 'pull_request' && "
+        "(github.event.workflow_run.conclusion == 'failure' || "
+        "steps.collect.outputs.stopped == 'true' || "
+        "steps.collect.outputs.action != '')"
+    )
 
 
 @needs_bash
