@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Die Behebungen laufen jede Woche auf main
+    accDescr: Jede Woche laufen Lint und die CI auf main, nach ihrem Zeitplan oder von Hand, wo Bot Health einen Zeitplan startet, den GitHub verpasst hat. Besteht jede Prüfung, war die Woche ruhig, ohne Job des Fix-Bots, ohne Pull Request und ohne Issue. Scheitert eine Prüfung und behebt ein Befehl, was sie fand, hält der Fix-Bot einen Pull Request von bot/self-heal, der sich selbst merged, sodass main vor dem nächsten Pull Request repariert ist. Behebt es kein Befehl, hält Bot Health ein Issue offen, bis ein Lauf besteht.
+
+    week(["Jede Woche, auf main"])
+    checks["Lint und die CI laufen nach ihrem Zeitplan oder von Hand,<br>wo Bot Health einen startet, den GitHub verpasst hat"]
+    passed{"Besteht jede<br>Prüfung?"}
+    quiet(["Eine ruhige Woche: kein Job des Fix-Bots,<br>kein Pull Request und kein Issue"])
+    command{"Behebt ein Befehl,<br>was sie fand?"}
+    heal["Der Fix-Bot hält einen Pull Request<br>von bot/self-heal, der sich selbst merged"]
+    healed(["main ist vor dem nächsten<br>Pull Request repariert"])
+    issue["Bot Health hält ein Issue offen,<br>bis ein Lauf besteht"]
+
+    week --> checks --> passed
+    passed -- "ja" --> quiet
+    passed -- "nein" --> command
+    command -- "ja" --> heal --> healed
+    command -- "nein" --> issue
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class week,checks,heal bot
+    class issue person
+    class quiet,healed done

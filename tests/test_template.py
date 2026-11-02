@@ -7202,6 +7202,22 @@ def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
             assert not promise.search(comment), (name, comment)
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_fixers_of_every_project_run_on_main_every_week(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # What no commit changes, such as a new rule of a tool, repairs itself before it
+    # fails the next pull request: both checks that keep fixes run at one time, so that
+    # one commit of the fix bot holds what they fix.
+    project = projects[kind] / ".github/workflows"
+    lint, check = (
+        CRON.findall((project / name).read_text(encoding="utf-8"))
+        for name in ("lint.yml", "ci.yml")
+    )
+    assert len(lint) == 1
+    assert check == lint
+
+
 # The heavy weekly jobs, whose runs take runners of the account for an hour or longer.
 HEAVY_WEEKLY = {
     "codeql.yml",
@@ -11914,7 +11930,7 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
     # Markdownlint fixes the head of the pull request after every other linter, as
     # the fixes of lint, and the PR coach explains last.
     names = names_of(lint)
-    head = names.index("Check out the head of the pull request for the fixes")
+    head = names.index("Take the commit that the fixes start from")
     assert names.index(hints) < head
     assert "steps.markdown.outcome == 'failure'" in values_of(lint["steps"][head:])
     fixes = [
