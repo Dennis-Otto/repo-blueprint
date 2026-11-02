@@ -17973,6 +17973,8 @@ def test_the_checks_build_the_website(projects: dict[str, Path], kind: str) -> N
     assert check.rindex('\nstep "') == website
     assert website < check.index("if [[ -f scripts/check-project.sh ]]")
     assert website_step(check) == website_step(generic)
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+    assert website_step(check) == website_step(own)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     # On Windows with the launcher of python.org, which every install has, and not
     # with python, which can be the stub of the Microsoft Store.
@@ -17981,6 +17983,17 @@ def test_the_checks_build_the_website(projects: dict[str, Path], kind: str) -> N
         " place of `.venv-docs/bin/`"
     ) in contributing
     assert "`bash scripts/check.sh` builds the website strictly as well" in contributing
+    # What a project writes into scripts/check-site.sh takes the folder from its
+    # argument, as the checks build the website elsewhere than the check docs.
+    assert (
+        "and, where it exists, runs `scripts/check-site.sh` with the folder of that"
+        " build, as the check *docs* does"
+    ) in contributing
+    agents = (projects[kind] / "AGENTS.md").read_text(encoding="utf-8")
+    assert (
+        "`scripts/check-site.sh`, which `scripts/check.sh` and the check *docs* run"
+        " with the folder of the built website as its argument."
+    ) in agents
 
 
 # A MkDocs that records how the step calls it, and whether the folder it builds into
@@ -18008,6 +18021,26 @@ if [[ -n "${FAIL:-}" ]]; then
 fi
 """
 
+# A scripts/check-site.sh that records what it gets and where it runs, and that fails
+# with a code of its own when FAIL_SITE is set.
+FAKE_CHECK_SITE = """#!/usr/bin/env bash
+set -euo pipefail
+{
+  echo "$# argument"
+  if [[ "$1" == "$TMPDIR"/* && -f "$1/index.html" ]]; then
+    echo "the website that the step built"
+  fi
+  if [[ -f scripts/check-site.sh ]]; then
+    echo "at the root of the repository"
+  fi
+} > "$SITE_CALLS"
+echo "The checks of this project ran."
+if [[ -n "${FAIL_SITE:-}" ]]; then
+  echo "robots.txt: keeps the search engines out"
+  exit 3
+fi
+"""
+
 
 def run_the_website_step(
     projects: dict[str, Path],
@@ -18018,11 +18051,15 @@ def run_the_website_step(
     tool: bool = False,
     broken: bool = False,
     lost: bool = False,
+    check_site: bool = False,
+    fail_site: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """The step Website of scripts/check.sh, in a repository with these pages and a
     fake MkDocs at this place: in .venv-docs, in an activated environment (VIRTUAL_ENV
     and its folder), alone on the PATH, or nowhere (""); with lost, its home page
-    shows a picture that the built page lacks."""
+    shows a picture that the built page lacks; with check_site, it has a fake
+    scripts/check-site.sh, which records its call in the file site-calls of tmp_path,
+    and with fail_site that script fails too."""
     check = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
     repository = tmp_path / "repository"
     (repository / "scripts").mkdir(parents=True)
@@ -18038,6 +18075,10 @@ def run_the_website_step(
     (repository / "scripts/website.sh").write_text(
         script, encoding="utf-8", newline="\n"
     )
+    if check_site:
+        (repository / "scripts/check-site.sh").write_text(
+            FAKE_CHECK_SITE, encoding="utf-8", newline="\n"
+        )
     for page in pages:
         (repository / page).parent.mkdir(parents=True, exist_ok=True)
         (repository / page).write_text("# Demo\n", encoding="utf-8", newline="\n")
@@ -18054,7 +18095,7 @@ def run_the_website_step(
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key not in {"NO_MKDOCS_2_WARNING", "FAIL", "VIRTUAL_ENV"}
+        if key not in {"NO_MKDOCS_2_WARNING", "FAIL", "FAIL_SITE", "VIRTUAL_ENV"}
     }
     if mkdocs:
         if mkdocs == "PATH":
@@ -18074,8 +18115,13 @@ def run_the_website_step(
     temporary.mkdir()
     calls = tmp_path / "calls"
     environment.update(
-        PATH=os.pathsep.join(path), TMPDIR=str(temporary), CALLS=str(calls)
+        PATH=os.pathsep.join(path),
+        TMPDIR=str(temporary),
+        CALLS=str(calls),
+        SITE_CALLS=str(tmp_path / "site-calls"),
     )
+    if fail_site:
+        environment["FAIL_SITE"] = "1"
     if fail:
         environment["FAIL"] = "1"
     if broken:
@@ -18233,6 +18279,111 @@ def test_the_website_step_passes_without_tools_or_website(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"\n== Website\n{message}\n"
     assert not calls.exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("check_site", [False, True])
+def test_the_website_step_runs_the_checks_of_the_project_where_it_has_them(
+    projects: dict[str, Path], tmp_path: Path, check_site: bool
+) -> None:
+    # As the check docs runs scripts/check-site.sh after the build, with the folder of
+    # the website: here the new one of the step, and without the Python of site-check,
+    # which the script of a project doesn't need.
+    result, _, temporary = run_the_website_step(
+        projects, tmp_path, ".venv-docs/bin/mkdocs", check_site=check_site
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    ran = "The checks of this project ran.\n" if check_site else ""
+    assert result.stdout == f"\n== Website\nThe website builds strictly.\n{ran}"
+    site_calls = tmp_path / "site-calls"
+    assert site_calls.exists() == check_site
+    if check_site:
+        assert site_calls.read_text(encoding="utf-8").splitlines() == [
+            "1 argument",
+            "the website that the step built",
+            "at the root of the repository",
+        ]
+    assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_website_step_fails_with_the_checks_of_the_project(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    result, _, temporary = run_the_website_step(
+        projects,
+        tmp_path,
+        ".venv-docs/bin/mkdocs",
+        check_site=True,
+        fail_site=True,
+    )
+
+    # What the project found, and who found it, as for the other checks of the step.
+    assert result.returncode == 1
+    assert result.stdout == (
+        "\n== Website\nThe website builds strictly.\n"
+        "The checks of this project ran.\n"
+        "robots.txt: keeps the search engines out\n"
+        "The website fails the checks of this project in scripts/check-site.sh; the"
+        " lines above say which.\n"
+    )
+    assert list(temporary.iterdir()) == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("mkdocs", "pages", "fail"),
+    [
+        # A website that doesn't build, which the script of the project can't check.
+        (".venv-docs/bin/mkdocs", ("mkdocs.yml", "docs/index.md"), True),
+        # No tools to build one, which the CI has.
+        ("", ("mkdocs.yml", "docs/index.md"), False),
+        # No website.
+        (".venv-docs/bin/mkdocs", ("mkdocs.yml",), False),
+    ],
+)
+def test_the_website_step_runs_the_checks_of_the_project_only_on_a_built_website(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    mkdocs: str,
+    pages: tuple[str, ...],
+    fail: bool,
+) -> None:
+    result, _, _ = run_the_website_step(
+        projects, tmp_path, mkdocs, pages, fail=fail, check_site=True
+    )
+
+    assert result.returncode == (1 if fail else 0), result.stdout + result.stderr
+    assert "The checks of this project ran." not in result.stdout
+    assert not (tmp_path / "site-calls").exists()
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("broken", [False, True])
+def test_the_website_step_runs_the_checks_of_the_project_after_the_promises(
+    projects: dict[str, Path], tmp_path: Path, broken: bool
+) -> None:
+    result, _, _ = run_the_website_step(
+        projects,
+        tmp_path,
+        ".venv-docs/bin/mkdocs",
+        tool=True,
+        broken=broken,
+        check_site=True,
+    )
+
+    ran = "The checks of this project ran.\n"
+    if broken:
+        assert result.returncode == 1
+        assert ran not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        promises = "keeps what its hooks promise (one language).\n"
+        assert result.stdout.index(promises) < result.stdout.index(ran)
 
 
 @pytest.mark.parametrize("kind", KINDS)
