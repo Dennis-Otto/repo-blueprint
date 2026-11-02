@@ -4658,6 +4658,75 @@ def test_the_prose_hints_give_vale_the_documents_that_the_pull_request_changes(
         assert "No document changes." in summary
 
 
+def vale_styles(config: str, document: str) -> str:
+    """The styles that Vale gives a document: those of the last section of .vale.ini
+    whose pattern holds it, in which a star also stands for a folder."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read_string(f"[vale]\n{config}")
+    styles = ""
+    for section in parser.sections():
+        patterns = section.removeprefix("{").removesuffix("}").split(",")
+        if any(fnmatch.fnmatchcase(document, pattern) for pattern in patterns):
+            styles = parser[section]["BasedOnStyles"]
+    return styles
+
+
+def spelling_reads(config: dict[str, Any], document: str) -> bool:
+    """Whether cspell reads a document: the last override whose pattern holds it
+    decides, and it reads one that no override holds. It takes no pattern with an
+    exclamation mark in ignorePaths."""
+    assert not any(path.startswith("!") for path in config["ignorePaths"])
+    enabled = True
+    for override in config["overrides"]:
+        if any(
+            fnmatch.fnmatchcase(document, pattern.removeprefix("**/"))
+            for pattern in override["filename"]
+        ):
+            enabled = override["enabled"]
+    return bool(enabled)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_prose_hints_read_only_the_languages_they_know(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    vale = (project / ".vale.ini").read_text(encoding="utf-8")
+    cspell = json.loads(
+        (project / ".github/prose/cspell.json").read_text(encoding="utf-8")
+    )
+    english = (
+        "README.md",
+        "docs/guide.md",
+        "docs/guide.en.md",
+        # A dot in a name makes no language of it.
+        "docs/upgrade-2.10.md",
+        "docs/guide.draft.md",
+    )
+    german = ("README.de.md", "docs/guide.de.md", "docs/de/guide.md")
+    further = (
+        "README.nl.md",
+        "docs/faq.nl.md",
+        "docs/index.fr.md",
+        "docs/games.es.md",
+        "docs/guide.pt-BR.md",
+        "docs/guide.zh_TW.md",
+        "docs/guide.zh-Hans.md",
+        "docs/guide.zh-Hans-CN.md",
+    )
+
+    assert cspell["language"] == "en,de"
+    for document in english:
+        assert vale_styles(vale, document) == "write-good, proselint", document
+        assert spelling_reads(cspell, document), document
+    for document in german:
+        assert not vale_styles(vale, document), document
+        assert spelling_reads(cspell, document), document
+    for document in further:
+        assert not vale_styles(vale, document), document
+        assert not spelling_reads(cspell, document), document
+
+
 def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
     job = job_in(links, "links")

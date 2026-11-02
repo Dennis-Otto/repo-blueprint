@@ -2529,6 +2529,61 @@ def test_an_untranslated_page_is_a_copy_that_search_engines_leave_out() -> None:
     assert "noindex" not in english
 
 
+def with_dutch(current: str) -> Any:
+    """The configuration of a website in English, German and Dutch, while the i18n
+    plugin builds the language current."""
+    config = bilingual(current)
+    config.plugins["i18n"].config.languages.append(
+        SimpleNamespace(locale="nl", default=False, build=True)
+    )
+    return config
+
+
+def test_an_untranslated_page_names_no_versions_beside_another_translation() -> None:
+    # German has its own version of the page, and Dutch shows the English one.
+    versions = {
+        "en": version("en", "games.html"),
+        "de": version("de", "de/games.html"),
+        "nl": version("en", "nl/games.html"),
+    }
+    head = HEAD.replace(
+        '<link rel="stylesheet"',
+        '<link rel="alternate" href="{nl}" hreflang="nl">\n<link rel="stylesheet"',
+    )
+    copy = hooks().on_post_page(
+        head.format(
+            canonical=SITE + "nl/games.html",
+            en="../games.html",
+            de="../de/games.html",
+            nl="games.html",
+        ),
+        page_of("nl/games.html", **versions),
+        with_dutch("nl"),
+    )
+    translated = hooks().on_post_page(
+        head.format(
+            canonical=SITE + "de/games.html",
+            en="../games.html",
+            de="games.html",
+            nl="../nl/games.html",
+        ),
+        page_of("de/games.html", locale="de", **versions),
+        with_dutch("de"),
+    )
+
+    assert 'rel="alternate"' not in copy
+    assert f'<link rel="canonical" href="{SITE}games.html">' in copy
+    assert '<meta name="robots" content="noindex, follow">' in copy
+    # The page that German translated still names its real versions, but not Dutch.
+    assert (
+        f'<link rel="alternate" href="{SITE}games.html" hreflang="en">'
+        f'<link rel="alternate" href="{SITE}de/games.html" hreflang="de">'
+        f'<link rel="alternate" href="{SITE}games.html" hreflang="x-default">'
+    ) in translated
+    assert 'hreflang="nl"' not in translated
+    assert "noindex" not in translated
+
+
 def test_an_untranslated_page_keeps_the_canonical_page_of_its_project() -> None:
     # The page moved: a hook of the project names the page that replaced it.
     moved = page_of(

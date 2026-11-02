@@ -471,17 +471,44 @@ def test_the_coverage_takes_the_place_of_the_coverage_bot() -> None:
 def test_the_website_of_the_blueprint() -> None:
     website = Website.load(ROOT)
 
-    assert website == Website("https://dennis-otto.github.io/repo-blueprint/", True)
+    assert website == Website(
+        "https://dennis-otto.github.io/repo-blueprint/", ("en", "de")
+    )
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
         (None, None),
-        ("site_name: x\n", Website("", False)),
+        ("site_name: x\n", Website("")),
         (
             "site_url: https://x.example/site\nplugins:\n#     - locale: de\n",
-            Website("https://x.example/site/", False),
+            Website("https://x.example/site/"),
+        ),
+        # The default language comes first, wherever the file names it; the locale of
+        # another plugin is no language of the website.
+        (
+            """\
+site_url: https://x.example/
+plugins:
+  - git-revision-date-localized:
+      locale: fr
+  - i18n:
+      languages:
+        - locale: de
+          name: Deutsch
+          build: true
+        - locale: "nl"
+          name: Nederlands
+          default: false
+        - locale: en # The language of the code.
+          name: English
+          default: true
+          build: true
+        - locale: pt-BR
+default: true
+""",
+            Website("https://x.example/", ("en", "de", "nl", "pt-BR")),
         ),
     ],
 )
@@ -495,21 +522,76 @@ def test_the_website_of_a_repository(
 
 
 @pytest.mark.parametrize(
-    ("name", "german", "address"),
+    ("name", "address"),
     [
-        ("docs/index.md", True, ""),
-        ("docs/guide.md", True, "guide/"),
-        ("docs/decisions/README.md", True, "decisions/"),
-        ("docs/decisions/0001-x.md", True, "decisions/0001-x/"),
-        ("docs/guide.de.md", True, "de/guide/"),
-        ("docs/index.de.md", True, "de/"),
-        ("docs/guide.de.md", False, "guide.de/"),
+        ("docs/index.md", ""),
+        ("docs/guide.md", "guide.html"),
+        ("docs/decisions/README.md", "decisions/"),
+        ("docs/decisions/0001-x.md", "decisions/0001-x.html"),
+        ("docs/guide.de.md", "de/guide.html"),
+        ("docs/index.de.md", "de/"),
+        # Every further language, not only German.
+        ("docs/faq.nl.md", "nl/faq.html"),
+        ("docs/index.fr.md", "fr/"),
+        ("docs/decisions/README.es.md", "es/decisions/"),
+        ("docs/guide.pt-BR.md", "pt-BR/guide.html"),
+        # The default language has no folder of its own.
+        ("docs/guide.en.md", "guide.html"),
+        ("docs/index.en.md", ""),
+        # An ending that is no language of the website is part of the name.
+        ("docs/guide.it.md", "guide.it.html"),
+        ("docs/release-2.10.md", "release-2.10.html"),
+        # A page named like a language is no page of that language.
+        ("docs/de.md", "de.html"),
+        ("docs/en.md", "en.html"),
     ],
 )
-def test_the_address_of_a_page(name: str, german: bool, address: str) -> None:
-    website = Website("https://x.example/", german)
+def test_the_address_of_a_page(name: str, address: str) -> None:
+    website = Website("https://x.example/", ("en", "de", "nl", "fr", "es", "pt-BR"))
 
     assert website.page(name) == f"https://x.example/{address}"
+
+
+@pytest.mark.parametrize(
+    ("name", "address"),
+    [
+        ("docs/index.md", ""),
+        ("docs/guide.md", "guide/"),
+        ("docs/decisions/README.md", "decisions/"),
+        ("docs/decisions/0001-x.md", "decisions/0001-x/"),
+        ("docs/faq.nl.md", "nl/faq/"),
+        ("docs/index.nl.md", "nl/"),
+    ],
+)
+def test_the_address_of_a_page_with_directory_addresses(
+    name: str, address: str
+) -> None:
+    website = Website("https://x.example/", ("en", "nl"), directory_urls=True)
+
+    assert website.page(name) == f"https://x.example/{address}"
+
+
+@pytest.mark.parametrize(
+    ("text", "directory_urls"),
+    [
+        ("site_name: x\n", False),
+        ("use_directory_urls: false\n", False),
+        ("use_directory_urls: true\n", True),
+    ],
+)
+def test_a_project_can_turn_on_directory_addresses(
+    tmp_path: Path, text: str, directory_urls: bool
+) -> None:
+    (tmp_path / "mkdocs.yml").write_text(text, encoding="utf-8")
+
+    assert Website.load(tmp_path) == Website("", (), directory_urls)
+
+
+def test_a_website_in_one_language_has_no_folders_of_languages() -> None:
+    website = Website("https://x.example/")
+
+    assert website.page("docs/guide.de.md") == "https://x.example/guide.de.html"
+    assert website.page("docs/guide.md") == "https://x.example/guide.html"
 
 
 def changed(*names: str, status: str = "modified") -> list[dict[str, Any]]:
@@ -517,7 +599,7 @@ def changed(*names: str, status: str = "modified") -> list[dict[str, Any]]:
 
 
 def test_the_website_of_a_pull_request() -> None:
-    website = Website("https://x.example/", True)
+    website = Website("https://x.example/", ("en", "de"))
     link = "https://github.com/o/r/actions/runs/7/artifacts/9"
     files = [
         *changed("docs/guide.md", "docs/guide.de.md", "src/app.py"),
@@ -535,15 +617,15 @@ def test_the_website_of_a_pull_request() -> None:
         "it, stays for 7 days: unzip the artifact `website` into a folder, run "
         "`python3 -m http.server --directory website` and open http://localhost:8000."
         "\n\nThe pages that it changes, at the address each has on the website:\n\n"
-        "- [`docs/guide.md`](https://x.example/guide/)\n"
-        "- [`docs/guide.de.md`](https://x.example/de/guide/)"
+        "- [`docs/guide.md`](https://x.example/guide.html)\n"
+        "- [`docs/guide.de.md`](https://x.example/de/guide.html)"
     )
 
 
 def test_a_website_change_without_its_build_or_address() -> None:
     files = changed(*(f"docs/page{number}.md" for number in range(MOST_PAGES + 2)))
 
-    part = website_part(files, Website("", False), lambda: None)
+    part = website_part(files, Website(""), lambda: None)
 
     assert part is not None
     assert "🌐 The check *docs* has kept no build of the website yet" in part.text
@@ -552,7 +634,7 @@ def test_a_website_change_without_its_build_or_address() -> None:
 
 
 def test_a_change_of_the_website_without_a_page() -> None:
-    part = website_part(changed("mkdocs.yml"), Website("", False), lambda: None)
+    part = website_part(changed("mkdocs.yml"), Website(""), lambda: None)
 
     assert part is not None
     assert "The pages that it changes" not in part.text
@@ -562,7 +644,7 @@ def test_no_website_part_without_a_change_of_the_website_or_a_website() -> None:
     def ask() -> str | None:
         raise AssertionError("no artifact to look for")
 
-    website = Website("https://x.example/", False)
+    website = Website("https://x.example/")
     assert website_part(changed("src/app.py"), website, ask) is None
     assert website_part(changed("docs/x.md", status="removed"), website, ask) is None
     assert website_part(changed("docs/guide.md"), None, ask) is None
