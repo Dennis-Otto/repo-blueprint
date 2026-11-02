@@ -44,6 +44,8 @@ gitIgnoredAuthors: ["/^[0-9]+\\+octo-release\\[bot\\]@users\\.noreply\\.github\\
 
 ## Consequences
 
-A commit of a bot no longer stops the Mend Renovate app, without a step for the owner, also with a new name of the app, whose update of the blueprint writes the rule anew. The rules of `hub` and `self` stay as they were. The check *renovate rules* validates the rule in each such repository, and the tests of the blueprint check what it matches; the table above was made by hand, so it needs asking again if Renovate changes how it treats a branch.
+A commit of a bot no longer stops the Mend Renovate app, without a step for the owner, also with a new name of the app, whose update of the blueprint writes the rule anew. The rules of `hub` and `self` stay as they were. A repository with the Mend Renovate app has no Renovate workflow and so no check *renovate rules*, and no variant of the blueprint answers `mend`: the tests of the blueprint check what the pattern matches, and `renovate-config-validator --strict` of the pinned Renovate was run on the rule by hand. The table above was made by hand too, so both need asking again if Renovate changes how it treats a branch.
 
-A person's commit stays an edit, on purpose, as a rule can't tell a person's merge from their work. That includes *Update branch* and `gh pr update-branch`, which GitHub makes in the name of whoever asks: [the troubleshooting](../troubleshooting.md#renovate-leaves-a-branch-alone) says how to hand such a branch back to Renovate.
+The rule follows the answer of Copier alone. A project that names its app only in `.github/repository.project.toml` gets no rule for it, so there the checklist says to answer the name with Copier.
+
+A person's commit stays an edit, on purpose, as a rule can't tell a person's merge from their work. That includes *Update branch* and `gh pr update-branch`, which GitHub makes in the name of whoever asks: the section *Renovate leaves a branch alone* of [the troubleshooting](../troubleshooting.md) says how to hand such a branch back to Renovate.

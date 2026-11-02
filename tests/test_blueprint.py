@@ -321,7 +321,6 @@ class FakeGitHub:
         # The pull requests of every state, newest first, as GitHub answers them,
         # which a test may break.
         self.pulls: list[Any] = []
-        self.bots: dict[str, int] = {}
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
             "spare": {"color": "ffffff", "description": "Not in the configuration"},
@@ -378,11 +377,6 @@ class FakeGitHub:
             return self.files_of_actions(payload["query"], payload["variables"])
         if path == f"users/{REPO.split('/')[0]}":
             return 200, {"login": REPO.split("/")[0], "type": self.account}
-        if bot := re.fullmatch(r"users/([\w-]+)%5Bbot%5D", path):
-            number = self.bots.get(bot[1])
-            if number is None:
-                return 404, {"message": "Not Found"}
-            return 200, {"login": f"{bot[1]}[bot]", "id": number, "type": "Bot"}
         return self.route(
             method, path.split("?")[0].removeprefix(f"repos/{REPO}"), payload
         )
@@ -3783,6 +3777,28 @@ def test_the_checklist_links_the_mend_app_and_leaves_its_rule_to_the_blueprint(
         "https://github.com/apps/renovate/installations/new",
     ]
     assert not [path for _, path in github.calls if path.startswith("users/")]
+
+
+@pytest.mark.parametrize(
+    ("app", "answers", "asked"),
+    [
+        ("", "renovate_runner: mend\n", False),
+        ("demo-app", "renovate_runner: mend\nrelease_app: demo-app\n", False),
+        ("demo-app", "renovate_runner: mend\nrelease_app: other-app\n", True),
+        ("demo-app", "renovate_runner: mend\n", True),
+    ],
+    ids=["no app", "the answer", "another answer", "no answer"],
+)
+def test_the_checklist_asks_for_the_answer_of_an_app_that_only_the_settings_name(
+    github: FakeGitHub, root: Path, app: str, answers: str, asked: bool
+) -> None:
+    (root / ".copier-answers.yml").write_text(answers, encoding="utf-8")
+
+    how = renovate(Api(github), REPO, root, app).how
+
+    # The rule of the blueprint comes from the answer alone, so without it Renovate
+    # would take the commits of this app for someone editing its branches.
+    assert (f"--data release_app={app}" in how) is asked
 
 
 def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:

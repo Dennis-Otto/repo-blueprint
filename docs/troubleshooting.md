@@ -175,7 +175,7 @@ Where a Renovate workflow runs, the bot-health bot keeps one issue open with the
 
 ## Renovate leaves a branch alone
 
-**What you see:** a pull request of Renovate falls behind `main` or stays on an old version, and its description says that Renovate won't rebase it because someone may have edited it.
+**What you see:** a pull request of Renovate falls behind `main` or stays on an old version, and a comment of Renovate, *Edited/Blocked Notification*, says that it won't rebase the pull request because it doesn't recognize the author of the last commit.
 
 **Why:** Renovate rebases a branch only as long as every commit on it counts as its own, and takes any other commit for work that it must not overwrite. The bots of the repository don't count as someone else: they commit as the release app, which is the address that Renovate runs under in a Renovate workflow, and which the rules of the blueprint name for the Mend Renovate app ([decision 0103](decisions/0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). A person does count, also with *Update branch* on the page of the pull request or `gh pr update-branch`: GitHub makes that merge in their name, and Renovate can't tell it from an edit.
 

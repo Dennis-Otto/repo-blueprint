@@ -175,7 +175,7 @@ Wo ein Renovate-Workflow läuft, hält der Bot-Health-Bot ein Issue mit den Warn
 
 ## Renovate lässt einen Branch in Ruhe
 
-**Was du siehst:** Ein Pull Request von Renovate fällt hinter `main` zurück oder bleibt auf einer alten Version, und seine Beschreibung sagt, dass Renovate ihn nicht rebased, weil ihn vielleicht jemand bearbeitet hat.
+**Was du siehst:** Ein Pull Request von Renovate fällt hinter `main` zurück oder bleibt auf einer alten Version, und ein Kommentar von Renovate, *Edited/Blocked Notification*, sagt, dass es den Pull Request nicht rebased, weil es den Autor des letzten Commits nicht erkennt.
 
 **Warum:** Renovate rebased einen Branch nur, solange jeder Commit darauf als sein eigener gilt, und hält jeden anderen für Arbeit, die es nicht überschreiben darf. Die Bots des Repositorys gelten nicht als jemand anderes: Sie committen als die Release-App, und das ist die Adresse, unter der Renovate in einem Renovate-Workflow läuft und die die Regeln des Blueprints für die Mend-Renovate-App nennen ([Entscheidung 0103](decisions/0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). Eine Person gilt als jemand anderes, auch mit *Update branch* auf der Seite des Pull Requests oder `gh pr update-branch`: GitHub macht diesen Merge in ihrem Namen, und Renovate kann ihn nicht von einer Bearbeitung unterscheiden.
 

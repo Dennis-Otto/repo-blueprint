@@ -529,7 +529,8 @@ jobs:
       # In a new repository only: an update gives every file of the blueprint as a new
       # repository has it, which its own step compares, and keeps renovate.json5 of
       # the project. The rules depend on the kind of project alone, not on the other
-      # answers of a repository that takes the blueprint.
+      # answers of a repository that takes the blueprint, apart from the rule of the
+      # Mend Renovate app, which no variant answers and the tests of the blueprint check.
       - name: Validate the rules of Renovate of the project
         if: matrix.start == 'new'
         timeout-minutes: 5
