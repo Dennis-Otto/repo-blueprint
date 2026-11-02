@@ -7,9 +7,14 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.6.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.0...v1.6.1) (2026-11-02)
+
 ### Bug fixes
 
 - **`scripts/check.sh` runs the checks of a project's website too:** after its local strict build it checked only what the hooks of the website promise, so a project's `scripts/check-site.sh` failed for the first time in the check *docs* of the pull request, unless its author remembered to run it by hand. Where that script exists, the step *Website* now runs it on the website it built, and fails with what the script found. The script gets that folder as its argument, which is no longer always `site`, so it must read the folder from its argument.
+- **Biome of a Node package leaves out the diagrams that `scripts/diagrams.sh` draws:** `biome ci` in the step *Lint and format* failed on every drawn picture, for code that Mermaid writes and that the next drawing writes again. A project can now delete its own `docs/images/diagrams/biome.jsonc` and the line for it in `exclude_docs` of `mkdocs.yml`.
+- **A release pull request of a Chrome extension passes Biome:** release-please puts each item of an array in `extension/manifest.json` on a line of its own, where Biome wanted a short array on one line, so `biome ci` failed on every release pull request. `biome.jsonc` now leaves the format of the manifest alone, and a project can delete an `extension/biome.jsonc` that did only this.
+- **Stylesheets and HTML are indented like the scripts beside them:** `.editorconfig` gave CSS and HTML four spaces and scripts two, and Biome formats CSS with the setting of `.editorconfig`. Both now have two spaces, as the stylesheets of the blueprint have. `npx --no -- biome check --write .`, which the fix bot runs too, brings the stylesheets of a Node package into this format.
 
 ## [1.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.5.0...v1.6.0) (2026-11-01)
 
