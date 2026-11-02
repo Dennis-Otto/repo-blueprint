@@ -1,6 +1,6 @@
 # The tests run on every logical core, at most eight, and the tests of the blueprint compile each template once
 
-- Status: accepted
+- Status: accepted, amended by [0102](0102-the-blueprint-checks-itself-on-python-3-14-and-its-tests-compile-once.md), which takes on the two costs that this record leaves for later
 - Date: 2026-10-25
 
 ## Context
