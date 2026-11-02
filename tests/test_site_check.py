@@ -5,6 +5,7 @@ site-check of blueprint.py, which the check docs runs after the build."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import random
 import re
 from pathlib import Path
@@ -531,6 +532,88 @@ def test_the_search_of_a_page_loads_its_worker_and_its_index() -> None:
     assert search('{"base": "."}') == []
     assert search("[1]") == []
     assert search("{not json") == []
+
+
+def automation_site(
+    tmp_path: Path, *, fold: str = "blueprint-fold", text: str = "It builds."
+) -> Path:
+    """A website with the page of the automation of the hooks, with the fold around
+    its last workflow and the text of that workflow in the search that are given."""
+    article = (
+        '<article class="md-content__inner md-typeset">'
+        '<h2 id="at-a-glance" data-blueprint-automation="true">At a glance</h2>'
+        '<h2 id="checks">Checks</h2>'
+        '<details class="blueprint-fold"><summary><h3 id="ci">CI</h3></summary>'
+        "<p>It checks.</p></details>"
+        f'<details class="{fold}"><summary><h3 id="docs">Docs</h3></summary>'
+        "<p>It builds.</p></details></article>"
+    )
+    config = (
+        '<script id="__config" type="application/json">'
+        '{"base": ".", "search": "worker.js"}</script>'
+    )
+    index = {
+        "docs": [
+            {"location": "automation.html", "title": "Automation", "text": ""},
+            {"location": "automation.html#ci", "title": "CI", "text": "It checks."},
+            {"location": "automation.html#docs", "title": "Docs", "text": text},
+        ]
+    }
+    files = {
+        "index.html": page("en"),
+        "automation.html": page("en", body=config + article),
+        "search/search_index.json": json.dumps(index),
+    }
+    return built(tmp_path, files)
+
+
+def test_the_automation_page_folds_each_workflow_and_the_search_reaches_it(
+    tmp_path: Path,
+) -> None:
+    assert messages(automation_site(tmp_path)) == []
+
+
+def test_a_workflow_outside_its_fold_on_the_automation_page_fails(
+    tmp_path: Path,
+) -> None:
+    assert messages(automation_site(tmp_path, fold="note")) == [
+        "automation.html: shows the workflow(s) docs outside a fold of the class "
+        "blueprint-fold, which makes the page far too tall on a phone"
+    ]
+
+
+def test_a_workflow_whose_text_the_search_lacks_fails(tmp_path: Path) -> None:
+    assert messages(automation_site(tmp_path, text=" ")) == [
+        "automation.html: has no text of the workflow(s) docs in the search, "
+        "search/search_index.json: the hook on_page_context that folds them has to run "
+        "after the plugin material/search reads the page"
+    ]
+
+
+def test_a_page_of_the_project_with_a_table_at_a_glance_may_have_no_folds(
+    tmp_path: Path,
+) -> None:
+    body = (
+        '<article class="md-content__inner md-typeset">'
+        '<h2 id="at-a-glance">At a glance</h2><h3 id="ci">CI</h3></article>'
+    )
+    site = built(
+        tmp_path, {"index.html": page("en"), "automation.html": page("en", body=body)}
+    )
+
+    assert messages(site) == []
+
+
+def test_the_automation_page_of_a_website_without_a_search_needs_only_its_folds(
+    tmp_path: Path,
+) -> None:
+    site = automation_site(tmp_path, fold="note")
+    (site / "search/search_index.json").unlink()
+
+    assert messages(site) == [
+        "automation.html: shows the workflow(s) docs outside a fold of the class "
+        "blueprint-fold, which makes the page far too tall on a phone"
+    ]
 
 
 def test_an_annotation_names_the_file_on_one_line() -> None:

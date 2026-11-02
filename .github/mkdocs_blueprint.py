@@ -1818,6 +1818,20 @@ CHANGES = frozenset({"push", "pull_request", "pull_request_target", "merge_group
 # The headings of the page that are not those of a workflow, by their anchors, the
 # same in every language.
 SECTIONS = ("required-checks", "at-a-glance", *GROUPS)
+# The attribute of the heading of the table of the workflows by which blueprint.py
+# site-check knows the page of the hooks from a page of the project with such a heading.
+AUTOMATION_MARK = 'data-blueprint-automation="true"'
+# The section of a workflow in the HTML of the page: its heading, the only kind that
+# the page has at this level, without the link to it that the extension toc puts in
+# it, and what follows it, up to the next heading of a workflow or a group, or the end
+# of the text, which on a page that a further language shows untranslated is the end
+# of the element around it. The section itself holds only paragraphs and a list, and
+# what a workflow says in them is escaped.
+WORKFLOW_SECTION = re.compile(
+    r'(?P<heading><h3\b[^>]*>.*?)(?:<a class="headerlink"[^>]*>.*?</a>)?</h3>'
+    r"(?P<body>.*?)(?=<h[23]\b|</div>|\Z)",
+    re.S,
+)
 # The words of the page in each language that it has. The comments of the
 # workflows are English on every page.
 WORDS: dict[str, dict[str, str]] = {
@@ -2481,7 +2495,7 @@ def automation_page(
     groups = {
         group: [flow for flow in flows if flow.group == group] for group in GROUPS
     }
-    lines += [f"## {words['at-a-glance']} {{#at-a-glance}}", ""]
+    lines += [f"## {words['at-a-glance']} {{#at-a-glance {AUTOMATION_MARK}}}", ""]
     lines += [words["glance intro"], ""]
     lines += [f"| {words['workflow']} | {words['when']} |", "| --- | --- |"]
     for flow in (flow for group in GROUPS for flow in groups[group]):
@@ -2520,6 +2534,43 @@ def automation_page(
             lines += [f"- **{words[key]}:** {value}" for key, value in facts if value]
             lines.append("")
     return "\n".join(lines)
+
+
+def folded_workflows(html_text: str) -> str:
+    """The HTML of the page of the automation with the section of each workflow in a
+    fold, whose title is its heading: a reader sees the list of the workflows and opens
+    the one they want, and an anchor still leads to each, since the title of a fold
+    always shows and the Material theme opens the fold around the element that a link
+    leads to.
+
+    The heading loses the link to it, which the reader finds in the menu of the page
+    and in the table at a glance: a control in the title of a fold, itself a control,
+    is a violation of WCAG 4.1.2 that the check of the accessibility fails on.
+    """
+    return WORKFLOW_SECTION.sub(
+        r'<details class="blueprint-fold">'
+        r"<summary>\g<heading></h3></summary>\g<body></details>",
+        html_text,
+    )
+
+
+def on_page_context(context: Any, page: Any, config: Any, nav: Any) -> Any:
+    """Fold the section of each workflow on a page of the automation that the hooks
+    wrote, which on a phone was three times as tall as any other page of a website;
+    a page of the project in its place stays as it is.
+
+    It comes after the search of Material has read the page in this same event: the
+    search ends a section at the end of the element around its heading, so that in the
+    HTML of a fold it would file the text of each workflow under the heading of its
+    group, whose anchor doesn't lead to it.
+    """
+    if page.file.src_uri in BUILT.pages:
+        page.content = folded_workflows(page.content)
+    return context
+
+
+# After the plugin material/search, which has the default priority.
+on_page_context.mkdocs_priority = -100  # type: ignore[attr-defined]
 
 
 def on_nav(nav: Any, config: Any, files: Any) -> Any:
