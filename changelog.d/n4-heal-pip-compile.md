@@ -1,0 +1,3 @@
+### Features
+
+- **A lock file of pip-compile that no longer matches its source fixes itself:** a change of `requirements-dev.in` reached no install until someone compiled `requirements-dev.txt` again, and no check said so. The new step *Lock files match their sources* of `scripts/check.sh` compiles each lock file again with the command in its header, for its Python and on the versions that it pins, so that a new release upstream never fails it; the fix bot commits the result, with the header of the file as it was. `python3 .github/blueprint.py locks --compile --fix` does the same on your machine, and the CI of every kind of project now installs uv when the repository has such a file.

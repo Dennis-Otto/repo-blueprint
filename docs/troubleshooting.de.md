@@ -177,7 +177,7 @@ Wo ein Renovate-Workflow läuft, hält der Bot-Health-Bot ein Issue mit den Warn
 
 **Was du siehst:** Ein Pull Request von Renovate fällt hinter `main` zurück oder bleibt auf einer alten Version, und ein Kommentar von Renovate, *Edited/Blocked Notification*, sagt, dass es den Pull Request nicht rebased, weil es den Autor des letzten Commits nicht erkennt.
 
-**Warum:** Renovate rebased einen Branch nur, solange jeder Commit darauf als sein eigener gilt, und hält jeden anderen für Arbeit, die es nicht überschreiben darf. Die Bots des Repositorys gelten nicht als jemand anderes: Sie committen als die Release-App, und das ist die Adresse, unter der Renovate in einem Renovate-Workflow läuft und die die Regeln des Blueprints für die Mend-Renovate-App nennen ([Entscheidung 0103](decisions/0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). Eine Person gilt als jemand anderes, auch mit *Update branch* auf der Seite des Pull Requests oder `gh pr update-branch`: GitHub macht diesen Merge in ihrem Namen, und Renovate kann ihn nicht von einer Bearbeitung unterscheiden.
+**Warum:** Renovate rebased einen Branch nur, solange jeder Commit darauf als sein eigener gilt, und hält jeden anderen für Arbeit, die es nicht überschreiben darf. Die Bots des Repositorys gelten nicht als jemand anderes: Sie committen als die Release-App, und das ist die Adresse, unter der Renovate in einem Renovate-Workflow läuft und die die Regeln des Blueprints für die Mend-Renovate-App nennen ([Entscheidung 0104](decisions/0104-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). Eine Person gilt als jemand anderes, auch mit *Update branch* auf der Seite des Pull Requests oder `gh pr update-branch`: GitHub macht diesen Merge in ihrem Namen, und Renovate kann ihn nicht von einer Bearbeitung unterscheiden.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/when-renovate-leaves-a-branch-alone.de.dark.svg">
@@ -233,6 +233,22 @@ python3 .github/blueprint.py locks --fix
 Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --output-file=requirements-test.txt requirements-test.in`, und Renovate behält ihn so, wenn es die Datei kompiliert. Eine Option, die Renovate nicht kennt, etwa `--python-platform`, `--no-header`, eine andere Ausgabedatei oder eine Quelldatei, die es nicht gibt, braucht eine Person: Kompiliere die Datei in ihrem Ordner neu, mit den Optionen, die Renovate kennt, wie im Beispiel. In einem Pull Request eines Branches des Repositorys führt der Fix-Bot `locks --fix` selbst aus.
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
+
+## Eine Lock-Datei passt nicht mehr zu ihrer Quelle
+
+**Was du siehst:** Der Schritt *Lock files match their sources* von `scripts/check.sh` scheitert und nennt jede Datei und jede Festlegung, etwa `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
+
+**Warum:** pip installiert eine Lock-Datei, wie sie ist. Ein Paket, das du in `requirements-dev.in` ergänzt, oder eine Grenze, die du dort verschiebst, erreicht keine Installation, bis die Datei neu kompiliert ist, und ein Paket, das du entfernst, bleibt installiert. Der Schritt lässt uv jede Lock-Datei mit dem Befehl in ihrem Kopf neu kompilieren, auf einer Kopie: für das Python des Kopfs, für Linux, außer die Datei ist `--universal`, und auf den Versionen, die die Datei festlegt. Ein neues Release ändert also nichts, ebenso wenig die Hashes einer festgelegten Version: Nur eine Änderung der Quellen verschiebt eine Festlegung.
+
+**Was zu tun ist:** In einem Pull Request von einem Branch des Repositorys nichts: Der Fix-Bot committet die Datei, und in einem aus einem Fork schlägt er die Änderung vor. Auf deinem Rechner kompilierst du jede solche Datei und committest sie:
+
+```sh
+python3 .github/blueprint.py locks --compile --fix
+```
+
+Der Kopf der Datei bleibt, wie er ist, mit ihrem Python und ihrem Werkzeug, und jede Festlegung, die die Quellen noch erlauben, bleibt auch. Findet uv keine Lösung, zeigt das Protokoll seine Antwort, und nichts ändert sich: Die Quellen widersprechen sich oder einem Paket, das sie festlegen. Korrigiere sie zuerst.
+
+Der Schritt sagt es und besteht bei dem, was er nicht vergleicht: einem Link, einem Befehl, den Renovate nicht lesen kann, was der Schritt *Lock files* erklärt, einer Zeile, die keine Festlegung ist, etwa `--index-url`, die eine Behebung verlieren würde, einem Kopf von uv ohne `--python-version=`, und jeder Datei, wenn uv fehlt oder keinen Paketindex erreicht. Die CI jeder Art von Projekt installiert uv, wenn das Repository eine `requirements*.txt` hat.
 
 ## Die Prüfung renovate rules scheitert
 

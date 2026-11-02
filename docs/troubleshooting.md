@@ -177,7 +177,7 @@ Where a Renovate workflow runs, the bot-health bot keeps one issue open with the
 
 **What you see:** a pull request of Renovate falls behind `main` or stays on an old version, and a comment of Renovate, *Edited/Blocked Notification*, says that it won't rebase the pull request because it doesn't recognize the author of the last commit.
 
-**Why:** Renovate rebases a branch only as long as every commit on it counts as its own, and takes any other commit for work that it must not overwrite. The bots of the repository don't count as someone else: they commit as the release app, which is the address that Renovate runs under in a Renovate workflow, and which the rules of the blueprint name for the Mend Renovate app ([decision 0103](decisions/0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). A person does count, also with *Update branch* on the page of the pull request or `gh pr update-branch`: GitHub makes that merge in their name, and Renovate can't tell it from an edit.
+**Why:** Renovate rebases a branch only as long as every commit on it counts as its own, and takes any other commit for work that it must not overwrite. The bots of the repository don't count as someone else: they commit as the release app, which is the address that Renovate runs under in a Renovate workflow, and which the rules of the blueprint name for the Mend Renovate app ([decision 0104](decisions/0104-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). A person does count, also with *Update branch* on the page of the pull request or `gh pr update-branch`: GitHub makes that merge in their name, and Renovate can't tell it from an edit.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/when-renovate-leaves-a-branch-alone.dark.svg">
@@ -233,6 +233,22 @@ python3 .github/blueprint.py locks --fix
 The header then reads `uv pip compile --generate-hashes --python-version=3.12 --output-file=requirements-test.txt requirements-test.in`, and Renovate keeps it so when it compiles the file. An option that Renovate doesn't know, such as `--python-platform`, `--no-header`, another output file or a source file that doesn't exist needs a person: compile the file again in its folder with the options that Renovate knows, as in the example. In a pull request of a branch of the repository, the fix bot runs `locks --fix` itself.
 
 A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
+
+## A lock file no longer matches its source
+
+**What you see:** the step *Lock files match their sources* of `scripts/check.sh` fails and names each file and pin, such as `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
+
+**Why:** pip installs a lock file as it is. A package that you add to `requirements-dev.in`, or a bound that you move there, reaches no install until the file is compiled again, and a package that you drop stays installed. The step has uv compile each lock file again with the command in its header, on a copy: for the Python of the header, for Linux unless the file is `--universal`, and on the versions that the file pins. So a new release upstream changes nothing, nor do the hashes of a pinned version: only a change of the sources moves a pin.
+
+**What to do:** in a pull request of a branch of the repository, nothing: the fix bot commits the file, and on one from a fork it suggests the change. On your machine, compile each such file and commit it:
+
+```sh
+python3 .github/blueprint.py locks --compile --fix
+```
+
+The header of the file stays as it is, with its Python and its tool, and each pin that the sources still allow stays too. When uv finds no solution, the log shows its answer, and nothing changes: the sources contradict themselves or a package that they pin. Correct them first.
+
+The step says so and passes for what it doesn't compare: a link, a command that Renovate can't read, which the step *Lock files* explains, a line that is no pin, such as `--index-url`, which a fix would lose, a header of uv without `--python-version=`, and every file when uv is missing or reaches no package index. The CI of every kind of project installs uv when the repository has a `requirements*.txt`.
 
 ## The check renovate rules fails
 
