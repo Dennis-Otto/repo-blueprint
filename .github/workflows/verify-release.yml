@@ -277,7 +277,7 @@ jobs:
                 --connect-timeout 15 --max-time 300 --output "$RUNNER_TEMP/pypi.json" \
                 "https://pypi.org/pypi/$name/$version/json"; then
                 # An answer that isn't JSON, such as the page of a gateway, has no files.
-                published="$(jq -r '.urls[].digests.sha256' "$RUNNER_TEMP/pypi.json" | sort || true)"
+                published="$(jq -r '.urls[].digests.sha256' "$RUNNER_TEMP/pypi.json" | tr -d '\r' | sort || true)"
               fi
               # sha256sum fails for a kind of file that the release doesn't have.
               attached="$(sha256sum ./*.whl ./*.tar.gz 2>/dev/null | cut -d' ' -f1 | sort || true)"
@@ -294,10 +294,12 @@ jobs:
               if [[ ${#tarballs[@]} -ne 1 || ! -f "${tarballs[0]}" ]]; then
                 fail "The release has no single npm package, a .tgz."
               else
-                package="$(tar -xOzf "${tarballs[0]}" package/package.json | jq -r .name || true)"
+                package="$(tar -xOzf "${tarballs[0]}" package/package.json | jq -r '.name // ""' || true)"
                 published="$(npm view "$package@$version" dist.integrity 2>/dev/null || true)"
                 attached="sha512-$(openssl dgst -sha512 -binary "${tarballs[0]}" | openssl base64 -A)"
-                if [[ "$published" == "$attached" ]]; then
+                if [[ -z "$package" ]]; then
+                  fail "${tarballs[0]#./} has no package.json with a name, so npm can't be asked for it."
+                elif [[ "$published" == "$attached" ]]; then
                   pass "npm has the same package $package@$version."
                 else
                   fail "npm doesn't have the package of the release $version."

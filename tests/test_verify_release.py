@@ -99,10 +99,10 @@ def zip_of(files: Mapping[str, str]) -> bytes:
     return data.getvalue()
 
 
-def npm_package_of(package: str) -> bytes:
+def npm_package_of(package: str | None) -> bytes:
     """An npm package, as npm pack makes it: a tar.gz with a folder named package."""
     data = io.BytesIO()
-    manifest = json.dumps({"name": package}).encode()
+    manifest = json.dumps({"name": package} if package else {}).encode()
     with tarfile.open(fileobj=data, mode="w:gz") as archive:
         member = tarfile.TarInfo("package/package.json")
         member.size = len(manifest)
@@ -317,6 +317,14 @@ PASSES: dict[str, tuple[dict[str, Any], str]] = {
         "r.openvex.json states the advisories that don't affect the release.",
     ),
     "the files on PyPI": (PYPI, f"PyPI has the same files of {VERSION}."),
+    "only a wheel, on PyPI too": (
+        {
+            **PYPI,
+            "assets": {f"r-{VERSION}-py3-none-any.whl": WHEEL},
+            "served": {PYPI_URL: json.dumps({"urls": PYPI_FILES["urls"][:1]})},
+        },
+        f"PyPI has the same files of {VERSION}.",
+    ),
     "the package on npm": (NPM, f"npm has the same package demo@{VERSION}."),
     "the image in GHCR": (
         {"publish_to": "ghcr"},
@@ -472,6 +480,10 @@ PROBLEMS: dict[str, tuple[dict[str, Any], str]] = {
         {"publish_to": "pypi", "served": PYPI["served"]},
         "The release has no wheel and no source archive to compare with PyPI.",
     ),
+    "only a wheel of the two files on PyPI": (
+        {**PYPI, "assets": {f"r-{VERSION}-py3-none-any.whl": WHEEL}},
+        f"PyPI doesn't have the files of the release {VERSION}.",
+    ),
     "another package on npm": (
         {**NPM, "npm_has": "sha512-other"},
         f"npm doesn't have the package of the release {VERSION}.",
@@ -487,6 +499,14 @@ PROBLEMS: dict[str, tuple[dict[str, Any], str]] = {
     "two npm packages": (
         {**NPM, "assets": {"r.tgz": TARBALL, "s.tgz": TARBALL}},
         "The release has no single npm package, a .tgz.",
+    ),
+    "an npm package without a name": (
+        {**NPM, "assets": {"r.tgz": npm_package_of(None)}},
+        "r.tgz has no package.json with a name, so npm can't be asked for it.",
+    ),
+    "a .tgz that is no npm package": (
+        {**NPM, "assets": {"r.tgz": b"no archive"}},
+        "r.tgz has no package.json with a name, so npm can't be asked for it.",
     ),
     "an image without a provenance": (
         {"publish_to": "ghcr", "answers": [exact(ATTESTED_IMAGE, code=1)]},
