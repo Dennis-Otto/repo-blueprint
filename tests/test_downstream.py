@@ -684,6 +684,82 @@ def test_an_answer_of_the_former_kind_goes_with_it(
     ) == ["publish_package"]
 
 
+def test_a_when_sees_what_it_sees_in_copier(blueprint: Path) -> None:
+    # The derived value that is never stored, the default of a question not answered
+    # yet, a yaml default and the filters of Copier: a new question behind any of them
+    # is a new question, not a difference.
+    write(
+        blueprint,
+        {
+            "copier.yml": COPIER
+            + """\
+project_type:
+  type: str
+stack:
+  type: str
+  when: false
+  default: "{{ 'node' if project_type == 'node-package' else 'x' }}"
+pinned:
+  type: yaml
+  when: false
+  default: "[1, 2]"
+count:
+  type: int
+  default: 3
+short: value
+behind_stack:
+  type: bool
+  when: "{{ stack == 'node' }}"
+behind_yaml:
+  type: bool
+  when: "{{ pinned[1] == 2 }}"
+behind_filter:
+  type: bool
+  when: "{{ stack | regex_search('^n') }}"
+behind_other:
+  type: bool
+  when: "{{ stack == 'php' }}"
+""",
+        },
+    )
+
+    asked = downstream.questions(blueprint, {"project_type": "node-package"})
+
+    assert {"behind_stack", "behind_yaml", "behind_filter", "count", "short"} <= asked
+    assert not {"stack", "pinned", "behind_other"} & asked
+    assert downstream.drift({"behind_stack": True}, {}, asked) == []
+
+
+def test_a_when_that_cant_be_rendered_fails_for_this_repository(
+    blueprint: Path,
+) -> None:
+    broken = """\
+broken:
+  type: bool
+  when: "{{ 1 | nothing }}"
+"""
+    write(blueprint, {"copier.yml": COPIER + broken})
+
+    with pytest.raises(downstream.Failed, match=r"copier\.yml can't be rendered"):
+        downstream.questions(blueprint, {})
+
+
+def test_the_real_template_asks_by_its_own_delimiters_and_defaults() -> None:
+    # The fixtures write {{ }}; copier.yml itself writes {= =}, with _envops.
+    root = Path(downstream.__file__).parent
+    answers = downstream.read(root / "tests/answers/player-switch-for-autodarts.yml")
+    assert answers["project_type"] == "chrome-extension"
+
+    asked = downstream.questions(root, answers)
+    assert "publish_package" not in asked
+    assert "stack" not in asked
+    assert "project_name" in asked
+
+    asked = downstream.questions(root, {**answers, "project_type": "node-package"})
+    assert "publish_package" in asked
+    assert "stack" not in asked
+
+
 def test_a_download_tries_three_times(
     blueprint: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

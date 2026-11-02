@@ -144,9 +144,9 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 
 ### [Mutationstests, Fuzzing und Property-Tests](docs/features/tests.de.md)
 
-- **Mutationstests:** Jede Woche zeigen Tausende kleine Änderungen des Codes, welche davon die Tests nicht bemerken.
+- **Mutationstests:** Jede Woche zeigen Tausende kleine Änderungen des Codes, welche die Tests nicht bemerken.
 - **Fuzzing:** Ein Python-Paket oder eine GitHub Action fuzzt jedes Ziel in `fuzz/`, in Pull Requests und jede Woche.
-- **Property-Tests:** Die Property-Tests von Python- und Home-Assistant-Projekten laufen jede Nacht mit neuen zufälligen Eingaben.
+- **Property-Tests:** Python- und Home-Assistant-Projekte führen sie jede Nacht mit neuen zufälligen Eingaben aus.
 
 ### [Releases und Sicherheit](docs/features/releases.de.md)
 
@@ -165,9 +165,10 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 - **Issues:** Der Issue-Assistent, eine KI, die nur liest, analysiert jedes neue Issue, labelt es und findet Duplikate.
 - **Willkommen:** Der erste Pull Request einer Person bekommt einen Kommentar mit dem, was ihm weiterhilft.
 - **Bereichs-Labels:** Jeder Pull Request bekommt die Labels der Bereiche, deren Dateien er ändert.
-- **Branches:** Der Branch-Bot bringt die Pull Requests, die auf Auto-Merge warten, einen nach dem anderen auf den Stand von `main`.
-- **Aufräumen:** Jede Woche verschwinden die gemergten Branches und die Caches geschlossener Pull Requests.
-- **Dashboard:** Eine Seite zeigt jedes Repository des Eigentümers, das Release des Blueprints, auf dem es steht, und den Zustand seiner Prüfungen.
+- **Branches:** Der Branch-Bot bringt Pull Requests, die auf Auto-Merge warten, einen nach dem anderen auf den neuesten Stand.
+- **Ersetzte Commits:** Läufe eines ersetzten Commits geben ihren Runner frei.
+- **Aufräumen:** Jede Woche verschwinden gemergte Branches und die Caches geschlossener Pull Requests.
+- **Dashboard:** Eine Seite zeigt jedes Repository des Eigentümers, sein Release des Blueprints und den Zustand seiner Prüfungen.
 
 ### [Website, Diagramme und Screenshots](docs/features/website.de.md)
 

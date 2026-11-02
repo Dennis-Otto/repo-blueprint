@@ -33,7 +33,7 @@ Copier asks these 27 questions when it copies the blueprint, in this order, and 
 - [`renovate_runner`](#renovate_runner): Who runs Renovate, which opens the updates of the dependencies
 - [`issue_assistant_ai`](#issue_assistant_ai): Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant
 - [`sample_code`](#sample_code): Start with sample code and tests; an existing repository that takes the blueprint answers no
-- [`test_workflows`](#test_workflows): Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more and whose fixes the fix bot commits; empty for none
+- [`test_workflows`](#test_workflows): Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more, whose fixes the fix bot commits and whose runs of a replaced commit the bot for replaced commits cancels; empty for none
 - [`test_marker`](#test_marker): The text before the name of each test or step in the logs of the tests that pytest doesn't run, such as "Browser step:", by which the flaky-test bot names the test that failed; empty for none
 
 ## The questions
@@ -376,7 +376,7 @@ A repository made from the sample answers no once its own code replaced the samp
 
 ### `test_workflows`
 
-Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more and whose fixes the fix bot commits; empty for none.
+Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more, whose fixes the fix bot commits and whose runs of a replaced commit the bot for replaced commits cancels; empty for none.
 
 The flaky-test bot and the fix bot watch the CI and Docker E2E of every repository; a repository whose other workflows run tests, such as visual tests, names them here.
 

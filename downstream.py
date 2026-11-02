@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import yaml
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -182,19 +183,46 @@ def questions(root: Path, answers: Mapping[str, Any]) -> set[str]:
     """The questions that the template here asks a repository with these answers,
     without Copier's settings: each whose `when` holds, as Copier stores no answer of
     another. So an answer of its former kind of project, such as publish_package of a
-    Node package that became a Chrome extension, is no new question to it."""
+    Node package that became a Chrome extension, is no new question to it.
+
+    Each `when` sees what it sees in Copier: the questions in their order, with the
+    default of each that has no answer, as the derived values such as `stack` never do,
+    and the filters of Copier."""
     template = read(root / "copier.yml")
-    jinja = SandboxedEnvironment(**template.get("_envops", {}))
+    jinja = SandboxedEnvironment(
+        loader=jinja2.FileSystemLoader(root),
+        extensions=[
+            "jinja2_ansible_filters.AnsibleCoreFiltersExtension",
+            *template.get("_jinja_extensions", []),
+        ],
+        **template.get("_envops", {}),
+    )
+    known = dict(answers)
+    asked: set[str] = set()
 
-    def asked(spec: Any) -> bool:
-        when = spec.get("when", True) if isinstance(spec, dict) else True
-        if isinstance(when, str):
-            when = yaml.safe_load(jinja.from_string(when).render(**answers))
-        return bool(when)
+    def rendered(text: str) -> str:
+        return jinja.from_string(text).render(**known)
 
-    return {
-        key for key, spec in template.items() if not key.startswith("_") and asked(spec)
-    }
+    try:
+        for key, spec in template.items():
+            if key.startswith("_"):
+                continue
+            details = spec if isinstance(spec, dict) else {"default": spec}
+            default = details.get("default")
+            if key not in known:
+                known[key] = default
+                if isinstance(default, str):
+                    known[key] = rendered(default)
+                    if details.get("type") not in (None, "str"):
+                        known[key] = yaml.safe_load(known[key])
+            when = details.get("when", True)
+            if isinstance(when, str):
+                when = yaml.safe_load(rendered(when))
+            if when:
+                asked.add(key)
+    except (jinja2.TemplateError, yaml.YAMLError) as error:
+        raise Failed(f"copier.yml can't be rendered: {error}") from error
+    return asked
 
 
 def new(

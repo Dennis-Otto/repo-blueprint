@@ -142,9 +142,9 @@ Each group has a page of its own, with what runs, the files that run it and the 
 
 ### [Mutation tests, fuzzing and property tests](docs/features/tests.md)
 
-- **Mutation tests:** Every week, thousands of small changes of the code show which of them the tests don't notice.
+- **Mutation tests:** Every week, thousands of small changes of the code show which the tests don't notice.
 - **Fuzzing:** A Python package or a GitHub Action fuzzes every target in `fuzz/`, in pull requests and every week.
-- **Property tests:** The property tests of Python and Home Assistant projects run every night with new random inputs.
+- **Property tests:** Python and Home Assistant projects run them every night with new random inputs.
 
 ### [Releases and security](docs/features/releases.md)
 
@@ -163,9 +163,10 @@ Each group has a page of its own, with what runs, the files that run it and the 
 - **Issues:** The issue assistant, an AI that only reads, analyses every new issue, labels it and finds duplicates.
 - **Welcome:** A person's first pull request gets a comment with what helps it along.
 - **Area labels:** Every pull request gets the labels of the areas whose files it changes.
-- **Branches:** The branch bot brings the pull requests that wait for auto-merge up to date with `main`, one at a time.
-- **Clean-up:** Every week, the merged branches and the caches of closed pull requests go.
-- **Dashboard:** One page shows every repository of the owner, the release of the blueprint it is on and the state of its checks.
+- **Branches:** The branch bot brings pull requests that wait for auto-merge up to date, one at a time.
+- **Replaced commits:** Runs of a replaced commit give their runner back.
+- **Clean-up:** Every week, merged branches and the caches of closed pull requests go.
+- **Dashboard:** One page shows every repository of the owner, its release of the blueprint and the state of its checks.
 
 ### [Website, diagrams and screenshots](docs/features/website.md)
 

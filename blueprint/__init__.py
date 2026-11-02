@@ -12,6 +12,8 @@ and the changelog of its releases.
     python3 blueprint.py update-commit ...  the pull request of an update (the blueprint bot)
     python3 blueprint.py bot-health ...     one issue per failing bot (the bot-health bot)
     python3 blueprint.py next-branch        the next pull request for auto-merge up to date (the branch bot)
+    python3 blueprint.py stale-runs [--dry-run]
+                                            cancel the runs of commits that a newer push replaced
     python3 blueprint.py diagrams extract   the ```mermaid blocks as sources and pictures
     python3 blueprint.py diagrams ...       keep, commit and report (the diagram bots)
     python3 blueprint.py pages [--fix]      the READMEs and docs in one column, for phones
