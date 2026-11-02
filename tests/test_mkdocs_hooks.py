@@ -790,6 +790,20 @@ def test_the_stylesheet_fixes_what_the_accessibility_check_found() -> None:
         assert rule in css, problem
 
 
+def test_the_stylesheet_makes_the_heading_of_a_fold_its_title() -> None:
+    css = (ROOT / ".github/mkdocs-blueprint.css").read_text(encoding="utf-8")
+
+    assert (
+        ".md-typeset details.blueprint-fold > summary > h3 {\n"
+        "  font-size: inherit;\n"
+        "  font-weight: inherit;\n"
+        "  letter-spacing: inherit;\n"
+        "  line-height: inherit;\n"
+        "  margin: 0;\n"
+        "}\n"
+    ) in css
+
+
 # The pictures of a page
 
 
@@ -2938,7 +2952,7 @@ def test_the_automation_page_shows_every_workflow_with_its_comment(
     headings = re.findall(r"^#{2,3} .*$", page, re.M)
     assert headings == [
         "## What a pull request needs {#required-checks}",
-        "## At a glance {#at-a-glance}",
+        '## At a glance {#at-a-glance data-blueprint-automation="true"}',
         "## Checks {#checks}",
         "### CI {#ci}",
         "## Releases {#releases}",
@@ -3033,6 +3047,73 @@ def test_the_automation_page_without_settings_or_an_address(tmp_path: Path) -> N
     assert "Required checks" not in page
     assert "- **Source:** `.github/workflows/release.yml`\n" in page
     assert module.BUILT.sources == [folder]
+
+
+# The heading and the section of a workflow, as the extension toc and the Markdown of
+# the page make them.
+SECTION = (
+    '<h3 id="ci">CI<a class="headerlink" href="#ci" title="Permanent link">&para;</a>'
+    "</h3>\n<p>What &lt;h3&gt; does.</p>\n<ul>\n<li><strong>When:</strong> a push</li>\n"
+    "</ul>\n"
+)
+
+
+def test_each_workflow_on_the_automation_page_is_a_fold_with_its_heading() -> None:
+    other = SECTION.replace("ci", "nightly").replace("CI", "Nightly")
+    content = (
+        '<h1 id="automation">Automation</h1>\n'
+        '<div class="md-typeset__scrollwrap"><table></table></div>\n'
+        f'<h2 id="checks">Checks</h2>\n<p>They check.</p>\n{SECTION}'
+        f'<h2 id="bots">Bots</h2>\n{other}{SECTION}'
+    )
+
+    folded = hooks().folded_workflows(content)
+
+    fold = (
+        '<details class="blueprint-fold"><summary><h3 id="ci">CI</h3></summary>\n'
+        "<p>What &lt;h3&gt; does.</p>\n<ul>\n<li><strong>When:</strong> a push</li>\n"
+        "</ul>\n</details>"
+    )
+    # Every heading of a workflow keeps its anchor in the title of its fold, without a
+    # link, as a control in the title of a fold fails the accessibility check; what
+    # comes before the first and every heading of a group stay outside the folds.
+    assert folded == (
+        '<h1 id="automation">Automation</h1>\n'
+        '<div class="md-typeset__scrollwrap"><table></table></div>\n'
+        f'<h2 id="checks">Checks</h2>\n<p>They check.</p>\n{fold}'
+        f'<h2 id="bots">Bots</h2>\n'
+        f"{fold.replace('ci', 'nightly').replace('CI', 'Nightly')}{fold}"
+    )
+
+
+def test_a_fold_of_a_workflow_ends_in_the_element_around_an_untranslated_page() -> None:
+    folded = hooks().folded_workflows(f'<div lang="en">\n{SECTION}\n</div>')
+
+    assert folded.endswith("</ul>\n\n</details></div>")
+
+
+def test_only_the_automation_page_of_the_hooks_is_folded_after_the_search_read_it(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    written = automation(tmp_path)
+    module.BUILT.pages = written
+
+    def shown(source: str) -> str:
+        page = SimpleNamespace(file=SimpleNamespace(src_uri=source), content=SECTION)
+        context = {"page": page}
+        assert module.on_page_context(context, page, "config", "nav") is context
+        return str(page.content)
+
+    assert shown("automation.md") == module.folded_workflows(SECTION)
+    assert '<details class="blueprint-fold">' in shown("automation.md")
+    # Any other page, and a page of the project in its place, stay as they are.
+    assert shown("guide.md") == SECTION
+    module.BUILT.pages = {}
+    assert shown("automation.md") == SECTION
+    # The search of Material reads the page in the same event, at the default priority,
+    # and would file the text of each workflow under its group in the HTML of a fold.
+    assert module.on_page_context.mkdocs_priority < 0
 
 
 def test_the_automation_page_speaks_the_languages_of_the_website(
@@ -3567,7 +3648,7 @@ def test_a_group_without_workflows_has_no_heading(tmp_path: Path) -> None:
     page = hooks().automation_pages(folder, website(tmp_path))["automation.md"]
 
     assert re.findall(r"^#{2,3} .*$", page, re.M) == [
-        "## At a glance {#at-a-glance}",
+        '## At a glance {#at-a-glance data-blueprint-automation="true"}',
         "## Bots {#bots}",
         "### draft {#draft}",
     ]
