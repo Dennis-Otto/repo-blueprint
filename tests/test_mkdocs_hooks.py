@@ -1009,6 +1009,97 @@ def test_a_video_takes_a_png_until_it_plays_or_shows_nothing(tmp_path: Path) -> 
     )
 
 
+def test_a_gif_of_each_scheme_plays_as_the_video_of_that_scheme(tmp_path: Path) -> None:
+    media = {
+        "images/a.gif": gif(),
+        "images/a.mp4": b"",
+        "images/a.webp": webp(6, 3),
+        "images/a.dark.gif": gif(),
+        "images/a.dark.mp4": b"",
+    }
+    html = themed_picture("images/a.gif", "images/a.dark.gif", alt="A")
+
+    assert pictures(tmp_path, html, media) == (
+        '<video class="blueprint-video blueprint-only-light" src="images/a.mp4"'
+        ' poster="images/a.webp" width="6" height="3" controls muted loop playsinline'
+        ' preload="none" aria-label="A"></video>'
+        '<video class="blueprint-video blueprint-only-dark" src="images/a.dark.mp4"'
+        ' width="6" height="3" controls muted loop playsinline preload="none"'
+        ' aria-label="A"></video>'
+    )
+
+
+def test_a_scheme_without_a_video_keeps_its_gif_beside_the_video_of_the_other(
+    tmp_path: Path,
+) -> None:
+    media = {"a.gif": gif(), "a.mp4": b"", "a.dark.gif": gif()}
+    html = themed_picture("a.gif", "a.dark.gif", alt="A")
+
+    assert pictures(tmp_path, html, media) == (
+        '<video class="blueprint-video blueprint-only-light" src="a.mp4" width="6"'
+        ' height="3" controls muted loop playsinline preload="none" aria-label="A">'
+        '</video><img src="a.dark.gif#only-dark" alt="A" width="6" height="3"'
+        ' loading="lazy" decoding="async">'
+    )
+
+
+@pytest.mark.parametrize(
+    ("given", "style"),
+    [
+        ('width="396"', ' style="width:396px"'),
+        ('width="396px"', ' style="width:396px"'),
+        ('width=" 39.5"', ' style="width:39.5px"'),
+        ('width="50%"', ' style="width:50%"'),
+        ('width="auto"', ""),
+        ('width=""', ""),
+        ('height="200"', ""),
+    ],
+)
+def test_a_video_is_as_wide_as_its_picture_says(
+    tmp_path: Path, given: str, style: str
+) -> None:
+    # The size of the file stays, for the shape of the video before it loads.
+    assert pictures(
+        tmp_path, f'<img src="a.gif" {given}>', {"a.gif": gif(), "a.mp4": b""}
+    ) == (
+        f'<video class="blueprint-video" src="a.mp4" width="6" height="3"{style}'
+        ' controls muted loop playsinline preload="none"></video>'
+    )
+
+
+def test_a_video_of_each_scheme_is_as_wide_as_their_picture_says(
+    tmp_path: Path,
+) -> None:
+    media = {"a.gif": gif(), "a.mp4": b"", "a.dark.gif": gif(), "a.dark.mp4": b""}
+    html = (
+        '<picture><source media="(prefers-color-scheme: dark)" srcset="a.dark.gif">'
+        '<img src="a.gif" width="396"></picture>'
+    )
+
+    assert pictures(tmp_path, html, media).count(' style="width:396px"') == 2
+
+
+def test_the_stylesheet_shows_a_video_as_its_gif() -> None:
+    css = (ROOT / ".github/mkdocs-blueprint.css").read_text(encoding="utf-8")
+    # In the other scheme it hides, as Material hides a picture with #only-dark.
+    assert (
+        '[data-md-color-scheme="default"] .md-typeset video.blueprint-only-dark,\n'
+        '[data-md-color-scheme="slate"] .md-typeset video.blueprint-only-light {\n'
+        "  display: none;\n"
+        "}"
+    ) in css
+    # No wider than the GIF, whose size the attributes name, or than the column.
+    assert (
+        ".md-typeset video.blueprint-video {\n"
+        "  display: block;\n"
+        "  height: auto;\n"
+        "  max-width: 100%;\n"
+        "}"
+    ) in css
+    # The whole column only when the website can't read the size of the GIF.
+    assert ".md-typeset video.blueprint-video:not([width]) {\n  width: 100%;\n}" in css
+
+
 def test_a_gif_without_a_video_stays_a_gif(tmp_path: Path) -> None:
     html = '<img src="images/a.gif" alt="A"><img src="images/b.png" alt="B">'
     media = {"images/a.gif": gif(), "images/b.png": png(), "images/b.mp4": b""}
