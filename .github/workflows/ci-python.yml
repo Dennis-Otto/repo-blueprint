@@ -123,6 +123,9 @@ jobs:
           # into main.
           if [[ "$EVENT" == pull_request ]]; then
             git checkout --quiet --force --detach HEAD^2
+          else
+            # Only what the commands change is a fix, not what the check left behind.
+            git checkout --quiet --force HEAD -- .
           fi
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py

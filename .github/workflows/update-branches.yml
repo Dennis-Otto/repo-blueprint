@@ -28,7 +28,7 @@ name: Update branches
 # nothing new from the fork runs then (decision 0099).
 # Every merge leaves the runs of its pull request behind, and every update the runs of
 # the commit that it replaced: after the line, the bot cancels those that no open pull
-# request has as its head any more, as this job runs anyway (decision 0107).
+# request has as its head any more, as this job runs anyway (decision 0108).
 # The bot checks out main alone, for blueprint.py, which holds the logic, and runs
 # nothing of a pull request. https://github.com/Dennis-Otto/repo-blueprint
 

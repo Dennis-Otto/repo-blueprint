@@ -82,7 +82,7 @@ from blueprint.checklist import (
     RELEASE_APP_PERMISSIONS,
 )
 from blueprint.coach import Catalog, missing, undeclared
-from blueprint.fixes import fixers, signed_off
+from blueprint.fixes import fixers, signed_off, watched
 from blueprint.github import Api
 from blueprint.locks import why_renovate_skips
 from blueprint.mutation import NOTHING_MATCHES, default_paths
@@ -11377,7 +11377,7 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     # that the release app needs none: the merges of the account that it names are the
     # ones whose runs the bot may approve (decision 0099).
     # The pull requests for their heads, whose replaced commits the bot cancels the runs
-    # of (decision 0107).
+    # of (decision 0108).
     assert job["permissions"] == {
         "actions": "write",
         "contents": "read",
@@ -11641,6 +11641,39 @@ def test_the_bots_after_the_checks_watch_the_other_tests_that_a_project_names(
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
     )
+    # The fix bot reads them as well, and waits for one once its file keeps fixes.
+    workflows = project / ".github/workflows"
+    assert watched(project).listed == watched_after_the_checks(after)
+    assert "Visual check" not in watched(project).keeping
+    (workflows / "visual.yml").write_text(
+        "name: Visual check\n\njobs:\n  visual:\n    steps:\n"
+        "      - uses: actions/upload-artifact@v7\n        with:\n"
+        "          name: fixes-visual\n",
+        encoding="utf-8",
+    )
+    assert "Visual check" in watched(project).keeping
+    assert "Screenshot bot" not in watched(project).keeping
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_fix_bot_waits_for_the_checks_that_fix_in_every_kind(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    found = watched(project)
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    ci = re.search(
+        r"^name: (.+)$",
+        (project / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert ci
+    # Every workflow of the list counts, the checks that fix are waited for, and no long
+    # run that keeps nothing, such as the tests of a browser and the scanners, is.
+    assert found.listed == watched_after_the_checks(after)
+    assert found.keeping == {ci[1], "Lint", "Docs"}
+    assert found.awaited("pull_request") == {ci[1], "Lint"}
+    assert found.awaited("push") == {ci[1], "Lint", "Docs"}
 
 
 @pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])
@@ -11990,7 +12023,7 @@ def test_a_pull_request_fails_that_runs_an_action_that_the_list_lacks() -> None:
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
+def test_the_check_of_the_signatures_starts_on_every_push_and_runs_nothing_of_the_pull_request(
     projects: dict[str, Path], project: str
 ) -> None:
     root = ROOT if project == "blueprint" else projects[project]

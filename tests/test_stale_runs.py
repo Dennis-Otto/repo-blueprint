@@ -284,6 +284,22 @@ def test_a_second_look_without_an_answer_keeps_the_runs_of_that_commit(
     )
 
 
+def test_a_list_of_heads_that_github_doesnt_know_cancels_nothing(root: Path) -> None:
+    # Taken for an empty list, it would call the runs of every head replaced, and the
+    # second look answers 404 as well.
+    github = FakeGitHub(a_run(1))
+    github.fail[f"repos/{REPO}/pulls"] = 404
+    github.fail[f"repos/{REPO}/commits"] = 404
+    outcome = cancel_stale_runs(Api(github), REPO, root)
+    assert github.cancelled == []
+    [warning] = outcome.warnings
+    assert warning.startswith(
+        "::warning::The bot for replaced commits stopped and cancels no more: "
+        "GitHub answered 404"
+    )
+    assert "No run of a commit" in outcome.summary
+
+
 @pytest.mark.parametrize("path", ["actions/runs", "pulls"])
 def test_a_list_that_fails_cancels_nothing(root: Path, path: str) -> None:
     github = FakeGitHub(a_run(1))

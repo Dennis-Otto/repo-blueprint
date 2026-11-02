@@ -18,7 +18,7 @@ name: Pull request title
 # The bot for replaced commits is a step of that job for the same reason: the run of a
 # commit that a newer push replaced tells nobody anything, yet it holds a runner of the
 # account, and this job runs on every push anyway, so the bot needs no runner of its own
-# (decision 0107). It cancels only runs of the checks whose commit no open pull request
+# (decision 0108). It cancels only runs of the checks whose commit no open pull request
 # has as its head; the branch bot does the same for the pull requests that merge.
 # https://github.com/Dennis-Otto/repo-blueprint
 

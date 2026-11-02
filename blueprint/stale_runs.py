@@ -108,10 +108,12 @@ class Sweep:
         found = [run for run in runs.values() if self.may_go(run)]
         if not found:
             return []
+        # Not missing_ok: without this list, every run would look replaced.
         heads = {
             pull["head"]["sha"]
             for pull in self.api.get_all(
-                f"repos/{self.repo}/pulls?state=open&per_page={PAGE}"
+                f"repos/{self.repo}/pulls?state=open&per_page={PAGE}",
+                missing_ok=False,
             )
         }
         return [run for run in found if run["head_sha"] not in heads]
