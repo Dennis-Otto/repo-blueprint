@@ -12455,7 +12455,10 @@ def test_every_project_fixes_what_a_command_can_fix(
     after = (github / "workflows/after-checks.yml").read_text(encoding="utf-8")
     assert {name.replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
     bot = job_in(after, "fixes")
-    assert "startsWith(github.event.workflow_run.name, 'CI (')" in condition_of(bot)
+    left_out = re.findall(r"!contains\(fromJSON\('(\[[^']*\])'\)", condition_of(bot))
+    assert len(left_out) == 2
+    for names in left_out:
+        assert not {name.replace("check", "CI"), "Lint"} & set(json.loads(names))
     assert "Dennis-Otto" not in values_of(bot)
     # The title and the entry of the changelog fix themselves in every kind as well: the
     # check of the title that starts them is among the workflows that it follows.
@@ -17188,11 +17191,7 @@ def test_a_project_accepts_what_its_website_has_once_through_the_update(
     assert artifact["with"]["include-hidden-files"] is True
     # The fix bot looks at Docs on main alone, and the bot's commit needs the file.
     after = (root / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert (
-        "(github.event.workflow_run.name == 'Lint' || "
-        "github.event.workflow_run.name == 'Docs' || "
-        "startsWith(github.event.workflow_run.name, 'CI ('))"
-    ) in after
+    assert ("(github.event.workflow_run.name == 'Docs' || !contains(fromJSON(") in after
 
 
 def test_the_blueprint_accepts_no_violation_and_tests_its_check_with_coverage() -> None:
