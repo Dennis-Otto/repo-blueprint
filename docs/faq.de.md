@@ -90,6 +90,17 @@ Mit pipx statt uv beginnt die Copier-Zeile mit `pipx run --spec copier==9.19.1 c
 
 `--vcs-ref=:current:` behält das Release des Blueprints, auf dem das Repository steht, und `--defaults` nimmt jede andere Antwort aus `.copier-answers.yml`. Der Push läuft über GitHub CLI, deren Anmeldung Workflows ändern darf. Die Regeln von `main` verlangen außerdem eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Was die Antwort in `.github/repository.toml` ändert, etwa eine Variable oder die Topics, wendet der Einstellungs-Bot nach dem Merge an.
 
+## Mein Code hat das Beispiel ersetzt: Wie behandeln die Updates ihn nicht länger als Beispiel?
+
+Antworte auf [`sample_code`](reference/questions.md#sample_code) mit Nein und hole zurück, was das Update löscht. Das Update löscht jede Datei, die nur das Beispiel rendert, etwa dein eigenes `docs/index.md` und `src/`, weil die neue Antwort sie nicht mehr rendert; der zweite Befehl stellt sie deshalb aus dem letzten Commit wieder her:
+
+```sh
+copier update --defaults --vcs-ref=:current: --data sample_code=false
+git diff --name-only --diff-filter=D -z | xargs -0 git restore --
+```
+
+Prüfe, dass `git status` danach nur `.copier-answers.yml` und die Seiten nennt, die vom Beispiel sprechen, etwa `CONTRIBUTING.md`, und committe sie. Von da an gehören die Dateien allein dir, und kein Update des Blueprints fasst sie an.
+
 ## Wie verlasse ich den Blueprint?
 
 Lösche `.github/workflows/blueprint-update.yml`, und kein Update des Blueprints kommt mehr; der Rollout des Blueprints lässt ein Repository ohne Blueprint-Bot aus. Alles andere bleibt und funktioniert, wie es ist, denn es ist eine Datei deines Repositorys: die Workflows, die Prüfungen, die Einstellungen als Code mit `.github/blueprint.py` und die anderen Bots. Die Lizenz des Blueprints, [MIT No Attribution](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE), verlangt nichts für das, was du behältst, nicht einmal einen Hinweis. Behalte `.copier-answers.yml`, wenn du vielleicht zurückkommst: `copier update` setzt bei dem Release an, das sie nennt.

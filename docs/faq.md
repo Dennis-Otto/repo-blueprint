@@ -90,6 +90,17 @@ With pipx in place of uv, the Copier line starts `pipx run --spec copier==9.19.1
 
 `--vcs-ref=:current:` keeps the release of the blueprint that the repository is on, and `--defaults` takes every other answer from `.copier-answers.yml`. The push goes through GitHub CLI, whose sign-in may change workflows. The rules of `main` also ask for a signature on every commit: turn `commit.gpgsign` on or add `--gpg-sign` to the commit, and the check *signed commits* names a commit without one and how to sign it again. The settings bot applies what the answer changes in `.github/repository.toml`, such as a variable or the topics, after the merge.
 
+## My code replaced the sample: how do I stop the updates from treating it as the sample?
+
+Answer no to [`sample_code`](reference/questions.md#sample_code), and take back what the update deletes. The update deletes each file that only the sample renders, such as `docs/index.md` and `src/` of your own, because the new answer no longer renders them, so the second command restores them from the last commit:
+
+```sh
+copier update --defaults --vcs-ref=:current: --data sample_code=false
+git diff --name-only --diff-filter=D -z | xargs -0 git restore --
+```
+
+Check that `git status` then lists only `.copier-answers.yml` and the pages that speak of the sample, such as `CONTRIBUTING.md`, and commit them. From then on the files are yours alone, and no update of the blueprint touches them.
+
 ## How do I leave the blueprint?
 
 Delete `.github/workflows/blueprint-update.yml`, and no update of the blueprint comes any more; the Rollout of the blueprint leaves a repository without the blueprint bot out. Everything else stays and works as it is, since it is a file of your repository: the workflows, the checks, the settings as code with `.github/blueprint.py` and the other bots. The license of the blueprint, [MIT No Attribution](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE), asks nothing of what you keep, not even a notice. Keep `.copier-answers.yml` if you might come back: `copier update` starts from the release that it names.

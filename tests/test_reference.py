@@ -194,8 +194,8 @@ def test_the_registry_names_every_repository_that_follows_the_blueprint() -> Non
     registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
     assert registry.owner == "Dennis-Otto"
     names = {item.name: item for item in registry.members}
-    # player-switch-for-autodarts, the node package that follows it since 0.8.8.
-    assert names["player-switch-for-autodarts"].kind == "node-package"
+    # player-switch-for-autodarts, the Chrome extension that follows it since 0.8.8.
+    assert names["player-switch-for-autodarts"].kind == "chrome-extension"
     assert names["player-switch-for-autodarts"].canary
     # Each canary with the answers of its repository, of its kind; and only these.
     answers = sorted(path.stem for path in (ROOT / "tests/answers").glob("*.yml"))

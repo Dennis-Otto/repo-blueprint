@@ -58,7 +58,9 @@ Diese Art bringt diese Schritte dazu:
 
 <!-- --8<-- [start:real-repository] -->
 
-Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der Workflow Variants des Blueprints macht bei jeder Änderung seiner Dateien eines daraus und führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert eines von der neuesten Version, wie sein Blueprint-Bot es täte.
+[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) ist aus dem Blueprint entstanden: ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Player Switch for Autodarts rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 
