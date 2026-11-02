@@ -17,7 +17,8 @@ answers of each of these repositories, and
         as a workflow, a script or the configuration of a bot. It warns of answers in tests/answers/ that differ from those of the
         repository.
     python3 downstream.py --answers
-        writes tests/answers/ anew from the answers of each repository on GitHub.
+        writes tests/answers/ anew from the answers of each repository on GitHub, and
+        the file of a new canary of .github/fleet.toml.
 
 The Downstream workflow runs it in each pull request that changes what the
 repositories get from the blueprint, and every week.
@@ -43,7 +44,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from jinja2.sandbox import SandboxedEnvironment
 
+import reference
 from blueprint.update import MARKERS
 
 ROOT = Path(__file__).resolve().parent
@@ -175,10 +178,23 @@ def text_of(repository: str, answers: Mapping[str, Any]) -> str:
     return HEADER.format(repository=repository) + text
 
 
-def questions(root: Path) -> set[str]:
-    """The questions of the template here, without Copier's settings."""
-    path = root / "copier.yml"
-    return {key for key in read(path) if not key.startswith("_")}
+def questions(root: Path, answers: Mapping[str, Any]) -> set[str]:
+    """The questions that the template here asks a repository with these answers,
+    without Copier's settings: each whose `when` holds, as Copier stores no answer of
+    another. So an answer of its former kind of project, such as publish_package of a
+    Node package that became a Chrome extension, is no new question to it."""
+    template = read(root / "copier.yml")
+    jinja = SandboxedEnvironment(**template.get("_envops", {}))
+
+    def asked(spec: Any) -> bool:
+        when = spec.get("when", True) if isinstance(spec, dict) else True
+        if isinstance(when, str):
+            when = yaml.safe_load(jinja.from_string(when).render(**answers))
+        return bool(when)
+
+    return {
+        key for key, spec in template.items() if not key.startswith("_") and asked(spec)
+    }
 
 
 def new(
@@ -292,7 +308,7 @@ def try_one(
         clone(source.format(repository=result.repository), folder, sleep)
         theirs = mapping(point(folder, template), ANSWERS_FILE)
         result.version = str(theirs.get("_commit", ""))
-        result.drift = drift(ours, theirs, questions(template))
+        result.drift = drift(ours, theirs, questions(template, theirs))
         before: dict[str, bytes] = {}
         if base is not None:
             other = work / f"{answers.stem}-base"
@@ -481,19 +497,41 @@ def download(
             attempt += 1
 
 
+def repositories(root: Path) -> dict[Path, str]:
+    """Each file of tests/answers/ with its repository, and the file that each new
+    canary of the registry takes; a copy of the blueprint without a registry, such as
+    a fork that no repository follows yet, has only its files."""
+    folder = root / ANSWERS
+    found = {path: repository_of(read(path)) for path in folder.glob("*.yml")}
+    registry = root / reference.FLEET
+    if registry.is_file():
+        try:
+            fleet = reference.fleet(registry.read_text(encoding="utf-8"))
+        except reference.PageError as error:
+            raise Failed(str(error)) from error
+        for item in fleet.members:
+            if item.canary:
+                found.setdefault(
+                    folder / f"{item.name}.yml", f"{fleet.owner}/{item.name}"
+                )
+    return dict(sorted(found.items()))
+
+
 def refresh(root: Path, fetch: Fetch) -> list[str]:
-    """Write each file of tests/answers/ anew from the answers of its repository."""
+    """Write each file of tests/answers/ anew from the answers of its repository, and
+    the file of a new canary of the registry."""
     written = []
-    asked = questions(root)
-    for path in sorted((root / ANSWERS).glob("*.yml")):
-        ours = read(path)
-        repository = repository_of(ours)
+    for path, repository in repositories(root).items():
+        known = path.is_file()
+        ours = read(path) if known else {}
         url = RAW.format(repository=repository)
         theirs = mapping(fetch(url), url)
         # A new question keeps its answer until the Rollout brings it.
+        asked = questions(root, theirs)
         kept = {key: ours[key] for key in new(ours, theirs, asked)}
         text = text_of(repository, {**theirs, **kept})
-        if text != path.read_text(encoding="utf-8"):
+        if not known or text != path.read_text(encoding="utf-8"):
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8", newline="\n")
             written.append(
                 f"{path.relative_to(root).as_posix()}: the answers of {repository}"
@@ -531,7 +569,7 @@ def main(
     parser.add_argument(
         "--answers",
         action="store_true",
-        help=f"write {ANSWERS.as_posix()}/ anew from the answers on GitHub",
+        help=f"write {ANSWERS.as_posix()}/ anew from the answers on GitHub, also of a new canary",
     )
     arguments = parser.parse_args(argv)
     if arguments.answers:

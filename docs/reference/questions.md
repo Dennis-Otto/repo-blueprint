@@ -368,6 +368,8 @@ The issue assistant labels the issues and answers its commands without AI; with 
 
 Start with sample code and tests; an existing repository that takes the blueprint answers no.
 
+A repository made from the sample answers no once its own code replaced the sample; the update then deletes those files, which docs/faq.md says how to take back.
+
 - **Type:** yes or no
 - **Asked:** always
 - **Default:** yes

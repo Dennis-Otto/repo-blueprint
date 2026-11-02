@@ -18,13 +18,12 @@ license: MIT
 owner: Dennis-Otto
 project_name: Player Switch for Autodarts
 project_slug: player-switch-for-autodarts
-project_type: node-package
-publish_package: false
+project_type: chrome-extension
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
 release_app_id: '4739928'
 renovate_runner: hub
-sample_code: true
+sample_code: false
 sponsor: Dennis-Otto
 successor: true
 test_marker: ''

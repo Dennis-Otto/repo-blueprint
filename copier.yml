@@ -358,6 +358,8 @@ issue_assistant_ai:
   help: Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant
   default: true
 
+# A repository made from the sample answers no once its own code replaced the sample;
+# the update then deletes those files, which docs/faq.md says how to take back.
 sample_code:
   type: bool
   help: Start with sample code and tests; an existing repository that takes the blueprint answers no
