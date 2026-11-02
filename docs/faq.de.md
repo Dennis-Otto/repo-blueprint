@@ -95,7 +95,7 @@ Mit pipx statt uv beginnt die Copier-Zeile mit `pipx run --spec copier==9.19.1 c
 Antworte auf [`sample_code`](reference/questions.md#sample_code) mit Nein und hole zurück, was das Update löscht. Das Update löscht jede Datei, die nur das Beispiel rendert, etwa dein eigenes `docs/index.md` und `src/`, weil die neue Antwort sie nicht mehr rendert; der zweite Befehl stellt sie deshalb aus dem letzten Commit wieder her:
 
 ```sh
-copier update --defaults --vcs-ref=:current: --data sample_code=false
+uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data sample_code=false
 git diff --name-only --diff-filter=D -z | xargs -0 git restore --
 ```
 
