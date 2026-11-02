@@ -5978,6 +5978,9 @@ def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
     )
 
 
+# In the copy of the mutation tests, the tool that the step runs in a repository of its
+# own is the code with the mutants, which runs only where mutmut set it up.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("mode", "code", "level"), [("", 0, "notice"), ("fail", 1, "error")]
@@ -6028,6 +6031,9 @@ def test_the_step_of_a_project_annotates_what_the_pull_request_changes(
     ]
 
 
+# In the copy of the mutation tests, the tool that the step runs in a repository of its
+# own is the code with the mutants, which runs only where mutmut set it up.
+@pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("project_part", "code", "annotations"),
