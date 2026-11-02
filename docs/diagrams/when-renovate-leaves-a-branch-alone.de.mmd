@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wann Renovate einen Branch in Ruhe lässt
+    accDescr: Renovate vergleicht Autor und Committer jedes Commits auf seinem Branch mit seiner eigenen Adresse und seiner Regel gitIgnoredAuthors. Bei einem Commit von Renovate rebased es weiter, ebenso bei einem des Fix-Bots, des Branch-Bots oder eines anderen Bots, die als Release-App committen: Wo Renovate als Release-App läuft, ist das seine eigene Adresse, und für die Mend-Renovate-App nennen sie die Regeln des Blueprints. Ein Commit von jemand anderem, auch ein Merge, den eine Person mit Update branch startet, zählt als Bearbeitung, und Renovate lässt den Branch in Ruhe, bis eine Person das Kästchen im Pull Request ankreuzt, was den Branch ohne diesen Commit neu baut.
+
+    commit["Ein Commit auf einem Branch von Renovate"]
+    who{{"`**Von wem ist er?**<br>Renovate vergleicht Autor und Committer`"}}
+    own["Renovates eigene Adresse"]
+    bots["Die Release-App: der Fix-Bot, der Branch-Bot und die anderen<br>self und hub: Renovates eigene Adresse<br>mend: die Regel gitIgnoredAuthors des Blueprints"]
+    person(["Jemand anderes,<br>auch Update branch einer Person"])
+    rebases["Renovate rebased und aktualisiert den Branch weiter"]
+    edited["Renovate hält das für eine Bearbeitung und lässt den Branch in Ruhe"]
+    box(["Eine Person kreuzt das Kästchen im Pull Request an"])
+
+    commit --> who
+    who --> own & bots & person
+    own & bots --> rebases
+    person --> edited --> box
+    box -- "der Branch wird ohne diesen Commit neu gebaut" --> rebases
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class commit,who,own,bots bot
+    class person,edited,box person
+    class rebases done
