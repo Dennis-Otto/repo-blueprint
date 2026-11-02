@@ -15,6 +15,8 @@ import workflow_steps
 from shell import BASH, in_bash
 from workflow_steps import Answer
 
+import pins
+
 ROOT = Path(__file__).parents[1]
 GIT = shutil.which("git")
 pytestmark = pytest.mark.skipif(
@@ -22,6 +24,8 @@ pytestmark = pytest.mark.skipif(
     reason="the scripts run in bash, Git Bash on Windows, with git",
 )
 RELEASE_WORKFLOW = "o/r/.github/workflows/release.yml@refs/heads/main"
+# The pin of gitsign in .github/pins.toml, which moves with every update by Renovate.
+GITSIGN = pins.load_record(ROOT)["sigstore/gitsign"]
 
 
 # The outcomes that a test plans for a stub, one per call and line; none succeeds.
@@ -254,7 +258,7 @@ def test_the_tag_of_a_release_is_signed_at_its_commit(github: GitHub) -> None:
     assert f"identity https://github.com/{RELEASE_WORKFLOW} " in message
     calls = github.calls.read_text(encoding="utf-8")
     assert "--retry 5 --retry-all-errors --connect-timeout 15" in calls
-    assert "69213a8a0813a151e5a47d0060862952ff833a845d57309dff76f7ba6600abae" in calls
+    assert GITSIGN.sha256 in calls
     assert "sleep" not in calls
 
 
@@ -415,8 +419,11 @@ def test_github_that_keeps_failing_fails(
 @pytest.mark.parametrize(
     ("stub", "error"),
     [
-        ("download", "gitsign 0.17.1 could not be downloaded."),
-        ("checksum", "The download of gitsign 0.17.1 doesn't have the checksum"),
+        ("download", f"gitsign {GITSIGN.version} could not be downloaded."),
+        (
+            "checksum",
+            f"The download of gitsign {GITSIGN.version} doesn't have the checksum",
+        ),
     ],
 )
 @pytest.mark.parametrize("arguments", [("v1.0.0",), ("verify", "v1.0.0")])
