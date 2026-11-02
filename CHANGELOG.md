@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.8.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.7.0...v1.8.0) (2026-11-02)
+
+
+### Features
+
+* the a11y check tests reflow at phone width ([#620](https://github.com/Dennis-Otto/repo-blueprint/issues/620)) ([345036c](https://github.com/Dennis-Otto/repo-blueprint/commit/345036c4b3c170c1c32b2e98582e9c248ddb1aa6))
+
 ## [1.7.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.6.1...v1.7.0) (2026-11-02)
 
 ### Features
