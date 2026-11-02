@@ -43,6 +43,24 @@ Der Branch-Bot stellt die Pull Requests, die auf Auto-Merge warten, in eine Reih
 - **Auch über Änderungen an Workflows hinweg:** Einen Pull Request auf den neuesten Stand zu bringen, merged `main` in seinen Branch, und hat `main` seitdem einen Workflow geändert, nimmt GitHub diesen Merge nur von einem Token an, das Workflows ändern darf. Das Token der Release-App des Bots darf es, wie das von Renovate, also kommt ein solcher Pull Request, etwa einer von Renovate, der die Actions aktualisiert, wie jeder andere auf den neuesten Stand statt mit einer Warnung in jedem Lauf.
 - **Die Zusammenfassung jedes Laufs** zeigt die Reihe: welchen Pull Request der Bot auf den neuesten Stand gebracht hat oder dessen Prüfungen laufen, und warum jeder andere wartet. `blueprint.py next-branch` enthält die Logik, und der Workflow checkt dafür nur `main` aus, auch wenn Auto-Merge angeschaltet wird.
 
+## Ersetzte Commits
+
+Ein Lauf einer Prüfung sagt nur etwas über seinen Commit. Sobald ein neuerer Push diesen Commit ersetzt hat oder sein Pull Request gemergt oder geschlossen wurde, liest niemand mehr die Antwort, doch der Lauf wartet weiter auf einen Runner des Kontos, den sich alle Repositorys eines Besitzers teilen, 20 zugleich bei GitHub Free. Die Concurrency der meisten Prüfungen bricht den Lauf für denselben Pull Request ab. Die schnellen Prüfungen dürfen sich nicht gegenseitig abbrechen, denn ein verspäteter Lauf für einen älteren Commit bräche den Lauf für den Head ab, und keine Prüfung bricht einen Lauf ab, wenn ihr Pull Request gemergt wird. Darum kümmert sich der Bot für ersetzte Commits:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-runs-of-a-replaced-commit.de.dark.svg">
+  <img src="../images/diagrams/the-runs-of-a-replaced-commit.de.svg" alt="Die Läufe eines ersetzten Commits: Ein neuer Commit in einem Pull Request startet den Job signed commits, und ein Merge oder eine Aktualisierung eines Branches startet den Branch-Bot, die beide ohnehin laufen. Jeder nimmt die Läufe, die warten oder laufen, und danach die Heads der offenen Pull Requests. Der Head eines offenen Pull Requests, ein Lauf von main, ein Release, ein Workflow, der keine Prüfung ist, ein zweiter Versuch und ein Lauf, der jünger als 20 Sekunden ist, bleiben. Eine zweite Liste von GitHub prüft den Commit jedes anderen Laufs, und wenn sie zustimmt, bricht der Bot den Lauf ab, der damit seinen Runner freigibt. Nach den Prüfungen startet für ihn kein Job, denn das Ereignis nennt die Heads der offenen Pull Requests.">
+</picture>
+
+- **Was bleibt:** der Head jedes offenen Pull Requests, auch eines Forks mit einem gleichnamigen Branch; ein Lauf von `main`, ein Zeitplan und ein Release; ein Workflow, der keine der Prüfungen in `update-branches.yml` ist, etwa einer, der etwas tut, wenn ein Pull Request geschlossen wird; ein Lauf, den jemand neu gestartet hat, denn er will dessen Antwort; und ein Lauf, der jünger als 20 Sekunden ist, dessen Head eine Liste von GitHub vielleicht noch nicht kennt.
+- **Im Zweifel geht nichts:** Eine Liste, die GitHub verweigert, bricht nichts ab, und eine zweite Liste, für den Commit, muss direkt vor dem Abbruch zustimmen. Ein Lauf, der bleibt, kostet nur einen Runner, und der nächste Blick nimmt ihn mit.
+- **Kein eigener Runner:** Der Bot ist ein Schritt von *signed commits*, das ohnehin bei jedem Push läuft, und ein Teil des Branch-Bots, der bei jedem Merge läuft. Er verlängert sie um wenige Sekunden, wo ein eigener Job an einem vollen Tag 467 Jobs mehr gewesen wären. Er lässt keinen von beiden scheitern: Was GitHub verweigert, ist eine Annotation.
+- **Für einen abgebrochenen Lauf startet nichts:** Jeder Lauf, der endet, startet *After the checks*, dessen Bot für wackelige Tests, Bot für abgebrochene Prüfungen und PR-Coach je einen Runner nähmen, nur um festzustellen, dass der Commit nicht mehr der Head ist. Das Ereignis nennt die Heads der offenen Pull Requests, also entfallen sie ohne Runner, auch nach einem Lauf, der von selbst endete. Ein Lauf aus einem Fork nennt keine, und seine Jobs fragen GitHub.
+- **Was es spart:** Am 1. November 2026 liefen in sieben Repositorys 547 Läufe weiter, nachdem ihr Commit ersetzt war; der Bot hätte 520 davon abgebrochen, etwa 740 Jobs und 900 Minuten an Runnern, wie [die Entscheidung](../decisions/0107-the-runs-of-a-replaced-commit-give-their-runner-back.md) darlegt.
+- **Selbst nachsehen:** `python3 .github/blueprint.py stale-runs --dry-run` sagt, was der Bot gerade abbräche, und die Zusammenfassung jedes Laufs des Jobs sagt, was er getan hat.
+
+**Womit:** `pull-request-title.yml`, `update-branches.yml`, `blueprint.py stale-runs`.
+
 ## Aufräumen
 
 Jede Woche verschwinden die Branches, die `main` enthält, und die Caches geschlossener Pull Requests; ein Branch mit eigener Arbeit bleibt und wird nach einem Monat aufgelistet.
