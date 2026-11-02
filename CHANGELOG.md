@@ -9,6 +9,7 @@ requests when there is none.
 
 ### Bug fixes
 
+- **The accessibility check keeps the cause of its error about a broken TOML file:** the error about `.github/a11y-accepted.toml` now carries the error of the parser, so a project whose ESLint covers `.github/` no longer fails on the rule `preserve-caught-error` after a blueprint update.
 - **`scripts/check.sh` runs the checks of a project's website too:** after its local strict build it checked only what the hooks of the website promise, so a project's `scripts/check-site.sh` failed for the first time in the check *docs* of the pull request, unless its author remembered to run it by hand. Where that script exists, the step *Website* now runs it on the website it built, and fails with what the script found. The script gets that folder as its argument, which is no longer always `site`, so it must read the folder from its argument.
 
 ## [1.6.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.5.0...v1.6.0) (2026-11-01)

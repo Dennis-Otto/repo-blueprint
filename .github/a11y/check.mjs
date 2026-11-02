@@ -190,7 +190,9 @@ export function parseAccepted(text) {
   try {
     data = parseToml(text);
   } catch (error) {
-    throw new Error(`${ACCEPTED} isn't valid TOML: ${error.message.split("\n")[0]}`);
+    throw new Error(`${ACCEPTED} isn't valid TOML: ${error.message.split("\n")[0]}`, {
+      cause: error,
+    });
   }
   const { baseline = false, accepted = [], ...others } = data;
   const problems = Object.keys(others).map((key) => `the key ${key} means nothing here`);
