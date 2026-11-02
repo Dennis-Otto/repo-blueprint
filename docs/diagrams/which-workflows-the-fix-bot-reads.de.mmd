@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Welche Workflows der Fix-Bot liest
+    accDescr: Ein Lauf eines Workflows scheitert. Ein Workflow, den die Liste von after-checks.yml auf main nicht nennt, startet keinen Bot, und der Bot liest keine seiner Behebungen, egal wie ein Pull Request ihn nennt. Bei einem Workflow der Liste, auch einem des Projekts wie Docker E2E, sucht der Bot ein Artefakt fixes-*. Ohne eines erklärt der PR-Coach die Prüfung. Mit einem wartet der Bot auf die Workflows, deren Dateien auf main ein solches Artefakt behalten, und auf keinen langen Lauf, der keines behält, bis zu einer Viertelstunde. Dann nimmt er die Behebungen jedes gescheiterten Laufs der Liste als Daten, nur Textdateien, die der Commit schon hat, und committet sie als einen Commit auf einen Branch des Repositorys, schlägt sie an einem Pull Request aus einem Fork vor oder hält einen Pull Request mit den Behebungen von main.
+
+    failed(["Ein Lauf eines Workflows scheitert"])
+    listed{"Die Liste von after-checks.yml<br>auf main nennt ihn?"}
+    ignored["Kein Bot startet, und der Bot<br>liest keine seiner Behebungen"]
+    kept{"Er hat ein Artefakt<br>fixes-* behalten?"}
+    coach["Der PR-Coach erklärt<br>die Prüfung"]
+    wait["Der Bot wartet auf die Workflows, deren Dateien auf main<br>Behebungen behalten, und auf keinen langen Lauf ohne"]
+    take["Er nimmt die Behebungen jedes gescheiterten Laufs der Liste<br>als Daten, nur Textdateien, die der Commit schon hat"]
+    heal["Ein Commit auf einem Branch des Repositorys, Vorschläge<br>an einem Fork oder ein Pull Request für main"]
+    list[("workflows: von after-checks.yml<br>CI, Lint, Docker E2E und<br>die Antwort test_workflows")]
+
+    failed --> listed
+    listed -- "nein" --> ignored
+    listed -- "ja" --> kept
+    kept -- "nein" --> coach
+    kept -- "ja" --> wait --> take --> heal
+    list -.-> listed
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class coach,wait,take bot
+    class failed person
+    class heal done
