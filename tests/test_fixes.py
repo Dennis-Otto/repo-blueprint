@@ -1108,7 +1108,7 @@ def test_without_a_list_the_bot_takes_nothing(
     assert "::error::" in captured.err
     # It stops before it asks GitHub for anything, and tells no step to commit.
     assert github.calls == []
-    assert not output.exists()
+    assert output.read_text(encoding="utf-8") == "stopped=true\n"
 
 
 def test_without_the_file_of_the_list_the_bot_stops(
@@ -1162,6 +1162,67 @@ def test_a_pull_request_whose_run_kept_no_fix_has_nothing_to_wait_for(
         f"GET repos/{REPO}/actions/runs?head_sha={SHA}&event=pull_request&per_page=100",
         f"GET repos/{REPO}/actions/runs/1/artifacts?per_page=100",
     ]
+
+
+@pytest.mark.parametrize("conclusion", ["success", "cancelled", "timed_out"])
+def test_a_run_that_did_not_fail_holds_no_runner_for_what_it_kept(
+    tmp_path: Path, conclusion: str
+) -> None:
+    # The job now follows a run that passed, which may hold an artifact: a first attempt
+    # that kept a fix and passed the second time, or a fixture bot of a project's own.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Lint", conclusion=conclusion),
+        run_of(2, "CI (python)", status="in_progress", conclusion=""),
+    ]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+
+    def wait(seconds: float) -> None:
+        raise AssertionError("no wait")
+
+    found = collect(
+        api_of(github),
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path,
+        downloader(api_of(github), REPO),
+        WATCHED,
+        wait,
+    )
+
+    assert found.folders == []
+    assert not any("/artifacts" in call for call in github.calls)
+
+
+def test_a_run_that_runs_again_still_holds_its_fix(tmp_path: Path) -> None:
+    # A failed run that started again counts as running, so its artifact keeps the job.
+    github = FakeGitHub()
+    github.runs = [run_of(1, "Lint", status="in_progress", conclusion="")]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    waits = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        github.runs[0].update(status="completed", conclusion="success")
+
+    found = collect(
+        api_of(github),
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path,
+        downloader(api_of(github), REPO),
+        WATCHED,
+        wait,
+    )
+
+    assert waits
+    assert found.folders == []
 
 
 def test_a_run_with_no_fix_takes_the_fix_of_the_run_whose_job_it_replaced(
@@ -2586,7 +2647,6 @@ def fix_bot_starts(
                 ),
                 "contains": lambda items, item: item in items,
                 "fromJSON": json.loads,
-                "startsWith": str.startswith,
             },
         )
     )
@@ -2617,9 +2677,12 @@ def test_the_fix_bot_starts_after_every_workflow_that_failed(name: str) -> None:
         ("Lint", True),
         ("Docs", True),
         ("CI (python)", True),
-        # The rest of the list has nothing to say about main when it passes.
-        ("Docker E2E", False),
-        ("Visual check", False),
+        # A project's own check may keep fixes, and a late one has to close their pull
+        # request. Those that never keep one have nothing to say about main.
+        ("Docker E2E", True),
+        ("Visual check", True),
+        ("Windows", False),
+        ("Downstream", False),
         ("CodeQL", False),
         ("Release", False),
     ],
@@ -2795,8 +2858,11 @@ def test_a_commit_of_the_bot_counts_only_once_its_run_has_ended(
     assert "Still running" in capsys.readouterr().out
 
     github.runs[1].update(status="completed", conclusion="failure")
+    output.unlink()
     assert fix_collect(root, github, output, run="2") == 1
     assert "changed the files of the fix bot" in capsys.readouterr().err
+    # The step that speaks on the pull request knows this from a job that merely failed.
+    assert output.read_text(encoding="utf-8") == "stopped=true\n"
 
 
 def test_a_fork_gets_the_suggestions_of_what_has_ended(
@@ -2877,6 +2943,7 @@ def test_a_late_run_on_main_leaves_the_pull_request_of_its_fixes_open(
     # They pass as well: main needs the fixes no more.
     github.runs[1].update(status="completed", conclusion="success")
     assert fix_bot_starts("CI (home-assistant)", "push", "success", "main")
+    assert fix_bot_starts("Docker E2E", "push", "success", "main")
     assert (
         fix_collect_of_main(root, github, folder, output, "push")
         == "action=close\npull=\n"
@@ -2934,6 +3001,10 @@ def test_a_run_of_a_check_starts_the_fix_bot_however_it_ends(
 @pytest.mark.parametrize(
     "name",
     [
+        "Variants",
+        "Windows",
+        "Issue assistant sync",
+        "Downstream",
         "CodeQL",
         "Dependency review",
         "Docs",
@@ -2957,8 +3028,9 @@ def test_a_workflow_that_keeps_nothing_starts_the_fix_bot_only_when_it_fails(
 
 def test_the_list_of_those_that_keep_nothing_names_no_workflow_that_does() -> None:
     condition = condition_of(workflow_steps.job("after-checks.yml", "fixes"))
-    [left_out] = re.findall(r"!contains\(fromJSON\('(\[[^']*\])'\)", condition)
+    left_out, of_main = re.findall(r"!contains\(fromJSON\('(\[[^']*\])'\)", condition)
 
+    assert left_out == of_main
     # Docs keeps nothing on a pull request, which is why the bot doesn't wait for it.
     assert "Docs" in json.loads(left_out)
     assert not watched(ROOT).awaited("pull_request") & set(json.loads(left_out))
@@ -3698,6 +3770,7 @@ def permissions_of(step: dict[str, Any]) -> dict[str, str]:
 # gh answers the calls of the steps of the fix bot that write, and python3 runs no
 # tool: each call of it is written down.
 WRITES = Answer(r"(?:pr comment|issue (?:create|edit|close)) .*")
+PR_COMMENTS = Answer(r"pr view \d+ --json comments --jq \.comments\[\]\.body")
 PYTHON3 = {"python3": workflow_steps.recording("python3")}
 
 
@@ -3936,20 +4009,75 @@ def test_the_fix_bot_says_on_the_pull_request_that_it_failed(
     done = run_fix_bot_step(
         tmp_path,
         "Say on the pull request that the fix bot failed",
+        (WRITES, PR_COMMENTS),
         PULL=pull,
+        SHA=SHA,
         URL="https://run/9",
     )
 
     assert done.returncode == 0, done.stderr
     if pull:
-        assert done.commands == [
+        assert done.called("pr comment") == [
             "pr comment 42 --body The fix bot couldn't fix the findings of this pull "
             "request that a command fixes (https://run/9); its summary says why. The PR "
             "coach names the command of each check that failed, which makes the fixes on "
-            "your machine."
+            f"your machine.<!-- the fix bot failed on {SHA} -->"
         ]
     else:
         assert done.calls == []
+
+
+@needs_bash
+def test_the_fix_bot_says_it_failed_once_for_each_commit(tmp_path: Path) -> None:
+    # A job follows every run of a commit, so a stop would repeat itself after each.
+    done = run_fix_bot_step(
+        tmp_path,
+        "Say on the pull request that the fix bot failed",
+        (
+            WRITES,
+            Answer(
+                PR_COMMENTS.args,
+                out=f"Something else\nIt failed.<!-- the fix bot failed on {SHA} -->\n",
+            ),
+        ),
+        PULL="42",
+        SHA=SHA,
+        URL="https://run/9",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("pr comment") == []
+
+    # Another commit of the pull request has its own say.
+    done = run_fix_bot_step(
+        tmp_path,
+        "Say on the pull request that the fix bot failed",
+        (
+            WRITES,
+            Answer(
+                PR_COMMENTS.args, out="It failed.<!-- the fix bot failed on old -->\n"
+            ),
+        ),
+        PULL="42",
+        SHA=SHA,
+        URL="https://run/9",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called("pr comment")) == 1
+
+
+def test_a_failed_job_after_a_run_that_did_not_fail_says_nothing_without_a_finding() -> (
+    None
+):
+    bot = workflow_steps.job("after-checks.yml", "fixes")
+    step = step_in(bot, "Say on the pull request that the fix bot failed")
+    assert condition_of(step) == (
+        "failure() && github.event.workflow_run.event == 'pull_request' && "
+        "(github.event.workflow_run.conclusion == 'failure' || "
+        "steps.collect.outputs.stopped == 'true' || "
+        "steps.collect.outputs.action != '')"
+    )
 
 
 @needs_bash

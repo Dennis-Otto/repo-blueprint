@@ -579,11 +579,20 @@ def collect(
     them all, and says which of them still ran after the wait. A pull request whose
     commit has no failed run with a fix has nothing for the bot. The commit decides that,
     not the run that started this job: GitHub keeps one pending job of a branch, so a run
-    with no fix can replace the job of one with."""
+    with no fix can replace the job of one with. A run that started this job and ended
+    without failing counts for nothing, whatever it kept, as the bot takes no fix of it;
+    one that runs again still counts."""
     awaited = workflows.awaited(event)
     runs = runs_of(api, repo, sha, event, branch, workflows.listed)
+    ended = {
+        found.id
+        for found in runs
+        if found.status == "completed" and found.conclusion != "failure"
+    }
     if event not in MAIN_EVENTS and not any(
-        artifacts_of(api, repo, each) for each in dict.fromkeys((run_id, *failed(runs)))
+        artifacts_of(api, repo, each)
+        for each in dict.fromkeys((run_id, *failed(runs)))
+        if each not in ended
     ):
         return Collected([])
     for _ in range(WAITS):
@@ -690,8 +699,8 @@ def plan(
         if late:
             return Plan(
                 "",
-                f"{still_running(late, sha)} #{pull['number']} stays open until they "
-                "have ended, as they may need its fixes.\n",
+                f"{still_running(late, sha)} #{pull['number']} stays open until a later "
+                "job of the bot finds them ended, as they may need its fixes.\n",
             )
         return Plan(
             "close", f"{branch} needs the fixes of #{pull['number']} no more.\n"
