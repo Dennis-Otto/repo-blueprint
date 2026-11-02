@@ -9141,6 +9141,7 @@ NO_PRIVATE_KEY = (
 RELEASE_APP_BOTS = {
     ("after-checks.yml", "diagrams"): ("the diagram bot", False),
     ("after-checks.yml", "fixes"): ("the fix bot", False),
+    ("after-checks.yml", "own-branch"): ("the fix bot", False),
     ("blueprint-update.yml", "update"): ("the blueprint bot", True),
     ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
     ("diagrams.yml", "pull-request"): ("the diagram bot", False),
@@ -9235,6 +9236,7 @@ def test_every_token_of_the_release_app_comes_after_its_check(
         handed_on = {
             ("after-checks.yml", "diagrams"),
             ("after-checks.yml", "fixes"),
+            ("after-checks.yml", "own-branch"),
             ("blueprint-update.yml", "update"),
             ("dependabot-automerge.yml", "auto-merge"),
             ("diagrams.yml", "pull-request"),
@@ -12391,6 +12393,12 @@ def test_every_project_fixes_what_a_command_can_fix(
     bot = job_in(after, "fixes")
     assert "startsWith(github.event.workflow_run.name, 'CI (')" in condition_of(bot)
     assert "Dennis-Otto" not in values_of(bot)
+    # The title and the entry of the changelog fix themselves in every kind as well: the
+    # check of the title that starts them is among the workflows that it follows.
+    assert "Pull request title" in watched_after_the_checks(after)
+    own = job_in(after, "own-branch")
+    assert "'Pull request title'" in condition_of(own)
+    assert "Dennis-Otto" not in values_of(own)
 
 
 def test_every_explanation_belongs_to_a_check_or_a_step(

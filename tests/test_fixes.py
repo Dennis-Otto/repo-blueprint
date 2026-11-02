@@ -29,7 +29,8 @@ from workflow_steps import Answer, condition_of, step_in
 import blueprint.fixes
 import pins
 from blueprint import cli
-from blueprint.coach import BOT, FIX_HEADLINE, Catalog
+from blueprint.changelog import Fragment, fragment_problems
+from blueprint.coach import BOT, DRAFT_HEADLINE, FIX_HEADLINE, Catalog
 from blueprint.fixes import (
     BRANCH,
     HEADLINE,
@@ -49,15 +50,20 @@ from blueprint.fixes import (
     collect,
     commit_onto_branch,
     downloader,
+    draft_of,
     expanded,
     files_of,
+    fix_own,
     fix_text,
     fixers,
+    fragment_path,
     heal_main,
     is_text,
     keep,
     listing,
     load,
+    needs_entry,
+    own_fix,
     placeable,
     plan,
     report_kept,
@@ -779,6 +785,10 @@ class FakeGitHub:
         self.downloads: dict[tuple[int, str], dict[str, bytes]] = {}
         self.review_comments: list[dict[str, Any]] = []
         self.patches: dict[str, str] = {}
+        # The status of a file of a pull request, where it isn't "modified".
+        self.statuses: dict[str, str] = {}
+        # The commits of a pull request.
+        self.pull_commits: list[dict[str, Any]] = []
         self.reviews: list[dict[str, Any]] = []
         self.comments: list[dict[str, Any]] = []
         self.created: list[dict[str, Any]] = []
@@ -886,10 +896,16 @@ class FakeGitHub:
             return 201, pull
         if found := re.fullmatch(rf"pulls/(\d+)/files\?{paged}", path):
             items = [
-                {"filename": name, "patch": patch}
+                {
+                    "filename": name,
+                    "patch": patch,
+                    "status": self.statuses.get(name, "modified"),
+                }
                 for name, patch in self.patches.items()
             ]
             return 200, self.page(items, found[2], found[3])
+        if found := re.fullmatch(rf"pulls/(\d+)/commits\?{paged}", path):
+            return 200, self.page(self.pull_commits, found[2], found[3])
         if found := re.fullmatch(rf"pulls/(\d+)/comments\?{paged}", path):
             return 200, self.page(self.review_comments, found[2], found[3])
         if found := re.fullmatch(r"pulls/(\d+)/reviews", path):
@@ -925,6 +941,7 @@ class FakeGitHub:
                 "number": number,
                 "state": "open",
                 "labels": [{"name": label} for label in labels],
+                "base": {"ref": "main"},
                 "head": {
                     "sha": SHA,
                     "ref": "feature",
@@ -1691,6 +1708,22 @@ def test_the_bot_never_fixes_its_own_fixes_again() -> None:
 
     with pytest.raises(FixLoop, match="don't fix the same way twice"):
         plan(api_of(github), REPO, SHA, "pull_request", "feature", 42, FIXES)
+
+
+def test_a_draft_of_the_changelog_takes_no_round_of_the_fixes() -> None:
+    # A draft comes once for each pull request, whatever the checks fix after it.
+    github = FakeGitHub()
+    github.pull()
+    github.commits[SHA] = bot_commit("b" * 40)
+    github.commits["b" * 40] = {
+        "commit": {"message": DRAFT_HEADLINE},
+        "author": {"type": "Bot"},
+        "parents": [{"sha": "c" * 40}],
+    }
+
+    decided = plan(api_of(github), REPO, SHA, "pull_request", "feature", 42, FIXES)
+
+    assert decided.action == "commit"
 
 
 def test_a_bot_branch_gets_its_commit_too() -> None:
@@ -2662,6 +2695,490 @@ def test_fix_commit_suggest_and_main_from_the_command_line(
     assert capsys.readouterr().out == "main needs no fix that a command makes.\n"
 
 
+# ---------------------------------------------------------------- the title and the entry
+
+
+def own_pull(
+    github: FakeGitHub,
+    title: str = "feat: add a dark mode",
+    ref: str = "feat/dark-mode",
+    author: str = "User",
+    labels: Sequence[str] = (),
+    fork: bool = False,
+) -> None:
+    """The pull request of a person, from a branch at the commit of the checks."""
+    github.pull(labels=labels, fork=fork)
+    github.pulls[0].update(title=title, user={"type": author})
+    github.pulls[0]["head"]["ref"] = ref
+    github.refs[ref] = SHA
+
+
+def draft_commit() -> dict[str, Any]:
+    return {"commit": {"message": f"{DRAFT_HEADLINE}\n\nMade from the title"}}
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("feat: add a dark mode", "### Features\n\n- Add a dark mode.\n"),
+        ("fix: keep the token secret.", "### Bug fixes\n\n- Keep the token secret.\n"),
+        ("perf: read the file once", "### Performance\n\n- Read the file once.\n"),
+        ("feat!: drop Python 3.12", "### Breaking changes\n\n- Drop Python 3.12.\n"),
+        (
+            "fix(ui)!: drop the old look",
+            "### Breaking changes\n\n- **ui:** drop the old look.\n",
+        ),
+        (
+            "feat(settings): add a dark mode",
+            "### Features\n\n- **settings:** add a dark mode.\n",
+        ),
+        (
+            "fix: `gh` waits for its token",
+            "### Bug fixes\n\n- `gh` waits for its token.\n",
+        ),
+    ],
+)
+def test_the_draft_of_an_entry_says_what_the_title_says(
+    title: str, expected: str
+) -> None:
+    assert draft_of(title) == expected
+    assert fragment_problems([Fragment("changelog.d/a.md", expected)], "") == []
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        # Nothing for users, or no Conventional Commit: the check asks for no entry.
+        "docs: add a guide",
+        "Add a dark mode",
+        # Nothing to say.
+        "feat: ...",
+        # What the bot writes into a page and into the notes of a release stays text.
+        "fix: the <details> stay open",
+        "fix: thank @someone for the report",
+        "feat: a [link](https://example.com) of its own",
+        "fix: see https://example.com",
+        "fix: see HTTP://example.com",
+        "feat: open www.example.com",
+    ],
+)
+def test_a_title_that_could_be_more_than_words_gets_no_draft(title: str) -> None:
+    assert draft_of(title) == ""
+
+
+@given(st.text(min_size=1), st.sampled_from(["feat", "fix", "perf", "feat!", "fix(a)"]))
+def test_every_draft_is_a_fragment_that_the_release_takes_in(
+    words: str, kind: str
+) -> None:
+    text = draft_of(f"{kind}: {words}")
+    if not text:
+        return
+    assert fragment_problems([Fragment("changelog.d/a.md", text)], "") == []
+    assert text.count("\n") == 3
+    assert not re.search(r"[<@]|\]\(|://|\bwww\.", text, re.I)
+
+
+@pytest.mark.parametrize(
+    ("branch", "taken", "expected"),
+    [
+        ("feat/dark-mode", (), "changelog.d/dark-mode.md"),
+        ("feature/dark-mode", (), "changelog.d/dark-mode.md"),
+        ("dark-mode", (), "changelog.d/dark-mode.md"),
+        ("feat-dark-mode", (), "changelog.d/feat-dark-mode.md"),
+        # A folder that is no type stays in the name.
+        ("dennis/dark-mode", (), "changelog.d/dennis-dark-mode.md"),
+        ("feat/ui/dark mode!", (), "changelog.d/ui-dark-mode.md"),
+        ("feat/.hidden.", (), "changelog.d/hidden.md"),
+        # A branch of nothing but signs takes the number of the pull request.
+        ("feat/---", (), "changelog.d/pull-42.md"),
+        ("feat/" + "a" * 300, (), "changelog.d/" + "a" * 80 + ".md"),
+        # The entry of another pull request that waits for its release stays its own.
+        ("feat/dark-mode", ("changelog.d/dark-mode.md",), "changelog.d/dark-mode-2.md"),
+        (
+            "feat/dark-mode",
+            ("changelog.d/Dark-Mode.md", "changelog.d/dark-mode-2.md"),
+            "changelog.d/dark-mode-3.md",
+        ),
+        # When in doubt, the bot commits nothing.
+        (
+            "feat/x",
+            ("changelog.d/x.md", *(f"changelog.d/x-{n}.md" for n in range(2, 10))),
+            "",
+        ),
+    ],
+)
+def test_the_name_of_a_draft_comes_from_the_branch_and_is_free(
+    branch: str, taken: Sequence[str], expected: str
+) -> None:
+    path = fragment_path(branch, taken, 42)
+
+    assert path == expected
+    if path:
+        assert allowed(path)
+        assert (
+            fragment_problems([Fragment(path, "### Features\n\n- A card.\n")], "") == []
+        )
+
+
+@given(st.text(), st.lists(st.text()))
+def test_every_name_of_a_draft_is_one_new_file_of_the_fragments(
+    branch: str, taken: list[str]
+) -> None:
+    path = fragment_path(branch, taken, 42)
+    if path:
+        assert re.fullmatch(r"changelog\.d/[A-Za-z0-9][A-Za-z0-9._-]*\.md", path)
+        assert path.lower() not in {name.lower() for name in taken}
+
+
+def needs(title: str, author: str, files: Sequence[tuple[str, str]]) -> bool:
+    return needs_entry(
+        title,
+        {"user": {"type": author}},
+        [{"filename": name, "status": status} for name, status in files],
+    )
+
+
+# The pull requests of the check of the title: whether the bot drafts an entry, and the
+# exit code of the check, which fails for a missing entry and for a file that is no
+# fragment.
+ENTRY_CASES = [
+    ("feat: a card", "User", [], True, 1),
+    ("fix: a crash", "User", [("app.py", "modified")], True, 1),
+    ("perf(api): quicker", "User", [("app.py", "modified")], True, 1),
+    ("feat!: a card", "User", [("changelog.d/.gitkeep", "added")], True, 1),
+    # A fragment that main has already is the entry of another pull request.
+    ("feat: a card", "User", [("changelog.d/old.md", "modified")], True, 1),
+    ("feat: a card", "User", [("changelog.d/old.md", "renamed")], True, 1),
+    ("feat: a card", "User", [("changelog.d/old.md", "removed")], True, 1),
+    ("feat: a card", "User", [("CHANGELOG.md", "removed")], True, 1),
+    # An entry of its own.
+    ("feat: a card", "User", [("changelog.d/card.md", "added")], False, 0),
+    ("feat: a card", "User", [("changelog.d/card.md", "copied")], False, 0),
+    ("feat: a card", "User", [("CHANGELOG.md", "modified")], False, 0),
+    # Nothing for users, or an update, or a bot.
+    ("docs: a guide", "User", [], False, 0),
+    ("Feat: a card", "User", [], False, 0),
+    ("feat: a card", "Bot", [], False, 0),
+    ("fix(deps): bump", "User", [], False, 0),
+    ("fix(deps-dev): bump", "User", [], False, 0),
+    # A file that is no fragment fails by itself, and its author meant one.
+    ("feat: a card", "User", [("changelog.d/my fix.md", "added")], False, 1),
+    ("feat: a card", "User", [("changelog.d/notes.txt", "added")], False, 1),
+]
+
+
+@pytest.mark.parametrize(("title", "author", "files", "expected", "code"), ENTRY_CASES)
+def test_the_bot_asks_for_an_entry_where_the_check_does(
+    title: str,
+    author: str,
+    files: Sequence[tuple[str, str]],
+    expected: bool,
+    code: int,
+) -> None:
+    assert needs(title, author, files) is expected
+
+
+@needs_bash
+@pytest.mark.skipif(
+    shutil.which("jq") is None, reason="the check of the entry needs jq"
+)
+@pytest.mark.parametrize(("title", "author", "files", "expected", "code"), ENTRY_CASES)
+def test_the_check_of_the_entry_decides_as_the_bot_does(
+    tmp_path: Path,
+    title: str,
+    author: str,
+    files: Sequence[tuple[str, str]],
+    expected: bool,
+    code: int,
+) -> None:
+    # The check itself, with the same pull requests: when it fails for a missing entry,
+    # and only then, the bot drafts one.
+    listed = [{"filename": name, "status": status} for name, status in files]
+    done = workflow_steps.run_step(
+        tmp_path,
+        "pull-request-title.yml",
+        "title",
+        "Require an entry in the changelog for a change for users",
+        answers=[Answer(r"api repos/o/r/pulls/42/files .*", json=listed)],
+        env={"GH_REPO": REPO, "NUMBER": "42", "TITLE": title, "AUTHOR": author},
+    )
+
+    assert done.returncode == code, done.stderr
+    assert ("title=No entry in the changelog" in done.stdout) is expected
+
+
+def test_a_title_in_the_wrong_form_is_corrected_alone() -> None:
+    github = FakeGitHub()
+    own_pull(github, title="Docs: Add a guide")
+
+    found = own_fix(api_of(github), REPO, SHA, 42)
+
+    assert (found.number, found.title, found.path) == (42, "docs: add a guide", "")
+    # Deciding writes nothing.
+    assert github.writes() == []
+
+    said = fix_own(api_of(github), REPO, SHA, 42, "app", "https://run")
+
+    assert github.pulls[0]["title"] == "docs: add a guide"
+    assert github.writes() == [f"PATCH repos/{REPO}/pulls/42"]
+    assert github.graphql == []
+    assert said == (
+        "The fix bot set the title of #42 to `docs: add a guide`: only its form "
+        "differed, and its type and breaking mark decide the version.\n"
+    )
+
+
+def test_a_pull_request_without_its_entry_gets_one_draft_as_a_new_file() -> None:
+    github = FakeGitHub()
+    own_pull(github)
+
+    said = fix_own(api_of(github), REPO, SHA, 42, "app", "https://run")
+
+    (request,) = github.graphql
+    change = request["variables"]["input"]
+    assert change["expectedHeadOid"] == SHA
+    assert change["branch"]["branchName"] == "feat/dark-mode"
+    assert change["message"] == {
+        "headline": DRAFT_HEADLINE,
+        "body": "Made from the title of the pull request after https://run\n\n"
+        "Signed-off-by: app[bot] <41898282+app[bot]@users.noreply.github.com>",
+    }
+    # Exactly one new file, which the bot built itself, and nothing else.
+    assert change["fileChanges"] == {
+        "additions": [
+            {
+                "path": "changelog.d/dark-mode.md",
+                "contents": base64.b64encode(
+                    b"### Features\n\n- Add a dark mode.\n"
+                ).decode(),
+            }
+        ]
+    }
+    assert "PATCH" not in " ".join(github.writes())
+    assert said == (
+        "The fix bot committed c0ffee0, a draft of the entry of the changelog from the "
+        "title: `changelog.d/dark-mode.md`. Read it, and say in the words of a user what "
+        "changes for them.\n"
+    )
+
+
+def test_a_corrected_title_and_its_draft_come_together() -> None:
+    # The check asks for no entry as long as the title is no Conventional Commit, so the
+    # bot looks at the title that it sets; a second run would only cost a runner.
+    github = FakeGitHub()
+    own_pull(github, title="Fix: Crash on save.", ref="fix/save")
+
+    said = fix_own(api_of(github), REPO, SHA, 42, "app", "https://run")
+
+    assert github.pulls[0]["title"] == "fix: crash on save"
+    (request,) = github.graphql
+    (added,) = request["variables"]["input"]["fileChanges"]["additions"]
+    assert added["path"] == "changelog.d/save.md"
+    assert base64.b64decode(added["contents"]) == (
+        b"### Bug fixes\n\n- Crash on save.\n"
+    )
+    # The title first: a commit starts the checks of the title anew.
+    assert [call.split()[0] for call in github.writes()] == ["PATCH", "POST"]
+    assert said.count("\n") == 2
+
+
+def test_the_draft_keeps_clear_of_the_files_of_the_commit() -> None:
+    github = FakeGitHub()
+    own_pull(github)
+    github.files = {"changelog.d/dark-mode.md": b"### Features\n\n- Another card.\n"}
+
+    found = own_fix(api_of(github), REPO, SHA, 42)
+
+    assert found.path == "changelog.d/dark-mode-2.md"
+    assert "Another card" not in found.draft
+
+
+def test_the_draft_keeps_clear_of_a_fragment_of_the_base_branch() -> None:
+    # A branch that is behind has no such file, but it would conflict with main.
+    github = FakeGitHub()
+    own_pull(github)
+    github.files = {"README.md": b"# A project\n"}
+    github.trees["main"] = {"changelog.d/dark-mode.md": b"### Features\n\n- A card.\n"}
+
+    found = own_fix(api_of(github), REPO, SHA, 42)
+
+    assert found.path == "changelog.d/dark-mode-2.md"
+
+
+@pytest.mark.parametrize(
+    ("change", "said"),
+    [
+        (
+            {"labels": [{"name": OPT_OUT}]},
+            f"#42 has the label {OPT_OUT}: the bot leaves it alone.\n",
+        ),
+        (
+            {"head": {"sha": SHA, "ref": "x", "repo": {"full_name": "someone/r"}}},
+            "#42 comes from a fork, which the bot leaves to the PR coach.\n",
+        ),
+        (
+            {"head": {"sha": "b" * 40, "ref": "x", "repo": {"full_name": REPO}}},
+            "aaaaaaa is no longer the head of an open pull request.\n",
+        ),
+        (
+            {"state": "closed"},
+            "aaaaaaa is no longer the head of an open pull request.\n",
+        ),
+    ],
+)
+def test_the_title_and_the_entry_leave_a_pull_request_alone(
+    change: dict[str, Any], said: str
+) -> None:
+    github = FakeGitHub()
+    own_pull(github, title="Feat: a card")
+    github.pulls[0].update(change)
+
+    assert fix_own(api_of(github), REPO, SHA, 42, "app", "https://run") == said
+    assert github.writes() == []
+
+
+NOTHING = (
+    "#42 has nothing that the bot corrects or drafts by itself; the check says what it "
+    "needs.\n"
+)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        # The type is unclear: the PR coach suggests, as ever.
+        "Add a dark mode",
+        "Feature: add a dark mode",
+        # A draft that would be more than words.
+        "fix: the <details> stay open",
+    ],
+)
+def test_the_bot_commits_nothing_when_in_doubt(title: str) -> None:
+    github = FakeGitHub()
+    own_pull(github, title=title)
+
+    assert fix_own(api_of(github), REPO, SHA, 42, "app", "https://run") == NOTHING
+    assert github.writes() == []
+
+
+def test_a_pull_request_that_needs_no_fragment_gets_none() -> None:
+    github = FakeGitHub()
+    own_pull(github)
+    github.patches = {"changelog.d/card.md": ""}
+    github.statuses = {"changelog.d/card.md": "added"}
+
+    assert own_fix(api_of(github), REPO, SHA, 42).path == ""
+
+
+def test_the_bot_drafts_once_for_each_pull_request() -> None:
+    # Whoever deleted the draft doesn't want it: the check explains from now on.
+    github = FakeGitHub()
+    own_pull(github)
+    github.pull_commits = [{"commit": {"message": "feat: a card"}}, draft_commit()]
+
+    assert fix_own(api_of(github), REPO, SHA, 42, "app", "https://run") == NOTHING
+    assert github.graphql == []
+
+
+def test_a_branch_that_moved_on_gets_its_draft_from_its_own_checks() -> None:
+    github = FakeGitHub()
+    own_pull(github)
+
+    def push(github: FakeGitHub) -> None:
+        github.refs["feat/dark-mode"] = "b" * 40
+
+    github.on_commit = push
+    github.graphql_fails = True
+
+    assert fix_own(api_of(github), REPO, SHA, 42, "app", "https://run") == (
+        "feat/dark-mode moved on from aaaaaaa; its checks fix it again.\n"
+    )
+
+
+def test_a_commit_that_fails_on_a_branch_that_stands_still_says_so() -> None:
+    github = FakeGitHub()
+    own_pull(github)
+    github.graphql_fails = True
+
+    with pytest.raises(GitHubError, match="Expected branch"):
+        fix_own(api_of(github), REPO, SHA, 42, "app", "https://run")
+
+
+def test_a_fix_of_the_checks_never_adds_a_fragment() -> None:
+    # The exception is the draft that the bot builds itself: a file that a check kept
+    # stays a fix of a file that the commit has already, also in changelog.d/.
+    github = FakeGitHub()
+    fixes = Fixes({"changelog.d/new.md": b"### Features\n\n- A card.\n"})
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, fixes, "app", "https://run"
+    )
+
+    assert github.graphql == []
+    assert "the bot changes files, it adds none" in said
+
+
+def fix_own_command(github: FakeGitHub, *rest: str) -> int:
+    return cli.main(
+        ["--repo", REPO, "fix", "own", "--sha", SHA, "--pull", "42", *rest],
+        api=api_of(github),
+    )
+
+
+def test_fix_own_decides_and_then_fixes_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github = FakeGitHub()
+    own_pull(github, title="Docs: Add a guide")
+    output = tmp_path / "output"
+
+    assert fix_own_command(github, "--output", str(output)) == 0
+    assert output.read_text(encoding="utf-8") == "action=fix\npull=42\n"
+    assert capsys.readouterr().out == (
+        "#42 has what the bot fixes by itself:\n\n- the title: `docs: add a guide`\n"
+    )
+    assert github.writes() == []
+
+    assert fix_own_command(github, "--app", "app", "--url", "https://run") == 0
+    assert capsys.readouterr().out.startswith("The fix bot set the title of #42")
+    assert github.pulls[0]["title"] == "docs: add a guide"
+
+
+def test_fix_own_without_an_output_only_says_what_it_decided(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github = FakeGitHub()
+    own_pull(github)
+
+    assert fix_own_command(github) == 0
+    assert capsys.readouterr().out == (
+        "#42 has what the bot fixes by itself:\n\n"
+        "- a draft of the entry of the changelog: `changelog.d/dark-mode.md`\n"
+    )
+
+
+def test_fix_own_with_nothing_to_do_starts_no_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github = FakeGitHub()
+    own_pull(github, title="Add a dark mode")
+    output = tmp_path / "output"
+
+    assert fix_own_command(github, "--output", str(output)) == 0
+    assert output.read_text(encoding="utf-8") == "action=\npull=\n"
+    assert "nothing that the bot corrects" in capsys.readouterr().out
+
+
+def test_fix_own_needs_a_commit_by_its_id(capsys: pytest.CaptureFixture[str]) -> None:
+    code = cli.main(
+        ["--repo", REPO, "fix", "own", "--sha", "main", "--pull", "42"],
+        api=api_of(FakeGitHub()),
+    )
+
+    assert code == 2
+    assert "a commit is 40 hex digits" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------- the workflows
 
 
@@ -2894,6 +3411,172 @@ def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None
         )
         assert done.stubbed[0].endswith(f"--folder {runner}/fixes")
         assert done.calls == []
+
+
+def title_bot_starts(
+    name: str = "Pull request title",
+    event: str = "pull_request_target",
+    conclusion: str = "failure",
+    head: str = REPO,
+    fork: bool = False,
+    heads: Sequence[str] = (SHA,),
+) -> bool:
+    """Whether the job of the title and the entry starts after a run, by its condition."""
+    condition = condition_of(workflow_steps.job("after-checks.yml", "own-branch"))
+    expression = re.sub(r"!(?!=)", " not ", condition)
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    expression = expression.replace(
+        "contains(github.event.workflow_run.pull_requests.*.head.sha, "
+        "github.event.workflow_run.head_sha)",
+        "github.event.workflow_run.head_sha in heads",
+    )
+    run = SimpleNamespace(
+        name=name,
+        event=event,
+        conclusion=conclusion,
+        head_sha=SHA,
+        head_repository=SimpleNamespace(full_name=head),
+    )
+    return bool(
+        eval(
+            expression,
+            {
+                "heads": heads,
+                "github": SimpleNamespace(
+                    repository=REPO,
+                    event=SimpleNamespace(
+                        workflow_run=run,
+                        repository=SimpleNamespace(fork=fork),
+                    ),
+                ),
+            },
+        )
+    )
+
+
+def test_the_title_and_the_entry_start_the_bot_only_on_a_branch_of_this_repository() -> (
+    None
+):
+    assert title_bot_starts()
+    # Only after the check of the title, and only when it failed.
+    assert not title_bot_starts(conclusion="success")
+    assert not title_bot_starts(conclusion="cancelled")
+    assert not title_bot_starts("Lint", "pull_request")
+    assert not title_bot_starts("Area labels")
+    assert not title_bot_starts(event="pull_request")
+    # Not from a fork, and not in one.
+    assert not title_bot_starts(head="someone/r")
+    assert not title_bot_starts(fork=True)
+    # Not for a commit that a newer push replaced, or whose pull request has closed.
+    assert not title_bot_starts(heads=("b" * 40,))
+    assert not title_bot_starts(heads=())
+
+
+def test_the_job_of_the_title_and_the_entry_has_only_what_it_needs() -> None:
+    job = workflow_steps.job("after-checks.yml", "own-branch")
+
+    assert job["permissions"] == {"contents": "read", "pull-requests": "write"}
+    app = step_in(job, "Create a token of the release app for the pull request")
+    assert permissions_of(app) == {
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+    }
+    # The token comes only when the bot has something to do.
+    assert condition_of(step_in(job, "Check that the release app is set up")) == (
+        "steps.own.outputs.action == 'fix'"
+    )
+    # It checks out the tool of main, never the code of the pull request.
+    [checkout] = [
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    ]
+    assert checkout["with"]["sparse-checkout"].startswith(".github\nblueprint\n")
+    assert "ref" not in checkout["with"]
+    assert job["concurrency"]["cancel-in-progress"] is False
+    # A group of its own: a commit of the fix bot takes the place of no job here, and
+    # GitHub keeps only one pending job of a group. The commit checks the head itself.
+    fixes = workflow_steps.job("after-checks.yml", "fixes")
+    assert job["concurrency"]["group"] != fixes["concurrency"]["group"]
+
+
+@needs_bash
+def test_the_steps_of_the_title_and_the_entry_pass_what_the_run_says(
+    tmp_path: Path,
+) -> None:
+    output = (tmp_path / "github/output").as_posix()
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "own-branch",
+        "Decide what the bot fixes of the title and the entry",
+        env={"GH_REPO": REPO, "SHA": SHA, "NUMBER": "42"},
+        stubs=PYTHON3,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == [
+        f"python3 blueprint.py --repo {REPO} fix own --sha {SHA} --pull 42 "
+        f"--output {output}"
+    ]
+
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "own-branch",
+        "Set the title and commit the draft of the entry",
+        env={
+            "GH_REPO": REPO,
+            "SHA": SHA,
+            "PULL": "42",
+            "APP_SLUG": "app",
+            "URL": "https://run",
+        },
+        stubs=PYTHON3,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed[-1] == (
+        f"python3 blueprint.py --repo {REPO} fix own --sha {SHA} --pull 42 --app app "
+        "--url https://run"
+    )
+
+
+@needs_bash
+@pytest.mark.parametrize("pull", ["42", ""])
+def test_the_job_of_the_title_says_on_the_pull_request_that_it_failed(
+    tmp_path: Path, pull: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "own-branch",
+        "Say on the pull request that the fix bot failed",
+        answers=(WRITES,),
+        env={"PULL": pull, "URL": "https://run/9"},
+        stubs=PYTHON3,
+    )
+
+    assert done.returncode == 0, done.stderr
+    if pull:
+        assert done.commands == [
+            "pr comment 42 --body The fix bot couldn't correct the title or draft the "
+            "entry of the changelog of this pull request (https://run/9); its summary "
+            "says why. The PR coach says what each needs."
+        ]
+    else:
+        assert done.calls == []
+
+
+def test_the_explanations_say_what_the_bot_fixes_of_the_title_and_the_entry() -> None:
+    catalog = Catalog.load(ROOT)
+    for name in ("conventional title", "changelog"):
+        entry = catalog.check(name)
+        assert entry
+        assert "Not yet" not in entry.manual
+        assert "#429" not in entry.manual
+        assert "the fix bot" in entry.fix
 
 
 @needs_bash

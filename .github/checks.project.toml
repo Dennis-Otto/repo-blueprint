@@ -38,7 +38,7 @@ for a condition instead of a time; give a test that shares state with another on
 files and settings, such as `tmp_path`. Write the reference pages and the parts that
 the registry names anew with `python3 reference.py`, and describe a new variable or
 secret in `ABOUT` first; `python3 downstream.py --answers` writes the answers of a new
-canary, which the fix bot can't, as it adds no file to a pull request. A canary whose
+canary, which the fix bot can't, as it adds no such file to a pull request. A canary whose
 kind changed gets its new kind in the registry and `python3 reference.py`; one that still
 answers `sample_code: true` answers no as `docs/faq.md` describes. `python3
 pins.py` downloads each version that moved and writes its sha256 beside it and into
