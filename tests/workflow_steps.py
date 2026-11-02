@@ -28,7 +28,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-import yaml
+from shared import load_yaml
 from shell import BASH, in_bash
 
 ROOT = Path(__file__).parents[1]
@@ -122,7 +122,7 @@ def parse(text: str) -> dict[str, Any]:
     the same object for the same text, which no test changes. A test reads a job, a
     permission or a condition from it, never from a slice of the text, which can hold
     a line of another job or of a comment."""
-    data: dict[Any, Any] = yaml.safe_load(text)
+    data: dict[Any, Any] = load_yaml(text)
     # YAML 1.1, which PyYAML reads, takes the key on for true.
     if True in data:
         data["on"] = data.pop(True)
