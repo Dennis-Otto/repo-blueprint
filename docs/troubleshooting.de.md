@@ -221,6 +221,22 @@ Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --o
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
 
+## Eine Lock-Datei passt nicht mehr zu ihrer Quelle
+
+**Was du siehst:** Der Schritt *Lock files match their sources* von `scripts/check.sh` scheitert und nennt jede Datei und jede Festlegung, etwa `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
+
+**Warum:** pip installiert eine Lock-Datei, wie sie ist. Ein Paket, das du in `requirements-dev.in` ergänzt, oder eine Grenze, die du dort verschiebst, erreicht keine Installation, bis die Datei neu kompiliert ist, und ein Paket, das du entfernst, bleibt installiert. Der Schritt lässt uv jede Lock-Datei mit dem Befehl in ihrem Kopf neu kompilieren, auf einer Kopie: für das Python des Kopfs, für Linux, außer die Datei ist `--universal`, und auf den Versionen, die die Datei festlegt. Ein neues Release ändert also nichts, ebenso wenig die Hashes einer festgelegten Version: Nur eine Änderung der Quellen verschiebt eine Festlegung.
+
+**Was zu tun ist:** In einem Pull Request von einem Branch des Repositorys nichts: Der Fix-Bot committet die Datei, und in einem aus einem Fork schlägt er die Änderung vor. Auf deinem Rechner kompilierst du jede solche Datei und committest sie:
+
+```sh
+python3 .github/blueprint.py locks --compile --fix
+```
+
+Der Kopf der Datei bleibt, wie er ist, mit ihrem Python und ihrem Werkzeug, und jede Festlegung, die die Quellen noch erlauben, bleibt auch. Findet uv keine Lösung, zeigt das Protokoll seine Antwort, und nichts ändert sich: Die Quellen widersprechen sich oder einem Paket, das sie festlegen. Korrigiere sie zuerst.
+
+Der Schritt sagt es und besteht bei dem, was er nicht vergleicht: einem Link, einem Befehl, den Renovate nicht lesen kann, was der Schritt *Lock files* erklärt, einer Zeile, die keine Festlegung ist, etwa `--index-url`, die eine Behebung verlieren würde, einem Kopf von uv ohne `--python-version=`, und jeder Datei, wenn uv fehlt oder keinen Paketindex erreicht. Die CI jeder Art von Projekt installiert uv, wenn das Repository eine `requirements*.txt` hat.
+
 ## Die Prüfung renovate rules scheitert
 
 **Was du siehst:** In einem Pull Request, der die Regeln von Renovate oder eine Lock-Datei ändert, scheitert die Prüfung *renovate rules* des Renovate-Workflows, in einem Repository, das Renovate selbst ausführt (die Antwort `renovate_runner` `self`), und im Blueprint. Ihre Annotationen nennen jedes Problem, etwa `Invalid configuration option` für eine Regel, `pip-compile error` für eine Lock-Datei oder `Renovate doesn't read the lock file requirements-test.txt.`; ihre Zusammenfassung und der Kommentar des PR-Coachs sagen, wie du es behebst.

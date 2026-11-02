@@ -3452,6 +3452,11 @@ def advisories_step(check: str) -> str:
 
 def locks_step(check: str) -> str:
     start = check.index('step "Lock files"')
+    return check[start : check.index('step "Lock files match', start)]
+
+
+def compile_step(check: str) -> str:
+    start = check.index('step "Lock files match their sources"')
     return check[start : check.index('step "Explanations of the checks"', start)]
 
 
@@ -3678,6 +3683,25 @@ def test_every_repository_checks_that_renovate_reads_its_lock_files(
     assert locks_step(check) == locks_step(generic) == locks_step(own)
     assert '  "$python" "$tool" locks\n' in locks_step(check)
     assert "--fix" not in locks_step(check).split("\nif ", 1)[1]
+    # After them, the compile of each lock file, with uv in the CI of the kind: for a
+    # lock file alone where the kind has no other use for it.
+    assert compile_step(check) == compile_step(generic) == compile_step(own)
+    assert '  "$python" "$tool" locks --compile\n' in compile_step(check)
+    assert "--fix" not in compile_step(check).split("\nif ", 1)[1]
+    workflow = load_yaml(
+        (projects[kind] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["check"]["steps"]
+    uv = next(
+        step
+        for step in steps
+        if str(step.get("uses")).startswith("astral-sh/setup-uv@")
+    )
+    assert steps.index(uv) < [step.get("run") for step in steps].index(
+        "bash scripts/check.sh"
+    )
+    if not any("--require-hashes" in str(step.get("run")) for step in steps):
+        assert uv["if"] == "hashFiles('**/requirements*.txt') != ''"
     assert (projects[kind] / ".github/blueprint/locks.py").read_bytes() == (
         ROOT / "blueprint/locks.py"
     ).read_bytes()
@@ -12079,6 +12103,7 @@ def test_every_project_fixes_what_a_command_can_fix(
         "Changelog fragments",
         "Accepted advisories",
         "Lock files",
+        "Lock files match their sources",
         "Version",
         *FIXED_STEPS.get(stack, []),
     ]
