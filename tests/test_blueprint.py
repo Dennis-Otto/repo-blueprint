@@ -27,6 +27,7 @@ from blueprint.checklist import (
     RELEASE_APP_PERMISSIONS,
     Step,
     best_practices,
+    change_answer,
     checklist,
     release_app_name,
     renovate,
@@ -1689,7 +1690,9 @@ def test_a_switch_that_github_kept_off_still_differs_in_a_check(
 
     out = capsys.readouterr().out
     assert "security.secret_scanning_non_provider_patterns: GitHub has false" in out
-    assert "python3 blueprint.py settings apply sets what the API can set." in out
+    assert (
+        "python3 .github/blueprint.py settings apply sets what the API can set." in out
+    )
 
 
 def test_a_switch_whose_write_github_refused_is_no_notice(
@@ -3422,7 +3425,7 @@ def test_the_checklist_leaves_a_switch_that_github_keeps_off_neutral(
     out = capsys.readouterr().out
     assert "  · Settings as code applied" in out
     assert (
-        "python3 blueprint.py settings apply; it tells whether GitHub keeps"
+        "python3 .github/blueprint.py settings apply; it tells whether GitHub keeps"
         " security.secret_scanning_non_provider_patterns off for the plan of the"
         " repository"
     ) in out
@@ -3547,7 +3550,7 @@ def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
     # Named in the settings, but not yet on GitHub.
     step = listing()
     assert step.done is False
-    assert step.how == "python3 blueprint.py settings apply"
+    assert step.how == "python3 .github/blueprint.py settings apply"
 
     run(github, root, "settings", "apply")
     assert listing().done is True
@@ -3559,11 +3562,12 @@ def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
     run(github, root, "settings", "apply")
     step = listing()
     assert step.done is False
-    assert step.how == (
-        'copier update --defaults --vcs-ref=:current: --data "topics=home-assistant,'
-        ' hacs", which names them in .github/repository.toml, then:'
-        " python3 blueprint.py settings apply"
-    )
+    (why, *rest) = step.how.splitlines()
+    # A branch and the copier of the quick start: main refuses the push of a commit,
+    # and the quick start puts no copier on the PATH.
+    assert rest == change_answer("topics=home-assistant, hacs")
+    assert "uvx --from copier==" in rest[2]
+    assert "python3 .github/blueprint.py settings apply" in why
 
 
 def without_release_app(root: Path) -> Settings:
@@ -3635,7 +3639,6 @@ def test_the_template_asks_for_the_copier_that_knows_the_current_ref() -> None:
     # came with 9.8.
     command = "--vcs-ref=:current:"
     assert command in (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
-    assert command in (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
     copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
     minimum = re.search(r'^_min_copier_version: "(\d+)\.(\d+)"$', copier, re.M)
     assert minimum is not None
@@ -3799,6 +3802,9 @@ def test_the_checklist_asks_for_the_answer_of_an_app_that_only_the_settings_name
     # The rule of the blueprint comes from the answer alone, so without it Renovate
     # would take the commits of this app for someone editing its branches.
     assert (f"--data release_app={app}" in how) is asked
+    if asked:
+        # By the steps of a new owner, whom main refuses a push and no copier awaits.
+        assert "\n".join(change_answer(f"release_app={app}")) in how
 
 
 def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:

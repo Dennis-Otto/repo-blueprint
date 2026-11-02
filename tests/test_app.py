@@ -33,7 +33,6 @@ from blueprint.app import (
     KEY_NAME,
     MESSAGE,
     NAME,
-    PINNED,
     SLICE,
     App,
     AppError,
@@ -48,7 +47,7 @@ from blueprint.app import (
     wait_for_code,
 )
 from blueprint.bootstrap import PUSH_AS_GH, CreateError
-from blueprint.checklist import RELEASE_APP_PERMISSIONS, release_app
+from blueprint.checklist import PINNED, RELEASE_APP_PERMISSIONS, release_app
 from blueprint.github import Api, GitHubError
 from blueprint.settings import Settings
 
@@ -1296,7 +1295,7 @@ def test_the_copier_is_the_one_of_the_quick_start() -> None:
     ] == list(COPIERS)
     # Renovate moves the version here with those of the pages, by this pattern.
     renovate = (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
-    assert '"/^blueprint/app\\\\.py$/",' in renovate
+    assert '"/^blueprint/checklist\\\\.py$/",' in renovate
     assert re.fullmatch(r"copier==\d+\.\d+\.\d+ copier (?:copy|update)", PINNED)
 
 

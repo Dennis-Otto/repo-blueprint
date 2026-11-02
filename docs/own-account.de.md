@@ -77,7 +77,7 @@ Wie `create` prüft er zuerst, was er braucht, und ein mit ✘ markierter Befund
 Zwei Dinge bleiben dir, und den Link des ersten gibt der Befehl aus:
 
 1. **Installiere die App** auf dem Repository, unter `https://github.com/apps/NAME/installations/new`.
-2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`.
+2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`. Die Regeln von `main` verlangen eine Signatur auf jedem Commit, auch auf diesem, schalte also vorher `commit.gpgsign` ein; der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst.
 
 Die Checkliste erkennt die Installation an der Check Suite, die GitHub für eine installierte App bei jedem Push öffnet. Sie hakt die App also nach dem Merge ab, wenn du zuerst installierst, und sonst nach dem nächsten Push.
 

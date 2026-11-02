@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from blueprint.bootstrap import PUSH_AS_GH
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
     BRANCH,
@@ -199,6 +201,48 @@ def renovate_runner(root: Path) -> str:
     return runner if runner in RENOVATE_RUNNERS else "hub"
 
 
+# Copier of the quick start, which puts no copier on the PATH. A manager in
+# .github/renovate.json5 moves the version with the pages.
+PINNED = "copier==9.19.1 copier update"
+ANSWER_BRANCH = "change-the-answers"
+ANSWER_MESSAGE = "chore: change the answers of the blueprint"
+SETTINGS_APPLY = "python3 .github/blueprint.py settings apply"
+
+
+def answer_steps(
+    copier: Sequence[str],
+    data: Sequence[str],
+    branch: str = ANSWER_BRANCH,
+    message: str = ANSWER_MESSAGE,
+) -> list[list[str]]:
+    """The steps that change answers of Copier, on a branch of their own: Copier writes
+    .github/repository.toml from them, and main takes pull requests only."""
+    return [
+        ["git", "switch", "--create", branch],
+        [*copier, "--defaults", "--vcs-ref=:current:", *data],
+        ["git", "add", "--all"],
+        ["git", "commit", "--signoff", "--message", message],
+        [*PUSH_AS_GH, "push", "--set-upstream", "origin", "HEAD"],
+        ["gh", "pr", "create", "--fill"],
+    ]
+
+
+def answer_commands(data: str) -> list[str]:
+    """The steps as a person runs them, who has the copier of the quick start."""
+    copier = shlex.split(f"uvx --from {PINNED}")
+    return [shlex.join(step) for step in answer_steps(copier, ["--data", data])]
+
+
+def change_answer(data: str) -> list[str]:
+    """What to run for another answer, and why it takes these steps: a commit that lacks
+    a signature fails nothing until the merge, which the rules of main then block."""
+    return [
+        "main takes only pull requests of signed commits, so run this on a branch, with"
+        " commit.gpgsign on or --gpg-sign added to the commit:",
+        *answer_commands(data),
+    ]
+
+
 def unanswered_app(app: str, root: Path) -> list[str]:
     """What to do when the settings as code name a release app that the answers of
     Copier don't: the rule that lets the Mend Renovate app take its commits for its own
@@ -208,9 +252,9 @@ def unanswered_app(app: str, root: Path) -> list[str]:
     return [
         f"The settings as code name the release app {app} and the answers of Copier"
         " don't, whose name the rule gitIgnoredAuthors comes from; so that Renovate"
-        " goes on rebasing the branches that its bots commit to, update on a branch:",
-        "uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current:"
-        f" --data release_app={app}",
+        " goes on rebasing the branches that its bots commit to, change the answer."
+        " Then merge the pull request.",
+        *change_answer(f"release_app={app}"),
     ]
 
 
@@ -276,14 +320,14 @@ def applied_step(drift: list[Drift], private: bool = False) -> Step:
         return Step(
             "Settings as code applied",
             None,
-            "python3 blueprint.py settings apply; it tells whether GitHub keeps "
+            f"{SETTINGS_APPLY}; it tells whether GitHub keeps "
             + ", ".join(item.setting for item in open_items)
             + " off for the plan of the repository",
         )
     return Step(
         "Settings as code applied",
         not open_items,
-        "python3 blueprint.py settings apply",
+        SETTINGS_APPLY,
     )
 
 
@@ -471,11 +515,14 @@ def listing(settings: Settings, drift: list[Drift]) -> Step:
         item.setting in ("repository.description", "repository.topics")
         for item in drift
     )
-    how = "python3 blueprint.py settings apply"
+    how = SETTINGS_APPLY
     if not named:
-        how = (
-            'copier update --defaults --vcs-ref=:current: --data "topics=home-assistant,'
-            ' hacs", which names them in .github/repository.toml, then: ' + how
+        how = "\n".join(
+            [
+                "The answer topics names them in .github/repository.toml. Merge the"
+                f" pull request, then run {how}.",
+                *change_answer("topics=home-assistant, hacs"),
+            ]
         )
     return Step("Description and topics set (HACS lists them)", named and applied, how)
 

@@ -16,10 +16,10 @@ What a workflow does with the token that GitHub gives it, `GITHUB_TOKEN`, starts
 
 ## How do I switch the AI of the issue assistant off?
 
-Change the answer [`issue_assistant_ai`](reference/questions.md#issue_assistant_ai) and commit the update:
+Change the answer [`issue_assistant_ai`](reference/questions.md#issue_assistant_ai) [on a branch and merge the update in a pull request](#how-do-i-change-an-answer-later):
 
 ```sh
-copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=false
+uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=false
 ```
 
 The settings bot then sets the variable [`ISSUE_ASSISTANT_AI`](reference/variables.md#issue_assistant_ai) to `off`, the environment `issue-assistant` asks for no secret, and `SUPPORT.md` tells reporters that no AI reads their issues. Labels, reminders, closing with the release and the commands of the maintainer work as before. Deleting the secret `CLAUDE_CODE_OAUTH_TOKEN` stops the AI at once as well, but the checklist then asks for it again. `--data issue_assistant_ai=true` turns the AI on later.
@@ -74,13 +74,18 @@ A pull request hears about this when it happens. The check *lint* annotates each
 
 ## How do I change an answer later?
 
-Run `copier update` with the new answer and commit the update, such as for the topics:
+Run the update with the new answer on a branch and merge it in a pull request, as `app register` does in [step 3 of the walkthrough](own-account.md#3-register-the-release-app), because the rules of `main` refuse a direct push. With the Copier of the quick start, such as for the topics:
 
 ```sh
-copier update --defaults --vcs-ref=:current: --data "topics=python, pypi, cli"
+git switch --create change-the-answers
+uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data 'topics=python, pypi, cli'
+git add --all
+git commit --signoff --message 'chore: change the answers of the blueprint'
+git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
+gh pr create --fill
 ```
 
-`--vcs-ref=:current:` keeps the release of the blueprint that the repository is on, and `--defaults` takes every other answer from `.copier-answers.yml`. The settings bot applies what the answer changes in `.github/repository.toml`, such as a variable or the topics, after the merge.
+`--vcs-ref=:current:` keeps the release of the blueprint that the repository is on, and `--defaults` takes every other answer from `.copier-answers.yml`. The push goes through GitHub CLI, whose sign-in may change workflows. The rules of `main` also ask for a signature on every commit: turn `commit.gpgsign` on or add `--gpg-sign` to the commit, and the check *signed commits* names a commit without one and how to sign it again. The settings bot applies what the answer changes in `.github/repository.toml`, such as a variable or the topics, after the merge.
 
 ## How do I leave the blueprint?
 
