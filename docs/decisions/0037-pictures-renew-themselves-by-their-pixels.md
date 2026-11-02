@@ -1,6 +1,6 @@
 # Pictures renew themselves by their pixels, through one pull request of a bot
 
-- Status: accepted, amended by [0067](0067-every-kind-photographs-itself-in-docker-with-the-playwright-of-the-browser.md), with which a new repository photographs its website and, by its kind, its integration or app, and the job *render* checks out the whole history, and by [0105](0105-the-screenshot-bot-corrects-the-sizes-that-pages-name.md), with which the job *pull-request* also corrects the sizes on the pages
+- Status: accepted, amended by [0067](0067-every-kind-photographs-itself-in-docker-with-the-playwright-of-the-browser.md), with which a new repository photographs its website and, by its kind, its integration or app, and the job *render* checks out the whole history, and by [0106](0106-the-screenshot-bot-corrects-the-sizes-that-pages-name.md), with which the job *pull-request* also corrects the sizes on the pages
 - Date: 2026-10-18
 
 ## Context

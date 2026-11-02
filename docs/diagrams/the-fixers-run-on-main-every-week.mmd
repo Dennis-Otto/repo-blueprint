@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The fixers run on main every week
+    accDescr: Each week, Lint and the CI run on main by their schedule, or by hand where bot health starts a schedule that GitHub missed. When every check passes, the week was quiet, with no job of the fix bot, no pull request and no issue. When a check fails and a command fixes what it found, the fix bot keeps one pull request from bot/self-heal, which merges itself, so that main is healed before the next pull request. When no command fixes it, bot health keeps one issue open until a run passes.
+
+    week(["Each week, on main"])
+    checks["Lint and the CI run by their schedule, or by hand<br>where bot health starts one that GitHub missed"]
+    passed{"Does every<br>check pass?"}
+    quiet(["A quiet week: no job of the fix bot,<br>no pull request and no issue"])
+    command{"Does a command<br>fix what it found?"}
+    heal["The fix bot keeps one pull request<br>from bot/self-heal, which merges itself"]
+    healed(["main is healed before<br>the next pull request"])
+    issue["Bot health keeps one issue open<br>until a run passes"]
+
+    week --> checks --> passed
+    passed -- "yes" --> quiet
+    passed -- "no" --> command
+    command -- "yes" --> heal --> healed
+    command -- "no" --> issue
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class week,checks,heal bot
+    class issue person
+    class quiet,healed done
