@@ -2396,7 +2396,7 @@ def test_report_from_the_command_line_with_its_parts(tmp_path: Path) -> None:
     assert "| `src/app.py` | 0.00 % | 100.00 % |" in body
     assert "#### Website\n\n🌐 The check *docs* has kept no build" in body
     assert (
-        "- [`docs/guide.md`](https://dennis-otto.github.io/repo-blueprint/guide/)"
+        "- [`docs/guide.md`](https://dennis-otto.github.io/repo-blueprint/guide.html)"
         in body
     )
 
