@@ -21,6 +21,13 @@ Lint and the CI also run on main each week, by their schedule or by hand, as bot
 starts a schedule that GitHub missed, so that what no commit changes, such as a new rule
 of a tool, repairs itself before it fails the next pull request. Only such a run that
 failed starts the bot, so a quiet week takes no runner of it.
+
+The check of the title runs no fixer, as it runs nothing of a pull request, so `fix own`
+works from what the API says of a pull request from a branch of this repository, and
+only there. It sets the title that the PR coach suggests when only its form differs,
+because the type and the breaking mark decide the version. And it commits one draft of
+the entry of the changelog from that title where the check asks for an entry: the one
+new file that the bot ever adds, which it names and writes itself, in changelog.d/.
 """
 
 from __future__ import annotations
@@ -41,14 +48,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from blueprint.bot_health import started_after
+from blueprint.changelog import FRAGMENT_NAME, FRAGMENTS
 from blueprint.coach import (
+    ALIASES,
     BOT,
+    DRAFT_HEADLINE,
     FIX_HEADLINE,
     NAME_LENGTH,
     OWN_CHECKS,
+    TYPES,
     Catalog,
     check_steps,
+    clean,
     code,
+    corrected_title,
     find_pull,
     fixed_by_bot,
     paged,
@@ -98,6 +111,24 @@ WAITS = 28
 # commit through the API keeps the mode of a file that it changes.
 FILE_MODES = frozenset({"100644", "100755"})
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.M)
+# A title of a change for users, for which the check of the title asks an entry: its
+# type, its scope, its breaking mark and its words.
+FOR_USERS = re.compile(r"^(feat|fix|perf)(?:\(([a-z0-9._/-]+)\))?(!)?: (.*)$")
+# The scopes of updates of dependencies, which write no entry.
+UPDATES = frozenset({"deps", "deps-dev"})
+# The kind of change of a draft, by the type of its title or by its breaking mark.
+DRAFT_KINDS = {"feat": "Features", "fix": "Bug fixes", "perf": "Performance"}
+DRAFT_BREAKING = "Breaking changes"
+# What a draft never holds, because it becomes a page and the notes of a release: HTML,
+# a mention and a link. Such a title stays for a person.
+NOT_WORDS = re.compile(r"[<@]|\]\(")
+# The longest name of a draft, without its end, and what GitHub takes for a title.
+DRAFT_NAME_LENGTH = 80
+LONGEST_TITLE = 256
+# The endings of the name of a draft, where the commit has the one before already.
+DRAFT_ENDINGS = ("", *(f"-{number}" for number in range(2, 10)))
+# The first line of the body of the draft, before the run of the checks.
+DRAFTED_AFTER = "Made from the title of the pull request after"
 
 
 # ---------------------------------------------------------------- in the check
@@ -580,6 +611,17 @@ def parent_of(api: Api, repo: str, sha: str) -> str:
     return str(parents[0].get("sha") or "")
 
 
+def opted_out(pull: Json) -> bool:
+    """Whether the author of a pull request wants no commit of the bot."""
+    return OPT_OUT in {str(label.get("name")) for label in pull.get("labels") or []}
+
+
+def from_fork(pull: Json, repo: str) -> bool:
+    """Whether a pull request comes from another repository, which no bot may push to."""
+    head = pull.get("head") or {}
+    return str((head.get("repo") or {}).get("full_name") or "") != repo
+
+
 def plan(
     api: Api,
     repo: str,
@@ -616,15 +658,13 @@ def plan(
     if pull is None:
         return Plan("", f"{sha[:7]} is no longer the head of an open pull request.\n")
     number = int(pull["number"])
-    labels = {str(label.get("name")) for label in pull.get("labels") or []}
-    if OPT_OUT in labels:
+    if opted_out(pull):
         return Plan(
             "", f"#{number} has the label {OPT_OUT}: the bot leaves it alone.\n"
         )
     if not fixes.files:
         return Plan("", f"No command fixed what the checks of #{number} found.\n")
-    head = pull.get("head") or {}
-    if str((head.get("repo") or {}).get("full_name") or "") != repo:
+    if from_fork(pull, repo):
         return Plan("suggest", f"#{number} comes from a fork.\n", number)
     # One more commit onto its own is fine: the checks of a commit end at different
     # times, and a check may fix a file after another one did. Two in a row are not.
@@ -647,7 +687,15 @@ def signed_off(api: Api, app: str, text: str) -> str:
     return f"{text}\n\nSigned-off-by: {app}[bot] <{email}>"
 
 
-def commit(api: Api, repo: str, branch: str, sha: str, fixes: Fixes, body: str) -> str:
+def commit(
+    api: Api,
+    repo: str,
+    branch: str,
+    sha: str,
+    fixes: Fixes,
+    body: str,
+    headline: str = HEADLINE,
+) -> str:
     """Commits the fixes onto branch while it is still at sha, as whoever sends the
     request; GitHub signs the commit, and the push starts the checks."""
     data = graphql(
@@ -657,7 +705,7 @@ def commit(api: Api, repo: str, branch: str, sha: str, fixes: Fixes, body: str) 
             "input": {
                 "branch": {"repositoryNameWithOwner": repo, "branchName": branch},
                 "expectedHeadOid": sha,
-                "message": {"headline": HEADLINE, "body": body},
+                "message": {"headline": headline, "body": body},
                 "fileChanges": {
                     "additions": [
                         {"path": path, "contents": base64.b64encode(data).decode()}
@@ -675,6 +723,31 @@ def head_of(api: Api, repo: str, branch: str) -> str:
     return str((ref.get("object") or {}).get("sha") or "")
 
 
+def onto_branch(
+    api: Api,
+    repo: str,
+    branch: str,
+    sha: str,
+    fixes: Fixes,
+    body: str,
+    headline: str = HEADLINE,
+) -> str:
+    """The commit that the bot made of the fixes on branch, or nothing when the branch
+    moved on from sha, whose new head its checks look at again."""
+    if head_of(api, repo, branch) != sha:
+        return ""
+    try:
+        return commit(api, repo, branch, sha, fixes, body, headline)
+    except GitHubError:
+        if head_of(api, repo, branch) != sha:
+            return ""
+        raise
+
+
+def moved_on(branch: str, sha: str) -> str:
+    return f"{branch} moved on from {sha[:7]}; its checks fix it again.\n"
+
+
 def commit_onto_branch(
     api: Api, repo: str, branch: str, sha: str, fixes: Fixes, app: str, url: str
 ) -> str:
@@ -685,17 +758,162 @@ def commit_onto_branch(
         return "\n".join(
             ["Every fix is in the branch already.", "", *listing(fixes), ""]
         )
-    if head_of(api, repo, branch) != sha:
-        return f"{branch} moved on from {sha[:7]}; its checks fix it again.\n"
     body = signed_off(api, app, f"{MADE_BY} {url}")
-    try:
-        made = commit(api, repo, branch, sha, fixes, body)
-    except GitHubError:
-        if head_of(api, repo, branch) != sha:
-            return f"{branch} moved on from {sha[:7]}; its checks fix it again.\n"
-        raise
+    made = onto_branch(api, repo, branch, sha, fixes, body)
+    if not made:
+        return moved_on(branch, sha)
     lines = [f"The fix bot committed {made[:7]} onto {code(branch, NAME_LENGTH)}:", ""]
     return "\n".join([*lines, *listing(fixes), ""])
+
+
+# ---------------------------------------------------------------- the title and the entry
+
+
+def needs_entry(title: str, pull: Json, files: Iterable[Json]) -> bool:
+    """Whether a pull request with this title has only its entry of the changelog
+    missing: a change for users of a person, with no entry of its own. The step of the
+    check of the title decides alike, and a test runs both on the same pull requests. A
+    file of changelog.d/ that is no fragment fails the check by itself, and its author
+    meant an entry, so the bot adds none next to it."""
+    match = FOR_USERS.match(title)
+    if (
+        match is None
+        or match[2] in UPDATES
+        or (pull.get("user") or {}).get("type") == "Bot"
+    ):
+        return False
+    folder = f"{FRAGMENTS}/"
+    for item in files:
+        name, status = str(item.get("filename")), str(item.get("status"))
+        if status == "removed":
+            continue
+        if name == "CHANGELOG.md":
+            return False
+        if name.startswith(folder) and not name.startswith(f"{folder}."):
+            own = status in ("added", "copied")
+            if own or not FRAGMENT_NAME.match(name.removeprefix(folder)):
+                return False
+    return True
+
+
+def draft_of(title: str) -> str:
+    """The text of a fragment from a title of a change for users: its words below the
+    heading of its kind, or nothing when they say nothing, or could be more than words.
+    A test proves that the release takes in each such text."""
+    match = FOR_USERS.match(title)
+    if match is None:
+        return ""
+    words = clean(match[4], LONGEST_TITLE).rstrip(". ")
+    if not words or NOT_WORDS.search(words):
+        return ""
+    kind = DRAFT_BREAKING if match[3] else DRAFT_KINDS[match[1]]
+    entry = f"**{match[2]}:** {words}" if match[2] else words[0].upper() + words[1:]
+    return f"### {kind}\n\n- {entry}.\n"
+
+
+def fragment_path(branch: str, taken: Iterable[str], number: int) -> str:
+    """The path of a new fragment, which the bot builds itself: the name of the branch
+    without its type, as the guide for the changelog asks, in the plain letters of a
+    fragment; the number of the pull request for a branch that leaves none. A fragment
+    that the commit has already is the entry of another pull request, so the name then
+    takes an ending, and when it runs out of them, the bot adds nothing."""
+    kind, _, rest = branch.partition("/")
+    name = rest if rest and kind.lower() in (*TYPES, *ALIASES) else branch
+    plain = re.sub(r"[^A-Za-z0-9._-]+", "-", name)[:DRAFT_NAME_LENGTH]
+    stem = plain.strip("-._") or f"pull-{number}"
+    names = {path.lower() for path in taken}
+    for ending in DRAFT_ENDINGS:
+        path = f"{FRAGMENTS}/{stem}{ending}.md"
+        if path.lower() not in names:
+            return path
+    return ""
+
+
+def drafted_before(api: Api, repo: str, number: int) -> bool:
+    """Whether a commit of a pull request is a draft of the bot. One who deleted it
+    wants none, and so the bot drafts once for each pull request and never again."""
+    return any(
+        str((item.get("commit") or {}).get("message") or "").partition("\n")[0]
+        == DRAFT_HEADLINE
+        for item in paged(api, f"repos/{repo}/pulls/{number}/commits")
+    )
+
+
+@dataclass(frozen=True)
+class OwnFix:
+    """What the bot fixes of the title and the entry of a pull request from a branch of
+    this repository: nothing when title and path are empty, and text says why."""
+
+    text: str
+    number: int | None = None
+    branch: str = ""
+    title: str = ""
+    path: str = ""
+    draft: str = ""
+
+
+def own_fix(api: Api, repo: str, sha: str, number: int | None) -> OwnFix:
+    """Decides what the bot fixes of the title and the entry of a pull request, from
+    what the API says of it now. When in doubt, it fixes nothing and the check explains."""
+    pull = find_pull(api, repo, sha, number)
+    if pull is None:
+        return OwnFix(f"{sha[:7]} is no longer the head of an open pull request.\n")
+    number = int(pull["number"])
+    if opted_out(pull):
+        return OwnFix(f"#{number} has the label {OPT_OUT}: the bot leaves it alone.\n")
+    if from_fork(pull, repo):
+        return OwnFix(
+            f"#{number} comes from a fork, which the bot leaves to the PR coach.\n"
+        )
+    branch = str(pull["head"].get("ref") or "")
+    title = str(pull.get("title") or "")
+    corrected = corrected_title(title, branch)
+    path = draft = ""
+    # The check asks for no entry while the title is no Conventional Commit: the bot
+    # looks at the title that it sets, so that one run brings both.
+    if needs_entry(
+        corrected or title, pull, paged(api, f"repos/{repo}/pulls/{number}/files")
+    ) and not drafted_before(api, repo, number):
+        draft = draft_of(corrected or title)
+        path = fragment_path(branch, files_of(api, repo, sha), number) if draft else ""
+    if not corrected and not path:
+        return OwnFix(
+            f"#{number} has nothing that the bot corrects or drafts by itself; the "
+            "check says what it needs.\n"
+        )
+    lines = [f"- the title: {code(corrected)}"] if corrected else []
+    if path:
+        lines += [f"- a draft of the entry of the changelog: {code(path, NAME_LENGTH)}"]
+    text = "\n".join([f"#{number} has what the bot fixes by itself:", "", *lines, ""])
+    return OwnFix(text, number, branch, corrected, path, draft)
+
+
+def fix_own(
+    api: Api, repo: str, sha: str, number: int | None, app: str, url: str
+) -> str:
+    """Sets the corrected title of a pull request from a branch of this repository, as
+    the release app, so that the check of the title runs again, and commits the draft of
+    its entry as one new file. The title first: the commit starts that check anew."""
+    found = own_fix(api, repo, sha, number)
+    said = found.text if not found.title and not found.path else ""
+    if found.title:
+        api.patch(f"repos/{repo}/pulls/{found.number}", {"title": found.title})
+        said += (
+            f"The fix bot set the title of #{found.number} to {code(found.title)}: only "
+            "its form differed, and its type and breaking mark decide the version.\n"
+        )
+    if found.path:
+        body = signed_off(api, app, f"{DRAFTED_AFTER} {url}")
+        fixes = Fixes({found.path: found.draft.encode()})
+        made = onto_branch(api, repo, found.branch, sha, fixes, body, DRAFT_HEADLINE)
+        if not made:
+            return said + moved_on(found.branch, sha)
+        said += (
+            f"The fix bot committed {made[:7]}, a draft of the entry of the changelog "
+            f"from the title: {code(found.path, NAME_LENGTH)}. Read it, and say in the "
+            "words of a user what changes for them.\n"
+        )
+    return said
 
 
 # ---------------------------------------------------------------- a pull request from a fork

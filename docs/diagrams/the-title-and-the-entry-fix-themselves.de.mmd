@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Der Titel und der Eintrag reparieren sich selbst
+    accDescr: Die Prüfung des Titels scheitert. Ein Pull Request aus einem Fork oder einer mit dem Label no-bot-fixes bleibt, wie er ist, und der PR-Coach erklärt. Auf einem Branch des Repositorys liest der Bot den Pull Request über die API. Ein Titel, der seinen Typ selbst nennt und nur in der Form abweicht, wird zu dem, den der PR-Coach vorschlägt; jeder andere bleibt ein Vorschlag. Ist dieser Titel ein feat, fix oder perf einer Person ohne eigenen Eintrag und ohne früheren Entwurf, committet der Bot eine neue Datei in changelog.d, die er selbst benennt und schreibt, und der Bericht bittet darum, sie zu lesen. Ein korrigierter Titel oder ein Entwurf startet die Prüfung erneut, die ihn behoben findet. Was bleibt, liegt beim PR-Coach.
+
+    failed(["Die Prüfung des Titels scheitert"])
+    own{"Ein Branch des Repositorys,<br>ohne no-bot-fixes?"}
+    coach["Was bleibt, liegt beim PR-Coach: Er schlägt den Titel<br>vor und sagt, was der Eintrag braucht"]
+    form{"Der Titel nennt seinen Typ selbst,<br>und nur die Form weicht ab?"}
+    title["Der Bot setzt den Titel,<br>den der PR-Coach vorschlägt"]
+    entry{"Ein feat, fix oder perf einer Person,<br>kein Eintrag und kein früherer Entwurf?"}
+    draft["Eine neue Datei in changelog.d, die der Bot<br>selbst benennt und aus dem Titel schreibt"]
+    again(["Die Prüfung läuft erneut und findet es behoben"])
+    read["Der Bericht bittet darum, den Entwurf zu lesen"]
+
+    failed --> own
+    own -- "nein" --> coach
+    own -- "ja" --> form
+    form -- "ja" --> title
+    form -- "nein" --> entry
+    title --> entry
+    title --> again
+    entry -- "nein" --> coach
+    entry -- "ja" --> draft
+    draft --> read
+    draft --> again
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class coach,title,draft bot
+    class failed,read person
+    class again done

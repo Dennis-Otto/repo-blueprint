@@ -303,10 +303,14 @@ a major one, and to write the changelog."""
 fix = """Edit the title of the pull request: a type, which is feat, fix, docs, perf,
 refactor, test, ci, build, chore, style or revert, a scope in parentheses if you like,
 `!` for a breaking change, a colon and what the change does. The check runs again by
-itself."""
+itself. On a branch of this repository, the fix bot corrects a title that names its type
+and differs only in its form, such as `Feat: add a dark mode`."""
 docs = "CONTRIBUTING.md#workflow"
-autofix = """Not yet: on a branch of this repository, the bot setting the title that
-the PR coach suggests follows in Dennis-Otto/repo-blueprint#429; until then, the PR coach suggests it."""
+autofix = """No command changes a title. After the check, `fix own` of the fix bot sets
+the title that the PR coach suggests, on a branch of this repository, when the title
+names its own type and only its form differs. The type and the breaking mark decide the
+version, so a title that names no type, or a word for one, stays a suggestion, as every
+title does on a pull request from a fork."""
 
 [check.changelog]
 title = "The entry in the changelog"
@@ -322,13 +326,18 @@ fragment that fails says what to change. A fragment that `main` has already is t
 entry of another pull request and doesn't count; give yours a name of its own. An
 entry under `## Unreleased` in `CHANGELOG.md` counts as well, but conflicts with every
 pull request that adds one at the same place. A change that users don't notice takes
-another type in the title, such as `refactor:`, `docs:` or `test:`."""
+another type in the title, such as `refactor:`, `docs:` or `test:`. On a branch of this
+repository, the fix bot commits a draft from the title; say in its place what changes for
+users."""
 docs = "CONTRIBUTING.md#the-changelog"
 autofix = """A heading of a fragment that surely means a kind of change, such as `### Fixes`
 for `### Fixed`, the fix bot renames, since the step *Changelog fragments* of
-`scripts/check.sh` checks every fragment as well. Not yet: a draft fragment from the
-title, a new file of `changelog.d/` and never an entry under `## Unreleased`, follows in
-Dennis-Otto/repo-blueprint#429; the words for users stay the author's."""
+`scripts/check.sh` checks every fragment as well. No command writes an entry: after the
+check, `fix own` of the fix bot commits a draft from the title onto a branch of this
+repository, once for each pull request, as one new file of `changelog.d/` that it names
+and writes itself; the words for users stay the author's, and the PR coach asks to read
+them. A title with HTML, a mention or a link gets no draft, and a pull request from a fork
+none, since no bot may push to it."""
 
 [check.codeql]
 title = "The CodeQL analysis"

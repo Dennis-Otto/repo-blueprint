@@ -362,6 +362,11 @@ TESTED = {
     ): "test_fixes.py",
     (
         "after-checks.yml",
+        "own-branch",
+        "Say on the pull request that the fix bot failed",
+    ): "test_fixes.py",
+    (
+        "after-checks.yml",
         "fixes",
         "Keep the issue of the fix bot of main current",
     ): "test_fixes.py",

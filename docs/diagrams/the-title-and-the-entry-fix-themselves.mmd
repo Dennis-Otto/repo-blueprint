@@ -1,0 +1,37 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The title and the entry fix themselves
+    accDescr: The check of the title fails. A pull request from a fork, or one with the label no-bot-fixes, stays as it is, and the PR coach explains. On a branch of the repository, the bot reads the pull request from the API. A title that names its own type and differs only in its form becomes the one that the PR coach suggests; any other stays a suggestion. When that title is a feat, fix or perf of a person with no entry of its own and no draft before, the bot commits one new file of changelog.d that it names and writes itself, and the report asks to read it. A corrected title or a draft starts the check again, which finds it fixed. What is left stays with the PR coach.
+
+    failed(["The check of the title fails"])
+    own{"A branch of the repository,<br>without no-bot-fixes?"}
+    coach["What is left stays with the PR coach: it suggests<br>the title and says what the entry needs"]
+    form{"The title names its own type,<br>and only its form differs?"}
+    title["The bot sets the title<br>that the PR coach suggests"]
+    entry{"A feat, fix or perf of a person,<br>no entry, and no draft before?"}
+    draft["One new file of changelog.d that the bot<br>names and writes itself, from the title"]
+    again(["The check runs again, and finds it fixed"])
+    read["The report asks to read the draft"]
+
+    failed --> own
+    own -- "no" --> coach
+    own -- "yes" --> form
+    form -- "yes" --> title
+    form -- "no" --> entry
+    title --> entry
+    title --> again
+    entry -- "no" --> coach
+    entry -- "yes" --> draft
+    draft --> read
+    draft --> again
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class coach,title,draft bot
+    class failed,read person
+    class again done

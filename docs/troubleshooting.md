@@ -234,6 +234,14 @@ The header then reads `uv pip compile --generate-hashes --python-version=3.12 --
 
 A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
 
+## The title of a pull request changed, or a file appeared in changelog.d
+
+**What you see:** the timeline of the pull request shows that the release app changed its title, or a commit *docs: draft the entry of the changelog from the title* added a file of `changelog.d/`.
+
+**Why:** the check of the title failed, and the fix bot fixed what it could from the title: its form, when the title names its own type, and a draft of the entry that a `feat`, `fix` or `perf` needs. See [the fix bot](features/self-healing.md#pull-requests-fix-themselves) and [decision 0110](decisions/0110-the-fix-bot-corrects-the-form-of-a-title-and-drafts-one-entry.md).
+
+**What to do:** pull the branch before you push again, read the draft, and say in its place what changes for users. To keep the bot out of a pull request, give it the label `no-bot-fixes`. A draft that you delete stays deleted: the check then asks for an entry again, and explains how to write one.
+
 ## A lock file no longer matches its source
 
 **What you see:** the step *Lock files match their sources* of `scripts/check.sh` fails and names each file and pin, such as `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
