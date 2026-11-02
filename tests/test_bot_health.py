@@ -959,7 +959,7 @@ def test_the_daily_look_reports_what_the_events_missed(
 LINT = SCHEDULED.replace("  schedule:", "  pull_request:\n  schedule:")
 
 
-def failed_lint(github: FakeGitHub, tmp_path: Path, sha: str) -> None:
+def failed_lint(github: FakeGitHub, tmp_path: Path, sha: str, attempt: int = 1) -> None:
     """A weekly run of Lint that failed at a commit, in time for its schedule, so that
     only a stale failure can start it."""
     write(tmp_path, 1, LINT)
@@ -971,6 +971,7 @@ def failed_lint(github: FakeGitHub, tmp_path: Path, sha: str) -> None:
             path=".github/workflows/w1.yml",
             created=NOW - timedelta(hours=7),
             sha=sha,
+            attempt=attempt,
         )
     ]
 
@@ -996,10 +997,10 @@ def test_the_daily_look_starts_lint_again_for_its_issue_once_main_left_the_failu
     github: FakeGitHub, tmp_path: Path
 ) -> None:
     # Only a run on main can close the issue, and without this Lint has none for a week.
-    failed_lint(github, tmp_path, HEAD)
+    failed_lint(github, tmp_path, HEAD, attempt=2)
     sweep(api_of(github), REPO, tmp_path, NOW)
     assert len(github.issues) == 1
-    failed_lint(github, tmp_path, LEFT)
+    failed_lint(github, tmp_path, LEFT, attempt=2)
 
     summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
 
@@ -1010,14 +1011,28 @@ def test_the_daily_look_starts_lint_again_for_its_issue_once_main_left_the_failu
     assert github.dispatched == [(1, {"ref": "main", "inputs": {}})]
 
 
-def test_the_daily_look_reports_a_failure_of_lint_at_the_head_of_main(
+def test_the_daily_look_gives_a_failure_of_lint_at_the_head_of_main_a_second_try(
     github: FakeGitHub, tmp_path: Path
 ) -> None:
+    # Nothing else runs it again, and a failed pull of an image would stay for a week.
     failed_lint(github, tmp_path, HEAD)
 
     sweep(api_of(github), REPO, tmp_path, NOW)
 
+    assert github.issues == {}
+    assert github.reruns == [10]
+    assert github.dispatched == []
+
+
+def test_the_daily_look_reports_a_second_failure_of_lint_at_the_head_of_main(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    failed_lint(github, tmp_path, HEAD, attempt=2)
+
+    sweep(api_of(github), REPO, tmp_path, NOW)
+
     assert len(github.issues) == 1
+    assert github.reruns == []
     assert github.dispatched == []
 
 

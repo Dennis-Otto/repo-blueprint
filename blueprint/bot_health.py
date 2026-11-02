@@ -851,8 +851,11 @@ def look_after(
         # weekly run is soon enough.
         waits = finished.key in issues
     else:
+        # Nothing else starts the second try of Lint: after the checks leaves it out,
+        # and bot health doesn't watch its end.
+        second_try = finished.name in CHECKED_BEFORE_THE_MERGE
         notes.append(
-            look_at(api, repo, branch, finished, issues, now, second_try=False)
+            look_at(api, repo, branch, finished, issues, now, second_try=second_try)
         )
     if workflow["state"] == "disabled_inactivity":
         api.put(f"repos/{repo}/actions/workflows/{workflow['id']}/enable")

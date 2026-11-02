@@ -361,17 +361,23 @@ class WorkflowRun:
     conclusion: str
 
 
-def runs_of(api: Api, repo: str, sha: str, event: str) -> list[WorkflowRun]:
+def runs_of(
+    api: Api, repo: str, sha: str, event: str, branch: str
+) -> list[WorkflowRun]:
     """The newest run of each workflow of a commit that keeps fixes: of the event of a
     pull request, and of every event of main, so that a check that bot health started
     by hand and one that its schedule started end in one pull request. One event at a
-    time: a commit of main is also that of the many runs after other workflows."""
+    time: a commit of main is also that of the many runs after other workflows. Of main
+    only its own runs: one by hand on a branch at the same commit keeps no fix, and
+    would hide the failed run of main."""
     latest: dict[str, WorkflowRun] = {}
     for each in MAIN_EVENTS if event in MAIN_EVENTS else (event,):
         data = api.get(
             f"repos/{repo}/actions/runs?head_sha={sha}&event={each}&per_page=100"
         ) or {"workflow_runs": []}
         for item in data["workflow_runs"]:
+            if each in MAIN_EVENTS and item.get("head_branch") != branch:
+                continue
             name = str(item.get("name") or "")
             if not (each == "push" and name == MAIN_WORKFLOW) and not any(
                 fnmatch.fnmatchcase(name, pattern) for pattern in WORKFLOWS
@@ -441,6 +447,7 @@ def collect(
     run_id: int,
     sha: str,
     event: str,
+    branch: str,
     folder: Path,
     download: Download,
     wait: Callable[[float], None] = time.sleep,
@@ -450,12 +457,12 @@ def collect(
     all. A pull request whose run kept no fix has nothing for the bot."""
     if event not in MAIN_EVENTS and not artifacts_of(api, repo, run_id):
         return []
-    runs = runs_of(api, repo, sha, event)
+    runs = runs_of(api, repo, sha, event, branch)
     for _ in range(WAITS):
         if all(found.status == "completed" for found in runs):
             break
         wait(WAIT)
-        runs = runs_of(api, repo, sha, event)
+        runs = runs_of(api, repo, sha, event, branch)
     folders = []
     for found in runs:
         passed_with_fixes = (
@@ -807,6 +814,10 @@ def holds(api: Api, repo: str, pull: Json, sha: str, fixes: Fixes) -> bool:
     return files_of(api, repo, head) == files | fixed
 
 
+def merge_itself(api: Api, repo: str, number: int) -> None:
+    gh(api, "pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+
+
 def heal_main(
     api: Api, repo: str, sha: str, base: str, fixes: Fixes, app: str, url: str
 ) -> str:
@@ -829,8 +840,12 @@ def heal_main(
         return f"{base} needs the fixes no more; closed #{number}.\n"
     # Each check of a weekly run that fails starts the bot, and the later run finds what
     # the first one made: a new commit would only start the checks of the pull request
-    # again, and those of one that is stuck anew every week.
+    # again, and those of one that is stuck anew every week. It only asks for the merge
+    # again when the run that made the commit failed to, or the pull request would wait
+    # for a person.
     if pull is not None and holds(api, repo, pull, sha, fixes):
+        if pull.get("auto_merge") is None:
+            merge_itself(api, repo, int(pull["number"]))
         return f"#{pull['number']} from {BRANCH} holds these fixes of {base} already.\n"
     # The commit starts from the commit of main that the checks fixed, on a branch of
     # its own, and the branch of the pull request moves to it in one step: a pull
@@ -854,7 +869,7 @@ def heal_main(
     else:
         number = int(pull["number"])
         api.patch(f"repos/{repo}/pulls/{number}", {"body": text})
-    gh(api, "pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+    merge_itself(api, repo, number)
     return (
         f"#{number} from {BRANCH} has the fixes of {base} in {made[:7]}, and merges "
         "itself once every check passes.\n"

@@ -940,7 +940,13 @@ def api_of(github: FakeGitHub) -> Api:
 def run_of(
     run_id: int, name: str, status: str = "completed", conclusion: str = "failure"
 ) -> dict[str, Any]:
-    return {"id": run_id, "name": name, "status": status, "conclusion": conclusion}
+    return {
+        "id": run_id,
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "head_branch": "main",
+    }
 
 
 def test_the_runs_of_a_commit_that_keep_fixes() -> None:
@@ -955,13 +961,13 @@ def test_the_runs_of_a_commit_that_keep_fixes() -> None:
         {"id": 5, "name": None, "status": None, "conclusion": None},
     ]
 
-    found = runs_of(api_of(github), REPO, SHA, "pull_request")
+    found = runs_of(api_of(github), REPO, SHA, "pull_request", "main")
 
     assert [(run.id, run.name, run.conclusion) for run in found] == [
         (2, "CI (python)", "failure"),
         (3, "Lint", "success"),
     ]
-    assert runs_of(api_of(github), REPO, OTHER, "pull_request") == []
+    assert runs_of(api_of(github), REPO, OTHER, "pull_request", "feature") == []
 
 
 def test_the_fixes_that_a_run_kept() -> None:
@@ -992,6 +998,7 @@ def test_a_pull_request_whose_run_kept_no_fix_has_nothing_to_wait_for(
         1,
         SHA,
         "pull_request",
+        "feature",
         tmp_path,
         downloader(api_of(github), REPO),
         wait,
@@ -1028,7 +1035,7 @@ def test_the_bot_waits_for_the_other_checks_that_fix_and_takes_all_their_fixes(
 
     api = api_of(github)
     found = collect(
-        api, REPO, 1, SHA, "pull_request", tmp_path, downloader(api, REPO), wait
+        api, REPO, 1, SHA, "pull_request", "main", tmp_path, downloader(api, REPO), wait
     )
 
     assert waits == [30, 30]
@@ -1054,7 +1061,15 @@ def test_the_bot_waits_only_a_while(tmp_path: Path) -> None:
 
     api = api_of(github)
     found = collect(
-        api, REPO, 1, SHA, "pull_request", tmp_path, downloader(api, REPO), waits.append
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "main",
+        tmp_path,
+        downloader(api, REPO),
+        waits.append,
     )
 
     assert len(waits) == blueprint.fixes.WAITS
@@ -1081,10 +1096,10 @@ def test_docs_keeps_the_fixes_of_main_alone_also_when_it_passes(
     }
 
     api = api_of(github)
-    assert [run.name for run in runs_of(api, REPO, SHA, "pull_request")] == [
+    assert [run.name for run in runs_of(api, REPO, SHA, "pull_request", "main")] == [
         "CI (python)"
     ]
-    found = collect(api, REPO, 1, SHA, "push", tmp_path, downloader(api, REPO))
+    found = collect(api, REPO, 1, SHA, "push", "main", tmp_path, downloader(api, REPO))
 
     # Another check that passed keeps nothing that counts, such as what an earlier
     # attempt of it kept.
@@ -1099,7 +1114,9 @@ def test_main_looks_at_its_checks_also_when_the_run_kept_nothing(
     github.runs = [run_of(2, "CI (python)", conclusion="success")]
 
     api = api_of(github)
-    assert collect(api, REPO, 2, SHA, event, tmp_path, downloader(api, REPO)) == []
+    assert (
+        collect(api, REPO, 2, SHA, event, "main", tmp_path, downloader(api, REPO)) == []
+    )
     assert any("actions/runs?head_sha" in call for call in github.calls)
 
 
@@ -1115,6 +1132,9 @@ def test_main_takes_the_fixes_of_a_commit_from_each_event_that_ran_its_checks(
         run_of(2, "Lint") | {"event": "schedule"},
         run_of(3, "CI (python)") | {"event": "workflow_dispatch"},
         run_of(4, "CI (python)", conclusion="success") | {"event": "pull_request"},
+        # By hand on a branch at the same commit, which keeps no fix and isn't main.
+        run_of(5, "CI (python)", conclusion="success")
+        | {"event": "workflow_dispatch", "head_branch": "feature"},
     ]
     github.artifacts = {2: [{"name": "fixes-lint"}], 3: [{"name": "fixes-check"}]}
     github.downloads = {
@@ -1123,7 +1143,9 @@ def test_main_takes_the_fixes_of_a_commit_from_each_event_that_ran_its_checks(
     }
 
     api = api_of(github)
-    found = collect(api, REPO, 2, SHA, "schedule", tmp_path, downloader(api, REPO))
+    found = collect(
+        api, REPO, 2, SHA, "schedule", "main", tmp_path, downloader(api, REPO)
+    )
 
     assert found == [tmp_path / "2-fixes-lint", tmp_path / "3-fixes-check"]
     assert load(found).files == {"README.md": b"# Fixed\n", "app.py": b"x = 2\n"}
@@ -1140,7 +1162,10 @@ def test_a_weekly_run_doesnt_take_up_a_check_that_passed_since(tmp_path: Path) -
     github.artifacts = {1: [{"name": "fixes-lint"}]}
 
     api = api_of(github)
-    assert collect(api, REPO, 2, SHA, "schedule", tmp_path, downloader(api, REPO)) == []
+    assert (
+        collect(api, REPO, 2, SHA, "schedule", "main", tmp_path, downloader(api, REPO))
+        == []
+    )
 
 
 # ---------------------------------------------------------------- plan
@@ -1603,6 +1628,7 @@ def healed_pull(github: FakeGitHub, parent: str, files: dict[str, bytes]) -> Non
             "state": "open",
             "head": {"ref": BRANCH, "sha": OTHER},
             "body": "old",
+            "auto_merge": {"merge_method": "squash"},
         }
     )
     github.refs[BRANCH] = OTHER
@@ -1624,6 +1650,22 @@ def test_main_leaves_a_pull_request_with_the_same_fixes_alone() -> None:
     assert github.graphql == []
     assert github.pulls[0]["body"] == "old"
     assert [call for call in github.calls if not call.startswith("GET ")] == []
+
+
+def test_main_asks_again_for_the_merge_of_a_pull_request_with_the_same_fixes() -> None:
+    # The run that made the commit failed to ask, and the next one must not leave the
+    # pull request to wait for a person: that is all it writes.
+    github = FakeGitHub()
+    healed_pull(github, SHA, {"app.py": b"x = 2\n"})
+    github.pulls[0]["auto_merge"] = None
+
+    said = heal_main(api_of(github), REPO, SHA, "main", FIXES, "app", "https://run")
+
+    assert said == f"#9 from {BRANCH} holds these fixes of main already.\n"
+    assert github.refs[BRANCH] == OTHER
+    assert [call for call in github.calls if not call.startswith("GET ")] == [
+        f"gh pr merge 9 --repo {REPO} --auto --squash"
+    ]
 
 
 @pytest.mark.parametrize(

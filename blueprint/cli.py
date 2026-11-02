@@ -652,6 +652,7 @@ def fix_bot_command(api: Api, repo: str, arguments: argparse.Namespace) -> int:
             arguments.run,
             arguments.sha,
             arguments.event,
+            arguments.branch,
             arguments.folder,
             downloader(api, repo),
         )
