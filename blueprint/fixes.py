@@ -13,6 +13,8 @@ so that one commit holds them all. Then `fix commit` commits them onto the branc
 pull request of this repository as the release app, `fix suggest` suggests them at
 their lines of a pull request from a fork, which no bot may push to, and `fix main`
 keeps one pull request from bot/self-heal with the fixes of main, which merges itself.
+A run that still runs after the wait leaves the commit to the job after its own end: a
+commit now would cancel it, and use up a commit of the bot for a part of the fixes.
 Docs keeps a fix of main alone, and while it passes: the first run of the accessibility
 check with the line baseline = true of .github/a11y-accepted.toml, which accepts what
 the website has.
@@ -540,6 +542,16 @@ def downloader(api: Api, repo: str) -> Download:
 
 
 @dataclass(frozen=True)
+class Collected:
+    """The folders of the fixes of a commit, and the workflows that the bot waited for
+    in vain, as one look at the runs found both: a fix that is here comes from a run that
+    had ended then, and a run that ended later has its own job."""
+
+    folders: list[Path]
+    late: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Plan:
     """What the fix bot does with the fixes of a commit: commit them onto the branch
     of a pull request, suggest them on one from a fork, keep the pull request of main
@@ -561,18 +573,19 @@ def collect(
     download: Download,
     workflows: Watched,
     wait: Callable[[float], None] = time.sleep,
-) -> list[Path]:
+) -> Collected:
     """Downloads the fixes of every workflow of the list for a commit into folder, one
     folder for each, once those that keep fixes have ended, so that one commit holds
-    them all. A pull request whose commit has no failed run with a fix has nothing for
-    the bot. The commit decides that, not the run that started this job: GitHub keeps
-    one pending job of a branch, so a run with no fix can replace the job of one with."""
+    them all, and says which of them still ran after the wait. A pull request whose
+    commit has no failed run with a fix has nothing for the bot. The commit decides that,
+    not the run that started this job: GitHub keeps one pending job of a branch, so a run
+    with no fix can replace the job of one with."""
     awaited = workflows.awaited(event)
     runs = runs_of(api, repo, sha, event, branch, workflows.listed)
     if event not in MAIN_EVENTS and not any(
         artifacts_of(api, repo, each) for each in dict.fromkeys((run_id, *failed(runs)))
     ):
-        return []
+        return Collected([])
     for _ in range(WAITS):
         if all(found.status == "completed" for found in runs if found.name in awaited):
             break
@@ -593,7 +606,14 @@ def collect(
             target = folder / f"{found.id}-{name}"
             download(found.id, name, target)
             folders.append(target)
-    return folders
+    return Collected(
+        folders,
+        tuple(
+            found.name
+            for found in runs
+            if found.name in awaited and found.status != "completed"
+        ),
+    )
 
 
 class FixLoop(Exception):
@@ -624,6 +644,12 @@ def from_fork(pull: Json, repo: str) -> bool:
     return str((head.get("repo") or {}).get("full_name") or "") != repo
 
 
+def still_running(late: Iterable[str], sha: str) -> str:
+    """The first words of the bot when it leaves its work to the job after these runs."""
+    names = ", ".join(code(name, NAME_LENGTH) for name in late)
+    return f"Still running after the wait for {sha[:7]}: {names}."
+
+
 def plan(
     api: Api,
     repo: str,
@@ -633,9 +659,17 @@ def plan(
     number: int | None,
     fixes: Fixes,
     listed: frozenset[str] = frozenset(),
+    late: Sequence[str] = (),
 ) -> Plan:
     """Decides what the bot does with the fixes of a commit; listed names the workflows
-    that it reads."""
+    that it reads, and late those that it waited for in vain.
+
+    Only a commit onto a branch waits for them. It would cancel these runs, whose fixes
+    the next commit then has to find again, and the bot commits only twice in a row, so
+    a part of the fixes could leave a later one without a commit. The job after the run
+    that ends last takes them all, however that run ends. The pull request of main costs
+    no run and takes the next fixes as well, and a suggestion comes once: both act on what
+    has ended, as a weekly run of main or a run of a fork starts no job when it passes."""
     if event in MAIN_EVENTS:
         ref = api.get(f"repos/{repo}/git/ref/heads/{branch}") or {}
         if (ref.get("object") or {}).get("sha") != sha:
@@ -653,6 +687,12 @@ def plan(
                 f"A failed check of {sha[:7]} kept fixes that have expired, so "
                 f"#{pull['number']} stays open until that check runs again.\n",
             )
+        if late:
+            return Plan(
+                "",
+                f"{still_running(late, sha)} #{pull['number']} stays open until they "
+                "have ended, as they may need its fixes.\n",
+            )
         return Plan(
             "close", f"{branch} needs the fixes of #{pull['number']} no more.\n"
         )
@@ -668,6 +708,12 @@ def plan(
         return Plan("", f"No command fixed what the checks of #{number} found.\n")
     if from_fork(pull, repo):
         return Plan("suggest", f"#{number} comes from a fork.\n", number)
+    if late:
+        return Plan(
+            "",
+            f"{still_running(late, sha)} The bot commits nothing yet, so that one commit "
+            "holds every fix: the job after the last of them makes it.\n",
+        )
     # One more commit onto its own is fine: the checks of a commit end at different
     # times, and a check may fix a file after another one did. Two in a row are not.
     if fixed_by_bot(api, repo, sha) is not None and (

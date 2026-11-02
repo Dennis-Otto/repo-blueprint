@@ -11735,6 +11735,11 @@ def test_the_fix_bot_waits_for_the_checks_that_fix_in_every_kind(
     assert found.listed == watched_after_the_checks(after)
     assert found.keeping == {ci[1], "Lint", "Docs"}
     assert found.awaited("pull_request") == {ci[1], "Lint"}
+    # The run that ends last starts the bot however it ends, unless it never keeps a fix.
+    bot = after[after.index("\n  fixes:\n") :]
+    left_out = re.search(r"!contains\(fromJSON\('(\[[^']*\])'\)", bot)
+    assert left_out
+    assert not found.awaited("pull_request") & set(json.loads(left_out[1]))
     assert found.awaited("push") == {ci[1], "Lint", "Docs"}
 
 

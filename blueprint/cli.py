@@ -688,7 +688,7 @@ def fix_bot_command(
         number = int(arguments.pull) if arguments.pull else None
         try:
             workflows = watched(root)
-            folders = collect(
+            found = collect(
                 api,
                 repo,
                 arguments.run,
@@ -706,8 +706,9 @@ def fix_bot_command(
                 arguments.event,
                 arguments.branch,
                 number,
-                load(folders),
+                load(found.folders),
                 workflows.listed,
+                found.late,
             )
         except (FixLoop, NoList) as error:
             # The annotation in the log, the reason in the summary as well.

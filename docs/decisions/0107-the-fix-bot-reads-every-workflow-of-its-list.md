@@ -1,6 +1,6 @@
 # The fix bot reads the fixes of every workflow of its list
 
-- Status: accepted
+- Status: accepted, amended by [0112](0112-the-fix-bot-leaves-a-commit-to-the-run-that-ends-last.md), by which a check that outlasts the wait gets the one commit instead of a commit of the others before it
 - Date: 2026-11-02
 
 ## Context
