@@ -1,6 +1,6 @@
 # Every website is accessible and quick on a phone, and a check proves it
 
-- Status: accepted, amended by [0097](0097-a-pull-request-checks-the-accessibility-of-the-pages-that-it-changes-and-a-new-violation-fails.md), by which a pull request opens only the pages that it changes and a new violation fails the check
+- Status: accepted, amended by [0097](0097-a-pull-request-checks-the-accessibility-of-the-pages-that-it-changes-and-a-new-violation-fails.md), by which a pull request opens only the pages that it changes and a new violation fails the check, and by [0113](0113-the-accessibility-check-opens-every-page-as-a-phone-shows-it.md), by which it opens each page at the width of a phone too
 - Date: 2026-10-18
 
 ## Context
@@ -21,7 +21,7 @@ Option 2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-a-website-stays-accessible-and-quick.dark.svg">
-  <img src="../images/diagrams/how-a-website-stays-accessible-and-quick.svg" alt="How a website stays accessible and quick: You write the pages in docs/. MkDocs builds the website with the hook and the stylesheet of the blueprint, which underline the links in the text, give the theme the contrast of WCAG 2.2 AA, load each picture as the reader comes to it and only in its theme, play a GIF with an MP4 beside it as that video, and pin the release of Mermaid. After the build, the check docs opens every page in Chrome, in the light and the dark theme, and runs axe-core on it; each serious or critical violation shows in the summary and as an annotation at its page. Without one, the website is published.">
+  <img src="../images/diagrams/how-a-website-stays-accessible-and-quick.svg" alt="How a website stays accessible and quick: You write the pages in docs/. MkDocs builds the website with the hook and the stylesheet of the blueprint, which underline the links in the text, give the theme the contrast of WCAG 2.2 AA, load each picture as the reader comes to it and only in its theme, play a GIF with an MP4 beside it as that video, and pin the release of Mermaid. After the build, the check docs opens every page in Chrome, in the light and the dark theme, at the width of a desktop and of a phone, runs axe-core on it and measures whether it scrolls sideways on the phone; each serious or critical violation shows in the summary and as an annotation at its page. Without one, the website is published.">
 </picture>
 
 - **A stylesheet of the blueprint:** `.github/mkdocs-blueprint.css`, which the hook serves before the stylesheets of the project, so that a project's rules win. It underlines the links in the text, gives the tabs the full color of the header and the current one bold, the links of the dark theme 6.5:1, buttons with a border in the dark theme the color of the links, and code at least 5:1. A picture for one theme hides with its link.
