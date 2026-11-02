@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pathspec
 import pytest
-import yaml
+from shared import load_yaml
 
 import reference
 from blueprint import cli
@@ -720,7 +720,7 @@ def test_the_link_fills_in_the_form_of_the_blueprint() -> None:
     assert link.netloc == "github.com"
     assert link.path == "/Dennis-Otto/repo-blueprint/issues/new"
     query = parse_qs(link.query)
-    form = yaml.safe_load(
+    form = load_yaml(
         (ROOT / ".github/ISSUE_TEMPLATE" / query["template"][0]).read_text(
             encoding="utf-8"
         )

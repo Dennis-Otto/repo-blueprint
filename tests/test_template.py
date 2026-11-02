@@ -44,7 +44,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
-from shared import copy_of, git_environment, once, run_folder
+from shared import copy_of, git_environment, load_yaml, once, run_folder
 from shell import BASH, in_bash
 from workflow_steps import (
     RUN_URL,
@@ -316,7 +316,7 @@ def workflows(project: Path) -> dict[str, str]:
 def accepted_dangerous_triggers() -> set[str]:
     """The workflows whose start on pull_request_target or workflow_run zizmor
     accepts, with the reason in its configuration."""
-    zizmor = yaml.safe_load((ROOT / ".github/zizmor.yml").read_text(encoding="utf-8"))
+    zizmor = load_yaml((ROOT / ".github/zizmor.yml").read_text(encoding="utf-8"))
     return set(zizmor["rules"]["dangerous-triggers"]["ignore"])
 
 
@@ -1660,6 +1660,27 @@ def test_a_project_without_a_sponsor(tmp_path: Path) -> None:
     assert "sponsor" not in (project / "README.md").read_text(encoding="utf-8").lower()
 
 
+def test_the_blueprint_checks_itself_on_the_newest_python_and_its_oldest() -> None:
+    # Its own .python-version is the one file that differs from what its template gives
+    # a GitHub Action: coverage measures branches with sys.monitoring from Python 3.14
+    # on, which takes a third off the tests, as decision 0102 describes.
+    own = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+    assert tuple(int(part) for part in own.split(".")) >= (3, 14)
+    # The tool of every repository still runs on the Python of the runner, so mypy and
+    # Ruff check against it, and the check on Windows runs the tests on it.
+    settings = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    oldest = settings["tool"]["mypy"]["python_version"]
+    assert settings["tool"]["ruff"]["target-version"] == f"py{oldest.replace('.', '')}"
+    windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
+    python = next(
+        found
+        for found in job_in(windows, "check")["steps"]
+        if "setup-python" in found.get("uses", "")
+    )
+    assert python["with"]["python-version"] == oldest
+    assert oldest == "3.12"
+
+
 def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
     project = render(
         tmp_path,
@@ -1677,7 +1698,6 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".editorconfig",
         ".gitattributes",
         ".gitignore",
-        ".python-version",
         "CLAUDE.md",
         "CODE_OF_CONDUCT.md",
         "GOVERNANCE.md",
@@ -1838,6 +1858,34 @@ def test_the_settings_tool_runs_in_every_repository(
         assert command.returncode == 0, command.stderr
         assert "--no-update" in command.stdout
     # Like the single file it was, the tool leaves no __pycache__ in the repository.
+    assert not (project / ".github/blueprint/__pycache__").exists()
+
+
+# On a copy of the tool, as the test above runs it: its Python knows nothing of the
+# switch of mutmut.
+@pytest.mark.mutation_unsafe
+def test_the_settings_tool_keeps_bytecode_only_in_the_folder_that_the_machine_names(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    project = shutil.copytree(projects["generic"], tmp_path / "generic")
+    folder = tmp_path / "bytecode"
+    command = [sys.executable, ".github/blueprint.py", "--help"]
+    environment = {
+        **without_bytecode_prefix(os.environ),
+        "PYTHONPYCACHEPREFIX": str(folder),
+    }
+
+    subprocess.run(
+        command, cwd=project, env=environment, check=True, capture_output=True
+    )
+    written = {path: path.stat().st_mtime_ns for path in folder.rglob("cli.*.pyc")}
+    assert len(written) == 1
+    subprocess.run(
+        command, cwd=project, env=environment, check=True, capture_output=True
+    )
+
+    # The second start reads what the first one wrote, and compiles nothing.
+    assert {path: path.stat().st_mtime_ns for path in written} == written
     assert not (project / ".github/blueprint/__pycache__").exists()
 
 
@@ -3760,6 +3808,78 @@ def test_the_checks_fail_on_a_fragment_that_the_release_cannot_take_in(
 def step_of_the_tests(check: str) -> str:
     start = check.index('step "Tests, with every line and branch covered"')
     return check[start : check.index("\nstep ", start) + 1]
+
+
+@pytest.mark.parametrize(
+    ("actions", "system", "free", "own", "folder"),
+    [
+        pytest.param("true", "Linux", "8283128", "", "/dev/shm", id="a runner"),
+        pytest.param("true", "Linux", "4194304", "", "/dev/shm", id="just enough"),
+        pytest.param("true", "Linux", "65536", "", "none", id="a job in a container"),
+        pytest.param("true", "Linux", "", "", "none", id="no such folder"),
+        pytest.param("true", "MINGW64_NT-10.0", "8283128", "", "none", id="on Windows"),
+        pytest.param("", "Linux", "8283128", "", "none", id="a contributor"),
+        pytest.param("true", "Linux", "8283128", "big", "big", id="its own folder"),
+    ],
+)
+def test_the_tests_keep_their_temporary_folders_in_memory_on_a_linux_runner(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    actions: str,
+    system: str,
+    free: str,
+    own: str,
+    folder: str,
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["python-package"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    (project / "scripts/tests.sh").write_text(
+        check[: check.index('step "Text files"')] + step_of_the_tests(check),
+        encoding="utf-8",
+        newline="\n",
+    )
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    seen = tmp_path / "seen"
+    later = tmp_path / "later"
+    for name, script in {
+        "python": f'printf %s "${{TMPDIR:-none}}" > "{seen.as_posix()}"',
+        "coverage": f'printf %s "${{TMPDIR:-none}}" > "{later.as_posix()}"',
+        "uname": f"echo {system}",
+        "df": f"echo Avail; echo {free}" if free else "exit 1",
+    }.items():
+        stub = stubs / name
+        stub.write_text(
+            f"#!/usr/bin/env bash\n{script}\n", encoding="utf-8", newline="\n"
+        )
+        stub.chmod(0o755)
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in {"TMPDIR", "GITHUB_ACTIONS"}
+    }
+    environment.update(STUBS=stubs.as_posix(), GITHUB_ACTIONS=actions)
+    if own:
+        (tmp_path / own).mkdir()
+        environment["TMPDIR"] = (tmp_path / own).as_posix()
+
+    done = subprocess.run(
+        in_bash("scripts/tests.sh"),
+        cwd=project,
+        env=environment,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    # Git Bash writes the path of its own folder in its own way.
+    found = seen.read_text(encoding="utf-8")
+    assert (Path(found).name if own else found) == folder
+    # What runs after the tests stays on the disk, or in the folder of the project.
+    after = later.read_text(encoding="utf-8")
+    assert (Path(after).name if own else after) == (own or "none")
 
 
 @pytest.mark.parametrize("plugins", [True, False])
@@ -6431,9 +6551,7 @@ def test_the_issue_assistant_shows_its_limits_of_the_ai_runs(
 def test_actionlint_knows_the_next_runner() -> None:
     # A project may test on it before the jobs move, as the Action test of the issue
     # assistant does in a matrix, and actionlint 1.7.12 doesn't know the label yet.
-    config = yaml.safe_load(
-        (ROOT / ".github/actionlint.yaml").read_text(encoding="utf-8")
-    )
+    config = load_yaml((ROOT / ".github/actionlint.yaml").read_text(encoding="utf-8"))
     assert NEXT_RUNNER in config["self-hosted-runner"]["labels"]
 
 
@@ -6470,7 +6588,7 @@ def test_zizmor_accepts_only_the_comment_trigger_of_the_issue_assistant(
     assert "actions/checkout" not in text
     zizmor = (root / ".github/zizmor.yml").read_text(encoding="utf-8")
     assert zizmor == (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
-    rules = yaml.safe_load(zizmor)["rules"]
+    rules = load_yaml(zizmor)["rules"]
     accepted = {
         rule
         for rule, found in rules.items()
@@ -6818,7 +6936,7 @@ def test_a_package_that_publishes_nowhere_speaks_of_no_registry(
     assert registry not in settings(nowhere)["environments"]
     assert registry not in settings(nowhere)["repository"]["topics"]
     answers = (nowhere / ".copier-answers.yml").read_text(encoding="utf-8")
-    assert yaml.safe_load(answers)["publish_package"] is False
+    assert load_yaml(answers)["publish_package"] is False
 
 
 def test_a_node_package_that_publishes_nowhere_is_private(
@@ -6858,7 +6976,7 @@ def test_only_a_package_of_a_registry_answers_whether_it_publishes(
 ) -> None:
     answers = (projects[kind] / ".copier-answers.yml").read_text(encoding="utf-8")
     asked = kind in {"node-package", "python-package"}
-    assert yaml.safe_load(answers).get("publish_package") is (True if asked else None)
+    assert load_yaml(answers).get("publish_package") is (True if asked else None)
 
 
 def test_the_answer_changes_nothing_of_a_kind_that_it_doesnt_ask(
@@ -6886,7 +7004,7 @@ def test_the_downstream_repositories_propose_their_answers(
 ) -> None:
     # The answers of the real repositories, which the Rollout brings the file to:
     # every file and heading that their .bestpractices.json names is there.
-    data = yaml.safe_load(answers.read_text(encoding="utf-8"))
+    data = load_yaml(answers.read_text(encoding="utf-8"))
     project = render(tmp_path, **data)
     criteria = proposed_criteria(project, f"{data['owner']}/{data['project_slug']}")
 
@@ -7137,7 +7255,7 @@ def test_each_repository_of_the_rollout_runs_its_schedules_at_times_of_its_own(
                 f" {hour} of {first} (slot {place[first]}); see decision 0083"
             )
     # The weekly run of the mutation tests takes two runners, a pull request four.
-    mutation = yaml.safe_load(
+    mutation = load_yaml(
         (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
     )
     strategy = mutation["jobs"]["mutation"]["strategy"]
@@ -9664,7 +9782,7 @@ def test_a_foreign_owner_gets_no_wiring_of_the_blueprint_owner(
     ]
     assert found == []
     # Their own name, in the license and the governance.
-    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    answers = load_yaml((project / ".copier-answers.yml").read_text("utf-8"))
     assert answers["author"] == "octo-org"
     assert answers["sponsor"] == "octo-org"
     assert "maintained by octo-org" in (project / "GOVERNANCE.md").read_text("utf-8")
@@ -10032,7 +10150,7 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         ' /tmp/renovate/problems.json --run "$RUN_URL" |',
     ]
     assert "matrix" not in workflow
-    parsed = yaml.safe_load(workflow)
+    parsed = load_yaml(workflow)
     assert parsed[True]["schedule"] == [{"cron": moved("17 */2 * * *", slot)}]
     # One job for the checks of the rules and one for the bot, which needs no other.
     assert set(parsed["jobs"]) == {"validate", "renovate"}
@@ -10084,7 +10202,7 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
     assert any(
         ref.startswith("renovatebot/github-action@") for ref in settings.workflows
     )
-    health = yaml.safe_load(
+    health = load_yaml(
         (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     )
     assert "Renovate" in health[True]["workflow_run"]["workflows"]
@@ -10122,7 +10240,7 @@ def test_the_hub_of_the_blueprint_runs_renovate_for_its_owner(
     projects: dict[str, Path], kind: str
 ) -> None:
     project = projects[kind]
-    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    answers = load_yaml((project / ".copier-answers.yml").read_text("utf-8"))
     assert answers["renovate_runner"] == "hub"
     assert not (project / ".github/workflows/renovate.yml").exists()
     assert not (project / ".github/renovate-global.json5").exists()
@@ -10131,7 +10249,7 @@ def test_the_hub_of_the_blueprint_runs_renovate_for_its_owner(
     rules = (project / ".github/renovate-blueprint.json5").read_text("utf-8")
     assert "ghcr.io/renovatebot/renovate" not in rules
     assert "the Renovate workflow of the blueprint runs it for every" in rules
-    health = yaml.safe_load(
+    health = load_yaml(
         (project / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
     )
     assert "Renovate" not in health[True]["workflow_run"]["workflows"]
@@ -10629,7 +10747,7 @@ def test_a_template_stops_when_the_text_that_it_replaces_is_gone(
     # The template of codeql.yml as Copier renders it, in the sandbox of Jinja with the
     # delimiters and the filters of the blueprint, with the blueprint's files, but its
     # workflow from tmp_path.
-    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     workflow = (ROOT / ".github/workflows/codeql.yml").read_text(encoding="utf-8")
     (tmp_path / ".github/workflows").mkdir(parents=True)
 
@@ -10694,7 +10812,7 @@ def test_a_template_cuts_parts_of_a_file_and_stops_when_they_are_gone(
 def blueprint_environment(*folders: Path) -> SandboxedEnvironment:
     """Jinja as Copier renders the template, with the delimiters and the filters of the
     blueprint, from the folders and then the blueprint's files."""
-    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     return SandboxedEnvironment(
         loader=ChoiceLoader([*map(FileSystemLoader, folders), FileSystemLoader(ROOT)]),
         extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"],
@@ -10715,7 +10833,7 @@ def moved(cron: str, slot: int) -> str:
 def slot_of(owner: str, name: str) -> int:
     """The slot of the schedules of the repository owner/name, as copier.yml computes
     it."""
-    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     template = blueprint_environment().from_string(
         questions["schedule_slot"]["default"]
     )
@@ -10782,7 +10900,7 @@ def test_a_template_moves_each_schedule_of_a_workflow_into_the_slot_of_the_proje
 def test_the_slot_of_the_schedules_is_the_place_of_a_repository_in_the_rollout() -> (
     None
 ):
-    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     question = questions["schedule_slot"]
     assert question["type"] == "int"
     assert question["when"] is False
@@ -10829,7 +10947,7 @@ def test_the_owner_of_the_blueprint_keeps_the_answers_of_its_repositories(
     # copier update --defaults gives each repository of the Rollout the release app
     # that it has, from the defaults of the blueprint owner, so the update changes none
     # of its settings.
-    answers = yaml.safe_load(
+    answers = load_yaml(
         (projects["generic"] / ".copier-answers.yml").read_text(encoding="utf-8")
     )
     keys = (
@@ -10845,7 +10963,7 @@ def test_the_owner_of_the_blueprint_keeps_the_answers_of_its_repositories(
             key: answers[key] for key in keys
         }, name
     # The defaults are those of the blueprint's own repository.
-    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    copier = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     own = copier["blueprint_owner"]["default"]
     settings = Settings.load(ROOT / ".github/repository.toml")
     assert own == {
@@ -10919,7 +11037,7 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
     written = re.search(r'\n {8}("\(\?<depName>copier\)[^\n]+"),\n', renovate)
     assert written is not None
     pattern = json.loads(written[1]).replace("(?<", "(?P<")
-    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    copier = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     least = tuple(int(part) for part in copier["_min_copier_version"].split("."))
     for readme in ("README.md", "README.de.md"):
         text = (ROOT / readme).read_text(encoding="utf-8")
@@ -14864,6 +14982,7 @@ ON_PUSH_TO_MAIN = {
         "codeql.yml",
         "links.yml",
         "osv-scanner.yml",
+        "windows.yml",
         "zizmor.yml",
     },
     # The bots whose newest run does all the work of an older one, in one group.
@@ -14985,6 +15104,9 @@ def test_the_checks_run_on_windows_as_well(projects: dict[str, Path]) -> None:
     assert "  schedule:\n    - cron: " in windows
     paths = re.search(r"  pull_request:\n    paths:\n((?:      - .+\n)+)", windows)
     assert paths
+    # The same paths on main: a red run there is what opens an issue, and a pull request
+    # doesn't wait for this check.
+    assert f"  push:\n    branches: [main]\n    paths:\n{paths[1]}" in windows
     assert {line[8:].strip('"') for line in paths[1].splitlines()} >= {
         "**.py",
         "blueprint/**",
@@ -16265,7 +16387,7 @@ def test_every_website_serves_a_map_of_its_pages(
     assert "\n  - .github/mkdocs_blueprint.py\n" in (
         project / ".github/mkdocs-blueprint.yml"
     ).read_text(encoding="utf-8")
-    settings = yaml.safe_load((project / "mkdocs.yml").read_text(encoding="utf-8"))
+    settings = load_yaml((project / "mkdocs.yml").read_text(encoding="utf-8"))
     address = settings["site_url"]
     site = tmp_path / "site"
     pages: list[str] = []
@@ -16356,7 +16478,7 @@ def test_every_website_shows_the_automation_of_its_repository(
     assert f"its {len(files)} workflows of GitHub Actions" in page
     for path in files:
         text = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(text)
+        data = load_yaml(text)
         anchor = re.sub(r"[^a-z0-9]+", "-", path.stem.lower())
         assert f"[{data['name']}](#{anchor}) | " in page, path.name
         first = re.search(r"^# (.+)$", text, re.M)
@@ -16558,7 +16680,7 @@ def test_every_website_is_checked_for_its_accessibility(
     )
     assert "/site-digest.json" in ignored
     # Every page each week, which publishes nothing.
-    on = yaml.safe_load(docs)[True]
+    on = load_yaml(docs)[True]
     assert "schedule" in on
     assert '"$EVENT" != schedule' in step_named(docs, "Look for the website")["run"]
     # The tests of the check are a step of scripts/check.sh, not of the check docs.
@@ -16588,7 +16710,7 @@ def test_a_project_accepts_what_its_website_has_once_through_the_update(
     # The file is the project's: the update brings it once, with the line that makes
     # the first run of every page on main write what the website has there, and passes.
     root = projects[kind]
-    questions = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    questions = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     assert ".github/a11y-accepted.toml" in questions["_skip_if_exists"]
     accepted = tomllib.loads(
         (root / ".github/a11y-accepted.toml").read_text(encoding="utf-8")
@@ -17142,7 +17264,7 @@ def test_the_recording_waits_on_its_first_screen_only_for_what_fits_on_it() -> N
     ):
         assert f"\n{setting}\n" in tape, setting
     columns = 121
-    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    copier = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     # The output in the order of the tape: the command, what Copier says first and an
     # empty line, and for each question its help, then the line of its answer, which
     # holds the help of a choice while the choice waits. Every question that may be
@@ -17196,7 +17318,7 @@ def test_the_recording_answers_each_question_that_copier_asks(tmp_path: Path) ->
     # another question shows. So a new question needs its key in the tape, and Copier
     # itself says which questions the answers of the tape lead to: those it stores.
     tape = (ROOT / ".github/docs-pictures/copier-copy.tape").read_text(encoding="utf-8")
-    copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    copier = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
     start = tape.index("\nWait+Screen@60s /The name of the project/\n")
     keys = tape[start : tape.index("\nWait@60s /^\\$$/\n")].split("\nEnter\n")
     # What follows the last key waits for the prompt.
@@ -17215,7 +17337,7 @@ def test_the_recording_answers_each_question_that_copier_asks(tmp_path: Path) ->
         owner=typed[2],
         project_type=kind,
     )
-    answers = yaml.safe_load((project / ".copier-answers.yml").read_text("utf-8"))
+    answers = load_yaml((project / ".copier-answers.yml").read_text("utf-8"))
     asked = [name for name in copier if name in answers]
     assert len(keys) == len(asked), (
         f"The tape has {len(keys)} keys, Copier asks {len(asked)} questions: {asked}"
@@ -18457,9 +18579,7 @@ def test_a_release_is_built_without_the_secrets_of_the_release(
     )
     # zizmor accepts the passed secrets at that one line of a Nextcloud app, not in
     # every workflow of the name release.yml of every repository.
-    zizmor = yaml.safe_load(
-        (project / ".github/zizmor.yml").read_text(encoding="utf-8")
-    )
+    zizmor = load_yaml((project / ".github/zizmor.yml").read_text(encoding="utf-8"))
     assert "secrets-inherit" not in zizmor["rules"]
     inherited = [line for line in release.splitlines() if "secrets: inherit" in line]
     assert inherited == (

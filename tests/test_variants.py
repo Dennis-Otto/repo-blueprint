@@ -4,15 +4,19 @@ offline; and once with the template of the blueprint itself."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
+import threading
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 import workflow_steps
+from copier._cli import CopierApp
 from shared import copy_of
 
 import variants
@@ -104,6 +108,41 @@ def plain_git(
     for role in ("AUTHOR", "COMMITTER"):
         monkeypatch.setenv(f"GIT_{role}_NAME", "Test")
         monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.com")
+
+
+# The render of the plan, and the lock around Copier in this process.
+RENDER = variants.render
+ONE_AT_A_TIME = threading.Lock()
+
+
+def render_here(tree: Path, answers: variants.Answers, folder: Path) -> variants.Files:
+    """What variants.render makes, with the same command of Copier in this process: a
+    Python of its own takes half a second to import Copier, and most tests render a
+    small template a dozen times. Copier changes the process, so one at a time, in the
+    folder of the template, as the real one runs. A render that fails goes to the real
+    one, which says why."""
+    project = folder / "variant"
+    command = [
+        "copier",
+        "copy",
+        "--quiet",
+        "--defaults",
+        *answers,
+        tree.as_posix(),
+        project.as_posix(),
+    ]
+    with ONE_AT_A_TIME, contextlib.chdir(tree), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            code = CopierApp.run(command, exit=False)[1]
+        except Exception:
+            code = 1
+    return RENDER(tree, answers, folder) if code else variants.files_of(project)
+
+
+@pytest.fixture(autouse=True)
+def copier_in_this_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(variants, "render", render_here)
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -524,8 +563,9 @@ def test_the_plan_runs_as_a_script(blueprint: Path, tmp_path: Path) -> None:
 
 
 def test_the_template_of_the_blueprint_shows_a_lock_file_in_one_kind(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(variants, "render", RENDER)
     # The real template, in a plain copy: the lock file of Home Assistant, as Renovate
     # changes it in #324, is in the projects of that kind only, with default answers
     # or those of a repository, and every required question has its answer.
