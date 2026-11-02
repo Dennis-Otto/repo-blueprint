@@ -12,9 +12,10 @@
 # title, problem, why and fix, and may have commands, one per line, and docs, a link or
 # a file of the repository with its anchor. Each says in autofix how it fixes itself:
 # the commands that fix what it finds, or the reason why no command can. The fix bot
-# commits only the fixes of the runs of Lint and of the CI, not yet those of a
-# workflow of the project's own (Dennis-Otto/repo-blueprint#429), so a person runs
-# the commands of such a check:
+# commits the fixes of every workflow of the list of after-checks.yml, also of one of
+# the project's own that the answer test_workflows names: with the steps "Fix what a
+# command can fix" and "Keep the fixes for the fix bot" of ci.yml at the end of the job
+# of its check, an artifact fixes-<name> of its own and fetch-depth: 2 in its checkout:
 # [check."e2e (*)"]
 # title = "The end-to-end tests"
 # problem = """A test of the whole app in a real browser failed; the summary of the

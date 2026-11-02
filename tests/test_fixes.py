@@ -16,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -39,6 +40,7 @@ from blueprint.fixes import (
     Fixes,
     FixLoop,
     Suggestion,
+    Watched,
     allowed,
     artifacts_of,
     blob_sha,
@@ -67,6 +69,7 @@ from blueprint.fixes import (
     suggest,
     suggestions_of,
     text_fixed,
+    watched,
 )
 from blueprint.github import Api, GitHubError
 
@@ -950,6 +953,49 @@ def run_of(
     }
 
 
+# The workflows of a repository whose checks are its CI, Lint and Docs.
+WATCHED = Watched(
+    frozenset({"Lint", "CI (python)", "CI (node)", "Docs", "CodeQL"}),
+    frozenset({"Lint", "CI (python)", "CI (node)", "Docs"}),
+)
+# The list of HomeDarts for Autodarts, with the tests of its own: Docker E2E, and
+# Visual check by the answer test_workflows of the blueprint.
+HOMEDARTS = (
+    "CI (home-assistant), Docker E2E, Visual check, CodeQL, Dependency review, Docs, "
+    "Lint, Pull request title, Secret scan, Fuzzing, Links, OSV-Scanner, "
+    "Workflow security, Release"
+)
+
+
+def workflow(name: str, artifact: str = "") -> str:
+    """The text of a workflow, with the step that keeps an artifact."""
+    step = f"      - uses: upload\n        with:\n          name: {artifact}\n"
+    return f"name: {name}\n\non:\n  pull_request:\n\njobs:\n  check:\n    steps:\n" + (
+        step if artifact else "      - run: 'true'\n"
+    )
+
+
+def homedarts(root: Path, after_checks: str = "") -> Path:
+    """The workflows that main has in a repository like HomeDarts for Autodarts, whose
+    end-to-end tests have a fix and whose visual tests have none."""
+    after = after_checks or (
+        "name: After the checks\n\non:\n  workflow_run:\n"
+        f"    workflows: [{HOMEDARTS}]\n    types: [completed]\n"
+    )
+    write(root, ".github/workflows/after-checks.yml", after)
+    write(
+        root,
+        ".github/workflows/ci.yml",
+        workflow("CI (home-assistant)", "fixes-check"),
+    )
+    write(root, ".github/workflows/lint.yml", workflow("Lint", "fixes-lint"))
+    write(root, ".github/workflows/docs.yml", workflow("Docs", "fixes-docs"))
+    write(root, ".github/workflows/e2e.yml", workflow("Docker E2E", "fixes-e2e"))
+    write(root, ".github/workflows/visual.yml", workflow("Visual check"))
+    write(root, ".github/workflows/codeql.yml", workflow("CodeQL"))
+    return root
+
+
 def test_the_runs_of_a_commit_that_keep_fixes() -> None:
     github = FakeGitHub()
     github.runs = [
@@ -958,17 +1004,105 @@ def test_the_runs_of_a_commit_that_keep_fixes() -> None:
         run_of(2, "CI (python)"),
         # An older run of the same workflow, which the newer one replaces.
         run_of(0, "CI (python)", conclusion="cancelled"),
-        run_of(4, "CodeQL"),
+        run_of(4, "Off the list"),
         {"id": 5, "name": None, "status": None, "conclusion": None},
     ]
 
-    found = runs_of(api_of(github), REPO, SHA, "pull_request", "main")
+    found = runs_of(api_of(github), REPO, SHA, "pull_request", "main", WATCHED.listed)
 
     assert [(run.id, run.name, run.conclusion) for run in found] == [
         (2, "CI (python)", "failure"),
         (3, "Lint", "success"),
     ]
-    assert runs_of(api_of(github), REPO, OTHER, "pull_request", "feature") == []
+    assert (
+        runs_of(api_of(github), REPO, OTHER, "pull_request", "feature", WATCHED.listed)
+        == []
+    )
+
+
+def test_the_bot_goes_by_the_list_and_the_files_of_main(tmp_path: Path) -> None:
+    write(
+        homedarts(tmp_path),
+        ".github/workflows/other.yaml",
+        workflow("Other", "fixes-x"),
+    )
+    write(
+        tmp_path,
+        ".github/workflows/comment.yml",
+        workflow("Secret scan") + "      # name: fixes-old\n",
+    )
+    write(tmp_path, ".github/workflows/unnamed.yml", "on: push\n")
+    write(
+        tmp_path,
+        ".github/workflows/quoted.yml",
+        'name: "Links"\n\njobs:\n  check:\n    steps:\n      - with:\n          name: "fixes-links"\n',
+    )
+
+    found = watched(tmp_path)
+
+    # Every workflow of the list, in the order of no one.
+    assert found.listed == frozenset(HOMEDARTS.split(", "))
+    # Those that keep fixes by their files; one off the list counts for nothing.
+    assert found.keeping == {
+        "CI (home-assistant)",
+        "Docker E2E",
+        "Docs",
+        "Links",
+        "Lint",
+    }
+    # Docs keeps nothing on a pull request.
+    for event in MAIN_EVENTS:
+        assert found.awaited(event) == found.keeping
+    assert found.awaited("pull_request") == found.keeping - {"Docs"}
+
+
+def test_this_repository_lists_what_keeps_fixes() -> None:
+    found = watched(ROOT)
+
+    assert {"Lint", "Docs", "CI (python)"} <= found.keeping
+    assert found.keeping <= found.listed
+    assert {"CodeQL", "Release", "Variants"} <= found.listed - found.keeping
+
+
+@pytest.mark.parametrize(
+    "after_checks",
+    [
+        # No workflow_run at all, an empty list and one that a variable sets.
+        "name: After the checks\non:\n  push:\n",
+        "name: After the checks\non:\n  workflow_run:\n    workflows: []\n",
+        "name: After the checks\non:\n  workflow_run:\n    workflows: ${{ x }}\n",
+    ],
+)
+def test_without_a_list_the_bot_takes_nothing(
+    tmp_path: Path, after_checks: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    homedarts(tmp_path, after_checks)
+    github = FakeGitHub()
+    github.pull()
+    github.runs = [run_of(1, "Lint")]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    output = tmp_path / "output"
+
+    code = fix_collect(tmp_path, github, output)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "lists no workflow" in captured.out
+    assert "::error::" in captured.err
+    # It stops before it asks GitHub for anything, and tells no step to commit.
+    assert github.calls == []
+    assert not output.exists()
+
+
+def test_without_the_file_of_the_list_the_bot_stops(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github = FakeGitHub()
+
+    assert fix_collect(tmp_path, github, tmp_path / "output") == 2
+
+    assert "after-checks.yml" in capsys.readouterr().err
+    assert github.calls == []
 
 
 def test_the_fixes_that_a_run_kept() -> None:
@@ -1002,6 +1136,7 @@ def test_a_pull_request_whose_run_kept_no_fix_has_nothing_to_wait_for(
         "feature",
         tmp_path,
         downloader(api_of(github), REPO),
+        WATCHED,
         wait,
     )
 
@@ -1036,7 +1171,16 @@ def test_the_bot_waits_for_the_other_checks_that_fix_and_takes_all_their_fixes(
 
     api = api_of(github)
     found = collect(
-        api, REPO, 1, SHA, "pull_request", "main", tmp_path, downloader(api, REPO), wait
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "main",
+        tmp_path,
+        downloader(api, REPO),
+        WATCHED,
+        wait,
     )
 
     assert waits == [30, 30]
@@ -1070,6 +1214,7 @@ def test_the_bot_waits_only_a_while(tmp_path: Path) -> None:
         "main",
         tmp_path,
         downloader(api, REPO),
+        WATCHED,
         waits.append,
     )
 
@@ -1077,12 +1222,180 @@ def test_the_bot_waits_only_a_while(tmp_path: Path) -> None:
     assert found == [tmp_path / "1-fixes-markdown"]
 
 
+def test_a_check_in_a_workflow_of_the_project_waits_with_the_others(
+    tmp_path: Path,
+) -> None:
+    # The end-to-end tests of HomeDarts for Autodarts keep a fix of their own, so that
+    # one commit holds it together with the one of Lint.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Lint"),
+        run_of(2, "Docker E2E", status="in_progress", conclusion=""),
+    ]
+    github.artifacts = {
+        1: [{"name": "fixes-lint"}],
+        2: [{"name": "fixes-e2e"}],
+    }
+    github.downloads = {
+        (1, "fixes-lint"): {"README.md": b"# Fixed\n"},
+        (2, "fixes-e2e"): {"tests/e2e/snapshot.txt": b"new\n"},
+    }
+    waits: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        github.runs[1].update(status="completed", conclusion="failure")
+
+    api = api_of(github)
+    workflows = watched(homedarts(tmp_path / "main"))
+    found = collect(
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        workflows,
+        wait,
+    )
+
+    assert waits == [30]
+    assert load(found).files == {
+        "README.md": b"# Fixed\n",
+        "tests/e2e/snapshot.txt": b"new\n",
+    }
+
+
+def test_the_bot_waits_for_no_workflow_that_keeps_no_fix(tmp_path: Path) -> None:
+    # The tests in a browser of the project and the scanners run long and keep nothing:
+    # the fix of Lint doesn't wait for them, and the next run of the checks starts anyway.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Lint"),
+        run_of(2, "Visual check", status="in_progress", conclusion=""),
+        run_of(3, "CodeQL", status="queued", conclusion=""),
+    ]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    github.downloads = {(1, "fixes-lint"): {"README.md": b"# Fixed\n"}}
+
+    def wait(seconds: float) -> None:
+        raise AssertionError("no wait")
+
+    api = api_of(github)
+    found = collect(
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        watched(homedarts(tmp_path / "main")),
+        wait,
+    )
+
+    assert load(found).files == {"README.md": b"# Fixed\n"}
+
+
+def test_every_workflow_of_the_list_counts_also_without_a_step_on_main(
+    tmp_path: Path,
+) -> None:
+    # A workflow whose artifact comes from a composite action, where the bot doesn't
+    # look: nothing waits for it, and its own end starts the bot, which reads it.
+    github = FakeGitHub()
+    github.runs = [run_of(2, "Visual check")]
+    github.artifacts = {2: [{"name": "fixes-visual"}]}
+    github.downloads = {(2, "fixes-visual"): {"docs/card.md": b"# Card\n"}}
+
+    api = api_of(github)
+    found = collect(
+        api,
+        REPO,
+        2,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        watched(homedarts(tmp_path / "main")),
+    )
+
+    assert load(found).files == {"docs/card.md": b"# Card\n"}
+
+
+def test_a_workflow_off_the_list_of_main_keeps_nothing_for_the_bot(
+    tmp_path: Path,
+) -> None:
+    # A pull request, also one from a fork, adds a workflow, or renames one, as it likes.
+    github = FakeGitHub()
+    github.runs = [run_of(1, "Lint"), run_of(2, "My own checks")]
+    github.artifacts = {
+        1: [{"name": "fixes-lint"}],
+        2: [{"name": "fixes-mine"}],
+    }
+    github.downloads = {
+        (1, "fixes-lint"): {"README.md": b"# Fixed\n"},
+        (2, "fixes-mine"): {"app.py": b"import evil\n"},
+    }
+
+    api = api_of(github)
+    found = collect(
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        watched(homedarts(tmp_path / "main")),
+    )
+
+    assert load(found).files == {"README.md": b"# Fixed\n"}
+    assert not any("fixes-mine" in call for call in github.calls)
+
+
+def test_only_a_run_that_failed_or_docs_on_main_keeps_fixes(tmp_path: Path) -> None:
+    # On a pull request, a run that passed found nothing to fix, whatever it kept.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Lint"),
+        run_of(2, "Docs", conclusion="success"),
+        run_of(3, "Docker E2E", conclusion="success"),
+        run_of(4, "Visual check", conclusion="cancelled"),
+    ]
+    github.artifacts = {
+        1: [{"name": "fixes-lint"}],
+        2: [{"name": "fixes-docs"}],
+        3: [{"name": "fixes-e2e"}],
+        4: [{"name": "fixes-visual"}],
+    }
+    github.downloads = {(1, "fixes-lint"): {"README.md": b"# Fixed\n"}}
+
+    api = api_of(github)
+    found = collect(
+        api,
+        REPO,
+        1,
+        SHA,
+        "pull_request",
+        "feature",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        watched(homedarts(tmp_path / "main")),
+    )
+
+    assert found == [tmp_path / "fixes/1-fixes-lint"]
+
+
 def test_docs_keeps_the_fixes_of_main_alone_also_when_it_passes(
     tmp_path: Path,
 ) -> None:
     # The first run of the accessibility check on main accepts what the website has,
-    # passes, and keeps the file for the fix bot. On a pull request, the bot doesn't
-    # wait for Docs, which keeps nothing there.
+    # passes, and keeps the file for the fix bot.
     github = FakeGitHub()
     github.runs = [
         run_of(1, "Docs", conclusion="success"),
@@ -1097,10 +1410,9 @@ def test_docs_keeps_the_fixes_of_main_alone_also_when_it_passes(
     }
 
     api = api_of(github)
-    assert [run.name for run in runs_of(api, REPO, SHA, "pull_request", "main")] == [
-        "CI (python)"
-    ]
-    found = collect(api, REPO, 1, SHA, "push", "main", tmp_path, downloader(api, REPO))
+    found = collect(
+        api, REPO, 1, SHA, "push", "main", tmp_path, downloader(api, REPO), WATCHED
+    )
 
     # Another check that passed keeps nothing that counts, such as what an earlier
     # attempt of it kept.
@@ -1116,7 +1428,10 @@ def test_main_looks_at_its_checks_also_when_the_run_kept_nothing(
 
     api = api_of(github)
     assert (
-        collect(api, REPO, 2, SHA, event, "main", tmp_path, downloader(api, REPO)) == []
+        collect(
+            api, REPO, 2, SHA, event, "main", tmp_path, downloader(api, REPO), WATCHED
+        )
+        == []
     )
     assert any("actions/runs?head_sha" in call for call in github.calls)
 
@@ -1145,7 +1460,7 @@ def test_main_takes_the_fixes_of_a_commit_from_each_event_that_ran_its_checks(
 
     api = api_of(github)
     found = collect(
-        api, REPO, 2, SHA, "schedule", "main", tmp_path, downloader(api, REPO)
+        api, REPO, 2, SHA, "schedule", "main", tmp_path, downloader(api, REPO), WATCHED
     )
 
     assert found == [tmp_path / "2-fixes-lint", tmp_path / "3-fixes-check"]
@@ -1164,9 +1479,73 @@ def test_a_weekly_run_doesnt_take_up_a_check_that_passed_since(tmp_path: Path) -
 
     api = api_of(github)
     assert (
-        collect(api, REPO, 2, SHA, "schedule", "main", tmp_path, downloader(api, REPO))
+        collect(
+            api,
+            REPO,
+            2,
+            SHA,
+            "schedule",
+            "main",
+            tmp_path,
+            downloader(api, REPO),
+            WATCHED,
+        )
         == []
     )
+
+
+def test_docs_keeps_a_fix_of_main_only_in_the_run_of_a_push(tmp_path: Path) -> None:
+    # A run by hand of the same commit accepts nothing that the bot would take, and
+    # hides no run of a push either.
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "Docs", conclusion="success") | {"event": "workflow_dispatch"}
+    ]
+    github.artifacts = {1: [{"name": "fixes-docs"}]}
+
+    api = api_of(github)
+    assert (
+        collect(
+            api,
+            REPO,
+            1,
+            SHA,
+            "schedule",
+            "main",
+            tmp_path,
+            downloader(api, REPO),
+            WATCHED,
+        )
+        == []
+    )
+    assert not any("run download" in call for call in github.calls)
+
+
+def test_main_takes_the_fix_of_a_workflow_of_the_project_too(tmp_path: Path) -> None:
+    github = FakeGitHub()
+    github.runs = [
+        run_of(1, "CI (home-assistant)", conclusion="success"),
+        run_of(2, "Docker E2E"),
+    ]
+    github.artifacts = {2: [{"name": "fixes-e2e"}]}
+    github.downloads = {(2, "fixes-e2e"): {"app.py": b"x = 2\n"}}
+
+    api = api_of(github)
+    found = collect(
+        api,
+        REPO,
+        1,
+        SHA,
+        "push",
+        "main",
+        tmp_path / "fixes",
+        downloader(api, REPO),
+        watched(homedarts(tmp_path / "main")),
+    )
+    fixes = load(found)
+
+    assert fixes.files == {"app.py": b"x = 2\n"}
+    assert plan(api, REPO, SHA, "push", "main", None, fixes).action == "pull-request"
 
 
 # ---------------------------------------------------------------- plan
@@ -1781,24 +2160,15 @@ def test_fix_run_with_a_broken_catalog(
     assert "blueprint.py: .github/checks.toml" in capsys.readouterr().err
 
 
-def test_fix_collect_from_the_command_line(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    github = FakeGitHub()
-    github.pull()
-    github.runs = [run_of(1, "CI (python)")]
-    github.artifacts = {1: [{"name": "fixes-check"}]}
-    github.downloads = {(1, "fixes-check"): {"app.py": b"x = 2\n"}}
-    output = tmp_path / "output"
-    folder = tmp_path / "fixes"
-
-    code = cli.main(
+def fix_collect(root: Path, github: FakeGitHub, output: Path, run: str = "1") -> int:
+    """Runs fix collect for a pull request as its step does, in the files of main."""
+    return cli.main(
         [
             "--repo",
             REPO,
             "fix",
             "collect",
-            "1",
+            run,
             "--sha",
             SHA,
             "--event",
@@ -1808,12 +2178,27 @@ def test_fix_collect_from_the_command_line(
             "--pull",
             "42",
             "--folder",
-            str(folder),
+            str(root / "fixes"),
             "--output",
             str(output),
         ],
         api=api_of(github),
+        root=root,
     )
+
+
+def test_fix_collect_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.runs = [run_of(1, "CI (home-assistant)")]
+    github.artifacts = {1: [{"name": "fixes-check"}]}
+    github.downloads = {(1, "fixes-check"): {"app.py": b"x = 2\n"}}
+    output = tmp_path / "output"
+    folder = tmp_path / "fixes"
+
+    code = fix_collect(homedarts(tmp_path), github, output)
 
     assert code == 0
     assert output.read_text(encoding="utf-8") == "action=commit\npull=42\n"
@@ -1850,6 +2235,7 @@ def test_fix_collect_takes_the_weekly_run_of_main(
             str(output),
         ],
         api=api_of(github),
+        root=homedarts(tmp_path / "main"),
     )
 
     assert code == 0
@@ -1863,7 +2249,7 @@ def test_fix_collect_without_an_output_only_says_what_it_decided(
     # On a machine, without $GITHUB_OUTPUT, the decision goes to the terminal alone.
     github = FakeGitHub()
     github.pull()
-    github.runs = [run_of(1, "CI (python)")]
+    github.runs = [run_of(1, "Lint")]
     github.artifacts = {1: [{"name": "fixes-check"}]}
     github.downloads = {(1, "fixes-check"): {"app.py": b"x = 2\n"}}
 
@@ -1886,11 +2272,12 @@ def test_fix_collect_without_an_output_only_says_what_it_decided(
             str(tmp_path / "fixes"),
         ],
         api=api_of(github),
+        root=homedarts(tmp_path / "main"),
     )
 
     assert code == 0
     assert capsys.readouterr().out == "#42 comes from a branch of this repository.\n"
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["fixes"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["fixes", "main"]
 
 
 def test_fix_collect_stops_a_loop(
@@ -1898,7 +2285,7 @@ def test_fix_collect_stops_a_loop(
 ) -> None:
     github = FakeGitHub()
     github.pull()
-    github.runs = [run_of(1, "CI (python)")]
+    github.runs = [run_of(1, "Lint")]
     github.artifacts = {1: [{"name": "fixes-check"}]}
     github.downloads = {(1, "fixes-check"): {"app.py": b"x = 2\n"}}
     github.commits[SHA] = bot_commit("b" * 40)
@@ -1921,6 +2308,7 @@ def test_fix_collect_stops_a_loop(
             str(tmp_path / "fixes"),
         ],
         api=api_of(github),
+        root=homedarts(tmp_path / "main"),
     )
 
     assert code == 1
@@ -1942,6 +2330,140 @@ def test_the_bot_takes_only_a_commit_and_a_number(
 
     assert code == 2
     assert "a commit is 40 hex digits" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("fork", "action", "said"),
+    [
+        (False, "commit", "The fix bot committed c0ffee0"),
+        (True, "suggest", "Suggested 1 fix(es) on #42."),
+    ],
+)
+def test_a_check_in_a_workflow_of_the_project_fixes_itself(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fork: bool,
+    action: str,
+    said: str,
+) -> None:
+    # The end-to-end tests of HomeDarts for Autodarts fail and keep a fix; Lint passes.
+    # From the end of their run to the commit, or the suggestion on a fork.
+    github = FakeGitHub()
+    github.pull(fork=fork)
+    github.patches = {"app.py": "@@ -1 +1 @@\n-x = 1\n+x = 1\n"}
+    github.runs = [run_of(1, "Lint", conclusion="success"), run_of(2, "Docker E2E")]
+    github.artifacts = {2: [{"name": "fixes-e2e"}]}
+    github.downloads = {(2, "fixes-e2e"): {"app.py": b"x = 2\n"}}
+    root = homedarts(tmp_path)
+    output = tmp_path / "output"
+
+    assert fix_collect(root, github, output, run="2") == 0
+    assert f"action={action}\n" in output.read_text(encoding="utf-8")
+    capsys.readouterr()
+
+    place = (
+        ["--pull", "42"]
+        if fork
+        else ["--branch", "feature", "--app", "app", "--url", "u"]
+    )
+    code = cli.main(
+        [
+            "--repo",
+            REPO,
+            "fix",
+            action,
+            "--sha",
+            SHA,
+            *place,
+            "--folder",
+            str(tmp_path / "fixes"),
+        ],
+        api=api_of(github),
+    )
+
+    assert code == 0
+    assert capsys.readouterr().out.startswith(said)
+    assert github.graphql if not fork else github.reviews
+
+
+def fix_bot_starts(
+    name: str,
+    event: str = "pull_request",
+    conclusion: str = "failure",
+    branch: str = "feature",
+    head: str = REPO,
+    fork: bool = False,
+) -> bool:
+    """Whether the job of the fix bot starts after a run, by its condition, whose few
+    expressions Python reads alike."""
+    condition = condition_of(workflow_steps.job("after-checks.yml", "fixes"))
+    expression = re.sub(r"!(?!=)", " not ", condition)
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    run = SimpleNamespace(
+        name=name,
+        event=event,
+        conclusion=conclusion,
+        head_branch=branch,
+        head_repository=SimpleNamespace(full_name=head),
+    )
+    return bool(
+        eval(
+            expression,
+            {
+                "github": SimpleNamespace(
+                    repository=REPO,
+                    event=SimpleNamespace(
+                        workflow_run=run,
+                        repository=SimpleNamespace(fork=fork, default_branch="main"),
+                    ),
+                ),
+                "contains": lambda items, item: item in items,
+                "fromJSON": json.loads,
+                "startsWith": str.startswith,
+            },
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["Lint", "CI (python)", "Docker E2E", "Visual check", "CodeQL", "Docs"],
+)
+def test_the_fix_bot_starts_after_every_workflow_that_failed(name: str) -> None:
+    assert fix_bot_starts(name)
+    assert fix_bot_starts(name, "push", branch="main")
+    # Not after one that passed on a pull request, which found nothing, or was cancelled.
+    assert not fix_bot_starts(name, conclusion="success")
+    assert not fix_bot_starts(name, conclusion="cancelled")
+    assert not fix_bot_starts(name, "push", "cancelled", "main")
+    # Also in a weekly run of main, by its schedule or by hand.
+    assert fix_bot_starts(name, "schedule", branch="main")
+    assert fix_bot_starts(name, "workflow_dispatch", branch="main")
+    # Not on another branch or event, not for a fork's main, not in a fork.
+    assert not fix_bot_starts(name, "push")
+    assert not fix_bot_starts(name, "schedule")
+    assert not fix_bot_starts(name, "repository_dispatch", branch="main")
+    assert not fix_bot_starts(name, "push", branch="main", head="someone/r")
+    assert not fix_bot_starts(name, fork=True)
+
+
+@pytest.mark.parametrize(
+    ("name", "starts"),
+    [
+        ("Lint", True),
+        ("Docs", True),
+        ("CI (python)", True),
+        # The rest of the list has nothing to say about main when it passes.
+        ("Docker E2E", False),
+        ("Visual check", False),
+        ("CodeQL", False),
+        ("Release", False),
+    ],
+)
+def test_the_fix_bot_looks_at_main_after_its_checks_passed(
+    name: str, starts: bool
+) -> None:
+    assert fix_bot_starts(name, "push", "success", "main") is starts
 
 
 def test_fix_commit_suggest_and_main_from_the_command_line(
@@ -2133,19 +2655,15 @@ def test_lint_runs_on_main_every_week_without_the_image_of_its_diagrams() -> Non
 
 def test_a_weekly_run_starts_the_fix_bot_only_when_it_fails() -> None:
     bot = workflow_steps.job("after-checks.yml", "fixes")
-    condition = " ".join(condition_of(bot).split())
-    weekly = (
-        '(contains(fromJSON(\'["schedule", "workflow_dispatch"]\'),'
-        " github.event.workflow_run.event) &&"
-        " github.event.workflow_run.head_branch =="
-        " github.event.repository.default_branch &&"
-        " github.event.workflow_run.head_repository.full_name == github.repository)"
-    )
-    # A quiet week starts no job of the bot, so it takes no runner.
-    assert (
-        "github.event.workflow_run.conclusion == 'failure' &&"
-        f" (github.event.workflow_run.event == 'pull_request' || {weekly})"
-    ) in condition
+    for event in ("schedule", "workflow_dispatch"):
+        assert fix_bot_starts("Lint", event, branch="main")
+        assert fix_bot_starts("CI (python)", event, branch="main")
+        # A quiet week starts no job of the bot, so it takes no runner.
+        assert not fix_bot_starts("Lint", event, "success", "main")
+        assert not fix_bot_starts("CI (python)", event, "success", "main")
+        # Only that of main, not one by hand on a branch or from a fork.
+        assert not fix_bot_starts("Lint", event)
+        assert not fix_bot_starts("Lint", event, branch="main", head="someone/r")
     issue = step_in(bot, "Keep the issue of the fix bot of main current")
     assert condition_of(issue) == (
         "always() && github.event.workflow_run.event != 'pull_request'"
