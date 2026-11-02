@@ -1148,7 +1148,8 @@ def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_sto
     assert settings.environments["signing"]["secrets"] == ["APP_PRIVATE_KEY"]
     assert settings.environments["appstore"]["secrets"] == ["APPSTORE_TOKEN"]
     # On GitHub neither exists yet: the settings bot creates each for main alone, and
-    # the check names the command for each secret, as the steps of #530 give them.
+    # the check names the command for each secret, as the steps of #530 give them. The
+    # key comes from its file, because the prompt of gh would store only its first line.
     repo = "octo-org/demo"
     nothing_yet = SimpleNamespace(get=lambda _path: None, get_all=lambda _path: [])
     split = {name: settings.environments[name] for name in ("signing", "appstore")}
@@ -1158,7 +1159,7 @@ def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_sto
             "secret APP_PRIVATE_KEY of signing",
             "set",
             "missing",
-            manual=f"gh secret set APP_PRIVATE_KEY --env signing --repo {repo}",
+            manual=f"gh secret set APP_PRIVATE_KEY --env signing --repo {repo} < KEY_FILE",
         ),
         Drift("environment appstore", "main only", "missing"),
         Drift(

@@ -34,7 +34,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 ## Auslieferung
 
-Der Merge des Release-Pull-Requests baut das Paket mit krankerl, signiert es mit dem Schlüssel der App und veröffentlicht es im App Store, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3. Das Environment `release` hält die Secrets `APP_PRIVATE_KEY` und `APPSTORE_TOKEN`, aus dem die Workflows sie nehmen. Die Environments `signing` und `appstore` halten je eine Kopie, für den Tag, an dem die Workflows dorthin umziehen, damit der Build nur noch den Schlüssel erreicht, der die App signiert ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). Der Einstellungs-Bot legt beide nur für `main` an, und bis du die Kopien gesetzt hast, schlägt er fehl und nennt die Befehle, wie die Checkliste auch.
+Der Merge des Release-Pull-Requests baut das Paket mit krankerl, signiert es mit dem Schlüssel der App und veröffentlicht es im App Store, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3. Das Environment `release` hält die Secrets `APP_PRIVATE_KEY` und `APPSTORE_TOKEN`, aus dem die Workflows sie nehmen. Das Environment `signing` hält eine Kopie des Schlüssels und `appstore` eine Kopie des Tokens, für den Tag, an dem die Workflows dorthin umziehen, damit der Build nur noch den Schlüssel erreicht, der die App signiert ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). Der Einstellungs-Bot legt beide nur für `main` an, und bis du die Kopien gesetzt hast, schlägt er fehl und nennt die Befehle, wie die Checkliste auch.
 
 ## Einmal von Hand
 

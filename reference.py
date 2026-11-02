@@ -799,8 +799,11 @@ def set_by(entry: Name, answers: Sequence[str]) -> str:
         )
     named = [code(name) for name in environments]
     word = "environment" if len(named) == 1 else "environments"
+    # The prompt of gh reads one line, and a private key has several.
+    source = " < KEY_FILE" if entry.name.endswith("_PRIVATE_KEY") else ""
     commands = [
-        code(f"gh secret set {entry.name} --env {name}") for name in environments
+        code(f"gh secret set {entry.name} --env {name}{source}")
+        for name in environments
     ]
     shown = ", as the checklist shows" if entry.listed else ""
     return (
