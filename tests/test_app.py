@@ -33,7 +33,6 @@ from blueprint.app import (
     KEY_NAME,
     MESSAGE,
     NAME,
-    PINNED,
     SLICE,
     App,
     AppError,
@@ -48,7 +47,7 @@ from blueprint.app import (
     wait_for_code,
 )
 from blueprint.bootstrap import PUSH_AS_GH, CreateError
-from blueprint.checklist import RELEASE_APP_PERMISSIONS, release_app
+from blueprint.checklist import PINNED, RELEASE_APP_PERMISSIONS, release_app
 from blueprint.github import Api, GitHubError
 from blueprint.settings import Settings
 
@@ -83,7 +82,8 @@ DATA = (
 COPIER_UPDATE = f"{COPIERS[0]} --defaults --vcs-ref=:current: {DATA}"
 PUSH = shlex.join([*PUSH_AS_GH, "push", "--set-upstream", "origin", "HEAD"])
 NAMING = [
-    f"git switch --create {BRANCH}",
+    "git fetch origin main",
+    f"git switch --force-create {BRANCH} FETCH_HEAD",
     COPIER_UPDATE,
     "git add --all",
     f"git commit --signoff --message {shlex.quote(MESSAGE)}",
@@ -683,7 +683,7 @@ def test_a_refused_key_says_how_to_go_on_without_showing_it(
 
 @pytest.mark.parametrize(
     ("step", "place"),
-    [(COPIER_UPDATE, 1), (PUSH, 4), ("gh pr create --fill", 5)],
+    [(COPIER_UPDATE, 2), (PUSH, 5), ("gh pr create --fill", 6)],
 )
 def test_a_step_that_fails_leaves_the_steps_to_run_by_hand(
     copy: Path, shell: Shell, step: str, place: int
@@ -1296,7 +1296,7 @@ def test_the_copier_is_the_one_of_the_quick_start() -> None:
     ] == list(COPIERS)
     # Renovate moves the version here with those of the pages, by this pattern.
     renovate = (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
-    assert '"/^blueprint/app\\\\.py$/",' in renovate
+    assert '"/^blueprint/checklist\\\\.py$/",' in renovate
     assert re.fullmatch(r"copier==\d+\.\d+\.\d+ copier (?:copy|update)", PINNED)
 
 

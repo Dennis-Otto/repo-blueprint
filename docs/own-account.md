@@ -58,7 +58,7 @@ python3 .github/blueprint.py create
 
 ## 3. Register the release app
 
-One command registers the app on your account or organization, with its name and all of its permissions filled in and without a webhook, sets its private key and opens the pull request that names it:
+One command registers the app on your account or organization, with its name and all of its permissions filled in and without a webhook, sets its private key and opens the pull request that names it. Turn `commit.gpgsign` on first: the rules of `main` ask for a signature on every commit, also on the one that names the app.
 
 ```sh
 python3 .github/blueprint.py app register
@@ -77,7 +77,7 @@ Like `create`, it first checks what it needs, and a finding marked with ✘ stop
 Two things are left for you, and the command prints the link of the first:
 
 1. **Install the app** on the repository, at `https://github.com/apps/NAME/installations/new`.
-2. **Merge the pull request** once its checks are green, on its page or with `gh pr merge --squash`.
+2. **Merge the pull request** once its checks are green, on its page or with `gh pr merge --squash`. The check *signed commits* names a commit without a signature and how to sign it again.
 
 The checklist sees the installation by the check suite that GitHub opens for an installed app at each push, so it ticks the app off after the merge when you install first, and after the next push otherwise.
 
