@@ -1,0 +1,32 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Which workflows the fix bot reads
+    accDescr: A run of a workflow fails. A workflow that the list of after-checks.yml of main doesn't name starts no bot, and the bot reads none of its fixes, whatever a pull request names it. For a workflow of the list, also one of the project's own such as Docker E2E, the bot looks for an artifact fixes-*. Without one, the PR coach explains the check. With one, the bot waits for the workflows whose files on main keep such an artifact, and for no long run that keeps none, up to a quarter of an hour. Then it takes the fixes of every run of the list that failed as data, only text files that the commit has, and commits them as one commit onto a branch of the repository, suggests them on a pull request from a fork, or keeps one pull request with the fixes of main. While a run still goes after the wait, a branch gets no commit: the job after the end of that run makes it.
+
+    failed(["A run of a workflow fails"])
+    listed{"The list of after-checks.yml<br>of main names it?"}
+    ignored["No bot starts, and the bot<br>reads none of its fixes"]
+    kept{"It kept an artifact<br>fixes-*?"}
+    coach["The PR coach explains<br>the check"]
+    wait["The bot waits for the workflows whose files on main<br>keep fixes, and for no long run that keeps none"]
+    take["It takes the fixes of every run of the list that failed<br>as data, only text files that the commit has"]
+    heal["One commit on a branch of the repository, suggestions<br>on a fork, or one pull request for main"]
+    list[("workflows: of after-checks.yml<br>CI, Lint, Docker E2E and<br>the answer test_workflows")]
+
+    failed --> listed
+    listed -- "no" --> ignored
+    listed -- "yes" --> kept
+    kept -- "no" --> coach
+    kept -- "yes" --> wait --> take --> heal
+    list -.-> listed
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class coach,wait,take bot
+    class failed person
+    class heal done

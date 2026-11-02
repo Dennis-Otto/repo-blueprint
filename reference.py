@@ -593,8 +593,10 @@ def questions_page(text: str) -> str:
         f"Copier asks these {len(asked)} questions when it copies the blueprint, in this"
         " order, and keeps the answers in `.copier-answers.yml`, so that `copier update`"
         " asks only a new question. `--data name=value` gives an answer without the"
-        " question, also later: `copier update --defaults --vcs-ref=:current: --data"
-        " name=value` changes an answer of an existing repository, and the defaults of"
+        " question, also later: `uvx --from copier==9.19.1 copier update --defaults"
+        " --vcs-ref=:current: --data name=value`, on a branch and merged in a pull"
+        " request as [the FAQ](../faq.md) shows, changes"
+        " an answer of an existing repository, and the defaults of"
         " Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/)"
         " answer the questions that stay the same for all of your repositories, as"
         " [your own account](../own-account.md) shows. A default that is a template of"
@@ -797,8 +799,11 @@ def set_by(entry: Name, answers: Sequence[str]) -> str:
         )
     named = [code(name) for name in environments]
     word = "environment" if len(named) == 1 else "environments"
+    # The prompt of gh reads one line, and a private key has several.
+    source = " < KEY_FILE" if entry.name.endswith("_PRIVATE_KEY") else ""
     commands = [
-        code(f"gh secret set {entry.name} --env {name}") for name in environments
+        code(f"gh secret set {entry.name} --env {name}{source}")
+        for name in environments
     ]
     shown = ", as the checklist shows" if entry.listed else ""
     return (

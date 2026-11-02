@@ -2,7 +2,8 @@
 // palette with and without the media of the system, a toggle that does nothing, a
 // website with one scheme, and a page of a further language without a translation; and
 // on small repositories around a website, for its command line: the violations that
-// fail and those accepted, the line baseline and the digest of the changed pages.
+// fail and those accepted, the line baseline and the digest of the changed pages; and
+// on pages wider than a phone, and those that only seem to be.
 // scripts/check.sh runs them with every line and branch of the check covered.
 //
 //   npm ci --prefix .github/a11y --ignore-scripts
@@ -12,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -93,10 +94,10 @@ after(async () => {
   await rm(site, { recursive: true, force: true });
 });
 
-/** The schemes in which a rule fails on a page. */
-function failing(findings, page, rule) {
+/** The schemes in which a rule fails on a page, at a width of the screen. */
+function failing(findings, page, rule, width = 1280) {
   return findings
-    .filter((finding) => finding.page === page && finding.rule === rule)
+    .filter((finding) => finding.page === page && finding.rule === rule && finding.width === width)
     .map((finding) => finding.scheme)
     .sort();
 }
@@ -116,6 +117,23 @@ test("every page is checked in the scheme that the system or the toggle shows", 
   const unshown = findings.find((finding) => finding.rule === "color-scheme");
   assert.equal(unshown.impact, "serious");
   assert.match(unshown.help, /doesn't show the dark scheme/);
+  // The same at the width of a phone, in the browser of each scheme there.
+  assert.deepEqual(failing(findings, "index.html", "color-contrast", 375), ["dark"]);
+  assert.deepEqual(failing(findings, "stuck.html", "color-scheme", 375), ["dark"]);
+  assert.deepEqual(failing(findings, "single.html", "color-contrast", 375), []);
+});
+
+test("the text inside a fold of the page of the automation is checked as well", async (t) => {
+  const folded = await mkdtemp(path.join(tmpdir(), "a11y-fold-"));
+  t.after(() => rm(folded, { recursive: true, force: true }));
+  const fold = '<details class="blueprint-fold"><summary>Title</summary><p>Faint words.</p></details>';
+  await writeFile(path.join(folded, "index.html"), page("", FOLLOWS).replace("<p></p>", fold));
+
+  const { findings } = await checkSite(browser, folded);
+
+  const faint = findings.find((finding) => finding.rule === "color-contrast");
+  assert.equal(faint.scheme, "dark");
+  assert.ok(faint.elements.some((element) => /\bp\b/.test(element)), faint.elements.join());
 });
 
 test("the pages named are checked alone", async () => {
@@ -540,7 +558,7 @@ test("the summary lists three elements of a rule and counts the others", async (
   const repo = await repository(t);
   await writeFile(path.join(repo.built, "faint.html"), faint(5));
   const { summary } = await run(t, repo, [repo.built, "faint.html"], { onRunner: true });
-  assert.match(summary, /5 element\(s\) in light and dark, .* and 2 more/);
+  assert.match(summary, /5 element\(s\) in light and dark at 1280 px, light and dark at 375 px, .* and 2 more/);
 });
 
 test("two rules on one page follow each other by name", async (t) => {
@@ -549,6 +567,171 @@ test("two rules on one page follow each other by name", async (t) => {
   const { lines } = await run(t, repo, [repo.built, "faint.html"]);
   assert.match(lines[0], /color-contrast/);
   assert.match(lines[1], /image-alt/);
+});
+
+/** A page with what the test puts into it and a style of its own. */
+function styled(body, style = "") {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Page</title><style>${style}</style></head><body><main><h1>Page</h1>${body}</main></body></html>`;
+}
+
+/** What the check names at the width of a phone, page by page: the widest element that
+ * overflows on a page that scrolls sideways, and nothing on one that fits. */
+async function reflowed(t, pages) {
+  const built = await mkdtemp(path.join(tmpdir(), "a11y-reflow-"));
+  t.after(() => rm(built, { recursive: true, force: true }));
+  for (const [name, [body, style]] of Object.entries(pages)) {
+    await writeFile(path.join(built, `${name}.html`), styled(body, style));
+  }
+  const { findings } = await checkSite(browser, built);
+  const found = {};
+  for (const name of Object.keys(pages)) {
+    const finding = findings.find((each) => each.page === `${name}.html` && each.rule === "reflow");
+    found[name] = finding?.elements;
+  }
+  return { found, findings };
+}
+
+const WORD = "unbreakable".repeat(10);
+
+test("a page that scrolls sideways on a phone fails, and names the widest element that overflows", async (t) => {
+  const repo = await repository(t);
+  await writeFile(path.join(repo.root, "docs", "wide.md"), "# Wide\n");
+  await writeFile(path.join(repo.built, "wide.html"), styled(
+    '<table class="data wide" style="width: 700px"><tr><td>Name</td><td>Value</td></tr></table>',
+  ));
+  const { status, lines, summary } = await run(t, repo, [repo.built, "wide.html"], { onRunner: true });
+
+  assert.equal(status, 1);
+  assert.match(lines[0], /^::error file=docs\/wide\.md,title=Accessibility%3A reflow on wide\.html::The page is \d+ px wide on a screen of 375 px, /);
+  assert.match(lines[0], /in light and dark at 375 px, `table\.data\.wide "Name Value"`\./);
+  assert.match(lines[0], /https:\/\/www\.w3\.org\/WAI\/WCAG22\/Understanding\/reflow\.html$/);
+  assert.match(summary, /\| `wide\.html` \| \[reflow\]\(https:\/\/www\.w3\.org\/WAI\/WCAG22\/Understanding\/reflow\.html\) \| serious \|/);
+  assert.match(summary, /\*\*A page that scrolls sideways:\*\* let what is wide wrap, or put it in a frame that scrolls on its own/);
+  assert.match(summary, /tabindex="0"/);
+});
+
+test("a violation of another rule leaves out what fixes a page that scrolls sideways", async (t) => {
+  const repo = await repository(t);
+  const { status, summary } = await run(t, repo, [repo.built, "faint.html"], { onRunner: true });
+
+  assert.equal(status, 1);
+  assert.doesNotMatch(summary, /A page that scrolls sideways/);
+});
+
+test("a page that scrolls sideways on a phone passes when the file accepts it", async (t) => {
+  const repo = await repository(t, entry("wide.html", "reflow"));
+  await writeFile(path.join(repo.built, "wide.html"), styled('<div style="width: 700px">Wide</div>'));
+  const { status, summary } = await run(t, repo, [repo.built, "wide.html"], { onRunner: true });
+
+  assert.equal(status, 0);
+  assert.match(summary, /`wide\.html`, reflow: Its colors are the demo\./);
+});
+
+test("what fits on a phone, wraps or scrolls in a frame of its own doesn't scroll the page", async (t) => {
+  const { found } = await reflowed(t, {
+    fits: ['<div style="width: 300px">Fits</div>'],
+    wraps: [`<p style="overflow-wrap: anywhere">${WORD}</p>`],
+    frame: ['<div tabindex="0" style="overflow-x: auto"><table><tr><td style="width: 700px">Wide</td></tr></table></div>'],
+    fixed: ['<div style="position: fixed; top: 0; left: 0; width: 700px">Stays</div>'],
+  });
+
+  assert.deepEqual(found, { fits: undefined, wraps: undefined, frame: undefined, fixed: undefined });
+});
+
+test("the element that a page names is the widest of those that overflow", async (t) => {
+  const { found, findings } = await reflowed(t, {
+    // Of what overflows, the widest and not the one that reaches furthest.
+    widest: ['<div class="wide" style="width: 700px">Wide</div><div class="far" style="position: relative; left: 800px; width: 100px">Far</div>'],
+    // Of an element and one inside it with the same width, the inner one.
+    inner: ['<div style="width: 700px"><section id="inner" style="width: 700px">Inner</section></div>'],
+    // A word that doesn't wrap leaves its box as wide as the screen.
+    word: [`<p>${WORD}</p>`],
+    // What stays in a frame or on the screen makes the page no wider, however wide.
+    among: [`<div style="position: fixed; width: 2000px"><span>Stays</span></div>
+      <div tabindex="0" style="overflow-x: auto"><div style="width: 1500px">Frame</div></div>
+      <pre tabindex="0" style="overflow-x: auto">${WORD.repeat(3)}</pre>
+      <section class="culprit" style="width: 500px">Wide</section>`],
+    // Nothing of the page has a box that overflows, so the page as a whole is named.
+    pseudo: ["", 'body::after { content: ""; position: absolute; top: 0; left: 0; width: 900px; height: 1px; }'],
+  });
+
+  assert.deepEqual(found.widest, ['div.wide "Wide"']);
+  assert.deepEqual(found.inner, ['#inner "Inner"']);
+  assert.deepEqual(found.word, [`p "${WORD.slice(0, 40)}"`]);
+  assert.deepEqual(found.among, ['section.culprit "Wide"']);
+  assert.deepEqual(found.pseudo, ["html"]);
+  // In each scheme, and only at the width of a phone.
+  assert.deepEqual(failing(findings, "widest.html", "reflow", 375), ["dark", "light"]);
+  assert.deepEqual(failing(findings, "widest.html", "reflow"), []);
+});
+
+// What scrolls sideways on a phone, as Material builds it: a table in the frame that
+// its script puts around it, without a link or anything else that takes the focus.
+const FRAME = '<div class="md-typeset__scrollwrap" style="overflow-x: auto"><div class="md-typeset__table"><table style="width: 700px"><tr><th>Name</th></tr><tr><td>Value</td></tr></table></div></div>';
+const SCRIPT = fileURLToPath(new URL("../mkdocs-blueprint.js", import.meta.url));
+
+/** A page of Material's kind with a table in a frame, and the script of the website. */
+function framed(body, script = '<script src="blueprint.js"></script>') {
+  return styled(`<article class="md-typeset">${body}</article>${script}`);
+}
+
+test("the script of the website gives the focus to what scrolls sideways on a phone", async (t) => {
+  const built = await mkdtemp(path.join(tmpdir(), "a11y-frame-"));
+  t.after(() => rm(built, { recursive: true, force: true }));
+  await copyFile(SCRIPT, path.join(built, "blueprint.js"));
+  await writeFile(path.join(built, "bare.html"), framed(FRAME, ""));
+  await writeFile(path.join(built, "table.html"), framed(FRAME));
+  await writeFile(path.join(built, "code.html"), framed(`<pre><code style="display: block; overflow-x: auto">${WORD}</code></pre>`));
+  // A fold is closed when the page loads, so nothing in it can scroll yet.
+  await writeFile(path.join(built, "fold.html"), framed(`<details class="blueprint-fold"><summary>Fold</summary>${FRAME}</details>`));
+  const { findings } = await checkSite(browser, built);
+
+  const rule = "scrollable-region-focusable";
+  // Without the script, the frame fails on a phone alone, where the table doesn't fit.
+  assert.deepEqual(failing(findings, "bare.html", rule, 375), ["dark", "light"]);
+  assert.deepEqual(failing(findings, "bare.html", rule), []);
+  for (const page of ["table.html", "code.html", "fold.html"]) {
+    assert.deepEqual(failing(findings, page, rule, 375), [], page);
+  }
+  // A frame that scrolls is no page that scrolls.
+  assert.deepEqual(findings.filter((finding) => finding.rule === "reflow"), []);
+});
+
+test("a table takes the focus once a window turns too narrow for it, and not before", async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  t.after(() => context.close());
+  const tab = await context.newPage();
+  await tab.setContent(framed(FRAME, ""));
+  await tab.addScriptTag({ path: SCRIPT });
+  await tab.evaluate(() => {
+    window.dispatchEvent(new Event("load"));
+  });
+  const frame = tab.locator(".md-typeset__scrollwrap");
+  const frames = () => tab.evaluate(async () => {
+    for (let each = 0; each < 3; each++) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  });
+
+  await frames();
+  assert.equal(await frame.getAttribute("tabindex"), null);
+  await tab.setViewportSize({ width: 375, height: 812 });
+  await frames();
+  assert.equal(await frame.getAttribute("tabindex"), "0");
+});
+
+test("the layout of a phone gets its own violations, with the width where they fail", async (t) => {
+  const repo = await repository(t);
+  await writeFile(path.join(repo.built, "narrow.html"), styled(
+    "<p>Too faint on a phone.</p>",
+    "@media (max-width: 45em) { p { color: #eee; } }",
+  ));
+  const { status, lines } = await run(t, repo, [repo.built, "narrow.html"]);
+
+  assert.equal(status, 1);
+  assert.match(lines[0], /color-contrast on narrow\.html: .*: 1 element\(s\) in light and dark at 375 px, `p`/);
+  assert.doesNotMatch(lines[0], /1280/);
+  assert.match(lines.at(-1), /on 1 page\(s\) in the light and the dark scheme, at 1280 and 375 px wide\.$/);
 });
 
 test("the command line runs the check when node starts the file", () => {

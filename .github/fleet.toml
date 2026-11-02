@@ -6,9 +6,9 @@
 # command.
 #
 # A new repository takes one entry here and `python3 reference.py`. A canary takes its
-# answers in tests/answers/<name>.yml too, without _commit and _src_path, which
-# `python3 downstream.py --answers` keeps equal to those of the repository, and from
-# which variants.py makes its leg of the Variants workflow.
+# answers in tests/answers/<name>.yml too, without _commit and _src_path: `python3
+# downstream.py --answers` writes them from the repository and keeps them equal to its
+# own, and variants.py makes its leg of the Variants workflow from them.
 
 # The owner of every repository here, on GitHub.
 owner = "Dennis-Otto"
@@ -40,7 +40,7 @@ pitch_de = "lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statis
 
 [[repository]]
 name = "player-switch-for-autodarts"
-kind = "node-package"
+kind = "chrome-extension"
 rollout = 3
 canary = true
 title = "Player Switch for Autodarts"

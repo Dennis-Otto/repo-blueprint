@@ -22,7 +22,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: those of a Node package, the lock file, Biome, tsc and node:test with every line, branch and function covered, and then *Extension*. It checks the manifest with `scripts/check-manifest.mjs`: Manifest V3, the version of the release, the limits of the store in every language, and a reason and a justification in the listings for each permission and host. Then it builds the zip of the store with `scripts/package-extension.sh`, the same zip for the same commit. Biome leaves the format of `extension/manifest.json` alone, because the release bot writes each item of an array on a line of its own, so a release pull request passes it, and it leaves out the diagrams that `scripts/diagrams.sh` draws.
 - **A test in Chrome:** the CI loads `extension/` into Chrome for Testing with `scripts/load-extension.mjs`, and fails when its service worker doesn't start.
 - **Workflows of this kind:** *Chrome Web Store* (`publish-store.yml`), which delivers each release and looks after it every day, and the newest Node on `main` (`newest-node.yml`).
-- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The steps of every kind:** the text files, the diagrams, the pages in one column, the files of the project, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 
 ## The checks that a pull request needs
@@ -58,7 +58,9 @@ This kind adds these steps:
 
 <!-- --8<-- [start:real-repository] -->
 
-No public repository of this kind follows the blueprint yet. The Variants workflow of the blueprint makes one from every change of its files and runs its checks with their real tools, and updates one from the latest release as its blueprint bot would.
+[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) is made from the blueprint: a shared Autodarts display where everyone plays under their own account and a tap on a tile switches players, without signing in again.
+
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Player Switch for Autodarts render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 

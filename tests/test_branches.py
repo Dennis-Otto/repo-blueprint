@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -1869,8 +1870,13 @@ def test_the_command_fails_when_github_lists_nothing(
 
 
 def test_the_command_acts_with_the_token_and_the_account_of_its_job(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    # Without a list of the checks, the bot for replaced commits asks GitHub nothing;
+    # tests/test_stale_runs.py tests it with the token of the job.
+    monkeypatch.chdir(tmp_path)
     github = forked()
     monkeypatch.setenv("ACTIONS_TOKEN", "the-token-of-the-job")
     monkeypatch.setenv("BOT_ACCOUNT", ACCOUNT)

@@ -163,6 +163,16 @@ secrets = []
 [% elif publish_to == 'npm' %]
 [environments.npm]
 secrets = []
+[% elif publish_to == 'nextcloud-appstore' %]
+# The key that signs the app and the token of the App Store, each in an environment of
+# its own, so that the build of a release can reach only the key. The workflows still
+# take both from the environment release, until they move here in a later version:
+# https://github.com/Dennis-Otto/repo-blueprint/issues/530
+[environments.signing]
+secrets = ["APP_PRIVATE_KEY"]
+
+[environments.appstore]
+secrets = ["APPSTORE_TOKEN"]
 [% elif publish_to == 'chrome-web-store' %]
 # The Chrome Web Store, to which publish-store.yml delivers every release. Its jobs
 # sign in to Google with the OIDC token of GitHub (decision 0085 of the blueprint), so

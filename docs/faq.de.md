@@ -16,10 +16,10 @@ Was ein Workflow mit dem Token tut, das GitHub ihm gibt, `GITHUB_TOKEN`, startet
 
 ## Wie schalte ich die KI des Issue-Assistenten ab?
 
-Ändere die Antwort [`issue_assistant_ai`](reference/questions.md#issue_assistant_ai) und committe das Update:
+Ändere die Antwort [`issue_assistant_ai`](reference/questions.md#issue_assistant_ai) [auf einem Branch und merge das Update mit einem Pull Request](#wie-ändere-ich-später-eine-antwort):
 
 ```sh
-copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=false
+uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=false
 ```
 
 Der Einstellungs-Bot setzt dann die Variable [`ISSUE_ASSISTANT_AI`](reference/variables.md#issue_assistant_ai) auf `off`, das Environment `issue-assistant` verlangt kein Secret, und `SUPPORT.md` sagt Meldenden, dass keine KI ihre Issues liest. Labels, Erinnerungen, das Schließen mit dem Release und die Befehle des Maintainers funktionieren wie zuvor. Das Secret `CLAUDE_CODE_OAUTH_TOKEN` zu löschen, stoppt die KI ebenfalls sofort, aber die Checkliste fragt dann wieder danach. `--data issue_assistant_ai=true` schaltet die KI später wieder ein.
@@ -74,13 +74,32 @@ Ein Pull Request erfährt das, wenn es passiert. Der Check *lint* annotiert jede
 
 ## Wie ändere ich später eine Antwort?
 
-Führe `copier update` mit der neuen Antwort aus und committe das Update, etwa für die Topics:
+Führe das Update mit der neuen Antwort auf einem Branch aus und merge es mit einem Pull Request, wie es `app register` in [Schritt 3 der Anleitung](own-account.md#3-die-release-app-registrieren) tut, denn die Regeln von `main` lehnen einen direkten Push ab. Mit dem Copier des Schnellstarts, etwa für die Topics:
 
 ```sh
-copier update --defaults --vcs-ref=:current: --data "topics=python, pypi, cli"
+git fetch origin main
+git switch --force-create change-the-answers FETCH_HEAD
+uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data 'topics=python, pypi, cli'
+git add --all
+git commit --signoff --message 'chore: change the answers of the blueprint'
+git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
+gh pr create --fill
 ```
 
-`--vcs-ref=:current:` behält das Release des Blueprints, auf dem das Repository steht, und `--defaults` nimmt jede andere Antwort aus `.copier-answers.yml`. Was die Antwort in `.github/repository.toml` ändert, etwa eine Variable oder die Topics, wendet der Einstellungs-Bot nach dem Merge an.
+Mit pipx statt uv beginnt die Copier-Zeile mit `pipx run --spec copier==9.19.1 copier update`, und mit einem eigenen Copier mit `copier update`. Die ersten beiden Zeilen starten den Branch beim aktuellen `main` von GitHub, auch wenn eine frühere Änderung ihren Branch zurückgelassen hat.
+
+`--vcs-ref=:current:` behält das Release des Blueprints, auf dem das Repository steht, und `--defaults` nimmt jede andere Antwort aus `.copier-answers.yml`. Der Push läuft über GitHub CLI, deren Anmeldung Workflows ändern darf. Die Regeln von `main` verlangen außerdem eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Was die Antwort in `.github/repository.toml` ändert, etwa eine Variable oder die Topics, wendet der Einstellungs-Bot nach dem Merge an.
+
+## Mein Code hat das Beispiel ersetzt: Wie behandeln die Updates ihn nicht länger als Beispiel?
+
+Antworte auf [`sample_code`](reference/questions.md#sample_code) mit Nein und hole zurück, was das Update löscht. Das Update löscht jede Datei, die nur das Beispiel rendert, etwa dein eigenes `docs/index.md` und `src/`, weil die neue Antwort sie nicht mehr rendert; der zweite Befehl stellt sie deshalb aus dem letzten Commit wieder her:
+
+```sh
+uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data sample_code=false
+git diff --name-only --diff-filter=D -z | xargs -0 git restore --
+```
+
+Prüfe, dass `git status` danach nur `.copier-answers.yml` und die Seiten nennt, die vom Beispiel sprechen, etwa `CONTRIBUTING.md`, und committe sie. Von da an gehören die Dateien allein dir, und kein Update des Blueprints fasst sie an.
 
 ## Wie verlasse ich den Blueprint?
 

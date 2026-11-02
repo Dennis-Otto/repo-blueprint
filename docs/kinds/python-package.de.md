@@ -20,7 +20,7 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 
 - **Das Beispiel:** `src/<package>/` mit seinem `py.typed`, die Tests in `tests/`, die Ziele des Fuzzings in `fuzz/` und `pyproject.toml`, für Python ab 3.12. Ersetze es durch den echten Code; seine Tests zeigen, wie.
 - **Die Schritte von `scripts/check.sh` für diese Art,** auf deinem Rechner wie in der CI: Ruff, mypy, die Tests mit jeder Zeile und jedem Zweig abgedeckt, auf jedem Kern, und der Build des Pakets.
-- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
+- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Dateien des Projekts, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
 - **Workflows dieser Art:** Fuzzing mit Atheris (`fuzz.yml`), das neueste Python auf `main` (`newest-python.yml`), die Property-Tests jede Nacht (`properties.yml`) und die Mutationstests mit mutmut jede Woche (`mutation.yml`).
 - **Alles, was jedes Repository bekommt:** den PR-Coach und den Fix-Bot, den Release-Bot, Renovate, die Einstellungen als Code, den Issue-Assistenten, die Website auf Deutsch und Englisch, die Sicherheitsprüfungen und den Blueprint-Bot, wie [die Anleitung](../guide.md#was-ein-neues-repository-bekommt) sie nennt.
 
@@ -35,7 +35,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 Der Merge des Release-Pull-Requests baut das Paket einmal, veröffentlicht es auf PyPI per Trusted Publishing aus dem Environment `pypi`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3.
 
-Ein Paket, das niemand von PyPI installiert, etwa ein privates, beantwortet `publish_package` mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data topics=python` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `pyproject.toml` eines neuen Repositorys hat den Classifier `Private :: Do Not Upload`, den PyPI ablehnt, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von PyPI oder einem `*.whl`.
+Ein Paket, das niemand von PyPI installiert, etwa ein privates, beantwortet `publish_package` mit Nein, oder später mit `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data topics=python` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `pyproject.toml` eines neuen Repositorys hat den Classifier `Private :: Do Not Upload`, den PyPI ablehnt, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von PyPI oder einem `*.whl`.
 
 ## Einmal von Hand
 

@@ -21,7 +21,9 @@ from what `reference.py` writes from `copier.yml`, the workflows and the setting
 code, or when a variable or a secret has no description in `ABOUT` of `reference.py`;
 and when the showcase of the READMEs, the section *A real repository* of a page of
 `docs/kinds/` or the order of the Rollout differ from the
-registry `.github/fleet.toml`, or a canary lacks its answers in `tests/answers/`.
+registry `.github/fleet.toml`, or a canary lacks its answers in `tests/answers/`, or the
+kind of a canary in the registry differs from the `project_type` of its answers, or a
+canary still answers `sample_code: true`.
 `tests/test_pins.py` fails when a pinned download of the workflows or of
 `.github/sign-tag.sh` has a version or a sha256 other than `.github/pins.toml`, as after
 a version moved by hand, or by Renovate when the download of its post-upgrade task
@@ -35,8 +37,10 @@ line and branch that the report lists as missing. Make a slow test faster, or le
 for a condition instead of a time; give a test that shares state with another one its own
 files and settings, such as `tmp_path`. Write the reference pages and the parts that
 the registry names anew with `python3 reference.py`, and describe a new variable or
-secret in `ABOUT` first; a new canary takes its answers from its `.copier-answers.yml`,
-without `_commit` and `_src_path`. `python3
+secret in `ABOUT` first; `python3 downstream.py --answers` writes the answers of a new
+canary, which the fix bot can't, as it adds no such file to a pull request. A canary whose
+kind changed gets its new kind in the registry and `python3 reference.py`; one that still
+answers `sample_code: true` answers no as `docs/faq.md` describes. `python3
 pins.py` downloads each version that moved and writes its sha256 beside it and into
 `.github/pins.toml`; the fix bot runs it too, but commits no change of
 `.github/workflows/`, which a person commits. `coverage run -m
@@ -45,6 +49,7 @@ pytest` runs the tests one after another;
 where pytest-xdist and pytest-cov are installed:"""
 commands = [
   "python3 reference.py",
+  "python3 downstream.py --answers",
   "python3 pins.py",
   "coverage run -m pytest",
   "coverage report",

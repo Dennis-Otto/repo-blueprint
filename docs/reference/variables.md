@@ -226,14 +226,14 @@ An API key of Anthropic, which the issue assistant takes in place of `CLAUDE_COD
 
 The API token of the account of the Nextcloud App Store, with which the release submits the signed package and the workflow *Register app* registers the id of the app. Only a Nextcloud app needs it.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set APPSTORE_TOKEN --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environments `appstore` and `release`, which only `main` may use: `gh secret set APPSTORE_TOKEN --env appstore` and `gh secret set APPSTORE_TOKEN --env release`, as the checklist shows
 - **Read by:** [`register-app.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/register-app.yml) (Register the app, where `project_type == 'nextcloud-app'`); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository)
 
 ### `APP_PRIVATE_KEY`
 
 The private key of the certificate of a Nextcloud app, with which the release signs the package for the App Store and the workflow *Register app* proves the id of the app. Only a Nextcloud app needs it.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set APP_PRIVATE_KEY --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environments `release` and `signing`, which only `main` may use: `gh secret set APP_PRIVATE_KEY --env release < KEY_FILE` and `gh secret set APP_PRIVATE_KEY --env signing < KEY_FILE`, as the checklist shows
 - **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`register-app.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/register-app.yml) (Register the app, where `project_type == 'nextcloud-app'`)
 
 ### `CLAUDE_CODE_OAUTH_TOKEN`
@@ -300,14 +300,14 @@ An API key of OpenAI, with which the issue assistant analyzes each new issue wit
 
 The private key of the release app, which `app register` sets without a file. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the app: they open and merge the release and update pull requests, so that their checks run, create the release tags and apply the settings. For an app that exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it from the file that the settings page of the app generates.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release < KEY_FILE`, as the checklist shows
 - **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository); [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`dependabot-automerge.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependabot-automerge.yml) (Dependabot maintenance, every repository); [`diagrams.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/diagrams.yml) (Diagrams, every repository); [`docs-pictures.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/docs-pictures.yml) (Docs pictures, the blueprint alone); [`osv-scanner.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/osv-scanner.yml) (OSV-Scanner, every repository); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`renovate.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/renovate.yml) (Renovate, where `renovate_runner == 'self'`); [`rollout.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/rollout.yml) (Rollout, the blueprint alone); [`screenshot-bot.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/screenshot-bot.yml) (Screenshots, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository); [`sync-issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/sync-issue-assistant.yml) (Issue assistant sync, the blueprint alone); [`update-branches.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/update-branches.yml) (Update branches, every repository); [`upstream.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/upstream.yml) (Upstream, where `project_type == 'nextcloud-app'`)
 
 ### `SETTINGS_APP_PRIVATE_KEY`
 
 The private key of the settings app, the file that its settings page generates. With it and `SETTINGS_APP_CLIENT_ID`, the settings bot and the blueprint bot act as the settings app, the only app that writes the administration of the repository. The file goes in with `< key.pem` after the command below.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set SETTINGS_APP_PRIVATE_KEY --env release`
+- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set SETTINGS_APP_PRIVATE_KEY --env release < KEY_FILE`
 - **Read by:** [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`osv-scanner.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/osv-scanner.yml) (OSV-Scanner, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository)
 
 What the workflows say of it:

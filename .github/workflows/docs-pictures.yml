@@ -197,11 +197,17 @@ jobs:
               sleep 3
             done
           done
-      # blueprint.py, which checks what the job render kept.
+      # blueprint.py, which checks what the job render kept, and the Markdown of the
+      # pages, whose named sizes it corrects; none of the pictures of main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: blueprint
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /blueprint.py
+            /blueprint/
+            /*.md
+            /docs/**/*.md
       - name: Fetch the pictures that the job render kept
         if: needs.render.outputs.stale == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -299,7 +305,7 @@ jobs:
 
           Signed-off-by: ${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
           head="$SHA"
-          parts="$(python3 blueprint.py screenshots parts "$kept")"
+          parts="$(python3 blueprint.py --repo "$GH_REPO" screenshots parts "$kept")"
           for ((part = 1; part <= parts; part++)); do
             python3 blueprint.py --repo "$GH_REPO" screenshots commit "$kept" --branch "$scratch" \
               --head "$head" --headline "$HEADLINE" --body "$body" --part "$part" > "$RUNNER_TEMP/commit.json"
@@ -307,7 +313,7 @@ jobs:
           done
           point "$BRANCH" "$head"
           gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
-          python3 blueprint.py screenshots report "$kept" --sha "$SHA" --run "$URL" --script "$SCRIPT" > "$RUNNER_TEMP/body.md"
+          python3 blueprint.py --repo "$GH_REPO" screenshots report "$kept" --sha "$SHA" --run "$URL" --script "$SCRIPT" > "$RUNNER_TEMP/body.md"
           if [[ -n "$open" ]]; then
             gh pr edit "$open" --title "$HEADLINE" --body-file "$RUNNER_TEMP/body.md"
           else

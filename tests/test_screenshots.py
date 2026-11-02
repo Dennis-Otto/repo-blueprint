@@ -15,32 +15,45 @@ from pathlib import Path
 
 import pytest
 from PIL import Image, ImageSequence
+from shared import load_yaml
 
 from blueprint.cli import main
 from blueprint.screenshots import (
     LARGEST,
     REPORT,
+    Correction,
     Kept,
+    Page,
     Picture,
     changed_share,
     commit_request,
+    corrected_pages,
+    corrections,
     due,
+    fit_page,
+    fitted_size,
     frames,
     is_picture,
     keep,
     kept,
     listing,
     looks_like_its_kind,
+    pages_of_folder,
     parts,
     pathspec,
     patterns,
+    picture_size,
     report,
+    repository_of,
+    resized,
     same_pixels,
+    shown_picture,
     shown_share,
     summary,
 )
 
 GIT = shutil.which("git")
+ROOT = Path(__file__).resolve().parents[1]
 RUN = "https://github.com/o/r/actions/runs/1"
 SHA = "a" * 40
 
@@ -409,9 +422,24 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
     ) == "docs/images/gone.png\n"
     assert json.loads((folder / REPORT).read_text(encoding="utf-8")) == {
         "pictures": [
-            {"path": "docs/images/gone.png", "status": "deleted", "share": None},
-            {"path": "docs/images/new.png", "status": "new", "share": None},
-            {"path": "docs/images/other.png", "status": "changed", "share": 0.25},
+            {
+                "path": "docs/images/gone.png",
+                "status": "deleted",
+                "share": None,
+                "before": None,
+            },
+            {
+                "path": "docs/images/new.png",
+                "status": "new",
+                "share": None,
+                "before": None,
+            },
+            {
+                "path": "docs/images/other.png",
+                "status": "changed",
+                "share": 0.25,
+                "before": None,
+            },
         ],
         "ignored": ["README.md"],
     }
@@ -540,7 +568,12 @@ def folder_with(
         json.dumps(
             {
                 "pictures": [
-                    {"path": p.path, "status": p.status, "share": p.share}
+                    {
+                        "path": p.path,
+                        "status": p.status,
+                        "share": p.share,
+                        "before": p.before,
+                    }
                     for p in pictures
                 ],
                 "ignored": [],
@@ -700,6 +733,590 @@ def test_the_request_commits_a_part_of_the_pictures(
         commit_request(folder, "o/r", "b", SHA, "docs: x", "Body", part=3)
 
 
+# The sizes that the pages name
+
+
+def encoded(kind: str, size: tuple[int, int] = (660, 878), **options: object) -> bytes:
+    """A picture of a kind that Pillow writes, of one color."""
+    out = io.BytesIO()
+    Image.new("RGB", size, (82, 108, 254)).save(out, kind, **options)
+    return out.getvalue()
+
+
+def animated_webp(size: tuple[int, int]) -> bytes:
+    first = Image.new("RGB", size, (82, 108, 254))
+    second = Image.new("RGB", size, (255, 255, 255))
+    out = io.BytesIO()
+    first.save(out, "WEBP", save_all=True, append_images=[second], duration=100)
+    return out.getvalue()
+
+
+PICTURES = {
+    "a.png": png(size=(660, 878)),
+    "a.gif": encoded("GIF"),
+    "a.jpg": encoded("JPEG"),
+    "a.jpeg": encoded("JPEG", progressive=True),
+    "lossy.webp": encoded("WEBP"),
+    "lossless.webp": encoded("WEBP", lossless=True),
+    "animated.webp": animated_webp((660, 878)),
+}
+
+
+@pytest.mark.parametrize(("path", "data"), PICTURES.items())
+def test_a_picture_names_its_size_in_its_header(path: str, data: bytes) -> None:
+    # As Pillow reads it, which the job with the release app doesn't have.
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.size == (660, 878)
+    assert picture_size(path, data) == (660, 878)
+    assert picture_size(path.upper(), data) == (660, 878)
+
+
+@pytest.mark.parametrize(("path", "data"), PICTURES.items())
+def test_a_broken_picture_has_no_size_and_stops_nothing(path: str, data: bytes) -> None:
+    # The files come from a job that ran the script of the project.
+    for length in range(min(len(data), 2000)):
+        assert picture_size(path, data[:length]) in (None, (660, 878))
+
+
+@pytest.mark.parametrize(
+    ("path", "data"),
+    [
+        ("a.mp4", b"\0\0\0\x18ftypmp42" + bytes(40)),
+        ("a.svg", b"<svg/>"),
+        ("a.png", b"not a picture at all, and long enough for it"),
+        # No header where one belongs, and sizes of no pixels.
+        ("a.png", b"\x89PNG\r\n\x1a\n" + bytes(40)),
+        ("a.png", png()[:16] + bytes(8) + png()[24:]),
+        ("a.gif", b"GIF89a" + bytes(40)),
+        ("a.jpg", b"\xff\xd8\xff\xe0\0\x02" + b"\0" + bytes(40)),
+        ("a.webp", b"RIFF\0\0\0\0WEBPVP8Z" + bytes(40)),
+        ("a.webp", b"RIFF\0\0\0\0WEBPVP8 " + bytes(40)),
+    ],
+    ids=["video", "svg", "text", "png", "png0", "gif0", "jpeg", "webp", "webp0"],
+)
+def test_a_file_that_names_no_size_has_none(path: str, data: bytes) -> None:
+    assert picture_size(path, data) is None
+
+
+@pytest.mark.parametrize(
+    ("named", "before", "after", "fitted"),
+    [
+        # The whole picture of another shape, as in paperless-unified-search#274.
+        ((660, 788), (660, 788), (660, 878), (660, 878)),
+        ((1600, 900), (1600, 900), (1280, 800), (1280, 800)),
+        # A single pixel more is another shape too, when the page names the whole.
+        ((660, 788), (660, 788), (660, 789), (660, 789)),
+        # A smaller picture keeps its width, with the height of the new shape.
+        ((120, 260), (390, 844), (390, 900), (120, 277)),
+        # A size that fits stays: the new size, a sharper file of the same shape,
+        # and rounding to the next pixel at a smaller size.
+        ((660, 878), (660, 788), (660, 878), None),
+        ((660, 788), (660, 788), (1320, 1576), None),
+        ((120, 259), (390, 800), (390, 844), None),
+        ((120, 260), (390, 800), (390, 844), None),
+    ],
+)
+def test_the_size_that_a_page_should_name(
+    named: tuple[int, int],
+    before: tuple[int, int],
+    after: tuple[int, int],
+    fitted: tuple[int, int] | None,
+) -> None:
+    assert fitted_size(named, before, after) == fitted
+
+
+def test_a_very_flat_picture_keeps_a_height_of_one_pixel() -> None:
+    assert fitted_size((3, 90), (30, 900), (9000, 1)) == (3, 1)
+
+
+@pytest.mark.parametrize(
+    ("address", "page", "shown"),
+    [
+        # Relative to the page.
+        ("a.png", "README.md", "a.png"),
+        ("images/a.png#only-dark", "docs/index.md", "docs/images/a.png"),
+        ("./images/a.png?v=1", "docs/index.md", "docs/images/a.png"),
+        ("../screenshots/a.png", "docs/index.md", "screenshots/a.png"),
+        ("../shot.png", "docs/deep/index.md", "docs/shot.png"),
+        # From main of the repository, as the hooks of the website read it.
+        ("https://github.com/o/r/raw/main/s/a.png", "docs/x.md", "s/a.png"),
+        ("https://github.com/o/r/raw/main/s/a.png#only-dark", "x.md", "s/a.png"),
+        ("https://github.com/O/R/raw/HEAD/s/a.png", "x.md", "s/a.png"),
+        ("https://github.com/o/r/raw/refs/heads/main/s/a.png", "x.md", "s/a.png"),
+        ("https://github.com/o/r/blob/main/s/a.png?raw=true", "x.md", "s/a.png"),
+        (
+            "https://github.com/o/r/blob/main/s/a.png?a=1&amp;raw=true",
+            "x.md",
+            "s/a.png",
+        ),
+        ("https://raw.githubusercontent.com/o/r/main/s/a.png", "x.md", "s/a.png"),
+        (
+            "https://raw.githubusercontent.com/o/r/refs/heads/main/s/a.png",
+            "x",
+            "s/a.png",
+        ),
+        # Anything else shows no picture of this branch of this repository.
+        ("https://github.com/o/r/blob/main/s/a.png", "x.md", ""),
+        ("https://github.com/o/other/raw/main/s/a.png", "x.md", ""),
+        ("https://github.com/o/r/raw/v1.0.0/s/a.png", "x.md", ""),
+        ("https://github.com/o/r/raw/main", "x.md", ""),
+        ("https://example.com/o/r/raw/main/s/a.png", "x.md", ""),
+        ("http://github.com/o/r/raw/main/s/a.png", "x.md", ""),
+        ("//github.com/o/r/raw/main/s/a.png", "x.md", ""),
+        ("data:image/png;base64,AAAA", "x.md", ""),
+        ("https://[broken/a.png", "x.md", ""),
+    ],
+)
+def test_the_picture_that_a_page_shows(address: str, page: str, shown: str) -> None:
+    assert shown_picture(address, page, "o/r") == shown
+
+
+def test_without_a_repository_only_a_relative_address_counts() -> None:
+    assert shown_picture("https://github.com/o/r/raw/main/a.png", "x.md", "") == ""
+    assert shown_picture("a.png", "x.md", "") == "a.png"
+
+
+RESIZED = {"s/a.png": ((660, 788), (660, 878))}
+FROM_MAIN = "https://github.com/o/r/raw/main/s/a.png"
+
+
+@pytest.mark.parametrize(
+    ("line", "corrected"),
+    [
+        # Markdown with attributes, as paperless-unified-search#274 has it, in any
+        # order, with other attributes, a title, a text with brackets, a fragment.
+        (
+            f'![A]({FROM_MAIN}#only-dark){{ width="660" height="788" }}',
+            f'![A]({FROM_MAIN}#only-dark){{ width="660" height="878" }}',
+        ),
+        (
+            f'  ![A [b] c]({FROM_MAIN} "T"){{ .x height="788" loading=lazy width="660" }}',
+            f'  ![A [b] c]({FROM_MAIN} "T"){{ .x height="878" loading=lazy width="660" }}',
+        ),
+        (
+            f"![A](<{FROM_MAIN}>){{: width=660 height='788' }}",
+            f"![A](<{FROM_MAIN}>){{: width=660 height='878' }}",
+        ),
+        # HTML, also on several lines and with a > in its text; a width in the text
+        # stays text.
+        (
+            f'<img src="{FROM_MAIN}" width="660" height="788" alt="A">',
+            f'<img src="{FROM_MAIN}" width="660" height="878" alt="A">',
+        ),
+        (
+            f"<IMG\n  alt='a > width=\"3\" b'\n  HEIGHT=788\n  WIDTH=660\n  SRC='{FROM_MAIN}'\n/>",
+            f"<IMG\n  alt='a > width=\"3\" b'\n  HEIGHT=878\n  WIDTH=660\n  SRC='{FROM_MAIN}'\n/>",
+        ),
+        # At a smaller size.
+        (
+            f'<img src="{FROM_MAIN}" width="330" height="394">',
+            f'<img src="{FROM_MAIN}" width="330" height="439">',
+        ),
+        # A line ending and the rest of the page stay.
+        (
+            f'Before\r\n![A]({FROM_MAIN}){{ width="660" height="788" }}\r\nAfter é\r\n',
+            f'Before\r\n![A]({FROM_MAIN}){{ width="660" height="878" }}\r\nAfter é\r\n',
+        ),
+    ],
+)
+def test_a_page_gets_the_size_of_the_new_picture(line: str, corrected: str) -> None:
+    fitted, made = fit_page(line, "docs/x.md", RESIZED, "o/r")
+    assert fitted == corrected
+    assert len(made) == 1
+    assert made[0].picture == "s/a.png"
+    # Once more changes nothing.
+    assert fit_page(fitted, "docs/x.md", RESIZED, "o/r") == (fitted, [])
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # A width alone leaves the height to the browser.
+        f'<img src="{FROM_MAIN}" width="320">',
+        f'![A]({FROM_MAIN}){{ width="320" }}',
+        # No whole numbers, no size, no picture at all.
+        f'<img src="{FROM_MAIN}" width="50%" height="788">',
+        f'<img src="{FROM_MAIN}" width="0" height="788">',
+        f'<img src="{FROM_MAIN}" data-width="660" data-height="788">',
+        f"![A]({FROM_MAIN})",
+        '<img width="660" height="788">',
+        # Other pictures, and a size that fits already.
+        '<img src="https://github.com/o/r/raw/main/s/b.png" width="660" height="788">',
+        '![A](s/a.png){ width="660" height="788" }',
+        f'<img src="{FROM_MAIN}" width="660" height="878">',
+    ],
+)
+def test_a_page_stays_when_in_doubt(line: str) -> None:
+    assert fit_page(line, "docs/x.md", RESIZED, "o/r") == (line, [])
+
+
+PAGE_OF_274 = (
+    f'![A]({FROM_MAIN}#only-light){{ width="660" height="788" }}\n'
+    f'![B](https://github.com/o/r/raw/main/s/a.dark.png#only-dark){{ width="660" height="788" }}\n'
+)
+
+
+def repository_with_pages(tmp_path: Path) -> Path:
+    """A repository whose script rendered s/a.png taller, with the pages that name
+    it, and files that the bot leaves alone."""
+    root = repository(
+        tmp_path / "repository",
+        {
+            "s/a.png": png(size=(660, 788)),
+            "s/same.png": png(size=(660, 788), changed=1),
+            "README.md": b"# Demo\n",
+            "README.de.md": PAGE_OF_274.encode(),
+            "docs/index.md": PAGE_OF_274.encode(),
+            "docs/deep/page.md": b'![A](../../s/a.png){ width="330" height="394" }\n',
+            "docs/other.md": b'<img src="../s/same.png" width="660" height="788">\n',
+            "docs/latin.md": b'\xe9 ![A](../s/a.png){ width="660" height="788" }\n',
+            "docs/with space.md": b'![A](../s/a.png){ width="660" height="788" }\n',
+            "tests/page.md": b'![A](../s/a.png){ width="660" height="788" }\n',
+            ".github/note.md": b'![A](../s/a.png){ width="660" height="788" }\n',
+        },
+    )
+    write(
+        root,
+        {
+            "s/a.png": png(size=(660, 878)),
+            "s/same.png": png(size=(660, 788), changed=2),
+        },
+    )
+    return root
+
+
+def test_keep_names_the_size_of_a_picture_that_came_out_at_another(
+    tmp_path: Path,
+) -> None:
+    root = repository_with_pages(tmp_path)
+    folder = tmp_path / "kept"
+    found = keep(root, folder)
+    assert found.pictures == (
+        Picture("s/a.png", "changed", None, (660, 788)),
+        Picture("s/same.png", "changed", 1 / (660 * 788)),
+    )
+    assert kept(folder) == found
+    assert resized(found, root) == {"s/a.png": ((660, 788), (660, 878))}
+    assert resized(found, folder / "files") == resized(found, root)
+
+
+def test_the_incident_of_a_pull_request_that_could_not_pass(tmp_path: Path) -> None:
+    # paperless-unified-search#274: the bot rendered a picture taller and left the
+    # sizes on the pages, whose check then failed until a person corrected them.
+    root = repository_with_pages(tmp_path)
+    folder = tmp_path / "kept"
+    keep(root, folder)
+    # The job with the release app has the checkout of main and the artifact.
+    git_in(root, "checkout", "--", ".")
+
+    pages = pages_of_folder(root, folder, "o/r")
+
+    # Only pages at the top and in docs/, that git tracks by plain paths, in UTF-8.
+    assert [page.path for page in pages] == [
+        "README.de.md",
+        "docs/deep/page.md",
+        "docs/index.md",
+    ]
+    by_path = {page.path: page for page in pages}
+    # The dark picture of the same page didn't change: its size stays.
+    assert by_path["docs/index.md"].data.decode() == PAGE_OF_274.replace(
+        'only-light){ width="660" height="788"', 'only-light){ width="660" height="878"'
+    )
+    assert by_path["docs/index.md"].corrections == (
+        Correction("s/a.png", (660, 788), (660, 878)),
+    )
+    # A smaller picture keeps its width.
+    assert by_path["docs/deep/page.md"].data == (
+        b'![A](../../s/a.png){ width="330" height="439" }\n'
+    )
+
+    additions = commit_request(folder, "o/r", "b", SHA, "docs: x", "Body", pages=pages)[
+        "variables"
+    ]["input"]["fileChanges"]["additions"]
+    assert {
+        addition["path"]: base64.b64decode(addition["contents"])
+        for addition in additions
+    } == {
+        "s/a.png": png(size=(660, 878)),
+        "s/same.png": png(size=(660, 788), changed=2),
+        **{page.path: page.data for page in pages},
+    }
+
+
+def test_a_script_reaches_no_page(tmp_path: Path) -> None:
+    # A page that a script changed in its job stays out, and so does one that the
+    # artifact holds: the text of a page comes from the checkout of main.
+    root = repository_with_pages(tmp_path)
+    write(root, {"docs/index.md": b"Written by the script\n"})
+    folder = tmp_path / "kept"
+    found = keep(root, folder)
+    assert "docs/index.md" in found.ignored
+    git_in(root, "checkout", "--", ".")
+    (folder / "pages/docs").mkdir(parents=True)
+    (folder / "pages/docs/index.md").write_bytes(b"Written by the script\n")
+    pages = {page.path: page for page in pages_of_folder(root, folder, "o/r")}
+    assert b"Written by the script" not in pages["docs/index.md"].data
+    assert pages["docs/index.md"].data.startswith(b"![A](")
+
+
+def test_a_lying_report_changes_only_the_numbers(tmp_path: Path) -> None:
+    # The report says another size before, which at most decides whether a page
+    # keeps its width: the height follows the file, and no other text changes.
+    root = repository_with_pages(tmp_path)
+    folder = tmp_path / "kept"
+    keep(root, folder)
+    git_in(root, "checkout", "--", ".")
+    written = json.loads((folder / REPORT).read_text(encoding="utf-8"))
+    written["pictures"][0]["before"] = [1, 1]
+    (folder / REPORT).write_text(json.dumps(written), encoding="utf-8")
+    pages = {page.path: page for page in pages_of_folder(root, folder, "o/r")}
+    assert pages["docs/index.md"].corrections == (
+        Correction("s/a.png", (660, 788), (660, 878)),
+    )
+
+
+@pytest.mark.parametrize("before", ['"a"', "1", "[1]", "[1, 2, 3]", '["a", "b"]'])
+def test_the_bot_needs_a_readable_size_in_the_report(
+    tmp_path: Path, before: str
+) -> None:
+    folder = folder_with(
+        tmp_path, {"docs/a.png": png()}, [Picture("docs/a.png", "changed", None)]
+    )
+    written = (folder / REPORT).read_text(encoding="utf-8")
+    (folder / REPORT).write_text(
+        written.replace('"before": null', f'"before": {before}'), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match=r"no readable report\.json"):
+        kept(folder)
+
+
+def test_a_picture_that_names_no_size_leaves_its_pages(tmp_path: Path) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"s/a.png": b"\x89PNG\r\n\x1a\n" + bytes(40)},
+        [Picture("s/a.png", "changed", None, (660, 788))],
+    )
+    assert resized(kept(folder), folder / "files") == {}
+    # Without a picture of another size, git isn't even asked.
+    assert corrected_pages(tmp_path / "nowhere", {}, "o/r") == []
+
+
+def test_the_bot_follows_no_link_to_a_page(tmp_path: Path) -> None:
+    root = repository_with_pages(tmp_path)
+    try:
+        os.symlink("index.md", root / "docs/link.md")
+    except OSError:
+        pytest.skip("this system makes no symbolic links")
+    git_in(root, "add", "docs/link.md")
+    pages = corrected_pages(root, {"s/a.png": ((660, 788), (660, 878))}, "o/r")
+    assert "docs/link.md" not in [page.path for page in pages]
+
+
+def test_a_page_that_a_sparse_checkout_leaves_out_stays(tmp_path: Path) -> None:
+    root = repository_with_pages(tmp_path)
+    (root / "docs/index.md").unlink()
+    pages = corrected_pages(root, {"s/a.png": ((660, 788), (660, 878))}, "o/r")
+    assert "docs/index.md" not in [page.path for page in pages]
+
+
+def test_large_pages_go_in_parts_of_their_own(tmp_path: Path) -> None:
+    folder = folder_with(tmp_path, {"s/a.png": png()}, [Picture("s/a.png", "new")])
+    pages = [Page("docs/a.md", b"a" * 3000, ()), Page("docs/b.md", b"b" * 3000, ())]
+    assert [[c.path for c in part] for part in parts(folder, pages=pages)] == [
+        ["s/a.png", "docs/a.md", "docs/b.md"]
+    ]
+    assert [[c.path for c in part] for part in parts(folder, 5000, pages)] == [
+        ["s/a.png", "docs/a.md"],
+        ["docs/b.md"],
+    ]
+
+
+def test_the_description_names_the_corrected_sizes(tmp_path: Path) -> None:
+    folder = folder_with(
+        tmp_path, {"s/a.png": png()}, [Picture("s/a.png", "changed", None, (1, 1))]
+    )
+    assert corrections([]) == ""
+    assert "the width and the height" not in report(folder, SHA, RUN)
+    pages = [
+        Page(
+            "docs/index.md",
+            b"",
+            (
+                Correction("s/a.png", (660, 788), (660, 878)),
+                Correction("s/a.png", (330, 394), (330, 439)),
+            ),
+        ),
+    ]
+    text = report(folder, SHA, RUN, pages=pages)
+    assert (
+        "| Page | Picture | Named | Now |\n"
+        "| --- | --- | ---: | ---: |\n"
+        "| `docs/index.md` | `s/a.png` | 660 x 788 | 660 x 878 |\n"
+        "| `docs/index.md` | `s/a.png` | 330 x 394 | 330 x 439 |\n"
+    ) in text
+    assert text.index("look different") < text.index("the width and the height")
+    assert text.index("the width and the height") < text.index("merges itself")
+
+
+@pytest.mark.parametrize(
+    ("origin", "found"),
+    [
+        ("https://github.com/o/r", "o/r"),
+        ("https://github.com/o/r.git", "o/r"),
+        ("https://github.com/o/r/", "o/r"),
+        ("git@github.com:o/r.git", "o/r"),
+        ("ssh://git@github.com/o/r.git", "o/r"),
+        ("https://example.com/o/r.git", ""),
+        ("", ""),
+    ],
+)
+def test_the_repository_of_the_remote(tmp_path: Path, origin: str, found: str) -> None:
+    root = repository(tmp_path / "repository", {"a.txt": b"a\n"})
+    if origin:
+        git_in(root, "remote", "add", "origin", origin)
+    assert repository_of(root) == found
+
+
+def test_the_commands_correct_the_sizes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repository_with_pages(tmp_path)
+    folder = tmp_path / "kept"
+    assert main(["screenshots", "keep", str(folder)], root=root) == 0
+    capsys.readouterr()
+    git_in(root, "checkout", "--", ".")
+
+    # The bot names the repository, and the size of a part counts the pages.
+    assert main(["--repo", "o/r", "screenshots", "parts", str(folder)], root=root) == 0
+    assert capsys.readouterr().out == "1\n"
+    commit = ["--repo", "o/r", "screenshots", "commit", str(folder), "--branch", "b"]
+    assert main([*commit, "--head", SHA, "--headline", "h"], root=root) == 0
+    additions = json.loads(capsys.readouterr().out)["variables"]["input"][
+        "fileChanges"
+    ]["additions"]
+    assert "docs/index.md" in [addition["path"] for addition in additions]
+    show = ["screenshots", "report", str(folder), "--sha", SHA, "--run", RUN]
+    assert main(["--repo", "o/r", *show], root=root) == 0
+    assert "| `docs/index.md` | `s/a.png` | 660 x 788 | 660 x 878 |" in (
+        capsys.readouterr().out
+    )
+    # Without --repo, the remote names it.
+    git_in(root, "remote", "add", "origin", "https://github.com/o/r.git")
+    assert main(show, root=root) == 0
+    assert "| `docs/index.md` | `s/a.png` |" in capsys.readouterr().out
+    # The command changes no file of the job.
+    assert git_in(root, "status", "--porcelain") == ""
+
+
+def test_restore_corrects_the_pages_on_your_machine(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repository_with_pages(tmp_path)
+    git_in(root, "remote", "add", "origin", "git@github.com:o/r.git")
+    assert main(["screenshots", "restore"], root=root) == 0
+    out = capsys.readouterr().out
+    assert "| `docs/index.md` | `s/a.png` | 660 x 788 | 660 x 878 |" in out
+    assert (
+        b'only-light){ width="660" height="878" }'
+        in (root / "docs/index.md").read_bytes()
+    )
+    # A second run finds them correct, so it says nothing of them.
+    assert main(["screenshots", "restore"], root=root) == 0
+    assert "| Page |" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["screenshot-bot.yml", "docs-pictures.yml"])
+def test_a_picture_bot_checks_out_its_tool_and_pages_without_pictures(
+    tmp_path: Path, name: str
+) -> None:
+    # The job with the release app needs the Markdown and no picture of main; git
+    # itself shows what the patterns of the job leave in the work tree.
+    workflow = load_yaml(
+        (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["pull-request"]
+    checkout = next(
+        step["with"]
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["persist-credentials"] is False
+    assert checkout["sparse-checkout-cone-mode"] is False
+    files = {
+        path: b"x\n"
+        for path in (
+            "README.md",
+            "README.de.md",
+            "CHANGELOG.md",
+            "blueprint.py",
+            "blueprint/screenshots.py",
+            "docs/index.md",
+            "docs/deep/er/page.de.md",
+            "docs/images/a.png",
+            "docs/images/deep/a.webp",
+            "screenshots/a.png",
+            "screenshots/notes.md",
+            "src/secret.py",
+            ".github/workflows/ci.yml",
+        )
+    }
+    root = repository(tmp_path / "repository", files)
+    git_in(
+        root,
+        "sparse-checkout",
+        "set",
+        "--no-cone",
+        *checkout["sparse-checkout"].split(),
+    )
+    present = {path for path in files if (root / path).is_file()}
+    assert present == {
+        "README.md",
+        "README.de.md",
+        "CHANGELOG.md",
+        "blueprint.py",
+        "blueprint/screenshots.py",
+        "docs/index.md",
+        "docs/deep/er/page.de.md",
+    }
+    # Each command of the bot reads the same pages, for the same repository.
+    script = "\n".join(step.get("run", "") for step in job["steps"])
+    for command in ("parts", "commit", "report"):
+        assert f'--repo "$GH_REPO" screenshots {command} "$kept"' in script
+
+
+def test_the_tool_of_a_repository_is_in_the_checkout_of_the_screenshot_bot(
+    tmp_path: Path,
+) -> None:
+    workflow = load_yaml(
+        (ROOT / ".github/workflows/screenshot-bot.yml").read_text(encoding="utf-8")
+    )
+    checkout = next(
+        step["with"]
+        for step in workflow["jobs"]["pull-request"]["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    files = {
+        path: b"x\n"
+        for path in (
+            ".github/blueprint.py",
+            ".github/blueprint/screenshots.py",
+            ".github/other.yml",
+        )
+    }
+    root = repository(tmp_path / "repository", files)
+    git_in(
+        root,
+        "sparse-checkout",
+        "set",
+        "--no-cone",
+        *checkout["sparse-checkout"].split(),
+    )
+    assert {path for path in files if (root / path).is_file()} == {
+        ".github/blueprint.py",
+        ".github/blueprint/screenshots.py",
+    }
+
+
 # What the bot says
 
 
@@ -728,7 +1345,7 @@ def test_the_summary_says_what_keep_found() -> None:
     assert text.startswith("These pictures look different:\n\n| Picture |")
     assert text.endswith(
         "\nThe script changed other files too, which the bot leaves out, because it "
-        "commits pictures only: `README.md`.\n"
+        "takes only pictures from the script: `README.md`.\n"
     )
 
 

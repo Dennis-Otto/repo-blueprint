@@ -173,6 +173,19 @@ When the token of the app fails, as for an app that isn't installed on the repos
 
 Where a Renovate workflow runs, the bot-health bot keeps one issue open with the warnings and errors of Renovate.
 
+## Renovate leaves a branch alone
+
+**What you see:** a pull request of Renovate falls behind `main` or stays on an old version, and a comment of Renovate, *Edited/Blocked Notification*, says that it won't rebase the pull request because it doesn't recognize the author of the last commit.
+
+**Why:** Renovate rebases a branch only as long as every commit on it counts as its own, and takes any other commit for work that it must not overwrite. The bots of the repository don't count as someone else: they commit as the release app, which is the address that Renovate runs under in a Renovate workflow, and which the rules of the blueprint name for the Mend Renovate app ([decision 0104](decisions/0104-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). A person does count, also with *Update branch* on the page of the pull request or `gh pr update-branch`: GitHub makes that merge in their name, and Renovate can't tell it from an edit.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/when-renovate-leaves-a-branch-alone.dark.svg">
+  <img src="images/diagrams/when-renovate-leaves-a-branch-alone.svg" alt="When Renovate leaves a branch alone: Renovate compares the author and the committer of every commit on its branch with its own address and its rule gitIgnoredAuthors. A commit of Renovate lets it go on rebasing, and so does one of the fix bot, the branch bot or another bot, which commit as the release app: where Renovate runs as the release app, that is its own address, and for the Mend Renovate app the rules of the blueprint name it. A commit of anyone else, also a merge that a person starts with Update branch, counts as an edit, and Renovate leaves the branch alone until a person ticks the box in the pull request, which builds the branch anew without that commit.">
+</picture>
+
+**What to do:** tick the box *If you want to rebase/retry this PR, check this box* in the description of the pull request. Renovate builds the branch anew in its next run, without the commit of the person, so move anything that must stay to a pull request of its own first. To bring a branch of Renovate up to `main`, leave it to Renovate and the branch bot rather than *Update branch*.
+
 ## OSV-Scanner reports a version that another package pins
 
 **What you see:** the check *osv-scanner* fails, and code scanning has open alerts of OSV-Scanner for a lock file whose dependency no update can move, so that the Findings workflow fails on `main` too. Renovate opens no pull request for them, and the issue *Renovate logs problems* lists `Detected empty commit - aborting git push` for a branch such as `renovate/pypi-pillow-vulnerability`. Home Assistant, for example, pins the Pillow and the uv that the tests of an integration install.
@@ -221,6 +234,30 @@ The header then reads `uv pip compile --generate-hashes --python-version=3.12 --
 
 A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for Read the Docs, needs no command in its header: add it to `ignorePaths` in `.github/renovate.json5`, such as `ignorePaths: ["docs/requirements.txt"]`, and Renovate and the step *Lock files* both leave it out. A name that the pattern `requirements*.txt` doesn't match does the same.
 
+## The title of a pull request changed, or a file appeared in changelog.d
+
+**What you see:** the timeline of the pull request shows that the release app changed its title, or a commit *docs: draft the entry of the changelog from the title* added a file of `changelog.d/`.
+
+**Why:** the check of the title failed, and the fix bot fixed what it could from the title: its form, when the title names its own type, and a draft of the entry that a `feat`, `fix` or `perf` needs. See [the fix bot](features/self-healing.md#pull-requests-fix-themselves) and [decision 0110](decisions/0110-the-fix-bot-corrects-the-form-of-a-title-and-drafts-one-entry.md).
+
+**What to do:** pull the branch before you push again, read the draft, and say in its place what changes for users. To keep the bot out of a pull request, give it the label `no-bot-fixes`. A draft that you delete stays deleted: the check then asks for an entry again, and explains how to write one.
+
+## A lock file no longer matches its source
+
+**What you see:** the step *Lock files match their sources* of `scripts/check.sh` fails and names each file and pin, such as `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
+
+**Why:** pip installs a lock file as it is. A package that you add to `requirements-dev.in`, or a bound that you move there, reaches no install until the file is compiled again, and a package that you drop stays installed. The step has uv compile each lock file again with the command in its header, on a copy: for the Python of the header, for Linux unless the file is `--universal`, and on the versions that the file pins. So a new release upstream changes nothing, nor do the hashes of a pinned version: only a change of the sources moves a pin.
+
+**What to do:** in a pull request of a branch of the repository, nothing: the fix bot commits the file, and on one from a fork it suggests the change. On your machine, compile each such file and commit it:
+
+```sh
+python3 .github/blueprint.py locks --compile --fix
+```
+
+The header of the file stays as it is, with its Python and its tool, and each pin that the sources still allow stays too. When uv finds no solution, the log shows its answer, and nothing changes: the sources contradict themselves or a package that they pin. Correct them first.
+
+The step says so and passes for what it doesn't compare: a link, a command that Renovate can't read, which the step *Lock files* explains, a line that is no pin, such as `--index-url`, which a fix would lose, a header of uv without `--python-version=`, and every file when uv is missing or reaches no package index. The CI of every kind of project installs uv when the repository has a `requirements*.txt`.
+
 ## The check renovate rules fails
 
 **What you see:** in a pull request that changes the rules of Renovate or a lock file, the check *renovate rules* of the Renovate workflow fails, in a repository that runs Renovate itself (the answer `renovate_runner` `self`) and in the blueprint. Its annotations name each problem, such as `Invalid configuration option` for a rule, `pip-compile error` for a lock file, or `Renovate doesn't read the lock file requirements-test.txt.`; its summary and the comment of the PR coach say how to fix it.
@@ -244,6 +281,20 @@ The last command takes the presets of the blueprint out of the rules, since Reno
 **Why:** a README shows its pictures from `main` of its own repository, so that they show wherever the README does, such as on PyPI or in the store of an app. The website serves such a picture from the checkout, so that the pull request that adds a screenshot shows it on its website too, before `main` has it ([decision 0062](decisions/0062-the-website-shows-the-pictures-of-its-repository-from-the-checkout.md)). A picture that git doesn't track would be missing on `main` once the pull request is merged: a new screenshot that isn't committed yet, one that the pull request deletes or moves, or a typo in its address.
 
 **What to do:** commit the picture, such as with `git add screenshots/settings.png`, or correct its address in the README. Without git, such as in a folder without its history, the website downloads the picture from `main` as before.
+
+## A release moves a file of the project
+
+**What you see:** the step *Files of the project* of `scripts/check.sh` fails, usually on the pull request of a blueprint update, and names the file and what moves, such as `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`.
+
+**Why:** an update never overwrites a file of the project, so a release that needs such a file changed brings the change as a migration of `blueprint.py`, which this step checks. On a branch of the repository, the fix bot commits the move by itself within minutes.
+
+**What to do:** where no fix bot runs, such as with the label `no-bot-fixes`, run the command and commit what changes:
+
+```sh
+python3 .github/blueprint.py migrate --fix
+```
+
+**To decline the move of a label,** write a comment behind its line, such as `group = "decision" # no candidates of the issue assistant`, and the step leaves that label alone. A label that the file doesn't have moves nowhere either.
 
 ## A scheduled workflow didn't run
 

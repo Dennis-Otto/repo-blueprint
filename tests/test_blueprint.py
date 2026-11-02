@@ -27,6 +27,7 @@ from blueprint.checklist import (
     RELEASE_APP_PERMISSIONS,
     Step,
     best_practices,
+    change_answer,
     checklist,
     release_app_name,
     renovate,
@@ -321,7 +322,6 @@ class FakeGitHub:
         # The pull requests of every state, newest first, as GitHub answers them,
         # which a test may break.
         self.pulls: list[Any] = []
-        self.bots: dict[str, int] = {}
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
             "spare": {"color": "ffffff", "description": "Not in the configuration"},
@@ -378,11 +378,6 @@ class FakeGitHub:
             return self.files_of_actions(payload["query"], payload["variables"])
         if path == f"users/{REPO.split('/')[0]}":
             return 200, {"login": REPO.split("/")[0], "type": self.account}
-        if bot := re.fullmatch(r"users/([\w-]+)%5Bbot%5D", path):
-            number = self.bots.get(bot[1])
-            if number is None:
-                return 404, {"message": "Not Found"}
-            return 200, {"login": f"{bot[1]}[bot]", "id": number, "type": "Bot"}
         return self.route(
             method, path.split("?")[0].removeprefix(f"repos/{REPO}"), payload
         )
@@ -1695,7 +1690,9 @@ def test_a_switch_that_github_kept_off_still_differs_in_a_check(
 
     out = capsys.readouterr().out
     assert "security.secret_scanning_non_provider_patterns: GitHub has false" in out
-    assert "python3 blueprint.py settings apply sets what the API can set." in out
+    assert (
+        "python3 .github/blueprint.py settings apply sets what the API can set." in out
+    )
 
 
 def test_a_switch_whose_write_github_refused_is_no_notice(
@@ -3428,7 +3425,7 @@ def test_the_checklist_leaves_a_switch_that_github_keeps_off_neutral(
     out = capsys.readouterr().out
     assert "  · Settings as code applied" in out
     assert (
-        "python3 blueprint.py settings apply; it tells whether GitHub keeps"
+        "python3 .github/blueprint.py settings apply; it tells whether GitHub keeps"
         " security.secret_scanning_non_provider_patterns off for the plan of the"
         " repository"
     ) in out
@@ -3553,7 +3550,7 @@ def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
     # Named in the settings, but not yet on GitHub.
     step = listing()
     assert step.done is False
-    assert step.how == "python3 blueprint.py settings apply"
+    assert step.how == "python3 .github/blueprint.py settings apply"
 
     run(github, root, "settings", "apply")
     assert listing().done is True
@@ -3565,11 +3562,12 @@ def test_the_checklist_of_an_integration_asks_for_the_topics_that_hacs_lists(
     run(github, root, "settings", "apply")
     step = listing()
     assert step.done is False
-    assert step.how == (
-        'copier update --defaults --vcs-ref=:current: --data "topics=home-assistant,'
-        ' hacs", which names them in .github/repository.toml, then:'
-        " python3 blueprint.py settings apply"
-    )
+    (why, *rest) = step.how.splitlines()
+    # A branch and the copier of the quick start: main refuses the push of a commit,
+    # and the quick start puts no copier on the PATH.
+    assert rest == change_answer("topics=home-assistant, hacs")
+    assert "uvx --from copier==" in rest[3]
+    assert "python3 .github/blueprint.py settings apply" in why
 
 
 def without_release_app(root: Path) -> Settings:
@@ -3598,6 +3596,7 @@ def test_the_checklist_names_the_command_that_registers_a_release_app(
     )
     assert registered.done is False
     lines = registered.how.splitlines()
+    assert "commit.gpgsign" in lines[0]
     assert lines[1] == "python3 .github/blueprint.py app register"
     assert lines[2] == (
         "The app gets read and write access to Actions, Administration, Checks, Commit"
@@ -3641,7 +3640,6 @@ def test_the_template_asks_for_the_copier_that_knows_the_current_ref() -> None:
     # came with 9.8.
     command = "--vcs-ref=:current:"
     assert command in (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
-    assert command in (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
     copier = (ROOT / "copier.yml").read_text(encoding="utf-8")
     minimum = re.search(r'^_min_copier_version: "(\d+)\.(\d+)"$', copier, re.M)
     assert minimum is not None
@@ -3700,7 +3698,6 @@ HUB = [
 def test_the_checklist_knows_that_renovate_runs_by_its_pull_requests(
     github: FakeGitHub, root: Path
 ) -> None:
-    settings = Settings.load(root / ".github/repository.toml")
     # Renovate keeps no issue open, so its old dashboard shows nothing; nor does a
     # pull request of someone else with the title of an update, or one that GitHub
     # answers without its branch.
@@ -3716,9 +3713,9 @@ def test_the_checklist_knows_that_renovate_runs_by_its_pull_requests(
         "no pull request",
     ]
 
-    waiting = renovate(Api(github), REPO, settings, root)
+    waiting = renovate(Api(github), REPO, root)
     github.pulls.append(RENOVATE)
-    running = renovate(Api(github), REPO, settings, root)
+    running = renovate(Api(github), REPO, root)
 
     assert waiting.text == "Renovate runs: it has opened a pull request"
     assert waiting.done is False
@@ -3732,9 +3729,7 @@ def test_the_checklist_waits_for_renovate_when_github_knows_no_pull_requests(
 ) -> None:
     github.fail[("GET", f"repos/{REPO}/pulls?state=all&per_page=100")] = 404
 
-    step = renovate(
-        Api(github), REPO, Settings.load(root / ".github/repository.toml"), root
-    )
+    step = renovate(Api(github), REPO, root)
 
     assert step.done is False
 
@@ -3762,69 +3757,55 @@ def test_the_checklist_says_how_renovate_comes_to_run(
 ) -> None:
     if answers is not None:
         (root / ".copier-answers.yml").write_text(answers, encoding="utf-8")
-    settings = Settings.load(root / ".github/repository.toml")
 
-    step = renovate(Api(github), REPO, settings, root)
+    step = renovate(Api(github), REPO, root)
 
     assert step.done is False
     assert step.how.splitlines() == how
 
 
-MEND = [
-    "Install the Mend Renovate app on this repository; it reads"
-    " .github/renovate.json5 and opens its pull requests from its first run:",
-    "https://github.com/apps/renovate/installations/new",
-    "The branch bot and the fix bot commit to its branches as the release app; so"
-    " that Renovate goes on rebasing them, add to .github/renovate.json5:",
-]
-
-
-@pytest.mark.parametrize(
-    ("app", "bots", "rest"),
-    [
-        (
-            "demo-release-automation",
-            {"demo-release-automation": 1234},
-            [
-                'gitIgnoredAuthors: ["1234+demo-release-automation[bot]'
-                '@users.noreply.github.com"]'
-            ],
-        ),
-        # An app that GitHub doesn't know, and no app yet.
-        ("demo-release-automation", {}, None),
-        ("", {}, None),
-    ],
-    ids=["app", "unknown app", "no app"],
-)
-def test_the_checklist_links_the_mend_app_and_the_author_it_takes_for_its_own(
-    github: FakeGitHub,
-    root: Path,
-    app: str,
-    bots: dict[str, int],
-    rest: list[str] | None,
+def test_the_checklist_links_the_mend_app_and_leaves_its_rule_to_the_blueprint(
+    github: FakeGitHub, root: Path
 ) -> None:
     (root / ".copier-answers.yml").write_text(
         "renovate_runner: mend\n", encoding="utf-8"
     )
-    path = root / ".github/repository.toml"
-    path.write_text(
-        CONFIG.replace("[variables]\n", f'[variables]\nRELEASE_APP = "{app}"\n'),
-        encoding="utf-8",
-    )
-    github.bots = bots
 
-    step = renovate(Api(github), REPO, Settings.load(path), root)
+    step = renovate(Api(github), REPO, root)
 
-    assert step.how.splitlines() == MEND + (
-        rest
-        or [
-            'gitIgnoredAuthors: ["ID+NAME[bot]@users.noreply.github.com"]',
-            "with the name of the release app for NAME, and for ID the number of its"
-            " bot user: gh api users/NAME%5Bbot%5D --jq .id",
-        ]
-    )
-    asked = [path for method, path in github.calls if path.startswith("users/")]
-    assert asked == ([f"users/{app}%5Bbot%5D"] if app else [])
+    # The rules of the blueprint take the commits of the release app for those of
+    # Renovate, so nothing is left to add by hand, and GitHub isn't asked for a number.
+    assert step.how.splitlines() == [
+        "Install the Mend Renovate app on this repository; it reads"
+        " .github/renovate.json5 and opens its pull requests from its first run:",
+        "https://github.com/apps/renovate/installations/new",
+    ]
+    assert not [path for _, path in github.calls if path.startswith("users/")]
+
+
+@pytest.mark.parametrize(
+    ("app", "answers", "asked"),
+    [
+        ("", "renovate_runner: mend\n", False),
+        ("demo-app", "renovate_runner: mend\nrelease_app: demo-app\n", False),
+        ("demo-app", "renovate_runner: mend\nrelease_app: other-app\n", True),
+        ("demo-app", "renovate_runner: mend\n", True),
+    ],
+    ids=["no app", "the answer", "another answer", "no answer"],
+)
+def test_the_checklist_asks_for_the_answer_of_an_app_that_only_the_settings_name(
+    github: FakeGitHub, root: Path, app: str, answers: str, asked: bool
+) -> None:
+    (root / ".copier-answers.yml").write_text(answers, encoding="utf-8")
+
+    how = renovate(Api(github), REPO, root, app).how
+
+    # The rule of the blueprint comes from the answer alone, so without it Renovate
+    # would take the commits of this app for someone editing its branches.
+    assert (f"--data release_app={app}" in how) is asked
+    if asked:
+        # By the steps of a new owner, whom main refuses a push and no copier awaits.
+        assert "\n".join(change_answer(f"release_app={app}")) in how
 
 
 def test_the_release_app_has_every_permission_that_a_workflow_asks_for() -> None:

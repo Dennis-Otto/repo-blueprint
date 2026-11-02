@@ -22,7 +22,7 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 - **Die Schritte von `scripts/check.sh` für diese Art,** auf deinem Rechner wie in der CI: die eines Node-Pakets, die Lock-Datei, Biome, tsc und node:test mit jeder Zeile, jedem Zweig und jeder Funktion abgedeckt, und dann *Extension*. Er prüft das Manifest mit `scripts/check-manifest.mjs`: Manifest V3, die Version des Releases, die Grenzen des Stores in jeder Sprache und für jede Berechtigung und jeden Host einen Grund und eine Begründung in den Einträgen. Dann baut er das Zip für den Store mit `scripts/package-extension.sh`, für denselben Commit dasselbe Zip. Biome lässt das Format von `extension/manifest.json` unangetastet, denn der Release-Bot schreibt jeden Eintrag einer Liste auf eine eigene Zeile, sodass ein Release-Pull-Request es besteht, und es lässt die Diagramme aus, die `scripts/diagrams.sh` zeichnet.
 - **Ein Test in Chrome:** die CI lädt `extension/` mit `scripts/load-extension.mjs` in Chrome for Testing und schlägt fehl, wenn ihr Service Worker nicht startet.
 - **Workflows dieser Art:** *Chrome Web Store* (`publish-store.yml`), der jedes Release liefert und jeden Tag nach ihm sieht, und das neueste Node auf `main` (`newest-node.yml`).
-- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
+- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Dateien des Projekts, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
 - **Alles, was jedes Repository bekommt:** den PR-Coach und den Fix-Bot, den Release-Bot, Renovate, die Einstellungen als Code, den Issue-Assistenten, die Website auf Deutsch und Englisch, die Sicherheitsprüfungen und den Blueprint-Bot, wie [die Anleitung](../guide.md#was-ein-neues-repository-bekommt) sie nennt.
 
 ## Die Prüfungen, die ein Pull Request braucht
@@ -58,7 +58,9 @@ Diese Art bringt diese Schritte dazu:
 
 <!-- --8<-- [start:real-repository] -->
 
-Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der Workflow Variants des Blueprints macht bei jeder Änderung seiner Dateien eines daraus und führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert eines von der neuesten Version, wie sein Blueprint-Bot es täte.
+[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) ist aus dem Blueprint entstanden: ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Player Switch for Autodarts rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 

@@ -13,8 +13,7 @@ name: Variants
 # still pass the checks of this commit.
 #
 # And the same update with the answers of each repository that takes the blueprint,
-# from tests/answers/ (adopted): without the sample code (except a repository that the
-# blueprint made new, MADE_NEW in tests/test_template.py), with their licenses, their
+# from tests/answers/ (adopted): without the sample code, with their licenses, their
 # languages and their discussions. Such a repository brings its own code and tests,
 # so these legs check what the blueprint gives it alone: the update, the website and
 # the lint of the workflows and of the Markdown. The Downstream workflow updates the
@@ -278,6 +277,9 @@ jobs:
             commit --quiet --message "chore: start from the blueprint $latest"
           # As the blueprint bot does it, without --trust: updating runs no code of the blueprint.
           (cd "$PROJECT" && copier update --defaults --conflict inline --vcs-ref "$commit")
+          # What the fix bot commits onto the pull request of an update: what a release
+          # moves in the files of the project, which the step of scripts/check.sh checks.
+          (cd "$PROJECT" && python3 .github/blueprint.py migrate --fix)
           git -C "$PROJECT" add --all
           echo "The ${ANSWERS:-$KIND} from $latest, updated to ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
 
@@ -344,7 +346,7 @@ jobs:
                   summary.write(
                       "\nThese files belong to the project: the update keeps them as the latest release made "
                       "them, and a new repository gets them otherwise. If the files of the blueprint need a "
-                      "change of them, the changelog says how an existing project makes it.\n\n"
+                      "change of them, a migration of blueprint/migrate.py makes it.\n\n"
                   )
                   summary.writelines(f"- `{name}`\n" for name in kept)
           for problem in problems:
@@ -529,7 +531,8 @@ jobs:
       # In a new repository only: an update gives every file of the blueprint as a new
       # repository has it, which its own step compares, and keeps renovate.json5 of
       # the project. The rules depend on the kind of project alone, not on the other
-      # answers of a repository that takes the blueprint.
+      # answers of a repository that takes the blueprint, apart from the rule of the
+      # Mend Renovate app, which no variant answers and the tests of the blueprint check.
       - name: Validate the rules of Renovate of the project
         if: matrix.start == 'new'
         timeout-minutes: 5

@@ -173,6 +173,19 @@ Scheitert das Token der App, etwa bei einer App, die im Repository nicht install
 
 Wo ein Renovate-Workflow läuft, hält der Bot-Health-Bot ein Issue mit den Warnungen und Fehlern von Renovate offen.
 
+## Renovate lässt einen Branch in Ruhe
+
+**Was du siehst:** Ein Pull Request von Renovate fällt hinter `main` zurück oder bleibt auf einer alten Version, und ein Kommentar von Renovate, *Edited/Blocked Notification*, sagt, dass es den Pull Request nicht rebased, weil es den Autor des letzten Commits nicht erkennt.
+
+**Warum:** Renovate rebased einen Branch nur, solange jeder Commit darauf als sein eigener gilt, und hält jeden anderen für Arbeit, die es nicht überschreiben darf. Die Bots des Repositorys gelten nicht als jemand anderes: Sie committen als die Release-App, und das ist die Adresse, unter der Renovate in einem Renovate-Workflow läuft und die die Regeln des Blueprints für die Mend-Renovate-App nennen ([Entscheidung 0104](decisions/0104-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). Eine Person gilt als jemand anderes, auch mit *Update branch* auf der Seite des Pull Requests oder `gh pr update-branch`: GitHub macht diesen Merge in ihrem Namen, und Renovate kann ihn nicht von einer Bearbeitung unterscheiden.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/when-renovate-leaves-a-branch-alone.de.dark.svg">
+  <img src="images/diagrams/when-renovate-leaves-a-branch-alone.de.svg" alt="Wann Renovate einen Branch in Ruhe lässt: Renovate vergleicht Autor und Committer jedes Commits auf seinem Branch mit seiner eigenen Adresse und seiner Regel gitIgnoredAuthors. Bei einem Commit von Renovate rebased es weiter, ebenso bei einem des Fix-Bots, des Branch-Bots oder eines anderen Bots, die als Release-App committen: Wo Renovate als Release-App läuft, ist das seine eigene Adresse, und für die Mend-Renovate-App nennen sie die Regeln des Blueprints. Ein Commit von jemand anderem, auch ein Merge, den eine Person mit Update branch startet, zählt als Bearbeitung, und Renovate lässt den Branch in Ruhe, bis eine Person das Kästchen im Pull Request ankreuzt, was den Branch ohne diesen Commit neu baut.">
+</picture>
+
+**Was zu tun ist:** Kreuze in der Beschreibung des Pull Requests das Kästchen *If you want to rebase/retry this PR, check this box* an. Renovate baut den Branch in seinem nächsten Lauf neu, ohne den Commit der Person; verschiebe also zuerst alles, was bleiben muss, in einen eigenen Pull Request. Um einen Branch von Renovate auf den Stand von `main` zu bringen, überlass das Renovate und dem Branch-Bot statt *Update branch*.
+
 ## OSV-Scanner meldet eine Version, die ein anderes Paket festlegt
 
 **Was du siehst:** Die Prüfung *osv-scanner* scheitert, und Code Scanning hat offene Alerts von OSV-Scanner für eine Lock-Datei, deren Abhängigkeit kein Update bewegen kann, sodass auch der Findings-Workflow auf `main` scheitert. Renovate öffnet keinen Pull Request für sie, und das Issue *Renovate logs problems* nennt `Detected empty commit - aborting git push` für einen Branch wie `renovate/pypi-pillow-vulnerability`. Home Assistant zum Beispiel legt das Pillow und das uv fest, die die Tests einer Integration installieren.
@@ -221,6 +234,30 @@ Der Kopf lautet dann `uv pip compile --generate-hashes --python-version=3.12 --o
 
 Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt` für Read the Docs, braucht keinen Befehl im Kopf: Trage sie in `ignorePaths` von `.github/renovate.json5` ein, etwa `ignorePaths: ["docs/requirements.txt"]`, dann lassen Renovate und der Schritt *Lock files* sie beide aus. Ein Name, auf den das Muster `requirements*.txt` nicht passt, tut dasselbe.
 
+## Der Titel eines Pull Requests hat sich geändert, oder eine Datei ist in changelog.d aufgetaucht
+
+**Was du siehst:** Die Timeline des Pull Requests zeigt, dass die Release-App seinen Titel geändert hat, oder ein Commit *docs: draft the entry of the changelog from the title* hat eine Datei in `changelog.d/` hinzugefügt.
+
+**Warum:** Die Prüfung des Titels ist gescheitert, und der Fix-Bot hat behoben, was er aus dem Titel beheben konnte: seine Form, wenn der Titel seinen Typ selbst nennt, und einen Entwurf des Eintrags, den ein `feat`, `fix` oder `perf` braucht. Siehe [den Fix-Bot](features/self-healing.de.md#pull-requests-reparieren-sich-selbst) und [Entscheidung 0110](decisions/0110-the-fix-bot-corrects-the-form-of-a-title-and-drafts-one-entry.md).
+
+**Was zu tun ist:** Hole den Branch, bevor du wieder pushst, lies den Entwurf und sage an seiner Stelle, was sich für die Nutzer ändert. Um den Bot von einem Pull Request fernzuhalten, gib ihm das Label `no-bot-fixes`. Ein Entwurf, den du löschst, bleibt gelöscht: Die Prüfung verlangt dann wieder einen Eintrag und erklärt, wie du ihn schreibst.
+
+## Eine Lock-Datei passt nicht mehr zu ihrer Quelle
+
+**Was du siehst:** Der Schritt *Lock files match their sources* von `scripts/check.sh` scheitert und nennt jede Datei und jede Festlegung, etwa `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
+
+**Warum:** pip installiert eine Lock-Datei, wie sie ist. Ein Paket, das du in `requirements-dev.in` ergänzt, oder eine Grenze, die du dort verschiebst, erreicht keine Installation, bis die Datei neu kompiliert ist, und ein Paket, das du entfernst, bleibt installiert. Der Schritt lässt uv jede Lock-Datei mit dem Befehl in ihrem Kopf neu kompilieren, auf einer Kopie: für das Python des Kopfs, für Linux, außer die Datei ist `--universal`, und auf den Versionen, die die Datei festlegt. Ein neues Release ändert also nichts, ebenso wenig die Hashes einer festgelegten Version: Nur eine Änderung der Quellen verschiebt eine Festlegung.
+
+**Was zu tun ist:** In einem Pull Request von einem Branch des Repositorys nichts: Der Fix-Bot committet die Datei, und in einem aus einem Fork schlägt er die Änderung vor. Auf deinem Rechner kompilierst du jede solche Datei und committest sie:
+
+```sh
+python3 .github/blueprint.py locks --compile --fix
+```
+
+Der Kopf der Datei bleibt, wie er ist, mit ihrem Python und ihrem Werkzeug, und jede Festlegung, die die Quellen noch erlauben, bleibt auch. Findet uv keine Lösung, zeigt das Protokoll seine Antwort, und nichts ändert sich: Die Quellen widersprechen sich oder einem Paket, das sie festlegen. Korrigiere sie zuerst.
+
+Der Schritt sagt es und besteht bei dem, was er nicht vergleicht: einem Link, einem Befehl, den Renovate nicht lesen kann, was der Schritt *Lock files* erklärt, einer Zeile, die keine Festlegung ist, etwa `--index-url`, die eine Behebung verlieren würde, einem Kopf von uv ohne `--python-version=`, und jeder Datei, wenn uv fehlt oder keinen Paketindex erreicht. Die CI jeder Art von Projekt installiert uv, wenn das Repository eine `requirements*.txt` hat.
+
 ## Die Prüfung renovate rules scheitert
 
 **Was du siehst:** In einem Pull Request, der die Regeln von Renovate oder eine Lock-Datei ändert, scheitert die Prüfung *renovate rules* des Renovate-Workflows, in einem Repository, das Renovate selbst ausführt (die Antwort `renovate_runner` `self`), und im Blueprint. Ihre Annotationen nennen jedes Problem, etwa `Invalid configuration option` für eine Regel, `pip-compile error` für eine Lock-Datei oder `Renovate doesn't read the lock file requirements-test.txt.`; ihre Zusammenfassung und der Kommentar des PR-Coachs sagen, wie du es behebst.
@@ -244,6 +281,20 @@ Der letzte Befehl nimmt die Presets des Blueprints aus den Regeln, da Renovate a
 **Warum:** Eine README zeigt ihre Bilder von `main` ihres eigenen Repositorys, damit sie überall zu sehen sind, wo die README es ist, etwa auf PyPI oder im Store einer App. Die Website liefert ein solches Bild aus dem Checkout aus, damit der Pull Request, der einen Screenshot hinzufügt, ihn auch auf seiner Website zeigt, bevor `main` ihn hat ([Entscheidung 0062](decisions/0062-the-website-shows-the-pictures-of-its-repository-from-the-checkout.md), englisch). Ein Bild, das Git nicht verfolgt, würde auf `main` fehlen, sobald der Pull Request gemergt ist: ein neuer Screenshot, der noch nicht committet ist, einer, den der Pull Request löscht oder verschiebt, oder ein Tippfehler in seiner Adresse.
 
 **Was zu tun ist:** Committe das Bild, etwa mit `git add screenshots/settings.png`, oder korrigiere seine Adresse in der README. Ohne Git, etwa in einem Ordner ohne seine Historie, lädt die Website das Bild wie bisher von `main` herunter.
+
+## Ein Release ändert eine Datei des Projekts
+
+**Was du siehst:** Der Schritt *Files of the project* von `scripts/check.sh` scheitert, meist am Pull Request eines Blueprint-Updates, und nennt die Datei und die Änderung, etwa `.github/labels.toml: the labels good first issue and help wanted move to the group contribution`.
+
+**Warum:** Ein Update überschreibt nie eine Datei des Projekts. Ein Release, das so eine Datei ändern muss, bringt die Änderung deshalb als Migration von `blueprint.py` mit, die dieser Schritt prüft. Auf einem Branch des Repositorys committet der Fix-Bot die Änderung innerhalb von Minuten selbst.
+
+**Was zu tun ist:** Wo kein Fix-Bot läuft, etwa mit dem Label `no-bot-fixes`, führe den Befehl aus und committe, was sich ändert:
+
+```sh
+python3 .github/blueprint.py migrate --fix
+```
+
+**Um die Änderung eines Labels abzulehnen,** schreibe einen Kommentar hinter seine Zeile, etwa `group = "decision" # keine Kandidaten des Issue-Assistenten`, dann lässt der Schritt dieses Label in Ruhe. Ein Label, das die Datei nicht hat, ändert sich ebenfalls nicht.
 
 ## Ein geplanter Workflow ist nicht gelaufen
 

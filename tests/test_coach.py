@@ -24,8 +24,11 @@ import blueprint.coach
 from blueprint import cli
 from blueprint.coach import (
     BOT,
+    DRAFT_HEADLINE,
     FIX_HEADLINE,
     MARKER,
+    PASSING_TITLE,
+    TITLE_PARTS,
     Catalog,
     CatalogError,
     Entry,
@@ -35,7 +38,9 @@ from blueprint.coach import (
     Unverified,
     annotation,
     check_steps,
+    clean,
     code,
+    corrected_title,
     escape_data,
     escape_property,
     fence,
@@ -374,9 +379,11 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Tests, with every line and branch covered",
         "Text files",
         "Pages in one column",
+        "Files of the project",
         "Changelog fragments",
         "Accepted advisories",
         "Lock files",
+        "Lock files match their sources",
         "Version",
         "Ruff",
         "Composer",
@@ -931,6 +938,137 @@ def test_every_suggested_title_passes(title: str, branch: str) -> None:
 
     assert re.match(TITLE[1], suggestion)
     assert "\n" not in suggestion
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Feat: Add a dark mode", "feat: add a dark mode"),
+        ("FIX: crash on save.", "fix: crash on save"),
+        ("feat:add a dark mode", "feat: add a dark mode"),
+        ("feat : add a dark mode", "feat: add a dark mode"),
+        ("feat - add a dark mode", "feat: add a dark mode"),
+        ("[Docs] update README", "docs: update README"),
+        ("[test]: cover the CLI", "test: cover the CLI"),
+        ("[test] cover the CLI", "test: cover the CLI"),
+        ("[feat!] drop the old look", "feat!: drop the old look"),
+        ("[Fix(UI)] the crash", "fix(ui): the crash"),
+        # A name keeps its capital, and the letter of a single word goes.
+        ("Feat: GitHub support", "feat: GitHub support"),
+        ("Fix: iOS crash", "fix: iOS crash"),
+        ("Fix: Home Assistant 2026.1 crash", "fix: Home Assistant 2026.1 crash"),
+        ("Docs: X11 forwarding", "docs: X11 forwarding"),
+        ("Feat: A card for the dashboard", "feat: a card for the dashboard"),
+        ("Feat: Update", "feat: update"),
+        ("Fix(Settings UI)!: Crash on save.", "fix(settings-ui)!: crash on save"),
+        ("feat(settings) add a dark mode", "feat(settings): add a dark mode"),
+        ("test(cli) cover the flags", "test(cli): cover the flags"),
+        ("Feat! drop Python 3.12", "feat!: drop Python 3.12"),
+        ("Feat!:drop Python 3.12", "feat!: drop Python 3.12"),
+        ("feat(): add a dark mode", "feat: add a dark mode"),
+        ("  Feat:   add a dark mode  ", "feat: add a dark mode"),
+    ],
+)
+def test_the_form_of_a_title_that_names_its_type_is_for_the_fix_bot(
+    title: str, expected: str
+) -> None:
+    assert corrected_title(title, "feat/another-type") == expected
+    # What the bot sets is what the PR coach suggests, whatever the branch.
+    assert suggest_title(title, "docs/another-type") == expected
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        # It passes already.
+        "feat: add a dark mode",
+        "fix(settings)!: Crash on save.",
+        # The title names no type: the words or the branch would choose one.
+        "",
+        "Add a dark mode",
+        "Dark mode for the settings.",
+        "Fix the crash on save",
+        "feat add a dark mode",
+        "docs for the CLI",
+        "Feature flags for the API",
+        # A word for a type is not its name, and the type decides the version.
+        "Feature: add a dark mode",
+        "bugfix - empty list",
+        "deps: update Ruff",
+        "add: a dark mode",
+        "Update: the CI",
+        # A sentence that starts with the name of a type and a dash.
+        "test-driven development of the CLI",
+        "ci-friendly logs",
+        "fix-up the docs",
+        # A bracket that holds more than its type: a tag of the author, not the type.
+        "[Test PR] feat: add a dark mode",
+        "[CI pipeline] speed up lint",
+        "[Fix #123] crash on save",
+        "[Fix: crash] on save",
+        "[feat add a dark mode",
+        # A second type: which of them decides the version is for a person.
+        "[fix] feat: add a dark mode",
+        "Docs: fix: the guide",
+        "Fix: Feat! the crash",
+        # Nothing that describes the change.
+        "feat:",
+        "feat: ...",
+        "[feat]",
+        "feat(settings)!:",
+        # The breaking mark in a place that no rule of the form moves it from.
+        "feat!(settings): drop the old settings",
+        # Longer than the coach shows, so the suggestion cuts its words.
+        "Feat: " + "x" * 300,
+        # Also where the cut falls just before a space and so stays within the length.
+        "Feat: " + "a" * 193 + " " + "b" * 40,
+    ],
+)
+def test_the_fix_bot_leaves_every_other_title_to_a_person(title: str) -> None:
+    assert corrected_title(title, "feat/branch") == ""
+
+
+def test_a_sentence_with_the_name_of_a_type_and_a_dash_keeps_its_words() -> None:
+    assert (
+        suggest_title("test-driven development of the CLI", "docs/guide")
+        == "docs: test-driven development of the CLI"
+    )
+
+
+def test_a_tag_in_brackets_stays_in_the_suggestion() -> None:
+    assert suggest_title("[Fix #123] crash on save", "feat/save") == (
+        "feat: [Fix #123] crash on save"
+    )
+    assert suggest_title("[Test PR] add a mode", "") == "feat: [Test PR] add a mode"
+
+
+def test_the_coach_knows_the_pattern_of_the_check_of_the_title() -> None:
+    assert TITLE
+    assert PASSING_TITLE.pattern == TITLE[1]
+
+
+@given(
+    st.from_regex(
+        r"\[?(feat|Fix|DOCS|test|ci)(\([^)\n]*\))?\]?!?( ?[:\]] ?| - | )?[^\n]*",
+        fullmatch=True,
+    ),
+    st.text(),
+)
+def test_a_corrected_title_passes_with_its_type_and_its_breaking_mark(
+    title: str, branch: str
+) -> None:
+    corrected = corrected_title(title, branch)
+    if not corrected:
+        return
+    # The check passes, so the bot doesn't start again, and has nothing more to say.
+    assert PASSING_TITLE.match(corrected)
+    assert corrected_title(corrected, branch) == ""
+    # It changes the form alone: the type that the title names and its breaking mark.
+    parts = TITLE_PARTS.match(clean(title, 200))
+    assert parts
+    head = corrected.partition(":")[0]
+    assert corrected.startswith(parts[1].lower())
+    assert ("!" in head) == bool(parts[3])
 
 
 # ---------------------------------------------------------------- the report
@@ -1919,6 +2057,27 @@ def test_the_report_names_the_commit_of_the_fix_bot(count: int) -> None:
         assert "`f10.py`" not in note[1]
 
 
+def test_the_report_asks_to_read_the_draft_that_the_bot_committed() -> None:
+    github = FakeGitHub()
+    github.commit = {
+        "commit": {"message": f"{DRAFT_HEADLINE}\n\nMade from the title"},
+        "author": {"login": "app[bot]", "type": "Bot"},
+        "files": [{"filename": "changelog.d/dark-mode.md"}],
+    }
+
+    body = (run_report(github, 42), body_of(github))[1]
+
+    note = re.search(r"📝 (.+)\n", body)
+    assert note
+    assert note[1] == (
+        f"**The fix bot drafted the entry of the changelog** in {SHA[:7]}: "
+        "`changelog.d/dark-mode.md`, from the title. Read it, and say in the words of "
+        "a user what changes for them; pull the branch before you push again."
+    )
+    # It is no fix of the checks, of which the report says something else.
+    assert "committed the automatic fixes" not in body
+
+
 def test_a_commit_of_another_bot_or_of_a_person_is_no_fix() -> None:
     github = FakeGitHub()
     github.commit = {"commit": {"message": FIX_HEADLINE}, "author": {"type": "User"}}
@@ -2238,7 +2397,7 @@ def test_report_from_the_command_line_with_its_parts(tmp_path: Path) -> None:
     assert "| `src/app.py` | 0.00 % | 100.00 % |" in body
     assert "#### Website\n\n🌐 The check *docs* has kept no build" in body
     assert (
-        "- [`docs/guide.md`](https://dennis-otto.github.io/repo-blueprint/guide/)"
+        "- [`docs/guide.md`](https://dennis-otto.github.io/repo-blueprint/guide.html)"
         in body
     )
 
