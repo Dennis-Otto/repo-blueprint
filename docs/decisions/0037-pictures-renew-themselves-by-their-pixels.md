@@ -1,6 +1,6 @@
 # Pictures renew themselves by their pixels, through one pull request of a bot
 
-- Status: accepted, amended by [0067](0067-every-kind-photographs-itself-in-docker-with-the-playwright-of-the-browser.md), with which a new repository photographs its website and, by its kind, its integration or app, and the job *render* checks out the whole history
+- Status: accepted, amended by [0067](0067-every-kind-photographs-itself-in-docker-with-the-playwright-of-the-browser.md), with which a new repository photographs its website and, by its kind, its integration or app, and the job *render* checks out the whole history, and by [0106](0106-the-screenshot-bot-corrects-the-sizes-that-pages-name.md), with which the job *pull-request* also corrects the sizes on the pages
 - Date: 2026-10-18
 
 ## Context
@@ -29,7 +29,7 @@ Option 2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-the-screenshots-renew-themselves.dark.svg">
-  <img src="../images/diagrams/how-the-screenshots-renew-themselves.svg" alt="How the screenshots renew themselves: After a change of main that touches a file of .github/screenshots-paths.txt, after every release, every week and on demand, the screenshot bot looks for scripts/screenshots.sh; without it, the bot renders nothing. The script renders the pictures without secrets, and each picture whose pixels stayed the same keeps its committed file. When pixels changed, one pull request from bot/screenshots holds the new pictures and merges itself once every check passes; when main looks as rendered, the bot closes it. So every picture shows the project as it is.">
+  <img src="../images/diagrams/how-the-screenshots-renew-themselves.svg" alt="How the screenshots renew themselves: After a change of main that touches a file of .github/screenshots-paths.txt, after every release, every week and on demand, the screenshot bot looks for scripts/screenshots.sh; without it, the bot renders nothing. The script renders the pictures without secrets, and each picture whose pixels stayed the same keeps its committed file. When pixels changed, one pull request from bot/screenshots holds the new pictures and the width and height that the pages name for them, and merges itself once every check passes; when main looks as rendered, the bot closes it. So every picture shows the project as it is.">
 </picture>
 
 ## Consequences

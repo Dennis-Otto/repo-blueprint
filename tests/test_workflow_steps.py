@@ -1484,7 +1484,7 @@ def test_a_picture_bot_commits_on_a_branch_of_its_own_and_merges_itself(
     assert done.read_by("pr (create|edit)", "--body-file") == ["The report\n"]
     assert done.commands[-1] == f"pr merge {number} --auto --squash"
     assert f"#{number} from {branch}, has the commit c2" in done.summary
-    assert "python3 blueprint.py screenshots parts" in commits
+    assert "python3 blueprint.py --repo o/r screenshots parts" in commits
 
 
 @WITH_JQ

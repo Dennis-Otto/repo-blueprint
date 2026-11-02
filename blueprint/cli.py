@@ -545,14 +545,22 @@ def screenshots_command(arguments: argparse.Namespace, root: Path) -> int:
             )
             return 2
         print(screenshots.summary(found), end="")
+        if arguments.action == "restore":
+            repository = arguments.repo or screenshots.repository_of(root)
+            pages = screenshots.correct_work_tree(root, found, repository)
+            corrected = screenshots.corrections(pages)
+            if corrected:
+                print(f"\n{corrected}", end="")
         return 0
+    if arguments.action == "commit" and not arguments.repo:
+        print("blueprint.py: screenshots commit needs --repo", file=sys.stderr)
+        return 2
+    repository = arguments.repo or screenshots.repository_of(root)
+    pages = screenshots.pages_of_folder(root, arguments.folder, repository)
     if arguments.action == "parts":
-        print(len(screenshots.parts(arguments.folder)))
+        print(len(screenshots.parts(arguments.folder, pages=pages)))
         return 0
     if arguments.action == "commit":
-        if not arguments.repo:
-            print("blueprint.py: screenshots commit needs --repo", file=sys.stderr)
-            return 2
         request = screenshots.commit_request(
             arguments.folder,
             arguments.repo,
@@ -561,11 +569,12 @@ def screenshots_command(arguments: argparse.Namespace, root: Path) -> int:
             arguments.headline,
             arguments.body,
             arguments.part,
+            pages,
         )
         print(json.dumps(request))
         return 0
     text = screenshots.report(
-        arguments.folder, arguments.sha, arguments.run, arguments.script
+        arguments.folder, arguments.sha, arguments.run, arguments.script, pages
     )
     print(text, end="")
     return 0
@@ -1611,7 +1620,8 @@ def add_screenshots_parsers(
     screenshots_actions.add_parser(
         "restore",
         help="give each picture whose pixels the script didn't change its committed "
-        "file back, and list the others",
+        "file back, list the others, and correct the width and height that the pages "
+        "name for one of another size",
     )
     shots_keep_parser = screenshots_actions.add_parser(
         "keep",
@@ -1620,13 +1630,16 @@ def add_screenshots_parsers(
     )
     shots_keep_parser.add_argument("folder", type=Path)
     parts_parser = screenshots_actions.add_parser(
-        "parts", help="how many commits carry the pictures of a folder of keep"
+        "parts",
+        help="how many commits carry the pictures of a folder of keep and the pages "
+        "that they correct",
     )
     parts_parser.add_argument("folder", type=Path)
     shots_commit_parser = screenshots_actions.add_parser(
         "commit",
         help="the request to GitHub's GraphQL API that commits a part of what a "
-        "folder of keep holds onto a branch of --repo, once it is checked",
+        "folder of keep holds, once it is checked, and of the pages that it corrects "
+        "onto a branch of --repo",
     )
     shots_commit_parser.add_argument("folder", type=Path)
     shots_commit_parser.add_argument("--branch", required=True)
