@@ -173,6 +173,19 @@ When the token of the app fails, as for an app that isn't installed on the repos
 
 Where a Renovate workflow runs, the bot-health bot keeps one issue open with the warnings and errors of Renovate.
 
+## Renovate leaves a branch alone
+
+**What you see:** a pull request of Renovate falls behind `main` or stays on an old version, and its description says that Renovate won't rebase it because someone may have edited it.
+
+**Why:** Renovate rebases a branch only as long as every commit on it counts as its own, and takes any other commit for work that it must not overwrite. The bots of the repository don't count as someone else: they commit as the release app, which is the address that Renovate runs under in a Renovate workflow, and which the rules of the blueprint name for the Mend Renovate app ([decision 0103](decisions/0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). A person does count, also with *Update branch* on the page of the pull request or `gh pr update-branch`: GitHub makes that merge in their name, and Renovate can't tell it from an edit.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/when-renovate-leaves-a-branch-alone.dark.svg">
+  <img src="images/diagrams/when-renovate-leaves-a-branch-alone.svg" alt="When Renovate leaves a branch alone: Renovate compares the author and the committer of every commit on its branch with its own address and its rule gitIgnoredAuthors. A commit of Renovate lets it go on rebasing, and so does one of the fix bot, the branch bot or another bot, which commit as the release app: where Renovate runs as the release app, that is its own address, and for the Mend Renovate app the rules of the blueprint name it. A commit of anyone else, also a merge that a person starts with Update branch, counts as an edit, and Renovate leaves the branch alone until a person ticks the box in the pull request, which builds the branch anew without that commit.">
+</picture>
+
+**What to do:** tick the box *If you want to rebase/retry this PR, check this box* in the description of the pull request. Renovate builds the branch anew in its next run, without the commit of the person, so move anything that must stay to a pull request of its own first. To bring a branch of Renovate up to `main`, leave it to Renovate and the branch bot rather than *Update branch*.
+
 ## OSV-Scanner reports a version that another package pins
 
 **What you see:** the check *osv-scanner* fails, and code scanning has open alerts of OSV-Scanner for a lock file whose dependency no update can move, so that the Findings workflow fails on `main` too. Renovate opens no pull request for them, and the issue *Renovate logs problems* lists `Detected empty commit - aborting git push` for a branch such as `renovate/pypi-pillow-vulnerability`. Home Assistant, for example, pins the Pillow and the uv that the tests of an integration install.

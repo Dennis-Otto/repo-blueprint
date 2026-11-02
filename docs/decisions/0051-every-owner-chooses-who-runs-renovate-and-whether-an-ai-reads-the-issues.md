@@ -1,6 +1,6 @@
 # Every owner chooses who runs Renovate, and whether an AI reads the issues
 
-- Status: accepted, amended by [0057](0057-renovate-keeps-no-dependency-dashboard.md), with which the checklist ticks Renovate off by its pull requests, and by [0094](0094-each-run-of-renovate-has-a-token-for-its-repository-alone.md), with which the hub runs Renovate once for each repository, with a token for it alone
+- Status: accepted, amended by [0057](0057-renovate-keeps-no-dependency-dashboard.md), with which the checklist ticks Renovate off by its pull requests, by [0103](0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md), whose rule in the rules of the blueprint takes the place of the line in the checklist, and by [0094](0094-each-run-of-renovate-has-a-token-for-its-repository-alone.md), with which the hub runs Renovate once for each repository, with a token for it alone
 - Date: 2026-10-18
 
 ## Context

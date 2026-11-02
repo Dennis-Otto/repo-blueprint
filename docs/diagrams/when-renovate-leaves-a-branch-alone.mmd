@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: When Renovate leaves a branch alone
+    accDescr: Renovate compares the author and the committer of every commit on its branch with its own address and its rule gitIgnoredAuthors. A commit of Renovate lets it go on rebasing, and so does one of the fix bot, the branch bot or another bot, which commit as the release app: where Renovate runs as the release app, that is its own address, and for the Mend Renovate app the rules of the blueprint name it. A commit of anyone else, also a merge that a person starts with Update branch, counts as an edit, and Renovate leaves the branch alone until a person ticks the box in the pull request, which builds the branch anew without that commit.
+
+    commit["A commit on a branch of Renovate"]
+    who{{"`**Whose is it?**<br>Renovate compares its author and its committer`"}}
+    own["Renovate's own address"]
+    bots["The release app: the fix bot, the branch bot and the others<br>self and hub: Renovate's own address<br>mend: the rule gitIgnoredAuthors of the blueprint"]
+    person(["Anyone else,<br>also a person's Update branch"])
+    rebases["Renovate goes on rebasing and updating the branch"]
+    edited["Renovate takes it for an edit and leaves the branch alone"]
+    box(["A person ticks the box in the pull request"])
+
+    commit --> who
+    who --> own & bots & person
+    own & bots --> rebases
+    person --> edited --> box
+    box -- "the branch is built anew, without that commit" --> rebases
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class commit,who,own,bots bot
+    class person,edited,box person
+    class rebases done

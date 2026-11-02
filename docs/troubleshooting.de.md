@@ -173,6 +173,19 @@ Scheitert das Token der App, etwa bei einer App, die im Repository nicht install
 
 Wo ein Renovate-Workflow läuft, hält der Bot-Health-Bot ein Issue mit den Warnungen und Fehlern von Renovate offen.
 
+## Renovate lässt einen Branch in Ruhe
+
+**Was du siehst:** Ein Pull Request von Renovate fällt hinter `main` zurück oder bleibt auf einer alten Version, und seine Beschreibung sagt, dass Renovate ihn nicht rebased, weil ihn vielleicht jemand bearbeitet hat.
+
+**Warum:** Renovate rebased einen Branch nur, solange jeder Commit darauf als sein eigener gilt, und hält jeden anderen für Arbeit, die es nicht überschreiben darf. Die Bots des Repositorys gelten nicht als jemand anderes: Sie committen als die Release-App, und das ist die Adresse, unter der Renovate in einem Renovate-Workflow läuft und die die Regeln des Blueprints für die Mend-Renovate-App nennen ([Entscheidung 0103](decisions/0103-renovate-takes-the-commits-of-the-release-app-for-its-own.md)). Eine Person gilt als jemand anderes, auch mit *Update branch* auf der Seite des Pull Requests oder `gh pr update-branch`: GitHub macht diesen Merge in ihrem Namen, und Renovate kann ihn nicht von einer Bearbeitung unterscheiden.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/when-renovate-leaves-a-branch-alone.de.dark.svg">
+  <img src="images/diagrams/when-renovate-leaves-a-branch-alone.de.svg" alt="Wann Renovate einen Branch in Ruhe lässt: Renovate vergleicht Autor und Committer jedes Commits auf seinem Branch mit seiner eigenen Adresse und seiner Regel gitIgnoredAuthors. Bei einem Commit von Renovate rebased es weiter, ebenso bei einem des Fix-Bots, des Branch-Bots oder eines anderen Bots, die als Release-App committen: Wo Renovate als Release-App läuft, ist das seine eigene Adresse, und für die Mend-Renovate-App nennen sie die Regeln des Blueprints. Ein Commit von jemand anderem, auch ein Merge, den eine Person mit Update branch startet, zählt als Bearbeitung, und Renovate lässt den Branch in Ruhe, bis eine Person das Kästchen im Pull Request ankreuzt, was den Branch ohne diesen Commit neu baut.">
+</picture>
+
+**Was zu tun ist:** Kreuze in der Beschreibung des Pull Requests das Kästchen *If you want to rebase/retry this PR, check this box* an. Renovate baut den Branch in seinem nächsten Lauf neu, ohne den Commit der Person; verschiebe also zuerst alles, was bleiben muss, in einen eigenen Pull Request. Um einen Branch von Renovate auf den Stand von `main` zu bringen, überlass das Renovate und dem Branch-Bot statt *Update branch*.
+
 ## OSV-Scanner meldet eine Version, die ein anderes Paket festlegt
 
 **Was du siehst:** Die Prüfung *osv-scanner* scheitert, und Code Scanning hat offene Alerts von OSV-Scanner für eine Lock-Datei, deren Abhängigkeit kein Update bewegen kann, sodass auch der Findings-Workflow auf `main` scheitert. Renovate öffnet keinen Pull Request für sie, und das Issue *Renovate logs problems* nennt `Detected empty commit - aborting git push` für einen Branch wie `renovate/pypi-pillow-vulnerability`. Home Assistant zum Beispiel legt das Pillow und das uv fest, die die Tests einer Integration installieren.

@@ -193,7 +193,7 @@ def renovate_runner(root: Path) -> str:
     return match.group(1) if match and match.group(1) in RENOVATE_RUNNERS else "hub"
 
 
-def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
+def renovate(api: Api, repo: str, root: Path) -> Step:
     """Renovate, which runs once it has opened a pull request, and how it comes to
     run."""
     pulls = api.get(f"repos/{repo}/pulls?state=all&per_page={LATEST}")
@@ -215,7 +215,6 @@ def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
             "Install the Mend Renovate app on this repository; it reads"
             " .github/renovate.json5 and opens its pull requests from its first run:",
             f"{MEND_APP}/installations/new",
-            *ignored_author(api, settings),
         ]
     else:
         how = [
@@ -224,32 +223,6 @@ def renovate(api: Api, repo: str, settings: Settings, root: Path) -> Step:
             " run after the installation opens its pull requests."
         ]
     return Step("Renovate runs: it has opened a pull request", running, "\n".join(how))
-
-
-def ignored_author(api: Api, settings: Settings) -> list[str]:
-    """The rule that lets the Mend Renovate app take the commits of the release app,
-    with which the branch bot and the fix bot update its branches, for none of
-    someone else, which would stop it from rebasing them."""
-    name = str(settings.variables.get("RELEASE_APP", "")).strip()
-    user = api.get(f"users/{name}%5Bbot%5D") if name else None
-    number = user.get("id") if isinstance(user, dict) else None
-    known = number is not None
-    address = (
-        f"{number}+{name}[bot]" if known else "ID+NAME[bot]"
-    ) + "@users.noreply.github.com"
-    return [
-        "The branch bot and the fix bot commit to its branches as the release app;"
-        " so that Renovate goes on rebasing them, add to .github/renovate.json5:",
-        f'gitIgnoredAuthors: ["{address}"]',
-        *(
-            []
-            if known
-            else [
-                "with the name of the release app for NAME, and for ID the number of"
-                " its bot user: gh api users/NAME%5Bbot%5D --jq .id"
-            ]
-        ),
-    ]
 
 
 def listed(access: str) -> str:
@@ -366,7 +339,7 @@ def checklist(
         ),
         installed,
         DEPENDABOT_ALERTS,
-        renovate(api, repo, settings, root),
+        renovate(api, repo, root),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
             "(the issue assistant closes them with the release)",
