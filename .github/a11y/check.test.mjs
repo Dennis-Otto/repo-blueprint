@@ -118,6 +118,19 @@ test("every page is checked in the scheme that the system or the toggle shows", 
   assert.match(unshown.help, /doesn't show the dark scheme/);
 });
 
+test("the text inside a fold of the page of the automation is checked as well", async (t) => {
+  const folded = await mkdtemp(path.join(tmpdir(), "a11y-fold-"));
+  t.after(() => rm(folded, { recursive: true, force: true }));
+  const fold = '<details class="blueprint-fold"><summary>Title</summary><p>Faint words.</p></details>';
+  await writeFile(path.join(folded, "index.html"), page("", FOLLOWS).replace("<p></p>", fold));
+
+  const { findings } = await checkSite(browser, folded);
+
+  const faint = findings.find((finding) => finding.rule === "color-contrast");
+  assert.equal(faint.scheme, "dark");
+  assert.ok(faint.elements.some((element) => /\bp\b/.test(element)), faint.elements.join());
+});
+
 test("the pages named are checked alone", async () => {
   const { pages, same } = await checkSite(browser, site, ["single.html"]);
 

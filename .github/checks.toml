@@ -153,9 +153,10 @@ checks every link and anchor of the built pages, also those written in HTML, suc
 assistants, and `blueprint.py site-check` what the hooks of the website promise, such
 as a sitemap in every folder of pages, the 404 page in the default language and that
 map, that no page loads more than 1,200 KB at once, as it names a page that
-does with what it loads the most, and that every page shows each picture of its
+does with what it loads the most, that every page shows each picture of its
 Markdown, the parts of the README included, with no empty paragraph where a plugin
-took one out; `scripts/check-site.sh` adds the checks of the project. axe-core opens
+took one out, and that the page of the automation shows each workflow in a fold and
+the search finds its text; `scripts/check-site.sh` adds the checks of the project. axe-core opens
 the pages that differ from `main` in Chrome, and every page when a stylesheet, a script
 or `mkdocs.yml` differs, and names each serious or critical violation of WCAG 2.2 A or
 AA that `.github/a11y-accepted.toml` doesn't accept, at the Markdown of its page, or at

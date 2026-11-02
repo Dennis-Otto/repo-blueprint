@@ -802,6 +802,14 @@ def test_the_stylesheet_makes_the_heading_of_a_fold_its_title() -> None:
         "  margin: 0;\n"
         "}\n"
     ) in css
+    # A link on the same page scrolls to the fold, whose title stays below the header.
+    assert (
+        ".md-typeset details.blueprint-fold {\n"
+        "  font-size: inherit;\n"
+        "  margin: 0.4em 0;\n"
+        "  scroll-margin-top: 3rem;\n"
+        "}\n"
+    ) in css
 
 
 # The pictures of a page
