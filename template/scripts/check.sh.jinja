@@ -203,6 +203,20 @@ else
   echo "Python 3.12 or newer is not installed here; the CI checks the pages."
 fi
 
+step "Files of the project"
+# What a release of the blueprint moves in a file that an update leaves as it is, such
+# as the group of a label in .github/labels.toml. migrate --fix moves it, and the fix bot
+# commits that onto the pull request of the update. The Python and blueprint.py of the
+# step Pages in one column.
+if [[ -n "$python" ]]; then
+  "$python" "$tool" migrate
+elif [[ -n "${CI:-}" ]]; then
+  echo "Checking the files of the project needs Python 3.12 or newer, which this runner lacks."
+  exit 1
+else
+  echo "Python 3.12 or newer is not installed here; the CI checks the files of the project."
+fi
+
 step "Changelog fragments"
 # Every fragment of changelog.d/ as the release takes it in, those that wait on main
 # for the next release too: rules that get stricter, in blueprint.py or in an update
