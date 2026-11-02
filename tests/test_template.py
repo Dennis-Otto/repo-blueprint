@@ -44,6 +44,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
+from PIL import Image
 from shared import copy_of, git_environment, load_yaml, once, run_folder
 from shell import BASH, in_bash
 from workflow_steps import (
@@ -16563,6 +16564,81 @@ class WebsiteFile:
         self.site = (dest_dir, use_directory_urls)
 
 
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_screenshot_bot_of_every_kind_corrects_the_sizes_on_its_pages(
+    projects: Mapping[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # A picture of another size, on a page that names its width and height, as
+    # paperless-unified-search#274 had it: in a checkout of the patterns of the job
+    # with the release app, the tool of each kind of project reads the pages of main,
+    # and the pull request holds the new numbers.
+    workflow = parse(
+        (projects[kind] / ".github/workflows/screenshot-bot.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    patterns = next(
+        step["with"]["sparse-checkout"]
+        for step in steps_using(job_in(workflow, "pull-request"), "actions/checkout")
+    )
+    project = tmp_path / "project"
+    shutil.copytree(projects[kind], project)
+
+    def picture(size: tuple[int, int]) -> bytes:
+        out = io.BytesIO()
+        Image.new("RGB", size, (82, 108, 254)).save(out, "PNG")
+        return out.getvalue()
+
+    (project / "docs/shot.png").write_bytes(picture((660, 788)))
+    (project / "docs/shows.md").write_text(
+        '![Shot](https://github.com/o/r/raw/main/docs/shot.png){ width="660" height="788" }\n',
+        encoding="utf-8",
+    )
+
+    def run(*command: str) -> str:
+        return subprocess.run(
+            command, cwd=project, capture_output=True, encoding="utf-8", check=True
+        ).stdout
+
+    run("git", "init", "--quiet")
+    run(
+        "git",
+        "add",
+        "--force",
+        "docs/shot.png",
+        "docs/shows.md",
+        ".github/blueprint.py",
+    )
+    run("git", "add", "--force", ".github/blueprint")
+    run(
+        "git",
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@e",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "Start",
+    )
+    (project / "docs/shot.png").write_bytes(picture((660, 878)))
+    kept = tmp_path / "kept"
+    tool = [sys.executable, ".github/blueprint.py", "--repo", "o/r", "screenshots"]
+    run(*tool, "keep", str(kept))
+
+    run("git", "checkout", "--", ".")
+    run("git", "sparse-checkout", "set", "--no-cone", *patterns.split())
+    assert not (project / "docs/shot.png").exists()
+    assert (project / "docs/shows.md").is_file()
+    assert run(*tool, "parts", str(kept)) == "1\n"
+    show = ("report", str(kept), "--sha", "a" * 40, "--run", "https://run")
+    assert "| `docs/shows.md` | `docs/shot.png` | 660 x 788 | 660 x 878 |" in run(
+        *tool, *show
+    )
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_website_shows_a_new_screenshot_of_its_readme_from_the_checkout(
     projects: dict[str, Path], kind: str, tmp_path: Path
@@ -17156,7 +17232,12 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     opener = job_in(parsed, "pull-request")
     assert opener["environment"]["name"] == "release"
     assert "bash scripts/screenshots.sh" not in values_of(opener)
-    assert ".github/blueprint\nblueprint\n" in [
+    # Its tool and the Markdown of the pages, whose named sizes it corrects from the
+    # numbers of those pictures; no picture of main.
+    assert (
+        "/.github/blueprint.py\n/.github/blueprint/\n/blueprint.py\n/blueprint/\n"
+        "/*.md\n/docs/**/*.md\n"
+    ) in [
         step.get("with", {}).get("sparse-checkout")
         for step in steps_using(opener, "actions/checkout")
     ]
