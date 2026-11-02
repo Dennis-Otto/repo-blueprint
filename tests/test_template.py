@@ -16596,9 +16596,9 @@ def test_the_screenshot_bot_of_every_kind_corrects_the_sizes_on_its_pages(
         encoding="utf-8",
     )
 
-    def run(*command: str) -> str:
+    def run(*command: str, cwd: Path = project) -> str:
         return subprocess.run(
-            command, cwd=project, capture_output=True, encoding="utf-8", check=True
+            command, cwd=cwd, capture_output=True, encoding="utf-8", check=True
         ).stdout
 
     run("git", "init", "--quiet")
@@ -16628,14 +16628,18 @@ def test_the_screenshot_bot_of_every_kind_corrects_the_sizes_on_its_pages(
     tool = [sys.executable, ".github/blueprint.py", "--repo", "o/r", "screenshots"]
     run(*tool, "keep", str(kept))
 
-    run("git", "checkout", "--", ".")
-    run("git", "sparse-checkout", "set", "--no-cone", *patterns.split())
-    assert not (project / "docs/shot.png").exists()
-    assert (project / "docs/shows.md").is_file()
-    assert run(*tool, "parts", str(kept)) == "1\n"
+    # A clone in a folder of its own, so that only the files of the patterns exist:
+    # the tool can't lean on a file that the job doesn't check out.
+    clone = tmp_path / "clone"
+    run("git", "clone", "--quiet", "--no-checkout", str(project), str(clone))
+    run("git", "sparse-checkout", "set", "--no-cone", *patterns.split(), cwd=clone)
+    run("git", "checkout", "--quiet", cwd=clone)
+    assert not (clone / "docs/shot.png").exists()
+    assert (clone / "docs/shows.md").is_file()
+    assert run(*tool, "parts", str(kept), cwd=clone) == "1\n"
     show = ("report", str(kept), "--sha", "a" * 40, "--run", "https://run")
     assert "| `docs/shows.md` | `docs/shot.png` | 660 x 788 | 660 x 878 |" in run(
-        *tool, *show
+        *tool, *show, cwd=clone
     )
 
 
