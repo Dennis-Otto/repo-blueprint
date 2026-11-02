@@ -941,6 +941,7 @@ class FakeGitHub:
                 "number": number,
                 "state": "open",
                 "labels": [{"name": label} for label in labels],
+                "base": {"ref": "main"},
                 "head": {
                     "sha": SHA,
                     "ref": "feature",
@@ -2756,6 +2757,9 @@ def test_the_draft_of_an_entry_says_what_the_title_says(
         "fix: the <details> stay open",
         "fix: thank @someone for the report",
         "feat: a [link](https://example.com) of its own",
+        "fix: see https://example.com",
+        "fix: see HTTP://example.com",
+        "feat: open www.example.com",
     ],
 )
 def test_a_title_that_could_be_more_than_words_gets_no_draft(title: str) -> None:
@@ -2771,7 +2775,7 @@ def test_every_draft_is_a_fragment_that_the_release_takes_in(
         return
     assert fragment_problems([Fragment("changelog.d/a.md", text)], "") == []
     assert text.count("\n") == 3
-    assert not re.search("[<@]|\\]\\(", text)
+    assert not re.search(r"[<@]|\]\(|://|\bwww\.", text, re.I)
 
 
 @pytest.mark.parametrize(
@@ -2987,6 +2991,18 @@ def test_the_draft_keeps_clear_of_the_files_of_the_commit() -> None:
 
     assert found.path == "changelog.d/dark-mode-2.md"
     assert "Another card" not in found.draft
+
+
+def test_the_draft_keeps_clear_of_a_fragment_of_the_base_branch() -> None:
+    # A branch that is behind has no such file, but it would conflict with main.
+    github = FakeGitHub()
+    own_pull(github)
+    github.files = {"README.md": b"# A project\n"}
+    github.trees["main"] = {"changelog.d/dark-mode.md": b"### Features\n\n- A card.\n"}
+
+    found = own_fix(api_of(github), REPO, SHA, 42)
+
+    assert found.path == "changelog.d/dark-mode-2.md"
 
 
 @pytest.mark.parametrize(

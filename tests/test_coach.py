@@ -950,6 +950,15 @@ def test_every_suggested_title_passes(title: str, branch: str) -> None:
         ("[Docs] update README", "docs: update README"),
         ("[test]: cover the CLI", "test: cover the CLI"),
         ("[test] cover the CLI", "test: cover the CLI"),
+        ("[feat!] drop the old look", "feat!: drop the old look"),
+        ("[Fix(UI)] the crash", "fix(ui): the crash"),
+        # A name keeps its capital, and the letter of a single word goes.
+        ("Feat: GitHub support", "feat: GitHub support"),
+        ("Fix: iOS crash", "fix: iOS crash"),
+        ("Fix: Home Assistant 2026.1 crash", "fix: Home Assistant 2026.1 crash"),
+        ("Docs: X11 forwarding", "docs: X11 forwarding"),
+        ("Feat: A card for the dashboard", "feat: a card for the dashboard"),
+        ("Feat: Update", "feat: update"),
         ("Fix(Settings UI)!: Crash on save.", "fix(settings-ui)!: crash on save"),
         ("feat(settings) add a dark mode", "feat(settings): add a dark mode"),
         ("test(cli) cover the flags", "test(cli): cover the flags"),
@@ -991,6 +1000,16 @@ def test_the_form_of_a_title_that_names_its_type_is_for_the_fix_bot(
         "test-driven development of the CLI",
         "ci-friendly logs",
         "fix-up the docs",
+        # A bracket that holds more than its type: a tag of the author, not the type.
+        "[Test PR] feat: add a dark mode",
+        "[CI pipeline] speed up lint",
+        "[Fix #123] crash on save",
+        "[Fix: crash] on save",
+        "[feat add a dark mode",
+        # A second type: which of them decides the version is for a person.
+        "[fix] feat: add a dark mode",
+        "Docs: fix: the guide",
+        "Fix: Feat! the crash",
         # Nothing that describes the change.
         "feat:",
         "feat: ...",
@@ -1000,6 +1019,8 @@ def test_the_form_of_a_title_that_names_its_type_is_for_the_fix_bot(
         "feat!(settings): drop the old settings",
         # Longer than the coach shows, so the suggestion cuts its words.
         "Feat: " + "x" * 300,
+        # Also where the cut falls just before a space and so stays within the length.
+        "Feat: " + "a" * 193 + " " + "b" * 40,
     ],
 )
 def test_the_fix_bot_leaves_every_other_title_to_a_person(title: str) -> None:
@@ -1011,6 +1032,13 @@ def test_a_sentence_with_the_name_of_a_type_and_a_dash_keeps_its_words() -> None
         suggest_title("test-driven development of the CLI", "docs/guide")
         == "docs: test-driven development of the CLI"
     )
+
+
+def test_a_tag_in_brackets_stays_in_the_suggestion() -> None:
+    assert suggest_title("[Fix #123] crash on save", "feat/save") == (
+        "feat: [Fix #123] crash on save"
+    )
+    assert suggest_title("[Test PR] add a mode", "") == "feat: [Test PR] add a mode"
 
 
 def test_the_coach_knows_the_pattern_of_the_check_of_the_title() -> None:

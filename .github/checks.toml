@@ -111,7 +111,7 @@ docs = "https://reuse.software/tutorial/"
 autofix = """No command can: `REUSE.toml` gives every file the license and the copyright
 of the project, so what the check finds is a header of a file's own, and under which
 license a file stands is the decision of a person. Its fix is a text added to
-`LICENSES/` or deleted from it, and the bot never adds or deletes a file."""
+`LICENSES/` or deleted from it, and the bot adds or deletes no file of `LICENSES/`."""
 
 [check.markdown]
 title = "The Markdown of the documents"

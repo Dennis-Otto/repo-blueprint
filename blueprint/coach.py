@@ -72,6 +72,9 @@ PASSING_TITLE = re.compile(rf"^({'|'.join(TYPES)})(\([a-z0-9._/-]+\))?(!)?: .+")
 TITLE_PARTS = re.compile(
     r"^\[?([A-Za-z]+)(?:\(([^)]*)\))?\]?(!)?(\s*[:\]]\s*|\s+-\s*|\s+)(.*)$"
 )
+# A bracket at the start of a title that closes right after its first word, a scope and
+# a breaking mark. Any other holds a tag of its own, such as "[Test PR] feat: x".
+BRACKETED = re.compile(r"\[[A-Za-z]+(?:\([^)]*\))?!?\]")
 # How much of a title the coach shows; the bot never sets one that this cuts.
 TITLE_LENGTH = 200
 # The words that people use for a type instead of its name.
@@ -491,10 +494,35 @@ def html_code(text: str) -> str:
     return f"<code>{html.escape(clean(text, NAME_LENGTH))}</code>"
 
 
+def title_parts(text: str) -> re.Match[str] | None:
+    """The parts of a title, or nothing for one whose bracket is more than its type."""
+    if text[:1] == "[" and not BRACKETED.match(text):
+        return None
+    return TITLE_PARTS.match(text)
+
+
 def names_its_type(text: str, match: re.Match[str]) -> bool:
     """Whether the first word of a title is marked as its type, by a colon or a dash
     after it, brackets around it, a scope or a breaking mark: a sentence has none."""
     return bool(match[4].strip() or text[:1] == "[" or match[2] is not None or match[3])
+
+
+def marks_a_type(text: str) -> bool:
+    """Whether a text starts with the name of a type that it marks as its type."""
+    match = title_parts(text)
+    return bool(match and match[1].lower() in TYPES and names_its_type(text, match))
+
+
+def lowered(text: str) -> str:
+    """Words with a lower first letter, but not those of a name: a first word with other
+    capitals, as README or GitHub, or a next word with a capital, as Home Assistant."""
+    words = text.split()
+    first = words[0] if words else ""
+    if not first[:1].isupper() or not (len(first) == 1 or first[1:].islower()):
+        return text
+    if len(words) > 1 and words[1].istitle():
+        return text
+    return text[0].lower() + text[1:]
 
 
 def suggest_title(title: str, branch: str) -> str:
@@ -502,7 +530,7 @@ def suggest_title(title: str, branch: str) -> str:
     or the name of the branch, as feat/dark-mode, or from its words."""
     text = clean(title, TITLE_LENGTH)
     kind = scope = bang = ""
-    match = TITLE_PARTS.match(text)
+    match = title_parts(text)
     word = match[1].lower() if match else ""
     # A type that the title marks as one, a word for a type with a colon, or one that is
     # no word of a sentence without it.
@@ -523,10 +551,7 @@ def suggest_title(title: str, branch: str) -> str:
     if not kind:
         repair = re.search(r"\b(fix|fixes|fixed|bug|repair|crash|error)\b", text, re.I)
         kind = "fix" if repair else "feat"
-    text = text.rstrip(". ")
-    # A lower first letter, but not of a name in capitals, such as README or CI.
-    if text[:1].isupper() and not text[1:2].isupper():
-        text = text[0].lower() + text[1:]
+    text = lowered(text.rstrip(". "))
     return (
         f"{kind}{f'({scope})' if scope else ''}{bang}: {text or 'describe the change'}"
     )
@@ -536,16 +561,18 @@ def corrected_title(title: str, branch: str) -> str:
     """The title that the fix bot may set by itself, or nothing: the one that the coach
     suggests, for a title that names its type itself and differs only in its form. The
     type and the breaking mark decide the version, so the bot takes them from the title
-    as they stand. A word for a type, a type that the branch or the words would choose
-    and a title without words stay suggestions for a person."""
-    text = clean(title, TITLE_LENGTH + 1)
-    match = TITLE_PARTS.match(text)
+    as they stand. A word for a type, a type that the branch or the words would choose,
+    a title that names a second type and a title without words stay suggestions for a
+    person."""
+    # Its full length: clean with a limit may cut it to just that limit.
+    text = clean(title, len(title))
+    match = title_parts(text)
     if (
         match is None
         or PASSING_TITLE.match(title)
         or len(text) > TITLE_LENGTH
-        or match[1].lower() not in TYPES
-        or not names_its_type(text, match)
+        or not marks_a_type(text)
+        or marks_a_type(match[5])
         or not match[5].rstrip(". ")
     ):
         return ""

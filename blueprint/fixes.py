@@ -46,6 +46,7 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 from blueprint.bot_health import started_after
 from blueprint.changelog import FRAGMENT_NAME, FRAGMENTS
@@ -120,8 +121,9 @@ UPDATES = frozenset({"deps", "deps-dev"})
 DRAFT_KINDS = {"feat": "Features", "fix": "Bug fixes", "perf": "Performance"}
 DRAFT_BREAKING = "Breaking changes"
 # What a draft never holds, because it becomes a page and the notes of a release: HTML,
-# a mention and a link. Such a title stays for a person.
-NOT_WORDS = re.compile(r"[<@]|\]\(")
+# a mention and a link, also a bare address, which GitHub links by itself. Such a title
+# stays for a person.
+NOT_WORDS = re.compile(r"[<@]|\]\(|://|\bwww\.", re.I)
 # The longest name of a draft, without its end, and what GitHub takes for a title.
 DRAFT_NAME_LENGTH = 80
 LONGEST_TITLE = 256
@@ -815,8 +817,8 @@ def fragment_path(branch: str, taken: Iterable[str], number: int) -> str:
     """The path of a new fragment, which the bot builds itself: the name of the branch
     without its type, as the guide for the changelog asks, in the plain letters of a
     fragment; the number of the pull request for a branch that leaves none. A fragment
-    that the commit has already is the entry of another pull request, so the name then
-    takes an ending, and when it runs out of them, the bot adds nothing."""
+    that the commit or its base branch has already is the entry of another pull request,
+    so the name then takes an ending, and when it runs out of them, the bot adds nothing."""
     kind, _, rest = branch.partition("/")
     name = rest if rest and kind.lower() in (*TYPES, *ALIASES) else branch
     plain = re.sub(r"[^A-Za-z0-9._-]+", "-", name)[:DRAFT_NAME_LENGTH]
@@ -875,7 +877,11 @@ def own_fix(api: Api, repo: str, sha: str, number: int | None) -> OwnFix:
         corrected or title, pull, paged(api, f"repos/{repo}/pulls/{number}/files")
     ) and not drafted_before(api, repo, number):
         draft = draft_of(corrected or title)
-        path = fragment_path(branch, files_of(api, repo, sha), number) if draft else ""
+        if draft:
+            # The base branch too: a name that only it has would be a conflict.
+            base = quote(str(pull["base"]["ref"]), safe="")
+            taken = {*files_of(api, repo, sha), *files_of(api, repo, base)}
+            path = fragment_path(branch, taken, number)
     if not corrected and not path:
         return OwnFix(
             f"#{number} has nothing that the bot corrects or drafts by itself; the "

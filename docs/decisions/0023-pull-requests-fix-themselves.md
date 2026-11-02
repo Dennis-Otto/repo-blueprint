@@ -1,6 +1,6 @@
 # Pull requests fix what a command can fix by themselves
 
-- Status: accepted
+- Status: accepted, amended by [0110](0110-the-fix-bot-corrects-the-form-of-a-title-and-drafts-one-entry.md), with which the bot adds one draft of an entry that it writes itself
 - Date: 2026-10-14
 
 ## Context
