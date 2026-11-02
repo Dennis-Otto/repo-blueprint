@@ -108,7 +108,7 @@ jobs:
         timeout-minutes: 2
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: requirements-dev.txt
@@ -118,7 +118,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: requirements-dev.txt
@@ -203,7 +203,7 @@ jobs:
         timeout-minutes: 2
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: |
@@ -215,7 +215,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: |
@@ -616,7 +616,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.4"
+          version: "0.13.5"
           enable-cache: true
           prune-cache: true
           cache-dependency-glob: |
