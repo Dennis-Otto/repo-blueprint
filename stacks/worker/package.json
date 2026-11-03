@@ -1,0 +1,20 @@
+{
+  "name": "blueprint-cloudflare-worker",
+  "version": "0.0.0",
+  "description": "Development tools of the Cloudflare Workers of the blueprint",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@cloudflare/vitest-plugin": "^1.5.1",
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.157.0"
+  }
+}

@@ -1,0 +1,63 @@
+# Releases and Cloudflare
+
+**{= project_name =}** runs on [Cloudflare Workers](https://developers.cloudflare.com/workers/). Cloudflare builds it from this repository with [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), and only a release goes live: no key of Cloudflare is stored in GitHub.
+
+## How a change goes live
+
+| What happens on `main` | What Cloudflare does |
+| --- | --- |
+| A pull request merges | Workers Builds builds the commit and `npm run deploy` uploads it as a version without traffic, which the dashboard lists with its commit |
+| The release pull request `chore: release X.Y.Z` merges | Workers Builds builds the commit and `npm run deploy` deploys it: version X.Y.Z goes live, tagged `vX.Y.Z` |
+
+The release workflow tags the same commit as `vX.Y.Z` and publishes the release on GitHub, with its changelog, its SBOMs and the signed provenance of its build, as [SECURITY.md](https://github.com/{= owner =}/{= project_slug =}/blob/main/SECURITY.md#verify-a-release) shows. So the Worker that runs is always the code of the latest release, and the dashboard of Cloudflare names its version by the tag of that release. `scripts/deploy-worker.sh`, which `npm run deploy` runs, decides between the two: it deploys only a commit of `main` whose subject names the release of the version in `package.json`, and uploads every other one.
+
+## Set up Cloudflare once
+
+You need an account of Cloudflare; the free plan runs a Worker. These steps take about ten minutes, and nothing of them is stored in GitHub.
+
+1. **Create the Worker** with its first deployment, from your machine, which signs in to Cloudflare in the browser and keeps the sign-in there:
+
+    ```sh
+    npm ci --ignore-scripts
+    npx wrangler login
+    npx wrangler deploy
+    ```
+
+    The Worker gets the name `{= project_slug =}` of `wrangler.jsonc`, which Workers Builds needs as well.
+2. **Connect the repository:** in the dashboard of Cloudflare, open *Workers & Pages*, the Worker `{= project_slug =}`, *Settings* and *Builds*, and choose *Connect*. Install the app *Cloudflare Workers and Pages* on GitHub for this repository only, and choose the repository `{= owner =}/{= project_slug =}`.
+3. **Set the build** as follows:
+
+    | Setting | Value |
+    | --- | --- |
+    | Branch | `main` |
+    | Build command | `npm ci --ignore-scripts` |
+    | Deploy command | `npm run deploy` |
+    | Builds for non-production branches | off: the checks of each pull request run in GitHub |
+    | Root directory | empty, the root of the repository |
+
+4. **Put each secret of the Worker into Cloudflare,** never into the repository:
+
+    ```sh
+    npx wrangler secret put NAME
+    ```
+
+    The dashboard has them under *Settings* and *Variables and Secrets* as well. For `npm run dev` on your machine, write them into `.dev.vars`, which git ignores.
+
+From then on, every merge reaches Cloudflare by itself, and the dashboard shows the log of each build.
+
+## Roll back
+
+A release that misbehaves goes back to the version before it in the dashboard, under *Deployments*, or with:
+
+```sh
+npx wrangler rollback
+```
+
+Then fix the cause in a pull request; the next release deploys it.
+
+## When a build fails
+
+- **The name doesn't match:** Workers Builds builds only the Worker whose name `wrangler.jsonc` names. Rename the one or the other.
+- **Another Node:** the build takes the Node of `.nvmrc`; if its log shows another one, set the build variable `NODE_VERSION` to the version of `.nvmrc` under *Settings* and *Builds*.
+- **A release that didn't deploy:** the log of its build says why `npm run deploy` only uploaded it, such as a `package.json` with another version than the title of the release, or a branch of another name than `main`. *Retry build* builds the same commit again, once a setting of Cloudflare was the cause; `npx wrangler deploy` from a checkout of its tag deploys it by hand.
+- **`npm run deploy` on your machine** refuses: it runs only in Workers Builds. `npx wrangler deploy` deploys by hand, past the release, for an emergency.

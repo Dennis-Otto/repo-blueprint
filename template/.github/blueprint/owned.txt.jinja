@@ -206,6 +206,9 @@ scripts/check.sh
 [%- if project_type == 'chrome-extension' %]
 scripts/chrome-for-testing.sh
 [%- endif %]
+[%- if project_type == 'cloudflare-worker' %]
+scripts/deploy-worker.sh
+[%- endif %]
 scripts/diagrams.sh
 [%- if project_type == 'chrome-extension' %]
 scripts/load-extension.mjs
@@ -217,9 +220,12 @@ scripts/social-preview.sh
 [%- if project_type == 'chrome-extension' %]
 scripts/store-status.mjs
 [%- endif %]
-[%- if stack == 'node' %]
+[%- if stack == 'node' and project_type != 'cloudflare-worker' %]
 tsconfig.build.json
 [%- endif %]
 [%- if stack == 'node' %]
 tsconfig.json
+[%- endif %]
+[%- if project_type == 'cloudflare-worker' %]
+vitest.config.ts
 [%- endif %]

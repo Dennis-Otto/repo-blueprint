@@ -68,3 +68,9 @@ For a Nextcloud app: the registration of its id with its certificate, once, by h
 For a Chrome extension: every release goes to the Chrome Web Store as the zip that the release attests, after a check of its provenance, signed in to Google with the OIDC token of GitHub and no stored secret. A daily run delivers a release whose review had to wait, and reports a rejection or a warning of Google with the fix.
 
 **How:** `publish-store.yml`, `scripts/store-status.mjs`, [the page of the kind](../kinds/chrome-extension.md).
+
+## Cloudflare
+
+For a Cloudflare Worker: Cloudflare's Workers Builds builds every commit of `main` and deploys only the merge of the release pull request, as the version of the release; every other commit becomes a version without traffic. No key of Cloudflare is stored in GitHub, and the secrets of the Worker live in Cloudflare.
+
+**How:** `scripts/deploy-worker.sh`, [the page of the kind](../kinds/cloudflare-worker.md).

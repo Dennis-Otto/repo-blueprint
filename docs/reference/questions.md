@@ -87,6 +87,7 @@ The kind of project.
 | `python-package` | Python package (PyPI) |
 | `node-package` | Node package (TypeScript, npm) |
 | `chrome-extension` | Chrome extension (Manifest V3, Chrome Web Store) |
+| `cloudflare-worker` | Cloudflare Worker (TypeScript, Workers Builds) |
 | `container` | Container image (GHCR) |
 | `generic` | Repository without a build (docs, configuration, scripts) |
 
@@ -209,7 +210,7 @@ The languages of the code, which CodeQL analyzes (it has no PHP).
 
 ```text
 [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
-[%- elif project_type in ['node-package', 'chrome-extension', 'nextcloud-app'] -%][javascript-typescript]
+[%- elif project_type in ['node-package', 'chrome-extension', 'cloudflare-worker', 'nextcloud-app'] -%][javascript-typescript]
 [%- else -%][]
 [%- endif -%]
 ```
@@ -274,6 +275,7 @@ The topics of the repository on GitHub, with those of each kind by default: HACS
 [%- elif project_type == 'python-package' -%]{= 'python, pypi' if publish_package else 'python' =}
 [%- elif project_type == 'node-package' -%]{= 'typescript, nodejs, npm' if publish_package else 'typescript, nodejs' =}
 [%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
+[%- elif project_type == 'cloudflare-worker' -%]cloudflare-workers, cloudflare, typescript
 [%- elif project_type == 'container' -%]docker, container, ghcr
 [%- endif -%]
 ```
@@ -424,7 +426,7 @@ release_app_id: '4739928'
 [%- if project_type == 'home-assistant' -%]home-assistant
 [%- elif project_type == 'nextcloud-app' -%]php
 [%- elif project_type in ['github-action', 'python-package'] -%]python
-[%- elif project_type in ['node-package', 'chrome-extension'] -%]node
+[%- elif project_type in ['node-package', 'chrome-extension', 'cloudflare-worker'] -%]node
 [%- elif project_type == 'container' -%]container
 [%- else -%]generic
 [%- endif -%]
@@ -443,6 +445,7 @@ release_app_id: '4739928'
 [%- elif project_type == 'python-package' -%]pypi
 [%- elif project_type == 'node-package' -%]npm
 [%- elif project_type == 'chrome-extension' -%]chrome-web-store
+[%- elif project_type == 'cloudflare-worker' -%]cloudflare-workers
 [%- elif project_type == 'container' -%]ghcr
 [%- else -%]none
 [%- endif -%]
@@ -528,7 +531,7 @@ The slot of the schedules of this repository, so that the scheduled workflows of
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.
 
 <details markdown>
-<summary>The 60 patterns of the files of a project</summary>
+<summary>The 61 patterns of the files of a project</summary>
 
 - `/README.md`
 - `/CHANGELOG.md`
@@ -578,6 +581,7 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/package-lock.json`
 - `/extension`
 - `/store`
+- `/wrangler.jsonc`
 - `/Dockerfile`
 - `/action.yml`
 - `/hacs.json`

@@ -68,3 +68,9 @@ Für eine Nextcloud-App: die Registrierung ihrer ID mit ihrem Zertifikat, einmal
 Für eine Chrome-Erweiterung: jedes Release kommt in den Chrome Web Store, als das Zip, das das Release bezeugt, nach einer Prüfung seiner Provenance, bei Google angemeldet mit dem OIDC-Token von GitHub und ohne gespeichertes Geheimnis. Ein täglicher Lauf liefert ein Release nach, dessen Prüfung warten musste, und meldet eine Ablehnung oder eine Warnung von Google mit der Lösung.
 
 **Womit:** `publish-store.yml`, `scripts/store-status.mjs`, [die Seite der Art](../kinds/chrome-extension.md).
+
+## Cloudflare
+
+Für einen Cloudflare Worker: Workers Builds von Cloudflare baut jeden Commit von `main` und liefert nur den Merge des Release-Pull-Requests aus, als die Version des Releases; jeder andere Commit wird eine Version ohne Verkehr. Kein Schlüssel von Cloudflare liegt in GitHub, und die Geheimnisse des Workers liegen bei Cloudflare.
+
+**Womit:** `scripts/deploy-worker.sh`, [die Seite der Art](../kinds/cloudflare-worker.md).

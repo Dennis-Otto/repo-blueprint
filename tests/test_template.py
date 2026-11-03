@@ -111,12 +111,13 @@ KINDS = [
     "python-package",
     "node-package",
     "chrome-extension",
+    "cloudflare-worker",
     "container",
     "generic",
 ]
-# The kinds of the stack of Node: a package of npm, and a Chrome extension, which the
-# same tools build and check.
-NODE = ("node-package", "chrome-extension")
+# The kinds of the stack of Node: a package of npm, a Chrome extension and a Cloudflare
+# Worker, which the same tools lint and check.
+NODE = ("node-package", "chrome-extension", "cloudflare-worker")
 NPM = shutil.which("npm")
 NPX = shutil.which("npx")
 # The languages that CodeQL analyzes in each kind of project by default, besides the
@@ -129,6 +130,7 @@ CODEQL = {
     "python-package": "python, actions",
     "node-package": "javascript-typescript, actions",
     "chrome-extension": "javascript-typescript, actions",
+    "cloudflare-worker": "javascript-typescript, actions",
     "container": "actions",
     "generic": "actions",
 }
@@ -2432,12 +2434,18 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     two_spaces = editorconfig["*.{json,jsonc,toml,yml,yaml,ts,js,mjs,css,html}"]
     assert two_spaces["indent_size"] == "2"
     # The coverage of the tests as the LCOV report that the CI keeps, which git and
-    # the package leave out.
-    assert "--test-reporter-destination=lcov.info" in manifest["scripts"]["test"]
-    assert (
-        "--test-reporter=spec --test-reporter-destination=stdout"
-        in (manifest["scripts"]["test"])
-    )
+    # the package leave out: node:test writes it, and for a Worker the coverage of
+    # Vitest, one folder above its own.
+    if kind == "cloudflare-worker":
+        assert manifest["scripts"]["test"] == "vitest run --coverage"
+        vitest = (project / "vitest.config.ts").read_text(encoding="utf-8")
+        assert '["lcovonly", { file: "../lcov.info" }]' in vitest
+    else:
+        assert "--test-reporter-destination=lcov.info" in manifest["scripts"]["test"]
+        assert (
+            "--test-reporter=spec --test-reporter-destination=stdout"
+            in (manifest["scripts"]["test"])
+        )
     ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/lcov.info" in ignored
     # A package of npm holds its build; a Chrome extension reaches no registry.
@@ -3279,6 +3287,11 @@ TOOL_ANNOTATIONS = {
     ],
     "node-package": ["  npm test 2>&1 | annotate node-test\n"],
     "chrome-extension": ["  npm test 2>&1 | annotate node-test\n"],
+    # Vitest writes the annotations of a Worker itself.
+    "cloudflare-worker": [
+        "# the CI, Vitest makes each test that fails an annotation at the line where it"
+        " failed.\nnpm test\n"
+    ],
 }
 
 # The tools whose findings CONTRIBUTING.md names, besides the text files and
@@ -6068,6 +6081,13 @@ AGENT_COMMANDS = {
         "`npm test`",
         "`npx --no -- biome check --write .`",
     ],
+    "cloudflare-worker": [
+        "npm ci --ignore-scripts",
+        "`npm test`: the tests in workerd",
+        "`npx --no -- biome check --write .`",
+        "`npm run dev`",
+        "`npx wrangler secret put NAME`",
+    ],
     "container": ["docker run --rm demo-project:check --self-test"],
     "generic": ["no build and no tests of its own"],
 }
@@ -7891,6 +7911,7 @@ WHAT_THE_USERS_RUN = {
     "python-package": [("pep621", "project.dependencies", "pyproject.toml")],
     "node-package": [("npm", "dependencies", "package.json")],
     "chrome-extension": [("npm", "dependencies", "package.json")],
+    "cloudflare-worker": [("npm", "dependencies", "package.json")],
     "container": [("dockerfile", "final", "Dockerfile")],
     "generic": [],
 }
@@ -7917,6 +7938,7 @@ THE_TOOLS_OF_A_KIND = {
     ],
     "node-package": [("npm", "devDependencies", "package.json")],
     "chrome-extension": [("npm", "devDependencies", "package.json")],
+    "cloudflare-worker": [("npm", "devDependencies", "package.json")],
     "container": [],
     "generic": [],
 }
@@ -10973,6 +10995,7 @@ TOPICS = {
     "python-package": ["python", "pypi"],
     "node-package": ["typescript", "nodejs", "npm"],
     "chrome-extension": ["chrome-extension", "browser-extension", "manifest-v3"],
+    "cloudflare-worker": ["cloudflare-workers", "cloudflare", "typescript"],
     "container": ["docker", "container", "ghcr"],
     "generic": [],
 }
@@ -13188,7 +13211,6 @@ WITH_NODE = pytest.mark.skipif(NODE_JS is None, reason="the script runs in Node"
 # The files of the delivery of a Chrome extension, which only that kind renders.
 EXTENSION_FILES = [
     ".github/workflows/publish-store.yml",
-    "docs/releases.md",
     "extension/manifest.json",
     "extension/_locales/en/messages.json",
     "scripts/check-manifest.mjs",
@@ -13262,6 +13284,361 @@ def test_only_a_chrome_extension_delivers_to_the_chrome_web_store(
     assert "/extension/lib/\n" in (project / ".gitignore").read_text(encoding="utf-8")
     mkdocs = (project / "mkdocs.yml").read_text(encoding="utf-8")
     assert "\n  - Releases and the Chrome Web Store: releases.md\n" in mkdocs
+
+
+# The files that only a Cloudflare Worker renders.
+WORKER_FILES = [
+    "wrangler.jsonc",
+    "vitest.config.ts",
+    "scripts/deploy-worker.sh",
+    "src/greet.ts",
+]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_cloudflare_builds_and_deploys_a_worker(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    worker = kind == "cloudflare-worker"
+    for name in WORKER_FILES:
+        assert (project / name).is_file() == worker, name
+    # Both deliveries outside GitHub have the page of their one-time set-up.
+    releases = project / "docs/releases.md"
+    assert releases.is_file() == (kind in ("chrome-extension", "cloudflare-worker"))
+    # Wrangler bundles a Worker, so tsc compiles nothing of it.
+    assert (project / "tsconfig.build.json").is_file() == (
+        kind in ("node-package", "chrome-extension")
+    )
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert (settings["variables"]["PUBLISH_TO"] == "cloudflare-workers") == worker
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    deploys = "whose Workers Builds deploys the commit of the release"
+    assert (deploys in contributing) == worker
+    security = (project / "docs/security.md").read_text(encoding="utf-8")
+    assert ("**Repository → Cloudflare.**" in security) == worker
+    notes = (project / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert ("compatibility date in `wrangler.jsonc`" in notes) == worker
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+    assert ("the Worker in the account of Cloudflare" in governance) == worker
+    if not worker:
+        return
+    # No key of Cloudflare anywhere in GitHub: Cloudflare builds and deploys.
+    assert "CLOUDFLARE" not in (project / ".github/repository.toml").read_text(
+        encoding="utf-8"
+    )
+    for name, text in workflows(project).items():
+        assert "CLOUDFLARE_API_TOKEN" not in text, name
+    assert "Caller → package" not in security
+    assert "The package is in `src/`" not in notes
+    # The Worker has the name of the repository, which Workers Builds asks for.
+    wrangler = (project / "wrangler.jsonc").read_text(encoding="utf-8")
+    config = json.loads(re.sub(r"^//.*\n", "", wrangler, flags=re.MULTILINE))
+    assert config["name"] == "demo-project"
+    assert config["main"] == "src/index.ts"
+    assert re.fullmatch(r"20\d\d-\d\d-\d\d", config["compatibility_date"])
+    assert "wrangler secret put NAME" in wrangler
+    # A private package, on the tools of the stack of a Worker, locked as the
+    # blueprint locks them.
+    package = json.loads((project / "package.json").read_text(encoding="utf-8"))
+    stack = json.loads(
+        (ROOT / "stacks/worker/package.json").read_text(encoding="utf-8")
+    )
+    assert package["private"] is True
+    assert "exports" not in package
+    assert "files" not in package
+    assert package["devDependencies"] == stack["devDependencies"]
+    assert package["scripts"] == {
+        "build": "wrangler deploy --dry-run --outdir dist",
+        "deploy": "bash scripts/deploy-worker.sh",
+        "dev": "wrangler dev",
+        "typecheck": "wrangler types && tsc --project tsconfig.json",
+        "test": "vitest run --coverage",
+    }
+    lock = json.loads((project / "package-lock.json").read_text(encoding="utf-8"))
+    assert lock["name"] == "demo-project"
+    assert lock["packages"][""]["devDependencies"] == stack["devDependencies"]
+    wrangler_lock = lock["packages"]["node_modules/wrangler"]
+    assert wrangler_lock["integrity"].startswith("sha512-")
+    # The types of the runtime and of the bindings, written anew before each check.
+    tsconfig = json.loads((project / "tsconfig.json").read_text(encoding="utf-8"))
+    assert tsconfig["compilerOptions"]["types"] == [
+        "./worker-configuration.d.ts",
+        "@cloudflare/vitest-plugin/types",
+    ]
+    # What Wrangler writes, and the secrets of wrangler dev, never reach git.
+    ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
+    for line in (
+        "/.wrangler/",
+        "/worker-configuration.d.ts",
+        ".dev.vars",
+        ".dev.vars.*",
+        "!.dev.vars.example",
+        ".env",
+    ):
+        assert line in ignored, line
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "\nexport WRANGLER_SEND_METRICS=false\n" in check
+    assert check.index("export WRANGLER_SEND_METRICS") < check.index('\nstep "Types"\n')
+    assert "\nnpm run --silent build\n" in section_of(check, 'step "Worker"')
+    assert '\nstep "Package"\n' not in check
+    assert "npm pack" not in check
+    assert "annotate node-test" not in check
+    # The script that decides about the deploy and the set-up of the tests belong to
+    # the blueprint, the configuration of the Worker to the project.
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert {"scripts/deploy-worker.sh", "vitest.config.ts"} <= set(owned.split("\n"))
+    assert "wrangler.jsonc" not in owned
+    text = releases.read_text(encoding="utf-8")
+    for step in (
+        "npx wrangler deploy",
+        "`npm ci --ignore-scripts`",
+        "`npm run deploy`",
+        "npx wrangler secret put NAME",
+    ):
+        assert step in text, step
+    assert "Chrome" not in text
+    mkdocs = (project / "mkdocs.yml").read_text(encoding="utf-8")
+    assert "\n  - Releases and Cloudflare: releases.md\n" in mkdocs
+    readme = (project / "README.md").read_text(encoding="utf-8")
+    assert "npm run dev" in readme
+    assert "[docs/releases.md](docs/releases.md)" in readme
+    preview = (project / ".github/social-preview.html").read_text(encoding="utf-8")
+    assert "Cloudflare Worker</div>" in preview
+    assert "Container image" not in preview
+
+
+def deploy_worker(
+    folder: Path, subject: str | None, version: str, **variables: str
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """scripts/deploy-worker.sh of a Worker at version, in a repository whose commit
+    has subject, or in a folder without git for None, with an npx that only records
+    its arguments: the run and those arguments."""
+    (folder / "package.json").write_text(
+        json.dumps({"name": "demo", "version": version}), encoding="utf-8"
+    )
+    if subject is not None:
+        for command in (
+            ["init", "--quiet"],
+            ["add", "--all"],
+            ["commit", "--quiet", "--message", subject],
+        ):
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *command,
+                ],
+                cwd=folder,
+                check=True,
+            )
+    stubs = folder.parent / "stubs"
+    stubs.mkdir(exist_ok=True)
+    arguments = folder.parent / "npx.txt"
+    (stubs / "npx").write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > '{arguments.as_posix()}'\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "npx").chmod(0o755)
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("WORKERS_CI")
+    }
+    done = subprocess.run(
+        in_bash("scripts/deploy-worker.sh"),
+        cwd=folder,
+        env={**environment, "STUBS": stubs.as_posix(), **variables},
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    called = []
+    if arguments.exists():
+        called = arguments.read_text(encoding="utf-8").splitlines()
+    return done, called
+
+
+# The variables that Workers Builds sets for a build of main.
+ON_MAIN = {
+    "WORKERS_CI": "1",
+    "WORKERS_CI_BRANCH": "main",
+    "WORKERS_CI_COMMIT_SHA": "0123456789abcdef0123456789abcdef01234567",
+}
+DEPLOY = ["--no", "--", "wrangler", "deploy", "--tag"]
+UPLOAD = ["--no", "--", "wrangler", "versions", "upload", "--message"]
+COMMIT_TAG = ["--tag", "0123456789ab"]
+LONG = "feat: " + "a" * 120
+
+
+@pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")
+@pytest.mark.parametrize(
+    ("subject", "version", "variables", "called", "said"),
+    [
+        # The merge of a release pull request goes live, also a prerelease, and also
+        # one whose title names the branch of release-please as its scope.
+        (
+            "chore: release 1.2.3 (#40)",
+            "1.2.3",
+            ON_MAIN,
+            [*DEPLOY, "v1.2.3", "--message", "Release 1.2.3"],
+            "is the release 1.2.3: it goes live",
+        ),
+        (
+            "chore(main): release 1.3.0-beta.2",
+            "1.3.0-beta.2",
+            ON_MAIN,
+            [*DEPLOY, "v1.3.0-beta.2", "--message", "Release 1.3.0-beta.2"],
+            "it goes live",
+        ),
+        # Every other commit becomes a version without traffic, with the reason.
+        (
+            "fix: answer a HEAD (#41)",
+            "1.2.3",
+            ON_MAIN,
+            [*UPLOAD, "fix: answer a HEAD (#41)", *COMMIT_TAG],
+            "because it is no release",
+        ),
+        (
+            "chore: release 1.2.4 (#42)",
+            "1.2.3",
+            ON_MAIN,
+            [*UPLOAD, "chore: release 1.2.4 (#42)", *COMMIT_TAG],
+            "it names the release 1.2.4, but package.json has the version 1.2.3",
+        ),
+        (
+            "chore: release 1.2.3 (#40)",
+            "1.2.3",
+            {**ON_MAIN, "WORKERS_CI_BRANCH": "release-please--branches--main"},
+            [*UPLOAD, "chore: release 1.2.3 (#40)", *COMMIT_TAG],
+            "on the branch release-please--branches--main, not on main",
+        ),
+        (
+            "chore: release 1.2.3 (#40)",
+            "1.2.3",
+            {"WORKERS_CI": "1"},
+            [*UPLOAD, "chore: release 1.2.3 (#40)"],
+            "Workers Builds named no branch",
+        ),
+        (
+            None,
+            "1.2.3",
+            ON_MAIN,
+            [*UPLOAD, "A build of Workers Builds", *COMMIT_TAG],
+            "checked out no history that names its commit",
+        ),
+        # A version keeps a short message.
+        (LONG, "1.2.3", ON_MAIN, [*UPLOAD, LONG[:100], *COMMIT_TAG], "no release"),
+    ],
+)
+def test_workers_builds_deploys_only_the_commit_of_a_release(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    subject: str | None,
+    version: str,
+    variables: dict[str, str],
+    called: list[str],
+    said: str,
+) -> None:
+    folder = tmp_path / "worker"
+    (folder / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        projects["cloudflare-worker"] / "scripts/deploy-worker.sh",
+        folder / "scripts/deploy-worker.sh",
+    )
+
+    done, arguments = deploy_worker(folder, subject, version, **variables)
+
+    assert done.returncode == 0, done.stderr
+    assert arguments == called
+    assert said in done.stdout
+
+
+@pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")
+def test_npm_run_deploy_refuses_outside_workers_builds(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # On a laptop, even the commit of a release deploys nothing: only Cloudflare does.
+    folder = tmp_path / "worker"
+    (folder / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        projects["cloudflare-worker"] / "scripts/deploy-worker.sh",
+        folder / "scripts/deploy-worker.sh",
+    )
+
+    done, arguments = deploy_worker(folder, "chore: release 1.2.3 (#40)", "1.2.3")
+
+    assert done.returncode == 1
+    assert arguments == []
+    assert "runs only there" in done.stderr
+    assert "npx wrangler deploy deploys by hand" in done.stderr
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(
+    NPM is None or NPX is None, reason="the Worker installs and runs with Node"
+)
+def test_the_worker_passes_its_checks_in_workerd(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The real tools of the lock file, as scripts/check.sh runs them: the types that
+    # Wrangler writes, the tests in workerd with every line covered, and the bundle.
+    project = shutil.copytree(projects["cloudflare-worker"], tmp_path / "worker")
+    environment = {**os.environ, "WRANGLER_SEND_METRICS": "false"}
+
+    def npm(*arguments: str) -> subprocess.CompletedProcess[str]:
+        assert NPM
+        return subprocess.run(
+            [NPM, *arguments],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    installed = npm("ci", "--ignore-scripts", "--no-audit", "--no-fund", "--silent")
+    assert installed.returncode == 0, installed.stderr
+    for script in ("typecheck", "test", "build"):
+        done = npm("run", "--silent", script)
+        assert done.returncode == 0, done.stdout + done.stderr
+    assert (project / "worker-configuration.d.ts").is_file()
+    assert "SF:src" in (project / "lcov.info").read_text(encoding="utf-8")
+    assert (project / "dist/index.js").is_file()
+
+    # A branch that no test takes fails the tests.
+    greet = project / "src/greet.ts"
+    code = greet.read_text(encoding="utf-8")
+    returned = "  return `Hello, ${trimmed}!`;\n"
+    assert returned in code
+    greet.write_text(
+        code.replace(
+            returned, '  if (trimmed === "nobody") {\n    return "";\n  }\n' + returned
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    uncovered = npm("run", "--silent", "test")
+    assert uncovered.returncode != 0
+    assert "Coverage" in uncovered.stdout + uncovered.stderr
+
+    # A main module that doesn't exist fails the step Worker, as it would fail the
+    # build of Cloudflare.
+    wrangler = project / "wrangler.jsonc"
+    wrangler.write_text(
+        wrangler.read_text(encoding="utf-8").replace("src/index.ts", "src/main.ts"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert npm("run", "--silent", "build").returncode != 0
 
 
 def the_extension(project: Path, folder: Path) -> Path:

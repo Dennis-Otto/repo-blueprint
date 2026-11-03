@@ -199,6 +199,7 @@ def test_every_leg_of_the_blueprint() -> None:
         "python-package",
         "node-package",
         "chrome-extension",
+        "cloudflare-worker",
         "container",
         "generic",
     ]

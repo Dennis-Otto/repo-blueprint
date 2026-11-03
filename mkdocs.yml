@@ -110,6 +110,7 @@ nav:
       - Python package: kinds/python-package.md
       - Node package: kinds/node-package.md
       - Chrome extension: kinds/chrome-extension.md
+      - Cloudflare Worker: kinds/cloudflare-worker.md
       - Container image: kinds/container.md
       - Repository without a build: kinds/generic.md
   - Your own account: own-account.md
