@@ -1357,6 +1357,11 @@ def test_the_build_signs_no_nextcloud_app_without_the_key_of_its_environment(
         " environment signing, and let the job assets of release.yml pass it"
         " under secrets:"
     ) in done.stdout
+    assert (
+        "If both are in place, GitHub didn't take the key of signing in place of"
+        " the empty value passed (decision 0114, #530): revert the blueprint"
+        " update, as the environment release still holds a copy of the key."
+    ) in done.stdout
     assert done.stubbed == []
     assert list(done.runner_temp.iterdir()) == []
 
