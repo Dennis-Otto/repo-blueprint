@@ -629,8 +629,8 @@ def test_the_workflows_are_the_blueprints_own(
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
         if kind == "nextcloud-app" and name in ("build-release.yml", "release.yml"):
-            # The build of a Nextcloud app enters the environment of the key that signs
-            # it, and gets the secrets of the release, which no other build does.
+            # The build of a Nextcloud app enters signing, the environment of the key
+            # that signs it, and gets that one secret passed, which no other build does.
             source, entered = re.subn(
                 r"    # No environment and no secret but the token of the job.*\n"
                 r"    # the build can reach the private key of the release app\.\n"
@@ -639,10 +639,11 @@ def test_the_workflows_are_the_blueprints_own(
                 source,
             )
             text, signs = re.subn(
-                r"    # The key that signs a Nextcloud app is a secret of this.*\n"
-                r"(?:    # .*\n)*    environment:\n      name: release\n"
+                r"    # The key that signs a Nextcloud app is the one secret of.*\n"
+                r"(?:    # .*\n)*    environment:\n      name: signing\n"
                 r"      deployment: false\n"
-                r"|(?:    # .*\n)*    secrets: inherit # zizmor: ignore\[secrets-inherit\]\n",
+                r"|(?:    # .*\n)*    secrets:\n"
+                r"      APP_PRIVATE_KEY: \$\{\{ secrets\.APP_PRIVATE_KEY \}\}\n",
                 "",
                 text,
             )
@@ -1170,23 +1171,33 @@ def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_sto
             manual=f"gh secret set APPSTORE_TOKEN --env appstore --repo {repo}",
         ),
     ]
-    # Each job that takes one of these secrets enters an environment that the settings
-    # say holds it, so that no release stops while the jobs move, one by one.
-    reading = set()
+    # Each job that takes one of these secrets enters the environment that holds it
+    # alone (step 3 of #530): the build and the job that signs the app id reach only
+    # the key, and the jobs that talk to the App Store only its token, never the key
+    # of the release app. A job that calls a workflow of the repository only passes
+    # the key on, as the called job takes it from its own environment.
+    reading, passing = set(), set()
     for name, flow in workflows(projects[kind]).items():
-        for job in load_yaml(flow)["jobs"].values():
+        for job_id, job in load_yaml(flow)["jobs"].items():
             for secret in ("APP_PRIVATE_KEY", "APPSTORE_TOKEN"):
-                if f"secrets.{secret}" in json.dumps(job):
-                    reading.add((name, secret))
-                    environment = reference.environment_of(job)
-                    assert environment, (name, secret)
-                    assert secret in settings.environments[environment]["secrets"]
+                if f"secrets.{secret}" not in json.dumps(job):
+                    continue
+                if "uses" in job:
+                    assert "environment" not in job, (name, job_id)
+                    passing.add((name, job_id, job["uses"], secret))
+                    continue
+                reading.add((name, job_id, secret))
+                environment = reference.environment_of(job)
+                assert environment, (name, job_id, secret)
+                assert settings.environments[environment]["secrets"] == [secret]
     assert reading == {
-        ("build-release.yml", "APP_PRIVATE_KEY"),
-        ("register-app.yml", "APP_PRIVATE_KEY"),
-        ("register-app.yml", "APPSTORE_TOKEN"),
-        ("release.yml", "APPSTORE_TOKEN"),
+        ("build-release.yml", "assets", "APP_PRIVATE_KEY"),
+        ("register-app.yml", "sign", "APP_PRIVATE_KEY"),
+        ("register-app.yml", "register", "APPSTORE_TOKEN"),
+        ("release.yml", "nextcloud-appstore", "APPSTORE_TOKEN"),
     }
+    build = "./.github/workflows/build-release.yml"
+    assert passing == {("release.yml", "assets", build, "APP_PRIVATE_KEY")}
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -19169,27 +19180,36 @@ def test_a_release_is_built_without_the_secrets_of_the_release(
 ) -> None:
     # The build runs actions of others, such as those that write the SBOMs or set up
     # PHP, Node and Python. Only the build of a Nextcloud app, which signs the app with
-    # the key of the environment release, enters an environment, and a called
-    # workflow sees its secrets only when the caller passes them on; every other
-    # build holds only the token of its job, never the private key of the release app.
+    # the key of the environment signing, enters an environment, which holds that key
+    # alone, and gets that one secret passed, as a called workflow sees no other; every
+    # other build holds only the token of its job, never the private key of the
+    # release app or the token of the App Store.
     project = projects[kind]
     release = (project / ".github/workflows/release.yml").read_text(encoding="utf-8")
     build = (project / ".github/workflows/build-release.yml").read_text(
         encoding="utf-8"
     )
     signs = kind == "nextcloud-app"
-    assert job_in(release, "assets").get("secrets") == ("inherit" if signs else None)
-    assert job_in(build, "assets").get("environment") == (
-        {"name": "release", "deployment": False} if signs else None
+    assert job_in(release, "assets").get("secrets") == (
+        {"APP_PRIVATE_KEY": "${{ secrets.APP_PRIVATE_KEY }}"} if signs else None
     )
-    # zizmor accepts the passed secrets at that one line of a Nextcloud app, not in
-    # every workflow of the name release.yml of every repository.
+    assert job_in(build, "assets").get("environment") == (
+        {"name": "signing", "deployment": False} if signs else None
+    )
+    # The build takes the key only when the caller passes it, and doesn't demand it:
+    # the step that signs fails without it, so no app is signed by nothing.
+    assert parse(build)["on"]["workflow_call"]["secrets"] == {
+        "APP_PRIVATE_KEY": {
+            "description": "The key that signs a Nextcloud app",
+            "required": False,
+        }
+    }
+    # No build inherits every secret of the release, so zizmor accepts no such thing,
+    # neither at a line nor for every workflow of the name release.yml.
     zizmor = load_yaml((project / ".github/zizmor.yml").read_text(encoding="utf-8"))
     assert "secrets-inherit" not in zizmor["rules"]
-    inherited = [line for line in release.splitlines() if "secrets: inherit" in line]
-    assert inherited == (
-        ["    secrets: inherit # zizmor: ignore[secrets-inherit]"] if signs else []
-    )
+    assert "secrets: inherit" not in release
+    assert "secrets-inherit" not in release
     # The one secret that the build reads is the key of a Nextcloud app; the other
     # is the token of its job, which every called workflow gets.
     assert set(re.findall(r"secrets\.(\w+)", build)) == {

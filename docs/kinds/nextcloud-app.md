@@ -34,7 +34,12 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 ## Delivery
 
-Merging the release pull request builds the package with krankerl, signs it with the key of the app and publishes it in the App Store, with its SBOM and the signed provenance of SLSA Build Level 3. The environment `release` holds the secrets `APP_PRIVATE_KEY` and `APPSTORE_TOKEN`, from which the workflows take them. The environment `signing` holds a copy of the key and `appstore` a copy of the token, for the day the workflows move there, so that the build can reach only the key that signs the app ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). The settings bot creates both for `main` alone, and until you set the copies, it fails and names the commands, as the checklist does.
+Merging the release pull request builds the package with krankerl, signs it with the key of the app and publishes it in the App Store, with its SBOM and the signed provenance of SLSA Build Level 3. The key `APP_PRIVATE_KEY` is the one secret of the environment `signing`, which only the build and the job of *Register the app* that signs the app id enter, and the token `APPSTORE_TOKEN` the one secret of `appstore`, which only the delivery to the App Store and the job of *Register the app* that posts the registration enter: the build reaches only the key that signs the app, never the token or the private key of the release app ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). The settings bot creates both for `main` alone, and until you set their secrets, it fails and names the commands, as the checklist does. The environment `release` holds copies of both until a beta release has shown the switch; no workflow reads them there.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-job-of-a-nextcloud-app-holds-which-secret.dark.svg">
+  <img src="../images/diagrams/which-job-of-a-nextcloud-app-holds-which-secret.svg" alt="Which job of a Nextcloud app holds which secret: The release workflow enters no environment and passes the build only the name of the key. The build enters the environment signing, which holds the key that signs the app and nothing else, and fails without it. The delivery to the App Store enters appstore, which holds the token of the App Store and nothing else. Register the app signs the app id in a job in signing and hands the signature and the certificate, neither of them secret, to a job in appstore that posts them.">
+</picture>
 
 ## Once by hand
 
