@@ -169,6 +169,19 @@
       groupName: "the tools of the Node packages",
     },
     {
+      matchFileNames: ["stacks/worker/**"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "the tools of the Cloudflare Workers",
+    },
+    {
+      // Vitest takes only a coverage provider of its own version, so a new major
+      // version of the one comes with that of the other.
+      matchFileNames: ["stacks/worker/**"],
+      matchPackageNames: ["vitest", "@vitest/coverage-istanbul"],
+      matchUpdateTypes: ["major"],
+      groupName: "Vitest of the Cloudflare Workers",
+    },
+    {
       matchFileNames: ["stacks/docs/**"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "the tools of the websites",

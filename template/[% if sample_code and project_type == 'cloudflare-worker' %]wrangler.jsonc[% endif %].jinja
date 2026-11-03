@@ -1,0 +1,16 @@
+// The Worker, for Wrangler and for Workers Builds, which builds and deploys it on
+// Cloudflare as docs/releases.md describes: its name, which is the name of the Worker
+// in the dashboard of Cloudflare, its code and the date of the behavior of the
+// runtime that it relies on. Add its bindings, routes and variables here, and run
+// `npm run typecheck`, which writes their types anew. A secret goes to Cloudflare
+// with `npx wrangler secret put NAME`, never into this file or the repository.
+// https://developers.cloudflare.com/workers/wrangler/configuration/
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "{= project_slug =}",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": {
+    "enabled": true
+  }
+}

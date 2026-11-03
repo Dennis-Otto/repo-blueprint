@@ -581,6 +581,12 @@ else
 fi
 [%- endif %]
 [%- if stack == 'node' %]
+[%- if project_type == 'cloudflare-worker' %]
+
+# Wrangler, which writes the types of the Worker, runs its tests and bundles it, sends
+# nothing about its use to Cloudflare from the checks.
+export WRANGLER_SEND_METRICS=false
+[%- endif %]
 
 step "Package lock"
 # npm ci --ignore-scripts installs exactly what package-lock.json locks, and stops at
@@ -604,9 +610,18 @@ fi
 step "Types"
 # In the CI, the problem matcher of actions/setup-node makes each error of the compiler
 # an annotation at its line.
+[%- if project_type == 'cloudflare-worker' %]
+# Wrangler writes the types of the runtime and of the bindings of wrangler.jsonc into
+# worker-configuration.d.ts first.
+[%- endif %]
 npm run --silent typecheck
 
 step "Tests, with every line, branch and function covered"
+[%- if project_type == 'cloudflare-worker' %]
+# In workerd, the runtime of Cloudflare Workers, as vitest.config.ts sets them up. In
+# the CI, Vitest makes each test that fails an annotation at the line where it failed.
+npm test
+[%- else %]
 # In the CI, each test that fails is an annotation at the line where it failed, from
 # the list of the spec reporter at the end.
 if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
@@ -614,6 +629,7 @@ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
 else
   npm test
 fi
+[%- endif %]
 
 [%- if project_type == 'chrome-extension' %]
 
@@ -623,6 +639,12 @@ step "Extension"
 # release builds it.
 node scripts/check-manifest.mjs
 bash scripts/package-extension.sh
+[%- elif project_type == 'cloudflare-worker' %]
+
+step "Worker"
+# The Worker as Workers Builds bundles it for Cloudflare, with the checks of Wrangler
+# on wrangler.jsonc and the code, into dist/: without an upload, a sign-in or a key.
+npm run --silent build
 [%- else %]
 
 step "Package"

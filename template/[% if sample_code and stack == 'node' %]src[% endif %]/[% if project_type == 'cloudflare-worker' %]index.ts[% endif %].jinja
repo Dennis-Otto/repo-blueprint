@@ -1,0 +1,28 @@
+/**
+ * {= project_name =}: {= description =}
+ *
+ * The Worker, which Cloudflare runs for every request; replace it with the real code.
+ * This module, which wrangler.jsonc names as the main one, exports only the handlers
+ * of the Worker; the code that they call lives in modules of its own, such as greet.ts.
+ */
+import { greet } from "./greet.ts";
+
+export default {
+  fetch(request) {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: { allow: "GET, HEAD" },
+      });
+    }
+    const url = new URL(request.url);
+    if (url.pathname !== "/") {
+      return new Response("Not Found", { status: 404 });
+    }
+    const name = url.searchParams.get("name") ?? "world";
+    if (name.trim() === "") {
+      return Response.json({ error: "name is empty" }, { status: 400 });
+    }
+    return Response.json({ message: greet(name) });
+  },
+} satisfies ExportedHandler<Env>;

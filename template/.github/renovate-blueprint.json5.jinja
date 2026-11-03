@@ -341,6 +341,16 @@
       matchUpdateTypes: ["major"],
       enabled: false,
     },
+[%- if project_type == 'cloudflare-worker' %]
+    {
+      // Vitest takes only a coverage provider of its own version, so a new major
+      // version of the one comes with that of the other.
+      matchManagers: ["npm"],
+      matchPackageNames: ["vitest", "@vitest/coverage-istanbul"],
+      matchUpdateTypes: ["major"],
+      groupName: "Vitest",
+    },
+[%- endif %]
 [%- endif %][% if stack == 'container' %]
     {
       // The base images of the image that the users run: a new version of one

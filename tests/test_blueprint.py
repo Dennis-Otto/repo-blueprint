@@ -3486,6 +3486,7 @@ def test_the_checklist_tells_secrets_and_the_community_profile_apart(
         ("ghcr", "package of the image is public"),
         ("hacs", "HACS default repositories"),
         ("nextcloud-appstore", "App certificate"),
+        ("cloudflare-workers", "connected with Workers Builds"),
         ("none", None),
     ],
 )

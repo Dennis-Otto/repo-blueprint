@@ -12,7 +12,7 @@ hide:
 [Compare](compare.md){ .md-button }
 [Read the guide](guide.md){ .md-button }
 
-![The social preview of the blueprint: eight kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](images/social-preview.webp)
+![The social preview of the blueprint: nine kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](images/social-preview.webp)
 
 ## How a repository looks after itself
 
@@ -155,6 +155,14 @@ The [guide](guide.md#what-a-new-repository-gets) lists every area, with the PR c
     Manifest V3 in TypeScript, the manifest checked against the store and loaded in Chrome for Testing; every release to the Chrome Web Store, without a stored secret.
 
     [:octicons-arrow-right-24: Chrome extension](kinds/chrome-extension.md)
+
+- :material-cloud-outline:{ .lg .middle } **Cloudflare Worker**
+
+    ---
+
+    TypeScript with Wrangler, its tests in workerd with full coverage; Cloudflare's Workers Builds deploys each release, without a key in GitHub.
+
+    [:octicons-arrow-right-24: Cloudflare Worker](kinds/cloudflare-worker.md)
 
 - :material-docker:{ .lg .middle } **Container image**
 

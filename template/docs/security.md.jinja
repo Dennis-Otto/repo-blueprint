@@ -25,6 +25,11 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 - It runs only the code of its package: Manifest V3 forbids remote code, and the extension evaluates no text of a page or message.
 - Every message from a page or a content script is checked before the extension acts on it.
 - The Chrome Web Store gets exactly the zip that the release attests, and reviews every version.
+[% elif project_type == 'cloudflare-worker' %]
+- Every request from the internet is untrusted input: the Worker checks its method, path and parameters before it acts, and answers anything else with an error.
+- The secrets of the Worker live in Cloudflare, set with `npx wrangler secret put`, never in the repository, a log or an answer.
+- Cloudflare builds and deploys only the commit of `main` that a release tags, with Workers Builds, and no key of Cloudflare is stored in GitHub.
+- The Worker reaches only the bindings of `wrangler.jsonc` and the addresses that its code names.
 [% elif project_type == 'python-package' or stack == 'node' %]
 - Every public function checks its arguments and rejects invalid ones with an error, instead of guessing.
 - The package never runs its input as code and opens no network connection or file that its documentation doesn't name.
@@ -54,6 +59,10 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 1. **Web pages and content scripts → extension.** Every message and every value read from a page is untrusted input.
 2. **Extension → browser.** Only through the permissions and hosts of its manifest.
 3. **Release → Chrome Web Store.** Only the zip that the release attests, after the workflow *Chrome Web Store* checked its provenance.
+[% elif project_type == 'cloudflare-worker' %]
+1. **Internet → Worker.** Every request, its headers and its body are untrusted input.
+2. **Worker → bindings and other services.** Only those of `wrangler.jsonc` and the addresses that its code names, with the secrets that Cloudflare keeps.
+3. **Repository → Cloudflare.** Workers Builds builds every push to `main`, and only a release goes live.
 [% elif project_type == 'python-package' or stack == 'node' %]
 1. **Caller → package.** Every argument of a public function is untrusted input.
 2. **Package → files and network.** Only those the caller names.
@@ -82,7 +91,12 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 | An update asks for a new permission, which disables it until each user accepts | `node scripts/check-manifest.mjs` fails on a permission or host without its reason in `store/permissions.json` |
 | Text of a page runs as code | Manifest V3 forbids remote code, and the extension evaluates no input |
 | A tampered package reaches the store | The workflow *Chrome Web Store* uploads only a zip whose attestation of the release it verified |
-| A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% elif project_type == 'python-package' or stack == 'node' %]
+| A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% elif project_type == 'cloudflare-worker' %]
+| A crafted request reaches code that it shouldn't | The Worker answers only the methods and paths that it knows, and checks every parameter before it acts |
+| A secret reaches the repository or a log | Secrets live in Cloudflare, set with `npx wrangler secret put`; `.dev.vars` of `wrangler dev` never reaches git |
+| A change goes live without its checks | Only a release deploys, from `main`, which takes no change without every required check |
+| A key of Cloudflare leaks from GitHub | None is stored there: Cloudflare builds and deploys with Workers Builds |
+| A package that it depends on runs code as it installs | Every install, in the CI, the dev container, Workers Builds and the documentation, is `npm ci --ignore-scripts`; Workers Builds skips its own install with `SKIP_DEPENDENCY_INSTALL` |[% elif project_type == 'python-package' or stack == 'node' %]
 | Invalid input leads to wrong results | Every public function rejects it with an error |
 | Input runs as code | The package evaluates no input |[% if stack == 'node' %]
 | A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% endif %][% elif stack == 'container' %]
@@ -96,7 +110,8 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 - The integration is as safe as Home Assistant and the network that it and the device run in.[% elif stack == 'php' %]
 - The app is as safe as Nextcloud, its configuration and the services that the app connects to.[% elif project_type == 'github-action' %]
 - The action is as safe as the workflow that runs it: a workflow that grants more permissions than the action needs grants them to the action too.[% elif project_type == 'chrome-extension' %]
-- The extension is as safe as Chrome, the pages that it reads and the review of the Chrome Web Store.[% elif project_type == 'python-package' or stack == 'node' %]
+- The extension is as safe as Chrome, the pages that it reads and the review of the Chrome Web Store.[% elif project_type == 'cloudflare-worker' %]
+- The Worker is as safe as Cloudflare, its account and the services that it reaches; anyone with access to the account can change the Worker or its secrets.[% elif project_type == 'python-package' or stack == 'node' %]
 - The package is as safe as the program that uses it and the arguments that this program passes in.[% elif stack == 'container' %]
 - The container is as safe as the host and the ports, volumes and variables that the user maps into it.[% else %]
 - Whoever runs a script trusts it with their permissions; read it before running it.[% endif %]

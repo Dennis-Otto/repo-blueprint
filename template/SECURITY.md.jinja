@@ -73,6 +73,8 @@ The private key of the certificate is a secret of the environment `release`, whi
 `npm audit signatures` checks the signatures and the provenance of the package as npm installed it.
 [% elif publish_to == 'chrome-web-store' %]
 The Chrome Web Store gets exactly this zip: the workflow *Chrome Web Store* downloads it from the release, checks its provenance as above and only then uploads it, signed in to Google without a stored secret, as [docs/releases.md](docs/releases.md) describes.
+[% elif publish_to == 'cloudflare-workers' %]
+Cloudflare deploys exactly the commit of a release: Workers Builds builds the Worker from the commit of `main` that the release tags, with the lock file of that commit, and `scripts/deploy-worker.sh` deploys only that commit, as [docs/releases.md](docs/releases.md) describes. No key of Cloudflare is stored in GitHub, and the secrets of the Worker live in Cloudflare, never in the repository.
 [% elif publish_to == 'github-action' %]
 Repositories that use the action pin the commit hash of a release; `gh release verify` shows which commit the tag of a release stands for.
 [% endif %]
