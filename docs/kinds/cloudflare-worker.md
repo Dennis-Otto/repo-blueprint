@@ -36,7 +36,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), the integration of Cloudflare with GitHub, builds every commit of `main` on Cloudflare and runs `npm run deploy`. Its script, `scripts/deploy-worker.sh`, deploys only the merge of the release pull request, `chore: release X.Y.Z`, as the version `vX.Y.Z`; every other commit becomes a version without traffic, which the dashboard lists. The release workflow tags the same commit and publishes the release with its SBOMs and the signed provenance of its isolated build, so the Worker that runs is the code of the latest release.
 
-No key of Cloudflare is stored in GitHub: an API token of Cloudflare can't be limited to one Worker, and Workers Builds needs none. The secrets of the Worker live in Cloudflare, set with `npx wrangler secret put`. [Decision 0114](../decisions/0114-cloudflare-deploys-a-worker-from-its-release-with-workers-builds.md) records why.
+No key of Cloudflare is stored in GitHub: an API token of Cloudflare can't be limited to one Worker, and Workers Builds needs none. The secrets of the Worker live in Cloudflare, set with `npx wrangler secret put`. [Decision 0115](../decisions/0115-cloudflare-deploys-a-worker-from-its-release-with-workers-builds.md) records why.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-a-cloudflare-worker-goes-live.dark.svg">

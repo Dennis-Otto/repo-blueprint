@@ -36,7 +36,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), die Integration von Cloudflare mit GitHub, baut jeden Commit von `main` bei Cloudflare und führt `npm run deploy` aus. Sein Skript, `scripts/deploy-worker.sh`, liefert nur den Merge des Release-Pull-Requests aus, `chore: release X.Y.Z`, als Version `vX.Y.Z`; jeder andere Commit wird eine Version ohne Verkehr, die das Dashboard auflistet. Der Release-Workflow taggt denselben Commit und veröffentlicht das Release mit seinen SBOMs und der signierten Provenance seines isolierten Builds, also ist der Worker, der läuft, der Code des neuesten Releases.
 
-Kein Schlüssel von Cloudflare liegt in GitHub: Ein API-Token von Cloudflare lässt sich nicht auf einen Worker beschränken, und Workers Builds braucht keines. Die Geheimnisse des Workers liegen bei Cloudflare, gesetzt mit `npx wrangler secret put`. [Entscheidung 0114](../decisions/0114-cloudflare-deploys-a-worker-from-its-release-with-workers-builds.md) hält fest, warum.
+Kein Schlüssel von Cloudflare liegt in GitHub: Ein API-Token von Cloudflare lässt sich nicht auf einen Worker beschränken, und Workers Builds braucht keines. Die Geheimnisse des Workers liegen bei Cloudflare, gesetzt mit `npx wrangler secret put`. [Entscheidung 0115](../decisions/0115-cloudflare-deploys-a-worker-from-its-release-with-workers-builds.md) hält fest, warum.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-a-cloudflare-worker-goes-live.de.dark.svg">
