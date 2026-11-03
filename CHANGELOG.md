@@ -7,6 +7,20 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.9.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.8.0...v1.9.0) (2026-11-03)
+
+
+### Features
+
+* a Nextcloud app signs in its own environment and posts to the App Store from another ([#630](https://github.com/Dennis-Otto/repo-blueprint/issues/630)) ([05b89a8](https://github.com/Dennis-Otto/repo-blueprint/commit/05b89a8c4320b351bee93a9b2f1396faf97be395))
+
+
+### Bug fixes
+
+* **deps:** lock file maintenance ([#601](https://github.com/Dennis-Otto/repo-blueprint/issues/601)) ([6b81050](https://github.com/Dennis-Otto/repo-blueprint/commit/6b81050bc3d970da01ea08d0380c985e4f972538))
+* **deps:** lock file maintenance ([#628](https://github.com/Dennis-Otto/repo-blueprint/issues/628)) ([433f0fe](https://github.com/Dennis-Otto/repo-blueprint/commit/433f0fecdd7eb489b56dfec11dff22ed4619780f))
+* **deps:** refresh pip-compile outputs ([#629](https://github.com/Dennis-Otto/repo-blueprint/issues/629)) ([acb1e15](https://github.com/Dennis-Otto/repo-blueprint/commit/acb1e158464471b73eba3fc61e420056391ad410))
+
 ## [1.8.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.7.0...v1.8.0) (2026-11-02)
 
 ### Features
