@@ -9,17 +9,9 @@ requests when there is none.
 
 ## [1.9.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.8.0...v1.9.0) (2026-11-03)
 
-
 ### Features
 
-* a Nextcloud app signs in its own environment and posts to the App Store from another ([#630](https://github.com/Dennis-Otto/repo-blueprint/issues/630)) ([05b89a8](https://github.com/Dennis-Otto/repo-blueprint/commit/05b89a8c4320b351bee93a9b2f1396faf97be395))
-
-
-### Bug fixes
-
-* **deps:** lock file maintenance ([#601](https://github.com/Dennis-Otto/repo-blueprint/issues/601)) ([6b81050](https://github.com/Dennis-Otto/repo-blueprint/commit/6b81050bc3d970da01ea08d0380c985e4f972538))
-* **deps:** lock file maintenance ([#628](https://github.com/Dennis-Otto/repo-blueprint/issues/628)) ([433f0fe](https://github.com/Dennis-Otto/repo-blueprint/commit/433f0fecdd7eb489b56dfec11dff22ed4619780f))
-* **deps:** refresh pip-compile outputs ([#629](https://github.com/Dennis-Otto/repo-blueprint/issues/629)) ([acb1e15](https://github.com/Dennis-Otto/repo-blueprint/commit/acb1e158464471b73eba3fc61e420056391ad410))
+- **A Nextcloud app signs in its own environment and posts to the App Store from another:** the build of the release now enters the environment `signing` and gets only the key that signs the app, so no action of the build can reach the private key of the release app or the token of the App Store any more. The delivery to the App Store takes its token from `appstore`, and *Register the app* signs the app id in a job in `signing` and posts it from a job in `appstore`, so no job holds the key and the token together. Should the build get no key, the release stops with an error that says where the key belongs, before anything is signed. The registration also reads the name of a certificate in the same form on every version of OpenSSL. Set `APP_PRIVATE_KEY` in `signing` and `APPSTORE_TOKEN` in `appstore` before you take this update; the settings bot names the commands. The copies in `release` stay until a beta release has shown the switch, so a revert brings the releases back ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)).
 
 ## [1.8.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.7.0...v1.8.0) (2026-11-02)
 
