@@ -9,6 +9,8 @@
 | A pull request merges | Workers Builds builds the commit and `npm run deploy` uploads it as a version without traffic, which the dashboard lists with its commit |
 | The release pull request `chore: release X.Y.Z` merges | Workers Builds builds the commit and `npm run deploy` deploys it: version X.Y.Z goes live, tagged `vX.Y.Z` |
 
+A prerelease, such as `chore: release 2.0.0-beta.1`, becomes a version without traffic as well, tagged `v2.0.0-beta.1`: try it, or roll it out gradually under *Deployments*, before the release deploys.
+
 The release workflow tags the same commit as `vX.Y.Z` and publishes the release on GitHub, with its changelog, its SBOMs and the signed provenance of its build, as [SECURITY.md](https://github.com/{= owner =}/{= project_slug =}/blob/main/SECURITY.md#verify-a-release) shows. So the Worker that runs is always the code of the latest release, and the dashboard of Cloudflare names its version by the tag of that release. `scripts/deploy-worker.sh`, which `npm run deploy` runs, decides between the two: it deploys only a commit of `main` whose subject names the release of the version in `package.json`, and uploads every other one.
 
 ## Set up Cloudflare once
@@ -31,6 +33,7 @@ You need an account of Cloudflare; the free plan runs a Worker. These steps take
     | --- | --- |
     | Branch | `main` |
     | Build command | `npm ci --ignore-scripts` |
+    | Build variable, under *Variables and secrets* | `SKIP_DEPENDENCY_INSTALL` = `1`: otherwise Cloudflare installs the dependencies itself first, with the install scripts of every package, in the one build that can deploy; the build command installs them without |
     | Deploy command | `npm run deploy` |
     | Builds for non-production branches | off: the checks of each pull request run in GitHub |
     | Root directory | empty, the root of the repository |
@@ -60,4 +63,5 @@ Then fix the cause in a pull request; the next release deploys it.
 - **The name doesn't match:** Workers Builds builds only the Worker whose name `wrangler.jsonc` names. Rename the one or the other.
 - **Another Node:** the build takes the Node of `.nvmrc`; if its log shows another one, set the build variable `NODE_VERSION` to the version of `.nvmrc` under *Settings* and *Builds*.
 - **A release that didn't deploy:** the log of its build says why `npm run deploy` only uploaded it, such as a `package.json` with another version than the title of the release, or a branch of another name than `main`. *Retry build* builds the same commit again, once a setting of Cloudflare was the cause; `npx wrangler deploy` from a checkout of its tag deploys it by hand.
+- **A warning about `SKIP_DEPENDENCY_INSTALL`:** the build variable of step 3 is missing, and Cloudflare's own install ran the install scripts of the packages. Set it to `1`.
 - **`npm run deploy` on your machine** refuses: it runs only in Workers Builds. `npx wrangler deploy` deploys by hand, past the release, for an emergency.

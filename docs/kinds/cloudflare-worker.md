@@ -19,7 +19,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 ## What you get
 
 - **The example:** a Worker in `src/index.ts`, which answers `GET /?name=Ada` with a greeting in JSON and refuses every other path and method, the code that it calls in `src/greet.ts`, and its tests in `test/`. `wrangler.jsonc` holds the name of the Worker, its main module, its compatibility date and its bindings. Replace it with the real Worker; its tests show how.
-- **Tests in the runtime of Cloudflare:** Vitest runs them in workerd with the bindings of `wrangler.jsonc`, through the [Vitest integration of Cloudflare](https://developers.cloudflare.com/workers/testing/vitest-integration/), and each request reaches the Worker as one from the internet would. `npm run dev` runs it on your machine.
+- **Tests in the runtime of Cloudflare:** Vitest runs them in workerd with the bindings of `wrangler.jsonc`, through the [Vitest integration of Cloudflare](https://developers.cloudflare.com/workers/testing/vitest-integration/), and each request reaches the Worker as one from the internet would. A secret lives only in Cloudflare, so a test that needs one calls the Worker of `src/index.ts` with an `env` of its own: `worker.fetch(request, { ...env, TOKEN: "test" }, createExecutionContext())`, with `env` and `createExecutionContext` from `cloudflare:test`. `npm run dev` runs it on your machine.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: the lock file, Biome, tsc on the types that Wrangler writes from `wrangler.jsonc`, the tests with every line, branch and function covered, and then *Worker*, which bundles the Worker with Wrangler as Cloudflare does, without an upload or a sign-in.
 - **Workflows of this kind:** the newest Node on `main` (`newest-node.yml`); Cloudflare builds and deploys the Worker itself, so no workflow holds a key of Cloudflare.
 - **The steps of every kind:** the text files, the diagrams, the pages in one column, the files of the project, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
@@ -47,11 +47,13 @@ No key of Cloudflare is stored in GitHub: an API token of Cloudflare can't be li
 
 `python3 .github/blueprint.py checklist` ticks off each step that it can see and names the rest, each with its link: the release app of the owner with its private key, as [your own account](../own-account.md) shows, the token of the issue assistant unless its AI is off, OpenSSF Best Practices, the REUSE API and the social preview.
 
-This kind adds no step of its own. Its steps happen in Cloudflare, which GitHub can't see:
+This kind adds these steps:
 
 - Create the Worker with its first deployment from your machine, `npx wrangler login` and `npx wrangler deploy`, which keeps the sign-in there.
-- Connect the repository in the dashboard of Cloudflare, under *Settings* and *Builds* of the Worker, with the app of Cloudflare installed for this repository only, the build command `npm ci --ignore-scripts` and the deploy command `npm run deploy`.
+- Connect the repository in the dashboard of Cloudflare, under *Settings* and *Builds* of the Worker, with the app of Cloudflare installed for this repository only, the build command `npm ci --ignore-scripts`, the build variable `SKIP_DEPENDENCY_INSTALL` set to `1`, so that Cloudflare runs no install script of a package, and the deploy command `npm run deploy`.
 - Put each secret of the Worker into Cloudflare with `npx wrangler secret put NAME`.
+
+They happen in Cloudflare, so the checklist names the first two as one step that it can't tick off.
 
 `docs/releases.md` of the new repository describes each step, how to roll a release back, and what to do when a build fails.
 

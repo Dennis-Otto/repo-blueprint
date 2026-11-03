@@ -1,6 +1,9 @@
 // The tests run in workerd, the runtime of Cloudflare Workers, as vitest.config.ts
 // sets them up: exports.default is the Worker of src/index.ts with the bindings of
-// wrangler.jsonc, and each request reaches it as one from the internet would.
+// wrangler.jsonc, and each request reaches it as one from the internet would. A
+// secret lives only in Cloudflare: a test that needs one imports the Worker of
+// src/index.ts and calls worker.fetch(request, { ...env, TOKEN: "test" },
+// createExecutionContext()), with env and createExecutionContext from cloudflare:test.
 import { exports } from "cloudflare:workers";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";

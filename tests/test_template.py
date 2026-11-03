@@ -7337,6 +7337,8 @@ def test_renovate_keeps_every_project_current(
     # The project's file extends the blueprint's, so that its own rules come last.
     assert '"local>Dennis-Otto/demo-project//.github/renovate-blueprint.json5"' in entry
     rules = (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    # Vitest and its coverage provider move to a new major version together.
+    assert ('groupName: "Vitest"' in rules) == (kind == "cloudflare-worker")
     for setting in (
         'minimumReleaseAge: "7 days"',
         "platformAutomerge: true",
@@ -13408,6 +13410,8 @@ def test_only_cloudflare_builds_and_deploys_a_worker(
         "`npm ci --ignore-scripts`",
         "`npm run deploy`",
         "npx wrangler secret put NAME",
+        "`SKIP_DEPENDENCY_INSTALL`",
+        "becomes a version without traffic",
     ):
         assert step in text, step
     assert "Chrome" not in text
@@ -13483,6 +13487,7 @@ ON_MAIN = {
     "WORKERS_CI": "1",
     "WORKERS_CI_BRANCH": "main",
     "WORKERS_CI_COMMIT_SHA": "0123456789abcdef0123456789abcdef01234567",
+    "SKIP_DEPENDENCY_INSTALL": "1",
 }
 DEPLOY = ["--no", "--", "wrangler", "deploy", "--tag"]
 UPLOAD = ["--no", "--", "wrangler", "versions", "upload", "--message"]
@@ -13494,8 +13499,8 @@ LONG = "feat: " + "a" * 120
 @pytest.mark.parametrize(
     ("subject", "version", "variables", "called", "said"),
     [
-        # The merge of a release pull request goes live, also a prerelease, and also
-        # one whose title names the branch of release-please as its scope.
+        # The merge of a release pull request goes live, also one whose title names
+        # the branch of release-please as its scope.
         (
             "chore: release 1.2.3 (#40)",
             "1.2.3",
@@ -13504,11 +13509,29 @@ LONG = "feat: " + "a" * 120
             "is the release 1.2.3: it goes live",
         ),
         (
+            "chore(main): release 1.3.0 (#43)",
+            "1.3.0",
+            ON_MAIN,
+            [*DEPLOY, "v1.3.0", "--message", "Release 1.3.0"],
+            "it goes live",
+        ),
+        # A prerelease becomes a version without traffic, to try it first.
+        (
             "chore(main): release 1.3.0-beta.2",
             "1.3.0-beta.2",
             ON_MAIN,
-            [*DEPLOY, "v1.3.0-beta.2", "--message", "Release 1.3.0-beta.2"],
-            "it goes live",
+            [
+                "--no",
+                "--",
+                "wrangler",
+                "versions",
+                "upload",
+                "--tag",
+                "v1.3.0-beta.2",
+                "--message",
+                "Prerelease 1.3.0-beta.2",
+            ],
+            "is the prerelease 1.3.0-beta.2: it becomes a version without traffic",
         ),
         # Every other commit becomes a version without traffic, with the reason.
         (
@@ -13535,7 +13558,7 @@ LONG = "feat: " + "a" * 120
         (
             "chore: release 1.2.3 (#40)",
             "1.2.3",
-            {"WORKERS_CI": "1"},
+            {"WORKERS_CI": "1", "SKIP_DEPENDENCY_INSTALL": "true"},
             [*UPLOAD, "chore: release 1.2.3 (#40)"],
             "Workers Builds named no branch",
         ),
@@ -13571,6 +13594,31 @@ def test_workers_builds_deploys_only_the_commit_of_a_release(
     assert done.returncode == 0, done.stderr
     assert arguments == called
     assert said in done.stdout
+    assert "SKIP_DEPENDENCY_INSTALL" not in done.stderr
+
+
+@pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")
+@pytest.mark.parametrize("skip", ["", "0", "true"])
+def test_workers_builds_warns_when_cloudflare_installs_with_scripts(
+    projects: dict[str, Path], tmp_path: Path, skip: str
+) -> None:
+    # Cloudflare's own install runs install scripts unless the set-up skipped it.
+    folder = tmp_path / "worker"
+    (folder / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        projects["cloudflare-worker"] / "scripts/deploy-worker.sh",
+        folder / "scripts/deploy-worker.sh",
+    )
+    variables = {**ON_MAIN, "SKIP_DEPENDENCY_INSTALL": skip}
+
+    done, arguments = deploy_worker(
+        folder, "chore: release 1.2.3 (#40)", "1.2.3", **variables
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert arguments[:4] == DEPLOY[:4]
+    warned = "::warning::Set the build variable SKIP_DEPENDENCY_INSTALL to 1"
+    assert (warned in done.stderr) == (skip != "true")
 
 
 @pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")

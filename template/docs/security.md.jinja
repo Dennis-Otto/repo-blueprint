@@ -96,7 +96,7 @@ What {= project_name =} protects, what it trusts and which risks remain. [SECURI
 | A secret reaches the repository or a log | Secrets live in Cloudflare, set with `npx wrangler secret put`; `.dev.vars` of `wrangler dev` never reaches git |
 | A change goes live without its checks | Only a release deploys, from `main`, which takes no change without every required check |
 | A key of Cloudflare leaks from GitHub | None is stored there: Cloudflare builds and deploys with Workers Builds |
-| A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% elif project_type == 'python-package' or stack == 'node' %]
+| A package that it depends on runs code as it installs | Every install, in the CI, the dev container, Workers Builds and the documentation, is `npm ci --ignore-scripts`; Workers Builds skips its own install with `SKIP_DEPENDENCY_INSTALL` |[% elif project_type == 'python-package' or stack == 'node' %]
 | Invalid input leads to wrong results | Every public function rejects it with an error |
 | Input runs as code | The package evaluates no input |[% if stack == 'node' %]
 | A package that it depends on runs code as it installs | Every install, in the CI, the dev container and the documentation, is `npm ci --ignore-scripts`, which runs no install script of a package |[% endif %][% elif stack == 'container' %]
