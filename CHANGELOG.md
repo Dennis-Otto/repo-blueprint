@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.10.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.9.0...v1.10.0) (2026-11-03)
+
+
+### Features
+
+* a project kind for a Cloudflare Worker ([#632](https://github.com/Dennis-Otto/repo-blueprint/issues/632)) ([7b22ad9](https://github.com/Dennis-Otto/repo-blueprint/commit/7b22ad9445af64fad984c4cfb0ef2131155ba2cd))
+
 ## [1.9.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.8.0...v1.9.0) (2026-11-03)
 
 ### Features
