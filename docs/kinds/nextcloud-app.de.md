@@ -34,7 +34,12 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 ## Auslieferung
 
-Der Merge des Release-Pull-Requests baut das Paket mit krankerl, signiert es mit dem Schlüssel der App und veröffentlicht es im App Store, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3. Das Environment `release` hält die Secrets `APP_PRIVATE_KEY` und `APPSTORE_TOKEN`, aus dem die Workflows sie nehmen. Das Environment `signing` hält eine Kopie des Schlüssels und `appstore` eine Kopie des Tokens, für den Tag, an dem die Workflows dorthin umziehen, damit der Build nur noch den Schlüssel erreicht, der die App signiert ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). Der Einstellungs-Bot legt beide nur für `main` an, und bis du die Kopien gesetzt hast, schlägt er fehl und nennt die Befehle, wie die Checkliste auch.
+Der Merge des Release-Pull-Requests baut das Paket mit krankerl, signiert es mit dem Schlüssel der App und veröffentlicht es im App Store, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3. Der Schlüssel `APP_PRIVATE_KEY` ist das einzige Secret des Environments `signing`, das nur der Build und der Job von *Register the app* betreten, der die ID der App signiert, und das Token `APPSTORE_TOKEN` das einzige Secret von `appstore`, das nur die Auslieferung in den App Store und der Job von *Register the app* betreten, der die Registrierung sendet: Der Build erreicht nur den Schlüssel, der die App signiert, nie das Token oder den privaten Schlüssel der Release-App ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)). Der Einstellungs-Bot legt beide nur für `main` an, und bis du ihre Secrets gesetzt hast, schlägt er fehl und nennt die Befehle, wie die Checkliste auch. Das Environment `release` hält Kopien von beiden, bis ein Beta-Release den Umzug gezeigt hat; kein Workflow liest sie dort.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-job-of-a-nextcloud-app-holds-which-secret.de.dark.svg">
+  <img src="../images/diagrams/which-job-of-a-nextcloud-app-holds-which-secret.de.svg" alt="Welcher Job einer Nextcloud-App welches Secret hält: Der Release-Workflow betritt kein Environment und reicht dem Build nur den Namen des Schlüssels weiter. Der Build betritt das Environment signing, das den Schlüssel hält, der die App signiert, und sonst nichts, und schlägt ohne ihn fehl. Die Auslieferung in den App Store betritt appstore, das das Token des App Stores hält und sonst nichts. Register the app signiert die ID der App in einem Job in signing und reicht die Signatur und das Zertifikat, beide kein Geheimnis, an einen Job in appstore weiter, der sie sendet.">
+</picture>
 
 ## Einmal von Hand
 

@@ -6,9 +6,12 @@ census makes sure that every such step of every workflow runs in a test."""
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import re
 import shutil
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1319,6 +1322,288 @@ def test_the_assets_go_to_the_draft_with_their_provenance(tmp_path: Path) -> Non
     ]
     statement = (tmp_path / "runner/assets/provenance.intoto.jsonl").read_text()
     assert json.loads(statement) == envelope
+
+
+# The key and the token of a Nextcloud app, each in an environment of its own (#530).
+
+OPENSSL = shutil.which("openssl")
+WITH_OPENSSL = pytest.mark.skipif(OPENSSL is None, reason="needs openssl")
+APP_ID = "demoapp"
+PYTHON3 = {"python3": f'exec "{Path(sys.executable).as_posix()}" "$@"\n'}
+SIGN_THE_APP_ID = "Check the certificate and sign the app id"
+REGISTER_THE_APP_ID = "Register the app id with its certificate"
+NOT_HANDED_OVER = (
+    "::error::The job sign the app id handed over no app id, certificate or signature."
+)
+
+
+def test_the_build_signs_no_nextcloud_app_without_the_key_of_its_environment(
+    tmp_path: Path,
+) -> None:
+    # Should GitHub not take the key of the environment signing in place of the empty
+    # value that release.yml passes, the release stops here, before anything signs.
+    done = run_step(
+        tmp_path,
+        "build-release.yml",
+        "assets",
+        "Sign the Nextcloud app",
+        env={"APP_ID": APP_ID, "APP_PRIVATE_KEY": ""},
+        stubs={"php": recording("php"), "openssl": recording("openssl")},
+    )
+
+    assert done.returncode == 1
+    assert (
+        "::error::The build got no APP_PRIVATE_KEY: set it as a secret of the"
+        " environment signing, and let the job assets of release.yml pass it"
+        " under secrets:"
+    ) in done.stdout
+    assert done.stubbed == []
+    assert list(done.runner_temp.iterdir()) == []
+
+
+@pytest.fixture(scope="module")
+def app_keys(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+    """The key of the app with the certificate that Nextcloud issued for its id, and
+    those of another app, by the names of their files."""
+    assert OPENSSL
+    folder = tmp_path_factory.mktemp("keys")
+    for name, app_id in (("app", APP_ID), ("other", "otherapp")):
+        subprocess.run(
+            [
+                OPENSSL,
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-keyout",
+                str(folder / f"{name}.key"),
+                "-out",
+                str(folder / f"{name}.crt"),
+                "-subj",
+                f"/CN={app_id}",
+                "-days",
+                "2",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    return {path.name: path.read_text(encoding="utf-8") for path in folder.iterdir()}
+
+
+def sign_the_app_id(
+    tmp_path: Path, certificate: str, *, key: str, confirmation: str = APP_ID
+) -> StepResult:
+    """Runs the step of the job sign of register-app.yml, whose curl downloads the
+    certificate."""
+    issued = tmp_path / "issued.crt"
+    issued.write_text(certificate, encoding="utf-8", newline="\n")
+    download = (
+        'while (($#)); do [[ "$1" == --output ]] && out="$2"; shift; done\n'
+        f'cp "{issued.as_posix()}" "$out"'
+    )
+    return run_step(
+        tmp_path,
+        "register-app.yml",
+        "sign",
+        SIGN_THE_APP_ID,
+        env={"APP_PRIVATE_KEY": key, "CONFIRMATION": confirmation},
+        stubs={**PYTHON3, "curl": recording("curl", download)},
+        files={"appinfo/info.xml": f"<info>\n  <id>{APP_ID}</id>\n</info>\n"},
+    )
+
+
+@WITH_OPENSSL
+def test_the_app_id_is_signed_in_the_environment_of_the_key_alone(
+    tmp_path: Path, app_keys: dict[str, str]
+) -> None:
+    # A job enters one environment: the key signs in signing, and the token posts in
+    # appstore, so that neither job holds both, nor the key of the release app.
+    sign, register = (
+        job("register-app.yml", "sign"),
+        job("register-app.yml", "register"),
+    )
+    assert sign["environment"] == {"name": "signing", "deployment": False}
+    assert register["environment"] == {"name": "appstore", "deployment": False}
+    assert register["needs"] == "sign"
+    handed_over = ("app-id", "certificate", "signature")
+    assert sign["outputs"] == {
+        name: f"${{{{ steps.sign.outputs.{name} }}}}" for name in handed_over
+    }
+    assert {
+        name: step_in(register, REGISTER_THE_APP_ID)["env"][name]
+        for name in ("APP_ID", "CERTIFICATE", "SIGNATURE")
+    } == {
+        "APP_ID": "${{ needs.sign.outputs.app-id }}",
+        "CERTIFICATE": "${{ needs.sign.outputs.certificate }}",
+        "SIGNATURE": "${{ needs.sign.outputs.signature }}",
+    }
+
+    done = sign_the_app_id(tmp_path, app_keys["app.crt"], key=app_keys["app.key"])
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert len(done.stubbed) == 1
+    assert done.stubbed[0].endswith(
+        f"https://raw.githubusercontent.com/nextcloud/app-certificate-requests/master/{APP_ID}/{APP_ID}.crt"
+    )
+    assert done.outputs["app-id"] == APP_ID
+    # The certificate as it came, and the app id signed by the key that it names.
+    certificate = base64.b64decode(done.outputs["certificate"]).decode()
+    assert certificate == app_keys["app.crt"]
+    (tmp_path / "app.crt").write_text(certificate, encoding="utf-8", newline="\n")
+    (tmp_path / "app-id").write_bytes(APP_ID.encode())
+    (tmp_path / "signature").write_bytes(base64.b64decode(done.outputs["signature"]))
+    assert OPENSSL
+    public = subprocess.run(
+        [OPENSSL, "x509", "-in", str(tmp_path / "app.crt"), "-pubkey", "-noout"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    (tmp_path / "app.pub").write_bytes(public)
+    verified = subprocess.run(
+        [
+            OPENSSL,
+            "dgst",
+            "-sha512",
+            "-verify",
+            str(tmp_path / "app.pub"),
+            "-signature",
+            str(tmp_path / "signature"),
+            str(tmp_path / "app-id"),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert verified.returncode == 0, verified.stderr
+    # Neither the key nor the certificate stays on the runner.
+    assert list(done.runner_temp.iterdir()) == []
+
+
+@WITH_OPENSSL
+def test_a_key_that_the_certificate_doesnt_name_signs_nothing(
+    tmp_path: Path, app_keys: dict[str, str]
+) -> None:
+    done = sign_the_app_id(tmp_path, app_keys["app.crt"], key=app_keys["other.key"])
+
+    assert done.returncode == 1
+    assert (
+        f"::error::APP_PRIVATE_KEY is not the key of the certificate of {APP_ID}."
+        in done.stdout
+    )
+    assert done.outputs == {}
+    assert list(done.runner_temp.iterdir()) == []
+
+
+@WITH_OPENSSL
+def test_a_certificate_of_another_app_signs_nothing(
+    tmp_path: Path, app_keys: dict[str, str]
+) -> None:
+    done = sign_the_app_id(tmp_path, app_keys["other.crt"], key=app_keys["other.key"])
+
+    assert done.returncode == 1
+    assert done.outputs == {}
+    assert list(done.runner_temp.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("key", "confirmation", "error"),
+    [
+        (
+            "",
+            APP_ID,
+            "::error::The environment signing needs the secret APP_PRIVATE_KEY.",
+        ),
+        ("a key", "otherapp", f"::error::Confirm with the id of the app, {APP_ID}."),
+    ],
+)
+def test_no_app_id_is_signed_without_the_key_or_the_confirmation(
+    tmp_path: Path, key: str, confirmation: str, error: str
+) -> None:
+    done = sign_the_app_id(tmp_path, "", key=key, confirmation=confirmation)
+
+    assert done.returncode == 1
+    assert error in done.stdout
+    assert done.stubbed == []
+    assert done.outputs == {}
+
+
+def register_the_app_id(tmp_path: Path, **env: str) -> tuple[StepResult, Path]:
+    """Runs the step of the job register of register-app.yml, whose curl keeps the
+    request that it posts."""
+    request = tmp_path / "request.json"
+    post = (
+        'while (($#)); do [[ "$1" == --data-binary ]] && body="${2#@}"; shift; done\n'
+        f'cp "$body" "{request.as_posix()}"'
+    )
+    done = run_step(
+        tmp_path,
+        "register-app.yml",
+        "register",
+        REGISTER_THE_APP_ID,
+        env=env,
+        stubs={"curl": recording("curl", post)},
+    )
+    return done, request
+
+
+@WITH_JQ
+@WITH_OPENSSL
+def test_the_app_store_gets_the_certificate_with_the_signed_app_id(
+    tmp_path: Path,
+) -> None:
+    certificate = "-----BEGIN CERTIFICATE-----\nMIIBdemo\n-----END CERTIFICATE-----\n"
+    done, request = register_the_app_id(
+        tmp_path,
+        APPSTORE_TOKEN="the token",
+        APP_ID=APP_ID,
+        CERTIFICATE=base64.b64encode(certificate.encode()).decode(),
+        SIGNATURE="c2lnbmVk",
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    runner = done.runner_temp.as_posix()
+    assert done.stubbed == [
+        "curl --fail-with-body --silent --show-error --request POST"
+        " --header Authorization: Token the token"
+        " --header Content-Type: application/json"
+        f" --data-binary @{runner}/request.json https://apps.nextcloud.com/api/v1/apps"
+    ]
+    assert json.loads(request.read_text(encoding="utf-8")) == {
+        "certificate": certificate,
+        "signature": "c2lnbmVk",
+    }
+    assert f"Registered {APP_ID} in the Nextcloud App Store." in done.summary
+    assert list(done.runner_temp.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("missing", "error"),
+    [
+        (
+            "APPSTORE_TOKEN",
+            "::error::The environment appstore needs the secret APPSTORE_TOKEN.",
+        ),
+        ("APP_ID", NOT_HANDED_OVER),
+        ("CERTIFICATE", NOT_HANDED_OVER),
+        ("SIGNATURE", NOT_HANDED_OVER),
+    ],
+)
+def test_nothing_is_registered_without_the_token_or_all_that_the_key_signed(
+    tmp_path: Path, missing: str, error: str
+) -> None:
+    # GitHub hands on no output of a job that it takes for a secret: it arrives empty.
+    env = {
+        "APPSTORE_TOKEN": "the token",
+        "APP_ID": APP_ID,
+        "CERTIFICATE": "Y2VydGlmaWNhdGU=",
+        "SIGNATURE": "c2lnbmVk",
+    }
+    done, request = register_the_app_id(tmp_path, **{**env, missing: ""})
+
+    assert done.returncode == 1
+    assert error in done.stdout
+    assert done.stubbed == []
+    assert not request.exists()
 
 
 @pytest.mark.parametrize("tool", ["blueprint.py", ".github/blueprint.py"])
