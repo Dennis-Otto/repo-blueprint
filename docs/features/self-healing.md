@@ -95,6 +95,12 @@ The release of a merge that fails, as at a push of its tag that GitHub refuses f
 
 **How:** `after-checks.yml`.
 
+## Pull requests of the bots that conflict
+
+The screenshot bot, the picture bot of the blueprint and the sync bot of the issue assistant build the branch of their pull request anew from `main`, but run only after a release, every week or every day. When one of their pull requests conflicts with `main`, the branch bot starts the bot's workflow at once instead of asking a person to merge `main`, once for each conflict: the label `merge-conflict` shows that it did, until GitHub finds the new branch mergeable. The two picture bots avoid most conflicts before they open one: a render that waited for the one before renders `main` as it is then, and when `main` changed a picture or a page of the pull request while the pictures rendered, as when the pull request before merged, the bot leaves its branch as it is and renders `main` anew. The diagram bot and the fix bot need neither: every change of `main` that can conflict with their pull request starts them anyway.
+
+**How:** `update-branches.yml`, `screenshot-bot.yml`, `docs-pictures.yml` and `sync-issue-assistant.yml` ([decision 0118](../decisions/0118-a-bot-whose-pull-request-conflicts-builds-it-anew-at-once.md)).
+
 ## When a check fails or stops
 
 A check that a runner, a site or GitHub fails for a moment, or that a race of two runs cancels, needs no person: the bots after the checks run it once more, and leave red only what fails for a reason.

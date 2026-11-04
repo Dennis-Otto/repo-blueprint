@@ -227,7 +227,7 @@ group = "release"
 [[label]]
 name = "merge-conflict"
 color = "b60205"
-description = "Needs a person: it conflicts with main, or a blueprint update has conflict markers"
+description = "Conflicts with main: a person merges it, or the bot that made it builds it anew"
 group = "release"
 
 [[label]]

@@ -18224,6 +18224,21 @@ def test_the_browser_of_the_pictures_and_its_playwright_move_together() -> None:
     assert rules["packageRules"][-1] == grouped[0]
 
 
+def assert_main_has_the_rendered_commit(opener: dict[str, Any]) -> None:
+    """The job with the release app runs code only of a commit of main: the commit
+    that the job render names, which runs the script of the project, is checked with
+    the token of the job before the checkout."""
+    names = [step.get("name") for step in opener["steps"]]
+    check = names.index("Check that main has the commit that the job render names")
+    (checkout,) = steps_using(opener, "actions/checkout")
+    assert check < opener["steps"].index(checkout)
+    step = opener["steps"][check]
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["SHA"] == "${{ needs.render.outputs.sha }}"
+    assert '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]' in step["run"]
+    assert 'compare/$SHA...main" --jq .behind_by)" == 0 ]]' in step["run"]
+
+
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
@@ -18287,6 +18302,25 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     assert app_permissions(opener)["workflows"] == "write"
     assert '\ngh pr merge "$open" --auto --squash\n' in scripts_of(opener)
     assert 'author.login == \\"app/$APP_SLUG\\"' in scripts_of(opener)
+    # A render that waited renders main as it is now, and the commits start from the
+    # commit that it rendered (paperless-unified-search#316).
+    (rendering,) = steps_using(render, "actions/checkout")
+    assert rendering["with"]["ref"] == "${{ github.ref }}"
+    assert render["outputs"]["sha"] == "${{ steps.rendered.outputs.sha }}"
+    (pages,) = steps_using(opener, "actions/checkout")
+    assert pages["with"]["ref"] == "${{ needs.render.outputs.sha }}"
+    assert_main_has_the_rendered_commit(opener)
+    assert "SHA: ${{ needs.render.outputs.sha }}" in workflow
+    assert "github.sha" not in workflow
+    # When main changed a file of the pull request meanwhile, the token of the job
+    # starts the workflow anew, and the release app needs no right for it.
+    assert opener["permissions"] == {"actions": "write", "contents": "read"}
+    assert "actions" not in app_permissions(opener)
+    assert " screenshots overtaken " in scripts_of(opener)
+    assert (
+        'GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \\\n    '
+        '"repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main'
+    ) in scripts_of(opener)
     for job in (plan, render, opener):
         assert "${{" not in scripts_of(job)
     # The bot-health bot keeps an issue open while the bot fails.
@@ -18323,6 +18357,15 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
     opener = job_in(parsed, "pull-request")
     assert opener["environment"]["name"] == "release"
     assert '\ngh pr merge "$open" --auto --squash\n' in scripts_of(opener)
+    # As the screenshot bot: main as it is now, and a new run when main changed a
+    # file of the pull request while the pictures rendered.
+    (rendering,) = steps_using(render, "actions/checkout")
+    assert rendering["with"]["ref"] == "${{ github.ref }}"
+    assert "SHA: ${{ needs.render.outputs.sha }}" in workflow
+    assert opener["permissions"] == {"actions": "write", "contents": "read"}
+    assert " screenshots overtaken " in scripts_of(opener)
+    assert "actions/workflows/docs-pictures.yml/dispatches" in scripts_of(opener)
+    assert_main_has_the_rendered_commit(opener)
     for job in (plan, render, opener):
         assert "${{" not in scripts_of(job)
     # The files whose change in a release can change the pictures.

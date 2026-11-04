@@ -211,6 +211,8 @@ class FakeGitHub:
         self.runs: dict[str, list[dict[str, Any]]] = {}
         self.approved: list[int] = []
         self.dispatched: list[Any] = []
+        # The workflows of other bots that the bot started, with what it sent.
+        self.started: list[tuple[str, Any]] = []
         # How often GitHub still shows the old head after it took an update.
         self.looks_until_moved: dict[int, int] = {}
         # The token of the job may read the runs, and so may a person. The token of the
@@ -305,6 +307,11 @@ class FakeGitHub:
         ):
             assert self.by_job
             self.dispatched.append(body)
+            return 204, None
+        found = re.fullmatch(rf"{own}/actions/workflows/([\w.-]+)/dispatches", path)
+        if method == "POST" and found:
+            assert self.by_job
+            self.started.append((found[1], body))
             return 204, None
         raise AssertionError(f"unexpected request {method} {path}")
 
@@ -684,6 +691,99 @@ def test_renovate_builds_a_branch_that_conflicts_anew() -> None:
         notes(summary)[1] == "conflicts with `main`; Renovate builds its branch anew."
     )
     assert [number for number, _ in github.updated] == [2]
+
+
+@pytest.mark.parametrize(("branch", "workflow"), sorted(branches.REBUILT_BY.items()))
+def test_a_conflict_starts_the_bot_that_builds_its_branch_anew(
+    branch: str, workflow: str
+) -> None:
+    # The screenshot bot's #316 of paperless-unified-search waited a week for the
+    # schedule of its bot: the branch bot starts the bot's workflow instead.
+    github = FakeGitHub(
+        pull(1, branch=branch, mergeable="CONFLICTING"), pull(2, enabled=LATER)
+    )
+    github.behind = {1: 3, 2: 1}
+
+    summary, warnings = with_job(github)
+
+    assert warnings == []
+    assert github.started == [(workflow, {"ref": "main"})]
+    assert github.dispatched == []
+    # The label says that the bot started it, and no comment asks a person to act.
+    assert github.added == [1]
+    assert github.comments == {}
+    assert notes(summary)[1] == (
+        f"conflicts with `main`: the bot started `{workflow}`, which builds its branch"
+        " anew from `main`; it has the label merge-conflict until then."
+    )
+    assert [number for number, _ in github.updated] == [2]
+
+
+def test_a_conflict_starts_the_bot_once() -> None:
+    # The label goes once the new branch no longer conflicts, and a new conflict
+    # starts the bot again.
+    github = FakeGitHub(
+        pull(1, branch="bot/screenshots", mergeable="CONFLICTING", labels=[LABEL])
+    )
+
+    summary, warnings = with_job(github)
+
+    assert warnings == []
+    assert github.started == []
+    assert github.added == []
+    assert notes(summary)[1] == (
+        "conflicts with `main`: `screenshot-bot.yml` builds its branch anew from "
+        "`main`."
+    )
+
+
+def test_a_person_starts_the_bot_that_builds_its_branch_anew() -> None:
+    # Without the token of a job, the bot starts nothing and leaves the label to the
+    # run that does.
+    github = FakeGitHub(pull(1, branch="bot/pictures", mergeable="CONFLICTING"))
+
+    summary, _ = bot(github)
+
+    assert github.started == []
+    assert github.added == []
+    assert github.comments == {}
+    assert notes(summary)[1] == (
+        "conflicts with `main`: start `docs-pictures.yml` on `main`, which builds its "
+        "branch anew."
+    )
+
+
+def test_a_refused_start_of_a_bot_leaves_the_conflict_for_the_next_run() -> None:
+    github = FakeGitHub(pull(1, branch="bot/screenshots", mergeable="CONFLICTING"))
+    github.fail[
+        ("POST", f"repos/{REPO}/actions/workflows/screenshot-bot.yml/dispatches")
+    ] = 403
+
+    summary, warnings = with_job(github)
+
+    # Without the label, the next run of the bot starts it again.
+    assert github.added == []
+    assert len(warnings) == 1
+    assert warnings[0].startswith("::warning::The branch bot couldn't handle #1: ")
+    assert "GitHub refused a request" in notes(summary)[1]
+
+
+def test_a_fork_whose_branch_has_the_name_of_a_bot_waits_for_a_person() -> None:
+    github = FakeGitHub(
+        pull(
+            1,
+            branch="bot/screenshots",
+            mergeable="CONFLICTING",
+            cross=True,
+            editable=True,
+        )
+    )
+
+    summary, _ = with_job(github)
+
+    assert github.started == []
+    assert github.added == [1]
+    assert "waits for a person" in notes(summary)[1]
 
 
 def test_the_label_goes_once_github_finds_no_conflict() -> None:

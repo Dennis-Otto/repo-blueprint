@@ -1457,7 +1457,7 @@ def test_the_sync_moves_its_pull_request_on_to_a_newer_release(tmp_path: Path) -
 @runs_the_script
 @needs_bash
 def test_the_sync_keeps_a_pull_request_of_the_same_release(tmp_path: Path) -> None:
-    result = pull_request(tmp_path, open_pulls=f"12\t{HEADLINE}")
+    result = pull_request(tmp_path, open_pulls=f"12\t{HEADLINE}\tMERGEABLE")
 
     assert result.returncode == 0, result.stdout + result.stderr
     # The branch bot keeps it current with main; nothing is committed again.
@@ -1468,6 +1468,30 @@ def test_the_sync_keeps_a_pull_request_of_the_same_release(tmp_path: Path) -> No
         "#12 brings the issue assistant v1.3.1 already, and merges itself once every"
         " check passes.\n"
     )
+
+
+@runs_the_script
+@needs_bash
+def test_the_sync_builds_a_pull_request_of_the_same_release_anew_that_conflicts(
+    tmp_path: Path,
+) -> None:
+    # The branch bot can't bring it up to date and starts the sync instead.
+    result = pull_request(
+        tmp_path,
+        open_pulls=f"12\t{HEADLINE}\tCONFLICTING",
+        others="",
+        branches=("bot/issue-assistant",),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = result.commands
+    assert "--json number,title,mergeable" in calls[0]
+    assert (
+        "api --method PATCH repos/o/r/git/refs/heads/bot/issue-assistant -f sha=c0ffee -F force=true"
+        in calls
+    )
+    assert calls[-1] == "pr merge bot/issue-assistant --auto --squash"
+    assert "already" not in result.summary
 
 
 @runs_the_script

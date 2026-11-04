@@ -8,8 +8,11 @@ name: Docs pictures
 # them, and on demand. It renders the pictures without secrets, keeps those whose
 # pixels stayed the same (blueprint.py screenshots keep), and keeps one pull request
 # from the branch bot/pictures with the others, as the release app, which merges
-# itself once every check passes. The recording waits for the network, so a frame
-# that repeats the one before counts once and the time each frame shows not at all.
+# itself once every check passes; as the screenshot bot, it renders main anew when
+# main changed a file of that pull request while it rendered, and the branch bot
+# starts it for one that conflicts (decision 0118). The recording waits for the
+# network, so a frame that repeats the one before counts once and the time each frame
+# shows not at all.
 # A failed run keeps an issue of the bot-health bot open until a run passes again.
 # It runs in the blueprint only; every repository has the Screenshots workflow.
 # https://github.com/Dennis-Otto/repo-blueprint
@@ -103,6 +106,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      sha: ${{ steps.rendered.outputs.sha }}
       stale: ${{ steps.keep.outputs.stale }}
     steps:
       # VHS clones the blueprint from GitHub, and the browser loads the website.
@@ -110,9 +114,15 @@ jobs:
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
+      # As for the screenshot bot: the newest commit of the branch, not that of the
+      # event, so that a run that waited for the one before has its pictures.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.ref }}
+      - name: Name the commit that the job renders
+        id: rendered
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         timeout-minutes: 5
         with:
@@ -161,7 +171,10 @@ jobs:
     environment:
       name: release
       deployment: false
+    # Actions for the token of the job, which starts the workflow anew when main changed
+    # a file of the pull request while the job render ran.
     permissions:
+      actions: write
       contents: read
     steps:
       - name: Block every host that the job doesn't need
@@ -197,11 +210,25 @@ jobs:
               sleep 3
             done
           done
+      # The job render runs the script of the project and its tools; the code that runs
+      # below with the token of the release app comes only from a commit of main, never
+      # from one that a render job that went wrong names, such as that of a fork.
+      - name: Check that main has the commit that the job render names
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ needs.render.outputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(gh api "repos/$GH_REPO/compare/$SHA...main" --jq .behind_by)" == 0 ]]
       # blueprint.py, which checks what the job render kept, and the Markdown of the
-      # pages, whose named sizes it corrects; none of the pictures of main.
+      # pages, whose named sizes it corrects; none of the pictures of main. Of the
+      # commit that the job render rendered, which the commits start from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ needs.render.outputs.sha }}
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /blueprint.py
@@ -271,8 +298,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
           STALE: ${{ needs.render.outputs.stale }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ needs.render.outputs.sha }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The token of the job, which may start a run of this workflow.
+          ACTIONS_TOKEN: ${{ github.token }}
         run: |
           open="$(gh pr list --head "$BRANCH" --state open --json number,isCrossRepository,author \
             --jq "map(select(.isCrossRepository == false and .author.login == \"app/$APP_SLUG\"))[0].number // empty")"
@@ -283,6 +312,23 @@ jobs:
               echo "main looks as rendered; closed #$open." >> "$GITHUB_STEP_SUMMARY"
             fi
             exit 0
+          fi
+
+          kept="$RUNNER_TEMP/pictures-kept"
+          # As the screenshot bot does: when main changed a picture or a page of the
+          # pull request since the commit that was rendered, the bot leaves the branch
+          # and the pull request as they are, and renders main anew.
+          gh api "repos/$GH_REPO/compare/$SHA...main" \
+            --jq '{behind_by, files: [.files[]? | {filename, previous_filename}]}' > "$RUNNER_TEMP/compared.json"
+          if python3 blueprint.py --repo "$GH_REPO" screenshots overtaken "$kept" \
+            --compared "$RUNNER_TEMP/compared.json" >> "$GITHUB_STEP_SUMMARY"; then
+            GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+              "repos/$GH_REPO/actions/workflows/docs-pictures.yml/dispatches" -f ref=main
+            echo "The bot started a new run of this workflow, which renders main anew." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          # 3 means not; an error that the tool does not catch exits 1.
+          elif (($? != 3)); then
+            exit 1
           fi
 
           # As the screenshot bot does: the commits on a branch of their own from the
@@ -299,7 +345,6 @@ jobs:
             gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           fi
           gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$scratch" -f sha="$SHA" > /dev/null
-          kept="$RUNNER_TEMP/pictures-kept"
           user_id="$(gh api "users/${APP_SLUG}[bot]" --jq .id)"
           body="Rendered by $SCRIPT on $SHA, the pictures whose pixels changed: $URL
 
