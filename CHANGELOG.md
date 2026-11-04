@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.10.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.9.0...v1.10.0) (2026-11-03)
+
+### Features
+
+- **A new kind of project, a Cloudflare Worker:** `copier copy --data project_type=cloudflare-worker` makes a Worker in TypeScript with Wrangler, on the tools of Node, an example that answers requests with its tests, and `wrangler.jsonc` with its name, compatibility date and bindings. Its tests run in workerd, the runtime of Cloudflare, through the Vitest integration of Cloudflare, with every line, branch and function covered; tsc checks the types that Wrangler writes from `wrangler.jsonc`, and the new step *Worker* of `scripts/check.sh` bundles the Worker as Cloudflare does, without an upload or a sign-in.
+- **Cloudflare deploys each release of a Worker, with no key of Cloudflare in GitHub:** Workers Builds, the integration of Cloudflare with GitHub, builds every commit of `main` and runs `npm run deploy`. Its script deploys only the merge of the release pull request, as the version of the release, and uploads every other commit as a version without traffic, so the Worker that runs is always the latest release (decision 0115). The secrets of the Worker live in Cloudflare, set with `npx wrangler secret put`. `docs/releases.md` of the new repository has the one-time set-up in Cloudflare, how to roll a release back and what to do when a build fails.
+
 ## [1.9.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.8.0...v1.9.0) (2026-11-03)
 
 ### Features
