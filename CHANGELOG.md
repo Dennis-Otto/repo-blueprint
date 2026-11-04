@@ -7,6 +7,12 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.0...v1.10.1) (2026-11-04)
+
+### Bug fixes
+
+- **The environment `release` of a Nextcloud app keeps only the key of the release app:** `.github/repository.toml` no longer declares `APP_PRIVATE_KEY` and `APPSTORE_TOKEN` in `release`, so release-please and the other jobs there no longer reach the key that signs the app or the token of the App Store; they live only in `signing` and `appstore`. `SECURITY.md` says so too. The settings bot doesn't delete a secret it no longer names, so an existing repository deletes its old copies once: `gh secret delete APP_PRIVATE_KEY --env release` and `gh secret delete APPSTORE_TOKEN --env release` ([#530](https://github.com/Dennis-Otto/repo-blueprint/issues/530)).
+
 ## [1.10.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.9.0...v1.10.0) (2026-11-03)
 
 ### Features
