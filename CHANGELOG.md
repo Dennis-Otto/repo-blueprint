@@ -9,10 +9,9 @@ requests when there is none.
 
 ## [1.11.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.0...v1.11.1) (2026-11-04)
 
-
 ### Bug fixes
 
-* the screenshot bot renders again when its pull request has a merge conflict ([#655](https://github.com/Dennis-Otto/repo-blueprint/issues/655)) ([51f32d6](https://github.com/Dennis-Otto/repo-blueprint/commit/51f32d638e2d8be6eb3f3a63c620ba779ff3c48f))
+- **A pull request of the screenshot bot that conflicts renders itself again:** when the pull request before it merged while the next one rendered, as after a release, the screenshot bot opened one that conflicted with `main` and waited a week for its schedule. Now a render that waited renders `main` as it is then, the bot renders `main` anew rather than open a pull request whose pictures or pages `main` changed meanwhile, and when a pull request of the screenshot bot, the picture bot or the sync bot of the issue assistant conflicts later, the branch bot starts that bot at once, which builds its branch anew from `main`, instead of asking a person to merge `main` into it ([decision 0118](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0118-a-bot-whose-pull-request-conflicts-builds-it-anew-at-once.md), [#654](https://github.com/Dennis-Otto/repo-blueprint/issues/654)).
 
 ## [1.11.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.1...v1.11.0) (2026-11-04)
 
