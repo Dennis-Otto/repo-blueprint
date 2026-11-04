@@ -30,7 +30,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 
 ### `BETA_CHANNEL`
 
-`true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases. Without it, or with any other value, no betas are published.
+`true` makes every change for users that reaches `main`, a `feat`, `fix` or `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release publishes as a prerelease for the testers who take prereleases. A beta of a Nextcloud app goes to the App Store with its version in the `appinfo/info.xml` of its package, which Nextcloud offers only to servers on its beta channel, and never replaces the last release. Without it, or with any other value, no betas are published.
 
 - **Set by:** you, where you want it: in `[variables]` of `.github/repository.project.toml`, which the settings bot applies, or under *Settings → Secrets and variables → Actions → Variables*
 - **Read by:** [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository)

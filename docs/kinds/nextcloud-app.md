@@ -41,6 +41,17 @@ Merging the release pull request builds the package with krankerl, signs it with
   <img src="../images/diagrams/which-job-of-a-nextcloud-app-holds-which-secret.svg" alt="Which job of a Nextcloud app holds which secret: The release workflow enters no environment and passes the build only the name of the key. The build enters the environment signing, which holds the key that signs the app and nothing else, and fails without it. The delivery to the App Store enters appstore, which holds the token of the App Store and nothing else. Register the app signs the app id in a job in signing and hands the signature and the certificate, neither of them secret, to a job in appstore that posts them.">
 </picture>
 
+### A beta
+
+With the repository variable `BETA_CHANNEL` set to `true`, every change for users becomes a beta of the next release, such as `1.5.0-beta.1`, which goes to the App Store as well, with its own version. The beta tags `main`, whose `appinfo/info.xml` still says the last release, as release-please writes the next version only in its pull request. The App Store takes the version of a release from the `info.xml` in its package and updates its release of that version, so the package of the beta would replace that of the last release for every user. The build therefore writes the version of the beta into the `info.xml` of the package before it signs it, and into the checkout, with which a `scripts/check-package.sh` may compare the package. A version with a pre-release identifier is a release of its own in the App Store, which Nextcloud offers only to servers on the beta channel, or to those that take experimental apps; the beta goes there as no nightly, which only the daily channel gets.
+
+The build checks the signed package, the delivery checks the package again before it posts it, and the verification checks it in the release: each fails when the `info.xml` of the package has a version other than that of its tag. The verification finds a beta among the unstable releases on the page of all releases of the app ([decision 0116](../decisions/0116-a-beta-of-a-nextcloud-app-goes-to-the-app-store-with-its-own-version.md), [#635](https://github.com/Dennis-Otto/repo-blueprint/issues/635)). As the newest version, a beta also brings its name, summary, description and screenshots to the page of the app in the App Store.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-beta-of-a-nextcloud-app-reaches-only-its-testers.dark.svg">
+  <img src="../images/diagrams/a-beta-of-a-nextcloud-app-reaches-only-its-testers.svg" alt="A beta of a Nextcloud app reaches only its testers: The beta v1.5.0-beta.1 tags main, whose appinfo/info.xml still says 1.4.0. The build writes 1.5.0-beta.1 into the info.xml of the package before it signs it, and checks the signed package. The delivery checks the version again and posts the package as no nightly. The App Store adds the release 1.5.0-beta.1 beside 1.4.0, which Nextcloud offers only to servers on the beta channel, while every other server keeps 1.4.0.">
+</picture>
+
 ## Once by hand
 
 `python3 .github/blueprint.py checklist` ticks off each step that it can see and names the rest, each with its link: the release app of the owner with its private key, as [your own account](../own-account.md) shows, the token of the issue assistant unless its AI is off, OpenSSF Best Practices, the REUSE API and the social preview.

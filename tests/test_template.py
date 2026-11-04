@@ -20701,7 +20701,9 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     # After the package is built and before the assets are attested.
     order = [
         "Build the Nextcloud app",
+        "Write the version of the release into the Nextcloud app",
         "Sign the Nextcloud app",
+        "Check the version of the signed Nextcloud app",
         "Check the signed Nextcloud app",
         "Unpack what the release ships",
         describe,
@@ -20720,6 +20722,70 @@ def test_the_sboms_of_a_release_are_checked_by_its_name_and_version() -> None:
     assert "--version" not in vex
     assert 'tag="v$version"' in (ROOT / ".github/workflows/release.yml").read_text(
         encoding="utf-8"
+    )
+
+
+# How the build, the delivery and the verification read the version in the package of
+# a Nextcloud app, which the App Store takes for the version of its release (#635).
+PACKAGED_VERSION = (
+    "packaged=\"$(python3 -c 'import sys, tarfile, xml.etree.ElementTree as t;"
+    ' info = tarfile.open(sys.argv[1]).extractfile(sys.argv[2] + "/appinfo/info.xml");'
+    ' print((t.parse(info).getroot().findtext("version") or "").strip())\' \\'
+)
+
+
+def test_a_beta_of_a_nextcloud_app_reaches_the_app_store_with_its_own_version(
+    projects: Mapping[str, Path],
+) -> None:
+    flows = {
+        name: (projects["nextcloud-app"] / ".github/workflows" / name).read_text(
+            encoding="utf-8"
+        )
+        for name in ("build-release.yml", "release.yml", "verify-release.yml")
+    }
+    # A Nextcloud app renders the release workflows of the blueprint, with the key
+    # that signs it passed to its build.
+    for name, text in flows.items():
+        own = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+        assert names_of_jobs(text) == names_of_jobs(own), name
+    build = job_with(flows["build-release.yml"], "Sign the Nextcloud app")
+    names = names_of(build)
+    write = "Write the version of the release into the Nextcloud app"
+    check = "Check the version of the signed Nextcloud app"
+    # The version goes into the unpacked package before the signature covers it, and
+    # the signed package is checked before the project's own check and the draft.
+    assert (
+        names.index("Build the Nextcloud app")
+        < names.index(write)
+        < names.index("Sign the Nextcloud app")
+        < names.index(check)
+        < names.index("Check the signed Nextcloud app")
+    )
+    for name in (write, check):
+        found = step_named(build, name)
+        assert found["if"] == "env.PUBLISH_TO == 'nextcloud-appstore'"
+        assert found["env"] == {
+            "APP_ID": "${{ steps.nextcloud.outputs.app-id }}",
+            "VERSION": "${{ inputs.version }}",
+        }
+    assert '"$RUNNER_TEMP/signing/$APP_ID/appinfo/info.xml" appinfo/info.xml' in (
+        script_of(build, write)
+    )
+    # A beta goes to the App Store, as a beta of its own version, never as a nightly,
+    # which would delete the nightly before it; a beta of an action moves no tag.
+    delivery = job_in(flows["release.yml"], "nextcloud-appstore")
+    assert delivery["if"] == "vars.PUBLISH_TO == 'nextcloud-appstore'"
+    submit = script_of(delivery, "Submit the signed package of the public release")
+    assert "nightly: false" in submit
+    assert submit.index(PACKAGED_VERSION) < submit.index("curl ")
+    assert (
+        "!contains(needs.release-please.outputs.tag, '-')"
+        in (job_in(flows["release.yml"], "github-action")["if"])
+    )
+    # The three read the version of the package alike, in the same words.
+    assert PACKAGED_VERSION in script_of(build, check)
+    assert PACKAGED_VERSION in script_of(
+        flows["verify-release.yml"], "Verify the release as its users can"
     )
 
 

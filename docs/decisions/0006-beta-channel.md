@@ -1,6 +1,6 @@
 # Publish a beta of the next release after every change for users, where a project wants it
 
-- Status: accepted
+- Status: accepted, amended by [0116](0116-a-beta-of-a-nextcloud-app-goes-to-the-app-store-with-its-own-version.md), with which a beta of a Nextcloud app goes to the App Store with its own version
 - Date: 2026-10-07
 
 ## Context
@@ -23,4 +23,4 @@ Option 2, switched on by the repository variable `BETA_CHANNEL`. The beta takes 
 
 ## Consequences
 
-A project with the beta channel has a tag and a prerelease for every change for users. HACS, npm and PyPI offer them only to those who ask for betas.
+A project with the beta channel has a tag and a prerelease for every change for users. HACS, npm and PyPI offer them only to those who ask for betas, and the Nextcloud App Store only to servers on the beta channel of Nextcloud ([0116](0116-a-beta-of-a-nextcloud-app-goes-to-the-app-store-with-its-own-version.md)).

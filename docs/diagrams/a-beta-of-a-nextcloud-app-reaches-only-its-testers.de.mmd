@@ -1,0 +1,23 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Eine Beta einer Nextcloud-App erreicht nur ihre Tester
+    accDescr: Die Beta v1.5.0-beta.1 taggt main, dessen appinfo/info.xml noch 1.4.0 sagt. Der Build schreibt 1.5.0-beta.1 in die info.xml des Pakets, bevor er es signiert, und prüft das signierte Paket. Die Auslieferung prüft die Version noch einmal und sendet das Paket als kein Nightly. Der App Store legt das Release 1.5.0-beta.1 neben 1.4.0 an, das Nextcloud nur Servern im Beta-Kanal anbietet, während jeder andere Server 1.4.0 behält.
+
+    tag["`die Beta **v1.5.0-beta.1** taggt main<br>dessen appinfo/info.xml 1.4.0 sagt`"]
+    build["`der Build schreibt **1.5.0-beta.1**<br>in die info.xml des Pakets<br>signiert es und prüft das signierte Paket`"]
+    deliver["die Auslieferung prüft die Version noch einmal<br>und sendet das Paket als kein Nightly"]
+    store["`der App Store legt das Release **1.5.0-beta.1**<br>neben 1.4.0 an, das bleibt, wie es ist`"]
+    beta["`Server im **Beta**-Kanal<br>bekommen 1.5.0-beta.1`"]
+    stable["`jeder andere Server<br>behält **1.4.0**`"]
+    tag --> build --> deliver --> store
+    store --> beta
+    store --> stable
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class tag,build,deliver bot
+    class store,beta,stable done
