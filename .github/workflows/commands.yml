@@ -42,7 +42,8 @@ jobs:
       github.event.issue.state == 'open' &&
       startsWith(github.event.comment.body, '/fix') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
-    # One command at a time for each pull request, so that two never commit at once.
+    # One command at a time for each pull request, so that two never commit at once;
+    # a command given while another one waits replaces the waiting one.
     concurrency:
       group: ${{ github.workflow }}-fix-${{ github.event.issue.number }}
       cancel-in-progress: false

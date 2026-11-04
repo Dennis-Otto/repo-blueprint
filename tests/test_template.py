@@ -11983,6 +11983,23 @@ def test_every_kind_takes_the_command_of_the_fix_bot(
     assert job["environment"] == {"name": "release", "deployment": False}
     owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
     assert ".github/workflows/commands.yml" in owned.splitlines()
+    # zizmor accepts its start on issue_comment, with the reason, in every kind.
+    zizmor = (project / ".github/zizmor.yml").read_text(encoding="utf-8")
+    assert zizmor == (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+
+
+def test_zizmor_accepts_only_the_comment_trigger_of_the_command_fix() -> None:
+    # The fix bot starts on a new comment, reads it only as text and checks out main.
+    text = (ROOT / ".github/workflows/commands.yml").read_text(encoding="utf-8")
+    assert triggers(text) == {"issue_comment": ["    types: [created]"]}
+    rules = load_yaml((ROOT / ".github/zizmor.yml").read_text(encoding="utf-8"))
+    accepted = {
+        rule
+        for rule, found in rules["rules"].items()
+        if "commands.yml" in found["ignore"]
+    }
+    assert accepted == {"dangerous-triggers"}
+    assert "commands.yml" in accepted_dangerous_triggers()
 
 
 @pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])

@@ -344,7 +344,8 @@ check, `fix own` of the fix bot commits a draft from the title onto a branch of 
 repository, once for each pull request, as one new file of `changelog.d/` that it names
 and writes itself; the words for users stay the author's, and the PR coach asks to read
 them. A title with HTML, a mention or a link gets no draft, and a pull request from a fork
-none, since no bot may push to it."""
+none, since the bot after the checks never pushes to it and `/fix` commits only
+the fixes of the checks."""
 
 [check.codeql]
 title = "The CodeQL analysis"

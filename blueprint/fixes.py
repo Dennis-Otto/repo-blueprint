@@ -672,7 +672,8 @@ def opted_out(pull: Json) -> bool:
 
 
 def from_fork(pull: Json, repo: str) -> bool:
-    """Whether a pull request comes from another repository, which no bot may push to."""
+    """Whether a pull request comes from another repository, which the bot after the checks never
+    pushes to."""
     head = pull.get("head") or {}
     return str((head.get("repo") or {}).get("full_name") or "") != repo
 
