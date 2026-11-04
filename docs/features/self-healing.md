@@ -59,6 +59,24 @@ Fix first, explain second: what a command can fix of a check that failed, the pu
   <img src="../images/diagrams/the-fixers-run-on-main-every-week.svg" alt="The fixers run on main every week: Each week, Lint and the CI run on main by their schedule, or by hand where bot health starts a schedule that GitHub missed. When every check passes, the week was quiet, with no job of the fix bot, no pull request and no issue. When a check fails and a command fixes what it found, the fix bot keeps one pull request from bot/self-heal, which merges itself, so that main is healed before the next pull request. When no command fixes it, bot health keeps one issue open until a run passes.">
 </picture>
 
+## Shown on real pull requests
+
+On 2026-11-04, once release 1.11.0 had reached every repository that follows the blueprint, one pull request in each of them broke a text file the way a person easily does: a line of `.github/agents.project.md` ended in a space. Each time the step *Text files* of `scripts/check.sh` failed, the fix bot committed the fix onto the branch as the release app, and every check of its commit passed. None of them was merged: each was closed and its branch deleted.
+
+| Kind | Repository | Pull request | Commit of the fix bot |
+| --- | --- | --- | --- |
+| The blueprint itself | repo-blueprint | [#650](https://github.com/Dennis-Otto/repo-blueprint/pull/650) | [`2ef0ef5`](https://github.com/Dennis-Otto/repo-blueprint/commit/2ef0ef5174e97959fc9693af3d3ac36adf5324ee) |
+| [GitHub Action](../kinds/github-action.md) | issue-assistant | [#273](https://github.com/Dennis-Otto/issue-assistant/pull/273) | [`f8efdbf`](https://github.com/Dennis-Otto/issue-assistant/commit/f8efdbf0db2a7d9b9e29a60a996de1ba7e4f384e) |
+| [Nextcloud app](../kinds/nextcloud-app.md) | paperless-unified-search | [#320](https://github.com/Dennis-Otto/paperless-unified-search/pull/320) | [`13e17d1`](https://github.com/Dennis-Otto/paperless-unified-search/commit/13e17d14ad449576b8e8aa01a0d063d442f11059) |
+| [Nextcloud app](../kinds/nextcloud-app.md) | paperless-sync | [#356](https://github.com/Dennis-Otto/paperless-sync/pull/356) | [`00d89e7`](https://github.com/Dennis-Otto/paperless-sync/commit/00d89e7c652adbd8848776b6a82c113e9aedc557) |
+| [Home Assistant integration](../kinds/home-assistant.md) | homedarts-for-autodarts | [#609](https://github.com/Dennis-Otto/homedarts-for-autodarts/pull/609) | [`54ea0b6`](https://github.com/Dennis-Otto/homedarts-for-autodarts/commit/54ea0b6a8ad611e67d5c9cd4287bc7b3c70b1fa5) |
+| [Repository without a build](../kinds/generic.md) | dennis-otto.github.io | [#149](https://github.com/Dennis-Otto/dennis-otto.github.io/pull/149) | [`bbbb344`](https://github.com/Dennis-Otto/dennis-otto.github.io/commit/bbbb344e03482bb09ff253fc953744d726b4412e) |
+| [Chrome extension](../kinds/chrome-extension.md) | player-switch-for-autodarts | [#151](https://github.com/Dennis-Otto/player-switch-for-autodarts/pull/151) | [`5242887`](https://github.com/Dennis-Otto/player-switch-for-autodarts/commit/5242887b3d90dc0504f651dd0db29954276fc257) |
+| [Cloudflare Worker](../kinds/cloudflare-worker.md) | dennis-otto-pager | [#9](https://github.com/Dennis-Otto/dennis-otto-pager/pull/9) | none yet, without the key of its release app (see below) |
+
+- **Without the key of the release app:** a repository whose release app has no private key yet gets no commit. The fix bot warns in its summary and commits nothing, and the PR coach names the command and the line, as on the pull request of the Cloudflare Worker above. With the key in the environment `release`, the same pull request fixes itself.
+- **The kinds with no repository of their own:** a [Python package](../kinds/python-package.md) runs the checks of the same stack as the GitHub Action, and a [Node package](../kinds/node-package.md) those of the Chrome extension; a [container image](../kinds/container.md) has no repository yet. For every kind, the Variants job renders a new repository from each change of the blueprint and runs its `scripts/check.sh`, whose step *Text files* and its fix `fix text` are the same in every kind. The fix bot is the same `after-checks.yml` in every kind, which sets only the list of workflows that it reads, and the tests run its steps against a fake GitHub.
+
 ## Flaky tests
 
 A test run that fails, or whose job runs out of time, runs its failed jobs once more, unless the same jobs broke for the commit before; a job that passes then is reported as flaky in one issue, with the step, the test and the error that failed, and the issue counts how often each job and test flaked.
