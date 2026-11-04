@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.0...v1.10.1) (2026-11-04)
+
+
+### Bug fixes
+
+* **security:** the environment release of a Nextcloud app keeps only the release app's key ([#640](https://github.com/Dennis-Otto/repo-blueprint/issues/640)) ([c6f3b68](https://github.com/Dennis-Otto/repo-blueprint/commit/c6f3b688880ae29eda13717f8b663082109db0c6))
+
 ## [1.10.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.9.0...v1.10.0) (2026-11-03)
 
 ### Features
