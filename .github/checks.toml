@@ -1007,8 +1007,12 @@ request changed `.release-please-manifest.json` itself, set the manifest back to
 version of `main` instead, or bring the branch up to date if a release came since: the
 release bot changes the version, a pull request doesn't. The command writes the version
 of the manifest into each file, and with `--base` none where the manifest differs from
-that of the base, as the fix bot runs it:"""
-commands = ["python3 .github/blueprint.py fix version --base origin/main"]
+that of the base, as the fix bot runs it. On a fork, fetch and name the remote of
+the upstream repository, such as `upstream/main`, instead of `origin/main`:"""
+commands = [
+  "git fetch origin main",
+  "python3 .github/blueprint.py fix version --base origin/main",
+]
 docs = "CONTRIBUTING.md#workflow"
 autofix = ["{blueprint} fix version"]
 

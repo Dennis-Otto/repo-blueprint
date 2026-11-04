@@ -45,7 +45,7 @@ Fix first, explain second: what a command can fix of a check that failed, the pu
   </picture>
 
 - **Safe with any pull request:** the bot runs nothing of a pull request with a token that can write. It takes the fixes as data, with `blueprint.py` of `main`, and lets through only text files that the commit has already, by plain paths, outside `.git` and the workflows; the draft of an entry, the one new file that it ever adds, it names and writes itself. It commits at most twice in a row (once more for a check that ends later), never a third time, and a pull request with the label `no-bot-fixes` gets no commit.
-- **On your machine:** `python3 .github/blueprint.py fix run` runs the commands of every step of `scripts/check.sh`, `python3 .github/blueprint.py fix text` fixes the text files alone, and `python3 .github/blueprint.py fix version` writes the version of the release bot back where a hand changed it; with `--base origin/main`, it writes none where the manifest differs from that of `main`, as in the CI.
+- **On your machine:** `python3 .github/blueprint.py fix run` runs the commands of every step of `scripts/check.sh`, `python3 .github/blueprint.py fix text` fixes the text files alone, and `python3 .github/blueprint.py fix version` writes the version of the release bot back where a hand changed it; with `--base origin/main`, after `git fetch origin main`, it writes none where the manifest differs from that of `main`, as in the CI (on a fork, use the remote of the upstream repository, such as `upstream/main`).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/the-fixers-run-on-main-every-week.dark.svg">
