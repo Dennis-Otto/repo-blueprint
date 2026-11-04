@@ -7,23 +7,17 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.11.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.1...v1.11.0) (2026-11-04)
+
 ### Bug fixes
 
 - **The Mutation workflow measures again:** it runs mutmut 3.8.1, which works with pytest 9.2; with mutmut 3.8.0 the first run of the tests stopped at the first test with `AttributeError: 'Function' object has no attribute '_nodeid'`, so no part ran and every project's weekly Mutation run failed ([#608](https://github.com/Dennis-Otto/repo-blueprint/issues/608)).
-
-## [1.11.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.1...v1.11.0) (2026-11-04)
-
+- **A version changed by hand in the manifest fails instead of being fixed away:** `fix version` no longer takes `.release-please-manifest.json` of the pull request as the right version. The fix step of the CI names `main` as the pull request found it, and where the pull request changed the manifest, the fix writes no version: the log lists the files and says to set the manifest back to the version of `main`, or to bring the branch up to date if a release came since, and the check keeps failing for a person to look. The pull request of the release bot still fixes itself as before. On your machine, `python3 .github/blueprint.py fix version --base origin/main` compares the same way ([decision 0069](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0069-a-lock-file-and-a-version-fix-themselves-only-where-their-tool-refuses-them.md), [#429](https://github.com/Dennis-Otto/repo-blueprint/issues/429)).
+- **A beta of a Nextcloud app never replaces its stable release in the App Store:** with `BETA_CHANNEL` on, the build writes the version of the beta, such as `1.5.0-beta.1`, into `appinfo/info.xml` of the package before it signs it, where the package used to say the last release, so the App Store adds the beta as a release of its own, which Nextcloud offers only to servers on its beta channel, instead of updating the last release with the code of the beta for every user. The build, the delivery to the App Store and the verification of the release each stop at a package whose `info.xml` has another version than its tag, and the verification finds a beta among the unstable releases of the app ([#635](https://github.com/Dennis-Otto/repo-blueprint/issues/635)).
 
 ### Features
 
-* /fix on a pull request from a fork ([#647](https://github.com/Dennis-Otto/repo-blueprint/issues/647)) ([0b2dc99](https://github.com/Dennis-Otto/repo-blueprint/commit/0b2dc9939509c38b3c71bc0cdb562e033eff939c))
-
-
-### Bug fixes
-
-* a beta of a Nextcloud app never replaces its stable release in the App Store ([#646](https://github.com/Dennis-Otto/repo-blueprint/issues/646)) ([af4df18](https://github.com/Dennis-Otto/repo-blueprint/commit/af4df183e92b7e2369744643097c244c6f7762d4))
-* a release version changed by hand fails instead of being fixed away ([#645](https://github.com/Dennis-Otto/repo-blueprint/issues/645)) ([69b37f3](https://github.com/Dennis-Otto/repo-blueprint/commit/69b37f34c5a4309113276d882bebc6743e204677))
-* **mutation:** run mutmut 3.8.1, which works with pytest 9.2 ([#594](https://github.com/Dennis-Otto/repo-blueprint/issues/594)) ([3076a01](https://github.com/Dennis-Otto/repo-blueprint/commit/3076a019ab50a5bfda44cb356f161a4001ac8175))
+- **`/fix` commits the fixes, also onto a fork:** a maintainer, anyone with write access, comments `/fix` on a pull request, and the fix bot commits what the commands of the failed checks fixed onto its branch, also onto the branch of a fork whose author allows edits by maintainers: there only the files that the pull request changes, and none that decides what a workflow runs. Where GitHub refuses that commit, or the fork allows no edits, the fork gets the fixes as suggestions at their lines, as before, and one comment of the bot says what it did and why. Anybody without write access gets that answer ([decision 0117](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0117-a-person-asks-for-the-fixes-of-a-fork-with-a-command.md), [#429](https://github.com/Dennis-Otto/repo-blueprint/issues/429)).
 
 ## [1.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.0...v1.10.1) (2026-11-04)
 
