@@ -1,6 +1,6 @@
 # Notes of the blueprint for coding agents
 
-These notes add to `AGENTS.md` what a coding agent needs to know about how the blueprint works.
+These notes add to `AGENTS.md` what a coding agent needs to know about how the blueprint works. 
 
 ## Where things are
 
