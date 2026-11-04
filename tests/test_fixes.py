@@ -3646,10 +3646,73 @@ def test_the_check_of_each_kind_of_project_keeps_its_fixes(path: Path) -> None:
     # On main too, only what the commands change is a fix.
     assert "git checkout --quiet --force HEAD -- ." in fix["run"]
     assert 'fix run "$CHECK" --keep "$RUNNER_TEMP/fixes"' in fix["run"]
+    # fix version compares the manifest with that of main, other than in the pull
+    # request of the release bot, which is a branch of this repository.
+    assert fix["env"]["RELEASE"] == (
+        "${{ startsWith(github.head_ref, 'release-please--') && "
+        "github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+    assert fix["run"].index('FIX_BASE="$(git rev-parse HEAD^1)"') < (
+        fix["run"].index("git checkout --quiet --force --detach HEAD^2")
+    )
     assert condition_of(keep_step) == "failure() && steps.fix.outcome == 'success'"
     assert keep_step["with"]["name"] == "fixes-check"
     assert keep_step["with"]["if-no-files-found"] == "ignore"
     assert keep_step["with"]["include-hidden-files"] is True
+
+
+def merged(root: Path) -> tuple[str, str]:
+    """A repository whose commit is the merge of a pull request into main, as the CI
+    checks it out: main and the head of the pull request, as its two parents."""
+    git(root, "init", "--quiet", "--initial-branch=main")
+    git(root, "config", "commit.gpgsign", "false")
+    git(root, "commit", "--quiet", "--allow-empty", "-m", "start")
+    git(root, "checkout", "--quiet", "-b", "feature")
+    git(root, "commit", "--quiet", "--allow-empty", "-m", "the pull request")
+    head = git(root, "rev-parse", "HEAD").strip()
+    git(root, "checkout", "--quiet", "main")
+    git(root, "commit", "--quiet", "--allow-empty", "-m", "main moved on")
+    base = git(root, "rev-parse", "HEAD").strip()
+    git(root, "merge", "--quiet", "--no-ff", "--no-edit", "feature")
+    return base, head
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "path",
+    sorted((ROOT / ".github/workflows").glob("ci-*.yml")),
+    ids=lambda path: path.name,
+)
+@pytest.mark.parametrize("release", ["false", "true"])
+def test_the_fix_step_names_main_for_fix_version(
+    tmp_path: Path, path: Path, release: str
+) -> None:
+    assert BASH
+    fix = step_in(workflow_steps.job(path.name, "check"), "Fix what a command can fix")
+    taken = fix["run"][: fix["run"].index("script=")]
+    base, head = merged(tmp_path)
+    environment = {
+        name: value for name, value in os.environ.items() if name != "FIX_BASE"
+    }
+
+    done = subprocess.run(
+        [
+            BASH,
+            "-eo",
+            "pipefail",
+            "-c",
+            taken + 'printf "%s\\n" "${FIX_BASE-none}" "$(git rev-parse HEAD)"\n',
+        ],
+        cwd=tmp_path,
+        env={**environment, "EVENT": "pull_request", "RELEASE": release},
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+    # The commands run on the head, and fix version reads main from FIX_BASE; the
+    # release bot's pull request changes the manifest itself, so it names none.
+    assert done.stdout.split() == [base if release == "false" else "none", head]
 
 
 def test_the_markdown_fixes_itself_on_the_head_of_the_pull_request() -> None:
