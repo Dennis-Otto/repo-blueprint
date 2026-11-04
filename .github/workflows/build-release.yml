@@ -436,8 +436,10 @@ jobs:
       # the last release for every user (#635). So the unpacked package gets the
       # version of the beta, which the App Store offers only to servers on the beta
       # channel of Nextcloud, before the signature covers it, and so does the checkout,
-      # with which the project's own check of the signed package may compare it. A
-      # release, whose version release-please wrote, keeps its info.xml as it is.
+      # with which the project's own check of the signed package may compare it. That
+      # check must compare appinfo/info.xml with the checkout, not with git archive
+      # HEAD, whose info.xml still says the last release. A release, whose version
+      # release-please wrote, keeps its info.xml as it is.
       - name: Write the version of the release into the Nextcloud app
         if: env.PUBLISH_TO == 'nextcloud-appstore'
         env:
