@@ -38,8 +38,10 @@ from blueprint.fixes import (
     MAIN_EVENTS,
     OPT_OUT,
     SUGGESTED,
+    Command,
     Fixes,
     FixLoop,
+    Pushed,
     Suggestion,
     Watched,
     allowed,
@@ -48,7 +50,9 @@ from blueprint.fixes import (
     changeable,
     changed,
     collect,
+    commit_on_command,
     commit_onto_branch,
+    decide_command,
     downloader,
     draft_of,
     expanded,
@@ -58,6 +62,7 @@ from blueprint.fixes import (
     fixers,
     fragment_path,
     heal_main,
+    is_command,
     is_text,
     keep,
     listing,
@@ -81,6 +86,8 @@ from blueprint.github import Api, GitHubError
 
 ROOT = Path(__file__).parents[1]
 REPO = "o/r"
+# The repository of a pull request from a fork.
+FORK = "someone/r"
 SHA = "a" * 40
 OTHER = "b" * 40
 MADE = "c0ffee" + "0" * 34
@@ -806,6 +813,14 @@ class FakeGitHub:
         self.on_commit: Callable[[FakeGitHub], None] = lambda github: None
         self.truncated = False
         self.calls: list[str] = []
+        # The command /fix: the permissions of people, the comments by their ids, the
+        # reactions to them, and the branches of the fork, which may refuse a commit.
+        self.permissions: dict[str, str] = {"maintainer": "write"}
+        self.issue_comments: dict[int, dict[str, Any]] = {}
+        self.reactions: list[tuple[int, str]] = []
+        self.reactions_fail = False
+        self.fork_refs: dict[str, str] = {"feature": SHA}
+        self.fork_refuses = False
 
     def __call__(
         self, arguments: Sequence[str], body: str | None
@@ -820,15 +835,30 @@ class FakeGitHub:
             return subprocess.CompletedProcess(arguments, 0, "", "")
         method, path = arguments[3], arguments[4]
         self.calls.append(f"{method} {path}")
+        if found := re.fullmatch(rf"repos/{FORK}/git/ref/heads/(.+)", path):
+            sha = self.fork_refs.get(found[1])
+            if not sha:
+                return answered(arguments, 404, {})
+            return answered(arguments, 200, {"object": {"sha": sha}})
         local = path.removeprefix(f"repos/{REPO}/")
         status, data = self.route(method, local, json.loads(body) if body else None)
-        text = "" if data is None else json.dumps(data)
-        return subprocess.CompletedProcess(
-            arguments, 0, f"HTTP/2.0 {status} X\r\nA: b\r\n\r\n{text}", ""
-        )
+        return answered(arguments, status, data)
 
     def route(self, method: str, path: str, body: Any) -> tuple[int, Any]:
         paged = r"per_page=(\d+)&page=(\d+)"
+        if found := re.fullmatch(r"collaborators/([^/]+)/permission", path):
+            if found[1] not in self.permissions:
+                return 404, {"message": "Not Found"}
+            return 200, {"permission": self.permissions[found[1]]}
+        if found := re.fullmatch(r"issues/comments/(\d+)/reactions", path):
+            assert method == "POST"
+            if self.reactions_fail:
+                return 403, {"message": "Resource not accessible by integration"}
+            self.reactions.append((int(found[1]), body["content"]))
+            return 201, {"id": 3, "content": body["content"]}
+        if found := re.fullmatch(r"issues/comments/(\d+)", path):
+            comment = self.issue_comments.get(int(found[1]))
+            return (200, comment) if comment else (404, {"message": "Not Found"})
         if found := re.fullmatch(
             r"actions/runs\?head_sha=(\w+)&event=(\w+)&per_page=100", path
         ):
@@ -923,6 +953,14 @@ class FakeGitHub:
             if self.graphql_fails:
                 return 200, {"errors": [{"message": "Expected branch to point to x"}]}
             branch = body["variables"]["input"]["branch"]["branchName"]
+            if body["variables"]["input"]["branch"]["repositoryNameWithOwner"] == FORK:
+                if self.fork_refuses:
+                    refusal = "Resource not accessible by integration"
+                    return 200, {"errors": [{"type": "FORBIDDEN", "message": refusal}]}
+                self.fork_refs[branch] = MADE
+                return 200, {
+                    "data": {"createCommitOnBranch": {"commit": {"oid": MADE}}}
+                }
             self.refs[branch] = MADE
             return 200, {"data": {"createCommitOnBranch": {"commit": {"oid": MADE}}}}
         raise AssertionError(f"unexpected request {method} {path}")
@@ -935,7 +973,11 @@ class FakeGitHub:
         return [call for call in self.calls if not call.startswith("GET ")]
 
     def pull(
-        self, number: int = 42, fork: bool = False, labels: Sequence[str] = ()
+        self,
+        number: int = 42,
+        fork: bool = False,
+        labels: Sequence[str] = (),
+        editable: bool = False,
     ) -> None:
         self.pulls.append(
             {
@@ -943,13 +985,24 @@ class FakeGitHub:
                 "state": "open",
                 "labels": [{"name": label} for label in labels],
                 "base": {"ref": "main"},
+                "maintainer_can_modify": editable,
                 "head": {
                     "sha": SHA,
                     "ref": "feature",
-                    "repo": {"full_name": "someone/r" if fork else REPO},
+                    "repo": {"full_name": FORK if fork else REPO},
                 },
             }
         )
+
+
+def answered(
+    arguments: Sequence[str], status: int, data: Any
+) -> subprocess.CompletedProcess[str]:
+    """What gh api --include answers: the status, the headers and the data."""
+    text = "" if data is None else json.dumps(data)
+    return subprocess.CompletedProcess(
+        list(arguments), 0, f"HTTP/2.0 {status} X\r\nA: b\r\n\r\n{text}", ""
+    )
 
 
 def api_of(github: FakeGitHub) -> Api:
@@ -4180,3 +4233,695 @@ def test_the_fix_bot_of_main_keeps_one_issue_of_its_failures(
         assert made[-1].startswith(last)
     else:
         assert made == made[:1]
+
+
+# ---------------------------------------------------------------- the command /fix
+
+
+@pytest.mark.parametrize(
+    ("body", "given"),
+    [
+        ("/fix", True),
+        ("  /fix  \n", True),
+        ("/fix\nThe format, please.", True),
+        ("/fixed it", False),
+        ("> /fix", False),
+        ("Could you /fix this?", False),
+        ("", False),
+    ],
+)
+def test_the_command_is_the_first_line_alone(body: str, given: bool) -> None:
+    assert is_command(body) is given
+
+
+def with_a_fix(
+    github: FakeGitHub, fork: bool = False, editable: bool = False
+) -> FakeGitHub:
+    """A pull request whose Lint failed and kept a fix of app.py, which it changes."""
+    github.pull(fork=fork, editable=editable)
+    github.runs = [run_of(1, "Lint")]
+    github.artifacts = {1: [{"name": "fixes-lint"}]}
+    github.downloads = {(1, "fixes-lint"): {"app.py": b"x = 2\n"}}
+    github.patches = {"app.py": "@@ -1 +1 @@\n-x = 0\n+x = 1\n"}
+    return github
+
+
+def no_wait(seconds: float) -> None:
+    """The bot waits for nothing in a test."""
+
+
+def decided(
+    github: FakeGitHub,
+    folder: Path,
+    user: str = "maintainer",
+    wait: Callable[[float], None] = no_wait,
+) -> Command:
+    api = api_of(github)
+    return decide_command(
+        api, REPO, 42, user, folder, downloader(api, REPO), WATCHED, wait
+    )
+
+
+def test_a_branch_of_the_repository_gets_the_commit_at_the_command(
+    tmp_path: Path,
+) -> None:
+    found = decided(with_a_fix(FakeGitHub()), tmp_path)
+
+    assert found == Command(
+        "commit", "#42 comes from a branch of this repository.\n", SHA, REPO, "feature"
+    )
+    assert load([tmp_path / "1-fixes-lint"]).files == {"app.py": b"x = 2\n"}
+
+
+def test_a_fork_that_allows_edits_gets_the_commit_at_the_command(
+    tmp_path: Path,
+) -> None:
+    found = decided(with_a_fix(FakeGitHub(), fork=True, editable=True), tmp_path)
+
+    assert found == Command(
+        "commit",
+        "#42 comes from a fork whose author allows edits by maintainers.\n",
+        SHA,
+        FORK,
+        "feature",
+    )
+
+
+def test_a_fork_that_allows_no_edits_gets_the_suggestions_at_the_command(
+    tmp_path: Path,
+) -> None:
+    found = decided(with_a_fix(FakeGitHub(), fork=True), tmp_path)
+
+    assert (found.action, found.repository) == ("suggest", FORK)
+    assert found.text.startswith(
+        "#42 comes from a fork whose author allows no edits by maintainers, so no bot "
+        "may commit onto its branch: the bot suggests the fixes at their lines"
+    )
+    assert "With **Allow edits by maintainers** turned on, `/fix` commits" in found.text
+
+
+def test_the_label_that_turns_off_the_bot_leaves_the_command_alone(
+    tmp_path: Path,
+) -> None:
+    github = with_a_fix(FakeGitHub())
+    github.pulls[0]["labels"] = [{"name": OPT_OUT}]
+
+    assert decided(github, tmp_path).action == "commit"
+
+
+@pytest.mark.parametrize(
+    ("user", "permission"),
+    [("reader", "read"), ("triager", "triage"), ("stranger", "none")],
+)
+def test_only_a_person_with_write_access_starts_the_bot(
+    tmp_path: Path, user: str, permission: str
+) -> None:
+    github = with_a_fix(FakeGitHub())
+    if permission != "none":
+        github.permissions[user] = permission
+
+    found = decided(github, tmp_path, user)
+
+    assert found == Command(
+        "",
+        "Only a person with write access to this repository starts the fix bot with "
+        f"`/fix`; `{user}` has the permission `{permission}`.\n",
+    )
+    # It reads nothing of the pull request.
+    assert github.calls == [f"GET repos/{REPO}/collaborators/{user}/permission"]
+
+
+@pytest.mark.parametrize("permission", ["admin", "write"])
+def test_a_person_with_write_access_starts_the_bot(
+    tmp_path: Path, permission: str
+) -> None:
+    github = with_a_fix(FakeGitHub())
+    github.permissions["owner"] = permission
+
+    assert decided(github, tmp_path, "owner").action == "commit"
+
+
+def test_the_command_waits_for_the_checks_that_still_run(tmp_path: Path) -> None:
+    # Unlike a job after a run, the command finds a check that has yet to fail.
+    github = with_a_fix(FakeGitHub())
+    github.runs[0].update(status="in_progress", conclusion="")
+    waits: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        github.runs[0].update(status="completed", conclusion="failure")
+
+    found = decided(github, tmp_path, wait=wait)
+
+    assert waits == [30]
+    assert found.action == "commit"
+
+
+def test_a_check_that_outlasts_the_wait_holds_the_command_back(
+    tmp_path: Path,
+) -> None:
+    github = with_a_fix(FakeGitHub())
+    github.runs.append(run_of(2, "CI (python)", status="in_progress", conclusion=""))
+    waits: list[float] = []
+
+    found = decided(github, tmp_path, wait=waits.append)
+
+    assert len(waits) == 28
+    assert found == Command(
+        "",
+        "Still running after the wait for aaaaaaa: `CI (python)`. The bot commits "
+        "nothing yet, so that one commit holds every fix: say `/fix` again once they "
+        "have ended.\n",
+    )
+
+
+def test_a_head_without_a_fix_takes_no_commit_at_the_command(tmp_path: Path) -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.runs = [run_of(1, "Lint")]
+
+    assert decided(github, tmp_path) == Command(
+        "",
+        "No command fixed what the checks of aaaaaaa found; the PR coach names what "
+        "is left and how to fix it.\n",
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "text"),
+    [
+        ({"state": "closed"}, "#42 is no open pull request.\n"),
+        (
+            {"head": {"sha": SHA, "ref": "feature", "repo": None}},
+            "The fork of #42 is gone, so no commit can reach its branch.\n",
+        ),
+    ],
+)
+def test_a_pull_request_that_no_commit_can_reach_takes_none(
+    tmp_path: Path, change: dict[str, Any], text: str
+) -> None:
+    github = with_a_fix(FakeGitHub())
+    github.pulls[0].update(change)
+
+    assert decided(github, tmp_path) == Command("", text)
+    assert not (tmp_path / "1-fixes-lint").exists()
+
+
+def fork_files(github: FakeGitHub) -> Fixes:
+    """A pull request from a fork that allows edits, with fixes of a file that it
+    changes, of a script that decides what a workflow runs, and of a file that it
+    doesn't change."""
+    github.pull(fork=True, editable=True)
+    github.files = {
+        "app.py": b"x  =  1\n",
+        "scripts/build.sh": b"echo  hi\n",
+        "other.py": b"y  =  1\n",
+    }
+    github.patches = {
+        "app.py": "@@ -1 +1 @@\n-x\n+x  =  1\n",
+        "scripts/build.sh": "@@ -1 +1 @@\n-echo\n+echo  hi\n",
+    }
+    return Fixes(
+        {
+            "app.py": b"x = 1\n",
+            "other.py": b"y = 1\n",
+            "scripts/build.sh": b"echo hi\n",
+        }
+    )
+
+
+def pushed(github: FakeGitHub, fixes: Fixes, repository: str = FORK) -> Pushed:
+    return commit_on_command(
+        api_of(github),
+        REPO,
+        42,
+        repository,
+        "feature",
+        SHA,
+        fixes,
+        "app",
+        "https://github.com/o/r/pull/42#issuecomment-7",
+    )
+
+
+def test_the_command_commits_onto_the_branch_of_a_fork_only_what_it_changes() -> None:
+    github = FakeGitHub()
+
+    done = pushed(github, fork_files(github))
+
+    assert done == Pushed(
+        "The fix bot committed c0ffee0 onto `someone/r:feature`:\n\n- `app.py`\n\n"
+        "Left to you:\n\n"
+        "- `other.py`: no file that the pull request changes\n"
+        "- `scripts/build.sh`: decides what a workflow runs, so a person commits its "
+        "fix\n\n"
+        "The checks of the new head run once GitHub lets them, which on a fork may "
+        "wait for a person to approve them.\n"
+    )
+    (request,) = github.graphql
+    given = request["variables"]["input"]
+    assert given["branch"] == {"repositoryNameWithOwner": FORK, "branchName": "feature"}
+    assert given["expectedHeadOid"] == SHA
+    assert [item["path"] for item in given["fileChanges"]["additions"]] == ["app.py"]
+    assert given["message"]["headline"] == HEADLINE
+    assert given["message"]["body"].startswith(
+        f"{MADE_BY} aaaaaaa, at the command "
+        "https://github.com/o/r/pull/42#issuecomment-7\n\nSigned-off-by: app[bot] "
+    )
+    assert github.fork_refs["feature"] == MADE
+    assert github.refs["feature"] == SHA
+
+
+def test_a_fork_that_refuses_the_commit_gets_the_suggestions() -> None:
+    github = FakeGitHub()
+    github.fork_refuses = True
+
+    done = pushed(github, fork_files(github))
+
+    assert done.to_suggest
+    assert done.text.startswith(
+        "GitHub refused the commit of the fix bot onto `someone/r:feature`: `GraphQL "
+        "answered [{'type': 'FORBIDDEN', 'message': 'Resource not accessible by "
+        "integration'}]`. So the fixes stay what a fork gets without the command: "
+        "the bot suggests them at their lines"
+    )
+    assert github.fork_refs["feature"] == SHA
+
+
+def test_a_branch_of_the_repository_that_refuses_the_commit_fails_the_bot() -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.graphql_fails = True
+
+    with pytest.raises(GitHubError, match="Expected branch"):
+        pushed(github, Fixes({"app.py": b"x = 2\n"}), REPO)
+
+
+def test_the_command_commits_onto_a_branch_of_the_repository_what_the_head_has() -> (
+    None
+):
+    # Every file of the head, as the bot after the checks commits them.
+    github = FakeGitHub()
+    github.pull()
+    github.files = {"app.py": b"x  =  1\n", "scripts/build.sh": b"echo  hi\n"}
+
+    done = pushed(
+        github, Fixes({"app.py": b"x = 1\n", "scripts/build.sh": b"echo hi\n"}), REPO
+    )
+
+    assert done == Pushed(
+        "The fix bot committed c0ffee0 onto `feature`:\n\n- `app.py`\n"
+        "- `scripts/build.sh`\n"
+    )
+    assert github.refs["feature"] == MADE
+
+
+def test_a_branch_that_moved_on_takes_no_commit_at_the_command() -> None:
+    github = FakeGitHub()
+    fixes = fork_files(github)
+    github.fork_refs["feature"] = OTHER
+
+    done = pushed(github, fixes)
+
+    assert done == Pushed(
+        "`someone/r:feature` moved on from aaaaaaa, so the bot commits nothing: say "
+        "`/fix` again once the checks of its new head have ended.\n"
+    )
+    assert github.graphql == []
+
+
+def test_a_push_while_the_bot_commits_at_the_command_wins() -> None:
+    github = FakeGitHub()
+    fixes = fork_files(github)
+    github.fork_refuses = True
+
+    def push(github: FakeGitHub) -> None:
+        github.fork_refs["feature"] = OTHER
+
+    github.on_commit = push
+
+    done = pushed(github, fixes)
+
+    assert not done.to_suggest
+    assert done.text.startswith("`someone/r:feature` moved on from aaaaaaa")
+
+
+def test_a_fork_with_no_fix_for_its_branch_gets_the_suggestions() -> None:
+    github = FakeGitHub()
+    github.pull(fork=True, editable=True)
+    github.files = {"pyproject.toml": b"[x]\na  =  1\n"}
+    github.patches = {"pyproject.toml": "@@ -1,2 +1,2 @@\n [x]\n-a\n+a  =  1\n"}
+
+    done = pushed(github, Fixes({"pyproject.toml": b"[x]\na = 1\n"}))
+
+    assert done == Pushed(
+        "No fix is left to commit.\n\nLeft to you:\n\n- `pyproject.toml`: decides "
+        "what a workflow runs, so a person commits its fix\n",
+        True,
+    )
+    assert github.graphql == []
+
+
+def test_a_branch_that_has_every_fix_takes_no_commit_at_the_command() -> None:
+    github = FakeGitHub()
+    github.pull()
+
+    done = pushed(github, Fixes({"app.py": b"x = 1\n"}), REPO)
+
+    assert done == Pushed("No fix is left to commit.\n")
+    assert github.graphql == []
+
+
+def fix_command(
+    root: Path, github: FakeGitHub, output: Path, comment: str = "7"
+) -> int:
+    """Runs fix command as its step does, in the files of main."""
+    return cli.main(
+        [
+            "--repo",
+            REPO,
+            "fix",
+            "command",
+            "--pull",
+            "42",
+            "--comment",
+            comment,
+            "--folder",
+            str(root / "fixes"),
+            "--output",
+            str(output),
+        ],
+        api=api_of(github),
+        root=root,
+    )
+
+
+def commented(github: FakeGitHub, body: str = "/fix") -> FakeGitHub:
+    github.issue_comments[7] = {"body": body, "user": {"login": "maintainer"}}
+    return github
+
+
+@pytest.mark.parametrize("fork", [False, True])
+def test_fix_command_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fork: bool
+) -> None:
+    github = commented(with_a_fix(FakeGitHub(), fork=fork, editable=True))
+    output = tmp_path / "output"
+
+    code = fix_command(homedarts(tmp_path), github, output)
+
+    assert code == 0
+    assert output.read_text(encoding="utf-8") == (
+        f"command=true\naction=commit\nsha={SHA}\n"
+        f"repository={FORK if fork else REPO}\nbranch=feature\n"
+        f"fork={str(fork).lower()}\n"
+    )
+    assert capsys.readouterr().out.startswith("#42 comes from a")
+    # The person sees at once that the bot took the command.
+    assert github.reactions == [(7, "eyes")]
+    assert load([tmp_path / "fixes" / "1-fixes-lint"]).files == {"app.py": b"x = 2\n"}
+
+
+def test_fix_command_says_nothing_to_another_comment(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github = commented(with_a_fix(FakeGitHub()), "/fixed it, thanks")
+    output = tmp_path / "output"
+
+    assert fix_command(homedarts(tmp_path), github, output) == 0
+
+    assert capsys.readouterr().out == "Comment 7 is no command of the fix bot.\n"
+    assert not output.exists()
+    assert github.reactions == []
+    # Nor to a comment that is gone.
+    assert fix_command(tmp_path, github, output, "8") == 0
+    assert not output.exists()
+
+
+def test_fix_command_goes_on_when_it_cannot_react(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github = commented(with_a_fix(FakeGitHub()))
+    github.reactions_fail = True
+    output = tmp_path / "output"
+
+    assert fix_command(homedarts(tmp_path), github, output) == 0
+
+    captured = capsys.readouterr()
+    assert "::warning::The fix bot couldn't react to the command" in captured.err
+    assert "action=commit\n" in output.read_text(encoding="utf-8")
+
+
+def test_fix_command_without_a_list_takes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    homedarts(
+        tmp_path, "name: After the checks\non:\n  workflow_run:\n    workflows: []\n"
+    )
+    github = commented(with_a_fix(FakeGitHub()))
+    output = tmp_path / "output"
+
+    assert fix_command(tmp_path, github, output) == 1
+
+    captured = capsys.readouterr()
+    assert "lists no workflow" in captured.out
+    assert "::error::" in captured.err
+    # The answer says that the bot failed, and no step commits.
+    assert output.read_text(encoding="utf-8") == "command=true\n"
+
+
+@pytest.mark.parametrize(("refuses", "suggests"), [(False, "false"), (True, "true")])
+def test_fix_commit_at_the_command_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], refuses: bool, suggests: str
+) -> None:
+    folder = tmp_path / "fixes"
+    kept(folder / "1-fixes-lint", {"app.py": "x = 2\n"})
+    github = with_a_fix(FakeGitHub(), fork=True, editable=True)
+    github.fork_refuses = refuses
+    output = tmp_path / "output"
+
+    code = cli.main(
+        [
+            "--repo",
+            REPO,
+            "fix",
+            "commit",
+            "--sha",
+            SHA,
+            "--branch",
+            "feature",
+            "--repository",
+            FORK,
+            "--pull",
+            "42",
+            "--app",
+            "app",
+            "--url",
+            "u",
+            "--folder",
+            str(folder),
+            "--output",
+            str(output),
+        ],
+        api=api_of(github),
+    )
+
+    assert code == 0
+    assert output.read_text(encoding="utf-8") == f"suggest={suggests}\n"
+    said = capsys.readouterr().out
+    assert said.startswith("GitHub refused" if refuses else "The fix bot committed")
+
+
+def command_starts(
+    body: str = "/fix",
+    association: str = "COLLABORATOR",
+    pull_request: bool = True,
+    state: str = "open",
+    fork: bool = False,
+) -> bool:
+    """Whether the job of the command starts after a comment, by its condition, whose
+    few expressions Python reads alike."""
+    condition = condition_of(workflow_steps.job("commands.yml", "fix"))
+    expression = re.sub(r"!(?!=)", " not ", condition)
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    event = SimpleNamespace(
+        repository=SimpleNamespace(fork=fork),
+        issue=SimpleNamespace(
+            pull_request={"url": "u"} if pull_request else None, state=state
+        ),
+        comment=SimpleNamespace(body=body, author_association=association),
+    )
+    return bool(
+        eval(
+            expression,
+            {
+                "github": SimpleNamespace(event=event),
+                "contains": lambda items, item: item in items,
+                "fromJSON": json.loads,
+                "startsWith": lambda text, start: text.lower().startswith(
+                    start.lower()
+                ),
+            },
+        )
+    )
+
+
+def test_the_command_starts_the_bot_only_for_a_comment_that_may_be_one() -> None:
+    assert command_starts()
+    assert command_starts("/fix\nThe format, please.", "OWNER")
+    assert command_starts(association="MEMBER")
+    # The bot reads the comment itself, so a word that only starts like it takes a
+    # runner for nothing, and says nothing.
+    assert command_starts("/fixed it")
+    assert not command_starts("Thanks!")
+    assert not command_starts(association="CONTRIBUTOR")
+    assert not command_starts(association="NONE")
+    # Not on an issue, a closed pull request or in a fork of the repository.
+    assert not command_starts(pull_request=False)
+    assert not command_starts(state="closed")
+    assert not command_starts(fork=True)
+
+
+def suggestion_after(
+    action: str, fork: str = "true", ready: str = "true", suggests: str = ""
+) -> bool:
+    """Whether the job suggests the fixes, by the condition of the step."""
+    found = workflow_steps.step(
+        "commands.yml", "fix", "Suggest the fixes on the pull request from a fork"
+    )
+    expression = condition_of(found).replace("&&", " and ").replace("||", " or ")
+    steps = SimpleNamespace(
+        decide=SimpleNamespace(outputs=SimpleNamespace(action=action, fork=fork)),
+        **{"release-app": SimpleNamespace(outputs=SimpleNamespace(ready=ready))},
+        commit=SimpleNamespace(outputs=SimpleNamespace(suggest=suggests)),
+    )
+    expression = expression.replace("steps.release-app.", "release_app.")
+    return bool(
+        eval(expression, {"steps": steps, "release_app": getattr(steps, "release-app")})
+    )
+
+
+def test_a_fork_gets_the_suggestions_wherever_the_commit_cannot_reach_it() -> None:
+    assert suggestion_after("suggest")
+    assert suggestion_after("commit", suggests="true")
+    assert suggestion_after("commit", ready="")
+    assert not suggestion_after("commit", suggests="false")
+    assert not suggestion_after("")
+    # A branch of the repository has the commit, or the bot says why not.
+    assert not suggestion_after("commit", fork="false", ready="")
+    assert not suggestion_after("commit", fork="false", suggests="true")
+
+
+def test_the_command_runs_nothing_of_the_pull_request() -> None:
+    found = workflow_steps.workflow("commands.yml")
+    assert set(found["on"]) == {"issue_comment"}
+    assert found["on"]["issue_comment"] == {"types": ["created"]}
+    assert found["permissions"] == {}
+    job = workflow_steps.job("commands.yml", "fix")
+    assert job["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "pull-requests": "write",
+    }
+    checkout = next(
+        step for step in job["steps"] if "actions/checkout" in step.get("uses", "")
+    )
+    # main alone, as the workflow runs on the default branch for a comment.
+    assert set(checkout["with"]) == {"persist-credentials", "sparse-checkout"}
+    token = step_in(job, "Create a token of the release app for the branch")
+    assert {key for key in token["with"] if key.startswith("permission-")} == {
+        "permission-contents",
+        "permission-pull-requests",
+    }
+    assert token["with"]["permission-pull-requests"] == "read"
+    # The comment is data that only the condition of the job and blueprint.py read.
+    for step in job["steps"]:
+        assert "comment.body" not in json.dumps(step)
+
+
+ANSWER = "$RUNNER_TEMP/answer.md"
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("variables", "files", "body"),
+    [
+        (
+            {"ACTION": "commit", "READY": "true", "FAILED": "false"},
+            {ANSWER: "#42 comes from a fork.\nThe fix bot committed c0ffee0.\n"},
+            "### The fix bot at `/fix`\n\n#42 comes from a fork.\n"
+            "The fix bot committed c0ffee0.\n",
+        ),
+        (
+            {"ACTION": "commit", "READY": "", "FAILED": "false"},
+            {ANSWER: "#42 comes from a fork.\n"},
+            "### The fix bot at `/fix`\n\n#42 comes from a fork.\n\nThis repository "
+            "has no release app set up, which the fix bot needs to commit; the summary "
+            "of the run (https://run/9) says how to set it up.\n",
+        ),
+        (
+            {"ACTION": "", "READY": "", "FAILED": "true"},
+            {},
+            "### The fix bot at `/fix`\n\n\nThe fix bot failed (https://run/9); its "
+            "summary says why. The PR coach names the command of each check that "
+            "failed, which makes the fixes on your machine.\n",
+        ),
+    ],
+)
+def test_the_bot_answers_each_command(
+    tmp_path: Path, variables: dict[str, str], files: dict[str, str], body: str
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "commands.yml",
+        "fix",
+        "Answer the command on the pull request",
+        answers=(Answer(r"pr comment 42 --body-file .*"),),
+        env={"PULL": "42", "URL": "https://run/9", **variables},
+        files=files,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.read_by("pr comment 42", "--body-file") == [body]
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("step", "code"),
+    [
+        ("Decide what the fix bot does at the command", 0),
+        ("Decide what the fix bot does at the command", 1),
+        ("Commit the fixes onto the branch of the pull request", 1),
+        ("Suggest the fixes on the pull request from a fork", 1),
+    ],
+)
+def test_what_the_bot_says_goes_into_the_answer_and_its_failure_stops_it(
+    tmp_path: Path, step: str, code: int
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "commands.yml",
+        "fix",
+        step,
+        env={
+            "PULL": "42",
+            "COMMENT": "7",
+            "SHA": SHA,
+            "APP_SLUG": "app",
+            "HEAD_REPO": FORK,
+            "BRANCH": "feature",
+            "URL": "https://c",
+        },
+        stubs={
+            "python3": workflow_steps.recording(
+                "python3", f'echo "#42 comes from a fork."; exit {code}'
+            )
+        },
+        files={ANSWER: "Before.\n"},
+    )
+
+    # The step fails with blueprint.py, not only with tee.
+    assert done.returncode == code, done.stderr
+    assert done.summary == "#42 comes from a fork.\n"
+    answer = done.runner_temp / "answer.md"
+    assert answer.read_text(encoding="utf-8") == "Before.\n#42 comes from a fork.\n"

@@ -406,6 +406,11 @@ TESTED = {
         "Delete the caches of closed pull requests",
     ): "test_workflow_steps.py",
     (
+        "commands.yml",
+        "fix",
+        "Answer the command on the pull request",
+    ): "test_fixes.py",
+    (
         "dependabot-automerge.yml",
         "auto-merge",
         "Enable automatic squash merge for patch and minor updates",

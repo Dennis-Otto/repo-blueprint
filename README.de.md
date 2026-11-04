@@ -137,7 +137,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 
 ### [Fix-Bot und Selbstheilung](docs/features/self-healing.de.md)
 
-- **Fix-Bot:** Eine Prüfung, die scheitert, behebt, was sie kann: eine veraltete Lock-Datei, die Form eines Titels, einen fehlenden Eintrag im Changelog; jede Woche auch auf `main`.
+- **Fix-Bot:** Eine Prüfung, die scheitert, behebt, was sie kann: eine veraltete Lock-Datei, die Form eines Titels, einen fehlenden Eintrag im Changelog; jede Woche auch auf `main`, und auf dem Branch eines Forks beim `/fix` eines Maintainers.
 - **Wackelige Tests:** Gescheiterte Test-Jobs laufen noch einmal, und ein Job, der dann besteht, wird in einem Issue gemeldet.
 - **Abgebrochene Prüfungen:** Eine Pflichtprüfung, die ein später Lauf oder ihr Zeitlimit abgebrochen hat, startet von selbst neu.
 - **Gescheiterte Releases:** Das Release eines Merges, das für einen Moment scheitert, führt seine gescheiterten Jobs noch einmal aus.

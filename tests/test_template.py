@@ -9421,6 +9421,7 @@ RELEASE_APP_BOTS = {
     ("after-checks.yml", "fixes"): ("the fix bot", False),
     ("after-checks.yml", "own-branch"): ("the fix bot", False),
     ("blueprint-update.yml", "update"): ("the blueprint bot", True),
+    ("commands.yml", "fix"): ("the fix bot", False),
     ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
     ("diagrams.yml", "pull-request"): ("the diagram bot", False),
     ("docs-pictures.yml", "pull-request"): ("the picture bot", False),
@@ -9516,6 +9517,7 @@ def test_every_token_of_the_release_app_comes_after_its_check(
             ("after-checks.yml", "fixes"),
             ("after-checks.yml", "own-branch"),
             ("blueprint-update.yml", "update"),
+            ("commands.yml", "fix"),
             ("dependabot-automerge.yml", "auto-merge"),
             ("diagrams.yml", "pull-request"),
             ("osv-scanner.yml", "dependabot"),
@@ -11961,6 +11963,43 @@ def test_the_fix_bot_waits_for_the_checks_that_fix_in_every_kind(
     assert left_out
     assert not found.awaited("pull_request") & set(json.loads(left_out[1]))
     assert found.awaited("push") == {ci[1], "Lint", "Docs"}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_kind_takes_the_command_of_the_fix_bot(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # /fix on a pull request, also from a fork, in every kind: the blueprint's workflow,
+    # which reads the fixes of the list of after-checks.yml of the project, and checks
+    # out blueprint.py, which the project has under .github.
+    project = projects[kind]
+    rendered = (project / ".github/workflows/commands.yml").read_text(encoding="utf-8")
+    assert rendered == (ROOT / ".github/workflows/commands.yml").read_text(
+        encoding="utf-8"
+    )
+    assert (project / ".github/blueprint.py").is_file()
+    assert watched(project).keeping
+    job = workflow_steps.job("commands.yml", "fix", project)
+    assert job["environment"] == {"name": "release", "deployment": False}
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert ".github/workflows/commands.yml" in owned.splitlines()
+    # zizmor accepts its start on issue_comment, with the reason, in every kind.
+    zizmor = (project / ".github/zizmor.yml").read_text(encoding="utf-8")
+    assert zizmor == (ROOT / ".github/zizmor.yml").read_text(encoding="utf-8")
+
+
+def test_zizmor_accepts_only_the_comment_trigger_of_the_command_fix() -> None:
+    # The fix bot starts on a new comment, reads it only as text and checks out main.
+    text = (ROOT / ".github/workflows/commands.yml").read_text(encoding="utf-8")
+    assert triggers(text) == {"issue_comment": ["    types: [created]"]}
+    rules = load_yaml((ROOT / ".github/zizmor.yml").read_text(encoding="utf-8"))
+    accepted = {
+        rule
+        for rule, found in rules["rules"].items()
+        if "commands.yml" in found["ignore"]
+    }
+    assert accepted == {"dangerous-triggers"}
+    assert "commands.yml" in accepted_dangerous_triggers()
 
 
 @pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])

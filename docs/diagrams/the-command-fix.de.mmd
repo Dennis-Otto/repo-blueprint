@@ -1,0 +1,41 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Der Befehl /fix
+    accDescr: Eine Person kommentiert /fix an einem Pull Request. Nur jemand mit Schreibrecht startet den Bot, alle anderen bekommen diese Antwort. Der Bot wartet auf die Prüfungen des Heads, die Behebungen behalten, und nimmt ihre Behebungen als Daten; läuft noch eine, committet er nichts und bittet, den Befehl später zu wiederholen. Ein Branch des Repositorys bekommt den Commit. Ein Fork, dessen Autor keine Änderungen durch Maintainer erlaubt, bekommt die Vorschläge an ihren Zeilen. Auf einem Fork, der sie erlaubt, committet der Bot die Dateien, die der Pull Request ändert, und keine, die bestimmt, was ein Workflow ausführt. Lehnt GitHub diesen Commit ab, bekommt der Fork stattdessen die Vorschläge. Ein Kommentar beantwortet jeden Befehl mit dem, was der Bot getan hat.
+
+    command(["Eine Person kommentiert /fix an einem Pull Request"])
+    access{"Schreibrecht?"}
+    refused["Die Antwort sagt, dass nur jemand<br>mit Schreibrecht den Bot startet"]
+    wait["Der Bot wartet auf die Prüfungen des Heads, die<br>Behebungen behalten, und nimmt sie als Daten"]
+    ended{"Sind alle fertig?"}
+    later["Er committet noch nichts: /fix noch<br>einmal, sobald sie fertig sind"]
+    where{"Wo liegt der Branch?"}
+    own["Ein Commit auf den Branch,<br>als die Release-App"]
+    edits{"Erlaubt der Fork Änderungen<br>durch Maintainer?"}
+    fork["Ein Commit der Dateien, die der Pull Request ändert,<br>keine, die bestimmt, was ein Workflow ausführt"]
+    took{"Nimmt GitHub ihn an?"}
+    suggest["Die Behebungen als Vorschläge an ihren Zeilen,<br>wie ein Fork sie ohne den Befehl bekommt"]
+    answer["Ein Kommentar beantwortet den Befehl"]
+
+    command --> access
+    access -- "nein" --> refused --> answer
+    access -- "ja" --> wait --> ended
+    ended -- "nein" --> later --> answer
+    ended -- "ja" --> where
+    where -- "dieses Repository" --> own --> answer
+    where -- "ein Fork" --> edits
+    edits -- "nein" --> suggest
+    edits -- "ja" --> fork --> took
+    took -- "ja" --> answer
+    took -- "nein" --> suggest --> answer
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class wait,later,refused,suggest bot
+    class command person
+    class own,fork,answer done
