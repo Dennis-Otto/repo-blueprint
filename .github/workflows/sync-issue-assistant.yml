@@ -393,11 +393,14 @@ jobs:
           # An update of what every repository runs: a fix, so that the blueprint
           # releases it, and one of dependencies, so that the release merges itself.
           headline="fix(deps): update the issue assistant to $TAG"
-          # The open pull request of the branch, as its number and title, or nothing.
-          open="$(gh pr list --head "$BRANCH" --state open --json number,title \
-            --jq '.[0] | select(.) | "\(.number)\t\(.title)"')"
+          # The open pull request of the branch, as its number, its title and whether
+          # GitHub finds it mergeable with main, or nothing.
+          open="$(gh pr list --head "$BRANCH" --state open --json number,title,mergeable \
+            --jq '.[0] | select(.) | "\(.number)\t\(.title)\t\(.mergeable)"')"
           number="${open%%$'\t'*}"
-          title="${open#*$'\t'}"
+          rest="${open#*$'\t'}"
+          title="${rest%%$'\t'*}"
+          mergeable="${rest##*$'\t'}"
           if [[ "$CHANGED" != true ]]; then
             if [[ -n "$number" ]]; then
               gh pr close "$number" --delete-branch \
@@ -417,7 +420,9 @@ jobs:
               exit 0
             fi
             # The same release: the branch bot keeps the pull request current with main.
-            if [[ "$title" == "$headline" ]]; then
+            # One that conflicts with main it can't, and starts this workflow instead:
+            # then the bot builds the branch anew from main (decision 0118).
+            if [[ "$title" == "$headline" && "$mergeable" != CONFLICTING ]]; then
               gh pr merge "$number" --auto --squash
               echo "#$number brings the issue assistant $TAG already, and merges itself once every check passes." >> "$GITHUB_STEP_SUMMARY"
               exit 0

@@ -19,6 +19,7 @@ from shared import load_yaml
 
 from blueprint.cli import main
 from blueprint.screenshots import (
+    COMPARED_FILES,
     LARGEST,
     REPORT,
     Correction,
@@ -38,6 +39,7 @@ from blueprint.screenshots import (
     kept,
     listing,
     looks_like_its_kind,
+    overtaken,
     pages_of_folder,
     parts,
     pathspec,
@@ -50,6 +52,7 @@ from blueprint.screenshots import (
     shown_picture,
     shown_share,
     summary,
+    written,
 )
 
 GIT = shutil.which("git")
@@ -683,6 +686,93 @@ def test_large_sets_of_pictures_go_in_parts(tmp_path: Path) -> None:
     assert LARGEST < 10_000_000
 
 
+def test_the_commits_write_the_pictures_and_the_pages(tmp_path: Path) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"docs/a.png": png()},
+        [Picture("docs/a.png", "changed", 0.5), Picture("docs/c.png", "deleted")],
+    )
+    page = Page("docs/index.md", b"# Hi\n", ())
+    assert written(folder, [page]) == ["docs/a.png", "docs/c.png", "docs/index.md"]
+    assert written(folder) == ["docs/a.png", "docs/c.png"]
+
+
+def changes(*names: str, **renamed: str) -> list[dict[str, str]]:
+    """The files of GitHub's comparison: changed by their names, renamed from the
+    names that renamed maps them to."""
+    found = [{"filename": name, "status": "modified"} for name in names]
+    found += [
+        {"filename": new, "status": "renamed", "previous_filename": old}
+        for old, new in renamed.items()
+    ]
+    return found
+
+
+def test_main_that_changed_no_file_of_the_pull_request_takes_it() -> None:
+    # Such as an update of the blueprint that merged while the pictures rendered.
+    moved, reason = overtaken(
+        ["docs/a.png", "docs/index.md"],
+        {"behind_by": 0, "files": changes(".github/workflows/ci.yml", "src/a.py")},
+    )
+    assert not moved
+    assert reason == (
+        "`main` changed none of the files of the pull request since the commit that "
+        "was rendered."
+    )
+    assert overtaken(["docs/a.png"], {"behind_by": 0}) == (False, reason)
+
+
+def test_main_that_changed_a_picture_of_the_pull_request_meanwhile_overtook_it() -> (
+    None
+):
+    # paperless-unified-search#316: the pull request before merged the same GIF while
+    # the release rendered.
+    moved, reason = overtaken(
+        ["docs/images/a.gif", "docs/images/a.mp4", "docs/images/b.gif"],
+        {"behind_by": 0, "files": changes("docs/images/a.gif", "docs/images/a.mp4")},
+        "trunk",
+    )
+    assert moved
+    assert reason == (
+        "`trunk` changed `docs/images/a.gif`, `docs/images/a.mp4` since the commit "
+        "that was rendered, so a pull request from that commit would conflict: the "
+        "bot renders `trunk` anew."
+    )
+
+
+def test_a_page_or_a_renamed_file_overtakes_the_pull_request_too() -> None:
+    assert overtaken(["docs/index.md"], {"files": changes("docs/index.md")})[0]
+    # A file that main moved away, and one that it moved there.
+    renamed = {"files": changes(**{"docs/old.png": "docs/new.png"})}
+    assert overtaken(["docs/old.png"], renamed)[0]
+    assert overtaken(["docs/new.png"], renamed)[0]
+
+
+def test_the_reason_names_five_files_of_the_pull_request_at_most() -> None:
+    paths = [f"docs/{number}.png" for number in range(7)]
+    moved, reason = overtaken(paths, {"files": changes(*paths)})
+    assert moved
+    assert "`docs/4.png` and 2 more since" in reason
+    assert "docs/5.png" not in reason
+
+
+def test_main_without_the_commit_that_was_rendered_overtook_it() -> None:
+    # After a forced push, main lacks the commit that the pull request would start from.
+    assert overtaken(["docs/a.png"], {"behind_by": 2, "files": []}) == (
+        True,
+        "`main` no longer has the commit that was rendered, so the bot renders `main` "
+        "anew.",
+    )
+
+
+def test_a_comparison_too_long_to_list_every_file_overtook_it() -> None:
+    files = changes(*(f"src/{number}.py" for number in range(COMPARED_FILES)))
+    moved, reason = overtaken(["docs/a.png"], {"behind_by": 0, "files": files})
+    assert moved
+    assert "more than GitHub lists" in reason
+    assert not overtaken(["docs/a.png"], {"files": files[1:]})[0]
+
+
 def test_the_request_commits_a_part_of_the_pictures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1189,6 +1279,22 @@ def test_the_commands_correct_the_sizes(
     # The bot names the repository, and the size of a part counts the pages.
     assert main(["--repo", "o/r", "screenshots", "parts", str(folder)], root=root) == 0
     assert capsys.readouterr().out == "1\n"
+    # Whether main changed a picture or a page of the pull request meanwhile, from
+    # GitHub's comparison, which the bot keeps in a file.
+    compared = tmp_path / "compared.json"
+    ask = ["--repo", "o/r", "screenshots", "overtaken", str(folder)]
+    ask += ["--compared", str(compared)]
+    compared.write_text(
+        json.dumps({"behind_by": 0, "files": changes("docs/index.md")}),
+        encoding="utf-8",
+    )
+    assert main(ask, root=root) == 0
+    assert "`main` changed `docs/index.md` since" in capsys.readouterr().out
+    compared.write_text(
+        json.dumps({"behind_by": 0, "files": changes("README.md")}), encoding="utf-8"
+    )
+    assert main([*ask, "--base", "trunk"], root=root) == 1
+    assert capsys.readouterr().out.startswith("`trunk` changed none of the files")
     commit = ["--repo", "o/r", "screenshots", "commit", str(folder), "--branch", "b"]
     assert main([*commit, "--head", SHA, "--headline", "h"], root=root) == 0
     additions = json.loads(capsys.readouterr().out)["variables"]["input"][

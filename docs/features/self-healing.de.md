@@ -95,6 +95,12 @@ Das Release eines Merges, das scheitert, etwa am Push seines Tags, den GitHub f�
 
 **Womit:** `after-checks.yml`.
 
+## Pull Requests der Bots mit Konflikten
+
+Der Screenshot-Bot, der Bilder-Bot des Blueprints und der Sync-Bot des Issue-Assistenten bauen den Branch ihres Pull Requests neu aus `main`, laufen aber nur nach einem Release, jede Woche oder jeden Tag. Hat einer ihrer Pull Requests Konflikte mit `main`, startet der Branch-Bot sofort den Workflow des Bots, statt eine Person zu bitten, `main` hineinzumergen, einmal für jeden Konflikt: Das Label `merge-conflict` zeigt, dass er es getan hat, bis GitHub den neuen Branch mergebar findet. Die beiden Bilder-Bots vermeiden die meisten Konflikte, bevor sie einen öffnen: Ein Rendern, das auf das davor gewartet hat, rendert `main` so, wie es dann ist, und hat `main` ein Bild oder eine Seite des Pull Requests geändert, während die Bilder gerendert wurden, etwa weil der Pull Request davor gemergt wurde, lässt der Bot seinen Branch, wie er ist, und rendert `main` neu. Der Diagramm-Bot und der Fix-Bot brauchen beides nicht: Jede Änderung von `main`, die mit ihrem Pull Request in Konflikt geraten kann, startet sie ohnehin.
+
+**Womit:** `update-branches.yml`, `screenshot-bot.yml`, `docs-pictures.yml` und `sync-issue-assistant.yml` ([Entscheidung 0118](../decisions/0118-a-bot-whose-pull-request-conflicts-builds-it-anew-at-once.md)).
+
 ## Wenn eine Prüfung scheitert oder abbricht
 
 Eine Prüfung, die ein Runner, eine Website oder GitHub für einen Moment scheitern lässt oder die ein Wettlauf zweier Läufe abbricht, braucht niemanden: Die Bots nach den Prüfungen führen sie einmal neu aus und lassen nur rot, was aus einem Grund scheitert.

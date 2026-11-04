@@ -1903,11 +1903,17 @@ PICTURE_BOTS = [
         id="screenshots",
     ),
 ]
-# The tool of the bots: two commits for the pictures, the JSON of each part's commit,
-# and the report.
+# How the bots ask GitHub what main changed since the commit that was rendered, and
+# two answers: no change, and one of a picture of the pull request.
+COMPARED = "{behind_by, files: [.files[]? | {filename, previous_filename}]}"
+NO_CHANGE = '{"behind_by":0,"files":[]}\n'
+MERGED = '{"behind_by":0,"files":[{"filename":"docs/images/a.gif"}]}\n'
+# The tool of the bots: whether main changed a file of the pull request meanwhile, two
+# commits for the pictures, the JSON of each part's commit, and the report.
 PICTURE_TOOL = recording(
     "python3",
     """case "$*" in
+  *"screenshots overtaken"*) echo "main changed none of them."; exit 1 ;;
   *"screenshots parts"*) echo 2 ;;
   *"screenshots commit"*) echo "{\\"part\\": \\"${!#}\\"}" ;;
   *"screenshots report"*) echo "The report" ;;
@@ -1934,7 +1940,12 @@ def test_a_picture_bot_closes_its_pull_request_once_main_looks_as_rendered(
             Answer(rf"pr list --head {branch} --state open .*", f"{open_number}\n"),
             Answer(r"pr close 4 --delete-branch --comment .*"),
         ],
-        env={"GH_TOKEN": "app-token", "APP_SLUG": "the-app", "STALE": "false"},
+        env={
+            "GH_TOKEN": "app-token",
+            "APP_SLUG": "the-app",
+            "STALE": "false",
+            "SHA": SHA,
+        },
     )
 
     assert done.returncode == 0, done.stderr
@@ -1968,6 +1979,7 @@ def test_a_picture_bot_commits_on_a_branch_of_its_own_and_merges_itself(
         title,
         answers=[
             Answer(rf"pr list --head {branch} --state open .*", f"{open_number}\n"),
+            exact(f"api repos/o/r/compare/{SHA}...main --jq {COMPARED}", NO_CHANGE),
             # A scratch branch that a failed run left behind, and the branch of the
             # pull request, which exists while it is open.
             exact(f"api repos/o/r/git/ref/heads/{scratch}", "{}"),
@@ -1989,7 +2001,12 @@ def test_a_picture_bot_commits_on_a_branch_of_its_own_and_merges_itself(
             Answer(rf"pr edit 4 --title {headline} --body-file \S+/body\.md"),
             Answer(r"pr merge \d+ --auto --squash"),
         ],
-        env={"GH_TOKEN": "app-token", "APP_SLUG": "the-app", "STALE": "true"},
+        env={
+            "GH_TOKEN": "app-token",
+            "APP_SLUG": "the-app",
+            "STALE": "true",
+            "SHA": SHA,
+        },
         stubs={"python3": PICTURE_TOOL},
     )
 
@@ -2027,6 +2044,84 @@ def test_a_picture_bot_commits_on_a_branch_of_its_own_and_merges_itself(
     assert done.commands[-1] == f"pr merge {number} --auto --squash"
     assert f"#{number} from {branch}, has the commit c2" in done.summary
     assert "python3 blueprint.py --repo o/r screenshots parts" in commits
+    # It asked first whether main changed a file of the pull request meanwhile.
+    assert done.commands[1] == f"api repos/o/r/compare/{SHA}...main --jq {COMPARED}"
+    assert "screenshots overtaken" in done.stubbed[0]
+    assert "--compared" in done.stubbed[0]
+    assert "main changed none of them." in done.summary
+
+
+@pytest.mark.parametrize(("name", "title", "branch", "headline"), PICTURE_BOTS)
+@pytest.mark.parametrize("open_number", ["4", ""])
+def test_a_picture_bot_renders_main_anew_when_main_changed_its_files_meanwhile(
+    tmp_path: Path,
+    name: str,
+    title: str,
+    branch: str,
+    headline: str,
+    open_number: str,
+) -> None:
+    # paperless-unified-search#316: the render of a release ran while the pull request
+    # before it merged with the same pictures, and the bot opened one from the commit
+    # of the release, which conflicted. Now the bot starts a run that renders main
+    # anew, and leaves the branch and the pull request as they are.
+    dispatch = f"api --method POST repos/o/r/actions/workflows/{name}/dispatches"
+    done = run_step(
+        tmp_path,
+        name,
+        "pull-request",
+        title,
+        answers=[
+            Answer(rf"pr list --head {branch} --state open .*", f"{open_number}\n"),
+            exact(f"api repos/o/r/compare/{SHA}...main --jq {COMPARED}", MERGED),
+            exact(f"{dispatch} -f ref=main"),
+        ],
+        env={
+            "GH_TOKEN": "app-token",
+            "APP_SLUG": "the-app",
+            "STALE": "true",
+            "SHA": SHA,
+        },
+        stubs={
+            "python3": recording(
+                "python3", 'echo "main changed a.gif since the commit."; exit 0'
+            )
+        },
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands[1:] == [
+        f"api repos/o/r/compare/{SHA}...main --jq {COMPARED}",
+        f"{dispatch} -f ref=main",
+    ]
+    assert "main changed a.gif since the commit." in done.summary
+    assert "renders main anew" in done.summary
+
+
+@pytest.mark.parametrize(("name", "title", "branch", "headline"), PICTURE_BOTS)
+def test_a_picture_bot_fails_when_its_tool_cant_tell_whether_main_moved(
+    tmp_path: Path, name: str, title: str, branch: str, headline: str
+) -> None:
+    done = run_step(
+        tmp_path,
+        name,
+        "pull-request",
+        title,
+        answers=[
+            Answer(rf"pr list --head {branch} --state open .*", "\n"),
+            exact(f"api repos/o/r/compare/{SHA}...main --jq {COMPARED}", NO_CHANGE),
+        ],
+        env={
+            "GH_TOKEN": "app-token",
+            "APP_SLUG": "the-app",
+            "STALE": "true",
+            "SHA": SHA,
+        },
+        stubs={"python3": recording("python3", "exit 2")},
+    )
+
+    assert done.returncode == 1
+    assert len(done.calls) == 2
 
 
 @WITH_JQ
@@ -2063,7 +2158,12 @@ def test_a_picture_bot_takes_only_its_own_pull_request(
             ),
             Answer(r"pr close 5 .*"),
         ],
-        env={"GH_TOKEN": "app-token", "APP_SLUG": "the-app", "STALE": "false"},
+        env={
+            "GH_TOKEN": "app-token",
+            "APP_SLUG": "the-app",
+            "STALE": "false",
+            "SHA": SHA,
+        },
     )
 
     assert done.returncode == 0, done.stderr
