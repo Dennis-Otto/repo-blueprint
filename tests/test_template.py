@@ -6462,6 +6462,9 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     nextcloud = security("nextcloud-app")
     assert "gh attestation verify demo_project.tar.gz" in nextcloud
     assert "app-certificate-requests/master/demo_project/demo_project.crt" in nextcloud
+    # The key that signs the app lives only in signing, never in release (#530).
+    assert "is the one secret of the environment `signing`" in nextcloud
+    assert "secret of the environment `release`" not in nextcloud
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
