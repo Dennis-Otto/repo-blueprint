@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.11.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.0...v1.11.1) (2026-11-04)
+
+
+### Bug fixes
+
+* the screenshot bot renders again when its pull request has a merge conflict ([#655](https://github.com/Dennis-Otto/repo-blueprint/issues/655)) ([51f32d6](https://github.com/Dennis-Otto/repo-blueprint/commit/51f32d638e2d8be6eb3f3a63c620ba779ff3c48f))
+
 ## [1.11.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.1...v1.11.0) (2026-11-04)
 
 ### Bug fixes
