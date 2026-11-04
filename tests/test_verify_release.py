@@ -110,6 +110,22 @@ def npm_package_of(package: str | None) -> bytes:
     return data.getvalue()
 
 
+def app_package_of(version: str | None) -> bytes:
+    """The signed package of the Nextcloud app demo, as the build packs it: a tar.gz
+    with the folder of its id, whose appinfo/info.xml has the version, or none."""
+    data = io.BytesIO()
+    info = (
+        f"<info>\n  <id>demo</id>\n  <version>{version}</version>\n</info>\n"
+        if version
+        else "<info>\n  <id>demo</id>\n</info>\n"
+    ).encode()
+    with tarfile.open(fileobj=data, mode="w:gz") as archive:
+        member = tarfile.TarInfo("demo/appinfo/info.xml")
+        member.size = len(info)
+        archive.addfile(member, io.BytesIO(info))
+    return data.getvalue()
+
+
 def served_as(url: str) -> str:
     """The name of the file with what the stand-in for curl gets from the URL."""
     return re.sub(r"[^a-zA-Z0-9.]", "_", url)
@@ -281,11 +297,20 @@ CHROME: dict[str, Any] = {
     "publish_to": "chrome-web-store",
     "assets": {EXTENSION: zip_of({"manifest.json": json.dumps(MANIFEST_V3)})},
 }
-INFO_XML = (
-    "api -H Accept: application/vnd.github.raw+json"
-    f" repos/o/r/contents/appinfo/info.xml?ref={TAG}"
-)
+
+
+def info_xml_at(tag: str) -> str:
+    """The call of gh for the appinfo/info.xml of the Nextcloud app at the tag."""
+    return (
+        "api -H Accept: application/vnd.github.raw+json"
+        f" repos/o/r/contents/appinfo/info.xml?ref={tag}"
+    )
+
+
+INFO_XML = info_xml_at(TAG)
 APP_PAGE = "https://apps.nextcloud.com/apps/demo"
+# The page of every release of the app, which shows a beta among the unstable ones.
+RELEASES_PAGE = f"{APP_PAGE}/releases"
 OFFERED = f'<a href="https://github.com/o/r/releases/download/{TAG}/demo.tar.gz">'
 NOT_YET_OFFERED = (
     '<a href="https://github.com/o/r/releases/download/v1.2.2/demo.tar.gz">'
@@ -293,7 +318,26 @@ NOT_YET_OFFERED = (
 NEXTCLOUD: dict[str, Any] = {
     "publish_to": "nextcloud-appstore",
     "answers": [exact(INFO_XML, "<info><id>demo</id></info>\n")],
+    "assets": {"demo.tar.gz": app_package_of(VERSION)},
     "served": {APP_PAGE: OFFERED},
+}
+# A beta of the app, whose info.xml at its tag on main still says the last release.
+APP_BETA = "v1.3.0-beta.1"
+NEXTCLOUD_BETA: dict[str, Any] = {
+    "publish_to": "nextcloud-appstore",
+    "tag": APP_BETA,
+    "answers": [
+        exact(
+            info_xml_at(APP_BETA),
+            "<info><id>demo</id><version>1.2.3</version></info>\n",
+        )
+    ],
+    "assets": {"demo.tar.gz": app_package_of(APP_BETA.removeprefix("v"))},
+    "served": {
+        RELEASES_PAGE: (
+            f'<a href="https://github.com/o/r/releases/download/{APP_BETA}/demo.tar.gz">'
+        )
+    },
 }
 MAJOR_TAG = "api repos/o/r/commits/v1 --jq .sha"
 ACTION: dict[str, Any] = {
@@ -355,6 +399,21 @@ PASSES: dict[str, tuple[dict[str, Any], str]] = {
     "the app in the Nextcloud App Store": (
         NEXTCLOUD,
         f"The Nextcloud App Store offers the package of demo {VERSION}.",
+    ),
+    "the version of the package of the Nextcloud app": (
+        NEXTCLOUD,
+        f"The appinfo/info.xml in demo.tar.gz has the version {VERSION}, which the"
+        " App Store takes for its release.",
+    ),
+    "a beta of the Nextcloud app, for the beta channel alone": (
+        NEXTCLOUD_BETA,
+        "The Nextcloud App Store offers the package of demo 1.3.0-beta.1 only to"
+        " servers on the beta channel of Nextcloud.",
+    ),
+    "the version of the beta in its package of the Nextcloud app": (
+        NEXTCLOUD_BETA,
+        "The appinfo/info.xml in demo.tar.gz has the version 1.3.0-beta.1, which the"
+        " App Store takes for its release.",
     ),
     "the major tag of an action": (ACTION, "The major tag v1 points at the release."),
     "a prerelease of an action": (
@@ -571,6 +630,27 @@ PROBLEMS: dict[str, tuple[dict[str, Any], str]] = {
     "an app store that doesn't answer": (
         {**NEXTCLOUD, "served": {APP_PAGE: None}},
         f"The Nextcloud App Store doesn't offer the package of demo {VERSION}.",
+    ),
+    # The package of a beta that still says the last release, which the App Store
+    # would have taken for that release, replacing its package for every user.
+    "a package of the Nextcloud app with the version of the last release": (
+        {**NEXTCLOUD_BETA, "assets": {"demo.tar.gz": app_package_of(VERSION)}},
+        f"The appinfo/info.xml in demo.tar.gz has the version {VERSION}, not"
+        " 1.3.0-beta.1, so the App Store takes the package for another release.",
+    ),
+    "a package of the Nextcloud app without its version": (
+        {**NEXTCLOUD, "assets": {"demo.tar.gz": app_package_of(None)}},
+        f"The appinfo/info.xml in demo.tar.gz has the version none, not {VERSION},"
+        " so the App Store takes the package for another release.",
+    ),
+    "no package of the Nextcloud app": (
+        {**NEXTCLOUD, "assets": {"demo.tar.gz": None}},
+        f"The appinfo/info.xml in demo.tar.gz has the version none, not {VERSION},"
+        " so the App Store takes the package for another release.",
+    ),
+    "a beta that the App Store doesn't list among the unstable releases": (
+        {**NEXTCLOUD_BETA, "served": {RELEASES_PAGE: NOT_YET_OFFERED}},
+        "The Nextcloud App Store doesn't offer the package of demo 1.3.0-beta.1.",
     ),
     "a major tag at another commit": (
         {**ACTION, "answers": [api(MAJOR_TAG, {"sha": OTHER_COMMIT})]},

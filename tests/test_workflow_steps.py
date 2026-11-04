@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import ast
 import base64
+import io
 import json
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1610,6 +1612,244 @@ def test_nothing_is_registered_without_the_token_or_all_that_the_key_signed(
     assert done.returncode == 1
     assert error in done.stdout
     assert done.stubbed == []
+    assert not request.exists()
+
+
+# A beta of a Nextcloud app reaches the App Store with its own version, never in the
+# place of the last release (#635): the App Store takes the version of a release from
+# the appinfo/info.xml in its package and updates a release of that version.
+
+INFO_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+\t<id>demoapp</id>
+\t<name>Démo</name>
+\t<!-- The version that release-please writes. -->
+\t<version>1.4.0</version>
+\t<dependencies>
+\t\t<php min-version="8.2"/>
+\t\t<nextcloud min-version="31" max-version="33"/>
+\t</dependencies>
+</info>
+"""
+# The info.xml of the package, which the build unpacks to sign it.
+UNPACKED_INFO_XML = f"$RUNNER_TEMP/signing/{APP_ID}/appinfo/info.xml"
+WRITE_THE_VERSION = "Write the version of the release into the Nextcloud app"
+CHECK_THE_VERSION = "Check the version of the signed Nextcloud app"
+SUBMIT_THE_PACKAGE = "Submit the signed package of the public release"
+APP_BETA = "1.5.0-beta.1"
+
+
+def info_xml(version: str) -> str:
+    """The info.xml of the app at the version."""
+    return INFO_XML.replace("<version>1.4.0</version>", f"<version>{version}</version>")
+
+
+def app_package(info: str | None) -> bytes:
+    """The package of the app, as krankerl and the signing pack it: a tar.gz with the
+    folder of its id, and the info.xml unless it is None."""
+    data = io.BytesIO()
+    files = {f"{APP_ID}/lib/Application.php": "<?php\n"}
+    if info is not None:
+        files[f"{APP_ID}/appinfo/info.xml"] = info
+    with tarfile.open(fileobj=data, mode="w:gz") as archive:
+        for name, text in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(text.encode())
+            archive.addfile(member, io.BytesIO(text.encode()))
+    return data.getvalue()
+
+
+def write_the_version(tmp_path: Path, version: str, info: str = INFO_XML) -> StepResult:
+    """Runs the step of the build that writes the version of the release into the
+    unpacked package and the checkout, which both have the info.xml of the tag."""
+    return run_step(
+        tmp_path,
+        "build-release.yml",
+        "assets",
+        WRITE_THE_VERSION,
+        env={"APP_ID": APP_ID, "VERSION": version},
+        stubs=PYTHON3,
+        files={"appinfo/info.xml": info, UNPACKED_INFO_XML: info},
+    )
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        # A beta of main, whose info.xml still has the version of the last release.
+        APP_BETA,
+        # A release, whose version release-please has written into the info.xml.
+        "1.4.0",
+    ],
+)
+def test_the_package_of_a_nextcloud_app_has_the_version_of_its_release(
+    tmp_path: Path, version: str
+) -> None:
+    done = write_the_version(tmp_path, version)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    # Only the version changes, before the signature covers it, and in the checkout
+    # too, which the project's own check of its signed package may compare with it.
+    for written in (
+        done.workspace / "appinfo/info.xml",
+        done.runner_temp / f"signing/{APP_ID}/appinfo/info.xml",
+    ):
+        assert written.read_bytes() == info_xml(version).encode()
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        INFO_XML.replace("\t<version>1.4.0</version>\n", ""),
+        INFO_XML.replace("</info>", "\t<version>1.4.0</version>\n</info>"),
+        INFO_XML.replace("<version>1.4.0</version>", "<version>1.4.0"),
+    ],
+    ids=["without a version", "with two versions", "not XML"],
+)
+def test_no_nextcloud_app_is_signed_whose_version_cant_be_written(
+    tmp_path: Path, info: str
+) -> None:
+    done = write_the_version(tmp_path, APP_BETA, info)
+
+    assert done.returncode == 1
+    assert (
+        f"::error::The appinfo/info.xml of {APP_ID} has no single version that the"
+        f" build can set to {APP_BETA}, so the App Store would take its package for"
+        " another release (#635)."
+    ) in done.stdout
+    assert (done.workspace / "appinfo/info.xml").read_text(encoding="utf-8") == info
+
+
+def check_the_version(tmp_path: Path, info: str | None) -> StepResult:
+    """Runs the check of the build after the signing, of the package with the info.xml,
+    for the beta."""
+    assets = tmp_path / "runner/assets"
+    assets.mkdir(parents=True)
+    (assets / f"{APP_ID}.tar.gz").write_bytes(app_package(info))
+    return run_step(
+        tmp_path,
+        "build-release.yml",
+        "assets",
+        CHECK_THE_VERSION,
+        env={"APP_ID": APP_ID, "VERSION": APP_BETA, "ASSETS": assets.as_posix()},
+        stubs=PYTHON3,
+    )
+
+
+def test_the_signed_package_of_a_nextcloud_app_has_the_version_of_its_release(
+    tmp_path: Path,
+) -> None:
+    done = check_the_version(tmp_path, info_xml(APP_BETA))
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "::error::" not in done.stdout
+
+
+@pytest.mark.parametrize(
+    ("info", "found"),
+    [(INFO_XML, "1.4.0"), (None, "none"), ("<info>", "none")],
+    ids=["of the last release", "without an info.xml", "not XML"],
+)
+def test_no_signed_package_of_another_version_becomes_a_release(
+    tmp_path: Path, info: str | None, found: str
+) -> None:
+    done = check_the_version(tmp_path, info)
+
+    assert done.returncode == 1
+    assert (
+        f"::error::The appinfo/info.xml in {APP_ID}.tar.gz has the version {found},"
+        f" not {APP_BETA}, so the App Store would take the package for another release"
+        " (#635)."
+    ) in done.stdout
+
+
+def submit_the_package(
+    tmp_path: Path, tag: str, info: str | None
+) -> tuple[StepResult, Path]:
+    """Runs the delivery to the App Store of the release of the tag, in the checkout of
+    the tag, whose info.xml still says 1.4.0 for a beta, with the package that the
+    release attaches, and returns its result and the request that curl posts."""
+    checkout = tmp_path / "checkout"
+    (checkout / "appinfo").mkdir(parents=True)
+    (checkout / "appinfo/info.xml").write_text(INFO_XML, encoding="utf-8", newline="\n")
+    # What gh release download brings.
+    (checkout / f"{APP_ID}.tar.gz").write_bytes(app_package(info))
+    (checkout / f"{APP_ID}.tar.gz.sig").write_bytes(b"signed")
+    request = tmp_path / "request.json"
+    post = (
+        'while (($#)); do [[ "$1" == --data-binary ]] && body="${2#@}"; shift; done\n'
+        f'cp "$body" "{request.as_posix()}"'
+    )
+    done = run_step(
+        tmp_path,
+        "release.yml",
+        "nextcloud-appstore",
+        SUBMIT_THE_PACKAGE,
+        answers=[
+            exact(
+                f"release download {tag} --repo o/r --pattern {APP_ID}.tar.gz"
+                f" --pattern {APP_ID}.tar.gz.sig"
+            )
+        ],
+        env={"APPSTORE_TOKEN": "the token", "GH_TOKEN": "a token", "TAG": tag},
+        stubs={
+            **PYTHON3,
+            "curl": recording("curl", post),
+            "openssl": recording("openssl", "printf c2lnbmVk"),
+        },
+        workspace=checkout,
+    )
+    return done, request
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("version", "offered"),
+    [
+        (
+            APP_BETA,
+            f"The App Store offers {APP_ID} {APP_BETA} only to servers on the beta"
+            " channel of Nextcloud.",
+        ),
+        ("1.4.0", f"The App Store offers {APP_ID} 1.4.0 to every server it fits."),
+    ],
+)
+def test_the_app_store_gets_a_package_of_the_version_of_its_tag(
+    tmp_path: Path, version: str, offered: str
+) -> None:
+    tag = f"v{version}"
+    done, request = submit_the_package(tmp_path, tag, info_xml(version))
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    # A beta is no nightly: the pre-release identifier of its version marks it.
+    assert json.loads(request.read_text(encoding="utf-8")) == {
+        "download": f"https://github.com/o/r/releases/download/{tag}/{APP_ID}.tar.gz",
+        "signature": "c2lnbmVk",
+        "nightly": False,
+    }
+    assert offered in done.summary
+
+
+@pytest.mark.parametrize(
+    ("info", "found"),
+    [(INFO_XML, "1.4.0"), (None, "none")],
+    ids=["of the last release", "without an info.xml"],
+)
+def test_the_app_store_gets_no_package_of_another_version_than_its_tag(
+    tmp_path: Path, info: str | None, found: str
+) -> None:
+    # A beta whose package still says the last release would replace that release
+    # for every user, as the App Store updates the release of the same version.
+    done, request = submit_the_package(tmp_path, f"v{APP_BETA}", info)
+
+    assert done.returncode == 1
+    assert (
+        f"::error::The appinfo/info.xml in {APP_ID}.tar.gz has the version {found},"
+        f" not {APP_BETA}, so the App Store would take the package for another release"
+        " (#635)."
+    ) in done.stdout
+    assert not [call for call in done.stubbed if call.startswith("curl ")]
     assert not request.exists()
 
 

@@ -128,8 +128,11 @@ ABOUT: dict[str, str] = {
     "BETA_CHANNEL": (
         "`true` makes every change for users that reaches `main`, a `feat`, `fix` or"
         " `perf`, a beta of the next release, such as `1.3.0-beta.2`, which the release"
-        " publishes as a prerelease for the testers who take prereleases. Without it,"
-        " or with any other value, no betas are published."
+        " publishes as a prerelease for the testers who take prereleases. A beta of a"
+        " Nextcloud app goes to the App Store with its version in the"
+        " `appinfo/info.xml` of its package, which Nextcloud offers only to servers on"
+        " its beta channel, and never replaces the last release. Without it, or with"
+        " any other value, no betas are published."
     ),
     "BLUEPRINT_AUTOMERGE": (
         "`off` makes every update of the blueprint wait for the maintainer, where its"
