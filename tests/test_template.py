@@ -1143,12 +1143,27 @@ def test_the_signing_key_of_a_nextcloud_app_is_only_in_the_step_that_signs() -> 
 def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_store(
     projects: dict[str, Path], kind: str
 ) -> None:
-    # The first step of #530, which moves the signing key out of reach of the key of
-    # the release app. No other kind holds these secrets.
+    # #530, which moves the signing key out of reach of the key of the release app.
+    # No other kind holds these secrets.
     settings = Settings.load(projects[kind] / ".github/repository.toml")
     if kind != "nextcloud-app":
         assert not {"signing", "appstore"} & settings.environments.keys()
         return
+    # Each secret lives in its own environment and in no other, the release too
+    # (step 4 of #530): no job that enters release, such as release-please, reaches
+    # the key that signs the app or the token of the App Store.
+    holders = {
+        secret: sorted(
+            name
+            for name, config in settings.environments.items()
+            if secret in config.get("secrets", [])
+        )
+        for secret in ("APP_PRIVATE_KEY", "APPSTORE_TOKEN")
+    }
+    assert holders == {"APP_PRIVATE_KEY": ["signing"], "APPSTORE_TOKEN": ["appstore"]}
+    assert settings.environments["release"]["secrets"] == [
+        "RELEASE_AUTOMATION_PRIVATE_KEY"
+    ]
     assert settings.environments["signing"]["secrets"] == ["APP_PRIVATE_KEY"]
     assert settings.environments["appstore"]["secrets"] == ["APPSTORE_TOKEN"]
     # On GitHub neither exists yet: the settings bot creates each for main alone, and
@@ -6447,6 +6462,9 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     nextcloud = security("nextcloud-app")
     assert "gh attestation verify demo_project.tar.gz" in nextcloud
     assert "app-certificate-requests/master/demo_project/demo_project.crt" in nextcloud
+    # The key that signs the app lives only in signing, never in release (#530).
+    assert "is the one secret of the environment `signing`" in nextcloud
+    assert "secret of the environment `release`" not in nextcloud
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
@@ -10710,10 +10728,10 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
     assert creation["bypass_actors"] == [
         {"actor_id": 12345, "actor_type": "Integration", "bypass_mode": "always"}
     ]
+    # The release app's key alone: the key that signs the app and the token of the
+    # App Store live in signing and appstore, out of reach of release-please (#530).
     assert settings.environments["release"]["secrets"] == [
-        "RELEASE_AUTOMATION_PRIVATE_KEY",
-        "APP_PRIVATE_KEY",
-        "APPSTORE_TOKEN",
+        "RELEASE_AUTOMATION_PRIVATE_KEY"
     ]
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "https://github.com/apps/octo-org-release-automation" in toml

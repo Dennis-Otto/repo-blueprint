@@ -226,14 +226,14 @@ An API key of Anthropic, which the issue assistant takes in place of `CLAUDE_COD
 
 The API token of the account of the Nextcloud App Store, with which the release submits the signed package and the workflow *Register app* registers the id of the app. Only a Nextcloud app needs it.
 
-- **Set by:** you, as a secret of the environments `appstore` and `release`, which only `main` may use: `gh secret set APPSTORE_TOKEN --env appstore` and `gh secret set APPSTORE_TOKEN --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environment `appstore`, which only `main` may use: `gh secret set APPSTORE_TOKEN --env appstore`, as the checklist shows
 - **Read by:** [`register-app.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/register-app.yml) (Register the app, where `project_type == 'nextcloud-app'`); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository)
 
 ### `APP_PRIVATE_KEY`
 
 The private key of the certificate of a Nextcloud app, with which the release signs the package for the App Store and the workflow *Register app* proves the id of the app. Only a Nextcloud app needs it.
 
-- **Set by:** you, as a secret of the environments `release` and `signing`, which only `main` may use: `gh secret set APP_PRIVATE_KEY --env release < KEY_FILE` and `gh secret set APP_PRIVATE_KEY --env signing < KEY_FILE`, as the checklist shows
+- **Set by:** you, as a secret of the environment `signing`, which only `main` may use: `gh secret set APP_PRIVATE_KEY --env signing < KEY_FILE`, as the checklist shows
 - **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`register-app.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/register-app.yml) (Register the app, where `project_type == 'nextcloud-app'`)
 
 ### `CLAUDE_CODE_OAUTH_TOKEN`

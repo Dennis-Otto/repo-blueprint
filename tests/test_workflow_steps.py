@@ -1340,7 +1340,7 @@ NOT_HANDED_OVER = (
 def test_the_build_signs_no_nextcloud_app_without_the_key_of_its_environment(
     tmp_path: Path,
 ) -> None:
-    # Should GitHub not take the key of the environment signing in place of the empty
+    # Without the key of the environment signing, which takes the place of the empty
     # value that release.yml passes, the release stops here, before anything signs.
     done = run_step(
         tmp_path,
@@ -1357,11 +1357,13 @@ def test_the_build_signs_no_nextcloud_app_without_the_key_of_its_environment(
         " environment signing, and let the job assets of release.yml pass it"
         " under secrets:"
     ) in done.stdout
+    # A release has shown that GitHub takes the key of signing, and release holds no
+    # copy of it any more (#530), so the error advises no revert to it.
     assert (
-        "If both are in place, GitHub didn't take the key of signing in place of"
-        " the empty value passed (decision 0114, #530): revert the blueprint"
-        " update, as the environment release still holds a copy of the key."
+        " The secret of the environment takes the place of the empty value passed"
+        " (decision 0114, #530)."
     ) in done.stdout
+    assert "revert" not in done.stdout
     assert done.stubbed == []
     assert list(done.runner_temp.iterdir()) == []
 
