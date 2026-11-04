@@ -7,6 +7,10 @@ requests when there is none.
 
 ## Unreleased
 
+### Bug fixes
+
+- **The Mutation workflow measures again:** it runs mutmut 3.8.1, which works with pytest 9.2; with mutmut 3.8.0 the first run of the tests stopped at the first test with `AttributeError: 'Function' object has no attribute '_nodeid'`, so no part ran and every project's weekly Mutation run failed ([#608](https://github.com/Dennis-Otto/repo-blueprint/issues/608)).
+
 ## [1.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.0...v1.10.1) (2026-11-04)
 
 ### Bug fixes
