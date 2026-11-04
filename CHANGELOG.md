@@ -11,6 +11,20 @@ requests when there is none.
 
 - **The Mutation workflow measures again:** it runs mutmut 3.8.1, which works with pytest 9.2; with mutmut 3.8.0 the first run of the tests stopped at the first test with `AttributeError: 'Function' object has no attribute '_nodeid'`, so no part ran and every project's weekly Mutation run failed ([#608](https://github.com/Dennis-Otto/repo-blueprint/issues/608)).
 
+## [1.11.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.1...v1.11.0) (2026-11-04)
+
+
+### Features
+
+* /fix on a pull request from a fork ([#647](https://github.com/Dennis-Otto/repo-blueprint/issues/647)) ([0b2dc99](https://github.com/Dennis-Otto/repo-blueprint/commit/0b2dc9939509c38b3c71bc0cdb562e033eff939c))
+
+
+### Bug fixes
+
+* a beta of a Nextcloud app never replaces its stable release in the App Store ([#646](https://github.com/Dennis-Otto/repo-blueprint/issues/646)) ([af4df18](https://github.com/Dennis-Otto/repo-blueprint/commit/af4df183e92b7e2369744643097c244c6f7762d4))
+* a release version changed by hand fails instead of being fixed away ([#645](https://github.com/Dennis-Otto/repo-blueprint/issues/645)) ([69b37f3](https://github.com/Dennis-Otto/repo-blueprint/commit/69b37f34c5a4309113276d882bebc6743e204677))
+* **mutation:** run mutmut 3.8.1, which works with pytest 9.2 ([#594](https://github.com/Dennis-Otto/repo-blueprint/issues/594)) ([3076a01](https://github.com/Dennis-Otto/repo-blueprint/commit/3076a019ab50a5bfda44cb356f161a4001ac8175))
+
 ## [1.10.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.10.0...v1.10.1) (2026-11-04)
 
 ### Bug fixes
