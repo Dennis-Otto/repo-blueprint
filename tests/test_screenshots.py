@@ -1293,7 +1293,7 @@ def test_the_commands_correct_the_sizes(
     compared.write_text(
         json.dumps({"behind_by": 0, "files": changes("README.md")}), encoding="utf-8"
     )
-    assert main([*ask, "--base", "trunk"], root=root) == 1
+    assert main([*ask, "--base", "trunk"], root=root) == 3
     assert capsys.readouterr().out.startswith("`trunk` changed none of the files")
     commit = ["--repo", "o/r", "screenshots", "commit", str(folder), "--branch", "b"]
     assert main([*commit, "--head", SHA, "--headline", "h"], root=root) == 0

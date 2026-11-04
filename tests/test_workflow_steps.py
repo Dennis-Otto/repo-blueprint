@@ -1913,7 +1913,7 @@ MERGED = '{"behind_by":0,"files":[{"filename":"docs/images/a.gif"}]}\n'
 PICTURE_TOOL = recording(
     "python3",
     """case "$*" in
-  *"screenshots overtaken"*) echo "main changed none of them."; exit 1 ;;
+  *"screenshots overtaken"*) echo "main changed none of them."; exit 3 ;;
   *"screenshots parts"*) echo 2 ;;
   *"screenshots commit"*) echo "{\\"part\\": \\"${!#}\\"}" ;;
   *"screenshots report"*) echo "The report" ;;
@@ -2098,9 +2098,10 @@ def test_a_picture_bot_renders_main_anew_when_main_changed_its_files_meanwhile(
     assert "renders main anew" in done.summary
 
 
+@pytest.mark.parametrize("status", [1, 2])
 @pytest.mark.parametrize(("name", "title", "branch", "headline"), PICTURE_BOTS)
 def test_a_picture_bot_fails_when_its_tool_cant_tell_whether_main_moved(
-    tmp_path: Path, name: str, title: str, branch: str, headline: str
+    tmp_path: Path, name: str, title: str, branch: str, headline: str, status: int
 ) -> None:
     done = run_step(
         tmp_path,
@@ -2117,7 +2118,8 @@ def test_a_picture_bot_fails_when_its_tool_cant_tell_whether_main_moved(
             "STALE": "true",
             "SHA": SHA,
         },
-        stubs={"python3": recording("python3", "exit 2")},
+        # An error that the tool does not catch exits 1, which is no answer either.
+        stubs={"python3": recording("python3", f"exit {status}")},
     )
 
     assert done.returncode == 1

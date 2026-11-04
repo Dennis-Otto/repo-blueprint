@@ -256,6 +256,18 @@ jobs:
               sleep 3
             done
           done
+      # The job render runs the script of the project and its tools; the code that runs
+      # below with the token of the release app comes only from a commit of main, never
+      # from one that a render job that went wrong names, such as that of a fork.
+      - name: Check that main has the commit that the job render names
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ needs.render.outputs.sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(gh api "repos/$GH_REPO/compare/$SHA...main" --jq .behind_by)" == 0 ]]
       # blueprint.py, which checks what the job render kept, and the Markdown of the
       # pages, whose named sizes it corrects; none of the pictures of main. Of the
       # commit that the job render rendered, which the commits start from.
@@ -371,7 +383,8 @@ jobs:
               "repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main
             echo "The bot started a new run of this workflow, which renders main anew." >> "$GITHUB_STEP_SUMMARY"
             exit 0
-          elif (($? != 1)); then
+          # 3 means not; an error that the tool does not catch exits 1.
+          elif (($? != 3)); then
             exit 1
           fi
 

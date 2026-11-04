@@ -18224,6 +18224,21 @@ def test_the_browser_of_the_pictures_and_its_playwright_move_together() -> None:
     assert rules["packageRules"][-1] == grouped[0]
 
 
+def assert_main_has_the_rendered_commit(opener: dict[str, Any]) -> None:
+    """The job with the release app runs code only of a commit of main: the commit
+    that the job render names, which runs the script of the project, is checked with
+    the token of the job before the checkout."""
+    names = [step.get("name") for step in opener["steps"]]
+    check = names.index("Check that main has the commit that the job render names")
+    (checkout,) = steps_using(opener, "actions/checkout")
+    assert check < opener["steps"].index(checkout)
+    step = opener["steps"][check]
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["SHA"] == "${{ needs.render.outputs.sha }}"
+    assert '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]' in step["run"]
+    assert 'compare/$SHA...main" --jq .behind_by)" == 0 ]]' in step["run"]
+
+
 def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     workflow = (ROOT / ".github/workflows/screenshot-bot.yml").read_text(
         encoding="utf-8"
@@ -18294,6 +18309,7 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     assert render["outputs"]["sha"] == "${{ steps.rendered.outputs.sha }}"
     (pages,) = steps_using(opener, "actions/checkout")
     assert pages["with"]["ref"] == "${{ needs.render.outputs.sha }}"
+    assert_main_has_the_rendered_commit(opener)
     assert "SHA: ${{ needs.render.outputs.sha }}" in workflow
     assert "github.sha" not in workflow
     # When main changed a file of the pull request meanwhile, the token of the job
@@ -18349,6 +18365,7 @@ def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> Non
     assert opener["permissions"] == {"actions": "write", "contents": "read"}
     assert " screenshots overtaken " in scripts_of(opener)
     assert "actions/workflows/docs-pictures.yml/dispatches" in scripts_of(opener)
+    assert_main_has_the_rendered_commit(opener)
     for job in (plan, render, opener):
         assert "${{" not in scripts_of(job)
     # The files whose change in a release can change the pictures.

@@ -577,7 +577,8 @@ def screenshots_command(arguments: argparse.Namespace, root: Path) -> int:
             arguments.base,
         )
         print(reason)
-        return 0 if moved else 1
+        # Not 1, which an error that the command does not catch returns as well.
+        return 0 if moved else 3
     if arguments.action == "commit":
         request = screenshots.commit_request(
             arguments.folder,
@@ -1802,7 +1803,7 @@ def add_screenshots_parsers(
         "overtaken",
         help="whether the default branch changed a picture or a page of the commits of "
         "a folder of keep since the commit that was rendered, so that their pull "
-        "request would conflict; exits 1 when not, and says why",
+        "request would conflict; exits 3 when not, and says why",
     )
     overtaken_parser.add_argument("folder", type=Path)
     overtaken_parser.add_argument(
