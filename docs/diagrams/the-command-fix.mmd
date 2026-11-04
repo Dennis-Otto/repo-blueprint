@@ -1,0 +1,41 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The command /fix
+    accDescr: A person comments /fix on a pull request. Only someone with write access starts the bot, and anybody else gets that answer. The bot waits for the checks of the head that keep fixes and takes their fixes as data; while one still runs, it commits nothing and asks for the command again later. A branch of the repository gets the commit. A fork whose author allows no edits by maintainers gets the suggestions at their lines. On a fork that allows them, the bot commits the files that the pull request changes, and none that decides what a workflow runs. When GitHub refuses that commit, the fork gets the suggestions instead. One comment answers each command with what the bot did.
+
+    command(["A person comments /fix on a pull request"])
+    access{"Write access?"}
+    refused["The answer says that only someone<br>with write access starts the bot"]
+    wait["The bot waits for the checks of the head that<br>keep fixes and takes their fixes as data"]
+    ended{"Have they all ended?"}
+    later["It commits nothing yet: say /fix<br>again once they have ended"]
+    where{"Where is the branch?"}
+    own["One commit onto the branch,<br>as the release app"]
+    edits{"Does the fork allow<br>edits by maintainers?"}
+    fork["One commit of the files that the pull request<br>changes, none that decides what a workflow runs"]
+    took{"Does GitHub take it?"}
+    suggest["The fixes as suggestions at their lines,<br>as a fork gets them without the command"]
+    answer["One comment answers the command"]
+
+    command --> access
+    access -- "no" --> refused --> answer
+    access -- "yes" --> wait --> ended
+    ended -- "no" --> later --> answer
+    ended -- "yes" --> where
+    where -- "this repository" --> own --> answer
+    where -- "a fork" --> edits
+    edits -- "no" --> suggest
+    edits -- "yes" --> fork --> took
+    took -- "yes" --> answer
+    took -- "no" --> suggest --> answer
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class wait,later,refused,suggest bot
+    class command person
+    class own,fork,answer done
