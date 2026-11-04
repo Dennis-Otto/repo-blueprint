@@ -1,6 +1,6 @@
 # Unsigned commits get a check of their own, outside the required checks
 
-- Status: accepted
+- Status: accepted, amended by [0108](0108-the-runs-of-a-replaced-commit-give-their-runner-back.md), with which the job also cancels the runs of a replaced commit
 - Date: 2026-11-01
 
 ## Context

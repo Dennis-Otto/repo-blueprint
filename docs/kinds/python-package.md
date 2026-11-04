@@ -20,7 +20,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 
 - **The example:** `src/<package>/` with its `py.typed`, the tests in `tests/`, the targets of the fuzzing in `fuzz/`, and `pyproject.toml`, for Python 3.12 and newer. Replace it with the real code; its tests show how.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: Ruff, mypy, the tests with every line and branch covered, on every core, and the build of the package.
-- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The steps of every kind:** the text files, the diagrams, the pages in one column, the files of the project, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
 - **Workflows of this kind:** fuzzing with Atheris (`fuzz.yml`), the newest Python on `main` (`newest-python.yml`), the property tests every night (`properties.yml`) and the mutation tests with mutmut every week (`mutation.yml`).
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 
@@ -35,7 +35,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request builds the package once, publishes it on PyPI by trusted publishing from the environment `pypi`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
 
-A package that nobody installs from PyPI, such as a private one, answers `publish_package` with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data topics=python`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `pyproject.toml` of a new repository has the classifier `Private :: Do Not Upload`, which PyPI refuses, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of PyPI or of a `*.whl`.
+A package that nobody installs from PyPI, such as a private one, answers `publish_package` with no, or later with `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data topics=python`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `pyproject.toml` of a new repository has the classifier `Private :: Do Not Upload`, which PyPI refuses, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of PyPI or of a `*.whl`.
 
 ## Once by hand
 

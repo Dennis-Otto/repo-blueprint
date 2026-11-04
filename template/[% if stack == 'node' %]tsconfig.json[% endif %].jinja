@@ -1,10 +1,18 @@
 {
   "compilerOptions": {
+[%- if project_type == 'cloudflare-worker' %]
+    "target": "es2024",
+    "lib": ["esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"],
+[%- else %]
     "target": "es2024",
     "lib": ["es2024"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "types": ["node"],
+[%- endif %]
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
@@ -16,7 +24,11 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
+[%- if project_type == 'cloudflare-worker' %]
+    "allowImportingTsExtensions": true,
+[%- else %]
     "rewriteRelativeImportExtensions": true,
+[%- endif %]
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },

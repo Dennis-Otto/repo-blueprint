@@ -47,7 +47,13 @@
   automergeStrategy: "squash",
   // Renovate keeps its own branches up to date with main.
   rebaseWhen: "behind-base-branch",
-  // The title check sets the labels.
+[% if renovate_runner == 'mend' and release_app %]  // The branch bot, the fix bot and the other bots commit onto its branches as the
+  // release app, which Renovate would take for someone editing the branch: it would
+  // stop rebasing it and bringing it new versions. So it takes their commits for its
+  // own. A pattern, since GitHub alone knows the number in the address of the bot user
+  // of the app, which differs for every owner; anyone else's commit stays an edit.
+  gitIgnoredAuthors: ["/^[0-9]+\\+{= release_app =}\\[bot\\]@users\\.noreply\\.github\\.com$/"],
+[% endif %]  // The title check sets the labels.
   labels: [],
   prConcurrentLimit: 10,
   prHourlyLimit: 0,
@@ -335,6 +341,16 @@
       matchUpdateTypes: ["major"],
       enabled: false,
     },
+[%- if project_type == 'cloudflare-worker' %]
+    {
+      // Vitest takes only a coverage provider of its own version, so a new major
+      // version of the one comes with that of the other.
+      matchManagers: ["npm"],
+      matchPackageNames: ["vitest", "@vitest/coverage-istanbul"],
+      matchUpdateTypes: ["major"],
+      groupName: "Vitest",
+    },
+[%- endif %]
 [%- endif %][% if stack == 'container' %]
     {
       // The base images of the image that the users run: a new version of one

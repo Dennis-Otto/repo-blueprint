@@ -148,7 +148,7 @@ build_type = "workflow"
 
 # Environments and the secrets they need; only main may use them.
 [environments.release]
-secrets = [{= ((["RELEASE_AUTOMATION_PRIVATE_KEY"] if release_app else []) + (["APP_PRIVATE_KEY", "APPSTORE_TOKEN"] if publish_to == 'nextcloud-appstore' else [])) | map('to_json') | join(', ') =}]
+secrets = [{= (["RELEASE_AUTOMATION_PRIVATE_KEY"] if release_app else []) | map('to_json') | join(', ') =}]
 
 [environments.issue-assistant]
 [%- if issue_assistant_ai %]
@@ -163,6 +163,16 @@ secrets = []
 [% elif publish_to == 'npm' %]
 [environments.npm]
 secrets = []
+[% elif publish_to == 'nextcloud-appstore' %]
+# The key that signs the app and the token of the App Store, each in an environment of
+# its own and in no other, so that the build of a release can reach only the key and no
+# job of release, such as release-please, either of them:
+# https://github.com/Dennis-Otto/repo-blueprint/issues/530
+[environments.signing]
+secrets = ["APP_PRIVATE_KEY"]
+
+[environments.appstore]
+secrets = ["APPSTORE_TOKEN"]
 [% elif publish_to == 'chrome-web-store' %]
 # The Chrome Web Store, to which publish-store.yml delivers every release. Its jobs
 # sign in to Google with the OIDC token of GitHub (decision 0085 of the blueprint), so

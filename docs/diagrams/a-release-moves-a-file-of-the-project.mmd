@@ -1,0 +1,24 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a release moves a file of the project
+    accDescr: An update of the blueprint leaves the files of the project as they are, such as the labels. Its pull request brings the step Files of the project of scripts/check.sh, which asks whether a release has left something to move. Where nothing is left, or the file declines the move, the pull request merges itself. Otherwise the check runs migrate --fix, and the fix bot commits the move onto the pull request, whose checks run again.
+
+    update(["The pull request of<br>a blueprint update"])
+    step{"Step Files of the project:<br>anything left to move?"}
+    fix["The check runs<br>migrate --fix"]
+    bot["The fix bot commits<br>the move onto the<br>pull request"]
+    merged(["The pull request<br>merges itself"])
+
+    update --> step
+    step -- "no, or the file<br>declines it" --> merged
+    step -- "yes" --> fix --> bot
+    bot -- "the checks<br>run again" --> step
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class update,fix,bot bot
+    class merged done

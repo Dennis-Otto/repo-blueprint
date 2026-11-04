@@ -176,7 +176,7 @@ def test_the_committed_pages_say_what_their_sources_say() -> None:
     kinds = [
         path.relative_to(ROOT) for path in sorted((ROOT / reference.KINDS).glob("*.md"))
     ]
-    assert len(kinds) == 16
+    assert len(kinds) == 18
     assert set(written) == {
         reference.QUESTIONS,
         reference.VARIABLES,
@@ -194,8 +194,8 @@ def test_the_registry_names_every_repository_that_follows_the_blueprint() -> Non
     registry = reference.fleet((ROOT / reference.FLEET).read_text(encoding="utf-8"))
     assert registry.owner == "Dennis-Otto"
     names = {item.name: item for item in registry.members}
-    # player-switch-for-autodarts, the node package that follows it since 0.8.8.
-    assert names["player-switch-for-autodarts"].kind == "node-package"
+    # player-switch-for-autodarts, the Chrome extension that follows it since 0.8.8.
+    assert names["player-switch-for-autodarts"].kind == "chrome-extension"
     assert names["player-switch-for-autodarts"].canary
     # Each canary with the answers of its repository, of its kind; and only these.
     answers = sorted(path.stem for path in (ROOT / "tests/answers").glob("*.yml"))
@@ -573,6 +573,11 @@ def test_who_sets_a_name() -> None:
         "you, as a secret of the environments `pypi` and `release`, which only `main`"
         " may use: `gh secret set KEY --env pypi` and"
         " `gh secret set KEY --env release`"
+    )
+    # The prompt of gh reads one line, and a private key has several.
+    key = Name("APP_PRIVATE_KEY", "secrets", environments={"signing"})
+    assert "`gh secret set APP_PRIVATE_KEY --env signing < KEY_FILE`" in (
+        reference.set_by(key, answers)
     )
 
 

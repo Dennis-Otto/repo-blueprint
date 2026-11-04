@@ -1,0 +1,27 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How a Cloudflare Worker goes live
+    accDescr: You merge a pull request into main, after every required check passed. Workers Builds of Cloudflare builds the commit with the lock file of the repository and runs npm run deploy, whose script asks whether the commit is a release. An ordinary commit becomes a version of the Worker without traffic, which the dashboard lists. The merge of the release pull request goes live with its version; the release workflow tags the same commit and publishes the release on GitHub, with its SBOMs and signed provenance. No key of Cloudflare is stored in GitHub.
+
+    merge["You merge a pull request into main"]
+    build["`*Workers Builds* of Cloudflare builds the commit with **package-lock.json**, with no key of Cloudflare in GitHub`"]
+    ask["`**npm run deploy** asks: is the commit the release of **package.json**?`"]
+    upload["`No: a version without traffic, listed with its commit`"]
+    live["`Yes, *chore: release X.Y.Z*: it goes live as **vX.Y.Z**`"]
+    release["`The release workflow tags the same commit and publishes the release, with SBOMs and provenance`"]
+
+    merge --> build --> ask
+    ask --> upload
+    ask --> live
+    merge --> release
+
+    classDef you fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class merge you
+    class build,ask,release bot
+    class upload,live done

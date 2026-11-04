@@ -21,7 +21,7 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 - **Das Beispiel:** `src/index.ts`, gebaut nach `dist/`, die Tests in `test/`, `tsconfig.json` und `tsconfig.build.json`, `biome.jsonc` und `package.json` mit seiner Lock-Datei. Ersetze es durch den echten Code; seine Tests zeigen, wie.
 - **Die Schritte von `scripts/check.sh` für diese Art,** auf deinem Rechner wie in der CI: die Lock-Datei, die zu `package.json` passen muss, Biome für Lint und Format, tsc für die Typen, node:test mit jeder Zeile, jedem Zweig und jeder Funktion abgedeckt und seinem Bericht im PR-Coach, und `npm pack`; npm installiert ohne die Skripte der Pakete. Biome lässt die Diagramme aus, die `scripts/diagrams.sh` zeichnet, weil die nächste Zeichnung sie neu schreibt.
 - **Workflows dieser Art:** das neueste Node auf `main` (`newest-node.yml`), nach jeder Änderung und jede Woche, während die CI das Node aus `.nvmrc` prüft.
-- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
+- **Die Schritte jeder Art:** die Textdateien, die Diagramme, die Seiten in einer Spalte, die Dateien des Projekts, die Fragmente des Changelogs, die akzeptierten Advisories, die Lock-Dateien, die Version, die Git-Hooks, ShellCheck für die Shell-Skripte und der strenge Build der Website.
 - **Alles, was jedes Repository bekommt:** den PR-Coach und den Fix-Bot, den Release-Bot, Renovate, die Einstellungen als Code, den Issue-Assistenten, die Website auf Deutsch und Englisch, die Sicherheitsprüfungen und den Blueprint-Bot, wie [die Anleitung](../guide.md#was-ein-neues-repository-bekommt) sie nennt.
 
 ## Die Prüfungen, die ein Pull Request braucht
@@ -35,7 +35,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 Der Merge des Release-Pull-Requests veröffentlicht das Paket auf npm mit Provenance, per Trusted Publishing aus dem Environment `npm`, ohne Token, und hängt es an das Release, mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3.
 
-Ein Paket, das niemand von npm installiert, etwa ein privates oder eine Browser-Erweiterung, die man aus einem Zip lädt, beantwortet [`publish_package`](../reference/questions.md#publish_package) mit Nein, oder später mit `copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data "topics=typescript, nodejs"` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `package.json` eines neuen Repositorys ist `private`, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von npm oder einem `*.tgz`.
+Ein Paket, das niemand von npm installiert, etwa ein privates oder eine Browser-Erweiterung, die man aus einem Zip lädt, beantwortet [`publish_package`](../reference/questions.md#publish_package) mit Nein, oder später mit `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data publish_package=false`. Das geschieht auf dem Update-Pull-Request des Release, das die Frage gebracht hat, denn auf einem älteren Release ändert der Befehl nichts, und mit den Standard-Topics kommt `--data "topics=typescript, nodejs"` dazu. Das Release liefert es dann nirgendwohin aus und trägt seine SBOMs, seine Provenance und das, was `scripts/release-assets.sh` baut; `package.json` eines neuen Repositorys ist `private`, und `SECURITY.md`, `GOVERNANCE.md` und `CONTRIBUTING.md` sprechen nicht mehr von npm oder einem `*.tgz`.
 
 ## Einmal von Hand
 
@@ -49,9 +49,7 @@ Diese Art bringt diese Schritte dazu:
 
 <!-- --8<-- [start:real-repository] -->
 
-[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) ist aus dem Blueprint entstanden: ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung.
-
-Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Player Switch for Autodarts rendern, mit ihnen aus, bevor er merged.
+Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der Workflow Variants des Blueprints macht bei jeder Änderung seiner Dateien eines daraus und führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert eines von der neuesten Version, wie sein Blueprint-Bot es täte.
 
 <!-- --8<-- [end:real-repository] -->
 

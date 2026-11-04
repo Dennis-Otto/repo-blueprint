@@ -33,6 +33,8 @@ Each release describes what it ships in its SBOMs, as SPDX and as CycloneDX: the
   <img src="../images/diagrams/what-the-sboms-of-a-release-describe.svg" alt="What the SBOMs of a release describe: The build unpacks what the release ships into a folder of its own: the zip of HACS, the wheel, the npm package, the zip of the Chrome extension or the signed Nextcloud app, and for an action, an image or a project without a package the files of its tag without those that only check, test and document it. syft, checked by its sha256, lists the components that a package installs, or that the sources declare, under the name of the repository and the version of the release, as SPDX and as CycloneDX. The build and the release verification check that both name the release, and a scanner of a user applies the OpenVEX document of the release to the SPDX SBOM.">
 </picture>
 
+The verification after a release names every problem that it finds in an annotation and in the summary of its run, and the bot-health bot reports the failed run in an issue. That holds for what ends the verification early too, such as a draft, which is no published release yet, or a download of gitsign with another checksum.
+
 A project that ships something that no registry builds, such as the zip of a browser extension, builds it with a `scripts/release-assets.sh` of its own. The build of the release runs `bash scripts/release-assets.sh FOLDER VERSION` at the commit of the release, in a job of its own that may write nothing and holds no secret, with Node.js and `npm ci --ignore-scripts` first where the project has a `package.json`. It attests each file that the script writes with the rest of the release and attaches it to the draft before the release is published; its SBOMs describe those zips and tarballs where no registry delivers the project, and the verification of the release fails for an asset without its signed provenance (decision 0084 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)):
 
 <picture>
@@ -66,3 +68,9 @@ For a Nextcloud app: the registration of its id with its certificate, once, by h
 For a Chrome extension: every release goes to the Chrome Web Store as the zip that the release attests, after a check of its provenance, signed in to Google with the OIDC token of GitHub and no stored secret. A daily run delivers a release whose review had to wait, and reports a rejection or a warning of Google with the fix.
 
 **How:** `publish-store.yml`, `scripts/store-status.mjs`, [the page of the kind](../kinds/chrome-extension.md).
+
+## Cloudflare
+
+For a Cloudflare Worker: Cloudflare's Workers Builds builds every commit of `main` and deploys only the merge of the release pull request, as the version of the release; every other commit becomes a version without traffic. No key of Cloudflare is stored in GitHub, and the secrets of the Worker live in Cloudflare.
+
+**How:** `scripts/deploy-worker.sh`, [the page of the kind](../kinds/cloudflare-worker.md).

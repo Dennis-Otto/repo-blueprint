@@ -68,11 +68,13 @@ openssl x509 -in {= nextcloud_app_id =}.crt -pubkey -noout > {= nextcloud_app_id
 openssl dgst -sha512 -verify {= nextcloud_app_id =}.pub -signature {= nextcloud_app_id =}.tar.gz.sig {= nextcloud_app_id =}.tar.gz
 ```
 
-The private key of the certificate is a secret of the environment `release`, which only the release workflow on `main` can use; it never reaches the App Store.
+The private key of the certificate is the one secret of the environment `signing`. Only the build of a release and the job of *Register the app* that signs the app id enter that environment, and only on `main`. The key never reaches the App Store, and no job that holds the token of the App Store or the private key of the release app can reach it.
 [% elif publish_to == 'npm' %]
 `npm audit signatures` checks the signatures and the provenance of the package as npm installed it.
 [% elif publish_to == 'chrome-web-store' %]
 The Chrome Web Store gets exactly this zip: the workflow *Chrome Web Store* downloads it from the release, checks its provenance as above and only then uploads it, signed in to Google without a stored secret, as [docs/releases.md](docs/releases.md) describes.
+[% elif publish_to == 'cloudflare-workers' %]
+Cloudflare deploys exactly the commit of a release: Workers Builds builds the Worker from the commit of `main` that the release tags, with the lock file of that commit, and `scripts/deploy-worker.sh` deploys only that commit, as [docs/releases.md](docs/releases.md) describes. No key of Cloudflare is stored in GitHub, and the secrets of the Worker live in Cloudflare, never in the repository.
 [% elif publish_to == 'github-action' %]
 Repositories that use the action pin the commit hash of a release; `gh release verify` shows which commit the tag of a release stands for.
 [% endif %]

@@ -6,7 +6,7 @@ description: Every question of the Copier template of Repo Blueprint, with its d
 
 <!-- reference.py writes this page from copier.yml: change copier.yml and run python3 reference.py. -->
 
-Copier asks these 27 questions when it copies the blueprint, in this order, and keeps the answers in `.copier-answers.yml`, so that `copier update` asks only a new question. `--data name=value` gives an answer without the question, also later: `copier update --defaults --vcs-ref=:current: --data name=value` changes an answer of an existing repository, and the defaults of Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) answer the questions that stay the same for all of your repositories, as [your own account](../own-account.md) shows. A default that is a template of Copier comes from the answers before it, in the delimiters of the blueprint: `{= … =}` for a value and `[% … %]` for a block.
+Copier asks these 27 questions when it copies the blueprint, in this order, and keeps the answers in `.copier-answers.yml`, so that `copier update` asks only a new question. `--data name=value` gives an answer without the question, also later: `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data name=value`, on a branch and merged in a pull request as [the FAQ](../faq.md) shows, changes an answer of an existing repository, and the defaults of Copier's [settings file](https://copier.readthedocs.io/en/stable/settings/) answer the questions that stay the same for all of your repositories, as [your own account](../own-account.md) shows. A default that is a template of Copier comes from the answers before it, in the delimiters of the blueprint: `{= … =}` for a value and `[% … %]` for a block.
 
 - [`project_name`](#project_name): The name of the project, such as "Paperless Sync"
 - [`project_slug`](#project_slug): The name of the repository; owner.github.io, such as dennis-otto.github.io, for the website of the owner itself
@@ -33,7 +33,7 @@ Copier asks these 27 questions when it copies the blueprint, in this order, and 
 - [`renovate_runner`](#renovate_runner): Who runs Renovate, which opens the updates of the dependencies
 - [`issue_assistant_ai`](#issue_assistant_ai): Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant
 - [`sample_code`](#sample_code): Start with sample code and tests; an existing repository that takes the blueprint answers no
-- [`test_workflows`](#test_workflows): Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more; empty for none
+- [`test_workflows`](#test_workflows): Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more, whose fixes the fix bot commits and whose runs of a replaced commit the bot for replaced commits cancels; empty for none
 - [`test_marker`](#test_marker): The text before the name of each test or step in the logs of the tests that pytest doesn't run, such as "Browser step:", by which the flaky-test bot names the test that failed; empty for none
 
 ## The questions
@@ -87,6 +87,7 @@ The kind of project.
 | `python-package` | Python package (PyPI) |
 | `node-package` | Node package (TypeScript, npm) |
 | `chrome-extension` | Chrome extension (Manifest V3, Chrome Web Store) |
+| `cloudflare-worker` | Cloudflare Worker (TypeScript, Workers Builds) |
 | `container` | Container image (GHCR) |
 | `generic` | Repository without a build (docs, configuration, scripts) |
 
@@ -209,7 +210,7 @@ The languages of the code, which CodeQL analyzes (it has no PHP).
 
 ```text
 [%- if project_type in ['home-assistant', 'github-action', 'python-package'] -%][python]
-[%- elif project_type in ['node-package', 'chrome-extension', 'nextcloud-app'] -%][javascript-typescript]
+[%- elif project_type in ['node-package', 'chrome-extension', 'cloudflare-worker', 'nextcloud-app'] -%][javascript-typescript]
 [%- else -%][]
 [%- endif -%]
 ```
@@ -274,6 +275,7 @@ The topics of the repository on GitHub, with those of each kind by default: HACS
 [%- elif project_type == 'python-package' -%]{= 'python, pypi' if publish_package else 'python' =}
 [%- elif project_type == 'node-package' -%]{= 'typescript, nodejs, npm' if publish_package else 'typescript, nodejs' =}
 [%- elif project_type == 'chrome-extension' -%]chrome-extension, browser-extension, manifest-v3
+[%- elif project_type == 'cloudflare-worker' -%]cloudflare-workers, cloudflare, typescript
 [%- elif project_type == 'container' -%]docker, container, ghcr
 [%- endif -%]
 ```
@@ -368,15 +370,17 @@ The issue assistant labels the issues and answers its commands without AI; with 
 
 Start with sample code and tests; an existing repository that takes the blueprint answers no.
 
+A repository made from the sample answers no once its own code replaced the sample; the update then deletes those files, which docs/faq.md says how to take back.
+
 - **Type:** yes or no
 - **Asked:** always
 - **Default:** yes
 
 ### `test_workflows`
 
-Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more; empty for none.
+Other workflows of the repository that run tests, by their names and separated by commas, whose failed jobs the flaky-test bot runs once more, whose fixes the fix bot commits and whose runs of a replaced commit the bot for replaced commits cancels; empty for none.
 
-The flaky-test bot watches the CI and Docker E2E of every repository; a repository whose other workflows run tests, such as visual tests, names them here.
+The flaky-test bot and the fix bot watch the CI and Docker E2E of every repository; a repository whose other workflows run tests, such as visual tests, names them here.
 
 - **Type:** text
 - **Asked:** always
@@ -422,7 +426,7 @@ release_app_id: '4739928'
 [%- if project_type == 'home-assistant' -%]home-assistant
 [%- elif project_type == 'nextcloud-app' -%]php
 [%- elif project_type in ['github-action', 'python-package'] -%]python
-[%- elif project_type in ['node-package', 'chrome-extension'] -%]node
+[%- elif project_type in ['node-package', 'chrome-extension', 'cloudflare-worker'] -%]node
 [%- elif project_type == 'container' -%]container
 [%- else -%]generic
 [%- endif -%]
@@ -441,6 +445,7 @@ release_app_id: '4739928'
 [%- elif project_type == 'python-package' -%]pypi
 [%- elif project_type == 'node-package' -%]npm
 [%- elif project_type == 'chrome-extension' -%]chrome-web-store
+[%- elif project_type == 'cloudflare-worker' -%]cloudflare-workers
 [%- elif project_type == 'container' -%]ghcr
 [%- else -%]none
 [%- endif -%]
@@ -526,7 +531,7 @@ The slot of the schedules of this repository, so that the scheduled workflows of
 After the first copy, these belong to the project: an update never overwrites them. Renovate keeps the dependency manifests of the project current. The patterns follow .gitignore: those without a slash would match at any depth, so the files of the root start with one. template/AGENTS.md.jinja lists them for coding agents, and a test keeps both lists equal.
 
 <details markdown>
-<summary>The 60 patterns of the files of a project</summary>
+<summary>The 61 patterns of the files of a project</summary>
 
 - `/README.md`
 - `/CHANGELOG.md`
@@ -576,6 +581,7 @@ After the first copy, these belong to the project: an update never overwrites th
 - `/package-lock.json`
 - `/extension`
 - `/store`
+- `/wrangler.jsonc`
 - `/Dockerfile`
 - `/action.yml`
 - `/hacs.json`

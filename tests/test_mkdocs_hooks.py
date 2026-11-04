@@ -790,6 +790,28 @@ def test_the_stylesheet_fixes_what_the_accessibility_check_found() -> None:
         assert rule in css, problem
 
 
+def test_the_stylesheet_makes_the_heading_of_a_fold_its_title() -> None:
+    css = (ROOT / ".github/mkdocs-blueprint.css").read_text(encoding="utf-8")
+
+    assert (
+        ".md-typeset details.blueprint-fold > summary > h3 {\n"
+        "  font-size: inherit;\n"
+        "  font-weight: inherit;\n"
+        "  letter-spacing: inherit;\n"
+        "  line-height: inherit;\n"
+        "  margin: 0;\n"
+        "}\n"
+    ) in css
+    # A link on the same page scrolls to the fold, whose title stays below the header.
+    assert (
+        ".md-typeset details.blueprint-fold {\n"
+        "  font-size: inherit;\n"
+        "  margin: 0.4em 0;\n"
+        "  scroll-margin-top: 3rem;\n"
+        "}\n"
+    ) in css
+
+
 # The pictures of a page
 
 
@@ -1007,6 +1029,97 @@ def test_a_video_takes_a_png_until_it_plays_or_shows_nothing(tmp_path: Path) -> 
         '<video class="blueprint-video" src="b.mp4" width="6" height="3" controls'
         ' muted loop playsinline preload="none"></video>'
     )
+
+
+def test_a_gif_of_each_scheme_plays_as_the_video_of_that_scheme(tmp_path: Path) -> None:
+    media = {
+        "images/a.gif": gif(),
+        "images/a.mp4": b"",
+        "images/a.webp": webp(6, 3),
+        "images/a.dark.gif": gif(),
+        "images/a.dark.mp4": b"",
+    }
+    html = themed_picture("images/a.gif", "images/a.dark.gif", alt="A")
+
+    assert pictures(tmp_path, html, media) == (
+        '<video class="blueprint-video blueprint-only-light" src="images/a.mp4"'
+        ' poster="images/a.webp" width="6" height="3" controls muted loop playsinline'
+        ' preload="none" aria-label="A"></video>'
+        '<video class="blueprint-video blueprint-only-dark" src="images/a.dark.mp4"'
+        ' width="6" height="3" controls muted loop playsinline preload="none"'
+        ' aria-label="A"></video>'
+    )
+
+
+def test_a_scheme_without_a_video_keeps_its_gif_beside_the_video_of_the_other(
+    tmp_path: Path,
+) -> None:
+    media = {"a.gif": gif(), "a.mp4": b"", "a.dark.gif": gif()}
+    html = themed_picture("a.gif", "a.dark.gif", alt="A")
+
+    assert pictures(tmp_path, html, media) == (
+        '<video class="blueprint-video blueprint-only-light" src="a.mp4" width="6"'
+        ' height="3" controls muted loop playsinline preload="none" aria-label="A">'
+        '</video><img src="a.dark.gif#only-dark" alt="A" width="6" height="3"'
+        ' loading="lazy" decoding="async">'
+    )
+
+
+@pytest.mark.parametrize(
+    ("given", "style"),
+    [
+        ('width="396"', ' style="width:396px"'),
+        ('width="396px"', ' style="width:396px"'),
+        ('width=" 39.5"', ' style="width:39.5px"'),
+        ('width="50%"', ' style="width:50%"'),
+        ('width="auto"', ""),
+        ('width=""', ""),
+        ('height="200"', ""),
+    ],
+)
+def test_a_video_is_as_wide_as_its_picture_says(
+    tmp_path: Path, given: str, style: str
+) -> None:
+    # The size of the file stays, for the shape of the video before it loads.
+    assert pictures(
+        tmp_path, f'<img src="a.gif" {given}>', {"a.gif": gif(), "a.mp4": b""}
+    ) == (
+        f'<video class="blueprint-video" src="a.mp4" width="6" height="3"{style}'
+        ' controls muted loop playsinline preload="none"></video>'
+    )
+
+
+def test_a_video_of_each_scheme_is_as_wide_as_their_picture_says(
+    tmp_path: Path,
+) -> None:
+    media = {"a.gif": gif(), "a.mp4": b"", "a.dark.gif": gif(), "a.dark.mp4": b""}
+    html = (
+        '<picture><source media="(prefers-color-scheme: dark)" srcset="a.dark.gif">'
+        '<img src="a.gif" width="396"></picture>'
+    )
+
+    assert pictures(tmp_path, html, media).count(' style="width:396px"') == 2
+
+
+def test_the_stylesheet_shows_a_video_as_its_gif() -> None:
+    css = (ROOT / ".github/mkdocs-blueprint.css").read_text(encoding="utf-8")
+    # In the other scheme it hides, as Material hides a picture with #only-dark.
+    assert (
+        '[data-md-color-scheme="default"] .md-typeset video.blueprint-only-dark,\n'
+        '[data-md-color-scheme="slate"] .md-typeset video.blueprint-only-light {\n'
+        "  display: none;\n"
+        "}"
+    ) in css
+    # No wider than the GIF, whose size the attributes name, or than the column.
+    assert (
+        ".md-typeset video.blueprint-video {\n"
+        "  display: block;\n"
+        "  height: auto;\n"
+        "  max-width: 100%;\n"
+        "}"
+    ) in css
+    # The whole column only when the website can't read the size of the GIF.
+    assert ".md-typeset video.blueprint-video:not([width]) {\n  width: 100%;\n}" in css
 
 
 def test_a_gif_without_a_video_stays_a_gif(tmp_path: Path) -> None:
@@ -2416,6 +2529,61 @@ def test_an_untranslated_page_is_a_copy_that_search_engines_leave_out() -> None:
     assert "noindex" not in english
 
 
+def with_dutch(current: str) -> Any:
+    """The configuration of a website in English, German and Dutch, while the i18n
+    plugin builds the language current."""
+    config = bilingual(current)
+    config.plugins["i18n"].config.languages.append(
+        SimpleNamespace(locale="nl", default=False, build=True)
+    )
+    return config
+
+
+def test_an_untranslated_page_names_no_versions_beside_another_translation() -> None:
+    # German has its own version of the page, and Dutch shows the English one.
+    versions = {
+        "en": version("en", "games.html"),
+        "de": version("de", "de/games.html"),
+        "nl": version("en", "nl/games.html"),
+    }
+    head = HEAD.replace(
+        '<link rel="stylesheet"',
+        '<link rel="alternate" href="{nl}" hreflang="nl">\n<link rel="stylesheet"',
+    )
+    copy = hooks().on_post_page(
+        head.format(
+            canonical=SITE + "nl/games.html",
+            en="../games.html",
+            de="../de/games.html",
+            nl="games.html",
+        ),
+        page_of("nl/games.html", **versions),
+        with_dutch("nl"),
+    )
+    translated = hooks().on_post_page(
+        head.format(
+            canonical=SITE + "de/games.html",
+            en="../games.html",
+            de="games.html",
+            nl="../nl/games.html",
+        ),
+        page_of("de/games.html", locale="de", **versions),
+        with_dutch("de"),
+    )
+
+    assert 'rel="alternate"' not in copy
+    assert f'<link rel="canonical" href="{SITE}games.html">' in copy
+    assert '<meta name="robots" content="noindex, follow">' in copy
+    # The page that German translated still names its real versions, but not Dutch.
+    assert (
+        f'<link rel="alternate" href="{SITE}games.html" hreflang="en">'
+        f'<link rel="alternate" href="{SITE}de/games.html" hreflang="de">'
+        f'<link rel="alternate" href="{SITE}games.html" hreflang="x-default">'
+    ) in translated
+    assert 'hreflang="nl"' not in translated
+    assert "noindex" not in translated
+
+
 def test_an_untranslated_page_keeps_the_canonical_page_of_its_project() -> None:
     # The page moved: a hook of the project names the page that replaced it.
     moved = page_of(
@@ -2847,7 +3015,7 @@ def test_the_automation_page_shows_every_workflow_with_its_comment(
     headings = re.findall(r"^#{2,3} .*$", page, re.M)
     assert headings == [
         "## What a pull request needs {#required-checks}",
-        "## At a glance {#at-a-glance}",
+        '## At a glance {#at-a-glance data-blueprint-automation="true"}',
         "## Checks {#checks}",
         "### CI {#ci}",
         "## Releases {#releases}",
@@ -2942,6 +3110,73 @@ def test_the_automation_page_without_settings_or_an_address(tmp_path: Path) -> N
     assert "Required checks" not in page
     assert "- **Source:** `.github/workflows/release.yml`\n" in page
     assert module.BUILT.sources == [folder]
+
+
+# The heading and the section of a workflow, as the extension toc and the Markdown of
+# the page make them.
+SECTION = (
+    '<h3 id="ci">CI<a class="headerlink" href="#ci" title="Permanent link">&para;</a>'
+    "</h3>\n<p>What &lt;h3&gt; does.</p>\n<ul>\n<li><strong>When:</strong> a push</li>\n"
+    "</ul>\n"
+)
+
+
+def test_each_workflow_on_the_automation_page_is_a_fold_with_its_heading() -> None:
+    other = SECTION.replace("ci", "nightly").replace("CI", "Nightly")
+    content = (
+        '<h1 id="automation">Automation</h1>\n'
+        '<div class="md-typeset__scrollwrap"><table></table></div>\n'
+        f'<h2 id="checks">Checks</h2>\n<p>They check.</p>\n{SECTION}'
+        f'<h2 id="bots">Bots</h2>\n{other}{SECTION}'
+    )
+
+    folded = hooks().folded_workflows(content)
+
+    fold = (
+        '<details class="blueprint-fold"><summary><h3 id="ci">CI</h3></summary>\n'
+        "<p>What &lt;h3&gt; does.</p>\n<ul>\n<li><strong>When:</strong> a push</li>\n"
+        "</ul>\n</details>"
+    )
+    # Every heading of a workflow keeps its anchor in the title of its fold, without a
+    # link, as a control in the title of a fold fails the accessibility check; what
+    # comes before the first and every heading of a group stay outside the folds.
+    assert folded == (
+        '<h1 id="automation">Automation</h1>\n'
+        '<div class="md-typeset__scrollwrap"><table></table></div>\n'
+        f'<h2 id="checks">Checks</h2>\n<p>They check.</p>\n{fold}'
+        f'<h2 id="bots">Bots</h2>\n'
+        f"{fold.replace('ci', 'nightly').replace('CI', 'Nightly')}{fold}"
+    )
+
+
+def test_a_fold_of_a_workflow_ends_in_the_element_around_an_untranslated_page() -> None:
+    folded = hooks().folded_workflows(f'<div lang="en">\n{SECTION}\n</div>')
+
+    assert folded.endswith("</ul>\n\n</details></div>")
+
+
+def test_only_the_automation_page_of_the_hooks_is_folded_after_the_search_read_it(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    written = automation(tmp_path)
+    module.BUILT.pages = written
+
+    def shown(source: str) -> str:
+        page = SimpleNamespace(file=SimpleNamespace(src_uri=source), content=SECTION)
+        context = {"page": page}
+        assert module.on_page_context(context, page, "config", "nav") is context
+        return str(page.content)
+
+    assert shown("automation.md") == module.folded_workflows(SECTION)
+    assert '<details class="blueprint-fold">' in shown("automation.md")
+    # Any other page, and a page of the project in its place, stay as they are.
+    assert shown("guide.md") == SECTION
+    module.BUILT.pages = {}
+    assert shown("automation.md") == SECTION
+    # The search of Material reads the page in the same event, at the default priority,
+    # and would file the text of each workflow under its group in the HTML of a fold.
+    assert module.on_page_context.mkdocs_priority < 0
 
 
 def test_the_automation_page_speaks_the_languages_of_the_website(
@@ -3476,7 +3711,7 @@ def test_a_group_without_workflows_has_no_heading(tmp_path: Path) -> None:
     page = hooks().automation_pages(folder, website(tmp_path))["automation.md"]
 
     assert re.findall(r"^#{2,3} .*$", page, re.M) == [
-        "## At a glance {#at-a-glance}",
+        '## At a glance {#at-a-glance data-blueprint-automation="true"}',
         "## Bots {#bots}",
         "### draft {#draft}",
     ]

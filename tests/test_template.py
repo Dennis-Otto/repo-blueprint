@@ -28,7 +28,7 @@ import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import CodeType, SimpleNamespace
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 from unittest import mock
 from xml.etree import ElementTree
 
@@ -44,6 +44,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader, nodes
 from jinja2.exceptions import FilterArgumentError
 from jinja2.sandbox import SandboxedEnvironment
 from mypy import api as mypy_api
+from PIL import Image
 from shared import copy_of, git_environment, load_yaml, once, run_folder
 from shell import BASH, in_bash
 from workflow_steps import (
@@ -81,13 +82,22 @@ from blueprint.checklist import (
     RELEASE_APP_PERMISSIONS,
 )
 from blueprint.coach import Catalog, missing, undeclared
-from blueprint.fixes import fixers
+from blueprint.fixes import fixers, signed_off, watched
+from blueprint.github import Api
 from blueprint.locks import why_renovate_skips
+from blueprint.migrate import contribution_labels, migrate
 from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
-from blueprint.settings import PERMISSIONS, Settings, allows
+from blueprint.settings import (
+    PERMISSIONS,
+    Drift,
+    Settings,
+    allows,
+    check_environments,
+)
 from blueprint.site_check import check as check_site
+from blueprint.stale_runs import checks_of
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
 from blueprint.versions import fix as fix_versions
@@ -101,12 +111,13 @@ KINDS = [
     "python-package",
     "node-package",
     "chrome-extension",
+    "cloudflare-worker",
     "container",
     "generic",
 ]
-# The kinds of the stack of Node: a package of npm, and a Chrome extension, which the
-# same tools build and check.
-NODE = ("node-package", "chrome-extension")
+# The kinds of the stack of Node: a package of npm, a Chrome extension and a Cloudflare
+# Worker, which the same tools lint and check.
+NODE = ("node-package", "chrome-extension", "cloudflare-worker")
 NPM = shutil.which("npm")
 NPX = shutil.which("npx")
 # The languages that CodeQL analyzes in each kind of project by default, besides the
@@ -119,6 +130,7 @@ CODEQL = {
     "python-package": "python, actions",
     "node-package": "javascript-typescript, actions",
     "chrome-extension": "javascript-typescript, actions",
+    "cloudflare-worker": "javascript-typescript, actions",
     "container": "actions",
     "generic": "actions",
 }
@@ -619,8 +631,8 @@ def test_the_workflows_are_the_blueprints_own(
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
         if kind == "nextcloud-app" and name in ("build-release.yml", "release.yml"):
-            # The build of a Nextcloud app enters the environment of the key that signs
-            # it, and gets the secrets of the release, which no other build does.
+            # The build of a Nextcloud app enters signing, the environment of the key
+            # that signs it, and gets that one secret passed, which no other build does.
             source, entered = re.subn(
                 r"    # No environment and no secret but the token of the job.*\n"
                 r"    # the build can reach the private key of the release app\.\n"
@@ -629,10 +641,11 @@ def test_the_workflows_are_the_blueprints_own(
                 source,
             )
             text, signs = re.subn(
-                r"    # The key that signs a Nextcloud app is a secret of this.*\n"
-                r"(?:    # .*\n)*    environment:\n      name: release\n"
+                r"    # The key that signs a Nextcloud app is the one secret of.*\n"
+                r"(?:    # .*\n)*    environment:\n      name: signing\n"
                 r"      deployment: false\n"
-                r"|(?:    # .*\n)*    secrets: inherit # zizmor: ignore\[secrets-inherit\]\n",
+                r"|(?:    # .*\n)*    secrets:\n"
+                r"      APP_PRIVATE_KEY: \$\{\{ secrets\.APP_PRIVATE_KEY \}\}\n",
                 "",
                 text,
             )
@@ -1124,6 +1137,84 @@ def test_the_signing_key_of_a_nextcloud_app_is_only_in_the_step_that_signs() -> 
     # Nothing of the project runs and nothing is downloaded while the key is on disk.
     for command in ("scripts/check-package.sh", "krankerl", "curl"):
         assert command not in sign, command
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_nextcloud_app_declares_an_environment_for_signing_and_for_the_app_store(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # #530, which moves the signing key out of reach of the key of the release app.
+    # No other kind holds these secrets.
+    settings = Settings.load(projects[kind] / ".github/repository.toml")
+    if kind != "nextcloud-app":
+        assert not {"signing", "appstore"} & settings.environments.keys()
+        return
+    # Each secret lives in its own environment and in no other, the release too
+    # (step 4 of #530): no job that enters release, such as release-please, reaches
+    # the key that signs the app or the token of the App Store.
+    holders = {
+        secret: sorted(
+            name
+            for name, config in settings.environments.items()
+            if secret in config.get("secrets", [])
+        )
+        for secret in ("APP_PRIVATE_KEY", "APPSTORE_TOKEN")
+    }
+    assert holders == {"APP_PRIVATE_KEY": ["signing"], "APPSTORE_TOKEN": ["appstore"]}
+    assert settings.environments["release"]["secrets"] == [
+        "RELEASE_AUTOMATION_PRIVATE_KEY"
+    ]
+    assert settings.environments["signing"]["secrets"] == ["APP_PRIVATE_KEY"]
+    assert settings.environments["appstore"]["secrets"] == ["APPSTORE_TOKEN"]
+    # On GitHub neither exists yet: the settings bot creates each for main alone, and
+    # the check names the command for each secret, as the steps of #530 give them. The
+    # key comes from its file, because the prompt of gh would store only its first line.
+    repo = "octo-org/demo"
+    nothing_yet = SimpleNamespace(get=lambda _path: None, get_all=lambda _path: [])
+    split = {name: settings.environments[name] for name in ("signing", "appstore")}
+    assert check_environments(cast(Api, nothing_yet), repo, split) == [
+        Drift("environment signing", "main only", "missing"),
+        Drift(
+            "secret APP_PRIVATE_KEY of signing",
+            "set",
+            "missing",
+            manual=f"gh secret set APP_PRIVATE_KEY --env signing --repo {repo} < KEY_FILE",
+        ),
+        Drift("environment appstore", "main only", "missing"),
+        Drift(
+            "secret APPSTORE_TOKEN of appstore",
+            "set",
+            "missing",
+            manual=f"gh secret set APPSTORE_TOKEN --env appstore --repo {repo}",
+        ),
+    ]
+    # Each job that takes one of these secrets enters the environment that holds it
+    # alone (step 3 of #530): the build and the job that signs the app id reach only
+    # the key, and the jobs that talk to the App Store only its token, never the key
+    # of the release app. A job that calls a workflow of the repository only passes
+    # the key on, as the called job takes it from its own environment.
+    reading, passing = set(), set()
+    for name, flow in workflows(projects[kind]).items():
+        for job_id, job in load_yaml(flow)["jobs"].items():
+            for secret in ("APP_PRIVATE_KEY", "APPSTORE_TOKEN"):
+                if f"secrets.{secret}" not in json.dumps(job):
+                    continue
+                if "uses" in job:
+                    assert "environment" not in job, (name, job_id)
+                    passing.add((name, job_id, job["uses"], secret))
+                    continue
+                reading.add((name, job_id, secret))
+                environment = reference.environment_of(job)
+                assert environment, (name, job_id, secret)
+                assert settings.environments[environment]["secrets"] == [secret]
+    assert reading == {
+        ("build-release.yml", "assets", "APP_PRIVATE_KEY"),
+        ("register-app.yml", "sign", "APP_PRIVATE_KEY"),
+        ("register-app.yml", "register", "APPSTORE_TOKEN"),
+        ("release.yml", "nextcloud-appstore", "APPSTORE_TOKEN"),
+    }
+    build = "./.github/workflows/build-release.yml"
+    assert passing == {("release.yml", "assets", build, "APP_PRIVATE_KEY")}
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -2369,12 +2460,18 @@ def test_a_node_package_lints_and_formats_its_code_with_biome(
     two_spaces = editorconfig["*.{json,jsonc,toml,yml,yaml,ts,js,mjs,css,html}"]
     assert two_spaces["indent_size"] == "2"
     # The coverage of the tests as the LCOV report that the CI keeps, which git and
-    # the package leave out.
-    assert "--test-reporter-destination=lcov.info" in manifest["scripts"]["test"]
-    assert (
-        "--test-reporter=spec --test-reporter-destination=stdout"
-        in (manifest["scripts"]["test"])
-    )
+    # the package leave out: node:test writes it, and for a Worker the coverage of
+    # Vitest, one folder above its own.
+    if kind == "cloudflare-worker":
+        assert manifest["scripts"]["test"] == "vitest run --coverage"
+        vitest = (project / "vitest.config.ts").read_text(encoding="utf-8")
+        assert '["lcovonly", { file: "../lcov.info" }]' in vitest
+    else:
+        assert "--test-reporter-destination=lcov.info" in manifest["scripts"]["test"]
+        assert (
+            "--test-reporter=spec --test-reporter-destination=stdout"
+            in (manifest["scripts"]["test"])
+        )
     ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/lcov.info" in ignored
     # A package of npm holds its build; a Chrome extension reaches no registry.
@@ -3216,6 +3313,11 @@ TOOL_ANNOTATIONS = {
     ],
     "node-package": ["  npm test 2>&1 | annotate node-test\n"],
     "chrome-extension": ["  npm test 2>&1 | annotate node-test\n"],
+    # Vitest writes the annotations of a Worker itself.
+    "cloudflare-worker": [
+        "# the CI, Vitest makes each test that fails an annotation at the line where it"
+        " failed.\nnpm test\n"
+    ],
 }
 
 # The tools whose findings CONTRIBUTING.md names, besides the text files and
@@ -3451,6 +3553,11 @@ def advisories_step(check: str) -> str:
 
 def locks_step(check: str) -> str:
     start = check.index('step "Lock files"')
+    return check[start : check.index('step "Lock files match', start)]
+
+
+def compile_step(check: str) -> str:
+    start = check.index('step "Lock files match their sources"')
     return check[start : check.index('step "Explanations of the checks"', start)]
 
 
@@ -3677,6 +3784,25 @@ def test_every_repository_checks_that_renovate_reads_its_lock_files(
     assert locks_step(check) == locks_step(generic) == locks_step(own)
     assert '  "$python" "$tool" locks\n' in locks_step(check)
     assert "--fix" not in locks_step(check).split("\nif ", 1)[1]
+    # After them, the compile of each lock file, with uv in the CI of the kind: for a
+    # lock file alone where the kind has no other use for it.
+    assert compile_step(check) == compile_step(generic) == compile_step(own)
+    assert '  "$python" "$tool" locks --compile\n' in compile_step(check)
+    assert "--fix" not in compile_step(check).split("\nif ", 1)[1]
+    workflow = load_yaml(
+        (projects[kind] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["check"]["steps"]
+    uv = next(
+        step
+        for step in steps
+        if str(step.get("uses")).startswith("astral-sh/setup-uv@")
+    )
+    assert steps.index(uv) < [step.get("run") for step in steps].index(
+        "bash scripts/check.sh"
+    )
+    if not any("--require-hashes" in str(step.get("run")) for step in steps):
+        assert uv["if"] == "hashFiles('**/requirements*.txt') != ''"
     assert (projects[kind] / ".github/blueprint/locks.py").read_bytes() == (
         ROOT / "blueprint/locks.py"
     ).read_bytes()
@@ -4569,6 +4695,75 @@ def test_the_prose_hints_give_vale_the_documents_that_the_pull_request_changes(
     else:
         assert calls == []
         assert "No document changes." in summary
+
+
+def vale_styles(config: str, document: str) -> str:
+    """The styles that Vale gives a document: those of the last section of .vale.ini
+    whose pattern holds it, in which a star also stands for a folder."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read_string(f"[vale]\n{config}")
+    styles = ""
+    for section in parser.sections():
+        patterns = section.removeprefix("{").removesuffix("}").split(",")
+        if any(fnmatch.fnmatchcase(document, pattern) for pattern in patterns):
+            styles = parser[section]["BasedOnStyles"]
+    return styles
+
+
+def spelling_reads(config: dict[str, Any], document: str) -> bool:
+    """Whether cspell reads a document: the last override whose pattern holds it
+    decides, and it reads one that no override holds. It takes no pattern with an
+    exclamation mark in ignorePaths."""
+    assert not any(path.startswith("!") for path in config["ignorePaths"])
+    enabled = True
+    for override in config["overrides"]:
+        if any(
+            fnmatch.fnmatchcase(document, pattern.removeprefix("**/"))
+            for pattern in override["filename"]
+        ):
+            enabled = override["enabled"]
+    return bool(enabled)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_prose_hints_read_only_the_languages_they_know(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    vale = (project / ".vale.ini").read_text(encoding="utf-8")
+    cspell = json.loads(
+        (project / ".github/prose/cspell.json").read_text(encoding="utf-8")
+    )
+    english = (
+        "README.md",
+        "docs/guide.md",
+        "docs/guide.en.md",
+        # A dot in a name makes no language of it.
+        "docs/upgrade-2.10.md",
+        "docs/guide.draft.md",
+    )
+    german = ("README.de.md", "docs/guide.de.md", "docs/de/guide.md")
+    further = (
+        "README.nl.md",
+        "docs/faq.nl.md",
+        "docs/index.fr.md",
+        "docs/games.es.md",
+        "docs/guide.pt-BR.md",
+        "docs/guide.zh_TW.md",
+        "docs/guide.zh-Hans.md",
+        "docs/guide.zh-Hans-CN.md",
+    )
+
+    assert cspell["language"] == "en,de"
+    for document in english:
+        assert vale_styles(vale, document) == "write-good, proselint", document
+        assert spelling_reads(cspell, document), document
+    for document in german:
+        assert not vale_styles(vale, document), document
+        assert spelling_reads(cspell, document), document
+    for document in further:
+        assert not vale_styles(vale, document), document
+        assert not spelling_reads(cspell, document), document
 
 
 def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
@@ -5912,6 +6107,13 @@ AGENT_COMMANDS = {
         "`npm test`",
         "`npx --no -- biome check --write .`",
     ],
+    "cloudflare-worker": [
+        "npm ci --ignore-scripts",
+        "`npm test`: the tests in workerd",
+        "`npx --no -- biome check --write .`",
+        "`npm run dev`",
+        "`npx wrangler secret put NAME`",
+    ],
     "container": ["docker run --rm demo-project:check --self-test"],
     "generic": ["no build and no tests of its own"],
 }
@@ -5978,8 +6180,8 @@ def test_the_list_of_a_project_names_exactly_the_files_of_the_blueprint(
     )
 
 
-# In the copy of the mutation tests, the tool that the step runs in a repository of its
-# own is the code with the mutants, which runs only where mutmut set it up.
+# In the copy of the mutation tests, the step starts the tool of the project, which is
+# the code with the mutants and fails in that process.
 @pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
@@ -6031,8 +6233,8 @@ def test_the_step_of_a_project_annotates_what_the_pull_request_changes(
     ]
 
 
-# In the copy of the mutation tests, the tool that the step runs in a repository of its
-# own is the code with the mutants, which runs only where mutmut set it up.
+# In the copy of the mutation tests, the step starts the tool of the project, which is
+# the code with the mutants and fails in that process.
 @pytest.mark.mutation_unsafe
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
@@ -6260,6 +6462,9 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     nextcloud = security("nextcloud-app")
     assert "gh attestation verify demo_project.tar.gz" in nextcloud
     assert "app-certificate-requests/master/demo_project/demo_project.crt" in nextcloud
+    # The key that signs the app lives only in signing, never in release (#530).
+    assert "is the one secret of the environment `signing`" in nextcloud
+    assert "secret of the environment `release`" not in nextcloud
     assert "gh attestation verify ./*.whl" in security("python-package")
     assert "npm audit signatures" in security("node-package")
     assert "oci://ghcr.io/dennis-otto/demo-project:X.Y.Z" in security("container")
@@ -6460,6 +6665,76 @@ def test_adopting_a_nextcloud_app_keeps_its_own_tests(tmp_path: Path) -> None:
         "bootstrap.php",
         "stubs/Emitter.php",
         "stubs/OC.php",
+    ]
+
+
+def test_the_digest_of_the_issue_assistant_has_its_labels(
+    projects: dict[str, Path],
+) -> None:
+    # The first label of the group is the one that the digest tells the maintainer to add.
+    for project in (ROOT, *projects.values()):
+        labels = tomllib.loads(
+            (project / ".github/labels.toml").read_text(encoding="utf-8")
+        )["label"]
+        names = [label["name"] for label in labels if label["group"] == "contribution"]
+        assert names == ["good first issue", "help wanted"], project
+
+
+def test_the_check_of_the_issue_assistant_accepts_the_group_contribution() -> None:
+    # check of a release before 1.9.0 refuses the group, and it runs from this pin.
+    lint = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
+    pin = re.search(r"Dennis-Otto/issue-assistant@[0-9a-f]{40} # v(\d+)\.(\d+)\.", lint)
+    assert pin is not None
+    assert (int(pin[1]), int(pin[2])) >= (1, 9)
+
+
+def test_a_new_repository_has_nothing_left_to_move(projects: dict[str, Path]) -> None:
+    for project in (ROOT, *projects.values()):
+        assert not migrate(project, fix=False), project
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_move_of_the_labels_gives_what_a_new_repository_has(
+    projects: dict[str, Path], kind: str
+) -> None:
+    new = (projects[kind] / ".github/labels.toml").read_text(encoding="utf-8")
+    section = re.search(r"# Contribution: .*?(?=# Release: )", new, re.DOTALL)
+    assert section is not None
+    wanted = re.findall(r"\[\[label\]\]\n(?:.+\n)+", section[0])
+    # As a repository has the file up to that release: the labels in the decisions,
+    # help wanted first, and no word of the group in the comment at the top.
+    old = new.replace(section[0], "")
+    old = re.sub(r"#   contribution .*\n", "", old)
+    old = old.replace(
+        '[[label]]\nname = "no-bot-fixes"',
+        "\n".join(reversed(wanted)).replace("contribution", "decision")
+        + '\n[[label]]\nname = "no-bot-fixes"',
+    )
+    assert 'group = "contribution"' not in old
+    assert contribution_labels(old) == new
+
+
+def test_the_update_of_every_kind_finishes_as_the_fix_bot_does() -> None:
+    # The update keeps the files of the project, and the step of scripts/check.sh then
+    # asks for what a release moves in them, which the fix bot brings to a real update.
+    script = (ROOT / ".github/workflows/variants.yml").read_text(encoding="utf-8")
+    update = script.index(
+        'copier update --defaults --conflict inline --vcs-ref "$commit"'
+    )
+    move = script.index('(cd "$PROJECT" && python3 .github/blueprint.py migrate --fix)')
+    assert update < move < script.index('git -C "$PROJECT" add --all', update)
+
+
+def test_the_check_moves_what_a_release_moves() -> None:
+    for name in ("scripts/check.sh", "template/scripts/check.sh.jinja"):
+        script = (ROOT / name).read_text(encoding="utf-8")
+        step = script.split('step "Files of the project"\n', 1)[1].split('\nstep "', 1)[
+            0
+        ]
+        assert '"$python" "$tool" migrate\n' in step, name
+    checks = tomllib.loads((ROOT / ".github/checks.toml").read_text(encoding="utf-8"))
+    assert checks["step"]["Files of the project"]["autofix"] == [
+        "{blueprint} migrate --fix"
     ]
 
 
@@ -7080,6 +7355,8 @@ def test_renovate_keeps_every_project_current(
     # The project's file extends the blueprint's, so that its own rules come last.
     assert '"local>Dennis-Otto/demo-project//.github/renovate-blueprint.json5"' in entry
     rules = (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    # Vitest and its coverage provider move to a new major version together.
+    assert ('groupName: "Vitest"' in rules) == (kind == "cloudflare-worker")
     for setting in (
         'minimumReleaseAge: "7 days"',
         "platformAutomerge: true",
@@ -7175,6 +7452,22 @@ def test_no_schedule_starts_on_the_full_hour_or_promises_its_time(
         for block in re.findall(r"(?:^[ \t]*#.*\n?)+", text, re.MULTILINE):
             comment = re.sub(r"\s*\n[ \t]*#\s*", " ", block)
             assert not promise.search(comment), (name, comment)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_fixers_of_every_project_run_on_main_every_week(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # What no commit changes, such as a new rule of a tool, repairs itself before it
+    # fails the next pull request: both checks that keep fixes run at one time, so that
+    # one commit of the fix bot holds what they fix.
+    project = projects[kind] / ".github/workflows"
+    lint, check = (
+        CRON.findall((project / name).read_text(encoding="utf-8"))
+        for name in ("lint.yml", "ci.yml")
+    )
+    assert len(lint) == 1
+    assert check == lint
 
 
 # The heavy weekly jobs, whose runs take runners of the account for an hour or longer.
@@ -7649,6 +7942,7 @@ WHAT_THE_USERS_RUN = {
     "python-package": [("pep621", "project.dependencies", "pyproject.toml")],
     "node-package": [("npm", "dependencies", "package.json")],
     "chrome-extension": [("npm", "dependencies", "package.json")],
+    "cloudflare-worker": [("npm", "dependencies", "package.json")],
     "container": [("dockerfile", "final", "Dockerfile")],
     "generic": [],
 }
@@ -7675,6 +7969,7 @@ THE_TOOLS_OF_A_KIND = {
     ],
     "node-package": [("npm", "devDependencies", "package.json")],
     "chrome-extension": [("npm", "devDependencies", "package.json")],
+    "cloudflare-worker": [("npm", "devDependencies", "package.json")],
     "container": [],
     "generic": [],
 }
@@ -9098,6 +9393,7 @@ NO_PRIVATE_KEY = (
 RELEASE_APP_BOTS = {
     ("after-checks.yml", "diagrams"): ("the diagram bot", False),
     ("after-checks.yml", "fixes"): ("the fix bot", False),
+    ("after-checks.yml", "own-branch"): ("the fix bot", False),
     ("blueprint-update.yml", "update"): ("the blueprint bot", True),
     ("dependabot-automerge.yml", "auto-merge"): ("the merge bot of Dependabot", False),
     ("diagrams.yml", "pull-request"): ("the diagram bot", False),
@@ -9192,6 +9488,7 @@ def test_every_token_of_the_release_app_comes_after_its_check(
         handed_on = {
             ("after-checks.yml", "diagrams"),
             ("after-checks.yml", "fixes"),
+            ("after-checks.yml", "own-branch"),
             ("blueprint-update.yml", "update"),
             ("dependabot-automerge.yml", "auto-merge"),
             ("diagrams.yml", "pull-request"),
@@ -9753,6 +10050,14 @@ def test_renovate_commits_as_the_bot_user_of_its_release_app(tmp_path: Path) -> 
     run = workflow_steps.step("renovate.yml", "renovate", "Run Renovate")
     assert run["env"]["RENOVATE_USERNAME"] == "${{ steps.bot.outputs.username }}"
     assert run["env"]["RENOVATE_GIT_AUTHOR"] == "${{ steps.bot.outputs.git-author }}"
+    # The author that GitHub gives a commit of the fix bot: Renovate that runs as the
+    # release app takes it for its own and goes on rebasing, with no rule for it.
+    fix_bot = signed_off(
+        cast(Api, SimpleNamespace(get=lambda _path: {"id": 321826887})),
+        "dennis-otto-release-automation",
+        "",
+    ).rpartition("<")[2]
+    assert done.outputs["git-author"].endswith(f"<{fix_bot}")
     # The settings of the bot name no owner, no app and no repository: the workflow
     # does, from the token, so that they serve every owner.
     bot = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
@@ -10261,6 +10566,79 @@ def test_the_hub_of_the_blueprint_runs_renovate_for_its_owner(
     assert "Renovate" not in health[True]["workflow_run"]["workflows"]
 
 
+# An app with its name and two numbers, as a foreign owner answers them.
+OCTO_APP: dict[str, Any] = {
+    "release_app": "octo-org-release-automation",
+    "release_app_client_id": "Iv23liOcto",
+    "release_app_id": "12345",
+}
+
+
+def test_the_mend_app_takes_the_commits_of_the_release_app_for_its_own(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner="mend",
+        **OCTO_APP,
+    )
+
+    rules = renovate_rules(
+        (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    # One pattern, as Renovate writes one, from the name of the app alone: the number
+    # of its bot user is known to GitHub only, and differs for every owner.
+    [rule] = rules["gitIgnoredAuthors"]
+    assert rule.startswith("/^")
+    assert rule.endswith("$/")
+    pattern = re.compile(rule[1:-1])
+    # The address of the fix bot and the branch bot, whatever its number.
+    bot = "octo-org-release-automation[bot]@users.noreply.github.com"
+    assert pattern.search(f"321826887+{bot}")
+    assert pattern.search(f"7+{bot}")
+    # No one else, whose commits stay an edit that Renovate leaves alone.
+    for author in (
+        "29139614+renovate[bot]@users.noreply.github.com",
+        "61191244+Octo-Org@users.noreply.github.com",
+        "321826887+another-release-automation[bot]@users.noreply.github.com",
+        f"321826887+not-{bot}",
+        f"number+{bot}",
+        bot,
+        f"321826887+{bot}.example.com",
+        f"someone-321826887+{bot}",
+        "321826887+octo-org-release-automationXbot]@users.noreply.github.com",
+        "321826887+octo-org-release-automation[bot]@usersXnoreply.github.com",
+    ):
+        assert not pattern.search(author), author
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [{"renovate_runner": "mend"}, {"renovate_runner": "self", **OCTO_APP}],
+    ids=["mend without an app", "self, which runs as the app"],
+)
+def test_renovate_ignores_no_author_where_it_needs_no_such_rule(
+    tmp_path: Path, answers: dict[str, Any]
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        **answers,
+    )
+
+    rules = renovate_rules(
+        (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    assert "gitIgnoredAuthors" not in rules
+
+
 def test_a_foreign_owner_may_take_the_mend_app_and_leave_out_the_ai(
     tmp_path: Path,
 ) -> None:
@@ -10350,10 +10728,10 @@ def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> Non
     assert creation["bypass_actors"] == [
         {"actor_id": 12345, "actor_type": "Integration", "bypass_mode": "always"}
     ]
+    # The release app's key alone: the key that signs the app and the token of the
+    # App Store live in signing and appstore, out of reach of release-please (#530).
     assert settings.environments["release"]["secrets"] == [
-        "RELEASE_AUTOMATION_PRIVATE_KEY",
-        "APP_PRIVATE_KEY",
-        "APPSTORE_TOKEN",
+        "RELEASE_AUTOMATION_PRIVATE_KEY"
     ]
     toml = (project / ".github/repository.toml").read_text(encoding="utf-8")
     assert "https://github.com/apps/octo-org-release-automation" in toml
@@ -10648,6 +11026,7 @@ TOPICS = {
     "python-package": ["python", "pypi"],
     "node-package": ["typescript", "nodejs", "npm"],
     "chrome-extension": ["chrome-extension", "browser-extension", "manifest-v3"],
+    "cloudflare-worker": ["cloudflare-workers", "cloudflare", "typescript"],
     "container": ["docker", "container", "ghcr"],
     "generic": [],
 }
@@ -11061,7 +11440,8 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
     for page in sorted((ROOT / "docs/kinds").glob("*.md")):
         text = page.read_text(encoding="utf-8")
         found = [match.groupdict() for match in re.finditer(pattern, text)]
-        assert [item["currentValue"] for item in found] == [version], page.name
+        # A page may also change an answer with it, such as a package that publishes nowhere.
+        assert {item["currentValue"] for item in found} == {version}, page.name
         assert f"uvx --from copier=={version} copier copy --data project_type=" in text
     # The walkthrough for an owner's own account copies and updates with the same
     # release: GitHub shows the page too, where a snippet of the website stays a line.
@@ -11070,10 +11450,10 @@ def test_renovate_keeps_the_copier_of_the_quick_start_current() -> None:
         text = (ROOT / name).read_text(encoding="utf-8")
         found = [match.groupdict() for match in re.finditer(pattern, text)]
         assert [item["currentValue"] for item in found] == [version] * 3, name
-    # So does app register, which names the release app with it: one line, for uv and
-    # for pipx.
-    assert '"/^blueprint/app\\\\.py$/"' in renovate
-    text = (ROOT / "blueprint/app.py").read_text(encoding="utf-8")
+    # So do app register, which names the release app with it, and the checklist, which
+    # tells how to change an answer: one line, for uv and for pipx.
+    assert '"/^blueprint/checklist\\\\.py$/"' in renovate
+    text = (ROOT / "blueprint/checklist.py").read_text(encoding="utf-8")
     found = [match.groupdict() for match in re.finditer(pattern, text)]
     assert [item["currentValue"] for item in found] == [version]
 
@@ -11252,7 +11632,13 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     # The token of the job handles the runs of forks, with the one right that takes, so
     # that the release app needs none: the merges of the account that it names are the
     # ones whose runs the bot may approve (decision 0099).
-    assert job["permissions"] == {"actions": "write", "contents": "read"}
+    # The pull requests for their heads, whose replaced commits the bot cancels the runs
+    # of (decision 0108).
+    assert job["permissions"] == {
+        "actions": "write",
+        "contents": "read",
+        "pull-requests": "read",
+    }
     bot = next(step for step in job["steps"] if "next-branch" in step.get("run", ""))
     assert bot["env"] == {
         "GH_TOKEN": "${{ steps.app.outputs.token }}",
@@ -11511,6 +11897,44 @@ def test_the_bots_after_the_checks_watch_the_other_tests_that_a_project_names(
         | OTHER_CHECKS
         | SCANNER_WORKFLOWS
     )
+    # The fix bot reads them as well, and waits for one once its file keeps fixes.
+    workflows = project / ".github/workflows"
+    assert watched(project).listed == watched_after_the_checks(after)
+    assert "Visual check" not in watched(project).keeping
+    (workflows / "visual.yml").write_text(
+        "name: Visual check\n\njobs:\n  visual:\n    steps:\n"
+        "      - uses: actions/upload-artifact@v7\n        with:\n"
+        "          name: fixes-visual\n",
+        encoding="utf-8",
+    )
+    assert "Visual check" in watched(project).keeping
+    assert "Screenshot bot" not in watched(project).keeping
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_fix_bot_waits_for_the_checks_that_fix_in_every_kind(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    found = watched(project)
+    after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
+    ci = re.search(
+        r"^name: (.+)$",
+        (project / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert ci
+    # Every workflow of the list counts, the checks that fix are waited for, and no long
+    # run that keeps nothing, such as the tests of a browser and the scanners, is.
+    assert found.listed == watched_after_the_checks(after)
+    assert found.keeping == {ci[1], "Lint", "Docs"}
+    assert found.awaited("pull_request") == {ci[1], "Lint"}
+    # The run that ends last starts the bot however it ends, unless it never keeps a fix.
+    bot = after[after.index("\n  fixes:\n") :]
+    left_out = re.search(r"!contains\(fromJSON\('(\[[^']*\])'\)", bot)
+    assert left_out
+    assert not found.awaited("pull_request") & set(json.loads(left_out[1]))
+    assert found.awaited("push") == {ci[1], "Lint", "Docs"}
 
 
 @pytest.mark.parametrize("names", ["Visual: check", "Visual check]", "Bot # 2", "`x`"])
@@ -11808,7 +12232,7 @@ def test_one_job_runs_every_linter_and_reports_each_one() -> None:
     # Markdownlint fixes the head of the pull request after every other linter, as
     # the fixes of lint, and the PR coach explains last.
     names = names_of(lint)
-    head = names.index("Check out the head of the pull request for the fixes")
+    head = names.index("Take the commit that the fixes start from")
     assert names.index(hints) < head
     assert "steps.markdown.outcome == 'failure'" in values_of(lint["steps"][head:])
     fixes = [
@@ -11860,7 +12284,7 @@ def test_a_pull_request_fails_that_runs_an_action_that_the_list_lacks() -> None:
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
+def test_the_check_of_the_signatures_starts_on_every_push_and_runs_nothing_of_the_pull_request(
     projects: dict[str, Path], project: str
 ) -> None:
     root = ROOT if project == "blueprint" else projects[project]
@@ -11877,7 +12301,12 @@ def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
     ]
     job = workflow["jobs"]["signatures"]
     assert job["name"] == "signed commits"
-    assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
+    # It writes nothing but the cancel of the runs of the commits that a push replaced.
+    assert job["permissions"] == {
+        "actions": "write",
+        "contents": "read",
+        "pull-requests": "read",
+    }
     [checkout] = steps_using(job, "actions/checkout")
     assert "ref" not in checkout["with"]
     assert checkout["with"]["persist-credentials"] is False
@@ -11901,6 +12330,131 @@ def test_the_check_of_the_signatures_starts_on_every_push_and_only_reads(
         text = (root / name).read_text(encoding="utf-8")
         assert "`git commit -s`" in text, name
         assert "`git commit -S`" in text, name
+
+
+def job_expression(condition: str) -> Callable[[dict[str, Any]], bool]:
+    """The if of a job as a function of the fields of the run of its event: the few
+    operators that the conditions after the checks use, read as GitHub reads them. A list
+    of fromJSON and the heads of the open pull requests are lists in Python as well."""
+    python = condition.replace("github.event.repository.fork", "False")
+    python = re.sub(
+        r"contains\(fromJSON\('(\[[^\]]*\])'\), ([\w.]+)\)",
+        lambda found: f"({found[2]} in {found[1]})",
+        python,
+    )
+    python = re.sub(
+        r"contains\(github\.event\.workflow_run\.pull_requests\.\*\.head\.sha, ([\w.]+)\)",
+        lambda found: f"({found[1]} in run['heads'])",
+        python,
+    )
+    python = python.replace("github.event.repository.default_branch", "'main'")
+    python = python.replace("github.repository", "'owner/repo'")
+    python = re.sub(
+        r"github\.event\.workflow_run\.([\w.]+)",
+        lambda found: f"run[{found[1]!r}]",
+        python,
+    )
+    python = python.replace("&&", " and ").replace("||", " or ")
+    python = re.sub(r"!(?!=)", " not ", python)
+
+    def evaluate(run: dict[str, Any]) -> bool:
+        return bool(eval(python, {"run": run}))
+
+    return evaluate
+
+
+def run_of_a_check(**fields: Any) -> dict[str, Any]:
+    """A run of a check of a pull request of the repository, of the head of it, that a
+    newer run cancelled at its first attempt."""
+    return {
+        "name": "CI (python)",
+        "event": "pull_request",
+        "conclusion": "cancelled",
+        "run_attempt": 1,
+        "head_sha": "new",
+        "head_branch": "feat/x",
+        "head_repository.full_name": "owner/repo",
+        "heads": ["new"],
+    } | fields
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+@pytest.mark.parametrize("name", ["rerun", "cancelled", "coach"])
+def test_a_run_of_a_replaced_commit_starts_no_job_after_the_checks(
+    projects: dict[str, Path], project: str, name: str
+) -> None:
+    # The concurrency of the checks and the bot for replaced commits cancel such runs by
+    # the hundred on a busy day, so each job that only finds out takes a runner for
+    # nothing. The heads of the open pull requests of its branch are in the event.
+    root = ROOT if project == "blueprint" else projects[project]
+    runs = job_expression(
+        condition_of(workflow_steps.job("after-checks.yml", name, root))
+    )
+    # The head of a pull request.
+    assert runs(run_of_a_check())
+    assert runs(run_of_a_check(event="pull_request_target"))
+    # A commit that a newer push replaced, and a pull request that closed.
+    assert not runs(run_of_a_check(heads=["newer"]))
+    assert not runs(run_of_a_check(heads=[]))
+    assert not runs(run_of_a_check(event="pull_request_target", heads=["newer"]))
+    # A second pull request with the same head still has it.
+    assert runs(run_of_a_check(heads=["newer", "new"]))
+    # GitHub names no pull request for a run of a fork, whose jobs ask GitHub themselves.
+    fork = run_of_a_check(heads=[], **{"head_repository.full_name": "someone/repo"})
+    assert runs(fork)
+    if name == "coach":
+        assert not runs(run_of_a_check(event="push", heads=[]))
+    else:
+        # A run of main names no pull request either, and it stays as it was.
+        assert runs(run_of_a_check(event="push", head_branch="main", heads=[]))
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_for_replaced_commits_needs_no_runner_of_its_own(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    # On every new commit of a pull request: a step of a job that runs anyway on every
+    # push, also from a fork, that is no required check and runs nothing of the pull
+    # request, whatever its check of the signatures found.
+    title = parse(
+        (root / ".github/workflows/pull-request-title.yml").read_text("utf-8")
+    )
+    job = title["jobs"]["signatures"]
+    step = next(s for s in job["steps"] if "stale-runs" in s.get("run", ""))
+    assert condition_of(step) == (
+        "${{ !cancelled() && github.event.action == 'synchronize' }}"
+    )
+    assert "${{" not in step["run"]
+    assert job["permissions"]["actions"] == "write"
+    assert not steps_using(job, "actions/labeler")
+    names = [s.get("name", "") for s in job["steps"]]
+    assert names.index(step["name"]) > names.index(
+        "Check the signature of every commit"
+    )
+    settings = tomllib.loads(
+        (root / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert job["name"] not in settings["branch"]["required_checks"]
+    # On every merge: the branch bot, with the token of its job.
+    update = workflow_steps.job("update-branches.yml", "update", root)
+    assert update["permissions"]["actions"] == "write"
+    assert update["permissions"]["pull-requests"] == "read"
+    # Neither has a job of its own, and neither workflow starts for it.
+    assert list(title["jobs"]) == ["title", "signatures"]
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_bot_for_replaced_commits_cancels_only_the_checks(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    checks = checks_of(root)
+    # Every kind of project has the checks of its pull requests in the list...
+    assert {"Lint", "Pull request title", "Secret scan", "CodeQL"} <= checks
+    assert any(name.startswith("CI (") for name in checks) or project == "blueprint"
+    # ...and no bot that does something when a pull request closes, and no release.
+    assert checks.isdisjoint(UNWATCHED - {"Mutation"} | {"Release", "After the checks"})
 
 
 def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
@@ -11946,7 +12500,9 @@ def test_the_pr_coach_reads_the_checks_and_runs_no_code_of_the_pull_request() ->
     assert job["name"] == "PR coach"
     assert condition_of(job) == (
         "!github.event.repository.fork && "
-        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event)"""
+        """contains(fromJSON('["pull_request", "pull_request_target"]'), github.event.workflow_run.event) && """
+        "(github.event.workflow_run.head_repository.full_name != github.repository || "
+        "contains(github.event.workflow_run.pull_requests.*.head.sha, github.event.workflow_run.head_sha))"
     )
     # One report at a time for each commit, the newest last, and none cancelled.
     assert job["concurrency"] == {
@@ -12075,9 +12631,11 @@ def test_every_project_fixes_what_a_command_can_fix(
     expected = [
         "Text files",
         "Pages in one column",
+        "Files of the project",
         "Changelog fragments",
         "Accepted advisories",
         "Lock files",
+        "Lock files match their sources",
         "Version",
         *FIXED_STEPS.get(stack, []),
     ]
@@ -12092,8 +12650,17 @@ def test_every_project_fixes_what_a_command_can_fix(
     after = (github / "workflows/after-checks.yml").read_text(encoding="utf-8")
     assert {name.replace("check", "CI"), "Lint"} <= watched_after_the_checks(after)
     bot = job_in(after, "fixes")
-    assert "startsWith(github.event.workflow_run.name, 'CI (')" in condition_of(bot)
+    left_out = re.findall(r"!contains\(fromJSON\('(\[[^']*\])'\)", condition_of(bot))
+    assert len(left_out) == 2
+    for names in left_out:
+        assert not {name.replace("check", "CI"), "Lint"} & set(json.loads(names))
     assert "Dennis-Otto" not in values_of(bot)
+    # The title and the entry of the changelog fix themselves in every kind as well: the
+    # check of the title that starts them is among the workflows that it follows.
+    assert "Pull request title" in watched_after_the_checks(after)
+    own = job_in(after, "own-branch")
+    assert "'Pull request title'" in condition_of(own)
+    assert "Dennis-Otto" not in values_of(own)
 
 
 def test_every_explanation_belongs_to_a_check_or_a_step(
@@ -12169,7 +12736,13 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
         " github.event.workflow_run.head_branch == github.event.repository.default_branch &&"
         " github.event.workflow_run.head_repository.full_name == github.repository)"
     )
-    assert f"({events} || {main})" in cancelled["if"]
+    # A run for the head of a pull request; a run for a commit that a newer one replaced
+    # starts no job at all, and a run from a fork asks GitHub in the step.
+    head = (
+        "(github.event.workflow_run.head_repository.full_name != github.repository ||"
+        " contains(github.event.workflow_run.pull_requests.*.head.sha, github.event.workflow_run.head_sha))"
+    )
+    assert f"(({events} && {head}) || {main})" in condition_of(cancelled)
     # Twice at most, whatever cancels the run again.
     assert "github.event.workflow_run.run_attempt < 3" in cancelled["if"]
     # It reads the runs, their checks, pull requests and the head of main and starts a
@@ -12669,7 +13242,6 @@ WITH_NODE = pytest.mark.skipif(NODE_JS is None, reason="the script runs in Node"
 # The files of the delivery of a Chrome extension, which only that kind renders.
 EXTENSION_FILES = [
     ".github/workflows/publish-store.yml",
-    "docs/releases.md",
     "extension/manifest.json",
     "extension/_locales/en/messages.json",
     "scripts/check-manifest.mjs",
@@ -12743,6 +13315,407 @@ def test_only_a_chrome_extension_delivers_to_the_chrome_web_store(
     assert "/extension/lib/\n" in (project / ".gitignore").read_text(encoding="utf-8")
     mkdocs = (project / "mkdocs.yml").read_text(encoding="utf-8")
     assert "\n  - Releases and the Chrome Web Store: releases.md\n" in mkdocs
+
+
+# The files that only a Cloudflare Worker renders.
+WORKER_FILES = [
+    "wrangler.jsonc",
+    "vitest.config.ts",
+    "scripts/deploy-worker.sh",
+    "src/greet.ts",
+]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_only_cloudflare_builds_and_deploys_a_worker(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    worker = kind == "cloudflare-worker"
+    for name in WORKER_FILES:
+        assert (project / name).is_file() == worker, name
+    # Both deliveries outside GitHub have the page of their one-time set-up.
+    releases = project / "docs/releases.md"
+    assert releases.is_file() == (kind in ("chrome-extension", "cloudflare-worker"))
+    # Wrangler bundles a Worker, so tsc compiles nothing of it.
+    assert (project / "tsconfig.build.json").is_file() == (
+        kind in ("node-package", "chrome-extension")
+    )
+    settings = tomllib.loads(
+        (project / ".github/repository.toml").read_text(encoding="utf-8")
+    )
+    assert (settings["variables"]["PUBLISH_TO"] == "cloudflare-workers") == worker
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    deploys = "whose Workers Builds deploys the commit of the release"
+    assert (deploys in contributing) == worker
+    security = (project / "docs/security.md").read_text(encoding="utf-8")
+    assert ("**Repository → Cloudflare.**" in security) == worker
+    notes = (project / ".github/agents.project.md").read_text(encoding="utf-8")
+    assert ("compatibility date in `wrangler.jsonc`" in notes) == worker
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+    assert ("the Worker in the account of Cloudflare" in governance) == worker
+    if not worker:
+        return
+    # No key of Cloudflare anywhere in GitHub: Cloudflare builds and deploys.
+    assert "CLOUDFLARE" not in (project / ".github/repository.toml").read_text(
+        encoding="utf-8"
+    )
+    for name, text in workflows(project).items():
+        assert "CLOUDFLARE_API_TOKEN" not in text, name
+    assert "Caller → package" not in security
+    assert "The package is in `src/`" not in notes
+    # The Worker has the name of the repository, which Workers Builds asks for.
+    wrangler = (project / "wrangler.jsonc").read_text(encoding="utf-8")
+    config = json.loads(re.sub(r"^//.*\n", "", wrangler, flags=re.MULTILINE))
+    assert config["name"] == "demo-project"
+    assert config["main"] == "src/index.ts"
+    assert re.fullmatch(r"20\d\d-\d\d-\d\d", config["compatibility_date"])
+    assert "wrangler secret put NAME" in wrangler
+    # A private package, on the tools of the stack of a Worker, locked as the
+    # blueprint locks them.
+    package = json.loads((project / "package.json").read_text(encoding="utf-8"))
+    stack = json.loads(
+        (ROOT / "stacks/worker/package.json").read_text(encoding="utf-8")
+    )
+    assert package["private"] is True
+    assert "exports" not in package
+    assert "files" not in package
+    assert package["devDependencies"] == stack["devDependencies"]
+    assert package["scripts"] == {
+        "build": "wrangler deploy --dry-run --outdir dist",
+        "deploy": "bash scripts/deploy-worker.sh",
+        "dev": "wrangler dev",
+        "typecheck": "wrangler types && tsc --project tsconfig.json",
+        "test": "vitest run --coverage",
+    }
+    lock = json.loads((project / "package-lock.json").read_text(encoding="utf-8"))
+    assert lock["name"] == "demo-project"
+    assert lock["packages"][""]["devDependencies"] == stack["devDependencies"]
+    wrangler_lock = lock["packages"]["node_modules/wrangler"]
+    assert wrangler_lock["integrity"].startswith("sha512-")
+    # The types of the runtime and of the bindings, written anew before each check.
+    tsconfig = json.loads((project / "tsconfig.json").read_text(encoding="utf-8"))
+    assert tsconfig["compilerOptions"]["types"] == [
+        "./worker-configuration.d.ts",
+        "@cloudflare/vitest-plugin/types",
+    ]
+    # What Wrangler writes, and the secrets of wrangler dev, never reach git.
+    ignored = (project / ".gitignore").read_text(encoding="utf-8").split("\n")
+    for line in (
+        "/.wrangler/",
+        "/worker-configuration.d.ts",
+        ".dev.vars",
+        ".dev.vars.*",
+        "!.dev.vars.example",
+        ".env",
+    ):
+        assert line in ignored, line
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "\nexport WRANGLER_SEND_METRICS=false\n" in check
+    assert check.index("export WRANGLER_SEND_METRICS") < check.index('\nstep "Types"\n')
+    assert "\nnpm run --silent build\n" in section_of(check, 'step "Worker"')
+    assert '\nstep "Package"\n' not in check
+    assert "npm pack" not in check
+    assert "annotate node-test" not in check
+    # The script that decides about the deploy and the set-up of the tests belong to
+    # the blueprint, the configuration of the Worker to the project.
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert {"scripts/deploy-worker.sh", "vitest.config.ts"} <= set(owned.split("\n"))
+    assert "wrangler.jsonc" not in owned
+    text = releases.read_text(encoding="utf-8")
+    for step in (
+        "npx wrangler deploy",
+        "`npm ci --ignore-scripts`",
+        "`npm run deploy`",
+        "npx wrangler secret put NAME",
+        "`SKIP_DEPENDENCY_INSTALL`",
+        "becomes a version without traffic",
+    ):
+        assert step in text, step
+    assert "Chrome" not in text
+    mkdocs = (project / "mkdocs.yml").read_text(encoding="utf-8")
+    assert "\n  - Releases and Cloudflare: releases.md\n" in mkdocs
+    readme = (project / "README.md").read_text(encoding="utf-8")
+    assert "npm run dev" in readme
+    assert "[docs/releases.md](docs/releases.md)" in readme
+    preview = (project / ".github/social-preview.html").read_text(encoding="utf-8")
+    assert "Cloudflare Worker</div>" in preview
+    assert "Container image" not in preview
+
+
+def deploy_worker(
+    folder: Path, subject: str | None, version: str, **variables: str
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """scripts/deploy-worker.sh of a Worker at version, in a repository whose commit
+    has subject, or in a folder without git for None, with an npx that only records
+    its arguments: the run and those arguments."""
+    (folder / "package.json").write_text(
+        json.dumps({"name": "demo", "version": version}), encoding="utf-8"
+    )
+    if subject is not None:
+        for command in (
+            ["init", "--quiet"],
+            ["add", "--all"],
+            ["commit", "--quiet", "--message", subject],
+        ):
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                    *command,
+                ],
+                cwd=folder,
+                check=True,
+            )
+    stubs = folder.parent / "stubs"
+    stubs.mkdir(exist_ok=True)
+    arguments = folder.parent / "npx.txt"
+    (stubs / "npx").write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > '{arguments.as_posix()}'\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (stubs / "npx").chmod(0o755)
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("WORKERS_CI")
+    }
+    done = subprocess.run(
+        in_bash("scripts/deploy-worker.sh"),
+        cwd=folder,
+        env={**environment, "STUBS": stubs.as_posix(), **variables},
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    called = []
+    if arguments.exists():
+        called = arguments.read_text(encoding="utf-8").splitlines()
+    return done, called
+
+
+# The variables that Workers Builds sets for a build of main.
+ON_MAIN = {
+    "WORKERS_CI": "1",
+    "WORKERS_CI_BRANCH": "main",
+    "WORKERS_CI_COMMIT_SHA": "0123456789abcdef0123456789abcdef01234567",
+    "SKIP_DEPENDENCY_INSTALL": "1",
+}
+DEPLOY = ["--no", "--", "wrangler", "deploy", "--tag"]
+UPLOAD = ["--no", "--", "wrangler", "versions", "upload", "--message"]
+COMMIT_TAG = ["--tag", "0123456789ab"]
+LONG = "feat: " + "a" * 120
+
+
+@pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")
+@pytest.mark.parametrize(
+    ("subject", "version", "variables", "called", "said"),
+    [
+        # The merge of a release pull request goes live, also one whose title names
+        # the branch of release-please as its scope.
+        (
+            "chore: release 1.2.3 (#40)",
+            "1.2.3",
+            ON_MAIN,
+            [*DEPLOY, "v1.2.3", "--message", "Release 1.2.3"],
+            "is the release 1.2.3: it goes live",
+        ),
+        (
+            "chore(main): release 1.3.0 (#43)",
+            "1.3.0",
+            ON_MAIN,
+            [*DEPLOY, "v1.3.0", "--message", "Release 1.3.0"],
+            "it goes live",
+        ),
+        # A prerelease becomes a version without traffic, to try it first.
+        (
+            "chore(main): release 1.3.0-beta.2",
+            "1.3.0-beta.2",
+            ON_MAIN,
+            [
+                "--no",
+                "--",
+                "wrangler",
+                "versions",
+                "upload",
+                "--tag",
+                "v1.3.0-beta.2",
+                "--message",
+                "Prerelease 1.3.0-beta.2",
+            ],
+            "is the prerelease 1.3.0-beta.2: it becomes a version without traffic",
+        ),
+        # Every other commit becomes a version without traffic, with the reason.
+        (
+            "fix: answer a HEAD (#41)",
+            "1.2.3",
+            ON_MAIN,
+            [*UPLOAD, "fix: answer a HEAD (#41)", *COMMIT_TAG],
+            "because it is no release",
+        ),
+        (
+            "chore: release 1.2.4 (#42)",
+            "1.2.3",
+            ON_MAIN,
+            [*UPLOAD, "chore: release 1.2.4 (#42)", *COMMIT_TAG],
+            "it names the release 1.2.4, but package.json has the version 1.2.3",
+        ),
+        (
+            "chore: release 1.2.3 (#40)",
+            "1.2.3",
+            {**ON_MAIN, "WORKERS_CI_BRANCH": "release-please--branches--main"},
+            [*UPLOAD, "chore: release 1.2.3 (#40)", *COMMIT_TAG],
+            "on the branch release-please--branches--main, not on main",
+        ),
+        (
+            "chore: release 1.2.3 (#40)",
+            "1.2.3",
+            {"WORKERS_CI": "1", "SKIP_DEPENDENCY_INSTALL": "true"},
+            [*UPLOAD, "chore: release 1.2.3 (#40)"],
+            "Workers Builds named no branch",
+        ),
+        (
+            None,
+            "1.2.3",
+            ON_MAIN,
+            [*UPLOAD, "A build of Workers Builds", *COMMIT_TAG],
+            "checked out no history that names its commit",
+        ),
+        # A version keeps a short message.
+        (LONG, "1.2.3", ON_MAIN, [*UPLOAD, LONG[:100], *COMMIT_TAG], "no release"),
+    ],
+)
+def test_workers_builds_deploys_only_the_commit_of_a_release(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    subject: str | None,
+    version: str,
+    variables: dict[str, str],
+    called: list[str],
+    said: str,
+) -> None:
+    folder = tmp_path / "worker"
+    (folder / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        projects["cloudflare-worker"] / "scripts/deploy-worker.sh",
+        folder / "scripts/deploy-worker.sh",
+    )
+
+    done, arguments = deploy_worker(folder, subject, version, **variables)
+
+    assert done.returncode == 0, done.stderr
+    assert arguments == called
+    assert said in done.stdout
+    assert "SKIP_DEPENDENCY_INSTALL" not in done.stderr
+
+
+@pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")
+@pytest.mark.parametrize("skip", ["", "0", "true"])
+def test_workers_builds_warns_when_cloudflare_installs_with_scripts(
+    projects: dict[str, Path], tmp_path: Path, skip: str
+) -> None:
+    # Cloudflare's own install runs install scripts unless the set-up skipped it.
+    folder = tmp_path / "worker"
+    (folder / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        projects["cloudflare-worker"] / "scripts/deploy-worker.sh",
+        folder / "scripts/deploy-worker.sh",
+    )
+    variables = {**ON_MAIN, "SKIP_DEPENDENCY_INSTALL": skip}
+
+    done, arguments = deploy_worker(
+        folder, "chore: release 1.2.3 (#40)", "1.2.3", **variables
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert arguments[:4] == DEPLOY[:4]
+    warned = "::warning::Set the build variable SKIP_DEPENDENCY_INSTALL to 1"
+    assert (warned in done.stderr) == (skip != "true")
+
+
+@pytest.mark.skipif(BASH is None or NODE_JS is None, reason="the script runs in bash")
+def test_npm_run_deploy_refuses_outside_workers_builds(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # On a laptop, even the commit of a release deploys nothing: only Cloudflare does.
+    folder = tmp_path / "worker"
+    (folder / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        projects["cloudflare-worker"] / "scripts/deploy-worker.sh",
+        folder / "scripts/deploy-worker.sh",
+    )
+
+    done, arguments = deploy_worker(folder, "chore: release 1.2.3 (#40)", "1.2.3")
+
+    assert done.returncode == 1
+    assert arguments == []
+    assert "runs only there" in done.stderr
+    assert "npx wrangler deploy deploys by hand" in done.stderr
+
+
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(
+    NPM is None or NPX is None, reason="the Worker installs and runs with Node"
+)
+def test_the_worker_passes_its_checks_in_workerd(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # The real tools of the lock file, as scripts/check.sh runs them: the types that
+    # Wrangler writes, the tests in workerd with every line covered, and the bundle.
+    project = shutil.copytree(projects["cloudflare-worker"], tmp_path / "worker")
+    environment = {**os.environ, "WRANGLER_SEND_METRICS": "false"}
+
+    def npm(*arguments: str) -> subprocess.CompletedProcess[str]:
+        assert NPM
+        return subprocess.run(
+            [NPM, *arguments],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    installed = npm("ci", "--ignore-scripts", "--no-audit", "--no-fund", "--silent")
+    assert installed.returncode == 0, installed.stderr
+    for script in ("typecheck", "test", "build"):
+        done = npm("run", "--silent", script)
+        assert done.returncode == 0, done.stdout + done.stderr
+    assert (project / "worker-configuration.d.ts").is_file()
+    assert "SF:src" in (project / "lcov.info").read_text(encoding="utf-8")
+    assert (project / "dist/index.js").is_file()
+
+    # A branch that no test takes fails the tests.
+    greet = project / "src/greet.ts"
+    code = greet.read_text(encoding="utf-8")
+    returned = "  return `Hello, ${trimmed}!`;\n"
+    assert returned in code
+    greet.write_text(
+        code.replace(
+            returned, '  if (trimmed === "nobody") {\n    return "";\n  }\n' + returned
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    uncovered = npm("run", "--silent", "test")
+    assert uncovered.returncode != 0
+    assert "Coverage" in uncovered.stdout + uncovered.stderr
+
+    # A main module that doesn't exist fails the step Worker, as it would fail the
+    # build of Cloudflare.
+    wrangler = project / "wrangler.jsonc"
+    wrangler.write_text(
+        wrangler.read_text(encoding="utf-8").replace("src/index.ts", "src/main.ts"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    assert npm("run", "--silent", "build").returncode != 0
 
 
 def the_extension(project: Path, folder: Path) -> Path:
@@ -16563,6 +17536,85 @@ class WebsiteFile:
         self.site = (dest_dir, use_directory_urls)
 
 
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_screenshot_bot_of_every_kind_corrects_the_sizes_on_its_pages(
+    projects: Mapping[str, Path], kind: str, tmp_path: Path
+) -> None:
+    # A picture of another size, on a page that names its width and height, as
+    # paperless-unified-search#274 had it: in a checkout of the patterns of the job
+    # with the release app, the tool of each kind of project reads the pages of main,
+    # and the pull request holds the new numbers.
+    workflow = parse(
+        (projects[kind] / ".github/workflows/screenshot-bot.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    patterns = next(
+        step["with"]["sparse-checkout"]
+        for step in steps_using(job_in(workflow, "pull-request"), "actions/checkout")
+    )
+    project = tmp_path / "project"
+    shutil.copytree(projects[kind], project)
+
+    def picture(size: tuple[int, int]) -> bytes:
+        out = io.BytesIO()
+        Image.new("RGB", size, (82, 108, 254)).save(out, "PNG")
+        return out.getvalue()
+
+    (project / "docs/shot.png").write_bytes(picture((660, 788)))
+    (project / "docs/shows.md").write_text(
+        '![Shot](https://github.com/o/r/raw/main/docs/shot.png){ width="660" height="788" }\n',
+        encoding="utf-8",
+    )
+
+    def run(*command: str, cwd: Path = project) -> str:
+        return subprocess.run(
+            command, cwd=cwd, capture_output=True, encoding="utf-8", check=True
+        ).stdout
+
+    run("git", "init", "--quiet")
+    run(
+        "git",
+        "add",
+        "--force",
+        "docs/shot.png",
+        "docs/shows.md",
+        ".github/blueprint.py",
+    )
+    run("git", "add", "--force", ".github/blueprint")
+    run(
+        "git",
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@e",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "Start",
+    )
+    (project / "docs/shot.png").write_bytes(picture((660, 878)))
+    kept = tmp_path / "kept"
+    tool = [sys.executable, ".github/blueprint.py", "--repo", "o/r", "screenshots"]
+    run(*tool, "keep", str(kept))
+
+    # A clone in a folder of its own, so that only the files of the patterns exist:
+    # the tool can't lean on a file that the job doesn't check out.
+    clone = tmp_path / "clone"
+    run("git", "clone", "--quiet", "--no-checkout", str(project), str(clone))
+    run("git", "sparse-checkout", "set", "--no-cone", *patterns.split(), cwd=clone)
+    run("git", "checkout", "--quiet", cwd=clone)
+    assert not (clone / "docs/shot.png").exists()
+    assert (clone / "docs/shows.md").is_file()
+    assert run(*tool, "parts", str(kept), cwd=clone) == "1\n"
+    show = ("report", str(kept), "--sha", "a" * 40, "--run", "https://run")
+    assert "| `docs/shows.md` | `docs/shot.png` | 660 x 788 | 660 x 878 |" in run(
+        *tool, *show, cwd=clone
+    )
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_every_website_shows_a_new_screenshot_of_its_readme_from_the_checkout(
     projects: dict[str, Path], kind: str, tmp_path: Path
@@ -16650,9 +17702,10 @@ def test_every_website_is_checked_for_its_accessibility(
     assert "continue-on-error" not in step
     assert "REPORT_ONLY" not in docs
     # A timeout fails the check now, and every page took 437 seconds on homedarts, the
-    # slowest website, so the limit is about twice that, and the job has room for it.
-    assert step["timeout-minutes"] == 15
-    assert job_with(docs, step["name"])["timeout-minutes"] == 20
+    # slowest website, at one width, and a second width opens each page twice as often,
+    # so the limit is about twice that, and the job has room for it.
+    assert step["timeout-minutes"] == 30
+    assert job_with(docs, step["name"])["timeout-minutes"] == 35
     assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
     assert step["run"] == (
         'if [[ "$EVENT" == pull_request ]]; then\n'
@@ -16734,11 +17787,7 @@ def test_a_project_accepts_what_its_website_has_once_through_the_update(
     assert artifact["with"]["include-hidden-files"] is True
     # The fix bot looks at Docs on main alone, and the bot's commit needs the file.
     after = (root / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
-    assert (
-        "(github.event.workflow_run.name == 'Lint' || "
-        "github.event.workflow_run.name == 'Docs' || "
-        "startsWith(github.event.workflow_run.name, 'CI ('))"
-    ) in after
+    assert ("(github.event.workflow_run.name == 'Docs' || !contains(fromJSON(") in after
 
 
 def test_the_blueprint_accepts_no_violation_and_tests_its_check_with_coverage() -> None:
@@ -17156,7 +18205,12 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     opener = job_in(parsed, "pull-request")
     assert opener["environment"]["name"] == "release"
     assert "bash scripts/screenshots.sh" not in values_of(opener)
-    assert ".github/blueprint\nblueprint\n" in [
+    # Its tool and the Markdown of the pages, whose named sizes it corrects from the
+    # numbers of those pictures; no picture of main.
+    assert (
+        "/.github/blueprint.py\n/.github/blueprint/\n/blueprint.py\n/blueprint/\n"
+        "/*.md\n/docs/**/*.md\n"
+    ) in [
         step.get("with", {}).get("sparse-checkout")
         for step in steps_using(opener, "actions/checkout")
     ]
@@ -17926,9 +18980,6 @@ ANSWERS = {
     path.stem: downstream.read(path)
     for path in sorted((ROOT / "tests/answers").glob("*.yml"))
 }
-# The canaries that the blueprint made new, with its sample code, which their own code
-# replaced since: their answers keep the sample code of their first copy.
-MADE_NEW = {"player-switch-for-autodarts"}
 
 
 def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
@@ -17943,10 +18994,12 @@ def test_the_answers_are_those_of_each_repository_of_the_rollout() -> None:
     assert list(ANSWERS) == sorted(
         item.name for item in registry.members if item.canary
     )
-    assert set(ANSWERS) >= MADE_NEW
+    kinds = {item.name: item.kind for item in registry.members}
     for name, answers in ANSWERS.items():
         assert answers["owner"] == "Dennis-Otto", name
         assert answers["project_slug"] == name
+        # The kind whose page of docs/kinds/ names it, as the repository answers it.
+        assert answers["project_type"] == kinds[name], name
         # Never Copier's own, which name the version of the repository and the source.
         assert not {"_commit", "_src_path"} & set(answers), name
     # A leg of the Variants for each, with the kind of project of its answers.
@@ -17970,10 +19023,10 @@ def test_the_answers_of_each_repository_render_every_file(
     # repository answers each question: a new question gets its answer here too.
     stored = downstream.read(project / ".copier-answers.yml")
     assert {k: v for k, v in stored.items() if not k.startswith("_")} == ANSWERS[name]
-    # A repository that takes the blueprint brings its own code and tests; one that
-    # the blueprint made new started from the sample, whose website it renders.
-    assert stored["sample_code"] == (name in MADE_NEW)
-    assert (project / "docs/index.md").exists() == (name in MADE_NEW)
+    # A repository brings its own code and tests, also one that the blueprint made new
+    # once: an update that still rendered the sample would change them.
+    assert stored["sample_code"] is False
+    assert not (project / "docs/index.md").exists()
 
 
 def test_the_adopted_legs_check_what_the_blueprint_alone_gives() -> None:
@@ -18570,27 +19623,36 @@ def test_a_release_is_built_without_the_secrets_of_the_release(
 ) -> None:
     # The build runs actions of others, such as those that write the SBOMs or set up
     # PHP, Node and Python. Only the build of a Nextcloud app, which signs the app with
-    # the key of the environment release, enters an environment, and a called
-    # workflow sees its secrets only when the caller passes them on; every other
-    # build holds only the token of its job, never the private key of the release app.
+    # the key of the environment signing, enters an environment, which holds that key
+    # alone, and gets that one secret passed, as a called workflow sees no other; every
+    # other build holds only the token of its job, never the private key of the
+    # release app or the token of the App Store.
     project = projects[kind]
     release = (project / ".github/workflows/release.yml").read_text(encoding="utf-8")
     build = (project / ".github/workflows/build-release.yml").read_text(
         encoding="utf-8"
     )
     signs = kind == "nextcloud-app"
-    assert job_in(release, "assets").get("secrets") == ("inherit" if signs else None)
-    assert job_in(build, "assets").get("environment") == (
-        {"name": "release", "deployment": False} if signs else None
+    assert job_in(release, "assets").get("secrets") == (
+        {"APP_PRIVATE_KEY": "${{ secrets.APP_PRIVATE_KEY }}"} if signs else None
     )
-    # zizmor accepts the passed secrets at that one line of a Nextcloud app, not in
-    # every workflow of the name release.yml of every repository.
+    assert job_in(build, "assets").get("environment") == (
+        {"name": "signing", "deployment": False} if signs else None
+    )
+    # The build takes the key only when the caller passes it, and doesn't demand it:
+    # the step that signs fails without it, so no app is signed by nothing.
+    assert parse(build)["on"]["workflow_call"]["secrets"] == {
+        "APP_PRIVATE_KEY": {
+            "description": "The key that signs a Nextcloud app",
+            "required": False,
+        }
+    }
+    # No build inherits every secret of the release, so zizmor accepts no such thing,
+    # neither at a line nor for every workflow of the name release.yml.
     zizmor = load_yaml((project / ".github/zizmor.yml").read_text(encoding="utf-8"))
     assert "secrets-inherit" not in zizmor["rules"]
-    inherited = [line for line in release.splitlines() if "secrets: inherit" in line]
-    assert inherited == (
-        ["    secrets: inherit # zizmor: ignore[secrets-inherit]"] if signs else []
-    )
+    assert "secrets: inherit" not in release
+    assert "secrets-inherit" not in release
     # The one secret that the build reads is the key of a Nextcloud app; the other
     # is the token of its job, which every called workflow gets.
     assert set(re.findall(r"secrets\.(\w+)", build)) == {
@@ -19012,7 +20074,7 @@ class GuideReleases:
         self.commit(self.blueprint)
         self.git(self.blueprint, "tag", tag)
 
-    def copy(self, tag: str, kind: str) -> None:
+    def copy(self, tag: str, kind: str, *, sample_code: bool = False) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             run_copy(
@@ -19024,7 +20086,7 @@ class GuideReleases:
                     "project_slug": "demo",
                     "description": "A demo",
                     "project_type": kind,
-                    "sample_code": False,
+                    "sample_code": sample_code,
                 },
                 defaults=True,
                 vcs_ref=tag,
@@ -19060,6 +20122,54 @@ class GuideReleases:
 
 
 VULNERABILITY = "or at once when it fixes a vulnerability."
+
+
+def test_a_repository_made_from_the_sample_answers_no_later_and_keeps_its_own_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As docs/faq.md says: the update takes each file of the sample for the template's,
+    # which the new answer no longer renders, and deletes it, also where the code of the
+    # repository replaced it. So player-switch-for-autodarts brought them back.
+    releases = GuideReleases(tmp_path, monkeypatch)
+    sample = releases.blueprint / "template/[% if sample_code %]sample.md[% endif %]"
+    sample.write_text("The sample.\n", encoding="utf-8", newline="\n")
+    releases.release("v1.0.0", releases.current)
+    releases.copy("v1.0.0", "chrome-extension", sample_code=True)
+    own = releases.project / "sample.md"
+    own.write_text("The code of the repository.\n", encoding="utf-8", newline="\n")
+    releases.commit(releases.project)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        # The release that it is on, as --vcs-ref=:current: of the command line says.
+        run_update(
+            releases.project,
+            vcs_ref="v1.0.0",
+            data={"sample_code": False},
+            defaults=True,
+            overwrite=True,
+            quiet=True,
+        )
+    assert not own.exists()
+    deleted = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=D", "-z"],
+        cwd=releases.project,
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout
+    assert deleted == "sample.md\0"
+    releases.git(releases.project, "restore", "--", *deleted.split("\0")[:-1])
+    releases.commit(releases.project)
+    stored = downstream.read(releases.project / ".copier-answers.yml")
+    assert stored["sample_code"] is False
+    assert own.read_text(encoding="utf-8") == "The code of the repository.\n"
+
+    # From now on, no update touches it, whatever the sample becomes.
+    sample.write_text("Another sample.\n", encoding="utf-8", newline="\n")
+    releases.release("v2.0.0", releases.current)
+    releases.update("v2.0.0")
+    assert own.read_text(encoding="utf-8") == "The code of the repository.\n"
 
 
 def test_a_real_update_brings_the_sentence_of_an_action_and_merges_around_the_part(

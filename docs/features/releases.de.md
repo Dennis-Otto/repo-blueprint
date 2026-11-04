@@ -33,6 +33,8 @@ Jedes Release beschreibt in seinen SBOMs, als SPDX und als CycloneDX, was es aus
   <img src="../images/diagrams/what-the-sboms-of-a-release-describe.de.svg" alt="Was die SBOMs eines Releases beschreiben: Der Build entpackt, was das Release ausliefert, in einen eigenen Ordner: das Zip von HACS, das Wheel, das npm-Paket, das Zip der Chrome-Erweiterung oder die signierte Nextcloud-App, und für eine Action, ein Image oder ein Projekt ohne Paket die Dateien seines Tags ohne die, die das Projekt nur prüfen, testen und dokumentieren. syft, geprüft an seinem sha256, listet die Komponenten, die ein Paket installiert oder die die Quellen deklarieren, unter dem Namen des Repositorys und der Version des Releases, als SPDX und als CycloneDX. Der Build und die Release-Prüfung prüfen, dass beide das Release nennen, und ein Scanner eines Nutzers wendet das OpenVEX-Dokument des Releases auf die SPDX-SBOM an.">
 </picture>
 
+Die Prüfung nach einem Release nennt jedes Problem, das sie findet, in einer Annotation und in der Zusammenfassung ihres Laufs, und der Bot-Health-Bot meldet den fehlgeschlagenen Lauf in einem Issue. Das gilt auch für das, was die Prüfung vorzeitig beendet, etwa einen Entwurf, der noch kein veröffentlichtes Release ist, oder einen Download von gitsign mit einer anderen Prüfsumme.
+
 Ein Projekt, das etwas ausliefert, das keine Registry baut, etwa das Zip einer Browser-Erweiterung, baut es mit einem eigenen `scripts/release-assets.sh`. Der Build des Releases führt `bash scripts/release-assets.sh ORDNER VERSION` am Commit des Releases aus, in einem eigenen Job, der nichts schreiben darf und kein Secret hat, mit Node.js und zuerst `npm ci --ignore-scripts`, wo das Projekt eine `package.json` hat. Er attestiert jede Datei, die das Skript schreibt, mit dem Rest des Releases und hängt sie an den Entwurf, bevor das Release veröffentlicht wird; seine SBOMs beschreiben diese Zips und Tarballs, wo keine Registry das Projekt ausliefert, und die Release-Prüfung schlägt bei einem Asset ohne seine signierte Provenance fehl (Entscheidung 0084 der [Entscheidungen](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)):
 
 <picture>
@@ -66,3 +68,9 @@ Für eine Nextcloud-App: die Registrierung ihrer ID mit ihrem Zertifikat, einmal
 Für eine Chrome-Erweiterung: jedes Release kommt in den Chrome Web Store, als das Zip, das das Release bezeugt, nach einer Prüfung seiner Provenance, bei Google angemeldet mit dem OIDC-Token von GitHub und ohne gespeichertes Geheimnis. Ein täglicher Lauf liefert ein Release nach, dessen Prüfung warten musste, und meldet eine Ablehnung oder eine Warnung von Google mit der Lösung.
 
 **Womit:** `publish-store.yml`, `scripts/store-status.mjs`, [die Seite der Art](../kinds/chrome-extension.md).
+
+## Cloudflare
+
+Für einen Cloudflare Worker: Workers Builds von Cloudflare baut jeden Commit von `main` und liefert nur den Merge des Release-Pull-Requests aus, als die Version des Releases; jeder andere Commit wird eine Version ohne Verkehr. Kein Schlüssel von Cloudflare liegt in GitHub, und die Geheimnisse des Workers liegen bei Cloudflare.
+
+**Womit:** `scripts/deploy-worker.sh`, [die Seite der Art](../kinds/cloudflare-worker.md).

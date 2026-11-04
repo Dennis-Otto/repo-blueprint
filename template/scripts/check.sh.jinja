@@ -203,6 +203,20 @@ else
   echo "Python 3.12 or newer is not installed here; the CI checks the pages."
 fi
 
+step "Files of the project"
+# What a release of the blueprint moves in a file that an update leaves as it is, such
+# as the group of a label in .github/labels.toml. migrate --fix moves it, and the fix bot
+# commits that onto the pull request of the update. The Python and blueprint.py of the
+# step Pages in one column.
+if [[ -n "$python" ]]; then
+  "$python" "$tool" migrate
+elif [[ -n "${CI:-}" ]]; then
+  echo "Checking the files of the project needs Python 3.12 or newer, which this runner lacks."
+  exit 1
+else
+  echo "Python 3.12 or newer is not installed here; the CI checks the files of the project."
+fi
+
 step "Changelog fragments"
 # Every fragment of changelog.d/ as the release takes it in, those that wait on main
 # for the next release too: rules that get stricter, in blueprint.py or in an update
@@ -248,6 +262,22 @@ elif [[ -n "${CI:-}" ]]; then
   exit 1
 else
   echo "Python 3.12 or newer is not installed here; the CI checks the lock files."
+fi
+
+step "Lock files match their sources"
+# pip installs a lock file as it is, so a change of its source, such as
+# requirements-dev.in, reaches no install until the file is compiled again. The step
+# compiles each lock file again with the command in its header, for its Python and on
+# the versions that it pins, so that a new release upstream changes nothing, and
+# compares the pins; locks --compile --fix keeps the result. It needs uv, without which
+# it says so and passes: the CI has it. The Python and blueprint.py of the step before.
+if [[ -n "$python" ]]; then
+  "$python" "$tool" locks --compile
+elif [[ -n "${CI:-}" ]]; then
+  echo "Comparing the lock files needs Python 3.12 or newer, which this runner lacks."
+  exit 1
+else
+  echo "Python 3.12 or newer is not installed here; the CI compares the lock files."
 fi
 
 step "Explanations of the checks"
@@ -551,6 +581,12 @@ else
 fi
 [%- endif %]
 [%- if stack == 'node' %]
+[%- if project_type == 'cloudflare-worker' %]
+
+# Wrangler, which writes the types of the Worker, runs its tests and bundles it, sends
+# nothing about its use to Cloudflare from the checks.
+export WRANGLER_SEND_METRICS=false
+[%- endif %]
 
 step "Package lock"
 # npm ci --ignore-scripts installs exactly what package-lock.json locks, and stops at
@@ -574,9 +610,18 @@ fi
 step "Types"
 # In the CI, the problem matcher of actions/setup-node makes each error of the compiler
 # an annotation at its line.
+[%- if project_type == 'cloudflare-worker' %]
+# Wrangler writes the types of the runtime and of the bindings of wrangler.jsonc into
+# worker-configuration.d.ts first.
+[%- endif %]
 npm run --silent typecheck
 
 step "Tests, with every line, branch and function covered"
+[%- if project_type == 'cloudflare-worker' %]
+# In workerd, the runtime of Cloudflare Workers, as vitest.config.ts sets them up. In
+# the CI, Vitest makes each test that fails an annotation at the line where it failed.
+npm test
+[%- else %]
 # In the CI, each test that fails is an annotation at the line where it failed, from
 # the list of the spec reporter at the end.
 if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
@@ -584,6 +629,7 @@ if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
 else
   npm test
 fi
+[%- endif %]
 
 [%- if project_type == 'chrome-extension' %]
 
@@ -593,6 +639,12 @@ step "Extension"
 # release builds it.
 node scripts/check-manifest.mjs
 bash scripts/package-extension.sh
+[%- elif project_type == 'cloudflare-worker' %]
+
+step "Worker"
+# The Worker as Workers Builds bundles it for Cloudflare, with the checks of Wrangler
+# on wrangler.jsonc and the code, into dist/: without an upload, a sign-in or a key.
+npm run --silent build
 [%- else %]
 
 step "Package"

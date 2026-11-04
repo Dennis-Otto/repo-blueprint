@@ -14,7 +14,7 @@
 
 **GitHub repositories that test, release, secure and update themselves — from one `copier copy`.**
 
-Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for eight kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python and Node packages, Chrome extensions, container images and repositories without a build. A new repository starts with more than 30 workflows, and a bot brings it up to every new release of the blueprint.
+Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for nine kinds of projects: Home Assistant integrations, Nextcloud apps, GitHub Actions, Python and Node packages, Chrome extensions, Cloudflare Workers, container images and repositories without a build. A new repository starts with more than 30 workflows, and a bot brings it up to every new release of the blueprint.
 
 - **Tested on every change.** `scripts/check.sh` runs the same checks on your machine and in the CI, with full coverage of the code. The PR coach explains every check that fails, and the fix bot commits what a command can fix.
 - **Released and signed by a bot.** Merging the release pull request publishes the release with SBOM and signed provenance of SLSA Build Level 3 (container images: Level 2), then verifies it as users can.
@@ -43,7 +43,7 @@ python3 .github/blueprint.py create
 
 With pipx in place of uv, the first line is `pipx run --spec copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint my-project`, and a Copier of your own, Copier 9.8 or later, runs `copier copy gh:Dennis-Otto/repo-blueprint my-project`; on Windows, `py -3` runs Python in place of `python3`. Copying runs no code of the blueprint: the template has no tasks, migrations or Jinja extensions, so Copier needs no `--trust`.
 
-Copier asks for the name, a one-sentence description, the kind of project, the GitHub account or organization that owns it, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later), a few details of the kind and the release app of the owner, which may stay empty until `app register` has registered it. The homepage is the website that the Docs workflow publishes on GitHub Pages, unless you name another or none, and the README, the About box, the issue forms, the manifest of an integration and `appinfo/info.xml` of an app link it; each kind starts with topics of its own, such as `home-assistant, hacs` for an integration, which HACS needs to list it. Copier refuses an answer that would break a file: a description or a name with `"""`, `*/`, `]]>` or a backslash, which would end a docstring of Python, a comment of TypeScript or the CDATA of `appinfo/info.xml`, a Nextcloud app id that the App Store doesn't take, and topics that GitHub doesn't.
+Copier asks for the name, a one-sentence description, the kind of project, the GitHub account or organization that owns it, the license (MIT, MIT-0, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later or AGPL-3.0-or-later), a few details of the kind and the release app of the owner, which may stay empty until `app register` has registered it. The homepage is the website that the Docs workflow publishes on GitHub Pages, unless you name another or none, and the README, the About box, the issue forms, the manifest of an integration and `appinfo/info.xml` of an app link it; each kind starts with topics of its own, such as `home-assistant, hacs` for an integration, which HACS needs to list it. Copier refuses an answer that would break a file, such as a name with `"""`, `*/`, `]]>` or a backslash, a Nextcloud app id that the App Store doesn't take, and topics that GitHub doesn't.
 
 `create` makes the repository of the copy, with no checkout of the blueprint: every copy brings `blueprint.py` in `.github/`. It takes the owner and the name from the answers of Copier, and its preflight first checks Python, Git, GitHub CLI and its sign-in, the owner and the name; a finding marked with ✘ stops it before anything is made, with the command that fixes it. Then `create` runs `git init --initial-branch=main`, commits the files with a sign-off, creates the repository with `gh repo create` and pushes to it, public unless you add `--private` ([green on GitHub Free too](https://dennis-otto.github.io/repo-blueprint/faq.html#can-a-repository-be-private-and-what-does-it-cost)), then applies the settings as code and prints the checklist: what is left for a person, such as the release app and the secrets, and which steps are done. `--dry-run` prints the preflight and the commands and runs none. A run that stopped midway goes on where it stopped when you run `create` again. A folder that pushes to another repository is no new copy, and `create` refuses it. The [troubleshooting](https://dennis-otto.github.io/repo-blueprint/troubleshooting.html) explains each finding of the preflight. Every workflow runs on `main`, so `settings check` names a repository whose default branch has another name.
 
@@ -96,14 +96,15 @@ Six public repositories follow the blueprint, each with code of its own and the 
 | [Python package](https://dennis-otto.github.io/repo-blueprint/kinds/python-package.html) | Python 3.12, Hatchling | Ruff, mypy, tests, build | PyPI, trusted publishing |
 | [Node package](https://dennis-otto.github.io/repo-blueprint/kinds/node-package.html) | Node 24, TypeScript | Biome, tsc, node:test with full coverage, pack; npm without install scripts | npm with provenance |
 | [Chrome extension](https://dennis-otto.github.io/repo-blueprint/kinds/chrome-extension.html) | Manifest V3, TypeScript | Node's, the manifest, Chrome for Testing | Chrome Web Store, without a stored secret |
+| [Cloudflare Worker](https://dennis-otto.github.io/repo-blueprint/kinds/cloudflare-worker.html) | TypeScript, Wrangler | Biome, tsc, Vitest in workerd | Cloudflare, without a key in GitHub |
 | [Container image](https://dennis-otto.github.io/repo-blueprint/kinds/container.html) | Alpine by digest | Hadolint, build, self-test | GHCR, multi-arch, with SBOM and provenance |
 | [Repository without a build](https://dennis-otto.github.io/repo-blueprint/kinds/generic.html) | | text files, shell scripts | releases only |
 
-Every kind starts with a small working example and its tests, to replace with the real code, and has a page of its own on the website: what it gets, the checks its pull requests need, its delivery, its checklist and the one line that copies it.
+Every kind starts with a working example and its tests, and has a page of its own on the website: what it gets, its checks, its delivery and the one line that copies it.
 
 <!-- --8<-- [end:kinds] -->
 
-![Repo Blueprint for GitHub repositories: eight kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](docs/images/social-preview.webp)
+![Repo Blueprint for GitHub repositories: nine kinds of projects with one standard, and a terminal in which copier copy asks for the kind of project, the checks and bots arrive, blueprint.py settings apply sets the rulesets, environments and labels, and copier update follows every new release](docs/images/social-preview.webp)
 
 ## How a repository looks after itself
 
@@ -134,7 +135,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 
 ### [Fix bot and self-healing](docs/features/self-healing.md)
 
-- **Fix bot:** A check that fails fixes what a command can fix, such as the format of the code, and commits it onto the branch.
+- **Fix bot:** A failing check fixes what it can: a stale lock file, a title's form, a missing changelog entry; weekly on `main` too.
 - **Flaky tests:** Failed test jobs run once more, and a job that passes then is reported in one issue.
 - **Cancelled checks:** A required check that a late run or its time limit cancelled starts again by itself.
 - **Failed releases:** The release of a merge that fails for a moment runs its failed jobs once more.
@@ -142,9 +143,9 @@ Each group has a page of its own, with what runs, the files that run it and the 
 
 ### [Mutation tests, fuzzing and property tests](docs/features/tests.md)
 
-- **Mutation tests:** Every week, thousands of small changes of the code show which of them the tests don't notice.
+- **Mutation tests:** Every week, thousands of small changes of the code show which the tests don't notice.
 - **Fuzzing:** A Python package or a GitHub Action fuzzes every target in `fuzz/`, in pull requests and every week.
-- **Property tests:** The property tests of Python and Home Assistant projects run every night with new random inputs.
+- **Property tests:** Python and Home Assistant projects run them every night with new random inputs.
 
 ### [Releases and security](docs/features/releases.md)
 
@@ -163,9 +164,10 @@ Each group has a page of its own, with what runs, the files that run it and the 
 - **Issues:** The issue assistant, an AI that only reads, analyses every new issue, labels it and finds duplicates.
 - **Welcome:** A person's first pull request gets a comment with what helps it along.
 - **Area labels:** Every pull request gets the labels of the areas whose files it changes.
-- **Branches:** The branch bot brings the pull requests that wait for auto-merge up to date with `main`, one at a time.
-- **Clean-up:** Every week, the merged branches and the caches of closed pull requests go.
-- **Dashboard:** One page shows every repository of the owner, the release of the blueprint it is on and the state of its checks.
+- **Branches:** The branch bot brings pull requests that wait for auto-merge up to date, one at a time.
+- **Replaced commits:** Runs of a replaced commit give their runner back.
+- **Clean-up:** Every week, merged branches and the caches of closed pull requests go.
+- **Dashboard:** One page shows every repository of the owner, its release of the blueprint and the state of its checks.
 
 ### [Website, diagrams and screenshots](docs/features/website.md)
 

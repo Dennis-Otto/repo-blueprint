@@ -112,7 +112,7 @@
 [%- if successor %]
 [#- A store entry doesn't pass with the repository (GOVERNANCE.md#continuity), so a
     successor alone can't release there within a week. -#]
-[%- if publish_to not in ['nextcloud-appstore', 'pypi', 'npm', 'chrome-web-store'] %]
+[%- if publish_to not in ['nextcloud-appstore', 'pypi', 'npm', 'chrome-web-store', 'cloudflare-workers'] %]
   "access_continuity_status": "Met",
   "access_continuity_justification": "The owner has designated a successor through GitHub's account successor setting, who can take the repository over, and everything that builds, tests, releases and protects the project is in the repository: {= files =}GOVERNANCE.md#continuity",
 [%- endif %]

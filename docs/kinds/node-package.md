@@ -21,7 +21,7 @@ With [uv](https://docs.astral.sh/uv/) and the GitHub CLI, as [the quick start](.
 - **The example:** `src/index.ts`, built into `dist/`, the tests in `test/`, `tsconfig.json` and `tsconfig.build.json`, `biome.jsonc`, and `package.json` with its lock file. Replace it with the real code; its tests show how.
 - **The steps of `scripts/check.sh` for this kind,** the same on your machine and in the CI: the lock file, which must agree with `package.json`, Biome for the lint and the format, tsc for the types, node:test with every line, branch and function covered and its report in the PR coach, and `npm pack`; npm installs without the scripts of the packages. Biome leaves out the diagrams that `scripts/diagrams.sh` draws, because the next drawing writes them again.
 - **Workflows of this kind:** the newest Node on `main` (`newest-node.yml`), after every change and every week, while the CI checks the Node of `.nvmrc`.
-- **The steps of every kind:** the text files, the diagrams, the pages in one column, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
+- **The steps of every kind:** the text files, the diagrams, the pages in one column, the files of the project, the fragments of the changelog, the accepted advisories, the lock files, the version, the Git hooks, ShellCheck for the shell scripts and the strict build of the website.
 - **Everything that every repository gets:** the PR coach and the fix bot, the release bot, Renovate, the settings as code, the issue assistant, the website in English and German, the security checks and the blueprint bot, as [the guide](../guide.md#what-a-new-repository-gets) lists them.
 
 ## The checks that a pull request needs
@@ -35,7 +35,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 Merging the release pull request publishes the package on npm with provenance, by trusted publishing from the environment `npm`, without a token, and attaches it to the release with its SBOM and the signed provenance of SLSA Build Level 3.
 
-A package that nobody installs from npm, such as a private one or a browser extension that people load from a zip, answers [`publish_package`](../reference/questions.md#publish_package) with no, or later with `copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data "topics=typescript, nodejs"`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `package.json` of a new repository is `private`, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of npm or of a `*.tgz`.
+A package that nobody installs from npm, such as a private one or a browser extension that people load from a zip, answers [`publish_package`](../reference/questions.md#publish_package) with no, or later with `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data publish_package=false`. It runs that on the update pull request of the release that brought the question, because on an older release the command changes nothing, and with the default topics it adds `--data "topics=typescript, nodejs"`. The release then delivers it nowhere and carries its SBOMs, its provenance and what `scripts/release-assets.sh` builds; `package.json` of a new repository is `private`, and `SECURITY.md`, `GOVERNANCE.md` and `CONTRIBUTING.md` no longer speak of npm or of a `*.tgz`.
 
 ## Once by hand
 
@@ -49,9 +49,7 @@ This kind adds these steps:
 
 <!-- --8<-- [start:real-repository] -->
 
-[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts) is made from the blueprint: a shared Autodarts display where everyone plays under their own account and a tap on a tile switches players, without signing in again.
-
-The Variants workflow tries every pull request of the blueprint that changes what the answers of Player Switch for Autodarts render on them, before it merges.
+No public repository of this kind follows the blueprint yet. The Variants workflow of the blueprint makes one from every change of its files and runs its checks with their real tools, and updates one from the latest release as its blueprint bot would.
 
 <!-- --8<-- [end:real-repository] -->
 

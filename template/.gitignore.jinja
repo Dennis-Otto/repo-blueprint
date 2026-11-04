@@ -71,4 +71,14 @@ __pycache__/
 # The extension that the build compiles from src/, which the store package zips.
 /extension/lib/
 [%- endif %]
+[%- if project_type == 'cloudflare-worker' %]
+# What Wrangler writes: the state of `wrangler dev`, and the types of the runtime and
+# of the bindings, which `npm run typecheck` writes anew from wrangler.jsonc. The
+# secrets of `wrangler dev` live in .dev.vars, as in .env, which never reach git.
+/.wrangler/
+/worker-configuration.d.ts
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+[%- endif %]
 [% endif -%]

@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: The run that ends last commits
+    accDescr: A check of a commit fails and keeps a fix. The job of the fix bot waits for the other checks of the commit that keep fixes, up to a quarter of an hour. When they have all ended, it makes one commit with every fix. When one still runs, it depends on where the fixes go. A suggestion on a fork and the pull request of main cancel no run, so they take what has ended. On a branch of the repository, the bot commits nothing, as a commit would cancel the run that still goes. The end of that run starts the job again, however it ended, and that job looks again. Once a job has made the commit, any other job of that commit finds a new head and commits nothing.
+
+    failed(["A check fails and keeps a fix"])
+    wait["The job of the bot waits for the other checks<br>that keep fixes, up to a quarter of an hour"]
+    ended{"Have they all ended?"}
+    where{"Where do the fixes go?"}
+    nothing["It commits nothing, as a commit<br>would cancel the run that still goes"]
+    others["It takes what has ended: a suggestion and the<br>pull request of main cancel no run"]
+    last["The run ends, failed, passed or cancelled,<br>and its end starts the job again"]
+    commit["One commit with every fix"]
+    moved["Any other job of that commit finds<br>a new head and commits nothing"]
+
+    failed --> wait --> ended
+    ended -- "yes" --> commit --> moved
+    ended -- "no" --> where
+    where -- "a branch of the repository" --> nothing --> last --> wait
+    where -- "a fork or main" --> others
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class wait,nothing,last,others,moved bot
+    class failed person
+    class commit done

@@ -1,14 +1,30 @@
 """Tests of the commands in the pages. A new owner follows them on a first run, and
 nothing else runs them: no page may need a checkout of the blueprint, which the quick
 start no longer has, or leave the first branch to the configuration of Git, which makes
-it `master` on many machines, while every workflow runs on `main`."""
+it `master` on many machines, while every workflow runs on `main`. No page may run a
+copier that the quick start doesn't put on the PATH either, or tell the reader to commit
+an update, which `main` refuses, since it takes pull requests only."""
 
 from __future__ import annotations
 
+import json
 import re
+import shlex
 from pathlib import Path
 
 import pytest
+
+from blueprint.app import BRANCH as APP_BRANCH
+from blueprint.app import MESSAGE as APP_MESSAGE
+from blueprint.app import App, naming_steps
+from blueprint.bootstrap import PUSH_AS_GH
+from blueprint.checklist import (
+    ANSWER_MESSAGE,
+    PINNED,
+    answer_commands,
+    answer_steps,
+    change_answer,
+)
 
 ROOT = Path(__file__).parents[1]
 CHECKOUT = "../repo-blueprint/blueprint.py"
@@ -21,6 +37,23 @@ CODE = re.compile(
 # One git init, up to the next command of its line.
 GIT_INIT = re.compile(r"\bgit init\b[^;&|\n]*")
 ON_MAIN = re.compile(r"(?:--initial-branch[= ]|-b )main\b")
+# The copier of the quick start, by its version, and one that a line runs without it.
+# The path of an environment of its own and the name of the step as a word don't count.
+PINNED_COPIER = re.compile(
+    r"(?:uvx --from|pipx run --spec) copier==\d+\.\d+\.\d+ copier (?:copy|update)\b"
+)
+BARE_COPIER = re.compile(r"(?<![\w/\\.=-])copier (?:copy|update) +\S[^;&|\n]*")
+# A version of Copier in a command, as the manager of Renovate reads it, and any other.
+VERSION = re.compile(r"copier==(\d+\.\d+\.\d+) copier (?:copy|update)")
+ANY_VERSION = re.compile(r"copier==\d")
+TO_MAIN = re.compile(r"commit the update|committe das Update")
+# What a page names without that copier on purpose: a copier of the reader's own, which
+# the quick start offers, and what the blueprint bot runs, not the reader.
+OWN_COPIERS = {
+    "copier copy gh:Dennis-Otto/repo-blueprint my-project",
+    "copier copy gh:Dennis-Otto/repo-blueprint mein-projekt",
+    "copier update --defaults --conflict inline",
+}
 WALKTHROUGHS = [
     ("README.md", "docs/own-account.md"),
     ("README.de.md", "docs/own-account.de.md"),
@@ -34,6 +67,16 @@ cd my-project
 git init && git add --all && git commit --signoff --message "chore: start"
 gh repo create octo-org/my-project --public --source . --push
 python3 ../repo-blueprint/blueprint.py checklist
+```
+"""
+# How an answer changed before it went through a pull request.
+OLD_ANSWER = """\
+## How do I change an answer later?
+
+Run `copier update` with the new answer and commit the update, such as for the topics:
+
+```sh
+copier update --defaults --vcs-ref=:current: --data "topics=python, pypi, cli"
 ```
 """
 
@@ -54,10 +97,20 @@ def commands(text: str) -> list[str]:
 
 
 def findings(text: str) -> list[str]:
-    """What in a page leads a new owner to a broken repository."""
-    inits = (found for line in commands(text) for found in GIT_INIT.findall(line))
-    return [CHECKOUT] * text.count(CHECKOUT) + [
-        found for found in inits if not ON_MAIN.search(found)
+    """What in a page leads a new owner to a broken repository, a command that isn't
+    there or a push that `main` refuses."""
+    lines = commands(text)
+    inits = (found for line in lines for found in GIT_INIT.findall(line))
+    bare = (
+        found
+        for line in lines
+        for found in BARE_COPIER.findall(PINNED_COPIER.sub("", line))
+    )
+    return [
+        *[CHECKOUT] * text.count(CHECKOUT),
+        *(found for found in inits if not ON_MAIN.search(found)),
+        *bare,
+        *TO_MAIN.findall(text),
     ]
 
 
@@ -91,12 +144,92 @@ def test_the_pages_are_found() -> None:
 
 
 @pytest.mark.parametrize("page", pages())
-def test_no_page_needs_a_checkout_or_leaves_the_branch_to_git(page: str) -> None:
-    assert findings(read(page)) == []
+def test_every_command_of_a_page_works_for_a_new_owner(page: str) -> None:
+    assert [found for found in findings(read(page)) if found not in OWN_COPIERS] == []
+
+
+@pytest.mark.parametrize("page", ["docs/faq.md", "docs/faq.de.md"])
+def test_the_faq_changes_an_answer_as_the_checklist_says(page: str) -> None:
+    """Both tell a new owner the same way, so a change of one can't leave the other
+    behind: the steps of app register, with the copier of the quick start."""
+    steps = "\n".join(answer_commands("topics=python, pypi, cli")) + "\n"
+    assert steps in blocks(read(page))
+
+
+def test_the_checklist_changes_an_answer_on_a_branch_with_the_quick_start() -> None:
+    copier = f"uvx --from {PINNED} --defaults --vcs-ref=:current: --data a=b"
+    assert answer_commands("a=b") == [
+        "git fetch origin main",
+        "git switch --force-create change-the-answers FETCH_HEAD",
+        copier,
+        "git add --all",
+        "git commit --signoff --message 'chore: change the answers of the blueprint'",
+        shlex.join([*PUSH_AS_GH, "push", "--set-upstream", "origin", "HEAD"]),
+        "gh pr create --fill",
+    ]
+    # The title of the pull request comes from the commit, and what it says is checked.
+    assert re.match(r"chore: ", ANSWER_MESSAGE)
+    # The reader learns before the commit that main takes signed commits only.
+    (why, *rest, other) = change_answer("a=b")
+    assert rest == answer_commands("a=b")
+    # The quick start offers pipx and a Copier of your own too, so the line fits them.
+    assert f"pipx run --spec {PINNED}" in other
+    assert "--gpg-sign" in why
+    assert "pull requests" in why
+
+
+def test_the_steps_are_those_of_app_register() -> None:
+    app = App("octo-app", "Iv23client", "123")
+    copier = shlex.split(f"uvx --from {PINNED}")
+    assert naming_steps(copier, app) == answer_steps(
+        copier, app.data(), APP_BRANCH, APP_MESSAGE
+    )
 
 
 def test_the_old_walkthrough_fails() -> None:
     assert findings(OLD_WALKTHROUGH) == [CHECKOUT, "git init "]
+
+
+def test_the_old_way_to_change_an_answer_fails() -> None:
+    assert findings(OLD_ANSWER) == [
+        'copier update --defaults --vcs-ref=:current: --data "topics=python, pypi, cli"',
+        "commit the update",
+    ]
+
+
+def test_every_pin_of_copier_moves_with_the_quick_start() -> None:
+    """The manager of Renovate moves a version only in the files that it lists, so a
+    command outside them stays behind the quick start for good."""
+    renovate = read(".github/renovate.json5")
+    (block, _) = renovate.split('"(?<depName>copier)==')
+    listed = re.findall(
+        r'^\s*("/\^.+/"),$', block.rsplit("managerFilePatterns", 1)[1], re.M
+    )
+    patterns = [re.compile(json.loads(item).strip("/")) for item in listed]
+    names = [
+        *pages(),
+        "reference.py",
+        *(f"blueprint/{path.name}" for path in (ROOT / "blueprint").glob("*.py")),
+    ]
+    versions = {name: VERSION.findall(read(name)) for name in names}
+    pinned = [name for name in names if versions[name]]
+    assert {"blueprint/checklist.py", "docs/faq.de.md", "docs/guide.md"} <= set(pinned)
+    # Each is listed, and each entry of the list still has a command to move.
+    assert not [
+        name for name in pinned if not any(item.match(name) for item in patterns)
+    ]
+    assert not [
+        item.pattern
+        for item in patterns
+        if not any(item.match(name) for name in pinned)
+    ]
+    # One release everywhere, and none in a form that the manager can't read.
+    assert len({version for found in versions.values() for version in found}) == 1
+    assert not [
+        name
+        for name in names
+        if len(ANY_VERSION.findall(read(name))) != len(versions[name])
+    ]
 
 
 @pytest.mark.parametrize(
@@ -116,6 +249,17 @@ def test_the_old_walkthrough_fails() -> None:
         ('<img alt="A new copy gets git init and its first commit">', []),
         ("A checkout at ../repo-blueprint/blueprint.py", [CHECKOUT]),
         ("`python3 .github/blueprint.py create`", []),
+        # A copier that the quick start doesn't install, and the ones that need none.
+        ("Run `copier update --defaults`.", ["copier update --defaults"]),
+        ("```sh\ncopier update --data a=b\n```\n", ["copier update --data a=b"]),
+        ("`copier copy gh:octo/repo .`", ["copier copy gh:octo/repo ."]),
+        ("`uvx --from copier==9.19.1 copier update --defaults`", []),
+        ("`pipx run --spec copier==9.19.1 copier copy gh:octo/repo .`", []),
+        ("The bot runs `copier update` every week.", []),
+        ("`~/.venvs/copier/bin/copier update --defaults`", []),
+        # A commit that main refuses, in both languages.
+        ("Change it and commit the update:", ["commit the update"]),
+        ("Ändere es und committe das Update:", ["committe das Update"]),
     ],
 )
 def test_what_counts_as_a_finding(text: str, found: list[str]) -> None:

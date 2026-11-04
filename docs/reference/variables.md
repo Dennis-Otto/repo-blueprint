@@ -21,7 +21,7 @@ The workflows read the variables of the repository as `vars.NAME` and its secret
 - [`DEPENDENCY_REVIEW`](#dependency_review): `off` makes the check *dependency-review* leave the vulnerabilities to the check *osv-scanner (pull request)*, which compares the lock files of a pull request with those of its base; GitHub offers its dependency review to a private repository only with GitHub Code Security.
 - [`ISSUE_ASSISTANT_AI`](#issue_assistant_ai): `off` makes the issue assistant label the issues and answer the commands of their comments without an AI engine, which then needs no secret; `on` lets the engine analyze each new issue as well.
 - [`MUTATION_PARTS`](#mutation_parts): The number of parts in which the mutation tests run, one job each, in place of the estimate from the number of mutants: more parts for a project whose parts run out of the six hours of a job.
-- [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project and, for a package of npm or PyPI, the answer `publish_package`.
+- [`PUBLISH_TO`](#publish_to): Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store`, `cloudflare-workers` or `none`, by the kind of project and, for a package of npm or PyPI, the answer `publish_package`.
 - [`RELEASE_APP`](#release_app): The name of the release app, as its address says: github.com/apps/NAME.
 - [`RELEASE_AUTOMATION_APP_ID`](#release_automation_app_id): The App ID of the release app, the number on its settings page.
 - [`RELEASE_AUTOMATION_CLIENT_ID`](#release_automation_client_id): The Client ID of the release app, with which each bot asks for a token of the app, together with the private key `RELEASE_AUTOMATION_PRIVATE_KEY`.
@@ -143,7 +143,7 @@ The number of parts in which the mutation tests run, one job each, in place of t
 
 ### `PUBLISH_TO`
 
-Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store` or `none`, by the kind of project and, for a package of npm or PyPI, the answer `publish_package`. The build, the release and the check of the latest release follow it. A value in `.github/repository.project.toml` changes only the delivery: the documents follow the answer, so a package that publishes nowhere answers `publish_package` with no.
+Where the release delivers the package: `pypi`, `npm`, `ghcr`, `hacs`, `nextcloud-appstore`, `github-action`, `chrome-web-store`, `cloudflare-workers` or `none`, by the kind of project and, for a package of npm or PyPI, the answer `publish_package`. A Cloudflare Worker reaches Cloudflare through Workers Builds, outside GitHub, so its release ships the files of its tag. The build, the release and the check of the latest release follow it. A value in `.github/repository.project.toml` changes only the delivery: the documents follow the answer, so a package that publishes nowhere answers `publish_package` with no.
 
 - **Set by:** the settings as code: `.github/repository.toml` sets it, from [`publish_to`](questions.md#publish_to), and the settings bot applies it; `.github/repository.project.toml` can set another value
 - **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`publish-store.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/publish-store.yml) (Chrome Web Store, where `publish_to == 'chrome-web-store'`); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`verify-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/verify-release.yml) (Release verification, every repository)
@@ -152,7 +152,7 @@ What the workflows say of it:
 
 - `publish-store.yml`: It runs where the repository variable `PUBLISH_TO` is chrome-web-store: in a repository of the kind chrome-extension, never in the blueprint or a fork.
 - `publish-store.yml`: A fork has none of the variables of the repository, so `PUBLISH_TO` keeps it out too.
-- `release.yml`: The jobs below attach the package, its SBOMs (SPDX and CycloneDX), the licenses of its third-party components, the advisories that don't affect it (OpenVEX) and its signed provenance, write the notes, make the release public, announce it in the discussions, and then deliver it where the repository variable `PUBLISH_TO` says: pypi, npm, ghcr, hacs, nextcloud-appstore, github-action, chrome-web-store, which publish-store.yml takes over once this workflow has passed, or none.
+- `release.yml`: The jobs below attach the package, its SBOMs (SPDX and CycloneDX), the licenses of its third-party components, the advisories that don't affect it (OpenVEX) and its signed provenance, write the notes, make the release public, announce it in the discussions, and then deliver it where the repository variable `PUBLISH_TO` says: pypi, npm, ghcr, hacs, nextcloud-appstore, github-action, chrome-web-store, which publish-store.yml takes over once this workflow has passed, cloudflare-workers, which Workers Builds deploys outside GitHub, or none.
 - `verify-release.yml`: It checks a release the way its users can: every asset carries the signed provenance of this repository's release workflow, both in GitHub and in the attached bundle; the SBOMs are attached and describe what the release ships, by its name and version; the release is immutable and its commit signed; and where the repository variable `PUBLISH_TO` delivers it, the same release is there.
 
 ### `RELEASE_APP`
@@ -226,14 +226,14 @@ An API key of Anthropic, which the issue assistant takes in place of `CLAUDE_COD
 
 The API token of the account of the Nextcloud App Store, with which the release submits the signed package and the workflow *Register app* registers the id of the app. Only a Nextcloud app needs it.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set APPSTORE_TOKEN --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environment `appstore`, which only `main` may use: `gh secret set APPSTORE_TOKEN --env appstore`, as the checklist shows
 - **Read by:** [`register-app.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/register-app.yml) (Register the app, where `project_type == 'nextcloud-app'`); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository)
 
 ### `APP_PRIVATE_KEY`
 
 The private key of the certificate of a Nextcloud app, with which the release signs the package for the App Store and the workflow *Register app* proves the id of the app. Only a Nextcloud app needs it.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set APP_PRIVATE_KEY --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environment `signing`, which only `main` may use: `gh secret set APP_PRIVATE_KEY --env signing < KEY_FILE`, as the checklist shows
 - **Read by:** [`build-release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/build-release.yml) (Build the release, every repository); [`register-app.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/register-app.yml) (Register the app, where `project_type == 'nextcloud-app'`)
 
 ### `CLAUDE_CODE_OAUTH_TOKEN`
@@ -300,14 +300,14 @@ An API key of OpenAI, with which the issue assistant analyzes each new issue wit
 
 The private key of the release app, which `app register` sets without a file. With it and `RELEASE_AUTOMATION_CLIENT_ID`, the bots act as the app: they open and merge the release and update pull requests, so that their checks run, create the release tags and apply the settings. For an app that exists, `python3 .github/blueprint.py app connect --key-file FILE` sets it from the file that the settings page of the app generates.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release`, as the checklist shows
+- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set RELEASE_AUTOMATION_PRIVATE_KEY --env release < KEY_FILE`, as the checklist shows
 - **Read by:** [`after-checks.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/after-checks.yml) (After the checks, every repository); [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`dependabot-automerge.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/dependabot-automerge.yml) (Dependabot maintenance, every repository); [`diagrams.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/diagrams.yml) (Diagrams, every repository); [`docs-pictures.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/docs-pictures.yml) (Docs pictures, the blueprint alone); [`osv-scanner.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/osv-scanner.yml) (OSV-Scanner, every repository); [`release.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/release.yml) (Release, every repository); [`renovate.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/renovate.yml) (Renovate, where `renovate_runner == 'self'`); [`rollout.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/rollout.yml) (Rollout, the blueprint alone); [`screenshot-bot.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/screenshot-bot.yml) (Screenshots, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository); [`sync-issue-assistant.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/sync-issue-assistant.yml) (Issue assistant sync, the blueprint alone); [`update-branches.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/update-branches.yml) (Update branches, every repository); [`upstream.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/upstream.yml) (Upstream, where `project_type == 'nextcloud-app'`)
 
 ### `SETTINGS_APP_PRIVATE_KEY`
 
 The private key of the settings app, the file that its settings page generates. With it and `SETTINGS_APP_CLIENT_ID`, the settings bot and the blueprint bot act as the settings app, the only app that writes the administration of the repository. The file goes in with `< key.pem` after the command below.
 
-- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set SETTINGS_APP_PRIVATE_KEY --env release`
+- **Set by:** you, as a secret of the environment `release`, which only `main` may use: `gh secret set SETTINGS_APP_PRIVATE_KEY --env release < KEY_FILE`
 - **Read by:** [`blueprint-update.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/blueprint-update.yml) (Blueprint update, every repository); [`osv-scanner.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/osv-scanner.yml) (OSV-Scanner, every repository); [`settings.yml`](https://github.com/Dennis-Otto/repo-blueprint/blob/main/.github/workflows/settings.yml) (Settings, every repository)
 
 What the workflows say of it:

@@ -36,10 +36,18 @@ On Windows, run them in Git Bash. While you work, the quicker steps of the check
 [%- elif stack == 'node' -%]
 On Windows, run them in Git Bash. While you work, the quicker steps of the checks:
 
+[% if project_type == 'cloudflare-worker' -%]
+- `npm test`: the tests in workerd, the runtime of Cloudflare Workers, with every line, branch and function covered.
+- `npx --no -- biome check --write .`: the format of the code, and the fixes that Biome can make for its rules.
+- `npm run typecheck`: the types, in the strict mode of the compiler, after Wrangler wrote those of `wrangler.jsonc`.
+- `npm run build`: the Worker, bundled as Cloudflare bundles it, without an upload.
+- `npm run dev`: the Worker on your machine. Its secrets live in Cloudflare, set with `npx wrangler secret put NAME`, and those of `npm run dev` in `.dev.vars`, which git ignores: never in the repository.
+[%- else -%]
 - `npm test`: the tests, with every line, branch and function covered.
 - `npx --no -- biome check --write .`: the format of the code, and the fixes that Biome can make for its rules.
 - `npm run typecheck`: the types, in the strict mode of the compiler.
 - `npm run build`: the package.
+[%- endif -%]
 [%- elif stack == 'container' -%]
 On Windows, run them in Git Bash. They need Docker: `scripts/check.sh` builds the image and runs its self-test, `docker run --rm {= project_slug =}:check --self-test`.
 [%- else -%]
@@ -59,7 +67,7 @@ Turn on the hook of the repository once with `git config core.hooksPath .githook
 - **The coding standards** of [CONTRIBUTING.md](CONTRIBUTING.md#coding-standards) apply; an exception to a rule is rare and has its reason in a comment at its place.
 - **The documentation changes with the code:** `README.md` and the pages in `docs/`, and with an English page its German one, such as `README.de.md`, where the project has one.
 - **Diagrams** are Mermaid sources in `docs/diagrams/<name>.mmd`, from top to bottom (`flowchart TB`), with `accTitle` and `accDescr`. `bash scripts/diagrams.sh` draws each, with Docker, as `docs/images/diagrams/<name>.svg` and `<name>.dark.svg`, and the Markdown shows them with a `<picture>`, whose `alt` repeats the title and the description. Never write a `mermaid` block: the GitHub app shows it as code, and `scripts/check.sh` fails on it once a page shows a picture of a diagram. Without Docker, change the source and push, and the diagram bot draws the pictures on the branch; a German page takes `<name>.de.mmd`. [CONTRIBUTING.md](CONTRIBUTING.md#diagrams) has the rest.
-- **A change for users** (`feat`, `fix`, `perf`) gets an entry in the words of a user, in a new file `changelog.d/<branch>.md` named after the branch without its type, such as `changelog.d/dark-mode.md` for the branch `feat/dark-mode`, below the heading of its kind of change, such as `### Features` or `### Bug fixes`. The check of the title, *conventional title*, asks for it, and `python3 .github/blueprint.py fragments` checks it as the release takes it in; with `--fix`, it renames a heading that surely means a kind of change, such as `### Fixes` to `### Fixed`. A file of its own conflicts with no other pull request, an entry under `## Unreleased` in `CHANGELOG.md` with every one that adds one at the same place, so write the fragment. The release bot moves the fragments into the section of the next release and writes the version, so leave the released sections alone.
+- **A change for users** (`feat`, `fix`, `perf`) gets an entry in the words of a user, in a new file `changelog.d/<branch>.md` named after the branch without its type, such as `changelog.d/dark-mode.md` for the branch `feat/dark-mode`, below the heading of its kind of change, such as `### Features` or `### Bug fixes`. On a branch of the repository, a pull request without one gets a draft from its title by the fix bot, once: replace its words with what changes for users. The check of the title, *conventional title*, asks for it, and `python3 .github/blueprint.py fragments` checks it as the release takes it in; with `--fix`, it renames a heading that surely means a kind of change, such as `### Fixes` to `### Fixed`. A file of its own conflicts with no other pull request, an entry under `## Unreleased` in `CHANGELOG.md` with every one that adds one at the same place, so write the fragment. The release bot moves the fragments into the section of the next release and writes the version, so leave the released sections alone.
 - **A decision that shapes the project,** such as a supported platform or the way of releasing, gets a record in [`docs/decisions/`](docs/decisions/README.md), with the next free number.
 
 ## Commits and pull requests
@@ -97,7 +105,7 @@ The files of this project, as `_skip_if_exists` in the `copier.yml` of the bluep
 
 - **Documentation and website:** `/README.md`, `/CHANGELOG.md`, `/mkdocs.yml`, `/docs/index.md`, `/docs/security.md`, `/docs/releases.md`, `/docs/decisions`
 - **Version, which the release bot writes:** `/version.txt`, `/.release-please-manifest.json`
-- **Code and tests:** `/src`, `/lib`, `/app`, `/appinfo`, `/img`, `/custom_components`, `/extension`, `/store`, `/tests`, `/test`, `/fuzz`, `/*.py`, `/action.yml`, `/hacs.json`, `/Dockerfile`
+- **Code and tests:** `/src`, `/lib`, `/app`, `/appinfo`, `/img`, `/custom_components`, `/extension`, `/store`, `/wrangler.jsonc`, `/tests`, `/test`, `/fuzz`, `/*.py`, `/action.yml`, `/hacs.json`, `/Dockerfile`
 - **Dependency manifests and lock files, which Renovate keeps current:** `/pyproject.toml`, `/requirements-dev.in`, `/requirements-dev.txt`, `/requirements-test.in`, `/requirements-test.txt`, `/requirements-fuzz.in`, `/requirements-fuzz.txt`, `/composer.json`, `/composer.lock`, `/package.json`, `/package-lock.json`
 - **Issue and discussion forms:** `.github/ISSUE_TEMPLATE/bug_report.yml`, `.github/ISSUE_TEMPLATE/feature_request.yml`, `.github/ISSUE_TEMPLATE/config.yml`, `.github/DISCUSSION_TEMPLATE/q-a.yml`, `.github/DISCUSSION_TEMPLATE/ideas.yml`
 - **Settings, labels and bots:** `.github/repository.project.toml`, `.github/checks.project.toml`, `.github/labels.toml`, `.github/labeler.yml`, `.github/renovate.json5`, `.github/renovate-accepted.json5`, `.github/a11y-accepted.toml`, `/osv-scanner.toml`, `.github/findings.toml`, `.github/dependency-review.yml`, `.github/workflows/action-test.yml`, `.github/issue-assistant/project.md`, `.github/agents.project.md`

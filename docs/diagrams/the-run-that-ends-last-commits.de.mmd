@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Der Lauf, der zuletzt endet, committet
+    accDescr: Eine Prüfung eines Commits scheitert und behält eine Behebung. Der Job des Fix-Bots wartet auf die anderen Prüfungen des Commits, die Behebungen behalten, bis zu einer Viertelstunde. Sind alle fertig, macht er einen Commit mit jeder Behebung. Läuft noch eine, kommt es darauf an, wohin die Behebungen gehen. Ein Vorschlag auf einem Fork und der Pull Request von main brechen keinen Lauf ab, sie nehmen also, was fertig ist. Auf einem Branch des Repositorys committet der Bot nichts, denn ein Commit bräche den Lauf ab, der noch geht. Das Ende dieses Laufs startet den Job erneut, wie auch immer er endete, und dieser Job schaut erneut. Hat ein Job den Commit gemacht, findet jeder andere Job dieses Commits einen neuen Head und committet nichts.
+
+    failed(["Eine Prüfung scheitert und behält eine Behebung"])
+    wait["Der Job des Bots wartet auf die anderen Prüfungen,<br>die Behebungen behalten, bis zu einer Viertelstunde"]
+    ended{"Sind alle fertig?"}
+    where{"Wohin gehen die Behebungen?"}
+    nothing["Er committet nichts, denn ein Commit<br>bräche den Lauf ab, der noch geht"]
+    others["Er nimmt, was fertig ist: Ein Vorschlag und der<br>Pull Request von main brechen keinen Lauf ab"]
+    last["Der Lauf endet, gescheitert, bestanden oder<br>abgebrochen, und sein Ende startet den Job erneut"]
+    commit["Ein Commit mit jeder Behebung"]
+    moved["Jeder andere Job dieses Commits findet<br>einen neuen Head und committet nichts"]
+
+    failed --> wait --> ended
+    ended -- "ja" --> commit --> moved
+    ended -- "nein" --> where
+    where -- "ein Branch des Repositorys" --> nothing --> last --> wait
+    where -- "ein Fork oder main" --> others
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class wait,nothing,last,others,moved bot
+    class failed person
+    class commit done
