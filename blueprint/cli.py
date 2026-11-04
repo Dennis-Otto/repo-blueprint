@@ -601,7 +601,7 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
         )
         return 0
     if arguments.action == "version":
-        return fix_version(root)
+        return fix_version(root, arguments.base or os.environ.get(versions.BASE))
     if arguments.action == "keep":
         print("\n".join(report_kept(keep_fixes(root, arguments.folder), kept=True)))
         return 0
@@ -627,14 +627,34 @@ def fix_command(arguments: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def fix_version(root: Path) -> int:
+def fix_version(root: Path, base: str | None = None) -> int:
     """Writes the version of the manifest of the release bot back into each file that
     has another one; a file without a version at the place of the step Version stays
-    for a person."""
-    done = versions.fix(root)
+    for a person, and so does every file where the manifest names another version than
+    on the base of the pull request."""
+    done = versions.fix(root, base or None)
     if done.version is None:
         print(f"{versions.MANIFEST} names no version, so there is none to write.")
         return 0
+    if done.changed:
+        for file in done.left:
+            print(
+                f"{file.path}: has version {file.found}, and the manifest {done.version}"
+                if file.found is not None
+                else f"{file.path}: has no version where the step Version reads it"
+            )
+        print(
+            f"{versions.MANIFEST} names version {done.version}, but "
+            f"{done.released or 'no version'} on the base of the pull request. Only "
+            "the release bot changes it, so the fix writes no version: "
+            + (
+                f"set it back to {done.released}, or bring the branch up to date with "
+                "the base if a release came since."
+                if done.released is not None
+                else "give each file its version by hand."
+            )
+        )
+        return 1
     for file in done.fixed:
         print(
             f"{file.path}: version {done.version} of the release bot, "
@@ -1782,10 +1802,16 @@ def add_fix_parsers(
         help="give every text file LF line endings, no trailing whitespace and a line "
         "break at its end",
     )
-    fix_actions.add_parser(
+    fix_version_parser = fix_actions.add_parser(
         "version",
         help="write the version of .release-please-manifest.json back into each file "
         "that the release bot writes it into, where a hand changed it",
+    )
+    fix_version_parser.add_argument(
+        "--base",
+        help="the commit that the pull request goes into, such as origin/main: where "
+        "the manifest names another version than there, write nothing (default: "
+        f"${versions.BASE}, which the fix step of the CI sets)",
     )
     collect_parser = fix_actions.add_parser(
         "collect",

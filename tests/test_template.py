@@ -1549,6 +1549,32 @@ def test_the_fix_bot_writes_the_version_of_the_release_bot_back(
     passed = run_the_steps(repository, script)
     assert passed.returncode == 0, passed.stdout
 
+    # A pull request that changes only the manifest, by hand: with main as its base,
+    # as the fix step of the CI names it, the fix writes no version, and the step
+    # keeps failing for a person to set the manifest back.
+    for arguments in (
+        ("add", "--all"),
+        ("-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "main"),
+    ):
+        subprocess.run(["git", *IDENTITY, *arguments], cwd=repository, check=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout.strip()
+    manifest = (project / MANIFEST).read_bytes()
+    (repository / MANIFEST).write_bytes(manifest.replace(b"0.0.0", b"0.4.2", 1))
+
+    refused = fix_versions(repository, base)
+
+    assert (refused.changed, refused.released, refused.fixed) == (True, "0.0.0", [])
+    assert [file.path for file in refused.left] == checked
+    for name in checked:
+        assert (repository / name).read_bytes() == (project / name).read_bytes(), name
+    assert run_the_steps(repository, script).returncode == 1
+
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_a_breaking_change_below_1_0_0_is_said_to_raise_the_minor_version(
