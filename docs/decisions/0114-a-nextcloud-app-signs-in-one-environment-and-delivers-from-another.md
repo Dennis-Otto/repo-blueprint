@@ -32,3 +32,5 @@ Option 3 would bring the key back into the reach of every delivery to the App St
 ## Consequences
 
 The build of a Nextcloud app reaches only the key that signs it, the delivery and the second job of the registration only the token of the App Store, and none of them the private key of the release app. The registration takes two jobs and a hand-over of public data, which `tests/test_workflow_steps.py` runs with a key and a certificate of its own. Once a beta release has built, signed and verified, step 4 of #530 takes both secrets out of `release`.
+
+The proof came from a release instead of a beta: paperless-sync 1.5.0, on version 1.9.0 of the blueprint, built and signed in `signing`, delivered from `appstore` and passed its verification on 2026-11-04. A beta would have replaced the last release in the App Store for every user, as its package still says the version of that release in `appinfo/info.xml` ([#635](https://github.com/Dennis-Otto/repo-blueprint/issues/635)). Step 4 then took both secrets out of `release`.
