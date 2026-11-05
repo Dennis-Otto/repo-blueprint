@@ -3283,6 +3283,32 @@ def test_create_fails_when_the_pull_request_that_registers_the_workflows_fails(
     assert f"The set-up of {REPO}:" in captured.out
 
 
+def test_create_applies_the_settings_when_github_cannot_list_the_workflows(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workflows_of(copy, "sbom.yml")
+    github.fail[("GET", f"repos/{REPO}/actions/workflows?per_page=100")] = 403
+    registering = Registering()
+    monkeypatch.setattr(cli, "register_workflows", registering)
+
+    assert run(github, copy, "create") == 2
+
+    captured = capsys.readouterr()
+    assert (
+        "GitHub couldn't be asked which workflows it knows: GitHub answered 403:"
+        " simulated failure. Run python3 .github/blueprint.py workflows register"
+        " once that is fixed." in captured.err
+    )
+    assert registering.asked == []
+    # The settings and the checklist all the same, so that main is protected.
+    assert f"The settings of {REPO} differ" in captured.out
+    assert f"The set-up of {REPO}:" in captured.out
+
+
 def test_create_without_the_answers_names_a_command_that_works(
     github: FakeGitHub,
     copy: Path,

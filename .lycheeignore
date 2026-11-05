@@ -4,3 +4,9 @@
 # The data of the dashboard, which only the Dashboard workflow publishes after the merge
 # that adds it; its deploy job asks for each file after every deployment.
 ^https://dennis-otto\.github\.io/repo-blueprint/dashboard/(repos\.json|releases\.atom)$
+
+# The section on what create checks after its push, which this repository's guide adds
+# and the website only shows after the Dashboard workflow deploys it; drop both lines
+# once the section is live.
+^https://dennis-otto\.github\.io/repo-blueprint/guide\.html#what-create-checks-after-its-push$
+^https://dennis-otto\.github\.io/repo-blueprint/de/guide\.html#was-create-nach-seinem-push-nachsieht$

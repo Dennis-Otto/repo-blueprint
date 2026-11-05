@@ -1283,10 +1283,21 @@ def create_command(api: Api, arguments: argparse.Namespace, root: Path) -> int:
     if repo is None:
         return 0
     workflows = local_workflows(root)
-    missing = wait_until_known(api, repo, workflows)
-    if workflows:
-        print(known_text(workflows, missing))
     registering = 0
+    try:
+        missing = wait_until_known(api, repo, workflows)
+    except GitHubError as error:
+        # The settings still follow the push, so that main isn't left unprotected.
+        print(
+            "blueprint.py: GitHub couldn't be asked which workflows it knows:"
+            f" {error}. Run {REGISTER_COMMAND} once that is fixed.",
+            file=sys.stderr,
+        )
+        missing = []
+        registering = 2
+    else:
+        if workflows:
+            print(known_text(workflows, missing))
     if missing:
         try:
             print(register_workflows(api, repo))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import shlex
@@ -371,11 +372,15 @@ DEPENDABOT_ALERTS = Step(
 
 
 def workflows_step(api: Api, repo: str, root: Path) -> list[Step]:
-    """Whether GitHub knows each workflow of the checkout, which it starts only then,
-    and whether the comments that registered some are out again (#652)."""
+    """Whether GitHub knows each workflow, which it starts only then, and whether the
+    comments that registered some are out again (#652). Both are of main as GitHub
+    has it, so that a pull request merged on GitHub counts before a pull; the
+    checkout stands in only when GitHub can't answer for main."""
     texts = workflows.local_workflows(root)
     if not texts:
         return []
+    with contextlib.suppress(GitHubError):
+        texts = workflows.read_main(api, repo).texts
     missing = workflows.unknown(texts, workflows.registered(api, repo))
     marked = workflows.marked(texts)
     how: list[str] = []

@@ -447,15 +447,33 @@ def test_the_checklist_names_the_workflows_that_github_does_not_know(
 
 
 def test_the_checklist_asks_for_the_comments_to_come_out_again(tmp_path: Path) -> None:
-    root = a_checkout(tmp_path, {**TEXTS, BOT: TEXTS[BOT] + NOTE})
+    # The register pull request merged on GitHub, and the checkout wasn't pulled
+    # since: main as GitHub has it counts.
+    root = a_checkout(tmp_path, TEXTS)
+    github = FakeGitHub({**TEXTS, BOT: TEXTS[BOT] + NOTE}, known=TEXTS)
 
-    [step] = workflows_step(api(FakeGitHub(TEXTS, known=TEXTS)), REPO, root)
+    [step] = workflows_step(api(github), REPO, root)
 
     assert step.done is False
     assert step.how == (
         "The comments that registered blueprint-update.yml are still in them:"
         f" {workflows.COMMAND} opens the pull request that takes them out, or names"
         " the one that is open."
+    )
+
+
+def test_the_checklist_reads_the_checkout_when_github_cannot_answer_for_main(
+    tmp_path: Path,
+) -> None:
+    root = a_checkout(tmp_path, {**TEXTS, BOT: TEXTS[BOT] + NOTE})
+    github = FakeGitHub(TEXTS, known=TEXTS)
+    github.repository = {"ref": None}
+
+    [step] = workflows_step(api(github), REPO, root)
+
+    assert step.done is False
+    assert step.how.startswith(
+        "The comments that registered blueprint-update.yml are still in them:"
     )
 
 
