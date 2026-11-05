@@ -20,7 +20,7 @@ flowchart TB
 
     start --> line
     line --> conflict
-    conflict -- "yes: Renovate's<br>or a bot's" --> rebuilt
+    conflict -- "yes: Renovate's or<br>one a bot builds anew" --> rebuilt
     conflict -- "no" --> fork
     conflict -- "yes: any other" --> comment
     %% The two ends of a conflict sit beside the line, which goes on below them.
