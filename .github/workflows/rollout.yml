@@ -130,23 +130,23 @@ jobs:
           read -r tag published <<<"$latest"
           # Started by hand, the rollout takes the latest release. After a run of the
           # Release workflow, whatever started it, it takes the release that the run
-          # published: the latest release went public while the run's job "publish the
-          # release" ran, in whichever attempt of the run. GitHub can fail that job after
-          # it made the release public, as it did with v1.11.1, and the attempt that runs
-          # the job again finds the release public already. A beta leaves the latest
-          # release as it was, a run that made no release ran no such job, and the
-          # Release workflow runs one run at a time, so no other run published meanwhile.
+          # published: the latest release went public after the run's job "publish the
+          # release" started, in whichever attempt of the run. GitHub can fail that job
+          # after it made the release public, as it did with v1.11.1, or finish the call
+          # only after the job ended, and the attempt that runs the job again finds the
+          # release public already. A beta leaves the latest release as it was, a run
+          # that made no release ran no such job, and the Release workflow runs one run
+          # at a time, so no other run published meanwhile.
           if [[ -n "$RUN_ID" ]]; then
             published_at="$(date -d "$published" +%s)"
             made=false
-            while read -r started completed; do
-              if [[ -n "$started" ]] && (($(date -d "$started" +%s) <= published_at)) &&
-                ((published_at <= $(date -d "$completed" +%s))); then
+            while read -r started _; do
+              if [[ -n "$started" ]] && (($(date -d "$started" +%s) <= published_at)); then
                 made=true
               fi
             done <<<"$publish"
             if [[ "$made" != true ]]; then
-              echo "The run made no release; the latest one, $tag, went public while no job of the run was publishing." >> "$GITHUB_STEP_SUMMARY"
+              echo "The run made no release; the latest one, $tag, went public before the run's job that publishes started." >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
           fi

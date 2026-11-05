@@ -521,7 +521,8 @@ jobs:
           # At times GitHub fails a call after it has done what was asked: it answered
           # the call that made v1.11.1 public with an HTTP 502, and the job failed. So a
           # call that fails counts once the release reads as public as asked: no draft,
-          # a prerelease as its tag says, and a release for everybody the latest one.
+          # a prerelease as its tag says, a release for everybody the latest one, and
+          # announced when the call asked for a discussion.
           # Made again, the call changes nothing that is done already, and GitHub links
           # no second discussion to a release that has one.
           publish() {
@@ -536,6 +537,13 @@ jobs:
               --jq '"\(.isDraft) \(.isPrerelease)"')" == "false $prerelease" ]] || return 1
             if [[ "$prerelease" == false ]] &&
               [[ "$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)" != "$TAG" ]]; then
+              return 1
+            fi
+            # The discussion may be missing although the release is public: GitHub
+            # created the one of v1.11.1 only when the job made the call again. The
+            # look goes through the REST API, as gh release view names no discussion.
+            if [[ " $* " == *" --discussion-category "* ]] &&
+              [[ -z "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.discussion_url // empty')" ]]; then
               return 1
             fi
             echo "GitHub answered the call that makes $TAG public with an error, and made it public all the same." >> "$GITHUB_STEP_SUMMARY"

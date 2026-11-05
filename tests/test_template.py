@@ -7338,7 +7338,9 @@ def test_releases_are_announced_in_the_discussions(
     assert publish["permissions"]["discussions"] == "write"
     # Only a release for everybody, not a prerelease, is announced.
     script = script_of(publish, "Make the complete release public")
-    assert script.index("exit 0") < script.index("--discussion-category")
+    assert script.index("exit 0") < script.index(
+        "announce=(--discussion-category Announcements)"
+    )
     assert "has_discussions = true" in (project / ".github/repository.toml").read_text(
         encoding="utf-8"
     )

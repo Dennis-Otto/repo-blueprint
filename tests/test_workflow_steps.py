@@ -1285,6 +1285,48 @@ def test_a_release_that_github_never_makes_public_fails_its_job(
     )
 
 
+@pytest.mark.parametrize(
+    ("discussion", "edits"),
+    [
+        # Public and the latest release, but GitHub linked no discussion yet, as
+        # with v1.11.1: the call is made again, and GitHub creates it then.
+        ("", 2),
+        ("https://github.com/o/r/discussions/659", 1),
+    ],
+)
+def test_a_public_release_without_its_announcement_is_announced_again(
+    tmp_path: Path, discussion: str, edits: int
+) -> None:
+    done = publishing(
+        tmp_path,
+        "v2.0.0",
+        [
+            Answer(r"api graphql .*", "General\nAnnouncements\n"),
+            failed_edit("v2.0.0"),
+            release_state("v2.0.0", "false false"),
+            latest_release("v2.0.0"),
+            exact(
+                "api repos/o/r/releases/tags/v2.0.0 --jq .discussion_url // empty",
+                f"{discussion}\n" if discussion else "",
+            ),
+            Answer(r"release edit v2\.0\.0 .*"),
+        ],
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        done.called("release edit")
+        == [
+            "release edit v2.0.0 --draft=false --latest "
+            "--discussion-category Announcements --repo o/r"
+        ]
+        * edits
+    )
+    assert done.stubbed == ["sleep 15"] * (edits - 1)
+    assert (MADE_PUBLIC_ANYWAY in done.summary) == (edits == 1)
+    assert "announced in the discussions" in done.summary
+
+
 @pytest.mark.parametrize("failures", [1, 3])
 def test_github_is_asked_again_for_the_categories_of_the_discussions(
     tmp_path: Path, failures: int

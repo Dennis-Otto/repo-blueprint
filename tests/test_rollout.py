@@ -185,8 +185,11 @@ LATEST = "v1.2.0 2026-10-13T10:00:30Z"
         ),
         # The run published a beta, which leaves the latest release as it was.
         ("2026-10-13T11:00:10Z 2026-10-13T11:00:30Z", ""),
-        # The latest release went public after the job had ended, by hand perhaps.
-        ("2026-10-13T09:59:50Z 2026-10-13T10:00:20Z", ""),
+        # After the job had ended: GitHub finished the call after its last error, or
+        # a person published the release before the run's failed jobs ran again.
+        ("2026-10-13T09:59:50Z 2026-10-13T10:00:20Z", "v1.2.0"),
+        # The latest release went public before the job started.
+        ("2026-10-13T10:00:40Z 2026-10-13T10:00:50Z", ""),
         # The run made no release: no job that publishes ran.
         ("", ""),
     ],
@@ -199,8 +202,8 @@ def test_the_rollout_takes_the_release_that_the_run_published(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.outputs == ({"tag": tag} if tag else {})
     made_none = (
-        "The run made no release; the latest one, v1.2.0, went public while no job "
-        "of the run was publishing."
+        "The run made no release; the latest one, v1.2.0, went public before the "
+        "run's job that publishes started."
     )
     assert (made_none in result.summary) == (not tag)
 
