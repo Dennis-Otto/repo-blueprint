@@ -7,6 +7,15 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.11.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.2...v1.11.3) (2026-11-05)
+
+
+### Bug fixes
+
+* a new repository and the Rollout name a workflow that GitHub hasn't registered ([#673](https://github.com/Dennis-Otto/repo-blueprint/issues/673)) ([004b653](https://github.com/Dennis-Otto/repo-blueprint/commit/004b6535c553ea1ae3bf7d89592f093bbd0653e2))
+* **deps:** update symfony/filesystem to 7.4.23, also in the update leg of the Variants ([#671](https://github.com/Dennis-Otto/repo-blueprint/issues/671)) ([eeaa9d4](https://github.com/Dennis-Otto/repo-blueprint/commit/eeaa9d4b1e2610c126e21448767ab8afca64fb96))
+* the Rollout takes a release that went public in an earlier attempt of the run ([#670](https://github.com/Dennis-Otto/repo-blueprint/issues/670)) ([e21bdcd](https://github.com/Dennis-Otto/repo-blueprint/commit/e21bdcde6c32d59b313616282c12917f3f48a818))
+
 ## [1.11.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.1...v1.11.2) (2026-11-04)
 
 ### Bug fixes
