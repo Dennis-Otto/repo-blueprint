@@ -433,6 +433,27 @@ jobs:
           extensions: dom, libxml, mbstring, xml
           coverage: pcov
           tools: composer:v2
+      # The update keeps composer.lock as the latest release locked it, so an advisory
+      # published since then would fail composer audit in every pull request, also in
+      # the one that fixes the lock of the blueprint. A repository gets that fix from
+      # its Renovate, whose vulnerability alerts update the named packages alone; the
+      # update leg does the same, and composer audit in the checks still fails a
+      # package that no version fixes yet.
+      - name: Update the locked packages that an advisory names, as Renovate does
+        if: matrix.start == 'update' && matrix.kind == 'nextcloud-app'
+        timeout-minutes: 5
+        run: |
+          cd "$PROJECT"
+          # composer audit fails when it finds an advisory; the list is what counts.
+          report="$(composer audit --locked --format=json --no-interaction || true)"
+          mapfile -t vulnerable < <(jq -r '.advisories | keys[]' <<<"$report")
+          if ((${#vulnerable[@]} == 0)); then
+            echo "No advisory names a locked package."
+            exit 0
+          fi
+          echo "::notice::An advisory names ${vulnerable[*]}, which the latest release locked; the update locks the version that fixes it, as Renovate does in a repository."
+          composer update "${vulnerable[@]}" --with-dependencies --no-install --no-interaction
+          echo "Renovate's update of ${vulnerable[*]}, which an advisory names, is part of the update." >> "$GITHUB_STEP_SUMMARY"
       - name: Install the locked tools of the app
         if: matrix.start != 'adopted' && matrix.kind == 'nextcloud-app'
         working-directory: ${{ env.PROJECT }}
