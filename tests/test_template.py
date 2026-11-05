@@ -7338,7 +7338,9 @@ def test_releases_are_announced_in_the_discussions(
     assert publish["permissions"]["discussions"] == "write"
     # Only a release for everybody, not a prerelease, is announced.
     script = script_of(publish, "Make the complete release public")
-    assert script.index("exit 0") < script.index("--discussion-category")
+    assert script.index("exit 0") < script.index(
+        "announce=(--discussion-category Announcements)"
+    )
     assert "has_discussions = true" in (project / ".github/repository.toml").read_text(
         encoding="utf-8"
     )
@@ -8769,11 +8771,14 @@ def test_every_release_of_the_blueprint_rolls_out_one_repository_at_a_time(
     )
     assert config["packages"]["."]["pull-request-title-pattern"].startswith(prefix)
     # The release that the run published, not the one at its commit: the job of the
-    # Release workflow that makes it public tells.
+    # Release workflow that makes it public tells, in every attempt that ran it.
     assert "HEAD_SHA" not in rollout
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "publish the release" in names_of_jobs(release)
-    assert 'select(.name == "publish the release")' in values_of(plan)
+    assert (
+        'select(.name == "publish the release" and .conclusion != "skipped"'
+        in values_of(plan)
+    )
     # One repository after the other, every one of them, each with a token of its own
     # that can only start workflows and read; 15 looks at most before the next one.
     assert job["strategy"] == {

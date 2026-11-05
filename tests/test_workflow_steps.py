@@ -1163,6 +1163,203 @@ def test_a_release_is_made_public_and_announced_where_it_can_be(
     assert ("announced" in done.summary) == ("Announcements" in edit)
 
 
+# How gh answers when GitHub fails for a moment, as it answered the call that made
+# v1.11.1 public, which it made public all the same (#661).
+BAD_GATEWAY = "HTTP 502: Bad Gateway (https://api.github.com/repos/o/r/releases/1)\n"
+MADE_PUBLIC_ANYWAY = "made it public all the same"
+
+
+def release_state(tag: str, state: str = "", code: int = 0) -> Answer:
+    """The answer of gh to the look at the release of the tag: whether it is a draft
+    and whether it is a prerelease, such as "false false"."""
+    pattern = (
+        rf"release view {re.escape(tag)} --repo o/r --json isDraft,isPrerelease .*"
+    )
+    if code:
+        return Answer(pattern, err=BAD_GATEWAY, code=code, once=True)
+    return Answer(pattern, f"{state}\n", once=True)
+
+
+def latest_release(tag: str) -> Answer:
+    """The answer of gh to the look at the latest release of the repository."""
+    return exact("release view --repo o/r --json tagName --jq .tagName", f"{tag}\n")
+
+
+def failed_edit(tag: str) -> Answer:
+    """The call that makes the release public, which GitHub fails once."""
+    return Answer(
+        rf"release edit {re.escape(tag)} .*", err=BAD_GATEWAY, code=1, once=True
+    )
+
+
+def publishing(tmp_path: Path, tag: str, answers: list[Answer]) -> StepResult:
+    """Runs *Make the complete release public* for the tag, with the answers of gh
+    before those of a repository without the category Announcements, and a sleep
+    that only counts."""
+    return run_step(
+        tmp_path,
+        "release.yml",
+        "publish",
+        "Make the complete release public",
+        answers=[*answers, Answer(r"api graphql .*", "General\n")],
+        env={"TAG": tag},
+        stubs={"sleep": recording("sleep")},
+    )
+
+
+@pytest.mark.parametrize(
+    ("tag", "state"), [("v2.0.0", "false false"), ("v2.0.0-beta.1", "false true")]
+)
+def test_a_release_that_github_made_public_despite_an_error_is_public(
+    tmp_path: Path, tag: str, state: str
+) -> None:
+    done = publishing(
+        tmp_path,
+        tag,
+        [failed_edit(tag), release_state(tag, state), latest_release("v2.0.0")],
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    # One call, which GitHub answered with an error after it had done what was asked.
+    assert len(done.called("release edit")) == 1
+    assert [call for call in done.stubbed if call.startswith("sleep")] == []
+    assert MADE_PUBLIC_ANYWAY in done.summary
+    # Only a release for everybody is the latest one.
+    assert bool(done.called("release view --repo")) == ("-" not in tag)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        # Still a draft.
+        release_state("v2.0.0", "true false"),
+        # Public, but not the latest release.
+        release_state("v2.0.0", "false false"),
+        # GitHub fails the look at the release as well.
+        release_state("v2.0.0", code=1),
+    ],
+)
+def test_a_release_that_github_did_not_make_public_is_made_public_again(
+    tmp_path: Path, state: Answer
+) -> None:
+    done = publishing(
+        tmp_path,
+        "v2.0.0",
+        [
+            failed_edit("v2.0.0"),
+            state,
+            latest_release("v1.9.0"),
+            Answer(r"release edit v2\.0\.0 .*"),
+        ],
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        done.called("release edit")
+        == ["release edit v2.0.0 --draft=false --latest --repo o/r"] * 2
+    )
+    assert done.stubbed == ["sleep 15"]
+    assert MADE_PUBLIC_ANYWAY not in done.summary
+
+
+def test_a_release_that_github_never_makes_public_fails_its_job(
+    tmp_path: Path,
+) -> None:
+    tag = "v2.0.0-beta.1"
+    done = publishing(
+        tmp_path,
+        tag,
+        [
+            Answer(r"release edit .*", err=BAD_GATEWAY, code=1),
+            Answer(r"release view .*", "true true\n"),
+        ],
+    )
+
+    # Three times at most, 15 seconds apart.
+    assert done.returncode == 1
+    assert len(done.called("release edit")) == 3
+    assert done.stubbed == ["sleep 15", "sleep 15"]
+    assert (
+        f"::error::GitHub failed three times to make {tag} public, which stays a "
+        "draft until the job runs again." in done.stdout
+    )
+
+
+@pytest.mark.parametrize(
+    ("discussion", "edits"),
+    [
+        # Public and the latest release, but GitHub linked no discussion yet, as
+        # with v1.11.1: the call is made again, and GitHub creates it then.
+        ("", 2),
+        ("https://github.com/o/r/discussions/659", 1),
+    ],
+)
+def test_a_public_release_without_its_announcement_is_announced_again(
+    tmp_path: Path, discussion: str, edits: int
+) -> None:
+    done = publishing(
+        tmp_path,
+        "v2.0.0",
+        [
+            Answer(r"api graphql .*", "General\nAnnouncements\n"),
+            failed_edit("v2.0.0"),
+            release_state("v2.0.0", "false false"),
+            latest_release("v2.0.0"),
+            exact(
+                "api repos/o/r/releases/tags/v2.0.0 --jq .discussion_url // empty",
+                f"{discussion}\n" if discussion else "",
+            ),
+            Answer(r"release edit v2\.0\.0 .*"),
+        ],
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        done.called("release edit")
+        == [
+            "release edit v2.0.0 --draft=false --latest "
+            "--discussion-category Announcements --repo o/r"
+        ]
+        * edits
+    )
+    assert done.stubbed == ["sleep 15"] * (edits - 1)
+    assert (MADE_PUBLIC_ANYWAY in done.summary) == (edits == 1)
+    assert "announced in the discussions" in done.summary
+
+
+@pytest.mark.parametrize("failures", [1, 3])
+def test_github_is_asked_again_for_the_categories_of_the_discussions(
+    tmp_path: Path, failures: int
+) -> None:
+    done = publishing(
+        tmp_path,
+        "v2.0.0",
+        [
+            *[
+                Answer(r"api graphql .*", err=BAD_GATEWAY, code=1, once=True)
+                for _ in range(failures)
+            ],
+            Answer(r"api graphql .*", "Announcements\n"),
+            Answer(r"release edit v2\.0\.0 .*"),
+        ],
+    )
+
+    assert done.stubbed == ["sleep 15"] * min(failures, 2)
+    if failures == 3:
+        assert done.returncode == 1
+        assert done.called("release edit") == []
+        assert (
+            "::error::GitHub failed three times to name the categories of the "
+            "discussions; v2.0.0 stays a draft until the job runs again."
+        ) in done.stdout
+        return
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.called("release edit") == [
+        "release edit v2.0.0 --draft=false --latest "
+        "--discussion-category Announcements --repo o/r"
+    ]
+
+
 def test_the_major_tag_of_an_action_follows_each_release() -> None:
     settings = job("release.yml", "github-action")
     assert settings["if"] == (
