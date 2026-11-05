@@ -101,17 +101,19 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          # The latest release, and the job of the run that makes a release public.
+          # The latest release, and the start and end of each job of the run that made
+          # a release public.
           ask_github() {
             latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt \
               --jq '"\(.tagName) \(.publishedAt)"')" || return
             publish=""
             if [[ -n "$RUN_ID" ]]; then
-              # All jobs of all attempts, of which the last attempt's counts: the list of the
-              # latest attempt leaves out a job that GitHub dates before the start of the
-              # run, as it did in the hour that repeats when the clocks of the US go back.
+              # The jobs of every attempt: the list of the latest attempt leaves out a job
+              # that GitHub dates before the start of the run, as it did in the hour that
+              # repeats when the clocks of the US go back. A job that GitHub skipped made
+              # nothing public, whatever its dates say.
               publish="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
-                --jq '[.jobs[] | select(.name == "publish the release")] | max_by(.run_attempt) // empty | "\(.conclusion) \(.started_at)"')"
+                --jq '.jobs[] | select(.name == "publish the release" and .conclusion != "skipped" and .completed_at != null) | "\(.started_at) \(.completed_at)"')"
             fi
           }
           # GitHub fails for a moment now and then, so it asks three times.
@@ -128,18 +130,23 @@ jobs:
           read -r tag published <<<"$latest"
           # Started by hand, the rollout takes the latest release. After a run of the
           # Release workflow, whatever started it, it takes the release that the run
-          # published: the run's job "publish the release" succeeded, and the latest
-          # release went public after that job started; a beta leaves the latest release
-          # as it was. A run that GitHub started again for its failed jobs keeps the jobs
-          # that passed before.
+          # published: the latest release went public while the run's job "publish the
+          # release" ran, in whichever attempt of the run. GitHub can fail that job after
+          # it made the release public, as it did with v1.11.1, and the attempt that runs
+          # the job again finds the release public already. A beta leaves the latest
+          # release as it was, a run that made no release ran no such job, and the
+          # Release workflow runs one run at a time, so no other run published meanwhile.
           if [[ -n "$RUN_ID" ]]; then
-            read -r conclusion started <<<"$publish"
-            if [[ "$conclusion" == success ]]; then
-              published_at="$(date -d "$published" +%s)"
-              started_at="$(date -d "$started" +%s)"
-            fi
-            if [[ "$conclusion" != success ]] || ((published_at < started_at)); then
-              echo "The run made no release; the latest one, $tag, went out before." >> "$GITHUB_STEP_SUMMARY"
+            published_at="$(date -d "$published" +%s)"
+            made=false
+            while read -r started completed; do
+              if [[ -n "$started" ]] && (($(date -d "$started" +%s) <= published_at)) &&
+                ((published_at <= $(date -d "$completed" +%s))); then
+                made=true
+              fi
+            done <<<"$publish"
+            if [[ "$made" != true ]]; then
+              echo "The run made no release; the latest one, $tag, went public while no job of the run was publishing." >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
           fi

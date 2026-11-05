@@ -171,12 +171,23 @@ LATEST = "v1.2.0 2026-10-13T10:00:30Z"
         # The run published it, whatever started it: the merge of the release pull
         # request, the daily schedule after the run of the merge failed, or a start by
         # hand that took up a draft; and however far main moved on meanwhile.
-        ("success 2026-10-13T10:00:10Z", "v1.2.0"),
-        ("success 2026-10-13T10:00:30Z", "v1.2.0"),
+        ("2026-10-13T10:00:10Z 2026-10-13T10:00:40Z", "v1.2.0"),
+        # At the second at which the job started or ended.
+        ("2026-10-13T10:00:30Z 2026-10-13T10:00:50Z", "v1.2.0"),
+        ("2026-10-13T10:00:10Z 2026-10-13T10:00:30Z", "v1.2.0"),
+        # In an attempt before the last: GitHub failed the job of that attempt after
+        # it had made the release public, as with v1.11.1 (#661), and the attempt
+        # that ran the job again found the release public already.
+        (
+            "2026-10-13T10:00:10Z 2026-10-13T10:00:40Z\n"
+            "2026-10-13T10:01:10Z 2026-10-13T10:01:30Z",
+            "v1.2.0",
+        ),
         # The run published a beta, which leaves the latest release as it was.
-        ("success 2026-10-13T11:00:10Z", ""),
-        # The run made no release.
-        ("skipped 2026-10-13T11:00:10Z", ""),
+        ("2026-10-13T11:00:10Z 2026-10-13T11:00:30Z", ""),
+        # The latest release went public after the job had ended, by hand perhaps.
+        ("2026-10-13T09:59:50Z 2026-10-13T10:00:20Z", ""),
+        # The run made no release: no job that publishes ran.
         ("", ""),
     ],
 )
@@ -187,55 +198,74 @@ def test_the_rollout_takes_the_release_that_the_run_published(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.outputs == ({"tag": tag} if tag else {})
-    made_none = "The run made no release; the latest one, v1.2.0, went out before."
+    made_none = (
+        "The run made no release; the latest one, v1.2.0, went public while no job "
+        "of the run was publishing."
+    )
     assert (made_none in result.summary) == (not tag)
 
 
-def publish_job(attempt: int, conclusion: str, started_at: str) -> dict[str, object]:
+def publish_job(
+    attempt: int, conclusion: str | None, started_at: str, completed_at: str | None
+) -> dict[str, object]:
     """The job of the Release workflow that makes a release public, as GitHub lists it."""
     return {
         "name": "publish the release",
         "run_attempt": attempt,
         "conclusion": conclusion,
         "started_at": started_at,
+        "completed_at": completed_at,
     }
+
+
+# The jobs that publish of the run of v1.11.1, which needed four attempts, as GitHub
+# listed them: the first two skipped the job, with dates of a job that never ran; the
+# third failed with an HTTP 502 of GitHub after the release had gone public at
+# 10:06:02; and the fourth found it public and passed (#661).
+RUN_OF_1_11_1 = [
+    publish_job(1, "skipped", "2026-11-04T09:58:28Z", "2026-11-04T09:58:28Z"),
+    publish_job(2, "skipped", "2026-11-04T10:00:43Z", "2026-11-04T10:00:25Z"),
+    publish_job(3, "failure", "2026-11-04T10:05:51Z", "2026-11-04T10:06:14Z"),
+    publish_job(4, "success", "2026-11-04T10:06:54Z", "2026-11-04T10:07:11Z"),
+    {"name": "release assets / release assets", "run_attempt": 4},
+]
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="the filter of gh needs jq")
 @pytest.mark.parametrize(
-    ("jobs", "tag"),
+    ("jobs", "latest", "tag"),
     [
         # The job of the only attempt.
-        ([publish_job(1, "success", "2026-10-13T10:00:10Z")], "v1.2.0"),
-        # A run that GitHub started again: the last attempt counts.
         (
-            [
-                publish_job(1, "failure", "2026-10-13T09:00:10Z"),
-                publish_job(2, "success", "2026-10-13T10:00:10Z"),
-            ],
+            [publish_job(1, "success", "2026-10-13T10:00:10Z", "2026-10-13T10:00:40Z")],
+            LATEST,
             "v1.2.0",
         ),
+        # A run that GitHub started again, whose release went public in an attempt
+        # before the last.
+        (RUN_OF_1_11_1, "v1.11.1 2026-11-04T10:06:02Z", "v1.11.1"),
+        # A job that GitHub skipped made nothing public, whatever its dates say.
         (
-            [
-                publish_job(2, "failure", "2026-10-13T10:00:10Z"),
-                publish_job(1, "success", "2026-10-13T09:00:10Z"),
-            ],
+            [publish_job(1, "skipped", "2026-10-13T10:00:00Z", "2026-10-13T10:01:00Z")],
+            LATEST,
             "",
         ),
+        # A job that hasn't ended.
+        ([publish_job(1, None, "2026-10-13T10:00:00Z", None)], LATEST, ""),
         # A run without that job, among the other jobs.
-        ([{"name": "release assets", "run_attempt": 1}], ""),
+        ([{"name": "release assets", "run_attempt": 1}], LATEST, ""),
     ],
 )
-def test_the_last_attempt_of_the_job_that_publishes_counts(
-    rollout: Rollout, jobs: list[dict[str, object]], tag: str
+def test_a_release_that_went_public_in_any_attempt_of_the_run_counts(
+    rollout: Rollout, jobs: list[dict[str, object]], latest: str, tag: str
 ) -> None:
-    # The list with every job, which also holds one that GitHub dates before the start
-    # of the run, as on 2026-11-01 when the clocks of the US went back and the Rollout
-    # took v1.3.0 for no release.
+    # The list with every job of every attempt, which also holds one that GitHub dates
+    # before the start of the run, as on 2026-11-01 when the clocks of the US went
+    # back and the Rollout took v1.3.0 for no release.
     pattern = r"api repos/o/r/actions/runs/7/jobs\?filter=all&per_page=100 .*"
     rollout.first = [Answer(pattern, json={"jobs": jobs})]
 
-    result = rollout.run("Find the release", RUN_ID="7", latest=LATEST)
+    result = rollout.run("Find the release", RUN_ID="7", latest=latest)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.outputs == ({"tag": tag} if tag else {})
@@ -270,7 +300,7 @@ def test_github_is_asked_again_for_the_release(
         "Find the release",
         RUN_ID="7",
         latest=LATEST,
-        publish="success 2026-10-13T10:00:10Z",
+        publish="2026-10-13T10:00:10Z 2026-10-13T10:00:40Z",
     )
 
     # Three times at most, 15 seconds apart.
