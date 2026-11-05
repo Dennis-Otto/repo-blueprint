@@ -7,6 +7,15 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.11.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.2...v1.11.3) (2026-11-05)
+
+### Bug fixes
+
+- **A new repository starts with every workflow that GitHub knows:** the first push of a new repository may leave each workflow that only a schedule, a release or a person starts unregistered, and GitHub then starts none of them, not even on their schedule, as with the blueprint bot, cleanup, SBOM and Verify release of dennis-otto-pager. Now `blueprint.py create` waits up to a minute after its push until GitHub knows every workflow of `.github/workflows/`, and for each one that it doesn't, it opens the pull request of the new command `python3 .github/blueprint.py workflows register`, one commit that GitHub signs and that adds a comment to the end of each; after its merge, the command opens the one that takes the comments out again. The command repairs an older repository the same way, and the checklist names each workflow that GitHub doesn't know. The Rollout names a blueprint bot that GitHub hasn't registered, with that command, instead of failing three times without a reason ([#652](https://github.com/Dennis-Otto/repo-blueprint/issues/652)).
+- **A release that GitHub made public despite an error reaches every repository:** GitHub answered the call that made v1.11.1 public with an HTTP 502 and made the release public all the same, so the job that publishes failed; the Rollout after the attempt that ran the job again took the release for an older one and brought it to no repository. Now the job reads the release again after a call that failed and passes once the release is public as asked and, when the repository has Announcements, announced, or makes the call again, three times at most, as it does with the categories of the discussions; and the Rollout takes the release that went public after a job of the run that publishes started, in whichever attempt of the run ([#661](https://github.com/Dennis-Otto/repo-blueprint/issues/661)).
+- **Nextcloud apps lock a safe symfony/filesystem:** the lock of the PHP stack moves symfony/filesystem from 7.4.21 to 7.4.23, which fixes the advisory [GHSA-6prc-h956-hxjq](https://github.com/symfony/symfony/security/advisories/GHSA-6prc-h956-hxjq); Composer's audit failed every new or updated Nextcloud app until then.
+- **The update leg of the Variants updates a package that an advisory names:** the update keeps the `composer.lock` of a Nextcloud app as the latest release locked it, so an advisory published since then failed every pull request, also the one that fixes the lock; now the leg updates the named packages first, as Renovate's vulnerability alerts do in a repository, and `composer audit` still fails a package that no version fixes.
+
 ## [1.11.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.1...v1.11.2) (2026-11-04)
 
 ### Bug fixes
