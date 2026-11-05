@@ -2462,3 +2462,56 @@ def test_no_test_slices_workflow_text_or_fakes_gh_on_its_own() -> None:
         if path.name not in ALLOWED
     }
     assert {name: lines for name, lines in found.items() if lines} == {}
+
+
+# composer audit --locked --format=json, as Composer 2 prints it, with an advisory or
+# without one.
+AUDIT_FOUND = json.dumps(
+    {
+        "advisories": {
+            "symfony/filesystem": [
+                {
+                    "advisoryId": "PKSA-g499-cm4q-v35y",
+                    "packageName": "symfony/filesystem",
+                    "affectedVersions": "<7.4.23",
+                }
+            ]
+        },
+        "abandoned": {},
+    }
+)
+AUDIT_CLEAN = json.dumps({"advisories": [], "abandoned": {}})
+
+
+@pytest.mark.skipif(
+    shutil.which("jq") is None, reason="the step reads the audit with jq"
+)
+@pytest.mark.parametrize(("report", "code"), [(AUDIT_FOUND, 1), (AUDIT_CLEAN, 0)])
+def test_the_update_leg_updates_a_locked_package_that_an_advisory_names(
+    tmp_path: Path, report: str, code: int
+) -> None:
+    composer = recording(
+        "composer",
+        f"if [[ $1 == audit ]]; then printf '%s\n' '{report}'; exit {code}; fi",
+    )
+    done = run_step(
+        tmp_path,
+        "variants.yml",
+        "variant",
+        "Update the locked packages that an advisory names, as Renovate does",
+        stubs={"composer": composer},
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    audit = "composer audit --locked --format=json --no-interaction"
+    if code:
+        # Only the named package, as Renovate's vulnerability alert updates it.
+        assert done.stubbed == [
+            audit,
+            "composer update symfony/filesystem --with-dependencies --no-install "
+            "--no-interaction",
+        ]
+        assert "symfony/filesystem" in done.summary
+    else:
+        assert done.stubbed == [audit]
+        assert "No advisory names a locked package." in done.stdout
