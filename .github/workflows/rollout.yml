@@ -387,6 +387,8 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPOSITORY: ${{ matrix.repository }}
           TAG: ${{ needs.plan.outputs.tag }}
+          # Why GitHub may not know a workflow whose file is there.
+          UNREGISTERED: https://github.com/Dennis-Otto/repo-blueprint/issues/652
         run: |
           set -euo pipefail
           # GitHub fails for a moment now and then, so it asks three times, 15 seconds
@@ -412,8 +414,23 @@ jobs:
             exit 1
           fi
           for attempt in 1 2 3; do
-            if started="$(gh workflow run blueprint-update.yml --repo "$REPOSITORY")"; then
+            if started="$(gh workflow run blueprint-update.yml --repo "$REPOSITORY" 2>"$RUNNER_TEMP/dispatch")"; then
               break
+            fi
+            cat "$RUNNER_TEMP/dispatch" >&2
+            # The look above found the file, so a 404 means that GitHub hasn't
+            # registered the workflow, as after a first push that registered none that
+            # only a schedule or a person starts (#652). No attempt changes that, only
+            # a push that changes the file.
+            if grep -q "HTTP 404" "$RUNNER_TEMP/dispatch"; then
+              problem="GitHub hasn't registered blueprint-update.yml in $REPOSITORY; see $UNREGISTERED"
+              echo "::error::Not started in $REPOSITORY: $problem."
+              {
+                echo "✘ Not started in $REPOSITORY: $problem."
+                echo
+                echo "GitHub starts a workflow only once it has registered it, not even on its schedule, and a push that changes the file registers it. In $REPOSITORY, \`python3 .github/blueprint.py workflows register\` opens the pull request that changes each workflow that GitHub doesn't know by a comment; after its merge, the command opens the one that takes the comments out again. The next Rollout then starts the blueprint bot there."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
             fi
             if ((attempt == 3)); then
               echo "::error::Not started in $REPOSITORY: its blueprint bot could not be started."
