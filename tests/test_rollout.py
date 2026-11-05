@@ -64,6 +64,15 @@ def answer(kind: str, outcome: str, values: dict[str, str]) -> Answer:
         # GitHub didn't name the run.
         if outcome == "quiet":
             return exact(call)
+        # The file is there, but GitHub hasn't registered the workflow (#652).
+        if outcome == "unregistered":
+            return exact(
+                call,
+                err="HTTP 404: workflow blueprint-update.yml not found on the default"
+                f" branch (https://api.github.com/repos/{repository}/actions/workflows"
+                "/blueprint-update.yml)\n",
+                code=1,
+            )
         return exact(
             call, err="could not create workflow dispatch event: HTTP 500\n", code=1
         )
@@ -464,6 +473,33 @@ def test_a_repository_whose_bot_cannot_be_started_fails_by_its_name(
     assert f"✘ Not started in o/b: {problem}." in result.summary
     assert result.outputs == {}
     assert result.called("workflow") == [DISPATCH] * len(dispatches)
+
+
+@pytest.mark.parametrize("lookups", [["200"], ["502", "200"]])
+def test_a_bot_that_github_has_not_registered_is_named_without_asking_again(
+    rollout: Rollout, lookups: list[str]
+) -> None:
+    # The file of the bot is there, but the first push of the repository didn't
+    # register it, and no attempt changes that: only a change of the file does.
+    rollout.plan("lookup-b", *lookups)
+    rollout.plan("dispatch-b", "unregistered", "ok")
+
+    result = rollout.run("Start the blueprint bot", REPOSITORY="o/b")
+
+    assert result.returncode == 1
+    problem = (
+        "GitHub hasn't registered blueprint-update.yml in o/b; see"
+        " https://github.com/Dennis-Otto/repo-blueprint/issues/652"
+    )
+    assert f"::error::Not started in o/b: {problem}." in result.stdout
+    assert f"✘ Not started in o/b: {problem}." in result.summary
+    # What registers it, in the repository itself.
+    assert "python3 .github/blueprint.py workflows register" in result.summary
+    # gh's own message stays in the log.
+    assert "HTTP 404: workflow blueprint-update.yml not found" in result.stderr
+    assert result.outputs == {}
+    assert result.called("workflow") == [DISPATCH]
+    assert slept(result) == ["sleep 15"] * (len(lookups) - 1)
 
 
 def test_a_repository_that_fails_holds_up_none_after_it(rollout: Rollout) -> None:

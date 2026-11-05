@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: How GitHub comes to know every workflow of a new repository
+    accDescr: GitHub starts a workflow only once it has registered it, and the first push of a new repository may register none; a run registers its workflow, so those that only a schedule, a release or a person starts stay unknown. After its push, python3 .github/blueprint.py create asks GitHub for up to a minute whether it knows every workflow of .github/workflows/. For each that it doesn't, create runs python3 .github/blueprint.py workflows register, which opens a pull request of one commit that GitHub signs, with a comment at the end of each such workflow. Its merge is a push that changes them, which registers them. Run again, the command opens the pull request that takes the comments out, and the files are the blueprint's again. Then every workflow starts on its push, its schedule, its release or by hand.
+
+    push(["`**blueprint.py create**<br>the first push`"])
+    look["`**create looks for up to a minute**<br>Does GitHub know every workflow<br>of .github/workflows/?`"]
+    register["`**workflows register**<br>a pull request of one signed commit:<br>a comment at the end of each unknown workflow`"]
+    merge(["You: merge it<br>once its checks are green"])
+    unmark["`**workflows register again**<br>the pull request that takes<br>the comments out`"]
+    again(["You: merge it"])
+    known["`**Every workflow starts**<br>on its push, its schedule,<br>its release or by hand`"]
+
+    push --> look
+    look -->|yes| known
+    look -->|no: those of a schedule, a release or a person| register
+    register --> merge
+    merge -->|a push that changes them registers them| unmark
+    unmark --> again
+    again --> known
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class look,register,unmark bot
+    class push,merge,again person
+    class known done

@@ -101,6 +101,16 @@ git diff --name-only --diff-filter=D -z | xargs -0 git restore --
 
 Check that `git status` then lists only `.copier-answers.yml` and the pages that speak of the sample, such as `CONTRIBUTING.md`, and commit them. From then on the files are yours alone, and no update of the blueprint touches them.
 
+## A workflow of mine can't be started (404)
+
+When `gh workflow run` answers `HTTP 404: workflow … not found on the default branch` for a workflow whose file is on `main`, GitHub hasn't registered it, and then not even its schedule starts it. A run registers its workflow, and a push that changes its file does; the first push of a new repository may register none ([#652](https://github.com/Dennis-Otto/repo-blueprint/issues/652)), so a workflow that only a schedule, a release or a person starts can stay unknown, such as the blueprint bot, which the Rollout then can't start. `python3 .github/blueprint.py checklist` names each one, and in the folder of the repository, run:
+
+```sh
+python3 .github/blueprint.py workflows register
+```
+
+It opens a pull request with one commit that GitHub signs, which adds a comment to the end of each workflow that GitHub doesn't know. Merge it once its checks are green: the merge is a push that changes them, which registers them. Then run the command again, and it opens the pull request that takes the comments out, so that the files are the blueprint's once more. `create` does the first step by itself when GitHub still doesn't know a workflow a minute after its push ([guide](guide.md#what-create-checks-after-its-push)).
+
 ## How do I leave the blueprint?
 
 Delete `.github/workflows/blueprint-update.yml`, and no update of the blueprint comes any more; the Rollout of the blueprint leaves a repository without the blueprint bot out. Everything else stays and works as it is, since it is a file of your repository: the workflows, the checks, the settings as code with `.github/blueprint.py` and the other bots. The license of the blueprint, [MIT No Attribution](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE), asks nothing of what you keep, not even a notice. Keep `.copier-answers.yml` if you might come back: `copier update` starts from the release that it names.

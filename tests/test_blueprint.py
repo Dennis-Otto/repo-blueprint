@@ -322,6 +322,8 @@ class FakeGitHub:
         # The pull requests of every state, newest first, as GitHub answers them,
         # which a test may break.
         self.pulls: list[Any] = []
+        # The paths of the workflows that GitHub has registered.
+        self.workflows: list[str] = []
         self.labels: dict[str, dict[str, str]] = {
             "good first issue": {"color": "000000", "description": "Old"},
             "spare": {"color": "ffffff", "description": "Not in the configuration"},
@@ -430,6 +432,7 @@ class FakeGitHub:
             (r"/pages", self.pages_site),
             (r"/issues", self.issue_list),
             (r"/pulls", self.pull_list),
+            (r"/actions/workflows", self.workflow_list),
         ):
             match = re.fullmatch(pattern, path)
             if match:
@@ -439,6 +442,10 @@ class FakeGitHub:
 
     def issue_list(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.issues
+
+    def workflow_list(self, method: str, body: Any) -> tuple[int, Any]:
+        known = [{"path": path} for path in self.workflows]
+        return 200, {"total_count": len(known), "workflows": known}
 
     def pull_list(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.pulls
@@ -3176,6 +3183,104 @@ def test_create_with_dry_run_changes_nothing(
     assert out.startswith(f"The preflight of {REPO}:\n")
     assert f"create would make {REPO} on GitHub, public, with:" in out
     assert "  python3 .github/blueprint.py settings apply\n" in out
+
+
+def workflows_of(copy: Path, *names: str) -> list[str]:
+    """The workflows of the copy, by their paths."""
+    folder = copy / ".github/workflows"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / name).write_text("on: workflow_dispatch\n", encoding="utf-8")
+    return [f".github/workflows/{name}" for name in names]
+
+
+class Registering:
+    """workflows register as create runs it: what it was asked for, and its answer."""
+
+    def __init__(self, error: GitHubError | None = None) -> None:
+        self.asked: list[str] = []
+        self.error = error
+
+    def __call__(self, api: Api, repo: str) -> str:
+        self.asked.append(repo)
+        if self.error:
+            raise self.error
+        return "The pull request that registers them: https://github.com/o/r/pull/1"
+
+
+def test_create_checks_that_github_knows_the_workflows_of_its_push(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github.workflows = workflows_of(copy, "ci.yml", "sbom.yml")
+    registering = Registering()
+    monkeypatch.setattr(cli, "register_workflows", registering)
+
+    assert run(github, copy, "create") == 0
+
+    out = capsys.readouterr().out
+    assert out.index(f"Created https://github.com/{REPO}") < out.index(
+        "GitHub knows all 2 workflows of .github/workflows/."
+    )
+    assert registering.asked == []
+    assert "✔ GitHub knows every workflow of .github/workflows/" in out
+
+
+def test_create_opens_the_pull_request_that_registers_what_github_does_not_know(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    waits: list[float],
+) -> None:
+    # The first push registered only the workflow that its run registered (#652).
+    github.workflows = workflows_of(copy, "ci.yml", "sbom.yml")[:1]
+    registering = Registering()
+    monkeypatch.setattr(cli, "register_workflows", registering)
+
+    assert run(github, copy, "create") == 0
+
+    assert registering.asked == [REPO]
+    # GitHub had a minute to register the workflows.
+    assert waits.count(10.0) == 5
+    out = capsys.readouterr().out
+    # The look, the pull request, the settings, then the checklist that names it.
+    places = [
+        out.index("GitHub hasn't registered 1 of the 2 workflows"),
+        out.index("The pull request that registers them"),
+        out.index(f"The settings of {REPO} differ"),
+        out.index(f"The set-up of {REPO}:"),
+    ]
+    assert places == sorted(places)
+    assert "✘ GitHub knows every workflow of .github/workflows/" in out
+    assert "GitHub hasn't registered sbom.yml: it starts none of them" in out
+
+
+def test_create_fails_when_the_pull_request_that_registers_the_workflows_fails(
+    github: FakeGitHub,
+    copy: Path,
+    shell: Shell,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workflows_of(copy, "sbom.yml")
+    registering = Registering(GitHubError(422, "simulated failure"))
+    monkeypatch.setattr(cli, "register_workflows", registering)
+
+    assert run(github, copy, "create") == 2
+
+    captured = capsys.readouterr()
+    assert (
+        "the pull request that registers the workflows could not be opened: GitHub"
+        " answered 422: simulated failure. Run python3 .github/blueprint.py"
+        " workflows register once that is fixed." in captured.err
+    )
+    # The checklist all the same.
+    assert f"The set-up of {REPO}:" in captured.out
 
 
 def test_create_without_the_answers_names_a_command_that_works(

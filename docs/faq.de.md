@@ -101,6 +101,16 @@ git diff --name-only --diff-filter=D -z | xargs -0 git restore --
 
 Prüfe, dass `git status` danach nur `.copier-answers.yml` und die Seiten nennt, die vom Beispiel sprechen, etwa `CONTRIBUTING.md`, und committe sie. Von da an gehören die Dateien allein dir, und kein Update des Blueprints fasst sie an.
 
+## Ein Workflow lässt sich nicht starten (404)
+
+Antwortet `gh workflow run` für einen Workflow, dessen Datei auf `main` liegt, mit `HTTP 404: workflow … not found on the default branch`, hat GitHub ihn nicht registriert, und dann startet ihn nicht einmal sein Zeitplan. Ein Lauf registriert seinen Workflow, und ein Push, der seine Datei ändert, ebenso; der erste Push eines neuen Repositorys registriert womöglich keinen ([#652](https://github.com/Dennis-Otto/repo-blueprint/issues/652)), also kann ein Workflow, den nur ein Zeitplan, ein Release oder eine Person startet, unbekannt bleiben, etwa der Blueprint-Bot, den der Rollout dann nicht starten kann. `python3 .github/blueprint.py checklist` nennt jeden davon, und im Ordner des Repositorys führst du aus:
+
+```sh
+python3 .github/blueprint.py workflows register
+```
+
+Das öffnet einen Pull Request mit einem Commit, den GitHub signiert und der ans Ende jedes Workflows, den GitHub nicht kennt, einen Kommentar anhängt. Merge ihn, sobald seine Checks grün sind: Der Merge ist ein Push, der sie ändert, und registriert sie. Führ den Befehl dann noch einmal aus, und er öffnet den Pull Request, der die Kommentare wieder herausnimmt, sodass die Dateien wieder die des Blueprints sind. `create` macht den ersten Schritt von selbst, wenn GitHub einen Workflow eine Minute nach seinem Push noch nicht kennt ([Anleitung](guide.md#was-create-nach-seinem-push-nachsieht)).
+
 ## Wie verlasse ich den Blueprint?
 
 Lösche `.github/workflows/blueprint-update.yml`, und kein Update des Blueprints kommt mehr; der Rollout des Blueprints lässt ein Repository ohne Blueprint-Bot aus. Alles andere bleibt und funktioniert, wie es ist, denn es ist eine Datei deines Repositorys: die Workflows, die Prüfungen, die Einstellungen als Code mit `.github/blueprint.py` und die anderen Bots. Die Lizenz des Blueprints, [MIT No Attribution](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE), verlangt nichts für das, was du behältst, nicht einmal einen Hinweis. Behalte `.copier-answers.yml`, wenn du vielleicht zurückkommst: `copier update` setzt bei dem Release an, das sie nennt.

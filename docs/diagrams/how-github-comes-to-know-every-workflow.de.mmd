@@ -1,0 +1,31 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie GitHub jeden Workflow eines neuen Repositorys kennenlernt
+    accDescr: GitHub startet einen Workflow erst, wenn es ihn registriert hat, und der erste Push eines neuen Repositorys registriert womöglich keinen; ein Lauf registriert seinen Workflow, also bleiben die unbekannt, die nur ein Zeitplan, ein Release oder eine Person startet. Nach seinem Push fragt python3 .github/blueprint.py create GitHub bis zu einer Minute lang, ob es jeden Workflow aus .github/workflows/ kennt. Für jeden, den es nicht kennt, führt create python3 .github/blueprint.py workflows register aus, das einen Pull Request mit einem Commit öffnet, den GitHub signiert, mit einem Kommentar am Ende jedes solchen Workflows. Sein Merge ist ein Push, der sie ändert, und registriert sie. Erneut ausgeführt, öffnet der Befehl den Pull Request, der die Kommentare wieder herausnimmt, und die Dateien sind wieder die des Blueprints. Dann startet jeder Workflow bei seinem Push, seinem Zeitplan, seinem Release oder von Hand.
+
+    push(["`**blueprint.py create**<br>der erste Push`"])
+    look["`**create schaut bis zu einer Minute**<br>Kennt GitHub jeden Workflow<br>aus .github/workflows/?`"]
+    register["`**workflows register**<br>ein Pull Request mit einem signierten Commit:<br>ein Kommentar am Ende jedes unbekannten Workflows`"]
+    merge(["Du: mergst ihn,<br>sobald seine Checks grün sind"])
+    unmark["`**workflows register erneut**<br>der Pull Request, der die<br>Kommentare wieder herausnimmt`"]
+    again(["Du: mergst ihn"])
+    known["`**Jeder Workflow startet**<br>bei seinem Push, seinem Zeitplan,<br>seinem Release oder von Hand`"]
+
+    push --> look
+    look -->|ja| known
+    look -->|nein: die eines Zeitplans, eines Releases oder einer Person| register
+    register --> merge
+    merge -->|ein Push, der sie ändert, registriert sie| unmark
+    unmark --> again
+    again --> known
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class look,register,unmark bot
+    class push,merge,again person
+    class known done
