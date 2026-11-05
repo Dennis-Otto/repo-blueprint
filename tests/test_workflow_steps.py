@@ -2499,7 +2499,9 @@ def test_the_update_leg_updates_a_locked_package_that_an_advisory_names(
         "variants.yml",
         "variant",
         "Update the locked packages that an advisory names, as Renovate does",
+        env={"PROJECT": "variant"},
         stubs={"composer": composer},
+        files={"variant/composer.lock": "{}\n"},
     )
 
     assert done.returncode == 0, done.stdout + done.stderr

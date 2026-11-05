@@ -441,9 +441,9 @@ jobs:
       # package that no version fixes yet.
       - name: Update the locked packages that an advisory names, as Renovate does
         if: matrix.start == 'update' && matrix.kind == 'nextcloud-app'
-        working-directory: ${{ env.PROJECT }}
         timeout-minutes: 5
         run: |
+          cd "$PROJECT"
           # composer audit fails when it finds an advisory; the list is what counts.
           report="$(composer audit --locked --format=json --no-interaction || true)"
           mapfile -t vulnerable < <(jq -r '.advisories | keys[]' <<<"$report")
