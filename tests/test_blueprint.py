@@ -2941,6 +2941,19 @@ def test_a_rate_limit_waits_before_the_one_more_try(
     assert waits == [pytest.approx(wait, abs=1)]
 
 
+def test_too_many_requests_waits_the_time_that_github_names(
+    waits: list[float],
+) -> None:
+    # What the code search answers to the token of a job after a search or two in a
+    # minute, as a run of the Dashboard workflow saw it.
+    limited = http(429, {"message": "try again in 56.888583718s"}, retry_after="56")
+    runner, calls = answers(limited, http(200, {"total_count": 0}))
+
+    assert Api(runner).get("search/code?q=x") == {"total_count": 0}
+    assert len(calls) == 2
+    assert waits == [56]
+
+
 def test_a_line_of_the_headers_without_a_name_is_no_header(waits: list[float]) -> None:
     limited = http(429, {"message": "Rate limit"}).replace(
         "\r\n\r\n", "\r\nretry-after 3\r\n\r\n"
