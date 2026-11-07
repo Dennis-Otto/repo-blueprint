@@ -974,6 +974,32 @@ def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
     )
 
 
+# An output of a job or a step whose name CodeQL takes for the commit of a pull request.
+COMMIT_OF_A_JOB = re.compile(r"\b(needs|steps)\.[\w-]+\.outputs\.\w*(head|sha|commit)")
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_only_a_job_of_the_environment_release_checks_out_a_commit_of_another_job(
+    projects: dict[str, Path], project: str
+) -> None:
+    # CodeQL takes a commit from the output of a job or a step, as the ref of
+    # actions/checkout, for the code of a pull request, and its alert blocks the
+    # merge or keeps the Findings failing; git checks such a commit out instead,
+    # after the checkout of the branch of the run. A job of the environment release
+    # runs only for main, which CodeQL knows.
+    root = ROOT if project == "blueprint" else projects[project]
+    for name, text in workflows(root).items():
+        for job_id, job in parse(text)["jobs"].items():
+            environment = job.get("environment")
+            if isinstance(environment, Mapping):
+                environment = environment.get("name")
+            if environment == "release":
+                continue
+            for checkout in steps_using(job, "actions/checkout"):
+                ref = str(checkout.get("with", {}).get("ref", ""))
+                assert not COMMIT_OF_A_JOB.search(ref), (name, job_id, ref)
+
+
 WARM_UP = "Wait until Harden-Runner lets the hosts through"
 # The policy of the jobs that render the screenshots, which blocks once the settings
 # of the project name its hosts.
@@ -6619,6 +6645,7 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`scripts/screenshots.sh` renders the social preview" not in contributing
     assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
+    assert "\n- `.github/screenshots.toml`, which this project adds" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
     assert sorted(files_of(project / "tests")) == (
@@ -18107,6 +18134,9 @@ def test_a_new_repository_photographs_its_website_and_what_its_kind_shows(
     assert "\n.github/screenshots-browser-requirements.txt\n" in paths
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "\n- `scripts/screenshots.sh` renders the social preview" in contributing
+    # Both name the settings of the bot, which the project adds when it needs them.
+    assert "\n- `.github/screenshots.toml`, which this project adds" in contributing
+    assert "\n# .github/screenshots.toml, which can name shards," in paths
     for other, (name, image, sources) in STARTER_PICTURES.items():
         assert (f'"{name}",' in script) == (other == kind), name
         assert (image in script) == (other == kind), image
@@ -18393,9 +18423,24 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     (newest,) = steps_using(start, "actions/checkout")
     assert newest["with"]["ref"] == "${{ github.ref }}"
     assert start["outputs"]["sha"] == "${{ steps.start.outputs.sha }}"
-    for job in (render, collector, opener):
+    # The jobs without the environment release check out the branch of the run, and
+    # git the named commit of its history, so that no input of actions/checkout takes
+    # a commit from another job: CodeQL takes such a one for code of a pull request
+    # (actions/cache-poisoning/poisonable-step, actions/untrusted-checkout/medium).
+    for job in (render, collector):
         (checkout,) = steps_using(job, "actions/checkout")
-        assert checkout["with"]["ref"] == "${{ needs.start.outputs.sha }}"
+        assert checkout["with"]["ref"] == "${{ github.ref }}"
+        assert checkout["with"]["fetch-depth"] == 0
+        pinned = step_named(job, "Check out the commit that the job start names")
+        assert job["steps"].index(pinned) == job["steps"].index(checkout) + 1
+        assert pinned["env"] == {"COMMIT": "${{ needs.start.outputs.sha }}"}
+        assert pinned["run"] == (
+            '[[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]\n'
+            'git merge-base --is-ancestor "$COMMIT" HEAD\n'
+            'git checkout --quiet --detach "$COMMIT"\n'
+        )
+    (checkout,) = steps_using(opener, "actions/checkout")
+    assert checkout["with"]["ref"] == "${{ needs.start.outputs.sha }}"
     assert_main_has_the_rendered_commit(opener, "start")
     assert "SHA: ${{ needs.start.outputs.sha }}" in workflow
     assert "STALE: ${{ needs.collect.outputs.stale }}" in workflow

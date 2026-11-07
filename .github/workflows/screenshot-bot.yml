@@ -282,13 +282,22 @@ jobs:
             done
           done
       # With the whole history, as the Docs workflow checks it out: a picture of the
-      # website shows the date of each page's last change, which git keeps. The commit
-      # that the job start named, the same for every shard.
+      # website shows the date of each page's last change, which git keeps.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ needs.start.outputs.sha }}
+          ref: ${{ github.ref }}
+      # The commit that the job start named, the same for every shard, and one of the
+      # branch of the run: git checks out the commit itself, so that no input of
+      # actions/checkout takes a commit from the output of another job.
+      - name: Check out the commit that the job start names
+        env:
+          COMMIT: ${{ needs.start.outputs.sha }}
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$COMMIT" HEAD
+          git checkout --quiet --detach "$COMMIT"
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         timeout-minutes: 5
         with:
@@ -368,11 +377,13 @@ jobs:
         with:
           egress-policy: audit
       # blueprint.py, which checks what each shard kept, and the settings, which name
-      # the files besides pictures, of the commit that the shards rendered.
+      # the files besides pictures, of the commit that the shards rendered, with the
+      # history that holds it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.start.outputs.sha }}
+          fetch-depth: 0
+          ref: ${{ github.ref }}
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /.github/blueprint.py
@@ -380,6 +391,16 @@ jobs:
             /.github/screenshots.toml
             /blueprint.py
             /blueprint/
+      # The commit that the job start named, the same for every shard, and one of the
+      # branch of the run: git checks out the commit itself, so that no input of
+      # actions/checkout takes a commit from the output of another job.
+      - name: Check out the commit that the job start names
+        env:
+          COMMIT: ${{ needs.start.outputs.sha }}
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$COMMIT" HEAD
+          git checkout --quiet --detach "$COMMIT"
       # Each into a folder of its own, but one alone into the folder itself.
       - name: Fetch what each shard kept
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
