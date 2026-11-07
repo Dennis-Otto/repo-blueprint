@@ -10139,9 +10139,10 @@ def test_renovate_commits_as_the_bot_user_of_its_release_app(tmp_path: Path) -> 
 
 # Anything that names the blueprint owner as a person or an account, or the release app
 # of the blueprint owner, but a reference to one of its repositories or to the website of
-# one, such as the blueprint itself or its issue assistant.
+# the blueprint itself or of its issue assistant; any other page of the owner's own
+# website is caught.
 BLUEPRINT_OWNER = re.compile(
-    r"(?i)dennis[ -]otto(?!/[\w.-]|\.github\.io/[\w.-])"
+    r"(?i)dennis[ -]otto(?!/[\w.-]|\.github\.io/(?:issue-assistant|repo-blueprint)/)"
     r"|Iv23liP9PIEHOV74AiIA|\b4739928\b"
 )
 
@@ -10802,6 +10803,26 @@ def test_the_badge_of_the_issue_assistant_names_it_and_not_its_owner() -> None:
     assert not BLUEPRINT_OWNER.search(ISSUE_ASSISTANT_BADGE)
     assert BLUEPRINT_OWNER.search("https://dennis-otto.github.io/")
     assert BLUEPRINT_OWNER.search("https://dennis-otto.github.io")
+    assert BLUEPRINT_OWNER.search("https://dennis-otto.github.io/privacy.html")
+    assert BLUEPRINT_OWNER.search("https://dennis-otto.github.io/de/")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_readme_shows_no_badge_of_the_issue_assistant_without_the_ai(
+    tmp_path: Path, kind: str
+) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project without the AI.",
+        project_type=kind,
+        issue_assistant_ai=False,
+    )
+
+    # Without the AI the issue assistant triages nothing, so no badge says it does.
+    badges = readme_badges(project)
+    assert ISSUE_ASSISTANT_BADGE not in badges
+    assert badges[-1].startswith("[![Sponsor]")
 
 
 def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> None:
