@@ -71,6 +71,12 @@ Six public repositories follow the blueprint, each with code of its own and the 
 
 <!-- --8<-- [end:made-with] -->
 
+<!-- --8<-- [start:also-made-with] -->
+
+**Also made with the blueprint:** once a week, the dashboard looks with GitHub's code search for the public repositories of other owners whose `.copier-answers.yml` names the blueprint, and lists each one [under *Also made with the blueprint*](https://dennis-otto.github.io/repo-blueprint/dashboard/#made-with) with its kind and the release of the blueprint it is on. To keep your repository off the list, give it the topic `repo-blueprint-unlisted`: every run of the dashboard, every two hours, checks each repository on the list again and leaves it out from then on, as it does with one that is private, archived or a fork.
+
+<!-- --8<-- [end:also-made-with] -->
+
 ## Why Repo Blueprint
 
 <!-- --8<-- [start:why] -->

@@ -5,28 +5,33 @@ config:
 ---
 flowchart TB
     accTitle: Wie das Dashboard seine Leser erreicht
-    accDescr: Alle zwei Stunden, nach einer Änderung des Changelogs und auf Abruf führt der Dashboard-Workflow dashboard.py aus, das liest, was GitHub von jedem öffentlichen Repository des Besitzers zeigt: seine Releases, Pull Requests, Läufe und Berichte und sein Scorecard. Es schreibt die Seite und daneben dieselben Daten als repos.json, die Gesundheit jedes Tages als history.json und die 30 neuesten Releases als Atom-Feed releases.atom. GitHub Pages veröffentlicht sie unter Adressen, die bleiben, und der Job, der veröffentlicht, fragt jede Datei ab. Menschen lesen die Seite, die Website des Besitzers liest repos.json, und Feedreader folgen releases.atom.
+    accDescr: Alle zwei Stunden, nach einer Änderung des Changelogs und auf Abruf führt der Dashboard-Workflow dashboard.py aus, das liest, was GitHub von jedem öffentlichen Repository des Besitzers zeigt: seine Releases, Pull Requests, Läufe und Berichte und sein Scorecard, und einmal in der Woche fragt es die Codesuche von GitHub nach den öffentlichen Repositorys anderer Besitzer, die mit dem Blueprint gebaut sind. Es schreibt die Seite und daneben dieselben Daten als repos.json, die Gesundheit jedes Tages als history.json, die 30 neuesten Releases als Atom-Feed releases.atom und die Repositorys anderer Besitzer als made-with.json. GitHub Pages veröffentlicht sie unter Adressen, die bleiben, und der Job, der veröffentlicht, fragt jede Datei ab. Menschen lesen die Seite, die Website des Besitzers liest repos.json, und Feedreader folgen releases.atom.
 
     start["Alle zwei Stunden · eine Änderung des Changelogs<br>auf Abruf"]
+    search["Die Codesuche von GitHub · einmal in der Woche<br>.copier-answers.yml anderer Besitzer"]
     collect["dashboard.py<br>was GitHub von jedem Repository zeigt<br>Releases · Pull Requests · Läufe · Scorecard"]
     page["index.html<br>die Seite"]
     data["repos.json<br>dieselben Daten"]
     history["history.json<br>die Gesundheit jedes Tages"]
     feed["releases.atom<br>die 30 neuesten Releases"]
+    made["made-with.json<br>auch mit dem Blueprint gebaut"]
     pages["GitHub Pages<br>/repo-blueprint/dashboard/<br>jede Datei abgefragt"]
     people["Menschen"]
     hub["Die Website des Besitzers"]
     readers["Feedreader"]
 
     start --> collect
+    search --> collect
     collect --> page
     collect --> data
     collect --> history
     collect --> feed
+    collect --> made
     page --> pages
     data --> pages
     history --> pages
     feed --> pages
+    made --> pages
     pages --> people
     pages --> hub
     pages --> readers
@@ -35,5 +40,5 @@ flowchart TB
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     class collect bot
-    class page,data,history,feed,pages done
+    class page,data,history,feed,made,pages done
     class people,hub,readers person
