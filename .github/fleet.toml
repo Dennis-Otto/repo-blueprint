@@ -18,6 +18,8 @@ owner = "Dennis-Otto"
 #   kind     its project_type, which has a page docs/kinds/<kind>.md
 #   rollout  its place in the Rollout, from 1: the quickest checks first, so that each
 #            update pull request is done soon, and the longest last
+#            (also its schedule slot, decision 0083: a new repository takes the next
+#            place, so that the slots of the others stay)
 #   canary   true when the Variants workflow updates a copy with its answers in every
 #            pull request of the blueprint that changes what they render, before the
 #            change merges
@@ -85,6 +87,18 @@ pitch = "the full-text search of Paperless-ngx in the unified search of Nextclou
 title_de = "Paperless Unified Search"
 what_de = "eine Nextcloud-App"
 pitch_de = "die Volltextsuche von Paperless-ngx in der Suche von Nextcloud."
+
+[[repository]]
+name = "dennis-otto-pager"
+kind = "cloudflare-worker"
+rollout = 7
+canary = true
+title = "Dennis Otto Pager"
+what = "a Cloudflare Worker in TypeScript"
+pitch = "a private Telegram pager for the repositories of its maintainer, which tells them only what needs them and acts on it with a button."
+title_de = "Dennis Otto Pager"
+what_de = "ein Cloudflare Worker in TypeScript"
+pitch_de = "ein privater Telegram-Pager für die Repositories seines Maintainers, der nur meldet, was ihn braucht, und es per Button erledigt."
 
 [[repository]]
 name = "dennis-otto.github.io"

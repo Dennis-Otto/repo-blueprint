@@ -197,6 +197,9 @@ def test_the_registry_names_every_repository_that_follows_the_blueprint() -> Non
     # player-switch-for-autodarts, the Chrome extension that follows it since 0.8.8.
     assert names["player-switch-for-autodarts"].kind == "chrome-extension"
     assert names["player-switch-for-autodarts"].canary
+    # dennis-otto-pager, the first real repository of the Cloudflare Worker kind.
+    assert names["dennis-otto-pager"].kind == "cloudflare-worker"
+    assert names["dennis-otto-pager"].canary
     # Each canary with the answers of its repository, of its kind; and only these.
     answers = sorted(path.stem for path in (ROOT / "tests/answers").glob("*.yml"))
     assert answers == sorted(name for name, item in names.items() if item.canary)
