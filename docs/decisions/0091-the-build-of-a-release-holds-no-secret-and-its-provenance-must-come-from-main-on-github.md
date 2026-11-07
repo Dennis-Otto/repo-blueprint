@@ -1,6 +1,6 @@
 # The build of a release holds no secret, and its provenance must come from a run for main on a runner of GitHub
 
-- Status: accepted, amended by [0114](0114-a-nextcloud-app-signs-in-one-environment-and-delivers-from-another.md), whose build of a Nextcloud app enters signing and gets only APP_PRIVATE_KEY passed
+- Status: accepted, amended by [0114](0114-a-nextcloud-app-signs-in-one-environment-and-delivers-from-another.md), whose build of a Nextcloud app enters signing and gets only APP_PRIVATE_KEY passed, and by [0122](0122-a-container-image-is-built-in-an-isolated-workflow-of-its-own.md), whose container image has an isolated build of its own and reaches SLSA Build Level 3
 - Date: 2026-11-01
 
 ## Context

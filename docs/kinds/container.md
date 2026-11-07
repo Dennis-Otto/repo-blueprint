@@ -32,7 +32,7 @@ The ruleset *Protect main* of `.github/repository.toml` lets a pull request merg
 
 ## Delivery
 
-Merging the release pull request builds the image for `linux/amd64` and `linux/arm64` and pushes it to the GitHub Container Registry with the tags of the version, such as `1.4.2`, `1.4` and `1`, with its SBOM and the signed provenance of the release workflow. The release workflow builds the image in the job that delivers it, not in the isolated build of the other assets, so the image reaches SLSA Build Level 2, and its other assets Level 3.
+Merging the release pull request builds the image for `linux/amd64` and `linux/arm64` and pushes it to the GitHub Container Registry with the tags of the version, such as `1.4.2`, `1.4` and `1`, with its SBOM and the signed provenance of its build. Once the release is public, the release workflow calls `build-image.yml`, an isolated build of its own, as `build-release.yml` is for the other assets, which builds the image of the signed tag, pushes it and attests it, so the image reaches SLSA Build Level 3 like every other asset. The release verification and the command in the README check that its provenance names `build-image.yml`, from a run for `main` on a runner of GitHub.
 
 ## Once by hand
 

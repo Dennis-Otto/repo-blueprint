@@ -72,10 +72,10 @@ npm run dev
 docker run --rm ghcr.io/{= repo | lower =}:latest
 ```
 
-Every image carries its SBOM and the signed provenance of the release workflow, which builds it on a runner of GitHub for `main`:
+Every image carries its SBOM and the signed provenance of its isolated build, `build-image.yml`, which builds it on a runner of GitHub for `main` (SLSA Build Level 3):
 
 ```sh
-gh attestation verify oci://ghcr.io/{= repo | lower =}:latest --repo {= repo =} --signer-workflow {= repo =}/.github/workflows/release.yml --source-ref refs/heads/main --deny-self-hosted-runners
+gh attestation verify oci://ghcr.io/{= repo | lower =}:latest --repo {= repo =} --signer-workflow {= repo =}/.github/workflows/build-image.yml --source-ref refs/heads/main --deny-self-hosted-runners
 ```
 [% else %]
 Describe here how to use the project.

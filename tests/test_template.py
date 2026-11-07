@@ -764,8 +764,8 @@ AUDITED_PRIVILEGED_JOBS = {
         "npm",
     ): "no repository delivers to npm yet: no run measured its hosts",
     (
-        "release.yml",
-        "ghcr",
+        "build-image.yml",
+        "image",
     ): "Docker builds the image and reaches the registries of its base images",
     (
         "renovate.yml",
@@ -6548,8 +6548,8 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
     )
     assert "the zips and tarballs of that script" in generic
     # Each attestation only of the workflow that builds the release: the isolated
-    # build of build-release.yml, and the release workflow for the image that it
-    # pushes, so that one of another workflow of the repository fails.
+    # build of build-release.yml, and that of build-image.yml for the image, so that
+    # one of another workflow of the repository fails.
     for kind in KINDS:
         verify = [
             line
@@ -6558,7 +6558,7 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
             if line.startswith("gh attestation verify ") and "artifact.tar" not in line
         ]
         assert len(verify) == 1, kind
-        workflow = "release.yml" if kind == "container" else "build-release.yml"
+        workflow = "build-image.yml" if kind == "container" else "build-release.yml"
         # And only of a run for main, the only branch whose runs make releases, on a
         # runner of GitHub, not on a machine that someone else controls.
         for line in verify:
@@ -6574,18 +6574,21 @@ def test_a_release_names_the_files_to_verify(projects: dict[str, Path]) -> None:
         "--signer-workflow Dennis-Otto/repo-blueprint/.github/workflows/build-release.yml"
         " --source-ref refs/heads/main --deny-self-hosted-runners"
     ) in (ROOT / "SECURITY.md").read_text(encoding="utf-8")
-    # The image is built and attested in the job of the release workflow that pushes
-    # it, outside the isolated build: SLSA Build Level 2, not 3.
+    # The image has the provenance of an isolated build of its own, SLSA Build Level 3
+    # like every other asset, and no page of a project claims less (#531).
     for kind in KINDS:
-        level = "the image in the registry carries the signed provenance of the release"
+        level = "the image in the registry carries the signed provenance of its own"
         assert (level in security(kind)) == (kind == "container"), kind
+        assert "Level 2" not in security(kind), kind
     readme = (projects["container"] / "README.md").read_text(encoding="utf-8")
     assert (
         "gh attestation verify oci://ghcr.io/dennis-otto/demo-project:latest"
         " --repo Dennis-Otto/demo-project --signer-workflow"
-        " Dennis-Otto/demo-project/.github/workflows/release.yml"
+        " Dennis-Otto/demo-project/.github/workflows/build-image.yml"
         " --source-ref refs/heads/main --deny-self-hosted-runners\n"
     ) in readme
+    assert "SLSA Build Level 3" in readme
+    assert "release.yml" not in readme
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -19913,6 +19916,75 @@ def test_a_release_is_built_in_isolation() -> None:
     assert "environment" not in job_in(build, "assets")
 
 
+def test_a_container_image_is_built_in_isolation() -> None:
+    # The image has an isolated build of its own, as the other assets have, so that
+    # its provenance names that build alone, as SLSA Build Level 3 asks (#531).
+    workflows_dir = ROOT / ".github/workflows"
+    release = (workflows_dir / "release.yml").read_text(encoding="utf-8")
+    build = (workflows_dir / "build-image.yml").read_text(encoding="utf-8")
+    ghcr = job_in(release, "ghcr")
+    assert ghcr["uses"] == "./.github/workflows/build-image.yml"
+    # Where PUBLISH_TO is ghcr, once the release is public, so that no image of a
+    # release that never went public has the tags of its version.
+    assert ghcr["if"] == "vars.PUBLISH_TO == 'ghcr'"
+    assert ghcr["needs"] == ["release-please", "publish"]
+    # The tag, its commit and the version as inputs, nothing else of the caller, and
+    # no secret: the token of the job alone pushes the image.
+    assert "needs." not in build
+    assert ghcr["with"] == {
+        name: f"${{{{ needs.release-please.outputs.{name} }}}}"
+        for name in ("tag", "sha", "version")
+    }
+    assert "secrets" not in ghcr
+    parsed = parse(build)
+    assert list(parsed["on"]) == ["workflow_call"]
+    assert "secrets" not in parsed["on"]["workflow_call"]
+    assert parsed["permissions"] == {}
+    assert set(re.findall(r"secrets\.(\w+)", build)) == {"GITHUB_TOKEN"}
+    # A called job gets no permission that its caller lacks: the job of the release
+    # grants exactly what the build needs.
+    (job,) = parsed["jobs"].values()
+    assert (
+        job["permissions"]
+        == ghcr["permissions"]
+        == {
+            "attestations": "write",
+            "contents": "read",
+            "id-token": "write",
+            "packages": "write",
+        }
+    )
+    assert "environment" not in job
+    # It builds, pushes and attests in the same job, from the digest that it pushed.
+    order = [
+        "Verify the tag before building",
+        "Build and push the image with SBOM and provenance",
+        "Attest the provenance of the image",
+    ]
+    names = names_of(job)
+    assert [names.index(name) for name in order] == sorted(
+        names.index(name) for name in order
+    )
+    push = step_named(job, "Build and push the image with SBOM and provenance")
+    assert push["uses"].startswith("docker/build-push-action@")
+    assert push["with"]["platforms"] == "linux/amd64,linux/arm64"
+    assert push["with"]["push"] is True
+    assert push["with"]["sbom"] is True
+    attest = step_named(job, "Attest the provenance of the image")
+    assert attest["uses"].startswith("actions/attest-build-provenance@")
+    assert attest["with"] == {
+        "subject-name": "${{ env.IMAGE }}",
+        "subject-digest": "${{ steps.push.outputs.digest }}",
+        "push-to-registry": True,
+    }
+    # The release workflow itself no longer builds nor attests an image.
+    assert "docker/build-push-action" not in release
+    assert "push-to-registry" not in release
+    # The verification demands the provenance of that build for the image.
+    verify = (workflows_dir / "verify-release.yml").read_text(encoding="utf-8")
+    assert 'attested "$GH_REPO/.github/workflows/build-image.yml"' in verify
+
+
 @pytest.mark.parametrize("kind", KINDS)
 def test_a_release_is_built_without_the_secrets_of_the_release(
     projects: dict[str, Path], kind: str
@@ -19931,6 +20003,15 @@ def test_a_release_is_built_without_the_secrets_of_the_release(
     signs = kind == "nextcloud-app"
     assert job_in(release, "assets").get("secrets") == (
         {"APP_PRIVATE_KEY": "${{ secrets.APP_PRIVATE_KEY }}"} if signs else None
+    )
+    # The build of the image, which every repository has as release.yml calls it,
+    # gets no secret and enters no environment, in a Nextcloud app too.
+    image = (project / ".github/workflows/build-image.yml").read_text(encoding="utf-8")
+    assert job_in(release, "ghcr")["uses"] == "./.github/workflows/build-image.yml"
+    assert "secrets" not in job_in(release, "ghcr")
+    assert "environment" not in job_in(image, "image")
+    assert image == (ROOT / ".github/workflows/build-image.yml").read_text(
+        encoding="utf-8"
     )
     assert job_in(build, "assets").get("environment") == (
         {"name": "signing", "deployment": False} if signs else None
@@ -21179,10 +21260,10 @@ def verify_a_hacs_release(
                 + re.escape(TRUSTED_RUN)
                 + r"( --bundle provenance\.sigstore\.json)?"
             ),
-            # The image, which the release workflow builds and attests itself.
+            # The image, which its own isolated build attests.
             exact(
                 f"attestation verify oci://ghcr.io/o/r:{version} --repo o/r"
-                " --signer-workflow o/r/.github/workflows/release.yml" + TRUSTED_RUN
+                " --signer-workflow o/r/.github/workflows/build-image.yml" + TRUSTED_RUN
             ),
             exact(
                 "api -H Accept: application/vnd.github.raw+json"
@@ -21387,14 +21468,14 @@ def test_the_provenance_of_a_release_is_that_of_main_on_github(
     assert done.returncode == 0, done.stdout + done.stderr
     assert "✘" not in done.summary
     # Every check of a provenance names the workflow that made it and demands a run
-    # for main on a runner of GitHub, also that of the image in GHCR, which the
-    # release workflow attests.
+    # for main on a runner of GitHub, also that of the image in GHCR, which its own
+    # isolated build attests.
     checks = done.called("attestation verify ")
     assert checks
     for check in checks:
         assert " --signer-workflow o/r/.github/workflows/" in check, check
         assert TRUSTED_RUN in check, check
-    image = "ghcr.io/o/r:1.2.3 carries the signed provenance of the release workflow."
+    image = "ghcr.io/o/r:1.2.3 carries the signed provenance of its isolated build."
     assert (f"- ✔ {image}\n" in done.summary) == (publish_to == "ghcr")
 
 
@@ -22230,8 +22311,10 @@ def test_every_release_run_signs_the_tag_of_a_merged_release() -> None:
     )
 
 
-def test_the_build_checks_the_tag_before_it_builds() -> None:
-    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+@pytest.mark.parametrize("name", ["build-release.yml", "build-image.yml"])
+def test_the_build_checks_the_tag_before_it_builds(name: str) -> None:
+    # The build of the assets and that of the container image alike.
+    build = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
     sha = parse(build)["on"]["workflow_call"]["inputs"]["sha"]
     assert sha["description"] == "The commit that the tag has to point at"
     assert sha["required"] is True
@@ -22240,6 +22323,11 @@ def test_the_build_checks_the_tag_before_it_builds() -> None:
     # Before the checkout of the tag.
     [checkout] = steps_using(job, "actions/checkout")
     assert job["steps"].index(step) < job["steps"].index(checkout)
+    assert checkout["with"] == {
+        "ref": "${{ inputs.tag }}",
+        "persist-credentials": False,
+    }
+    assert job["env"]["TAG"] == "${{ inputs.tag }}"
     # The script of the commit that runs the workflow, not the one of the tag.
     assert "contents/.github/sign-tag.sh?ref=$GITHUB_SHA" in step["run"]
     assert 'bash "$RUNNER_TEMP/sign-tag.sh" verify "$TAG" "$SHA"' in step["run"]
@@ -22262,7 +22350,9 @@ def test_a_release_of_a_scheduled_run_is_verified_in_full() -> None:
     weekly = "github.event_name == 'schedule' && inputs.tag == ''"
     assert f"          WEEKLY: ${{{{ {weekly} }}}}\n" in verify
     assert "GITHUB_EVENT_NAME" not in verify
-    assert verify.count('[[ "$WEEKLY" == true ]]') == 6
+    # The leniencies of the weekly run, the one for an image made before its own
+    # isolated build too.
+    assert verify.count('[[ "$WEEKLY" == true ]]') == 7
     release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     job = job_in(release, "verify")
     assert job["uses"] == "./.github/workflows/verify-release.yml"
