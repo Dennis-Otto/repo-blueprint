@@ -6,12 +6,14 @@ name: Dashboard
 # is on, its releases, its open pull requests, the last runs of its main workflows and
 # its OpenSSF Scorecard (dashboard.py), and beside it the same data as repos.json, the
 # health of each day as history.json and the releases of every repository as the
-# Atom feed releases.atom, at addresses that stay. On a schedule, which GitHub keeps as it can,
+# Atom feed releases.atom, at addresses that stay, and the public repositories of
+# other owners made with the blueprint, which GitHub's code search finds once a week,
+# as made-with.json. On a schedule, which GitHub keeps as it can,
 # and after every change of either, of the changelog that a page includes and of the
-# code that reads GitHub. A history of the published dashboard that can't be read
-# fails the build, so that the website keeps its trends until the next run instead of
-# a history of one day. Everything it shows is public anyway, so the job's own token
-# reads it. This workflow belongs to the blueprint alone; the Docs workflow checks the
+# code that reads GitHub. A history or a list of the published dashboard that can't
+# be read fails the build, so that the website keeps its trends until the next run
+# instead of a history of one day; a search that GitHub refuses keeps the list as it
+# was. Everything it shows is public anyway, so the job's own token reads it. This workflow belongs to the blueprint alone; the Docs workflow checks the
 # documentation in every pull request and publishes the website of every other
 # repository.
 
@@ -112,7 +114,8 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           python3 dashboard.py --owner "$OWNER" --out site/dashboard/index.html \
-            --history https://dennis-otto.github.io/repo-blueprint/dashboard/history.json
+            --history https://dennis-otto.github.io/repo-blueprint/dashboard/history.json \
+            --made-with https://dennis-otto.github.io/repo-blueprint/dashboard/made-with.json
       # The accessibility of the dashboard, as the check docs checks the pages of the
       # website, which it keeps accessible: it reports in the summary and as
       # annotations, and the website is published all the same.
@@ -215,11 +218,11 @@ jobs:
           dashboard="${PAGE_URL%/}/dashboard"
           found="$RUNNER_TEMP/dashboard"
           failed=0
-          for file in index.html history.json repos.json releases.atom; do
+          for file in index.html history.json repos.json releases.atom made-with.json; do
             case "$file" in
               index.html) holds='<title>' ;;
               history.json) holds='"date"' ;;
-              repos.json) holds='"repos"' ;;
+              repos.json | made-with.json) holds='"repos"' ;;
               *) holds='<feed' ;;
             esac
             address="$dashboard/$file"

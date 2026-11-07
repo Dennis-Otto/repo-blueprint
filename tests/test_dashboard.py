@@ -9,6 +9,7 @@ import io
 import json
 import subprocess
 import urllib.error
+import urllib.parse
 import zipfile
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -1013,6 +1014,8 @@ def published(url: str, timeout: float) -> io.BytesIO:
         return io.BytesIO(b'{"date": "2026-10-01"}')
     if url == "https://site/torn.json":
         return io.BytesIO(b'[{"date": "2026-10-01", "re')
+    if url == "https://site/null.json":
+        return io.BytesIO(b"null")
     if url == "https://site/gone.json":
         raise http_error(url, 404, "Not Found")
     if url == "https://site/busy.json":
@@ -1055,6 +1058,7 @@ def test_the_history_closes_the_answer_of_an_error(code: int) -> None:
         ("https://site/offline.json", "offline"),
         ("https://site/torn.json", "Unterminated string"),
         ("https://site/object.json", "holds no list"),
+        ("https://site/null.json", "holds no list"),
     ],
 )
 def test_a_history_that_cant_be_read_is_never_replaced(url: str, reason: str) -> None:
@@ -1441,6 +1445,464 @@ def test_the_summary_of_a_release_ends_at_a_word() -> None:
     assert dashboard.summary("x" * 600) == "x" * dashboard.SUMMARY + "…"
 
 
+# ------------------------------------------------------ made with the blueprint
+
+SEARCHED = (
+    f"search/code?q={urllib.parse.quote(dashboard.SEARCH)}&per_page={dashboard.LISTED}"
+)
+SOURCE = "https://github.com/Dennis-Otto/repo-blueprint.git"
+
+
+def hit(repo: str, path: str = ".copier-answers.yml") -> dict[str, Any]:
+    return {"path": path, "repository": {"full_name": repo}}
+
+
+def about(repo: str, **more: Any) -> tuple[int, dict[str, Any]]:
+    """What GitHub shows of a public repository."""
+    return (
+        200,
+        {
+            "full_name": repo,
+            "private": False,
+            "visibility": "public",
+            "topics": ["home-assistant"],
+            **more,
+        },
+    )
+
+
+def answered(text: str) -> tuple[int, dict[str, str]]:
+    return (200, content(text))
+
+
+def copied(kind: str, commit: str, source: str = SOURCE) -> tuple[int, Any]:
+    return answered(f"_commit: {commit}\n_src_path: {source}\nproject_type: {kind}\n")
+
+
+BLOCKED_ANSWER = (451, {"message": "Repository access blocked"})
+
+# The code search of GitHub and what it finds: one repository made with the blueprint
+# under two spellings of its old name, one with values that no page may show, and
+# every kind that the list leaves out.
+MADE_WITH: dict[str, tuple[int, Any]] = {
+    SEARCHED: (
+        200,
+        {
+            "total_count": 15,
+            "incomplete_results": False,
+            "items": [
+                hit("zed/tool"),
+                hit("alice/old-name"),
+                hit("Alice/Old-Name"),
+                "noise",
+                {"path": ".copier-answers.yml"},
+                hit("bob/nested", "docs/.copier-answers.yml"),
+                hit("Dennis-Otto/demo"),
+                hit("carol/private"),
+                hit("dave/fork"),
+                hit("erin/archived"),
+                hit("frank/unlisted"),
+                hit("grace/other-template"),
+                hit("heidi/gone"),
+                hit("ivan/blocked"),
+                hit("judy/blocked-answers"),
+                hit("kim/no-answers"),
+                hit("mallory/internal"),
+            ],
+        },
+    ),
+    # Renamed since: GitHub answers the old name with the new one.
+    "repos/alice/old-name": about("alice/app"),
+    "repos/Alice/Old-Name": about("alice/app"),
+    "repos/alice/app/contents/.copier-answers.yml": copied(
+        "python-package", "v0.3.0", "gh:dennis-otto/repo-blueprint"
+    ),
+    "repos/zed/tool": about("zed/tool"),
+    "repos/zed/tool/contents/.copier-answers.yml": copied(
+        "<script>", "v0.2.0;rm", "git@github.com:Dennis-Otto/repo-blueprint.git"
+    ),
+    "repos/Dennis-Otto/demo": about("Dennis-Otto/demo"),
+    "repos/carol/private": about("carol/private", private=True),
+    "repos/dave/fork": about("dave/fork", fork=True),
+    "repos/erin/archived": about("erin/archived", archived=True),
+    "repos/frank/unlisted": about(
+        "frank/unlisted", topics=["python", dashboard.OPT_OUT]
+    ),
+    "repos/grace/other-template": about("grace/other-template"),
+    "repos/grace/other-template/contents/.copier-answers.yml": copied(
+        "python-package", "v1.0.0", "gh:Dennis-Otto/repo-blueprint-fork"
+    ),
+    "repos/ivan/blocked": BLOCKED_ANSWER,
+    "repos/judy/blocked-answers": about("judy/blocked-answers"),
+    "repos/judy/blocked-answers/contents/.copier-answers.yml": BLOCKED_ANSWER,
+    "repos/kim/no-answers": about("kim/no-answers"),
+    "repos/mallory/internal": about("mallory/internal", visibility="internal"),
+}
+LISTED = [
+    dashboard.Made("alice/app", "python-package", "v0.3.0"),
+    dashboard.Made("zed/tool", "", ""),
+]
+
+
+def test_the_search_finds_the_repositories_of_other_owners() -> None:
+    found = dashboard.made_with(
+        simulated(MADE_WITH), "Dennis-Otto", dashboard.MadeWith(), NOW
+    )
+
+    assert found == dashboard.MadeWith("2026-10-08T06:05:00Z", LISTED)
+
+
+@pytest.mark.parametrize(
+    ("source", "blueprint"),
+    [
+        ("gh:Dennis-Otto/repo-blueprint", True),
+        ("https://github.com/Dennis-Otto/repo-blueprint", True),
+        ("https://github.com/dennis-otto/repo-blueprint.git", True),
+        ("git+https://github.com/Dennis-Otto/repo-blueprint/", True),
+        ("git@github.com:Dennis-Otto/repo-blueprint.git", True),
+        ("ssh://git@github.com/Dennis-Otto/repo-blueprint", True),
+        ("gh:Dennis-Otto/repo-blueprint-fork", False),
+        ("https://github.com/Dennis-Otto/repo-blueprint.git.example.com", False),
+        ("https://gitlab.com/Dennis-Otto/repo-blueprint", False),
+        ("/home/someone/repo-blueprint", False),
+        ("", False),
+    ],
+)
+def test_the_answers_name_the_blueprint(source: str, blueprint: bool) -> None:
+    assert (dashboard.SOURCE.fullmatch(source) is not None) is blueprint
+
+
+@pytest.mark.parametrize(
+    ("searched", "due"),
+    [
+        ("", True),
+        ("not a time", True),
+        ("2026-10-01T06:05:00Z", True),
+        ("2026-10-01T06:06:00Z", False),
+        ("2026-10-08T06:00:00Z", False),
+    ],
+)
+def test_the_search_runs_once_a_week(searched: str, due: bool) -> None:
+    assert dashboard.due(dashboard.MadeWith(searched), NOW) is due
+
+
+def test_between_searches_every_run_checks_the_list_again() -> None:
+    previous = dashboard.MadeWith(
+        "2026-10-05T00:00:00Z",
+        [
+            dashboard.Made("alice/old-name", "python-package", "v0.2.0"),
+            dashboard.Made("frank/unlisted", "python-package", "v0.3.0"),
+            dashboard.Made("carol/private", "node", "v0.3.0"),
+            dashboard.Made("heidi/gone", "node", "v0.3.0"),
+            dashboard.Made("zed/tool", "node", "v0.1.0"),
+        ],
+    )
+    # No search: GitHub would answer it with nothing here, and the run would fail.
+    routes = {path: answer for path, answer in MADE_WITH.items() if path != SEARCHED}
+
+    found = dashboard.made_with(simulated(routes), "Dennis-Otto", previous, NOW)
+
+    # The topic, the private repository and the one that is gone leave the list at
+    # once; the others keep their values until the next search, under their new name.
+    assert found == dashboard.MadeWith(
+        "2026-10-05T00:00:00Z",
+        [
+            dashboard.Made("alice/app", "python-package", "v0.2.0"),
+            dashboard.Made("zed/tool", "node", "v0.1.0"),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "searched", "reason"),
+    [
+        (
+            (403, {"message": "Resource not accessible by integration"}),
+            "2026-09-30T00:00:00Z",
+            "GitHub answered 403: Resource not accessible by integration",
+        ),
+        (
+            (422, {"message": "Validation Failed"}),
+            "",
+            "GitHub answered 422",
+        ),
+        (
+            (200, {"total_count": 3, "incomplete_results": True, "items": []}),
+            "2026-09-30T00:00:00Z",
+            "timed out and found only a part",
+        ),
+        ((200, {"message": "odd"}), "2026-09-30T00:00:00Z", "answered with no list"),
+        ((404, {"message": "Not Found"}), "2026-09-30T00:00:00Z", "with no list"),
+    ],
+)
+def test_a_failed_search_keeps_the_previous_list(
+    answer: tuple[int, Any], searched: str, reason: str
+) -> None:
+    previous = dashboard.MadeWith(searched, [dashboard.Made("zed/tool", "node", "")])
+
+    found = dashboard.made_with(
+        simulated({**MADE_WITH, SEARCHED: answer}), "Dennis-Otto", previous, NOW
+    )
+
+    assert (found.searched, found.repos) == (searched, previous.repos)
+    assert reason in found.failed
+
+
+@pytest.mark.parametrize(
+    ("searched", "broken"),
+    [
+        # Between two searches, the check of a repository on the list fails.
+        ("2026-10-05T00:00:00Z", "repos/zed/tool"),
+        # A search finds a repository whose answers can't be read.
+        ("2026-09-30T00:00:00Z", "repos/zed/tool/contents/.copier-answers.yml"),
+    ],
+)
+def test_a_list_that_cant_be_checked_stays_as_it_was(
+    searched: str, broken: str
+) -> None:
+    previous = dashboard.MadeWith(
+        searched,
+        [dashboard.Made("carol/private"), dashboard.Made("zed/tool", "node", "")],
+    )
+    routes = {**MADE_WITH, broken: (500, {"message": "Server Error"})}
+
+    found = dashboard.made_with(simulated(routes), "Dennis-Otto", previous, NOW)
+
+    assert (found.searched, found.repos) == (previous.searched, previous.repos)
+    assert "GitHub answered 500" in found.failed
+
+
+def test_the_list_holds_each_repository_once_and_at_most_its_limit() -> None:
+    names = [f"owner{number:03d}/app" for number in range(dashboard.LISTED + 5)]
+    repos = [dashboard.Made(name.upper()) for name in reversed(names)]
+
+    listed = dashboard.listed_once([*repos, dashboard.Made("owner000/app", "node")])
+
+    assert [item.repo.lower() for item in listed] == names[: dashboard.LISTED]
+    # The newest answer of a repository counts.
+    assert listed[0] == dashboard.Made("owner000/app", "node")
+
+
+def made_with_site(url: str, timeout: float) -> io.BytesIO:
+    """The website of the dashboard, with its list of other owners' repositories."""
+    pages = {
+        "https://site/made-with.json": {
+            "searched": "2026-10-05T00:00:00Z",
+            "repos": [
+                {"repo": "zed/tool", "kind": "node", "blueprint": "v0.2.0"},
+                {"repo": "no name"},
+                {"kind": "node"},
+                "noise",
+                {"repo": "kim/app", "kind": "<b>", "blueprint": None},
+            ],
+        },
+        "https://site/odd.json": {"searched": 20261005, "repos": []},
+        "https://site/days.json": [{"date": "2026-10-01"}],
+        "https://site/empty.json": {"searched": "2026-10-05T00:00:00Z"},
+    }
+    if url in pages:
+        return io.BytesIO(json.dumps(pages[url]).encode())
+    return published(url, timeout)
+
+
+def test_the_list_comes_from_the_published_dashboard() -> None:
+    assert dashboard.load_made_with(
+        "https://site/made-with.json", made_with_site
+    ) == dashboard.MadeWith(
+        "2026-10-05T00:00:00Z",
+        [dashboard.Made("zed/tool", "node", "v0.2.0"), dashboard.Made("kim/app")],
+    )
+    assert (
+        dashboard.load_made_with("https://site/odd.json", made_with_site)
+        == dashboard.MadeWith()
+    )
+    # Nothing is published yet: the first run searches.
+    assert dashboard.load_made_with("https://site/gone.json", made_with_site) == (
+        dashboard.MadeWith()
+    )
+    assert dashboard.load_made_with("", made_with_site) == dashboard.MadeWith()
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        (
+            "https://site/busy.json",
+            "the list of other owners' repositories at https://site/busy.json "
+            "can't be read: HTTP Error 503",
+        ),
+        ("https://site/torn.json", "Unterminated string"),
+        ("https://site/days.json", "holds no repositories"),
+        ("https://site/empty.json", "holds no repositories"),
+    ],
+)
+def test_a_list_that_cant_be_read_is_never_replaced(url: str, reason: str) -> None:
+    with pytest.raises(dashboard.HistoryError, match=reason):
+        dashboard.load_made_with(url, made_with_site)
+
+
+def made_with_section(others: dashboard.MadeWith, latest: str = "v0.3.0") -> str:
+    page = dashboard.render([], "Dennis-Otto", latest, NOW, others=others)
+    section = page.split('<h2 id="made-with">', 1)[1]
+    return section.split("</main>", 1)[0]
+
+
+@pytest.mark.parametrize("number", [0, 1, 3])
+def test_the_page_lists_the_repositories_of_other_owners(number: int) -> None:
+    repos = [
+        dashboard.Made(f"owner{index}/app", "python-package", f"v0.{3 - index}.0")
+        for index in range(number)
+    ]
+
+    section = made_with_section(dashboard.MadeWith("2026-10-05T00:00:00Z", repos))
+
+    assert section.startswith("Also made with the blueprint</h2>")
+    assert "as GitHub's code search found them on 2026-10-05;" in section
+    assert f"<code>{dashboard.OPT_OUT}</code> stays off the list" in section
+    assert '<a href="made-with.json">made-with.json</a>.</p>' in section
+    assert "GitHub refused" not in section
+    rows = section.count("<tr><td>")
+    assert rows == number
+    if not number:
+        assert "<table>" not in section
+        assert "No repository of another owner is on the list yet." in section
+        return
+    assert "No repository" not in section
+    assert (
+        '<tr><td><a href="https://github.com/owner0/app">owner0/app</a></td>'
+        '<td class="muted">python-package</td><td class="ok">✔ v0.3.0</td></tr>'
+    ) in section
+    if number > 1:
+        assert '<td class="wait">v0.2.0 → v0.3.0</td>' in section
+        assert section.index("owner0/app") < section.index("owner2/app")
+
+
+def test_the_page_says_when_github_refused_the_list() -> None:
+    section = made_with_section(
+        dashboard.MadeWith("", [dashboard.Made("zed/tool")], failed="refused"),
+        latest="",
+    )
+
+    assert "as GitHub's code search finds them, which hasn't answered yet;" in section
+    assert "GitHub refused the requests of this run, so the list stays" in section
+    # What GitHub answered is for the log, not for the page.
+    assert "refused</" not in section
+    dash = f'<td class="muted">{dashboard.DASH}</td>'
+    assert dash + dash in section
+
+
+@pytest.mark.parametrize(("version", "latest"), [("v0.2.0", ""), ("v0.2.0", "v0.3.0")])
+def test_the_release_of_the_blueprint_of_another_owner(
+    version: str, latest: str
+) -> None:
+    expected = f"{version} → {latest}" if latest else version
+    assert dashboard.made_with_cell(version, latest) == (
+        f'<td class="wait">{expected}</td>'
+    )
+
+
+def test_the_dashboard_publishes_the_list_of_other_owners(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "site" / "index.html"
+
+    code = dashboard.main(
+        ["--owner", "Dennis-Otto", "--out", str(out)],
+        api=simulated({**ROUTES, **MADE_WITH}),
+        opener=opener,
+        now=NOW,
+        download=downloader,
+    )
+
+    assert code == 0
+    found = json.loads((out.parent / "made-with.json").read_text(encoding="utf-8"))
+    assert found == {
+        "schema": 1,
+        "generated": "2026-10-08T06:05:00Z",
+        "searched": "2026-10-08T06:05:00Z",
+        "opt_out": "repo-blueprint-unlisted",
+        "repos": [
+            {
+                "name": "app",
+                "repo": "alice/app",
+                "url": "https://github.com/alice/app",
+                "kind": "python-package",
+                "blueprint": "v0.3.0",
+            },
+            {
+                "name": "tool",
+                "repo": "zed/tool",
+                "url": "https://github.com/zed/tool",
+                "kind": None,
+                "blueprint": None,
+            },
+        ],
+    }
+    assert '<a href="https://github.com/alice/app">' in out.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+    assert "with 2 of other owners" in output
+    assert "::warning" not in output
+
+
+def test_the_dashboard_keeps_the_list_when_the_search_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "site" / "index.html"
+    refused = (403, {"message": "Resource not accessible by integration"})
+
+    code = dashboard.main(
+        [
+            "--owner",
+            "Dennis-Otto",
+            "--out",
+            str(out),
+            "--made-with",
+            "https://site/made-with.json",
+        ],
+        api=simulated({**ROUTES, **MADE_WITH, SEARCHED: refused}),
+        # The list of the published dashboard is older than a week.
+        opener=made_with_site,
+        now=NOW + timedelta(days=7),
+        download=downloader,
+    )
+
+    assert code == 0
+    found = json.loads((out.parent / "made-with.json").read_text(encoding="utf-8"))
+    assert found["searched"] == "2026-10-05T00:00:00Z"
+    assert [repo["repo"] for repo in found["repos"]] == ["zed/tool", "kim/app"]
+    assert "GitHub refused the requests of this run" in out.read_text(encoding="utf-8")
+    assert (
+        "::warning title=Also made with the blueprint::GitHub refused the requests "
+        "for the repositories of other owners, so their list stays as it was: "
+        "GitHub answered 403: Resource not accessible by integration"
+    ) in capsys.readouterr().out
+
+
+def test_the_dashboard_keeps_its_page_when_the_list_cant_be_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "site" / "index.html"
+
+    code = dashboard.main(
+        [
+            "--owner",
+            "Dennis-Otto",
+            "--out",
+            str(out),
+            "--made-with",
+            "https://site/busy.json",
+        ],
+        api=simulated({**ROUTES, **MADE_WITH}),
+        opener=made_with_site,
+        now=NOW,
+        download=downloader,
+    )
+
+    assert code == 2
+    assert "the list of other owners' repositories at" in capsys.readouterr().err
+    assert not (tmp_path / "site").exists()
+
+
 # The published dashboard, as the job that publishes it asks for it: a fake curl
 # answers each address with what its file holds, but the one that ends with BROKEN,
 # and the feed with FEED, if set.
@@ -1456,12 +1918,18 @@ done
 case "$url" in
   *.html) printf '<title>Repository dashboard</title>\n' > "$2" ;;
   *history.json) printf '[{"date": "2026-10-08"}]\n' > "$2" ;;
-  *repos.json) printf '{"repos": []}\n' > "$2" ;;
+  *repos.json | *made-with.json) printf '{"repos": []}\n' > "$2" ;;
   *) printf '%s\n' "${FEED:-<feed xmlns=\"http://www.w3.org/2005/Atom\"/>}" > "$2" ;;
 esac
 """
 PUBLISHED_DASHBOARD = "https://owner.github.io/repo-blueprint/dashboard"
-DASHBOARD_FILES = ("index.html", "history.json", "repos.json", "releases.atom")
+DASHBOARD_FILES = (
+    "index.html",
+    "history.json",
+    "repos.json",
+    "releases.atom",
+    "made-with.json",
+)
 
 
 @pytest.mark.skipif(BASH is None, reason="the steps run in bash, Git Bash on Windows")

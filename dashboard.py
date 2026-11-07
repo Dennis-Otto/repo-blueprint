@@ -9,9 +9,12 @@ pull request of the next one, its open pull requests and those that conflict, th
 run of its main workflows on main, the website among them, and its OpenSSF Scorecard.
 Beside the page it writes the same data as JSON, repos.json, the health of each day,
 history.json, and the newest releases of every repository as an Atom feed,
-releases.atom, at addresses that stay. It shows nothing that isn't public anyway: no
-finding of code scanning and no alert of Dependabot. The Dashboard workflow publishes
-it on GitHub Pages.
+releases.atom, at addresses that stay. Once a week, GitHub's code search finds the
+public repositories of other owners that are made with the blueprint, which the page
+lists under "Also made with the blueprint" and made-with.json holds, without those
+with the topic OPT_OUT. It shows nothing that isn't public anyway: no finding of code
+scanning and no alert of Dependabot. The Dashboard workflow publishes it on GitHub
+Pages.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -137,12 +140,14 @@ class Row:
 
 
 def answers(api: Api, repo: str) -> dict[str, str]:
-    """The release of the blueprint and the kind of project, from .copier-answers.yml."""
+    """The release of the blueprint, where it comes from and the kind of project, from
+    .copier-answers.yml."""
     content = api.get(f"repos/{repo}/contents/.copier-answers.yml")
     if not isinstance(content, dict):
         return {}
     text = base64.b64decode(content.get("content", "")).decode("utf-8", "replace")
-    return dict(re.findall(r"^(_commit|project_type): *(\S+)", text, re.MULTILINE))
+    found = re.findall(r"^(_commit|_src_path|project_type): *(\S+)", text, re.MULTILINE)
+    return {key: value.strip("'\"") for key, value in found}
 
 
 def workflow_files(api: Api, repo: str) -> set[str]:
@@ -365,7 +370,8 @@ Downloader = Callable[[str], bytes]
 
 
 class HistoryError(Exception):
-    """The history of the published dashboard can't be read."""
+    """What the published dashboard keeps, its history or its list of the
+    repositories of other owners, can't be read."""
 
 
 def gh_download(path: str) -> bytes:
@@ -648,25 +654,36 @@ def health(
     )
 
 
-def load_history(url: str, opener: Opener) -> list[dict[str, Any]]:
-    """The history that the published dashboard holds: none when nothing is published
-    there yet. Any other failure raises HistoryError: the page would otherwise publish
-    a history of today alone, and the trends of up to HISTORY days would be gone."""
+# What published_json returns where nothing is published yet: no JSON, not even null.
+UNPUBLISHED = object()
+
+
+def published_json(url: str, opener: Opener, what: str) -> Any:
+    """The JSON that the published dashboard holds at url, what it keeps: UNPUBLISHED
+    when nothing is published there yet. Any other failure raises HistoryError, so
+    that the website keeps what it published instead of a page that forgot it."""
     if not url:
-        return []
+        return UNPUBLISHED
     try:
         with opener(url, timeout=TIMEOUT) as response:
-            found = json.load(response)
+            return json.load(response)
     except urllib.error.HTTPError as error:
         # The error is the answer too, and holds its body until it is closed.
         with error:
             if error.code == 404:
-                return []
-            raise HistoryError(
-                f"the history at {url} can't be read: {error}"
-            ) from error
+                return UNPUBLISHED
+            raise HistoryError(f"{what} at {url} can't be read: {error}") from error
     except (OSError, ValueError, http.client.HTTPException) as error:
-        raise HistoryError(f"the history at {url} can't be read: {error}") from error
+        raise HistoryError(f"{what} at {url} can't be read: {error}") from error
+
+
+def load_history(url: str, opener: Opener) -> list[dict[str, Any]]:
+    """The history that the published dashboard holds: none when nothing is published
+    there yet. Any other failure raises HistoryError: the page would otherwise publish
+    a history of today alone, and the trends of up to HISTORY days would be gone."""
+    found = published_json(url, opener, "the history")
+    if found is UNPUBLISHED:
+        return []
     if not isinstance(found, list):
         raise HistoryError(f"the history at {url} holds no list of days")
     return [
@@ -697,6 +714,218 @@ def week_before(history: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
     target = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     older = [item for item in history if str(item.get("date", "")) <= target]
     return dict((older[-1] if older else {}).get("repos") or {})
+
+
+# --------------------------------------------------------- made with the blueprint
+
+# The topic that keeps a repository of another owner off the list "Also made with the
+# blueprint", which README.md names.
+OPT_OUT = "repo-blueprint-unlisted"
+# How long the list of a code search stays: the first run after it searches again. In
+# between, every run checks each repository on it again, so that one that took the
+# topic OPT_OUT, went private or was archived leaves the list at the next run.
+SEARCH_EVERY = timedelta(days=7)
+# What GitHub's code search looks for: the answers of Copier that name the blueprint.
+# The search of the REST API finds the words, not the line; made() checks the line.
+SEARCH = f'"{BLUEPRINT}" filename:.copier-answers.yml'
+ANSWERS_FILE = ".copier-answers.yml"
+# The most repositories that the list holds, one page of the search: each one costs a
+# request in every run.
+LISTED = 100
+# Where the answers of a copy say that it comes from the blueprint: what `copier copy`
+# writes for gh:, or an address of GitHub over HTTPS or SSH, with or without .git.
+SOURCE = re.compile(
+    r"(?:gh:|(?:git\+)?https://github\.com/|(?:ssh://)?git@github\.com[:/])"
+    + re.escape(BLUEPRINT)
+    + r"(?:\.git)?/?",
+    re.IGNORECASE,
+)
+# The full name of a repository on GitHub, and what a value of the answers of another
+# owner may hold to be shown: anything else shows as unknown.
+FULL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}")
+VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
+# What GitHub answers for a repository that it blocks, such as after a takedown: the
+# list treats it as one that is gone.
+BLOCKED = 451
+# The version of the shape of made-with.json, as SCHEMA is that of repos.json.
+MADE_WITH_SCHEMA = 1
+
+
+class SearchError(Exception):
+    """GitHub's code search answered with nothing that can be relied on."""
+
+
+@dataclass
+class Made:
+    """A public repository of another owner that is made with the blueprint: its full
+    name, its kind and the release of the blueprint that it is on."""
+
+    repo: str
+    kind: str = ""
+    blueprint: str = ""
+
+
+@dataclass
+class MadeWith:
+    """The list "Also made with the blueprint": when the code search that found it
+    ran, and the repositories on it, by name."""
+
+    searched: str = ""
+    repos: list[Made] = field(default_factory=list)
+    # Why this run kept the list as it was, if it did: for the log, not the page.
+    failed: str = ""
+
+
+def shown_value(value: Any) -> str:
+    """value, from the answers of another owner, where it is a plain value."""
+    text = str(value or "")
+    return text if VALUE.fullmatch(text) else ""
+
+
+def load_made_with(url: str, opener: Opener) -> MadeWith:
+    """The list that the published dashboard holds: none when nothing is published
+    there yet. Any other failure raises HistoryError: a run whose search fails would
+    otherwise publish an empty list."""
+    found = published_json(url, opener, "the list of other owners' repositories")
+    if found is UNPUBLISHED:
+        return MadeWith()
+    if not isinstance(found, dict) or not isinstance(found.get("repos"), list):
+        raise HistoryError(f"the list at {url} holds no repositories")
+    searched = found.get("searched")
+    return MadeWith(
+        searched=searched if isinstance(searched, str) else "",
+        repos=[
+            Made(
+                str(item["repo"]),
+                shown_value(item.get("kind")),
+                shown_value(item.get("blueprint")),
+            )
+            for item in found["repos"]
+            if isinstance(item, dict) and FULL_NAME.fullmatch(str(item.get("repo")))
+        ],
+    )
+
+
+def due(previous: MadeWith, now: datetime) -> bool:
+    """Whether the run searches again: SEARCH_EVERY after the last search, or when no
+    search found the list yet."""
+    try:
+        return now - when(previous.searched) >= SEARCH_EVERY
+    except ValueError:
+        return True
+
+
+def search(api: Api) -> list[str]:
+    """The full names of the repositories whose answers of Copier, at their root, the
+    code search finds; SearchError when its answer can't be relied on."""
+    found = api.get(f"search/code?q={urllib.parse.quote(SEARCH)}&per_page={LISTED}")
+    if not isinstance(found, dict) or not isinstance(found.get("items"), list):
+        raise SearchError("GitHub's code search answered with no list")
+    if found.get("incomplete_results"):
+        raise SearchError("GitHub's code search timed out and found only a part")
+    return [
+        str((item.get("repository") or {}).get("full_name", ""))
+        for item in found["items"]
+        if isinstance(item, dict) and item.get("path") == ANSWERS_FILE
+    ]
+
+
+def public(api: Api, repo: str, owner: str) -> str:
+    """The full name of repo where the list may show it: a public repository of
+    another owner, no fork, not archived and without the topic OPT_OUT; "" where it
+    may not, also where GitHub doesn't know it or blocks it."""
+    if not FULL_NAME.fullmatch(repo):
+        return ""
+    try:
+        about = api.get(f"repos/{repo}")
+    except GitHubError as error:
+        if error.status != BLOCKED:
+            raise
+        return ""
+    if not isinstance(about, dict):
+        return ""
+    name = str(about.get("full_name", ""))
+    shown = (
+        about.get("private") is False
+        and about.get("visibility", "public") == "public"
+        and not about.get("fork")
+        and not about.get("archived")
+        and OPT_OUT not in (about.get("topics") or [])
+        and FULL_NAME.fullmatch(name) is not None
+        and name.split("/", 1)[0].lower() != owner.lower()
+    )
+    return name if shown else ""
+
+
+def made(api: Api, repo: str, owner: str) -> Made | None:
+    """repo with its kind and release of the blueprint, where the list may show it
+    and its answers say that it comes from the blueprint."""
+    name = public(api, repo, owner)
+    if not name:
+        return None
+    try:
+        found = answers(api, name)
+    except GitHubError as error:
+        if error.status != BLOCKED:
+            raise
+        return None
+    if not SOURCE.fullmatch(found.get("_src_path", "")):
+        return None
+    return Made(
+        name, shown_value(found.get("project_type")), shown_value(found.get("_commit"))
+    )
+
+
+def listed_once(repos: list[Made]) -> list[Made]:
+    """repos, each once, by name, at most LISTED."""
+    unique = {item.repo.lower(): item for item in repos}
+    return sorted(unique.values(), key=lambda item: item.repo.lower())[:LISTED]
+
+
+def made_with(api: Api, owner: str, previous: MadeWith, now: datetime) -> MadeWith:
+    """The list of this run: that of a new search when one is due, else the previous
+    one, checked again. When GitHub refuses either, the previous list stays as it
+    was, with the reason in failed."""
+    try:
+        if due(previous, now):
+            found = [made(api, name, owner) for name in search(api)]
+            return MadeWith(
+                stamp(now), listed_once([item for item in found if item is not None])
+            )
+        kept = [
+            Made(name, item.kind, item.blueprint)
+            for item in previous.repos
+            if (name := public(api, item.repo, owner))
+        ]
+        return MadeWith(previous.searched, listed_once(kept))
+    except (GitHubError, SearchError) as error:
+        return MadeWith(previous.searched, previous.repos, str(error))
+
+
+def made_with_data(others: MadeWith, now: datetime) -> dict[str, Any]:
+    """The list, for made-with.json: when the search that found it ran, the topic that
+    keeps a repository off it, and every repository, by name, with null where its
+    kind or its release of the blueprint isn't known."""
+    return dict(
+        known(
+            {
+                "schema": MADE_WITH_SCHEMA,
+                "generated": stamp(now),
+                "searched": others.searched,
+                "opt_out": OPT_OUT,
+                "repos": [
+                    {
+                        "name": item.repo.split("/", 1)[1],
+                        "repo": item.repo,
+                        "url": f"https://github.com/{item.repo}",
+                        "kind": item.kind,
+                        "blueprint": item.blueprint,
+                    }
+                    for item in others.repos
+                ],
+            }
+        )
+    )
 
 
 # --------------------------------------------------------------------------- data
@@ -830,6 +1059,7 @@ td.state { text-align: center; }
 a { color: inherit; }
 .ok { color: var(--ok); } .bad { color: var(--bad); font-weight: 600; }
 .wait { color: var(--wait); } .none, .muted { color: var(--muted); }
+.narrow table { min-width: 0; }
 """
 
 
@@ -949,12 +1179,63 @@ def blueprint_cell(row: Row, latest: str) -> str:
     return cell(f"{row.blueprint} → {latest}", css="wait")
 
 
+def made_with_cell(version: str, latest: str) -> str:
+    """The release of the blueprint that a repository of another owner is on."""
+    if not version:
+        return cell(DASH, css="muted")
+    if version == latest:
+        return cell(f"✔ {version}", css="ok")
+    return cell(f"{version} → {latest}" if latest else version, css="wait")
+
+
+def made_with_section(others: MadeWith, latest: str) -> str:
+    """The list "Also made with the blueprint": every public repository of another
+    owner that the code search found, with its kind and the release that it is on."""
+    day = others.searched[:10]
+    found = (
+        f"as GitHub's code search found them on {html.escape(day)}"
+        if day
+        else "as GitHub's code search finds them, which hasn't answered yet"
+    )
+    kept = (
+        " GitHub refused the requests of this run, so the list stays as it was."
+        if others.failed
+        else ""
+    )
+    intro = (
+        '<h2 id="made-with">Also made with the blueprint</h2>\n'
+        "<p>The public repositories of other owners whose .copier-answers.yml "
+        f"names the blueprint, {found}; it searches once a week, and every run checks "
+        "each repository again. One with the topic "
+        f"<code>{OPT_OUT}</code> stays off the list, as does a private, archived or "
+        'forked one. The same list as JSON: <a href="made-with.json">made-with.json'
+        f"</a>.{kept}</p>\n"
+    )
+    if not others.repos:
+        return intro + "<p>No repository of another owner is on the list yet.</p>\n"
+    lines = [
+        "<tr>"
+        + cell(item.repo, f"https://github.com/{item.repo}")
+        + cell(item.kind or DASH, css="muted")
+        + made_with_cell(item.blueprint, latest)
+        + "</tr>"
+        for item in others.repos
+    ]
+    return (
+        intro + '<div class="table narrow"><table>\n<thead><tr><th>Repository</th>'
+        "<th>Kind</th><th>Blueprint</th></tr></thead>\n<tbody>\n"
+        + "\n".join(lines)
+        + "\n</tbody>\n</table></div>\n"
+    )
+
+
 def render(
     rows: list[Row],
     owner: str,
     latest: str,
     now: datetime,
     previous: dict[str, Any] | None = None,
+    others: MadeWith | None = None,
 ) -> str:
     heads = [
         "Repository",
@@ -1021,6 +1302,7 @@ def render(
         + "\n".join(lines)
         + "\n</tbody>\n</table></div>\n"
         + health_table(rows, previous or {})
+        + made_with_section(others or MadeWith(), latest)
         + "</main>\n</body>\n</html>\n"
     )
 
@@ -1045,6 +1327,11 @@ def main(
         help="the address of the history.json of the published dashboard, if any",
     )
     parser.add_argument(
+        "--made-with",
+        default="",
+        help="the address of the made-with.json of the published dashboard, if any",
+    )
+    parser.add_argument(
         "--url",
         default=PUBLISHED,
         help="the address where the dashboard is published, which its feed links to",
@@ -1053,8 +1340,10 @@ def main(
     api = api or Api()
     now = now or datetime.now(UTC)
     try:
-        # First: a history that can't be read stops the page before its requests.
+        # First: what the published dashboard keeps and can't be read stops the page
+        # before its requests.
         history = load_history(arguments.history, opener)
+        kept = load_made_with(arguments.made_with, opener)
         latest = (api.get(f"repos/{BLUEPRINT}/releases/latest") or {}).get(
             "tag_name", ""
         )
@@ -1070,10 +1359,18 @@ def main(
     except (GitHubError, HistoryError) as error:
         print(f"dashboard.py: {error}", file=sys.stderr)
         return 2
+    # A search that GitHub refuses keeps the list as it was, and the page all the same.
+    others = made_with(api, arguments.owner, kept, now)
+    if others.failed:
+        print(
+            "::warning title=Also made with the blueprint::GitHub refused the "
+            "requests for the repositories of other owners, so their list stays as "
+            f"it was: {others.failed}"
+        )
     previous = week_before(history, now)
     arguments.out.parent.mkdir(parents=True, exist_ok=True)
     arguments.out.write_text(
-        render(rows, arguments.owner, latest, now, previous), encoding="utf-8"
+        render(rows, arguments.owner, latest, now, previous, others), encoding="utf-8"
     )
     arguments.out.with_name("history.json").write_text(
         json.dumps(add_to_history(history, rows, now), indent=1) + "\n",
@@ -1086,7 +1383,13 @@ def main(
     arguments.out.with_name("releases.atom").write_text(
         feed(published, arguments.owner, arguments.url, now), encoding="utf-8"
     )
-    print(f"Wrote the dashboard of {len(rows)} repositories to {arguments.out}.")
+    arguments.out.with_name("made-with.json").write_text(
+        json.dumps(made_with_data(others, now), indent=1) + "\n", encoding="utf-8"
+    )
+    print(
+        f"Wrote the dashboard of {len(rows)} repositories to {arguments.out}, "
+        f"with {len(others.repos)} of other owners."
+    )
     return 0
 
 
