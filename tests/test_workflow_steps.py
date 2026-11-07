@@ -99,6 +99,10 @@ jobs:
         run: |
           cat brought.txt given.txt
           echo "$GITHUB_WORKSPACE"
+      - name: Lines of jq
+        run: |
+          mapfile -t names < <(jq -r 'keys[]' <<<'{"a": 1, "b": 2}')
+          printf '%q\\n' "${names[@]}"
 """
 
 
@@ -234,6 +238,19 @@ def test_a_step_runs_in_the_checkout_that_the_test_made(
     ]
     assert done.workspace == checkout
     assert not (tmp_path / "workspace").exists()
+
+
+@WITH_JQ
+def test_a_step_reads_the_lines_of_jq_as_on_the_runners_of_github(
+    tmp_path: Path, demo: Path
+) -> None:
+    # Each line without the CR that jq.exe of Windows writes before its LF, which
+    # mapfile kept: the update leg of the Variants updated symfony/filesystem with a CR
+    # at its end, a package that Composer doesn't know (#676).
+    done = run_step(tmp_path, "demo.yml", "demo", "Lines of jq", root=demo)
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "a\nb\n"
 
 
 # Text that a slice of the workflow takes for a job, a permission or a condition: the
