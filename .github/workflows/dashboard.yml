@@ -107,8 +107,10 @@ jobs:
         id: promises
         timeout-minutes: 5
         run: python3 blueprint.py site-check site --output "$GITHUB_OUTPUT"
+      # Some 4 minutes on a run of its own; the weekly search may wait up to 90 s more
+      # for GitHub's limit of the code search, and checks every repository it finds.
       - name: Collect the state of every repository
-        timeout-minutes: 5
+        timeout-minutes: 7
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER: ${{ github.repository_owner }}

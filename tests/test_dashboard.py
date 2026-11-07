@@ -1635,16 +1635,28 @@ def test_between_searches_every_run_checks_the_list_again() -> None:
         ((404, {"message": "Not Found"}), "2026-09-30T00:00:00Z", "with no list"),
     ],
 )
-def test_a_failed_search_keeps_the_previous_list(
+def test_a_failed_search_checks_the_previous_list_again(
     answer: tuple[int, Any], searched: str, reason: str
 ) -> None:
-    previous = dashboard.MadeWith(searched, [dashboard.Made("zed/tool", "node", "")])
+    previous = dashboard.MadeWith(
+        searched,
+        [
+            dashboard.Made("carol/private", "node", ""),
+            dashboard.Made("frank/unlisted", "node", ""),
+            dashboard.Made("zed/tool", "node", ""),
+        ],
+    )
 
     found = dashboard.made_with(
         simulated({**MADE_WITH, SEARCHED: answer}), "Dennis-Otto", previous, NOW
     )
 
-    assert (found.searched, found.repos) == (searched, previous.repos)
+    # The time of the last search stays, so that the next run searches again; the
+    # private repository and the one with the topic leave the list all the same.
+    assert (found.searched, found.repos) == (
+        searched,
+        [dashboard.Made("zed/tool", "node", "")],
+    )
     assert reason in found.failed
 
 
@@ -1657,19 +1669,49 @@ def test_a_failed_search_keeps_the_previous_list(
         ("2026-09-30T00:00:00Z", "repos/zed/tool/contents/.copier-answers.yml"),
     ],
 )
-def test_a_list_that_cant_be_checked_stays_as_it_was(
+def test_a_repository_that_cant_be_checked_leaves_the_list(
     searched: str, broken: str
 ) -> None:
     previous = dashboard.MadeWith(
         searched,
-        [dashboard.Made("carol/private"), dashboard.Made("zed/tool", "node", "")],
+        [
+            dashboard.Made("alice/app", "python-package", "v0.3.0"),
+            dashboard.Made("carol/private"),
+            dashboard.Made("zed/tool", "node", ""),
+        ],
     )
-    routes = {**MADE_WITH, broken: (500, {"message": "Server Error"})}
+    routes = {
+        **MADE_WITH,
+        "repos/alice/app": about("alice/app"),
+        broken: (500, {"message": "Server Error"}),
+    }
 
     found = dashboard.made_with(simulated(routes), "Dennis-Otto", previous, NOW)
 
-    assert (found.searched, found.repos) == (previous.searched, previous.repos)
-    assert "GitHub answered 500" in found.failed
+    # The error of one repository takes only that one off the list: never does it
+    # keep the others unchecked, such as the one that went private.
+    assert found.repos == [dashboard.Made("alice/app", "python-package", "v0.3.0")]
+    assert "zed/tool: GitHub answered 500" in found.failed
+
+
+@pytest.mark.parametrize("due", [False, True])
+def test_a_rate_limit_keeps_the_old_entry_of_a_repository(due: bool) -> None:
+    searched = "2026-09-30T00:00:00Z" if due else "2026-10-05T00:00:00Z"
+    previous = dashboard.MadeWith(
+        searched,
+        [dashboard.Made("carol/private"), dashboard.Made("zed/tool", "node", "v0.1.0")],
+    )
+    routes = {**MADE_WITH, "repos/zed/tool": (429, {"message": "Too Many Requests"})}
+
+    found = dashboard.made_with(simulated(routes), "Dennis-Otto", previous, NOW)
+
+    # GitHub only asks to wait, which says nothing of the repository: its entry stays
+    # until a run can check it again; what GitHub can tell about still counts.
+    assert [item.repo for item in found.repos] == (
+        ["alice/app", "zed/tool"] if due else ["zed/tool"]
+    )
+    assert dashboard.Made("zed/tool", "node", "v0.1.0") in found.repos
+    assert "zed/tool: GitHub answered 429" in found.failed
 
 
 def test_the_list_holds_each_repository_once_and_at_most_its_limit() -> None:
@@ -1784,7 +1826,7 @@ def test_the_page_says_when_github_refused_the_list() -> None:
     )
 
     assert "as GitHub's code search finds them, which hasn't answered yet;" in section
-    assert "GitHub refused the requests of this run, so the list stays" in section
+    assert "GitHub refused some requests of this run: a repository that" in section
     # What GitHub answered is for the log, not for the page.
     assert "refused</" not in section
     dash = f'<td class="muted">{dashboard.DASH}</td>'
@@ -1844,7 +1886,7 @@ def test_the_dashboard_publishes_the_list_of_other_owners(
     assert "::warning" not in output
 
 
-def test_the_dashboard_keeps_the_list_when_the_search_fails(
+def test_the_dashboard_checks_the_list_again_when_the_search_fails(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = tmp_path / "site" / "index.html"
@@ -1869,11 +1911,13 @@ def test_the_dashboard_keeps_the_list_when_the_search_fails(
     assert code == 0
     found = json.loads((out.parent / "made-with.json").read_text(encoding="utf-8"))
     assert found["searched"] == "2026-10-05T00:00:00Z"
-    assert [repo["repo"] for repo in found["repos"]] == ["zed/tool", "kim/app"]
-    assert "GitHub refused the requests of this run" in out.read_text(encoding="utf-8")
+    # The previous list, checked again: GitHub knows kim/app no more.
+    assert [repo["repo"] for repo in found["repos"]] == ["zed/tool"]
+    assert "GitHub refused some requests of this run" in out.read_text(encoding="utf-8")
     assert (
-        "::warning title=Also made with the blueprint::GitHub refused the requests "
-        "for the repositories of other owners, so their list stays as it was: "
+        "::warning title=Also made with the blueprint::GitHub refused requests "
+        "for the repositories of other owners, so their list may miss some until "
+        "the next run: "
         "GitHub answered 403: Resource not accessible by integration"
     ) in capsys.readouterr().out
 

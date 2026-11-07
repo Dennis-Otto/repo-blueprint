@@ -37,6 +37,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -747,6 +748,9 @@ VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
 # What GitHub answers for a repository that it blocks, such as after a takedown: the
 # list treats it as one that is gone.
 BLOCKED = 451
+# Too many requests: GitHub's answer for a limit that it doesn't name, as for the
+# code search, which says nothing of the repository asked about.
+TOO_MANY = 429
 # The version of the shape of made-with.json, as SCHEMA is that of repos.json.
 MADE_WITH_SCHEMA = 1
 
@@ -772,7 +776,7 @@ class MadeWith:
 
     searched: str = ""
     repos: list[Made] = field(default_factory=list)
-    # Why this run kept the list as it was, if it did: for the log, not the page.
+    # What GitHub refused in this run, if anything: for the log, not the page.
     failed: str = ""
 
 
@@ -882,24 +886,53 @@ def listed_once(repos: list[Made]) -> list[Made]:
     return sorted(unique.values(), key=lambda item: item.repo.lower())[:LISTED]
 
 
+def checked_again(api: Api, item: Made, owner: str) -> Made | None:
+    """item, under its name of today, where the list may still show it: between two
+    searches, its kind and release stay those that the last search found."""
+    name = public(api, item.repo, owner)
+    return Made(name, item.kind, item.blueprint) if name else None
+
+
 def made_with(api: Api, owner: str, previous: MadeWith, now: datetime) -> MadeWith:
     """The list of this run: that of a new search when one is due, else the previous
-    one, checked again. When GitHub refuses either, the previous list stays as it
-    was, with the reason in failed."""
-    try:
-        if due(previous, now):
-            found = [made(api, name, owner) for name in search(api)]
-            return MadeWith(
-                stamp(now), listed_once([item for item in found if item is not None])
-            )
-        kept = [
-            Made(name, item.kind, item.blueprint)
+    one, checked again. Each repository is judged on its own: one that GitHub can't
+    tell about leaves the list until a search finds it again, and only a rate limit
+    keeps its old entry, with the reason in failed. A search that fails keeps the
+    time of the last one, so that the next run searches again, and checks the
+    previous list instead."""
+    old = {item.repo.lower(): item for item in previous.repos}
+    failed: list[str] = []
+
+    def judged(name: str, check: Callable[[], Made | None]) -> Made | None:
+        try:
+            return check()
+        except GitHubError as error:
+            failed.append(f"{name}: {error}")
+            # A rate limit tells nothing about the repository; any other refusal
+            # can't show that it is still public, so it leaves the list.
+            busy = error.rate_limited or error.status == TOO_MANY
+            return old.get(name.lower()) if busy else None
+
+    names: list[str] | None = None
+    if due(previous, now):
+        try:
+            names = search(api)
+        except (GitHubError, SearchError) as error:
+            failed.append(str(error))
+    if names is None:
+        searched = previous.searched
+        found = [
+            judged(item.repo, partial(checked_again, api, item, owner))
             for item in previous.repos
-            if (name := public(api, item.repo, owner))
         ]
-        return MadeWith(previous.searched, listed_once(kept))
-    except (GitHubError, SearchError) as error:
-        return MadeWith(previous.searched, previous.repos, str(error))
+    else:
+        searched = stamp(now)
+        found = [judged(name, partial(made, api, name, owner)) for name in names]
+    return MadeWith(
+        searched,
+        listed_once([item for item in found if item is not None]),
+        "; ".join(failed),
+    )
 
 
 def made_with_data(others: MadeWith, now: datetime) -> dict[str, Any]:
@@ -1198,7 +1231,8 @@ def made_with_section(others: MadeWith, latest: str) -> str:
         else "as GitHub's code search finds them, which hasn't answered yet"
     )
     kept = (
-        " GitHub refused the requests of this run, so the list stays as it was."
+        " GitHub refused some requests of this run: a repository that it didn't tell "
+        "about is off the list until a search finds it again."
         if others.failed
         else ""
     )
@@ -1363,9 +1397,9 @@ def main(
     others = made_with(api, arguments.owner, kept, now)
     if others.failed:
         print(
-            "::warning title=Also made with the blueprint::GitHub refused the "
-            "requests for the repositories of other owners, so their list stays as "
-            f"it was: {others.failed}"
+            "::warning title=Also made with the blueprint::GitHub refused "
+            "requests for the repositories of other owners, so their list may miss "
+            f"some until the next run: {others.failed}"
         )
     previous = week_before(history, now)
     arguments.out.parent.mkdir(parents=True, exist_ok=True)
