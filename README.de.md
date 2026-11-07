@@ -170,7 +170,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 - **Branches:** Der Branch-Bot bringt Pull Requests, die auf Auto-Merge warten, einen nach dem anderen auf den neuesten Stand.
 - **Ersetzte Commits:** Läufe eines ersetzten Commits geben ihren Runner frei.
 - **Aufräumen:** Jede Woche verschwinden gemergte Branches und die Caches geschlossener Pull Requests.
-- **Dashboard:** Eine Seite zeigt jedes Repository des Eigentümers, sein Release des Blueprints und den Zustand seiner Prüfungen.
+- **Dashboard:** Eine Seite zeigt jedes Repository, sein Release des Blueprints und seine Prüfungen, auch [die Kopien anderer Eigentümer](https://dennis-otto.github.io/repo-blueprint/dashboard/); das Topic `repo-blueprint-unlisted` hält deine davon fern.
 
 ### [Website, Diagramme und Screenshots](docs/features/website.de.md)
 
