@@ -168,7 +168,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 - **Branches:** The branch bot brings pull requests that wait for auto-merge up to date, one at a time.
 - **Replaced commits:** Runs of a replaced commit give their runner back.
 - **Clean-up:** Every week, merged branches and the caches of closed pull requests go.
-- **Dashboard:** One page shows each repository, its blueprint release and checks, also [other owners' copies](https://dennis-otto.github.io/repo-blueprint/dashboard/#made-with); the topic `repo-blueprint-unlisted` hides yours.
+- **Dashboard:** One page shows each repository, its blueprint release and checks, also [other owners' copies](https://dennis-otto.github.io/repo-blueprint/dashboard/); the topic `repo-blueprint-unlisted` hides yours.
 
 ### [Website, diagrams and screenshots](docs/features/website.md)
 
