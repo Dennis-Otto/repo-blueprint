@@ -974,7 +974,36 @@ def test_the_wait_for_docker_ends_once_apt_get_is_done_or_after_two_minutes(
     )
 
 
+# An output of a job or a step whose name CodeQL takes for the commit of a pull request.
+COMMIT_OF_A_JOB = re.compile(r"\b(needs|steps)\.[\w-]+\.outputs\.\w*(head|sha|commit)")
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_only_a_job_of_the_environment_release_checks_out_a_commit_of_another_job(
+    projects: dict[str, Path], project: str
+) -> None:
+    # CodeQL takes a commit from the output of a job or a step, as the ref of
+    # actions/checkout, for the code of a pull request, and its alert blocks the
+    # merge or keeps the Findings failing; git checks such a commit out instead,
+    # after the checkout of the branch of the run. A job of the environment release
+    # runs only for main, which CodeQL knows.
+    root = ROOT if project == "blueprint" else projects[project]
+    for name, text in workflows(root).items():
+        for job_id, job in parse(text)["jobs"].items():
+            environment = job.get("environment")
+            if isinstance(environment, Mapping):
+                environment = environment.get("name")
+            if environment == "release":
+                continue
+            for checkout in steps_using(job, "actions/checkout"):
+                ref = str(checkout.get("with", {}).get("ref", ""))
+                assert not COMMIT_OF_A_JOB.search(ref), (name, job_id, ref)
+
+
 WARM_UP = "Wait until Harden-Runner lets the hosts through"
+# The policy of the jobs that render the screenshots, which blocks once the settings
+# of the project name its hosts.
+BY_THE_SETTINGS = "${{ needs.start.outputs.policy }}"
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -993,13 +1022,18 @@ def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
             where = f"{name}: {job_id}"
             steps = job.get("steps") or []
             hardening = steps_using(job, "step-security/harden-runner")
-            if not hardening or hardening[0]["with"]["egress-policy"] != "block":
+            policy = hardening[0]["with"]["egress-policy"] if hardening else None
+            if policy not in ("block", BY_THE_SETTINGS):
                 assert WARM_UP not in [step.get("name") for step in steps], where
                 continue
             # Before every step that could need a host, and for just the hosts that the
-            # job allows, by the same words, so that they can't drift apart.
+            # job allows, by the same words, so that they can't drift apart; where the
+            # settings of the project decide, only when they block.
             warm_up = steps[steps.index(hardening[0]) + 1]
             assert warm_up["name"] == WARM_UP, where
+            assert warm_up.get("if") == (
+                None if policy == "block" else "needs.start.outputs.policy == 'block'"
+            ), where
             allowed = hardening[0]["with"]["allowed-endpoints"]
             assert warm_up["env"] == {"HOSTS": allowed}, where
             # Two minutes, and a last try of 5 s for each host, of a job of 5 minutes.
@@ -6611,6 +6645,7 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`scripts/screenshots.sh` renders the social preview" not in contributing
     assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
+    assert "\n- `.github/screenshots.toml`, which this project adds" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
     assert sorted(files_of(project / "tests")) == (
@@ -16064,6 +16099,13 @@ SUPERSEDED = {
 }
 
 
+RENDERS_ONE_AT_A_TIME = {
+    "group": "${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch'"
+    " && 'render' || github.run_id }}",
+    "cancel-in-progress": False,
+}
+
+
 def cancels_a_push(value: bool | str) -> bool:
     """Whether a cancel-in-progress cancels the run of a push: its value, or that of
     its expression, which compares only the name of the event."""
@@ -16100,7 +16142,9 @@ def test_a_push_to_main_cancels_only_the_checks_of_the_commit_before(
             assert concurrency == SUPERSEDED, path
             assert cancels_a_push(concurrency["cancel-in-progress"])
         elif sides[name] == "runs":
-            assert concurrency is None, path
+            # Or, for the screenshot bot, only its runs by hand wait in one group:
+            # a push only plans, in a group of its own.
+            assert concurrency in (None, RENDERS_ONE_AT_A_TIME), path
         else:
             # Every push to main is in the same group, whose newest run replaces the
             # older one or waits for it.
@@ -18090,6 +18134,9 @@ def test_a_new_repository_photographs_its_website_and_what_its_kind_shows(
     assert "\n.github/screenshots-browser-requirements.txt\n" in paths
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "\n- `scripts/screenshots.sh` renders the social preview" in contributing
+    # Both name the settings of the bot, which the project adds when it needs them.
+    assert "\n- `.github/screenshots.toml`, which this project adds" in contributing
+    assert "\n# .github/screenshots.toml, which can name shards," in paths
     for other, (name, image, sources) in STARTER_PICTURES.items():
         assert (f'"{name}",' in script) == (other == kind), name
         assert (image in script) == (other == kind), image
@@ -18229,17 +18276,19 @@ def test_the_browser_of_the_pictures_and_its_playwright_move_together() -> None:
     assert rules["packageRules"][-1] == grouped[0]
 
 
-def assert_main_has_the_rendered_commit(opener: dict[str, Any]) -> None:
+def assert_main_has_the_rendered_commit(
+    opener: dict[str, Any], job: str = "render"
+) -> None:
     """The job with the release app runs code only of a commit of main: the commit
-    that the job render names, which runs the script of the project, is checked with
+    that job names, before the scripts of the project ran with it, is checked with
     the token of the job before the checkout."""
     names = [step.get("name") for step in opener["steps"]]
-    check = names.index("Check that main has the commit that the job render names")
+    check = names.index(f"Check that main has the commit that the job {job} names")
     (checkout,) = steps_using(opener, "actions/checkout")
     assert check < opener["steps"].index(checkout)
     step = opener["steps"][check]
     assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
-    assert step["env"]["SHA"] == "${{ needs.render.outputs.sha }}"
+    assert step["env"]["SHA"] == f"${{{{ needs.{job}.outputs.sha }}}}"
     assert '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]' in step["run"]
     assert 'compare/$SHA...main" --jq .behind_by)" == 0 ]]' in step["run"]
 
@@ -18264,14 +18313,43 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     )
     # Only the push run of a release, not its daily or manual runs on the same commit.
     assert "github.event.workflow_run.event == 'push'" in condition_of(plan)
-    # A push that is not due never replaces a waiting render of one that is.
-    assert "concurrency" not in parsed
-    assert "concurrency" not in plan
-    # The script of the project runs without secrets and with a token that reads.
+    # A due plan starts a run by hand, which renders; a push that is not due never
+    # replaces a waiting render of one that is, since only the runs by hand wait in
+    # one group, and the newest of those that wait replaces an older one.
+    assert "github.event_name != 'workflow_dispatch'" in condition_of(plan)
+    assert (
+        'gh api --method POST "repos/$GH_REPO/actions/workflows/screenshot-bot.yml/'
+        'dispatches" -f ref=main'
+    ) in scripts_of(plan)
+    assert plan["permissions"] == {"actions": "write", "contents": "read"}
+    assert "secrets." not in values_of(plan)
+    assert parsed["concurrency"] == RENDERS_ONE_AT_A_TIME
+    for job in parsed["jobs"].values():
+        assert "concurrency" not in job or job is parsed["jobs"]["pull-request"]
+    # The job start names the newest commit of the branch, after any wait, and the
+    # shards of the settings; it runs only blueprint.py, with a token that reads.
+    start = job_in(parsed, "start")
+    assert condition_of(start) == (
+        "!github.event.repository.fork && github.event_name == 'workflow_dispatch'"
+    )
+    assert start["permissions"] == {"contents": "read"}
+    assert " screenshots due " in f"{scripts_of(start)} "
+    assert " screenshots plan " in f"{scripts_of(start)} "
+    assert "bash scripts/screenshots.sh" not in values_of(start)
+    # The script of the project runs without secrets and with a token that reads, in
+    # one job for each shard of the settings, each with its name.
     render = job_in(parsed, "render")
-    assert "bash scripts/screenshots.sh" in [
-        step.get("run") for step in render["steps"]
+    assert render["needs"] == "start"
+    assert render["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"include": "${{ fromJSON(needs.start.outputs.shards) }}"},
+    }
+    (rendering,) = [
+        step
+        for step in render["steps"]
+        if step.get("run") == "bash scripts/screenshots.sh"
     ]
+    assert rendering["env"] == {"SCREENSHOTS_SHARD": "${{ matrix.shard }}"}
     assert render["permissions"] == {"contents": "read"}
     assert "secrets." not in values_of(render)
     assert "environment" not in render
@@ -18280,21 +18358,54 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
         for step in steps_using(render, "actions/checkout")
     )
     assert " screenshots keep " in scripts_of(render)
-    assert render["concurrency"] == {
-        "group": "${{ github.workflow }}-render",
-        "cancel-in-progress": False,
-    }
     assert "\nuv venv --quiet .venv-docs\n" in scripts_of(render)
+    (shard,) = steps_using(render, "actions/upload-artifact")
+    assert shard["with"]["name"] == "screenshots-${{ matrix.id }}"
+    # Harden-Runner blocks every host but those of the steps and of the settings once
+    # the settings name hosts, and only records the traffic without them.
+    hardening = render["steps"][0]
+    assert hardening["uses"].startswith("step-security/harden-runner@")
+    assert hardening["with"]["egress-policy"] == BY_THE_SETTINGS
+    allowed = hardening["with"]["allowed-endpoints"]
+    assert allowed.endswith(" ${{ needs.start.outputs.hosts }}")
+    endpoints = allowed.removesuffix(" ${{ needs.start.outputs.hosts }}").split()
+    for endpoint in endpoints:
+        assert ENDPOINT.fullmatch(endpoint), endpoint
+    # uv from the mirror of Astral or GitHub's releases, by the list of its versions.
+    assert {
+        "releases.astral.sh:443",
+        "raw.githubusercontent.com:443",
+        "release-assets.githubusercontent.com:443",
+        "pypi.org:443",
+        "files.pythonhosted.org:443",
+    } <= set(endpoints)
+    # The job collect puts the shards together once every one rendered, and checks
+    # each with blueprint.py of that commit; it runs nothing of the script.
+    collector = job_in(parsed, "collect")
+    assert collector["needs"] == ["start", "render"]
+    assert condition_of(collector) == "needs.render.result == 'success'"
+    assert collector["permissions"] == {"contents": "read"}
+    assert "secrets." not in values_of(collector)
+    assert not any(
+        "\nbash scripts/" in f"\n{step.get('run', '')}" for step in collector["steps"]
+    )
+    (fetched,) = steps_using(collector, "actions/download-artifact")
+    assert fetched["with"]["pattern"] == "screenshots-*"
+    assert " screenshots collect " in scripts_of(collector)
+    (collected,) = steps_using(collector, "actions/upload-artifact")
+    assert collected["with"]["name"] == "screenshots"
     # Only the job that runs nothing of the script has the release app, and takes
     # the pictures as data, checked by blueprint.py of main.
     opener = job_in(parsed, "pull-request")
+    assert opener["needs"] == ["start", "collect"]
     assert opener["environment"]["name"] == "release"
     assert "bash scripts/screenshots.sh" not in values_of(opener)
-    # Its tool and the Markdown of the pages, whose named sizes it corrects from the
+    # Its tool, the settings of main, which name the files besides pictures that it
+    # takes, and the Markdown of the pages, whose named sizes it corrects from the
     # numbers of those pictures; no picture of main.
     assert (
-        "/.github/blueprint.py\n/.github/blueprint/\n/blueprint.py\n/blueprint/\n"
-        "/*.md\n/docs/**/*.md\n"
+        "/.github/blueprint.py\n/.github/blueprint/\n/.github/screenshots.toml\n"
+        "/blueprint.py\n/blueprint/\n/*.md\n/docs/**/*.md\n"
     ) in [
         step.get("with", {}).get("sparse-checkout")
         for step in steps_using(opener, "actions/checkout")
@@ -18307,15 +18418,33 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     assert app_permissions(opener)["workflows"] == "write"
     assert '\ngh pr merge "$open" --auto --squash\n' in scripts_of(opener)
     assert 'author.login == \\"app/$APP_SLUG\\"' in scripts_of(opener)
-    # A render that waited renders main as it is now, and the commits start from the
-    # commit that it rendered (paperless-unified-search#316).
-    (rendering,) = steps_using(render, "actions/checkout")
-    assert rendering["with"]["ref"] == "${{ github.ref }}"
-    assert render["outputs"]["sha"] == "${{ steps.rendered.outputs.sha }}"
-    (pages,) = steps_using(opener, "actions/checkout")
-    assert pages["with"]["ref"] == "${{ needs.render.outputs.sha }}"
-    assert_main_has_the_rendered_commit(opener)
-    assert "SHA: ${{ needs.render.outputs.sha }}" in workflow
+    # A render that waited renders main as it is now, every shard the same commit,
+    # and the commits start from it (paperless-unified-search#316).
+    (newest,) = steps_using(start, "actions/checkout")
+    assert newest["with"]["ref"] == "${{ github.ref }}"
+    assert start["outputs"]["sha"] == "${{ steps.start.outputs.sha }}"
+    # The jobs without the environment release check out the branch of the run, and
+    # git the named commit of its history, so that no input of actions/checkout takes
+    # a commit from another job: CodeQL takes such a one for code of a pull request
+    # (actions/cache-poisoning/poisonable-step, actions/untrusted-checkout/medium).
+    for job in (render, collector):
+        (checkout,) = steps_using(job, "actions/checkout")
+        assert checkout["with"]["ref"] == "${{ github.ref }}"
+        assert checkout["with"]["fetch-depth"] == 0
+        pinned = step_named(job, "Check out the commit that the job start names")
+        assert job["steps"].index(pinned) == job["steps"].index(checkout) + 1
+        assert pinned["env"] == {"COMMIT": "${{ needs.start.outputs.sha }}"}
+        assert pinned["run"] == (
+            '[[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]\n'
+            'git merge-base --is-ancestor "$COMMIT" HEAD\n'
+            'git checkout --quiet --detach "$COMMIT"\n'
+        )
+    (checkout,) = steps_using(opener, "actions/checkout")
+    assert checkout["with"]["ref"] == "${{ needs.start.outputs.sha }}"
+    assert_main_has_the_rendered_commit(opener, "start")
+    assert "SHA: ${{ needs.start.outputs.sha }}" in workflow
+    assert "STALE: ${{ needs.collect.outputs.stale }}" in workflow
+    assert "needs.render.outputs" not in workflow
     assert "github.sha" not in workflow
     # When main changed a file of the pull request meanwhile, the token of the job
     # starts the workflow anew, and the release app needs no right for it.
@@ -18326,7 +18455,7 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
         'GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \\\n    '
         '"repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main'
     ) in scripts_of(opener)
-    for job in (plan, render, opener):
+    for job in (plan, start, render, collector, opener):
         assert "${{" not in scripts_of(job)
     # The bot-health bot keeps an issue open while the bot fails.
     health = (ROOT / ".github/workflows/bot-health.yml").read_text(encoding="utf-8")
@@ -18335,6 +18464,60 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     dangerous = accepted_dangerous_triggers()
     for name in ("screenshot-bot.yml", "docs-pictures.yml"):
         assert name in dangerous, name
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("artifacts", "shards", "stale"),
+    [
+        # No shard kept anything: no artifact, and no folder.
+        ((), [], False),
+        # One artifact alone comes into the folder itself.
+        (("",), [""], True),
+        # Several, each into a folder of its own.
+        (
+            ("screenshots-en", "screenshots-de"),
+            ["/screenshots-de/", "/screenshots-en/"],
+            True,
+        ),
+    ],
+)
+def test_the_job_collect_takes_the_folder_of_every_shard(
+    tmp_path: Path, artifacts: tuple[str, ...], shards: list[str], stale: bool
+) -> None:
+    script = step_named(
+        job_in(workflows(ROOT)["screenshot-bot.yml"], "collect"),
+        "Put the shards together",
+    )["run"]
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    for artifact in artifacts:
+        folder = temp / "shards" / artifact
+        (folder / "files/docs").mkdir(parents=True)
+        (folder / "report.json").write_text("{}", encoding="utf-8")
+    output, summary = tmp_path / "output", tmp_path / "summary"
+    result, calls = run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        # The tool keeps a folder for the pull request when it got a shard.
+        {"python3": 'if (($# > 4)); then mkdir -p "$4"; touch "$4/report.json"; fi\n'},
+        RUNNER_TEMP=temp.as_posix(),
+        GITHUB_OUTPUT=output.as_posix(),
+        GITHUB_STEP_SUMMARY=summary.as_posix(),
+        APP="",
+    )
+
+    assert result.returncode == 0, result.stderr
+    folders = [f"{(temp / 'shards').as_posix()}{shard}" for shard in shards]
+    collected = (temp / "screenshots").as_posix()
+    assert calls == [
+        " ".join(["python3 blueprint.py screenshots collect", collected, *folders])
+    ]
+    written = output.read_text(encoding="utf-8") if output.exists() else ""
+    assert ("stale=true" in written) == stale
+    # Without the release app, the run says where the pictures are.
+    assert ("the artifact screenshots of this run" in result.stdout) == stale
 
 
 def test_the_pictures_of_the_blueprint_renew_themselves_after_a_release() -> None:
