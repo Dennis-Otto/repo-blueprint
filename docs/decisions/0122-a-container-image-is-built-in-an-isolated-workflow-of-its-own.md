@@ -27,3 +27,5 @@ Option 2.
 ## Consequences
 
 An image reaches SLSA Build Level 3 like every other asset: its provenance names a build that no other job of the release can change, and an attestation of `release.yml` or any other workflow fails the verification of a new release. The job `ghcr` is now a call, so its steps show as *deliver to GHCR / image* in the run. No repository of the owner delivers an image yet: the proof is a real release of a container in a test repository, whose `gh attestation verify oci://ghcr.io/<owner>/<repository>:<version> --repo <owner>/<repository> --signer-workflow <owner>/<repository>/.github/workflows/build-image.yml --source-ref refs/heads/main --deny-self-hosted-runners` passes, whose provenance has the build type of GitHub Actions with `build-image.yml` as the workflow of its build signer, and whose run of `verify-release.yml` passes.
+
+`README.md` belongs to the project, so only a new container repository gets the new command in its README; an existing one changes its line `gh attestation verify oci://…` by hand to the one of its `SECURITY.md`, as the changelog says.
