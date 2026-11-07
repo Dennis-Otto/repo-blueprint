@@ -194,8 +194,6 @@ The guide describes how [your own account](guide.md#your-own-account) gets its r
 
 --8<-- "README.md:made-with"
 
---8<-- "README.md:also-made-with"
-
 ## Why Repo Blueprint
 
 --8<-- "README.md:why"

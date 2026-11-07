@@ -73,12 +73,6 @@ Sechs öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und
 
 <!-- --8<-- [end:made-with] -->
 
-<!-- --8<-- [start:also-made-with] -->
-
-**Auch mit dem Blueprint gebaut:** Einmal in der Woche sucht das Dashboard mit der Codesuche von GitHub die öffentlichen Repositories anderer Eigentümer, deren `.copier-answers.yml` den Blueprint nennt, und listet jedes [unter *Also made with the blueprint*](https://dennis-otto.github.io/repo-blueprint/dashboard/#made-with) mit seiner Art und der Version des Blueprints, auf der es ist. Damit dein Repository nicht auf der Liste steht, gib ihm das Topic `repo-blueprint-unlisted`: Jeder Lauf des Dashboards, alle zwei Stunden, prüft jedes Repository der Liste erneut und lässt es von da an weg, wie eines, das privat, archiviert oder ein Fork ist.
-
-<!-- --8<-- [end:also-made-with] -->
-
 ## Warum Repo Blueprint
 
 <!-- --8<-- [start:why] -->
@@ -175,7 +169,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 - **Branches:** Der Branch-Bot bringt Pull Requests, die auf Auto-Merge warten, einen nach dem anderen auf den neuesten Stand.
 - **Ersetzte Commits:** Läufe eines ersetzten Commits geben ihren Runner frei.
 - **Aufräumen:** Jede Woche verschwinden gemergte Branches und die Caches geschlossener Pull Requests.
-- **Dashboard:** Eine Seite zeigt jedes Repository des Eigentümers, sein Release des Blueprints und den Zustand seiner Prüfungen.
+- **Dashboard:** Eine Seite zeigt jedes Repository, sein Release des Blueprints und seine Prüfungen, auch [die Kopien anderer Eigentümer](https://dennis-otto.github.io/repo-blueprint/dashboard/#made-with); das Topic `repo-blueprint-unlisted` hält deine davon fern.
 
 ### [Website, Diagramme und Screenshots](docs/features/website.de.md)
 
