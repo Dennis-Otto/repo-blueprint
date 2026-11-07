@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -59,6 +60,17 @@ GH = """#!/usr/bin/env bash
 export MSYS2_ARG_CONV_EXCL='*'
 exec "$FAKE_GH_PYTHON" -I -S -X utf8 "$FAKE_GH" "$@"
 """
+# jq.exe, the jq of Windows, ends each line that it writes with CRLF, where the jq of
+# the runners of GitHub, on Linux, ends it with LF. read and mapfile of bash keep the
+# CR, so a step that took the lines of jq got each of them with a CR at its end on
+# Windows (#676). There, a jq in front of that one runs it with --binary, which writes
+# LF as on Linux; a stub of the test named jq still comes first.
+JQ = shutil.which("jq")
+JQ_AS_ON_LINUX = (
+    {"jq": f'exec "{Path(JQ).as_posix()}" --binary "$@"\n'}
+    if os.name == "nt" and JQ
+    else {}
+)
 
 
 @dataclass(frozen=True)
@@ -250,11 +262,12 @@ def run_step(
     workspace: Path | None = None,
 ) -> StepResult:
     """Runs the step of the job as GitHub does, in tmp_path: gh answers with answers,
-    each stub, a name with the text of its bash, comes first on the PATH, and files are
-    the files of the workspace by their paths, such as those that a checkout brings,
-    or of $RUNNER_TEMP by a path that starts with it, such as those of a step before.
-    The workspace is tmp_path/workspace, or the checkout of a repository that the test
-    made, such as one with the history of a pull request."""
+    each stub, a name with the text of its bash, comes first on the PATH, as does a jq
+    that writes LF on Windows too, and files are the files of the workspace by their
+    paths, such as those that a checkout brings, or of $RUNNER_TEMP by a path that
+    starts with it, such as those of a step before. The workspace is
+    tmp_path/workspace, or the checkout of a repository that the test made, such as
+    one with the history of a pull request."""
     assert BASH, "the steps run in bash, Git Bash on Windows"
     found = step(workflow_name, job_id, step_name, root)
     script = found.get("run")
@@ -296,7 +309,7 @@ def run_step(
         ),
         encoding="utf-8",
     )
-    for name, text in {"gh": GH, **(stubs or {})}.items():
+    for name, text in {"gh": GH, **JQ_AS_ON_LINUX, **(stubs or {})}.items():
         stub = folders["stubs"] / name
         body = text if text.startswith("#!") else f"#!/usr/bin/env bash\n{text}"
         stub.write_text(body, encoding="utf-8", newline="\n")
