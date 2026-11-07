@@ -492,6 +492,11 @@ TESTED = {
     ): "test_rollout.py",
     (
         "screenshot-bot.yml",
+        "plan",
+        "Start the run that renders the pictures",
+    ): "test_workflow_steps.py",
+    (
+        "screenshot-bot.yml",
         "pull-request",
         "Open, update or close the pull request of the screenshots",
     ): "test_workflow_steps.py",
@@ -2714,3 +2719,73 @@ def test_the_update_leg_updates_a_locked_package_that_an_advisory_names(
     else:
         assert done.stubbed == [audit]
         assert "No advisory names a locked package." in done.stdout
+
+
+# The screenshot bot: the plan starts a run by hand, which names its commit and shards.
+
+
+def test_a_due_plan_starts_the_run_that_renders(tmp_path: Path) -> None:
+    # The runs by hand wait for each other in one group, so the plan of a push starts
+    # one instead of rendering in its own run, which waits for nothing.
+    dispatch = (
+        "api --method POST repos/o/r/actions/workflows/screenshot-bot.yml/dispatches"
+    )
+    done = run_step(
+        tmp_path,
+        "screenshot-bot.yml",
+        "plan",
+        "Start the run that renders the pictures",
+        answers=[exact(f"{dispatch} -f ref=main")],
+        env={"GH_TOKEN": "job-token", "GH_REPO": "o/r"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == [f"{dispatch} -f ref=main"]
+    assert "started a run of this workflow by hand" in done.summary
+
+
+@pytest.mark.parametrize(
+    ("due", "code", "outputs"),
+    [
+        (
+            0,
+            0,
+            {
+                "due": "true",
+                "sha": SHA,
+                "shards": '[{"shard":"","id":"all"}]',
+                "policy": "audit",
+                "hosts": "",
+            },
+        ),
+        # Without the script, nothing renders, and the run passes.
+        (1, 0, {}),
+        # An error of the tool fails the run.
+        (2, 1, {}),
+    ],
+)
+def test_the_start_names_the_newest_commit_and_the_shards(
+    tmp_path: Path, due: int, code: int, outputs: dict[str, str]
+) -> None:
+    # The tool says whether the script is there, then prints the plan of the settings.
+    tool = (
+        f'if [[ "$3" == due ]]; then exit {due}; fi\n'
+        """echo 'shards=[{"shard":"","id":"all"}]'\n"""
+        "echo policy=audit\n"
+        "echo hosts=\n"
+    )
+    done = run_step(
+        tmp_path,
+        "screenshot-bot.yml",
+        "start",
+        "Name the commit and the shards that render",
+        stubs={
+            "python3": recording("python3", tool),
+            "git": recording("git", f"echo {SHA}"),
+        },
+    )
+
+    assert done.returncode == code, done.stderr
+    assert done.outputs == outputs
+    assert done.stubbed[0] == "python3 blueprint.py screenshots due"
+    assert ("python3 blueprint.py screenshots plan" in done.stubbed) == bool(outputs)
