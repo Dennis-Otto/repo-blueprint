@@ -216,12 +216,12 @@ def verify(
                 + re.escape(TRUSTED_RUN)
                 + r"( --bundle provenance\.sigstore\.json)?"
             ),
-            # The image, which the release workflow builds and attests itself, by the
-            # lower-case name that GHCR takes.
+            # The image, which its own isolated build attests, by the lower-case name
+            # that GHCR takes.
             exact(
                 f"attestation verify oci://ghcr.io/{repository.lower()}:{version}"
                 f" --repo {repository} --signer-workflow"
-                f" {repository}/.github/workflows/release.yml" + TRUSTED_RUN
+                f" {repository}/.github/workflows/build-image.yml" + TRUSTED_RUN
             ),
         ],
         env={
@@ -288,6 +288,12 @@ NPM: dict[str, Any] = {
 }
 IMAGE = f"ghcr.io/o/r:{VERSION}"
 ATTESTED_IMAGE = (
+    f"attestation verify oci://{IMAGE} --repo o/r"
+    " --signer-workflow o/r/.github/workflows/build-image.yml" + TRUSTED_RUN
+)
+# The provenance of an image made before its isolated build, which the release
+# workflow attested in the job that pushed it.
+IMAGE_OF_THE_RELEASE_WORKFLOW = (
     f"attestation verify oci://{IMAGE} --repo o/r"
     " --signer-workflow o/r/.github/workflows/release.yml" + TRUSTED_RUN
 )
@@ -372,7 +378,7 @@ PASSES: dict[str, tuple[dict[str, Any], str]] = {
     "the package on npm": (NPM, f"npm has the same package demo@{VERSION}."),
     "the image in GHCR": (
         {"publish_to": "ghcr"},
-        f"{IMAGE} carries the signed provenance of the release workflow.",
+        f"{IMAGE} carries the signed provenance of its isolated build.",
     ),
     "the zip of the extension": (
         CHROME,
@@ -569,7 +575,7 @@ PROBLEMS: dict[str, tuple[dict[str, Any], str]] = {
     ),
     "an image without a provenance": (
         {"publish_to": "ghcr", "answers": [exact(ATTESTED_IMAGE, code=1)]},
-        f"{IMAGE} has no valid provenance.",
+        f"{IMAGE} has no valid provenance of its isolated build.",
     ),
     "two zips of the extension": (
         {**CHROME, "assets": {"r.zip": zip_of({}), "s.zip": zip_of({})}},
@@ -709,6 +715,18 @@ OLDER_RELEASE: dict[str, tuple[dict[str, Any], str, str]] = {
         "r.spdx.json carries the signed provenance of the release workflow, from"
         " before the isolated build.",
         "r.spdx.json has no valid provenance of the isolated build.",
+    ),
+    "the provenance of the release workflow for the image": (
+        {
+            "publish_to": "ghcr",
+            "answers": [
+                exact(ATTESTED_IMAGE, code=1),
+                exact(IMAGE_OF_THE_RELEASE_WORKFLOW),
+            ],
+        },
+        f"{IMAGE} carries the signed provenance of the release workflow, from before"
+        " its isolated build.",
+        f"{IMAGE} has no valid provenance of its isolated build.",
     ),
     "no zip of the extension": (
         {"publish_to": "chrome-web-store"},
@@ -1009,7 +1027,7 @@ def test_the_image_of_a_repository_with_capitals_has_the_lower_case_name_of_ghcr
     assert_verified(done)
     image = f"ghcr.io/dennis-otto/demo:{VERSION}"
     assert (
-        f"- ✔ {image} carries the signed provenance of the release workflow.\n"
+        f"- ✔ {image} carries the signed provenance of its isolated build.\n"
         in done.summary
     )
     # The SBOMs and the provenance keep the name of the repository as it is.

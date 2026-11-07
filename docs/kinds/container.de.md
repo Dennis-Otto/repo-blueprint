@@ -32,7 +32,7 @@ Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Reque
 
 ## Auslieferung
 
-Der Merge des Release-Pull-Requests baut das Image für `linux/amd64` und `linux/arm64` und schiebt es in die GitHub Container Registry, mit den Tags der Version, etwa `1.4.2`, `1.4` und `1`, mit seiner SBOM und der signierten Provenance des Release-Workflows. Der Release-Workflow baut das Image in dem Job, der es ausliefert, nicht im isolierten Build der übrigen Assets, also erreicht das Image SLSA Build Level 2 und seine übrigen Assets Level 3.
+Der Merge des Release-Pull-Requests baut das Image für `linux/amd64` und `linux/arm64` und schiebt es in die GitHub Container Registry, mit den Tags der Version, etwa `1.4.2`, `1.4` und `1`, mit seiner SBOM und der signierten Provenance seines Builds. Sobald das Release öffentlich ist, ruft der Release-Workflow `build-image.yml` auf, einen eigenen isolierten Build, wie es `build-release.yml` für die übrigen Assets ist, der das Image des signierten Tags baut, in die Registry schiebt und seine Provenance signiert, also erreicht das Image SLSA Build Level 3 wie jedes andere Asset. Die Prüfung des Releases und der Befehl im README prüfen, dass seine Provenance `build-image.yml` nennt, aus einem Lauf für `main` auf einem Runner von GitHub.
 
 ## Einmal von Hand
 
