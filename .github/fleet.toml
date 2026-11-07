@@ -18,6 +18,8 @@ owner = "Dennis-Otto"
 #   kind     its project_type, which has a page docs/kinds/<kind>.md
 #   rollout  its place in the Rollout, from 1: the quickest checks first, so that each
 #            update pull request is done soon, and the longest last
+#            (also its schedule slot, decision 0083: a new repository takes the next
+#            place, so that the slots of the others stay)
 #   canary   true when the Variants workflow updates a copy with its answers in every
 #            pull request of the blueprint that changes what they render, before the
 #            change merges
@@ -29,7 +31,7 @@ owner = "Dennis-Otto"
 [[repository]]
 name = "homedarts-for-autodarts"
 kind = "home-assistant"
-rollout = 7
+rollout = 6
 canary = true
 title = "HomeDarts for Autodarts"
 what = "a Home Assistant integration"
@@ -41,7 +43,7 @@ pitch_de = "lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statis
 [[repository]]
 name = "player-switch-for-autodarts"
 kind = "chrome-extension"
-rollout = 4
+rollout = 3
 canary = true
 title = "Player Switch for Autodarts"
 what = "a Chrome extension in TypeScript"
@@ -53,7 +55,7 @@ pitch_de = "ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen
 [[repository]]
 name = "issue-assistant"
 kind = "github-action"
-rollout = 3
+rollout = 2
 canary = true
 title = "Issue assistant"
 what = "a GitHub Action"
@@ -65,7 +67,7 @@ pitch_de = "eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, 
 [[repository]]
 name = "paperless-sync"
 kind = "nextcloud-app"
-rollout = 6
+rollout = 5
 canary = true
 title = "Paperless Sync"
 what = "a Nextcloud app"
@@ -77,7 +79,7 @@ pitch_de = "die Dokumente von Paperless-ngx in Nextcloud Files, nach Korresponde
 [[repository]]
 name = "paperless-unified-search"
 kind = "nextcloud-app"
-rollout = 5
+rollout = 4
 canary = true
 title = "Paperless Unified Search"
 what = "a Nextcloud app"
@@ -89,7 +91,7 @@ pitch_de = "die Volltextsuche von Paperless-ngx in der Suche von Nextcloud."
 [[repository]]
 name = "dennis-otto-pager"
 kind = "cloudflare-worker"
-rollout = 2
+rollout = 7
 canary = true
 title = "Dennis Otto Pager"
 what = "a Cloudflare Worker in TypeScript"
