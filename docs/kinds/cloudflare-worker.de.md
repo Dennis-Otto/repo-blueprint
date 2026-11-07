@@ -61,7 +61,9 @@ Sie geschehen bei Cloudflare, also nennt die Checkliste die ersten beiden als ei
 
 <!-- --8<-- [start:real-repository] -->
 
-Noch folgt kein öffentliches Repository dieser Art dem Blueprint. Der Workflow Variants des Blueprints macht bei jeder Änderung seiner Dateien eines daraus und führt seine Prüfungen mit ihren echten Werkzeugen aus, und er aktualisiert eines von der neuesten Version, wie sein Blueprint-Bot es täte.
+[Dennis Otto Pager](https://github.com/Dennis-Otto/dennis-otto-pager) ist aus dem Blueprint entstanden: ein privater Telegram-Pager für die Repositories seines Maintainers, der nur meldet, was ihn braucht, und es per Button erledigt.
+
+Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Dennis Otto Pager rendern, mit ihnen aus, bevor er merged.
 
 <!-- --8<-- [end:real-repository] -->
 

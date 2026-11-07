@@ -61,7 +61,9 @@ They happen in Cloudflare, so the checklist names the first two as one step that
 
 <!-- --8<-- [start:real-repository] -->
 
-No public repository of this kind follows the blueprint yet. The Variants workflow of the blueprint makes one from every change of its files and runs its checks with their real tools, and updates one from the latest release as its blueprint bot would.
+[Dennis Otto Pager](https://github.com/Dennis-Otto/dennis-otto-pager) is made from the blueprint: a private Telegram pager for the repositories of its maintainer, which tells them only what needs them and acts on it with a button.
+
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Dennis Otto Pager render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 
