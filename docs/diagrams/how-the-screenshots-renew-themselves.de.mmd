@@ -5,32 +5,34 @@ config:
 ---
 flowchart TB
     accTitle: Wie sich die Screenshots selbst erneuern
-    accDescr: Nach einer Änderung von main, die eine Datei aus .github/screenshots-paths.txt betrifft, nach jedem Release, jede Woche und auf Wunsch sucht der Screenshot-Bot scripts/screenshots.sh; ohne das Skript rendert er nichts. Das Skript rendert die Bilder ohne Secrets, und jedes Bild, dessen Pixel gleich blieben, behält seine committete Datei. Haben sich Pixel geändert und hat main keine dieser Dateien geändert, während sie gerendert wurden, hält ein Pull Request von bot/screenshots die neuen Bilder und die Breite und Höhe, die die Seiten für sie nennen, und merged sich selbst, sobald alle Prüfungen bestehen; sieht main aus wie gerendert, schließt der Bot ihn. Hat main inzwischen eine davon geändert, etwa weil der Pull Request davor gemergt wurde, oder hat der Pull Request später Konflikte mit main, rendert der Bot main neu: von selbst oder vom Branch-Bot gestartet. So zeigt jedes Bild das Projekt, wie es ist.
+    accDescr: Nach einer Änderung von main, die eine Datei aus .github/screenshots-paths.txt betrifft, nach jedem Release und jede Woche startet der Plan des Screenshot-Bots einen Lauf von Hand, wie es der Branch-Bot und ein Mensch tun; ohne scripts/screenshots.sh rendert der Bot nichts. Die Läufe von Hand rendern einer nach dem anderen das neueste main. Jeder Shard, den .github/screenshots.toml nennt, rendert seine Bilder dieses Commits nebeneinander, ohne Secrets, und jedes Bild, dessen Pixel gleich blieben, behält seine committete Datei. Haben sich Pixel geändert, setzt der Job collect die Shards zusammen, und hat main keine dieser Dateien geändert, während sie gerendert wurden, hält ein Pull Request von bot/screenshots die neuen Bilder, die Dateien, die die Einstellungen nennen, und die Breite und Höhe, die die Seiten für die Bilder nennen, und merged sich selbst, sobald alle Prüfungen bestehen; sieht main aus wie gerendert, schließt der Bot ihn. Hat main inzwischen eine davon geändert, etwa weil der Pull Request davor gemergt wurde, oder hat der Pull Request später Konflikte mit main, rendert der Bot main neu: von selbst oder vom Branch-Bot gestartet. So zeigt jedes Bild das Projekt, wie es ist.
 
     event["`Eine Änderung von main, die eine<br>Datei der Liste betrifft, ein Release,<br>jede Woche oder von Hand`"]
     script{"Hat das Repository<br>scripts/screenshots.sh?"}
     off["Kein Skript:<br>Der Bot rendert nichts"]
-    render["Das Skript rendert<br>die Bilder, ohne Secrets"]
+    queue["`Ein Lauf von Hand rendert<br>das neueste *main*,<br>ein Lauf nach dem anderen`"]
+    render["`Jeder Shard rendert seine<br>Bilder dieses Commits,<br>nebeneinander, ohne Secrets`"]
     pixels{"Haben sich Pixel<br>gegenüber main geändert?"}
     same["`Gleiche Pixel: Das Bild<br>behält seine committete Datei,<br>ein offener Pull Request schließt`"]
-    pr["`Ein Pull Request von<br>*bot/screenshots* mit den<br>neuen Größen auf den Seiten,<br>der sich selbst merged`"]
+    collect["`Der Job *collect* setzt<br>die Shards zusammen`"]
     moved{"Hat main eine dieser Dateien<br>geändert, während sie gerendert wurden?"}
+    pr["`Ein Pull Request von<br>*bot/screenshots* mit den<br>neuen Größen auf den Seiten,<br>der sich selbst merged`"]
     again["`Der Bot rendert main neu:<br>von selbst oder nach einem Konflikt<br>vom Branch-Bot gestartet`"]
     done["Jedes Bild zeigt<br>das Projekt, wie es ist"]
 
     event --> script
     script -- "nein" --> off
-    script -- "ja" --> render --> pixels
+    script -- "ja" --> queue --> render --> pixels
     pixels -- "nein" --> same --> done
-    pixels -- "ja" --> moved
+    pixels -- "ja" --> collect --> moved
     moved -- "nein" --> pr --> done
     moved -- "ja" --> again
     pr -- "später Konflikte mit main" --> again
-    again --> render
+    again --> queue
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class render,pr,again bot
+    class queue,render,collect,pr,again bot
     class off person
     class done done

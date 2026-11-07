@@ -26,7 +26,9 @@ from blueprint.screenshots import (
     Kept,
     Page,
     Picture,
+    Settings,
     changed_share,
+    collect,
     commit_request,
     corrected_pages,
     corrections,
@@ -45,10 +47,12 @@ from blueprint.screenshots import (
     pathspec,
     patterns,
     picture_size,
+    plan,
     report,
     repository_of,
     resized,
     same_pixels,
+    settings,
     shown_picture,
     shown_share,
     summary,
@@ -193,9 +197,12 @@ def test_a_picture_starts_as_its_kind_does() -> None:
 def test_the_list_names_the_files_whose_change_can_change_the_pictures(
     tmp_path: Path,
 ) -> None:
+    # The script, the list and the settings, whose shards, files and hosts a render
+    # tries out, count on their own.
     assert patterns(tmp_path) == [
         "scripts/screenshots.sh",
         ".github/screenshots-paths.txt",
+        ".github/screenshots.toml",
     ]
     listed = tmp_path / ".github/screenshots-paths.txt"
     listed.parent.mkdir()
@@ -206,13 +213,24 @@ def test_the_list_names_the_files_whose_change_can_change_the_pictures(
     assert patterns(tmp_path) == [
         "scripts/screenshots.sh",
         ".github/screenshots-paths.txt",
+        ".github/screenshots.toml",
         "docs/**",
         "!docs/changelog.md",
     ]
-    assert patterns(tmp_path, Path("other.txt"), Path("draw.sh")) == [
-        "draw.sh",
-        "other.txt",
-    ]
+    assert patterns(
+        tmp_path, Path("other.txt"), Path("draw.sh"), Path("other.toml")
+    ) == ["draw.sh", "other.txt", "other.toml"]
+
+
+def test_a_change_of_the_settings_renders_anew(tmp_path: Path) -> None:
+    root = repository(
+        tmp_path / "repository", {"scripts/screenshots.sh": b"#!/usr/bin/env bash\n"}
+    )
+    first = git_in(root, "rev-parse", "HEAD")
+    commit(root, {".github/screenshots.toml": b'hosts = ["ghcr.io:443"]\n'})
+    ready, reason = due(root, first)
+    assert ready
+    assert "`.github/screenshots.toml`" in reason
 
 
 def test_a_pattern_is_a_pathspec_of_git() -> None:
@@ -555,9 +573,13 @@ def test_keep_fails_on_a_picture_that_is_no_picture(tmp_path: Path) -> None:
 
 
 def folder_with(
-    tmp_path: Path, files: dict[str, bytes], pictures: list[Picture]
+    tmp_path: Path,
+    files: dict[str, bytes],
+    pictures: list[Picture],
+    name: str = "kept",
+    ignored: tuple[str, ...] = (),
 ) -> Path:
-    folder = tmp_path / "kept"
+    folder = tmp_path / name
     for path, data in files.items():
         (folder / "files" / path).parent.mkdir(parents=True, exist_ok=True)
         (folder / "files" / path).write_bytes(data)
@@ -579,7 +601,7 @@ def folder_with(
                     }
                     for p in pictures
                 ],
-                "ignored": [],
+                "ignored": list(ignored),
             }
         ),
         encoding="utf-8",
@@ -1451,7 +1473,8 @@ def test_the_summary_says_what_keep_found() -> None:
     assert text.startswith("These pictures look different:\n\n| Picture |")
     assert text.endswith(
         "\nThe script changed other files too, which the bot leaves out, because it "
-        "takes only pictures from the script: `README.md`.\n"
+        "takes only pictures from the script, and the files that "
+        "`.github/screenshots.toml` names: `README.md`.\n"
     )
 
 
@@ -1487,6 +1510,342 @@ def test_the_description_names_ten_other_files_at_most(tmp_path: Path) -> None:
     text = report(folder, SHA, RUN)
     assert "`notes/9.md` and 2 more.\n" in text
     assert "upload it" not in text
+
+
+# The settings: shards, files besides pictures and hosts
+
+
+def settings_in(tmp_path: Path, text: str | bytes) -> Path:
+    """A checkout whose .github/screenshots.toml holds text."""
+    file = tmp_path / ".github/screenshots.toml"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_bytes(text if isinstance(text, bytes) else text.encode())
+    return tmp_path
+
+
+def test_without_settings_one_job_renders_every_picture(tmp_path: Path) -> None:
+    # One job, named all, whose script renders every picture, and Harden-Runner only
+    # records the traffic, as before the settings.
+    assert settings(tmp_path) == Settings()
+    assert plan(Settings()) == (
+        'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\n'
+    )
+    # A file of comments alone sets nothing either.
+    assert settings(settings_in(tmp_path, "# Nothing yet\n")) == Settings()
+
+
+def test_the_settings_name_shards_files_and_hosts(tmp_path: Path) -> None:
+    root = settings_in(
+        tmp_path,
+        "# HomeDarts for Autodarts\n"
+        'shards = ["en-1", "en-2", "de.1", "timeline_2"]\n'
+        'files = ["docs/demo/timeline.json"]\n'
+        'hosts = ["ghcr.io:443", "*.data.mcr.microsoft.com:443", "apt.example:80"]\n',
+    )
+    found = settings(root)
+    assert found == Settings(
+        ("en-1", "en-2", "de.1", "timeline_2"),
+        ("docs/demo/timeline.json",),
+        ("ghcr.io:443", "*.data.mcr.microsoft.com:443", "apt.example:80"),
+    )
+    lines = plan(found).splitlines()
+    assert json.loads(lines[0].removeprefix("shards=")) == [
+        {"shard": "en-1", "id": "en-1"},
+        {"shard": "en-2", "id": "en-2"},
+        {"shard": "de.1", "id": "de.1"},
+        {"shard": "timeline_2", "id": "timeline_2"},
+    ]
+    # Hosts turn the block on, for every host but these and those of the jobs.
+    assert lines[1:] == [
+        "policy=block",
+        "hosts=ghcr.io:443 *.data.mcr.microsoft.com:443 apt.example:80",
+    ]
+    assert settings(root, Path("other.toml")) == Settings()
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("shards = [", r"\.github/screenshots\.toml is no TOML that the bot can read"),
+        (b'shards = ["\xff"]\n', r"is no TOML that the bot can read"),
+        (
+            "host = []\n",
+            r"sets host, which the bot doesn't know; it knows shards, files and hosts",
+        ),
+        ('shards = "en"\n', r"shards is a list of strings"),
+        ("files = [1]\n", r"files is a list of strings"),
+        ('shards = ["en", "de", "en"]\n', r"shards names en twice"),
+        ('shards = ["-en"]\n', r"the shard '-en' is no plain name"),
+        ('shards = ["a/b"]\n', r"the shard 'a/b' is no plain name"),
+        (f'shards = ["{"x" * 65}"]\n', r"is no plain name"),
+        (
+            "shards = [" + ", ".join(f'"s{n}"' for n in range(257)) + "]\n",
+            r"names 257 shards, more than the 256 jobs",
+        ),
+        ('files = ["../x.json"]\n', r"the file '\.\./x\.json' is no path of plain"),
+        ('files = ["docs/a b.json"]\n', r"is no path of plain names"),
+        ('files = [".github/data.json"]\n', r"is in \.git or \.github"),
+        ('files = [".git/config"]\n', r"is in \.git or \.github"),
+        ('files = ["docs/a.PNG"]\n', r"is a picture, which the bot takes anyway"),
+        ('hosts = ["ghcr.io"]\n', r"the host 'ghcr\.io' is no host and port"),
+        ('hosts = ["GHCR.io:443"]\n', r"is no host and port"),
+        ('hosts = ["localhost:443"]\n', r"is no host and port"),
+        ('hosts = ["ghcr.io:0"]\n', r"is no host and port"),
+        ('hosts = ["ghcr.io:65536"]\n', r"is no host and port"),
+        ('hosts = ["ghcr.io:443 evil.example:443"]\n', r"is no host and port"),
+        ('hosts = ["-ghcr.io:443"]\n', r"is no host and port"),
+    ],
+)
+def test_the_bot_refuses_settings_it_cant_take(
+    tmp_path: Path, text: str | bytes, message: str
+) -> None:
+    # A typo never drops a host, a shard or a file without a word: the run fails and
+    # says what is wrong.
+    with pytest.raises(ValueError, match=message):
+        settings(settings_in(tmp_path, text))
+
+
+def test_a_shard_may_be_as_long_as_a_name_of_github_allows(tmp_path: Path) -> None:
+    longest = "x" * 64
+    root = settings_in(tmp_path, f'shards = ["{longest}"]\nhosts = ["a.b:65535"]\n')
+    assert settings(root).shards == (longest,)
+
+
+# Files besides pictures
+
+
+TIMELINE = "docs/demo/timeline.json"
+
+
+def test_keep_takes_the_files_that_the_settings_name(tmp_path: Path) -> None:
+    root = repository(
+        tmp_path / "repository",
+        {
+            "README.md": b"# Demo\n",
+            TIMELINE: b'{"games": 1}\n',
+            "docs/demo/gone.json": b"{}\n",
+            "docs/demo/other.json": b"{}\n",
+            "docs/images/a.png": png(),
+        },
+    )
+    write(
+        root,
+        {
+            TIMELINE: b'{"games": 2}\n',
+            "docs/demo/new.json": b"[]\n",
+            # Not named: left out, as before.
+            "docs/demo/other.json": b'{"x": 1}\n',
+            "docs/images/a.png": png(changed=1),
+        },
+    )
+    (root / "docs/demo/gone.json").unlink()
+    files = (TIMELINE, "docs/demo/new.json", "docs/demo/gone.json")
+    folder = tmp_path / "kept"
+    found = keep(root, folder, files)
+
+    assert found == Kept(
+        (
+            Picture("docs/demo/gone.json", "deleted", kind="file"),
+            Picture("docs/demo/new.json", "new", kind="file"),
+            Picture(TIMELINE, "changed", kind="file"),
+            Picture("docs/images/a.png", "changed", 0.25),
+        ),
+        ("docs/demo/other.json",),
+    )
+    assert (folder / "files" / TIMELINE).read_bytes() == b'{"games": 2}\n'
+    assert (folder / "deleted.txt").read_text(encoding="utf-8") == (
+        "docs/demo/gone.json\n"
+    )
+    # The job that commits takes them only as main names them.
+    assert kept(folder, files) == found
+    with pytest.raises(
+        ValueError,
+        match=r"hold docs/demo/new\.json, which is no picture and no file that "
+        r"\.github/screenshots\.toml names",
+    ):
+        kept(folder)
+    # A file whose bytes are the same never shows in git's status, so it stays.
+    assert keep(root, None, (TIMELINE, "README.md")).pictures[-1].path == (
+        "docs/images/a.png"
+    )
+
+
+def test_keep_fails_on_a_named_file_that_is_no_text(tmp_path: Path) -> None:
+    root = repository(tmp_path / "repository", {"README.md": b"# Demo\n"})
+    write(root, {TIMELINE: b"\xff\xfe binary"})
+    with pytest.raises(
+        ValueError, match=r"wrote docs/demo/timeline\.json, which .* no text in UTF-8"
+    ):
+        keep(root, tmp_path / "kept", (TIMELINE,))
+
+
+@pytest.mark.parametrize(
+    ("stored", "pictures", "files", "message"),
+    [
+        (
+            {TIMELINE: b"\xff\xfe"},
+            [Picture(TIMELINE, "changed")],
+            (TIMELINE,),
+            r"hold docs/demo/timeline\.json, which is no text in UTF-8",
+        ),
+        (
+            {},
+            [Picture(TIMELINE, "deleted")],
+            (),
+            r"would delete docs/demo/timeline\.json, which is no picture and no file",
+        ),
+        # A list that names a file the settings refuse, as a run can't pass it.
+        (
+            {".github/data.json": b"{}"},
+            [Picture(".github/data.json", "new")],
+            (".github/data.json",),
+            r"hold \.github/data\.json, which is no picture and no file",
+        ),
+    ],
+)
+def test_the_bot_takes_a_file_only_as_text_and_as_main_names_it(
+    tmp_path: Path,
+    stored: dict[str, bytes],
+    pictures: list[Picture],
+    files: tuple[str, ...],
+    message: str,
+) -> None:
+    folder = folder_with(tmp_path, stored, pictures)
+    with pytest.raises(ValueError, match=message):
+        kept(folder, files)
+
+
+def test_the_kind_of_each_change_comes_from_its_path(tmp_path: Path) -> None:
+    # A report that gives a file a size changes no page: the size of a file besides
+    # pictures is none.
+    folder = folder_with(
+        tmp_path,
+        {TIMELINE: b"{}\n", "docs/a.png": png(size=(8, 2))},
+        [Picture(TIMELINE, "changed", 0.5, (4, 1)), Picture("docs/a.png", "new")],
+    )
+    found = kept(folder, (TIMELINE,))
+    assert [picture.kind for picture in found.pictures] == ["file", "picture"]
+    assert resized(found, folder / "files") == {}
+    request = commit_request(folder, "o/r", "b", SHA, "h", "", files=(TIMELINE,))
+    additions = request["variables"]["input"]["fileChanges"]["additions"]
+    assert [addition["path"] for addition in additions] == [TIMELINE, "docs/a.png"]
+    assert written(folder, files=(TIMELINE,)) == [TIMELINE, "docs/a.png"]
+    assert len(parts(folder, files=(TIMELINE,))) == 1
+
+
+def test_the_summary_and_the_description_name_the_files(tmp_path: Path) -> None:
+    table = (
+        "These files that `.github/screenshots.toml` names besides pictures changed:"
+        "\n\n| File | Change |\n| --- | --- |\n"
+        "| `docs/demo/timeline.json` | changed |\n"
+    )
+    only = Kept((Picture(TIMELINE, "changed", kind="file"),))
+    assert (
+        listing(only) == "| Picture | Change | Pixels changed |\n| --- | --- | ---: |\n"
+    )
+    assert summary(only) == f"Every picture looks as committed.\n\n{table}"
+    both = Kept((Picture("docs/a.png", "new"), *only.pictures))
+    assert summary(both) == (
+        "These pictures look different:\n\n| Picture | Change | Pixels changed |\n"
+        f"| --- | --- | ---: |\n| `docs/a.png` | new |  |\n\n{table}"
+    )
+    folder = folder_with(
+        tmp_path, {TIMELINE: b"{}\n"}, [Picture(TIMELINE, "changed")], name="files"
+    )
+    text = report(folder, SHA, RUN, files=(TIMELINE,))
+    assert text.startswith(
+        f"`bash scripts/screenshots.sh` rendered the pictures of `main` anew, on {SHA}"
+        f", and every picture looks as committed.\n\n{table}\nA picture whose pixels"
+    )
+    folder = folder_with(
+        tmp_path,
+        {TIMELINE: b"{}\n", "docs/a.png": png()},
+        [Picture("docs/a.png", "new"), Picture(TIMELINE, "changed")],
+        name="both",
+    )
+    text = report(folder, SHA, RUN, files=(TIMELINE,))
+    assert ", and these look different:\n\n| Picture |" in text
+    assert f"| `docs/a.png` | new |  |\n\n{table}" in text
+
+
+# Shards
+
+
+def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
+    english = folder_with(
+        tmp_path / "shards",
+        {"docs/images/en/a.png": png(changed=1)},
+        [
+            Picture("docs/images/en/a.png", "changed", 0.25, (4, 2)),
+            Picture("docs/images/en/old.png", "deleted"),
+        ],
+        name="screenshots-en",
+        ignored=("README.md",),
+    )
+    german = folder_with(
+        tmp_path / "shards",
+        {"docs/images/de/a.png": png(), TIMELINE: b"{}\n"},
+        [Picture(TIMELINE, "changed"), Picture("docs/images/de/a.png", "new")],
+        name="screenshots-de",
+        ignored=("README.md", "notes.txt"),
+    )
+    folder = tmp_path / "screenshots"
+    found = collect(folder, [english, german], (TIMELINE,))
+
+    assert found == Kept(
+        (
+            Picture(TIMELINE, "changed", kind="file"),
+            Picture("docs/images/de/a.png", "new"),
+            Picture("docs/images/en/a.png", "changed", 0.25, (4, 2)),
+            Picture("docs/images/en/old.png", "deleted"),
+        ),
+        ("README.md", "notes.txt"),
+    )
+    # As one run of keep over every picture would have left it, and checked alike.
+    assert kept(folder, (TIMELINE,)) == found
+    assert (folder / "files/docs/images/en/a.png").read_bytes() == png(changed=1)
+    assert (folder / "files" / TIMELINE).read_bytes() == b"{}\n"
+    assert (folder / "deleted.txt").read_text(encoding="utf-8") == (
+        "docs/images/en/old.png\n"
+    )
+    report_of = json.loads((folder / REPORT).read_text(encoding="utf-8"))
+    assert report_of["ignored"] == ["README.md", "notes.txt"]
+    assert report_of["pictures"][2] == {
+        "path": "docs/images/en/a.png",
+        "status": "changed",
+        "share": 0.25,
+        "before": [4, 2],
+    }
+
+
+def test_each_picture_belongs_to_one_shard(tmp_path: Path) -> None:
+    one = folder_with(
+        tmp_path, {"docs/a.png": png()}, [Picture("docs/a.png", "new")], name="one"
+    )
+    two = folder_with(tmp_path, {}, [Picture("docs/a.png", "deleted")], name="two")
+    with pytest.raises(
+        ValueError,
+        match=r"The shards one and two both changed docs/a\.png, which only one",
+    ):
+        collect(tmp_path / "screenshots", [one, two])
+    assert not (tmp_path / "screenshots").exists()
+
+
+def test_collect_checks_each_shard(tmp_path: Path) -> None:
+    # A shard runs the script of the project, so its folder is data to check, as the
+    # job with the release app checks it.
+    shard = folder_with(
+        tmp_path, {"docs/index.md": b"# Hi\n"}, [Picture("docs/index.md", "new")]
+    )
+    with pytest.raises(ValueError, match=r"hold docs/index\.md, which is no picture"):
+        collect(tmp_path / "screenshots", [shard])
+
+
+def test_collect_leaves_the_folder_away_when_no_shard_kept_anything(
+    tmp_path: Path,
+) -> None:
+    assert collect(tmp_path / "screenshots", []) == Kept((), ())
+    assert not (tmp_path / "screenshots").exists()
 
 
 # The commands
@@ -1594,3 +1953,67 @@ def test_the_commands_of_the_screenshot_bot(
         == 2
     )
     assert "no readable report.json" in capsys.readouterr().err
+
+
+def test_the_commands_of_the_settings_and_the_shards(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repository(
+        tmp_path / "repository",
+        {"README.md": b"# Demo\n", TIMELINE: b"{}\n", "docs/a.png": png()},
+    )
+    assert main(["screenshots", "plan"], root=root) == 0
+    assert capsys.readouterr().out == (
+        'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\n'
+    )
+    settings_in(
+        root,
+        f'shards = ["en"]\nfiles = ["{TIMELINE}"]\nhosts = ["ghcr.io:443"]\n',
+    )
+    assert main(["screenshots", "plan"], root=root) == 0
+    assert capsys.readouterr().out == (
+        'shards=[{"shard":"en","id":"en"}]\npolicy=block\nhosts=ghcr.io:443\n'
+    )
+    # The shard's keep takes the file that the settings name.
+    write(root, {TIMELINE: b'{"games": 2}\n', "docs/a.png": png(changed=1)})
+    shard = tmp_path / "shards/screenshots-en"
+    assert main(["screenshots", "keep", str(shard)], root=root) == 0
+    assert "| `docs/demo/timeline.json` | changed |" in capsys.readouterr().out
+    # The job collect puts the shards together, and the job with the release app
+    # takes the file by the settings of its checkout.
+    folder = tmp_path / "screenshots"
+    assert main(["screenshots", "collect", str(folder), str(shard)], root=root) == 0
+    assert capsys.readouterr().out.startswith("These pictures look different:")
+    assert main(["screenshots", "collect", str(tmp_path / "none")], root=root) == 0
+    assert capsys.readouterr().out == (
+        "Every picture looks as committed, so no file changes.\n"
+    )
+    arguments = ["--repo", "o/r", "screenshots", "commit", str(folder), "--branch", "b"]
+    assert main([*arguments, "--head", SHA, "--headline", "h"], root=root) == 0
+    request = json.loads(capsys.readouterr().out)
+    assert [
+        addition["path"]
+        for addition in request["variables"]["input"]["fileChanges"]["additions"]
+    ] == ["docs/a.png", TIMELINE]
+    assert main(["--repo", "o/r", "screenshots", "parts", str(folder)], root=root) == 0
+    assert capsys.readouterr().out == "1\n"
+    compared = tmp_path / "compared.json"
+    compared.write_text(
+        json.dumps({"behind_by": 0, "files": [{"filename": TIMELINE}]}),
+        encoding="utf-8",
+    )
+    overtaken_arguments = ["screenshots", "overtaken", str(folder)]
+    assert main([*overtaken_arguments, "--compared", str(compared)], root=root) == 0
+    assert "`docs/demo/timeline.json`" in capsys.readouterr().out
+    report_arguments = ["screenshots", "report", str(folder), "--sha", SHA]
+    assert main([*report_arguments, "--run", RUN], root=root) == 0
+    assert "| `docs/demo/timeline.json` | changed |" in capsys.readouterr().out
+    # Settings that the bot can't take stop every command that reads them, with
+    # what is wrong.
+    settings_in(root, 'shard = ["en"]\n')
+    assert main(["screenshots", "plan"], root=root) == 2
+    assert (
+        "blueprint.py: .github/screenshots.toml sets shard, which the bot doesn't know"
+    ) in capsys.readouterr().err
+    assert main(["screenshots", "restore"], root=root) == 2
+    capsys.readouterr()
