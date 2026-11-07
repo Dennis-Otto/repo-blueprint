@@ -360,7 +360,7 @@ Who runs Renovate, which opens the updates of the dependencies: a workflow of th
 
 Let an AI engine, Claude, analyze each new issue, with its token as a secret of the environment issue-assistant.
 
-The issue assistant labels the issues and answers its commands without AI; with AI, the engine of .github/issue-assistant/config.toml, Claude, also analyzes each new issue, with its secret in the environment issue-assistant.
+The issue assistant labels the issues and answers its commands without AI; with AI, the engine of .github/issue-assistant/config.toml, Claude, also analyzes each new issue, with its secret in the environment issue-assistant, and the README of a new repository shows the badge of the issue assistant.
 
 - **Type:** yes or no
 - **Asked:** always

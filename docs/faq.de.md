@@ -22,7 +22,7 @@ Was ein Workflow mit dem Token tut, das GitHub ihm gibt, `GITHUB_TOKEN`, startet
 uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=false
 ```
 
-Der Einstellungs-Bot setzt dann die Variable [`ISSUE_ASSISTANT_AI`](reference/variables.md#issue_assistant_ai) auf `off`, das Environment `issue-assistant` verlangt kein Secret, und `SUPPORT.md` sagt Meldenden, dass keine KI ihre Issues liest. Labels, Erinnerungen, das Schließen mit dem Release und die Befehle des Maintainers funktionieren wie zuvor. Das Secret `CLAUDE_CODE_OAUTH_TOKEN` zu löschen, stoppt die KI ebenfalls sofort, aber die Checkliste fragt dann wieder danach. `--data issue_assistant_ai=true` schaltet die KI später wieder ein.
+Der Einstellungs-Bot setzt dann die Variable [`ISSUE_ASSISTANT_AI`](reference/variables.md#issue_assistant_ai) auf `off`, das Environment `issue-assistant` verlangt kein Secret, und `SUPPORT.md` sagt Meldenden, dass keine KI ihre Issues liest. Labels, Erinnerungen, das Schließen mit dem Release und die Befehle des Maintainers funktionieren wie zuvor. Das Secret `CLAUDE_CODE_OAUTH_TOKEN` zu löschen, stoppt die KI ebenfalls sofort, aber die Checkliste fragt dann wieder danach. `--data issue_assistant_ai=true` schaltet die KI später wieder ein. Das README gehört dir, deshalb lässt das Update das Badge des Issue-Assistenten darin: Nimm seine Zeile `[![issues: triaged by issue assistant](…)](https://dennis-otto.github.io/issue-assistant/)` von Hand heraus, und kopiere sie aus dem [README des Issue-Assistenten](https://github.com/Dennis-Otto/issue-assistant#show-that-you-use-it) zurück, wenn du die KI wieder einschaltest.
 
 ## Wie verhindere ich, dass sich die Updates des Blueprints selbst mergen?
 

@@ -11,6 +11,11 @@
 [%- if homepage %]
 [![Documentation](https://img.shields.io/badge/docs-website-526cfe?logo=materialformkdocs&logoColor=white)]({= homepage =})
 [%- endif %]
+[#- The badge that the issue assistant offers in its README, while its AI triages each
+    new issue and links the assistant below each of its comments. -#]
+[%- if issue_assistant_ai %]
+[![issues: triaged by issue assistant](https://img.shields.io/badge/issues-triaged%20by%20issue%20assistant-blue)](https://dennis-otto.github.io/issue-assistant/)
+[%- endif %]
 [%- if sponsor %]
 [![Sponsor](https://img.shields.io/badge/sponsor-%E2%99%A5-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/{= sponsor =})
 [%- endif %]

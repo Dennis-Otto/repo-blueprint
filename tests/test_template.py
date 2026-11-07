@@ -10138,10 +10138,11 @@ def test_renovate_commits_as_the_bot_user_of_its_release_app(tmp_path: Path) -> 
 
 
 # Anything that names the blueprint owner as a person or an account, or the release app
-# of the blueprint owner, but a reference to one of its repositories, such as the
-# blueprint itself or its issue assistant.
+# of the blueprint owner, but a reference to one of its repositories or to the website of
+# one, such as the blueprint itself or its issue assistant.
 BLUEPRINT_OWNER = re.compile(
-    r"(?i)dennis[ -]otto(?!/[\w.-])|Iv23liP9PIEHOV74AiIA|\b4739928\b"
+    r"(?i)dennis[ -]otto(?!/[\w.-]|\.github\.io/[\w.-])"
+    r"|Iv23liP9PIEHOV74AiIA|\b4739928\b"
 )
 
 
@@ -10750,6 +10751,8 @@ def test_a_foreign_owner_may_take_the_mend_app_and_leave_out_the_ai(
     )
     assert config["transparency"]["files"] == []
     assert config["engine"]["name"] == "claude"
+    # Nor does the README promise a triage by the issue assistant.
+    assert "issue-assistant" not in (project / "README.md").read_text("utf-8")
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -10768,6 +10771,37 @@ def test_the_issue_assistant_names_its_ai_by_default(
         (project / ".github/issue-assistant/config.toml").read_text("utf-8")
     )
     assert config["transparency"]["files"] == ["SUPPORT.md"]
+    # The README shows the badge of the issue assistant among its others, above the
+    # description, before the one of the sponsor that comes last.
+    badges = readme_badges(project)
+    assert badges[-2:] == [ISSUE_ASSISTANT_BADGE, badges[-1]]
+    assert badges[-1].startswith("[![Sponsor]")
+
+
+# The badge that the README of the issue assistant offers to a repository that uses
+# it, which the blueprint's own README shows as well.
+ISSUE_ASSISTANT_BADGE = (
+    "[![issues: triaged by issue assistant]"
+    "(https://img.shields.io/badge/issues-triaged%20by%20issue%20assistant-blue)]"
+    "(https://dennis-otto.github.io/issue-assistant/)"
+)
+
+
+def readme_badges(project: Path) -> list[str]:
+    """The lines of badges below the title of the README of a project."""
+    readme = (project / "README.md").read_text(encoding="utf-8")
+    return readme.split("\n\n")[1].splitlines()
+
+
+def test_the_badge_of_the_issue_assistant_names_it_and_not_its_owner() -> None:
+    # The blueprint's own README shows the badge as well.
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"\n{ISSUE_ASSISTANT_BADGE}\n" in readme
+    # It links the website of the issue assistant, a repository of the blueprint's
+    # owner, which the README of a foreign owner may name; the owner's own it may not.
+    assert not BLUEPRINT_OWNER.search(ISSUE_ASSISTANT_BADGE)
+    assert BLUEPRINT_OWNER.search("https://dennis-otto.github.io/")
+    assert BLUEPRINT_OWNER.search("https://dennis-otto.github.io")
 
 
 def test_a_foreign_owner_names_a_release_app_of_their_own(tmp_path: Path) -> None:

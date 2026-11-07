@@ -121,7 +121,7 @@ Um die Antwort später zu ändern, führ `uvx --from copier==9.19.1 copier updat
 
 ## 6. Der Issue-Assistent
 
-Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Claude, und die Checkliste fragt nach seinem Token, als Secret `CLAUDE_CODE_OAUTH_TOKEN` des Environments `issue-assistant`. Ohne sie setzt `.github/repository.toml` die Variable `ISSUE_ASSISTANT_AI` auf `off`, das Environment fragt nach keinem Secret, und `SUPPORT.md` sagt den Meldenden, dass keine KI ihre Issues liest; Labels, Erinnerungen, Schließen und die Befehle des Maintainers funktionieren wie bisher. `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=true`, auf einem Branch wie in [Schritt 3](#3-die-release-app-registrieren), schaltet die KI später ein.
+Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Claude, und die Checkliste fragt nach seinem Token, als Secret `CLAUDE_CODE_OAUTH_TOKEN` des Environments `issue-assistant`. Ohne sie setzt `.github/repository.toml` die Variable `ISSUE_ASSISTANT_AI` auf `off`, das Environment fragt nach keinem Secret, `SUPPORT.md` sagt den Meldenden, dass keine KI ihre Issues liest, und das README zeigt kein Badge des Issue-Assistenten; Labels, Erinnerungen, Schließen und die Befehle des Maintainers funktionieren wie bisher. `uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=true`, auf einem Branch wie in [Schritt 3](#3-die-release-app-registrieren), schaltet die KI später ein.
 
 ## 7. Die Checkliste
 

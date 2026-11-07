@@ -4,7 +4,7 @@ The bots of issues and pull requests, what starts them and what they cost, and t
 
 ## Issues
 
-A first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix.
+A first analysis of every new issue by an AI that only reads, labels, duplicates, reminders, and closing with the release that ships the fix. With the AI, the README of a new repository shows the badge *issues: triaged by issue assistant*, which links the website of the issue assistant, as its README offers it.
 
 **How:** The [issue assistant](https://github.com/Dennis-Otto/issue-assistant).
 
