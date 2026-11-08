@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,7 @@ from blueprint.bot_health import (
     MOST_STARTS,
     ONE_TRY,
     OWN_ISSUE,
+    PREVIEW_TITLE,
     QUIET_RUNS,
     RENOVATE,
     RENOVATE_TITLE,
@@ -142,11 +145,24 @@ class FakeGitHub:
         self.fail: dict[tuple[str, str], int] = {}
         # What a refused second try finds: the run as another bot left it.
         self.rerun_by_another: dict[str, Any] | None = None
+        # The social preview, as GraphQL names it, and the commits of its picture.
+        self.preview: dict[str, Any] = {
+            "usesCustomOpenGraphImage": False,
+            "openGraphImageUrl": "https://opengraph.githubassets.com/1/" + REPO,
+        }
+        self.graphql_refused = False
+        self.picture_commits: list[dict[str, str]] = [{"sha": HEAD}]
         self.calls: list[tuple[str, str]] = []
 
     def __call__(
         self, arguments: Sequence[str], body: str | None
     ) -> subprocess.CompletedProcess[str]:
+        if arguments[1] == "graphql":
+            self.calls.append(("POST", "graphql"))
+            answer = json.dumps({"data": {"repository": self.preview}})
+            return subprocess.CompletedProcess(
+                arguments, int(self.graphql_refused), answer, "refused"
+            )
         paged = "--paginate" in arguments
         method, path = ("GET", arguments[-1]) if paged else (arguments[3], arguments[4])
         self.calls.append((method, path))
@@ -200,6 +216,10 @@ class FakeGitHub:
                 self.runs_of_event,
             ),
             (r"/git/ref/heads/main", self.head_of_main),
+            (
+                r"/commits\?sha=main&path=\.github/social-preview\.png&per_page=1",
+                self.commits_of_the_picture,
+            ),
             (r"/actions/workflows/(\d+)/enable", self.enable),
             (r"/actions/workflows/(\d+)/dispatches", self.dispatch),
         ):
@@ -211,6 +231,9 @@ class FakeGitHub:
 
     def head_of_main(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, {"object": {"sha": HEAD}}
+
+    def commits_of_the_picture(self, method: str, body: Any) -> tuple[int, Any]:
+        return 200, self.picture_commits
 
     def repository(self, method: str, body: Any) -> tuple[int, Any]:
         if not self.known:
@@ -1940,6 +1963,197 @@ def test_the_workflows_of_the_blueprint_start_as_their_schedules_do(
     dry = name in ("findings.yml", "issue-lifecycle.yml", "sync-issue-assistant.yml")
     assert inputs == ({"dry_run": "false"} if dry else {})
     assert missed_time(text, NOW)[0] is not None
+
+
+# ---------------------------------------------------------------- social preview
+
+UPLOAD = "https://repository-images.githubusercontent.com/1/2"
+PREVIEW_HEADING = ["", "#### Social preview", ""]
+
+
+def with_a_picture(
+    root: Path, picture: bytes = b"the picture", page: str = '<img src="card.png">\n'
+) -> Path:
+    (root / ".github").mkdir(parents=True, exist_ok=True)
+    (root / ".github/social-preview.html").write_text(page, encoding="utf-8")
+    (root / ".github/social-preview.png").write_bytes(picture)
+    return root
+
+
+def uploaded(github: FakeGitHub) -> None:
+    github.preview = {"usesCustomOpenGraphImage": True, "openGraphImageUrl": UPLOAD}
+
+
+def serving(data: bytes | OSError) -> Callable[..., Any]:
+    """GitHub's host of uploads, which serves the uploaded social preview."""
+
+    def opener(url: str, timeout: float) -> Any:
+        assert url == UPLOAD
+        if isinstance(data, OSError):
+            raise data
+        return io.BytesIO(data)
+
+    return opener
+
+
+def preview_lines(summary: str) -> list[str]:
+    lines = summary.splitlines()
+    return lines[lines.index("#### Social preview") - 1 :]
+
+
+def test_the_daily_look_keeps_one_issue_until_github_shows_the_new_social_preview(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    root = with_a_picture(tmp_path)
+    uploaded(github)
+
+    summary, healthy = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+
+    assert healthy
+    assert preview_lines(summary) == [
+        *PREVIEW_HEADING,
+        "GitHub shows another picture than `.github/social-preview.png`: opened #1.",
+    ]
+    issue = github.issues[1]
+    assert issue["title"] == PREVIEW_TITLE == "Upload the new social preview"
+    assert issue["labels"] == [LABEL, "maintenance"]
+    assert github.state_of(1) == {
+        "key": "social-preview",
+        "sha256": hashlib.sha256(b"the picture").hexdigest(),
+    }
+    picture = f"https://github.com/{REPO}/blob/{HEAD}/.github/social-preview.png"
+    assert issue["body"].split("\n", 1)[1] == (
+        "GitHub shows an older social preview for links to this repository, not "
+        "`.github/social-preview.png` of `main`. GitHub takes the social preview "
+        "only from an upload, which no API offers:\n\n"
+        f"1. Save [the picture]({picture}?raw=true).\n"
+        "2. Upload it under [Settings → General → Social preview]"
+        f"(https://github.com/{REPO}/settings): **Edit** → **Upload an image…**\n\n"
+        "The nightly look of the bot-health bot closes this issue once GitHub shows "
+        "this picture, byte for byte.\n\n"
+        "![The new social preview, .github/social-preview.png of main]"
+        f"({picture}?raw=true)\n"
+    )
+
+    # The next night, nothing changed: the issue stays as it is, without a
+    # notification.
+    github.calls.clear()
+    summary, healthy = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+    assert healthy
+    assert writes(github) == [("POST", "graphql")]
+    assert preview_lines(summary)[-1] == (
+        "GitHub shows another picture than `.github/social-preview.png`: #1."
+    )
+
+    # The picture changes again before anyone uploads it: the issue shows the new one.
+    with_a_picture(root, b"the next picture")
+    github.picture_commits = [{"sha": LEFT}]
+    summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+    assert preview_lines(summary)[-1] == (
+        "`.github/social-preview.png` changed again: updated #1."
+    )
+    assert github.state_of(1)["sha256"] == (
+        hashlib.sha256(b"the next picture").hexdigest()
+    )
+    assert f"/blob/{LEFT}/.github/social-preview.png" in github.issues[1]["body"]
+    assert 1 not in github.comments
+
+    # Someone uploads it: the next night closes the issue.
+    summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"the next picture"))
+    assert preview_lines(summary)[-1] == (
+        "GitHub shows `.github/social-preview.png` now: closed #1."
+    )
+    assert github.issues[1]["state"] == "closed"
+    assert github.issues[1]["state_reason"] == "completed"
+    assert github.comments[1] == [
+        "GitHub shows `.github/social-preview.png` of `main` now."
+    ]
+
+    # And then there is nothing to do.
+    github.calls.clear()
+    summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"the next picture"))
+    assert preview_lines(summary)[-1] == "GitHub shows `.github/social-preview.png`."
+    assert writes(github) == [("POST", "graphql")]
+
+
+def test_a_social_preview_that_nobody_uploaded_gets_the_issue_too(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    root = with_a_picture(tmp_path)
+    # A list of commits that names none links the picture of the branch.
+    github.picture_commits = []
+
+    _, healthy = sweep(api_of(github), REPO, root, NOW, serving(b"unread"))
+
+    assert healthy
+    body = github.issues[1]["body"]
+    assert "GitHub shows a card of its own for links to this repository" in body
+    assert "/blob/main/.github/social-preview.png?raw=true" in body
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        '<div class="panel" data-default-panel>\n',
+        '<div class="panel">\n  <div class="card checks">\n',
+    ],
+)
+def test_the_default_panel_of_a_kind_is_no_picture_to_upload(
+    github: FakeGitHub, tmp_path: Path, page: str
+) -> None:
+    # The checklist asks first to replace the panel with the project itself.
+    root = with_a_picture(tmp_path, page=page)
+
+    summary, healthy = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+
+    assert healthy
+    assert "Social preview" not in summary
+    assert github.issues == {}
+    assert ("POST", "graphql") not in github.calls
+
+
+def test_an_issue_without_a_picture_to_upload_closes(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    number = github.add_issue("social-preview", sha256="0" * 64)
+    root = with_a_picture(tmp_path, page='<div class="panel" data-default-panel>\n')
+
+    summary, _ = sweep(api_of(github), REPO, root, NOW)
+    assert preview_lines(summary)[-1] == f"No picture to upload: closed #{number}."
+    assert github.issues[number]["state_reason"] == "not_planned"
+    assert github.comments[number] == [
+        "`.github/social-preview.png` is gone, or `.github/social-preview.html` "
+        "shows the default panel again: there is no picture to upload."
+    ]
+
+    # Without the picture, the look says nothing of it.
+    summary, _ = sweep(api_of(github), REPO, tmp_path / "elsewhere", NOW)
+    assert "Social preview" not in summary
+
+
+@pytest.mark.parametrize(
+    ("refused", "upload", "error"),
+    [
+        (False, TimeoutError("timed out"), f"`{UPLOAD}: timed out`"),
+        (True, None, "`GitHub answered 0: refused`"),
+    ],
+)
+def test_a_social_preview_that_cannot_be_compared_fails_the_look(
+    github: FakeGitHub,
+    tmp_path: Path,
+    refused: bool,
+    upload: OSError | None,
+    error: str,
+) -> None:
+    root = with_a_picture(tmp_path)
+    uploaded(github)
+    github.graphql_refused = refused
+
+    summary, healthy = sweep(api_of(github), REPO, root, NOW, serving(upload or b"x"))
+
+    assert not healthy
+    assert preview_lines(summary)[-1] == f"Couldn't compare it: {error}"
+    assert github.issues == {}
 
 
 # ---------------------------------------------------------------- Renovate
