@@ -7,6 +7,19 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.13.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.12.0...v1.13.0) (2026-11-08)
+
+
+### Features
+
+* the screenshot bot waits for each host on its own port, and a project can name a time limit and the folder of a failed shard ([#698](https://github.com/Dennis-Otto/repo-blueprint/issues/698)) ([09c4282](https://github.com/Dennis-Otto/repo-blueprint/commit/09c42821bb0303ffbe1a60b8778b548ed5f0dbce))
+
+
+### Bug fixes
+
+* Harden-Runner v2.22.4 everywhere, and the screenshot bot lets it see the DNS lookups ([#691](https://github.com/Dennis-Otto/repo-blueprint/issues/691)) ([dc114db](https://github.com/Dennis-Otto/repo-blueprint/commit/dc114db88572f97efc5cc23931a1e26ee660fa8e))
+* the blueprint's workflows ask GitHub for the API version ([#692](https://github.com/Dennis-Otto/repo-blueprint/issues/692)) ([15685e8](https://github.com/Dennis-Otto/repo-blueprint/commit/15685e810eacf46b0ceee73704e840f9385cfd5b))
+
 ## [1.12.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.3...v1.12.0) (2026-11-08)
 
 ### Features
