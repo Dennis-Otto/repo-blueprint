@@ -147,13 +147,20 @@ class FakeGitHub:
     def __call__(
         self, arguments: Sequence[str], body: str | None
     ) -> subprocess.CompletedProcess[str]:
-        method, path = arguments[3], arguments[4]
+        paged = "--paginate" in arguments
+        method, path = ("GET", arguments[-1]) if paged else (arguments[3], arguments[4])
         self.calls.append((method, path))
         payload = json.loads(body) if body else None
         status: int = self.fail.get((method, path), 0)
         data: Any = {"message": "simulated failure"} if status else None
         if not status:
             status, data = self.route(method, path, payload)
+        if paged:
+            # gh api --paginate --slurp: every page in one list; here one page.
+            if status >= 400:
+                error = f"gh: {data['message']} (HTTP {status})"
+                return subprocess.CompletedProcess(arguments, 1, "", error)
+            return subprocess.CompletedProcess(arguments, 0, json.dumps([data]), "")
         text = "" if data is None else json.dumps(data)
         return subprocess.CompletedProcess(
             arguments,
@@ -172,6 +179,10 @@ class FakeGitHub:
             (r"/actions/runs/(\d+)", self.run),
             (r"/actions/runs/(\d+)/rerun-failed-jobs", self.rerun),
             (r"/actions/runs/(\d+)/attempts/(\d+)/jobs\?per_page=100", self.run_jobs),
+            (
+                r"/actions/runs/(\d+)/jobs\?filter=latest&per_page=100",
+                self.latest_jobs,
+            ),
             (r"/check-runs/(\d+)/annotations\?per_page=50", self.job_annotations),
             (r"/issues\?labels=bot-failure&state=open&per_page=100", self.open_list),
             (r"/issues", self.new_issue),
@@ -221,6 +232,15 @@ class FakeGitHub:
         self, method: str, body: Any, number: str, attempt: str
     ) -> tuple[int, Any]:
         return 200, {"jobs": self.jobs.get((int(number), int(attempt)), [])}
+
+    def latest_jobs(self, method: str, body: Any, number: str) -> tuple[int, Any]:
+        # The latest attempt of each job: a second try of the failed jobs runs only
+        # them, and GitHub lists the others as they ended before.
+        latest: dict[str, dict[str, Any]] = {}
+        for (run, _attempt), jobs in sorted(self.jobs.items()):
+            if run == int(number):
+                latest.update({job["name"]: job for job in jobs})
+        return 200, {"total_count": len(latest), "jobs": list(latest.values())}
 
     def job_annotations(self, method: str, body: Any, job: str) -> tuple[int, Any]:
         return 200, self.annotations.get(int(job), [])
@@ -471,6 +491,159 @@ def test_one_failed_run_is_one(github: FakeGitHub) -> None:
     assert github.comments[number][0].endswith("after 1 failed run.")
 
 
+SCREENSHOTS = ".github/workflows/screenshot-bot.yml"
+PLAN = "plan the screenshots"
+RENDER = "render the screenshots"
+KEEP = "keep the pull request"
+
+
+def screenshots_failed(github: FakeGitHub, *jobs: tuple[str, str]) -> int:
+    """The issue of the Screenshots workflow after its run 1 failed in a second try,
+    with the jobs of that try, by their names and conclusions."""
+    github.jobs[(1, 2)] = [
+        job_of_a_run(10 + index, name, conclusion)
+        for index, (name, conclusion) in enumerate(jobs)
+    ]
+    return github.add_issue(SCREENSHOTS, run=1, attempt=2, failed=1, where="x")
+
+
+def screenshots_passed(github: FakeGitHub, *jobs: tuple[str, str]) -> str:
+    """What the bot makes of run 3 of the Screenshots workflow, a push that passed
+    with the jobs, by their names and conclusions."""
+    github.runs[3] = run_of(
+        3, name="Screenshots", path=SCREENSHOTS, event="push", conclusion="success"
+    )
+    github.jobs[(3, 1)] = [
+        job_of_a_run(30 + index, name, conclusion)
+        for index, (name, conclusion) in enumerate(jobs)
+    ]
+    return watch_run(api_of(github), REPO, 3, NOW)
+
+
+@pytest.mark.parametrize(
+    ("failed", "passed"),
+    [
+        # A push that only plans: the render that failed was skipped.
+        (
+            [(PLAN, "success"), (RENDER, "failure"), (KEEP, "skipped")],
+            [(PLAN, "success"), (RENDER, "skipped"), (KEEP, "skipped")],
+        ),
+        # A render that ran out of time, and a run without it.
+        (
+            [(PLAN, "success"), (RENDER, "timed_out")],
+            [(PLAN, "success")],
+        ),
+        # A job that GitHub cancelled at its time limit counted as failed, and a job
+        # of another name doesn't stand in for it.
+        (
+            [(PLAN, "success"), (RENDER, "cancelled")],
+            [(PLAN, "success"), ("draw the screenshots", "success")],
+        ),
+    ],
+)
+def test_a_run_that_passes_without_the_job_that_failed_leaves_the_issue_open(
+    github: FakeGitHub,
+    failed: list[tuple[str, str]],
+    passed: list[tuple[str, str]],
+) -> None:
+    number = screenshots_failed(github, *failed)
+
+    result = screenshots_passed(github, *passed)
+
+    assert result == (
+        f"Screenshots: passes, but without the job `{RENDER}` that failed in #{number}."
+    )
+    assert github.issues[number]["state"] == "open"
+    assert writes(github) == []
+
+
+def test_a_run_in_which_the_jobs_that_failed_pass_closes_the_issue(
+    github: FakeGitHub,
+) -> None:
+    # The job that the failure cancelled says nothing, and a job that passed in the
+    # failure needn't run again.
+    number = screenshots_failed(
+        github, (PLAN, "success"), (RENDER, "failure"), (KEEP, "cancelled")
+    )
+
+    result = screenshots_passed(
+        github, (PLAN, "skipped"), (RENDER, "success"), (KEEP, "skipped")
+    )
+
+    assert result == f"Screenshots: passes again: closed #{number}."
+    assert github.issues[number]["state"] == "closed"
+
+
+def test_every_job_that_failed_has_to_pass_again(github: FakeGitHub) -> None:
+    number = screenshots_failed(
+        github, ("check", "failure"), (RENDER, "failure"), (KEEP, "failure")
+    )
+
+    result = screenshots_passed(github, (RENDER, "success"))
+
+    assert result == (
+        f"Screenshots: passes, but without the jobs `check`, `{KEEP}` that failed "
+        f"in #{number}."
+    )
+
+
+def test_a_second_try_of_the_failed_jobs_that_passes_closes_the_issue(
+    github: FakeGitHub,
+) -> None:
+    # The run of the failure passes in a later try, which runs only the job that
+    # failed; the others passed before.
+    number = screenshots_failed(github, (RENDER, "failure"))
+    github.runs[1] = run_of(
+        1, name="Screenshots", path=SCREENSHOTS, conclusion="success", attempt=3
+    )
+    github.jobs[(1, 1)] = [job_of_a_run(1, PLAN, "success")]
+    github.jobs[(1, 3)] = [job_of_a_run(13, RENDER, "success")]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == f"Screenshots: passes again: closed #{number}."
+
+
+@pytest.mark.parametrize(
+    ("legs", "closes"),
+    [
+        # Every leg passes, by its full name.
+        ([("render (en, 1/2)", "success"), ("render (en, 2/2)", "success")], True),
+        # A matrix of other values, such as more shards: by the name before them.
+        (
+            [
+                ("render (en, 1/3)", "success"),
+                ("render (en, 2/3)", "success"),
+                ("render (en, 3/3)", "success"),
+            ],
+            True,
+        ),
+        # The leg that failed passes, but another one is skipped.
+        ([("render (en, 1/2)", "success"), ("render (en, 2/2)", "skipped")], False),
+        # A matrix that was skipped as a whole, as GitHub names it then.
+        ([("render (${{ matrix.locale }}, ${{ matrix.shard }})", "skipped")], False),
+        # Another job, whose name only starts the same.
+        ([("render the screenshots (en)", "success")], False),
+    ],
+)
+def test_a_leg_of_a_matrix_that_failed_needs_every_leg_to_pass(
+    github: FakeGitHub, legs: list[tuple[str, str]], closes: bool
+) -> None:
+    number = screenshots_failed(
+        github, ("render (en, 1/2)", "failure"), ("render (en, 2/2)", "success")
+    )
+
+    result = screenshots_passed(github, (PLAN, "success"), *legs)
+
+    if closes:
+        assert result == f"Screenshots: passes again: closed #{number}."
+    else:
+        assert result == (
+            f"Screenshots: passes, but without the job `render` that failed in "
+            f"#{number}."
+        )
+
+
 def test_a_run_that_passes_without_an_issue_changes_nothing(
     github: FakeGitHub,
 ) -> None:
@@ -478,6 +651,8 @@ def test_a_run_that_passes_without_an_issue_changes_nothing(
 
     assert watch_run(api_of(github), REPO, 1, NOW) == "Release: passes."
     assert writes(github) == []
+    # Without an issue, no job of any run matters.
+    assert [path for _, path in github.calls if "/jobs" in path] == []
 
 
 @pytest.mark.parametrize(
@@ -550,6 +725,7 @@ def test_only_a_run_for_its_tag_closes_the_issue_of_a_published_release(
         conclusion="success",
         attempt=3,
     )
+    github.jobs[(1, 3)] = [job_of_a_run(12, "verify the release", "success")]
     result = watch_run(api_of(github), REPO, 1, NOW)
     assert result == f"{name}: passes again: closed #1."
     assert github.issues[1]["state"] == "closed"
@@ -954,6 +1130,51 @@ def test_the_daily_look_reports_what_the_events_missed(
     ]
     assert github.reruns == []
     assert github.dispatched == []
+
+
+def test_the_daily_look_closes_an_issue_only_when_the_jobs_that_failed_pass(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    path = ".github/workflows/w{}.yml"
+    github.workflows = [workflow(1, "Docs pictures"), workflow(2, "Screenshots")]
+    github.workflow_runs = {
+        1: [
+            run_of(12, name="Docs pictures", path=path.format(1), conclusion="success")
+        ],
+        # A push that only planned, after a run that rendered and passed: the end of
+        # that run would have closed the issue, the latest run doesn't.
+        2: [
+            run_of(23, name="Screenshots", path=path.format(2), conclusion="success"),
+            run_of(22, name="Screenshots", path=path.format(2), conclusion="success"),
+        ],
+    }
+    pictures = github.add_issue(path.format(1), run=11, attempt=1, failed=1)
+    screenshots = github.add_issue(path.format(2), run=21, attempt=1, failed=2)
+    github.jobs[(11, 1)] = [job_of_a_run(1, "render", "failure")]
+    github.jobs[(12, 1)] = [job_of_a_run(2, "render", "success")]
+    github.jobs[(21, 1)] = [
+        job_of_a_run(3, PLAN, "success"),
+        job_of_a_run(4, RENDER, "failure"),
+    ]
+    github.jobs[(22, 1)] = [
+        job_of_a_run(5, PLAN, "success"),
+        job_of_a_run(6, RENDER, "success"),
+    ]
+    github.jobs[(23, 1)] = [
+        job_of_a_run(7, PLAN, "success"),
+        job_of_a_run(8, RENDER, "skipped"),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert summary.splitlines()[6:] == [
+        f"| `Docs pictures` | passes again: closed #{pictures} |",
+        f"| `Screenshots` | passes, but without the job `{RENDER}` that failed in "
+        f"#{screenshots} |",
+    ]
+    assert github.issues[pictures]["state"] == "closed"
+    assert github.issues[screenshots]["state"] == "open"
 
 
 LINT = SCHEDULED.replace("  schedule:", "  pull_request:\n  schedule:")

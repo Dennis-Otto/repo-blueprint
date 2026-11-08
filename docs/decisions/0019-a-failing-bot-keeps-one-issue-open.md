@@ -1,6 +1,6 @@
 # A bot that fails keeps one issue open until it passes again
 
-- Status: accepted
+- Status: accepted, amended by [0126](0126-a-failure-issue-waits-for-the-jobs-that-failed.md), with which a run that passes closes the issue only once every job that failed passed again in it
 - Date: 2026-10-13
 
 ## Context

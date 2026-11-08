@@ -6,7 +6,9 @@ schedule, and that of another run to whoever started it, which in these reposito
 is mostly the release app, so a failing bot went unnoticed for days. When a run of a
 watched workflow ends on the default branch, the bot runs its failed jobs once more
 if a second try can pass, and otherwise keeps one issue per workflow current, with
-the failed jobs, their steps and their first errors; a run that passes closes it.
+the failed jobs, their steps and their first errors; a run that passes closes it
+once every job that failed ran again in it and passed, so a run that skipped such a
+job, as one that only plans, leaves it open.
 Once a day it looks at the latest run of every workflow, those of the project too,
 in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or
 switched off. A failure of Lint, which main runs only each week, counts only at the
@@ -314,18 +316,26 @@ def first_error(api: Api, repo: str, job: int) -> str:
     return (telling or errors or [""])[0]
 
 
+def jobs_of(api: Api, repo: str, run: int, attempt: int) -> list[Json]:
+    """The jobs that ran in an attempt of a run."""
+    data = api.get(
+        f"repos/{repo}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100"
+    )
+    return list((data or {}).get("jobs", []))
+
+
+def failed_jobs(jobs: Sequence[Json]) -> list[Json]:
+    """The jobs that failed or ran out of time. The jobs that a failure cancelled say
+    nothing, unless only they ended badly."""
+    failed = [job for job in jobs if job.get("conclusion") in ("failure", "timed_out")]
+    return failed or [job for job in jobs if job.get("conclusion") == "cancelled"]
+
+
 def failures(api: Api, repo: str, run: Run) -> list[Failure]:
     if run.conclusion == "startup_failure":
         return []
-    data = api.get(
-        f"repos/{repo}/actions/runs/{run.id}/attempts/{run.attempt}/jobs?per_page=100"
-    )
-    jobs = (data or {}).get("jobs", [])
-    # The jobs that a failure cancelled say nothing, unless only they ended badly.
-    failed = [job for job in jobs if job.get("conclusion") in ("failure", "timed_out")]
-    failed = failed or [job for job in jobs if job.get("conclusion") == "cancelled"]
     found = []
-    for job in failed[:MOST_JOBS]:
+    for job in failed_jobs(jobs_of(api, repo, run.id, run.attempt))[:MOST_JOBS]:
         steps = [
             str(step["name"])
             for step in job.get("steps") or []
@@ -384,8 +394,10 @@ def failure_body(run: Run, branch: str, found: list[Failure], state: Json) -> st
         f"{marker(state)}\n"
         f"The workflow **{run.name}** fails on `{branch}` since {state['since']}, "
         f"{runs} so far. GitHub mails such a failure only to whoever started the run "
-        "or last changed its schedule, often a bot, so this issue stays open until a "
-        "run passes again; the bot-health bot closes it then.\n\n"
+        "or last changed its schedule, often a bot, so this issue stays open until "
+        "the jobs that failed pass again in a run; the bot-health bot closes it then. "
+        "A run that skips one of them leaves it open: close it by hand when such a "
+        "job is gone or has a new name.\n\n"
         f"**The latest failure:** {run.link()}, attempt {run.attempt}, started by "
         f"{started}.\n\n"
         f"{failure_table(run, found)}\n\n"
@@ -448,15 +460,47 @@ def report(api: Api, repo: str, branch: str, run: Run, issue: Issue | None) -> s
 def ran_out_of_time(api: Api, repo: str, run: Run) -> bool:
     """Whether GitHub cancelled a job of the run at its time limit, as it says on the
     job, and not a person or a newer run."""
-    data = api.get(
-        f"repos/{repo}/actions/runs/{run.id}/attempts/{run.attempt}/jobs?per_page=100"
-    )
     return any(
         OUT_OF_TIME in str(annotation.get("message"))
-        for job in (data or {}).get("jobs", [])
+        for job in jobs_of(api, repo, run.id, run.attempt)
         if job.get("conclusion") == "cancelled"
         for annotation in annotations_of(api, repo, int(job["id"]))
     )
+
+
+def base_name(job: str) -> str:
+    """The name of a job without the values of its matrix, such as render for
+    render (en, 3/4), which another run may give other values or other legs."""
+    return job.split(" (", 1)[0]
+
+
+def not_passed_again(api: Api, repo: str, run: Run, issue: Issue) -> list[str]:
+    """The jobs that failed in the run of the issue and didn't pass again in the run,
+    by the names before the values of a matrix: such a job passes again when it ran,
+    in every leg, and passed. A workflow that plans first passes without the jobs
+    that it skipped, and a skipped job proves nothing. A failure that names no failed
+    job, as a run that GitHub couldn't start, leaves none."""
+    failed = failed_jobs(
+        jobs_of(
+            api,
+            repo,
+            int(issue.state.get("run") or 0),
+            int(issue.state.get("attempt") or 1),
+        )
+    )
+    if not failed:
+        return []
+    # The latest try of each job, also of one that a second try of the failed jobs
+    # left as it was.
+    legs: dict[str, set[str]] = {}
+    for job in api.get_all(
+        f"repos/{repo}/actions/runs/{run.id}/jobs?filter=latest&per_page=100"
+    ):
+        legs.setdefault(base_name(str(job["name"])), set()).add(
+            str(job.get("conclusion") or "")
+        )
+    names = {base_name(str(job["name"])) for job in failed}
+    return sorted(name for name in names if legs.get(name, set()) != {PASSED})
 
 
 def run_again(api: Api, repo: str, run: Run) -> str | None:
@@ -493,6 +537,13 @@ def look_at(
         # The end of an older run may come after that of the failure: ids only grow.
         if run.id < int(issue.state.get("run") or 0):
             return f"passes, in a run older than the failure of #{issue.number}"
+        missing = not_passed_again(api, repo, run, issue)
+        if missing:
+            jobs = "the job" if len(missing) == 1 else "the jobs"
+            return (
+                f"passes, but without {jobs} {', '.join(map(code, missing))} "
+                f"that failed in #{issue.number}"
+            )
         failed = int(issue.state.get("failed") or 0)
         runs = "1 failed run" if failed == 1 else f"{failed} failed runs"
         close_issue(
