@@ -132,7 +132,7 @@ A check that a runner, a site or GitHub fails for a moment, or that a race of tw
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-job-behind-harden-runner.dark.svg">
-  <img src="../images/diagrams/a-job-behind-harden-runner.svg" alt="A job behind Harden-Runner: Harden-Runner blocks every host that the job doesn't name. The job then asks each of its hosts every 3 seconds, for two minutes at most, until Harden-Runner lets it through, and runs its steps. Without sudo and Docker, it waits until Harden-Runner has removed Docker. A job that ends is done. One that hangs until its time limit ends as cancelled, and a bot runs its cancelled jobs once more; when that hangs too, a required check stays cancelled for you, and a bot gets an issue.">
+  <img src="../images/diagrams/a-job-behind-harden-runner.svg" alt="A job behind Harden-Runner: Harden-Runner blocks every host that the job doesn't name. A job that keeps sudo first takes GitHub's DNS experiment out of the way, so that Harden-Runner sees its lookups. The job then asks each of its hosts every 3 seconds, for two minutes at most, until Harden-Runner lets it through, and runs its steps. Without sudo and Docker, it waits until Harden-Runner has removed Docker. A job that ends is done. One that hangs until its time limit ends as cancelled, and a bot runs its cancelled jobs once more; when that hangs too, a required check stays cancelled for you, and a bot gets an issue.">
 </picture>
 
 ## When a bot fails

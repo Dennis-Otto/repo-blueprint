@@ -675,7 +675,8 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
 
 
-# The release that fixes an advisory which a pin of the blueprint once fell under.
+# The release that fixes an advisory or a bug which a pin of the blueprint once fell
+# under.
 # Renovate only ever moves a pin forward; this holds it against a move back by hand,
 # on the machine and in the workflows of every kind, while zizmor reports it only on
 # GitHub, in the analysis of the pull request.
@@ -683,6 +684,14 @@ FIXED_RELEASES = {
     # GHSA-5xjx-3w67-w9x9: the action trusts a revoked root certificate in the chain
     # that Sigstore uses for trusted publishing and attestations on PyPI.
     "pypa/gh-action-pypi-publish": "1.14.3",
+    # GitHub's DNS experiment on some of its runners (egress-dns-resolver.service,
+    # 90-egress-proxy.conf) hides the lookups of a job from Harden-Runner, which then
+    # drops the addresses of its hosts and of the runner's, so that the job hangs until
+    # its time limit. v2.22.3 takes the experiment away only when its feature flags come
+    # within 3 s; when StepSecurity's API answered with 429, it stayed, and jobs hung
+    # again, without sudo too (homedarts-for-autodarts#586). v2.22.4 takes it away then
+    # as well (decision 0123).
+    "step-security/harden-runner": "2.22.4",
 }
 
 
@@ -1128,36 +1137,6 @@ def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
             f"::warning::Harden-Runner still blocks {host} after two minutes"
             in result.stdout
         )
-
-
-# GitHub's DNS experiment on some of its runners (egress-dns-resolver.service,
-# 90-egress-proxy.conf) hides the lookups of a job from Harden-Runner, which then drops
-# the addresses of its hosts and of the runner's, so that the job hangs until its time
-# limit. Harden-Runner v2.22.3 takes the experiment away only when its feature flags
-# come within 3 s; when StepSecurity's API answered with 429, it stayed, and jobs hung
-# again, without sudo too (homedarts-for-autodarts#586). v2.22.4 takes it away then as
-# well (decision 0123).
-HARDEN_RUNNER = re.compile(r"step-security/harden-runner@(\S+)(?: # v(\S+))?")
-TAKES_THE_EXPERIMENT_AWAY = (2, 22, 4)
-
-
-@pytest.mark.parametrize("project", ["blueprint", *KINDS])
-def test_every_workflow_takes_a_harden_runner_that_takes_the_dns_experiment_away(
-    projects: dict[str, Path], project: str
-) -> None:
-    root = ROOT if project == "blueprint" else projects[project]
-    pinned = 0
-    for name, text in workflows(root).items():
-        for commit, version in HARDEN_RUNNER.findall(text):
-            # Pinned to a commit, with its version for Renovate, as every action is.
-            assert re.fullmatch(r"[0-9a-f]{40}", commit), (name, commit)
-            assert re.fullmatch(r"\d+\.\d+\.\d+", version), (name, version)
-            assert tuple(map(int, version.split("."))) >= TAKES_THE_EXPERIMENT_AWAY, (
-                name,
-                version,
-            )
-            pinned += 1
-    assert pinned
 
 
 SEE_LOOKUPS = "Let Harden-Runner see the DNS lookups"

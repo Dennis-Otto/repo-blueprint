@@ -132,7 +132,7 @@ Eine Prüfung, die ein Runner, eine Website oder GitHub für einen Moment scheit
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/a-job-behind-harden-runner.de.dark.svg">
-  <img src="../images/diagrams/a-job-behind-harden-runner.de.svg" alt="Ein Job hinter Harden-Runner: Harden-Runner sperrt jeden Host, den der Job nicht nennt. Der Job fragt dann alle 3 Sekunden jeden seiner Hosts, höchstens zwei Minuten lang, bis Harden-Runner ihn durchlässt, und führt seine Schritte aus. Ohne sudo und Docker wartet er, bis Harden-Runner Docker entfernt hat. Ein Job, der endet, ist fertig. Einer, der bis zu seinem Zeitlimit hängt, endet abgebrochen, und ein Bot führt seine abgebrochenen Jobs einmal neu aus; hängt das auch, bleibt eine vorgeschriebene Prüfung für dich abgebrochen, und ein Bot bekommt ein Issue.">
+  <img src="../images/diagrams/a-job-behind-harden-runner.de.svg" alt="Ein Job hinter Harden-Runner: Harden-Runner sperrt jeden Host, den der Job nicht nennt. Ein Job, der sudo behält, räumt zuerst GitHubs DNS-Experiment aus dem Weg, damit Harden-Runner seine Abfragen sieht. Der Job fragt dann alle 3 Sekunden jeden seiner Hosts, höchstens zwei Minuten lang, bis Harden-Runner ihn durchlässt, und führt seine Schritte aus. Ohne sudo und Docker wartet er, bis Harden-Runner Docker entfernt hat. Ein Job, der endet, ist fertig. Einer, der bis zu seinem Zeitlimit hängt, endet abgebrochen, und ein Bot führt seine abgebrochenen Jobs einmal neu aus; hängt das auch, bleibt eine vorgeschriebene Prüfung für dich abgebrochen, und ein Bot bekommt ein Issue.">
 </picture>
 
 ## Wenn ein Bot fehlschlägt
