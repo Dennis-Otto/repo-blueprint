@@ -3283,6 +3283,24 @@ def test_every_script_of_a_new_repository_is_executable(
     )
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_create_commits_every_script_of_a_new_repository_as_executable(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # Copier can't give a script its executable bit on Windows, so create records it
+    # before the first commit, for each of the list that the copy of its kind has.
+    project = projects[kind]
+    scripts = {
+        path.relative_to(project).as_posix()
+        for path in text_files(project)
+        if path.read_bytes().startswith(b"#!")
+    }
+
+    assert {
+        name for name in bootstrap.EXECUTABLES if (project / name).is_file()
+    } == scripts
+
+
 # The author of the commits of the tests, whatever this computer has set up.
 IDENTITY = ("-c", "user.name=Dev", "-c", "user.email=dev@example.com")
 

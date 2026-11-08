@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import shlex
 import subprocess
 from collections.abc import Sequence
@@ -9,7 +11,7 @@ from pathlib import Path
 
 import preflight
 import pytest
-from shared import without_the_version
+from shared import ROOT, git_environment, without_the_version
 
 from blueprint import bootstrap
 from blueprint.bootstrap import Answer, CreateError, create, doctor
@@ -130,6 +132,44 @@ def test_a_new_copy_becomes_a_repository_on_main(
             "Created https://github.com/octo-org/demo, with the branch main.\n",
         ]
     )
+
+
+# The executable files of a copy of the kind container, by the order of the list.
+SCRIPTS = [
+    ".devcontainer/setup.sh",
+    ".githooks/pre-push",
+    ".github/blueprint.py",
+    "app/entrypoint.sh",
+    "scripts/check.sh",
+]
+CHMOD = f"git update-index --chmod=+x -- {' '.join(SCRIPTS)}"
+
+
+def scripts_of_a_copy(root: Path, mode: int = 0o644) -> None:
+    """The scripts and the hook of a copy, with the mode that Copier gives them: none
+    on Windows, which has no executable files."""
+    for name in SCRIPTS:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/usr/bin/env bash\n", encoding="utf-8", newline="\n")
+        path.chmod(mode)
+
+
+def test_the_scripts_of_a_copy_are_committed_as_executable(
+    root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Windows has no executable bit, so Git for Windows adds every script as a plain
+    # file, and Git skips the hook: create records them as executable on every
+    # platform, those of its kind only.
+    scripts_of_a_copy(root)
+    shell = Shell()
+
+    create(root, "A demo", dry_run=True, run=shell, python=PYTHON)
+    shown = capsys.readouterr().out
+    create(root, "A demo", run=shell, python=PYTHON)
+
+    assert f"  {ADD}\n  {CHMOD}\n  {COMMIT}\n" in shown
+    assert shell.steps == [INIT, ADD, CHMOD, COMMIT, GH]
 
 
 def test_a_private_repository(root: Path) -> None:
@@ -897,6 +937,93 @@ def test_the_first_commit_is_signed_off_on_main_with_every_file(
     assert git("ls-files").split() == [".copier-answers.yml", "docs/index.md"]
     # Once committed, create would push it as it is.
     assert git("status", "--porcelain") == ""
+
+
+@pytest.mark.usefixtures("plain_git")
+@pytest.mark.parametrize(
+    ("file_mode", "mode"),
+    [
+        # As Git for Windows has it: no executable bit on the disk, and none read.
+        pytest.param("false", 0o644, id="Windows"),
+        pytest.param(
+            "true",
+            0o755,
+            id="Linux",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows has no executable files"
+            ),
+        ),
+        # A copy that reached Linux without its bits: create gives them on the disk too.
+        pytest.param(
+            "true",
+            0o644,
+            id="Linux without the bits",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows has no executable files"
+            ),
+        ),
+    ],
+)
+def test_the_real_git_commits_the_scripts_as_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, file_mode: str, mode: int
+) -> None:
+    root = tmp_path / "demo"
+    root.mkdir()
+    (root / ".copier-answers.yml").write_text(ANSWERS, encoding="utf-8")
+    scripts_of_a_copy(root, mode)
+    # Over the core.fileMode that git init writes into the repository.
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fileMode")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", file_mode)
+    gh = Shell()
+
+    def git_and_simulated_gh(
+        arguments: Sequence[str], folder: Path
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments[0] == "gh":
+            return gh(arguments, folder)
+        return bootstrap.run_command(arguments, folder)
+
+    create(root, "A demo", run=git_and_simulated_gh)
+
+    def git(*arguments: str) -> str:
+        return bootstrap.run_command(["git", *arguments], root).stdout.strip()
+
+    tree = git("ls-tree", "-r", "--format=%(objectmode) %(path)", "HEAD").splitlines()
+    assert tree == [
+        "100644 .copier-answers.yml",
+        *(f"100755 {name}" for name in sorted(SCRIPTS)),
+    ]
+    # Git takes the mode of the disk for one that it reads, and on Windows none.
+    assert git("status", "--porcelain") == ""
+
+
+def rendered(path: str) -> str:
+    """The name of a file of template/ in a copy, without its conditions and .jinja."""
+    return re.sub(r"\[%.*?%\]", "", path.removeprefix("template/")).removesuffix(
+        ".jinja"
+    )
+
+
+# It asks Git for the modes of the files of the template, which the copy of the
+# mutation tests has no Git for.
+@pytest.mark.mutation_unsafe
+def test_create_knows_every_file_that_the_template_marks_executable() -> None:
+    listing = subprocess.run(
+        ["git", "ls-files", "--stage", "-z", "--", "template"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+        env=git_environment(ROOT),
+    ).stdout.decode()
+    executable = set()
+    for entry in listing.split("\0")[:-1]:
+        meta, _, path = entry.partition("\t")
+        if meta.startswith("100755 "):
+            executable.add(rendered(path))
+
+    assert executable == set(bootstrap.EXECUTABLES)
+    assert list(bootstrap.EXECUTABLES) == sorted(bootstrap.EXECUTABLES)
 
 
 @pytest.mark.usefixtures("plain_git")
