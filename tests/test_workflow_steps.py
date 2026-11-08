@@ -89,6 +89,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "EXPORTED=yes" >> "$GITHUB_ENV"
           echo "### Done" >> "$GITHUB_STEP_SUMMARY"
+      - name: Escape sequences
+        env:
+          API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
+        run: |
+          gh help api | grep -c -e --allow-escape-sequences || true
+          gh api --header "$API_VERSION_HEADER" repos/o/r/log || echo "gh failed with $?"
+          gh api --header "$API_VERSION_HEADER" --allow-escape-sequences repos/o/r/log || echo "gh failed with $?"
+          gh api --header "$API_VERSION_HEADER" repos/o/r/log --jq . || echo "gh failed with $?"
       - name: Default shell
         run: |
           false | true
@@ -207,6 +215,41 @@ def test_the_fake_gh_filters_json_with_jq_as_gh_does(
     # as an empty line and anything else as compact JSON. The call that asks for no
     # version of the API fails before any answer.
     assert done.stdout == 'gh failed with 1\na\n\nb\n{"x":[1,2]}\n'
+
+
+@pytest.mark.parametrize(
+    ("gh", "guarded"),
+    [("", True), ("2.97.0", True), ("2.96.0", False)],
+    ids=["runner", "first-guarded", "older"],
+)
+def test_the_fake_gh_guards_against_escape_sequences_as_its_version_does(
+    tmp_path: Path, demo: Path, gh: str, guarded: bool
+) -> None:
+    red = "\x1b[31mred\x1b[0m\n"
+    done = run_step(
+        tmp_path,
+        "demo.yml",
+        "demo",
+        "Escape sequences",
+        answers=[Answer(r"api .*repos/o/r/log.*", red)],
+        env={"FAKE_GH_CLI": gh},
+        root=demo,
+    )
+
+    assert done.returncode == 0, done.stderr
+    # The gh of the runners, as every gh since v2.97.0, lists the option, refuses a raw
+    # answer with escape sequences without it, and prints one with it or through a
+    # filter; an older gh knows no such option and prints every answer as it is.
+    if guarded:
+        assert done.stdout == f"1\ngh failed with 1\n{red}{red}"
+        assert (
+            "the response contains terminal escape sequences;"
+            " pass --allow-escape-sequences to output it anyway\n"
+        ) in done.stderr
+    else:
+        assert done.stdout == f"0\n{red}gh failed with 1\n{red}"
+        assert "unknown flag: --allow-escape-sequences\n" in done.stderr
+    assert done.commands[0] == "help api"
 
 
 def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -> None:

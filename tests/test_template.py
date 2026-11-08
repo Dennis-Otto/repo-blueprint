@@ -15697,13 +15697,15 @@ def run_after_the_checks(
     answers: Mapping[str, object],
     stubs: Mapping[str, str] | None = None,
     files: Mapping[str, str] | None = None,
+    root: Path = workflow_steps.ROOT,
     **variables: str,
 ) -> workflow_steps.StepResult:
     """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
     answers as gh_answers() says, these stubs of other commands, and these files of
     the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python) for the commit
     abc1234def of the branch feature of o/r, which ended on 12 October 2026, unless the
-    variables say otherwise."""
+    variables say otherwise. The workflow is the blueprint's, or that of the project
+    at root."""
     return workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -15721,6 +15723,7 @@ def run_after_the_checks(
         },
         stubs=stubs,
         files=files,
+        root=root,
     )
 
 
@@ -15730,11 +15733,14 @@ def run_a_bot_after_the_checks(
     step: str,
     answers: Mapping[str, object],
     stubs: Mapping[str, str] | None = None,
+    root: Path = workflow_steps.ROOT,
     **variables: str,
 ) -> tuple[list[str], str, dict[str, str]]:
     """Runs a step of a bot after the checks, which passes; returns the calls of gh,
     the summary of the step and what gh was given to write."""
-    done = run_after_the_checks(tmp_path, job, step, answers, stubs, None, **variables)
+    done = run_after_the_checks(
+        tmp_path, job, step, answers, stubs, None, root, **variables
+    )
     assert done.returncode == 0, done.stderr
     return done.commands, done.summary, written_by(done)
 
@@ -16227,6 +16233,105 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
         for call in calls
     )
     assert "\n".join(FLAKY_ROWS) in summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("gh", "allowed"),
+    [("", True), ("2.97.0", True), ("2.96.0", False)],
+    ids=["runner", "first-guarded", "older"],
+)
+def test_the_flaky_test_bot_reads_a_log_with_colors_with_every_gh(
+    tmp_path: Path, gh: str, allowed: bool
+) -> None:
+    # #735: since v2.97.0, gh api fails on a raw answer with terminal escape sequences,
+    # such as the colors of a log, without --allow-escape-sequences, which an older gh
+    # doesn't know; the report named no test of the logs of the runners.
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+        FAKE_GH_CLI=gh,
+    )
+
+    assert written["issue-comment"] == FLAKY_REPORT
+    option = "--allow-escape-sequences " if allowed else ""
+    assert f"api {option}repos/o/r/actions/jobs/11/logs" in calls
+    assert all(
+        ("--allow-escape-sequences" in call) == allowed
+        for call in calls
+        if call.endswith("/logs")
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_warns_of_a_log_that_it_cannot_read(
+    tmp_path: Path,
+) -> None:
+    # The step went on with an empty log and said nothing of why; now a warning of the
+    # run names the job, on one line with its percent sign escaped as %25, which the
+    # runner shows as a percent sign again, and the reason of gh, and the row has the
+    # error of the job without a test.
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11, "test (100 %)", "failure", ("Run the tests", "failure")
+                    )
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/11/logs.error": "gh: Not Found (HTTP 404)\n",
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert (
+        "::warning::The log of the job test (100 %25) couldn't be read, so the report"
+        " names none of its tests: gh: Not Found (HTTP 404)\n"
+    ) in done.stdout
+    assert (
+        "| [`test (100 %)`](https://github.com/o/r/actions/runs/5/job/11)"
+        f" | `Run the tests` | {NOTHING} | `{EXITED}` |"
+    ) in done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("kind", ["python-package", "home-assistant"])
+def test_the_flaky_test_bot_of_a_project_reads_a_log_with_colors(
+    projects: Mapping[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # The workflow of a project is the blueprint's, with the workflows and the marker
+    # of the project: its report names the tests of a log with colors as well.
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        root=projects[kind],
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-comment"] == FLAKY_REPORT
+    assert "api --allow-escape-sequences repos/o/r/actions/jobs/11/logs" in calls
 
 
 @WITH_JQ
