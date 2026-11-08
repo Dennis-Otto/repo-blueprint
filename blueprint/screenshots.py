@@ -339,8 +339,9 @@ def plan(found: Settings) -> str:
     shards as the matrix of the job render, one job named all for a project that
     names none; whether Harden-Runner blocks every host but those of the jobs and of
     the settings, or, without hosts, only records the traffic, and the hosts that the
-    jobs don't wait for; the time limit of the script, that of the job when the
-    settings give none; and the folder that a failed render keeps, if any."""
+    jobs don't wait for; the time limit of the script, the most that the settings may
+    give when they give none, so that a hung script fails its step before the job
+    runs out of time and the folder of the failure is kept; and the folder that a failed render keeps, if any."""
     shards = [{"shard": shard, "id": shard} for shard in found.shards] or [
         {"shard": "", "id": WHOLE}
     ]
@@ -349,7 +350,7 @@ def plan(found: Settings) -> str:
         f"policy={'block' if found.hosts else 'audit'}\n"
         f"hosts={' '.join(found.hosts)}\n"
         f"skip_wait={' '.join(found.skip_wait)}\n"
-        f"timeout_minutes={found.timeout_minutes or JOB_MINUTES}\n"
+        f"timeout_minutes={found.timeout_minutes or MOST_MINUTES}\n"
         f"failure_folder={found.failure_folder}\n"
     )
 

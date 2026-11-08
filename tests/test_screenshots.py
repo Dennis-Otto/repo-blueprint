@@ -1531,7 +1531,7 @@ def test_without_settings_one_job_renders_every_picture(tmp_path: Path) -> None:
     assert settings(tmp_path) == Settings()
     assert plan(Settings()) == (
         'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\nskip_wait=\n'
-        f"timeout_minutes={JOB_MINUTES}\nfailure_folder=\n"
+        f"timeout_minutes={MOST_MINUTES}\nfailure_folder=\n"
     )
     # A file of comments alone sets nothing either.
     assert settings(settings_in(tmp_path, "# Nothing yet\n")) == Settings()
@@ -1559,12 +1559,13 @@ def test_the_settings_name_shards_files_and_hosts(tmp_path: Path) -> None:
         {"shard": "timeline_2", "id": "timeline_2"},
     ]
     # Hosts turn the block on, for every host but these and those of the jobs; the
-    # script gets the time limit of the job, and a failed render keeps nothing.
+    # script gets the most time that the settings may give, which ends before the
+    # job does, so that a hung render fails its step and keeps its folder, and a failed render keeps nothing.
     assert lines[1:] == [
         "policy=block",
         "hosts=ghcr.io:443 *.data.mcr.microsoft.com:443 apt.example:80",
         "skip_wait=",
-        f"timeout_minutes={JOB_MINUTES}",
+        f"timeout_minutes={MOST_MINUTES}",
         "failure_folder=",
     ]
     assert settings(root, Path("other.toml")) == Settings()
@@ -2038,7 +2039,7 @@ def test_the_commands_of_the_settings_and_the_shards(
     assert main(["screenshots", "plan"], root=root) == 0
     assert capsys.readouterr().out == (
         'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\nskip_wait=\n'
-        f"timeout_minutes={JOB_MINUTES}\nfailure_folder=\n"
+        f"timeout_minutes={MOST_MINUTES}\nfailure_folder=\n"
     )
     settings_in(
         root,
@@ -2047,7 +2048,7 @@ def test_the_commands_of_the_settings_and_the_shards(
     assert main(["screenshots", "plan"], root=root) == 0
     assert capsys.readouterr().out == (
         'shards=[{"shard":"en","id":"en"}]\npolicy=block\nhosts=ghcr.io:443\n'
-        f"skip_wait=\ntimeout_minutes={JOB_MINUTES}\nfailure_folder=\n"
+        f"skip_wait=\ntimeout_minutes={MOST_MINUTES}\nfailure_folder=\n"
     )
     # The shard's keep takes the file that the settings name.
     write(root, {TIMELINE: b'{"games": 2}\n', "docs/a.png": png(changed=1)})

@@ -31,7 +31,7 @@ failure_folder = "tests/e2e/artifacts"
 ```
 
 - **`skip_wait`** names hosts of `hosts`, by the same words; the jobs still allow them. Its hosts reach the step in `SKIP_WAIT`, which every other job leaves empty, so that `HOSTS` stays the very words of `allowed-endpoints`.
-- **`timeout_minutes`** becomes the `timeout-minutes` of the step *Render the pictures*; without it, the step has the 60 minutes of the job. At most 45 leaves a quarter of an hour for the steps before and after the script. The step runs the script with `exec`, so that the script itself gets the SIGINT with which GitHub ends a step that runs out of time, can stop its demo and say where it waited.
+- **`timeout_minutes`** becomes the `timeout-minutes` of the step *Render the pictures*; without it, the step has 45 minutes, the most that it may set. At most 45 leaves a quarter of an hour for the steps before and after the script, so that a hung script always fails its step before the hour of the job ends, and the steps after it still run. The step runs the script with `exec`, so that the script itself gets the SIGINT with which GitHub ends a step that runs out of time, can stop its demo and say where it waited. The runner gives it little time for that: about 7.5 seconds after the SIGINT it sends a SIGTERM, and about 2.5 seconds later it kills what still runs.
 - **`failure_folder`** is a path of plain names in the repository outside `.git`. When a step of the render fails, also one that ran out of time, the job uploads that folder as `failed-render-<shard>-attempt-<attempt>`, for seven days. That name never matches `screenshots-*`, which the job *collect* takes, so a failure of an earlier attempt never reaches the pull request.
 
 The settings stay strict: a host of `skip_wait` that `hosts` doesn't name, a time limit that is no whole number from 1 to 45, or a folder that isn't plain fails the run that starts the render, with what is wrong.
@@ -41,4 +41,4 @@ The settings stay strict: a host of `skip_wait` that `hosts` doesn't name, a tim
 - A job that allows a host on another port than 443 no longer waits two minutes and warns for it on every run.
 - The boundary of [decision 0118](0118-a-bot-whose-pull-request-conflicts-builds-it-anew-at-once.md) stays: the artifact of a failure comes from the job *render*, which has no secrets and a token that only reads, and the job with the release app never downloads it.
 - A host of `skip_wait` may still be blocked for up to a minute when the script first asks for it, so the script must try it again by itself.
-- HomeDarts for Autodarts can set `skip_wait`, `timeout_minutes` and `failure_folder` and drop the limit of its script for each group in the bot.
+- HomeDarts for Autodarts can set `skip_wait`, `timeout_minutes` and `failure_folder`. It keeps its own `timeout --kill-after` for each group as long as it needs a limit for each group or more than about ten seconds to clean up, and drops only what the step now does for it.
