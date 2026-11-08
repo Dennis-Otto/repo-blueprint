@@ -7,6 +7,23 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.14.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.13.0...v1.14.0) (2026-11-08)
+
+
+### Features
+
+* **template:** a new repository's social preview shows the project, not a list of checks ([#715](https://github.com/Dennis-Otto/repo-blueprint/issues/715)) ([98595c6](https://github.com/Dennis-Otto/repo-blueprint/commit/98595c67e0d3d3b59906d5a8ddc0b25a93d3372b))
+
+
+### Bug fixes
+
+* a bot's failure issue stays open until the jobs that failed pass again ([#703](https://github.com/Dennis-Otto/repo-blueprint/issues/703)) ([7a3357b](https://github.com/Dennis-Otto/repo-blueprint/commit/7a3357b9de9c20ea915b5bb325f6f85f7f709121))
+* **a11y:** the accessibility check checks the page that redirects, and its own tests take less than half the time ([#711](https://github.com/Dennis-Otto/repo-blueprint/issues/711)) ([9f2259e](https://github.com/Dennis-Otto/repo-blueprint/commit/9f2259e9f10878c53afe28a1cb51ceecebc8fa55))
+* blueprint.py checklist and settings work on Windows with any text from GitHub ([#704](https://github.com/Dennis-Otto/repo-blueprint/issues/704)) ([7f38bb1](https://github.com/Dennis-Otto/repo-blueprint/commit/7f38bb1f19e2b15fc9340da4c83b12334e04f7c2))
+* create on Windows records the hook and the scripts as executable ([#714](https://github.com/Dennis-Otto/repo-blueprint/issues/714)) ([b03e6f5](https://github.com/Dennis-Otto/repo-blueprint/commit/b03e6f5927e35f56c0194180567a04b2a797de00))
+* **deps:** update the issue assistant to v1.10.2 ([#716](https://github.com/Dennis-Otto/repo-blueprint/issues/716)) ([4435469](https://github.com/Dennis-Otto/repo-blueprint/commit/4435469957eff528385d78a8feae45b5c8b0d57f))
+* the check Findings fails once when an alert opens, not after every scan ([#724](https://github.com/Dennis-Otto/repo-blueprint/issues/724)) ([24fe2b6](https://github.com/Dennis-Otto/repo-blueprint/commit/24fe2b668b6d97c286d5684876711fa86b68fdb1))
+
 ## [1.13.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.12.0...v1.13.0) (2026-11-08)
 
 ### Features
