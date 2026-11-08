@@ -675,7 +675,8 @@ def test_no_workflow_pins_an_action_to_a_branch() -> None:
             assert re.match(r" # v?\d", comment), f"{path.name}: {action}{comment}"
 
 
-# The release that fixes an advisory which a pin of the blueprint once fell under.
+# The release that fixes an advisory or a bug which a pin of the blueprint once fell
+# under.
 # Renovate only ever moves a pin forward; this holds it against a move back by hand,
 # on the machine and in the workflows of every kind, while zizmor reports it only on
 # GitHub, in the analysis of the pull request.
@@ -683,6 +684,14 @@ FIXED_RELEASES = {
     # GHSA-5xjx-3w67-w9x9: the action trusts a revoked root certificate in the chain
     # that Sigstore uses for trusted publishing and attestations on PyPI.
     "pypa/gh-action-pypi-publish": "1.14.3",
+    # GitHub's DNS experiment on some of its runners (egress-dns-resolver.service,
+    # 90-egress-proxy.conf) hides the lookups of a job from Harden-Runner, which then
+    # drops the addresses of its hosts and of the runner's, so that the job hangs until
+    # its time limit. v2.22.3 takes the experiment away only when its feature flags come
+    # within 3 s; when StepSecurity's API answered with 429, it stayed, and jobs hung
+    # again, without sudo too (homedarts-for-autodarts#586). v2.22.4 takes it away then
+    # as well (decision 0123).
+    "step-security/harden-runner": "2.22.4",
 }
 
 
@@ -1281,10 +1290,14 @@ def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
             if policy not in ("block", BY_THE_SETTINGS):
                 assert WARM_UP not in [step.get("name") for step in steps], where
                 continue
-            # Before every step that could need a host, and for just the hosts that the
-            # job allows, by the same words, so that they can't drift apart; where the
+            # Before every step that could need a host, but the one that lets
+            # Harden-Runner see the lookups of DNS, and for just the hosts that the job
+            # allows, by the same words, so that they can't drift apart; where the
             # settings of the project decide, only when they block.
-            warm_up = steps[steps.index(hardening[0]) + 1]
+            after = steps.index(hardening[0]) + 1
+            if steps[after].get("name") == SEE_LOOKUPS:
+                after += 1
+            warm_up = steps[after]
             assert warm_up["name"] == WARM_UP, where
             assert warm_up.get("if") == (
                 None if policy == "block" else "needs.start.outputs.policy == 'block'"
@@ -1379,6 +1392,136 @@ def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
             f"::warning::Harden-Runner still blocks {host} after two minutes"
             in result.stdout
         )
+
+
+SEE_LOOKUPS = "Let Harden-Runner see the DNS lookups"
+# The condition of the step in a job that blocks and keeps sudo, by the way that it
+# keeps it: always, or only for the kind that needs Docker for its build.
+KEEPS_SUDO = {
+    None: None,
+    "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}": (
+        "vars.PUBLISH_TO == 'nextcloud-appstore'"
+    ),
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_that_blocks_and_keeps_sudo_lets_harden_runner_see_its_dns_lookups(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Harden-Runner takes GitHub's DNS experiment away unless its feature flags say
+    # no; a job with sudo makes sure, right after it, as HomeDarts' jobs with
+    # containers do (homedarts-for-autodarts#525). A job without sudo can't, and in a
+    # job that only records its traffic, the experiment drops nothing.
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            where = f"{name}: {job_id}"
+            steps = job.get("steps") or []
+            names = [step.get("name") for step in steps]
+            hardening = steps_using(job, "step-security/harden-runner")
+            settings = hardening[0]["with"] if hardening else {}
+            policy = settings.get("egress-policy")
+            sudo = settings.get("disable-sudo-and-containers")
+            if policy not in ("block", BY_THE_SETTINGS) or sudo is True:
+                assert SEE_LOOKUPS not in names, where
+                continue
+            see = steps[steps.index(hardening[0]) + 1]
+            assert see["name"] == SEE_LOOKUPS, where
+            assert names.count(SEE_LOOKUPS) == 1, where
+            # Where the settings of the project decide, only when they block.
+            assert see.get("if") == (
+                "needs.start.outputs.policy == 'block'"
+                if policy == BY_THE_SETTINGS
+                else KEEPS_SUDO[sudo]
+            ), where
+            scripts.add(see["run"])
+    assert len(scripts) <= 1, scripts
+    if project == "blueprint":
+        assert scripts
+
+
+def see_lookups(
+    tmp_path: Path, files: Mapping[str, str], fails: str = "false"
+) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
+    """Runs the step with the files of the runner in a folder of their own, and with a
+    sudo that fails for the commands that the condition `fails` matches; the result,
+    the calls and the folder."""
+    script = step_named(
+        job_in(workflows(ROOT)["screenshot-bot.yml"], "render"), SEE_LOOKUPS
+    )["run"]
+    runner = tmp_path / "runner"
+    for path, content in files.items():
+        (runner / path).parent.mkdir(parents=True, exist_ok=True)
+        (runner / path).write_text(content, encoding="utf-8")
+    root = runner.as_posix()
+    script = re.sub(r"(?<![\w/])/(etc|run)/", lambda found: root + found[0], script)
+    result, calls = run_workflow_step(
+        tmp_path, script, tmp_path, {"sudo": f"if {fails}; then exit 1; fi\n"}
+    )
+    return result, calls, root
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_dns_step_does_nothing_on_a_runner_without_githubs_experiment(
+    tmp_path: Path,
+) -> None:
+    result, calls, _ = see_lookups(
+        tmp_path, {"etc/resolv.conf": "nameserver 127.0.0.53\n"}
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls == []
+    assert "::notice::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"etc/systemd/resolved.conf.d/90-egress-proxy.conf": "[Resolve]\n"},
+        {"run/systemd/resolved.conf.d/90-egress-proxy.conf": "[Resolve]\n"},
+        {"etc/resolv.conf": "nameserver 127.0.0.100\n"},
+    ],
+)
+def test_the_dns_step_takes_githubs_experiment_away(
+    tmp_path: Path, files: Mapping[str, str]
+) -> None:
+    # The services of the experiment may be gone already, which fails nothing.
+    result, calls, root = see_lookups(
+        tmp_path, files, '[[ "$1 $2" == "systemctl stop" || $1 == resolvectl ]]'
+    )
+
+    assert result.returncode == 0, result.stderr
+    dropin = "systemd/resolved.conf.d/90-egress-proxy.conf"
+    stub = f"{root}/run/systemd/resolve/stub-resolv.conf"
+    assert calls == [
+        f"sudo rm -f {root}/etc/{dropin} {root}/run/{dropin}",
+        "sudo systemctl restart systemd-resolved",
+        f"sudo ln -sfn {stub} {root}/etc/resolv.conf",
+        "sudo systemctl stop egress-dns-resolver.service egress-outbound-proxy.service",
+        "sudo resolvectl flush-caches",
+    ]
+    assert "::notice::GitHub's DNS experiment is on this runner" in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_dns_step_fails_when_it_cant_take_the_experiment_away(
+    tmp_path: Path,
+) -> None:
+    # Harden-Runner would block the hosts of the job until its time limit; the failure
+    # says so at once.
+    result, calls, _ = see_lookups(
+        tmp_path,
+        {"etc/resolv.conf": "nameserver 127.0.0.100\n"},
+        "[[ $1 == systemctl ]]",
+    )
+
+    assert result.returncode != 0
+    assert calls[-1] == "sudo systemctl restart systemd-resolved"
 
 
 def test_the_release_jobs_allow_the_hosts_of_their_delivery() -> None:

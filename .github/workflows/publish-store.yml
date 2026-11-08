@@ -90,7 +90,7 @@ jobs:
       sign-in: ${{ steps.setup.outputs.sign-in }}
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-sudo-and-containers: true
@@ -412,7 +412,7 @@ jobs:
       zip: ${{ steps.zip.outputs.zip }}
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-sudo-and-containers: true
@@ -526,7 +526,7 @@ jobs:
       UPLOAD: https://chromewebstore.googleapis.com/upload/v2/publishers/${{ vars.CWS_PUBLISHER_ID }}/items/${{ vars.CWS_EXTENSION_ID }}:upload
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-sudo-and-containers: true

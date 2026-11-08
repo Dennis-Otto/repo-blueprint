@@ -1,6 +1,6 @@
 # Jobs that block wait for their hosts, and try again when they hang
 
-- Status: accepted
+- Status: accepted, amended by [0123](0123-harden-runner-v2-22-4-and-a-job-with-sudo-takes-githubs-dns-experiment-away.md), with which every workflow takes Harden-Runner v2.22.4 and a job that blocks and keeps sudo takes GitHub's DNS experiment away itself
 - Date: 2026-10-31
 
 ## Context
