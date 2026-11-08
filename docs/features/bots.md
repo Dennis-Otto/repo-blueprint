@@ -95,7 +95,7 @@ Every bot starts from an event, such as a merge into `main`, a pull request or t
   <img src="../images/diagrams/when-the-schedules-of-a-repository-run.svg" alt="When the schedules of a repository run: The blueprint has slot 0, a repository of the registry its place in the Rollout, any other repository a slot from the hash of its owner and name. Each weekly schedule moves by as many days, every schedule by 8 minutes for each within its hour, so the heavy weekly jobs of two repositories in slots 0 to 6 never share an hour of a day.">
 </picture>
 
-- **The blueprint:** its own schedules come to 259 runs a week, with Renovate for every repository (84) and the dashboard (84), which cost nothing in a public repository.
+- **The blueprint:** its own schedules come to 438 runs a week, with the hourly look of the sync bot of the issue assistant (168), Renovate for every repository (84) and the dashboard (84), which cost nothing in a public repository.
 - **Private repositories:** public repositories run Actions for free. A private one on GitHub Free has 2,000 minutes a month, and GitHub rounds every job up to a whole minute. Each run of a bot starts a short run of the bot-health bot after it, and each run of the release bot one of Issue lifecycle, which now skips the scheduled ones, so the schedules of every hour and every half hour came to close to 200 runs a day, about 6,000 a month had GitHub run them all, three times the free minutes. All the schedules of a project and the runs that they start now come to about 20 a day, about 600 a month. The checks of the pull requests cost more; decisions 0009 and 0027 keep their jobs few.
 
 ## Dashboard
