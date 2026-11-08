@@ -161,4 +161,8 @@ def test_the_command_fails_outside_a_repository(
 
     assert main(["binaries"], root=tmp_path / "folder") == 2
 
-    assert capsys.readouterr().err.startswith("blueprint.py: Command '['git'")
+    # The words of the failed command, which Python 3.15 no longer puts in quotes.
+    err = capsys.readouterr().err
+    assert err.startswith("blueprint.py: Command "), err
+    assert "['git', 'ls-files', " in err, err
+    assert err.endswith(" returned non-zero exit status 128.\n"), err
