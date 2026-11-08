@@ -1009,6 +1009,261 @@ def test_only_a_job_of_the_environment_release_checks_out_a_commit_of_another_jo
                 assert not COMMIT_OF_A_JOB.search(ref), (name, job_id, ref)
 
 
+# The events that start a workflow with the rights of the repository for what someone
+# else did: an issue, a comment or a discussion, a pull request, also a fork's, on the
+# base branch, or the run of another workflow.
+STARTED_BY_OTHERS = {
+    "issues",
+    "issue_comment",
+    "discussion",
+    "discussion_comment",
+    "pull_request_target",
+    "workflow_run",
+}
+# The text of an issue or a comment, which anyone may write.
+UNTRUSTED_TEXT = re.compile(r"github\.event\.(issue|comment)\.(title|body)")
+
+
+def checks_that_main_has(step: Mapping[str, Any], commit: str) -> bool:
+    """Whether a step fails unless main has the commit: one whole SHA, which main is
+    not ahead of."""
+    script = str(step.get("run", ""))
+    return (
+        (step.get("env") or {}).get("SHA") == commit
+        and '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]' in script
+        and re.search(r'compare/\$SHA\.\.\.main" --jq \.behind_by\)" == 0 \]\]', script)
+        is not None
+    )
+
+
+def checkouts_against_the_rules(workflow: Mapping[str, Any]) -> list[str]:
+    """The checkouts of a parsed workflow that keep the token in .git/config, or that
+    check out more than the default branch where others start the workflow: neither
+    github.ref, which names it for these events, nor a commit that a step before
+    checked that main has."""
+    events = workflow["on"]
+    started_by_others = not STARTED_BY_OTHERS.isdisjoint(
+        [events] if isinstance(events, str) else events
+    )
+    found = []
+    for job_id, job in workflow["jobs"].items():
+        steps = job.get("steps") or []
+        for number, step in enumerate(steps, start=1):
+            if not str(step.get("uses", "")).startswith("actions/checkout@"):
+                continue
+            where = f"{job_id}: step {number}"
+            options = step.get("with") or {}
+            if options.get("persist-credentials") is not False:
+                found.append(f"{where}: keeps the token")
+            ref = options.get("ref")
+            if not started_by_others or ref in (None, "${{ github.ref }}"):
+                continue
+            if not any(
+                checks_that_main_has(other, ref) for other in steps[: number - 1]
+            ):
+                found.append(f"{where}: checks out {ref}")
+    return found
+
+
+CHECKOUT = "actions/checkout@" + "a" * 40
+# The two lines of a step that checks that main has the commit in SHA.
+IS_A_COMMIT = '[[ "$SHA" =~ ^[0-9a-f]{40}$ ]]\n'
+MAIN_HAS_IT = (
+    '[[ "$(gh api "repos/$GH_REPO/compare/$SHA...main" --jq .behind_by)" == 0 ]]\n'
+)
+CHECKS_THAT_MAIN_HAS = {
+    "env": {"SHA": "${{ needs.start.outputs.sha }}"},
+    "run": IS_A_COMMIT + MAIN_HAS_IT,
+}
+
+
+def checkout_of(ref: str | None = None, credentials: bool = False) -> dict[str, Any]:
+    options: dict[str, Any] = {"persist-credentials": credentials}
+    if ref is not None:
+        options["ref"] = ref
+    return {"uses": CHECKOUT, "with": options}
+
+
+@pytest.mark.parametrize(
+    ("events", "steps", "found"),
+    [
+        ("push", [checkout_of()], []),
+        ("push", [{"uses": CHECKOUT}], ["a: step 1: keeps the token"]),
+        (["push"], [checkout_of(credentials=True)], ["a: step 1: keeps the token"]),
+        # A commit of a pull request, where the workflow runs with its own rights.
+        ({"pull_request": None}, [checkout_of("${{ github.head_ref }}")], []),
+        ({"workflow_run": {}}, [checkout_of()], []),
+        ({"issue_comment": {}}, [checkout_of("${{ github.ref }}")], []),
+        (
+            {"pull_request_target": {}},
+            [checkout_of("${{ github.event.pull_request.head.sha }}")],
+            ["a: step 1: checks out ${{ github.event.pull_request.head.sha }}"],
+        ),
+        (
+            ["issues", "workflow_dispatch"],
+            [checkout_of("refs/pull/1/head")],
+            ["a: step 1: checks out refs/pull/1/head"],
+        ),
+        (
+            {"workflow_run": {}},
+            [CHECKS_THAT_MAIN_HAS, checkout_of("${{ needs.start.outputs.sha }}")],
+            [],
+        ),
+        # The check comes after the checkout, or checks another commit, or only that
+        # the commit is one.
+        (
+            {"workflow_run": {}},
+            [checkout_of("${{ needs.start.outputs.sha }}"), CHECKS_THAT_MAIN_HAS],
+            ["a: step 1: checks out ${{ needs.start.outputs.sha }}"],
+        ),
+        (
+            {"workflow_run": {}},
+            [CHECKS_THAT_MAIN_HAS, checkout_of("${{ needs.other.outputs.sha }}")],
+            ["a: step 2: checks out ${{ needs.other.outputs.sha }}"],
+        ),
+        (
+            {"discussion": {}},
+            [
+                {**CHECKS_THAT_MAIN_HAS, "run": IS_A_COMMIT},
+                checkout_of("${{ needs.start.outputs.sha }}"),
+            ],
+            ["a: step 2: checks out ${{ needs.start.outputs.sha }}"],
+        ),
+        (
+            {"discussion_comment": {}},
+            [
+                {**CHECKS_THAT_MAIN_HAS, "run": MAIN_HAS_IT},
+                checkout_of("${{ needs.start.outputs.sha }}"),
+            ],
+            ["a: step 2: checks out ${{ needs.start.outputs.sha }}"],
+        ),
+    ],
+)
+def test_a_checkout_against_the_rules_is_found(
+    events: object, steps: list[dict[str, Any]], found: list[str]
+) -> None:
+    workflow = {"on": events, "jobs": {"a": {"steps": steps}, "b": {"uses": "./b.yml"}}}
+    assert checkouts_against_the_rules(workflow) == found
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_checkout_keeps_no_token_and_one_that_others_start_runs_main(
+    projects: dict[str, Path], project: str
+) -> None:
+    # The token in .git/config would reach every later step and every artifact of the
+    # folder (zizmor: artipacked). A workflow that others start has the rights of the
+    # repository, which code of a pull request must never get. A repository whose
+    # tests walk its workflows leaves the blueprint's to these.
+    root = ROOT if project == "blueprint" else projects[project]
+    found = {
+        name: checkouts_against_the_rules(parse(text))
+        for name, text in workflows(root).items()
+    }
+    assert {name: flaws for name, flaws in found.items() if flaws} == {}
+
+
+def values_in_scripts(workflow: Mapping[str, Any]) -> list[str]:
+    """The steps of a parsed workflow that write an expression into their script,
+    where bash runs what it expands to, and the environments of the workflow, of a
+    job and of a step that take the text of an issue or a comment."""
+    found = [
+        f"{where}: the text of an issue or a comment"
+        for where, settings in [
+            ("workflow", workflow),
+            *((job_id, job) for job_id, job in workflow["jobs"].items()),
+        ]
+        if UNTRUSTED_TEXT.search(values_of(settings.get("env") or {}))
+    ]
+    for job_id, job in workflow["jobs"].items():
+        for number, step in enumerate(job.get("steps") or [], start=1):
+            where = f"{job_id}: step {number}"
+            if "${{" in str(step.get("run", "")):
+                found.append(f"{where}: an expression in the script")
+            if UNTRUSTED_TEXT.search(values_of(step.get("env") or {})):
+                found.append(f"{where}: the text of an issue or a comment")
+    return found
+
+
+@pytest.mark.parametrize(
+    ("workflow", "found"),
+    [
+        ({"jobs": {"a": {"steps": [{"run": 'echo "$TITLE"'}]}}}, []),
+        (
+            {"jobs": {"a": {"steps": [{"run": "echo ${{ github.ref }}"}]}}},
+            ["a: step 1: an expression in the script"],
+        ),
+        ({"jobs": {"a": {"steps": [{"uses": "./a", "with": {"b": "${{ c }}"}}]}}}, []),
+        (
+            {"jobs": {"a": {"env": {"TITLE": "${{ github.event.issue.title }}"}}}},
+            ["a: the text of an issue or a comment"],
+        ),
+        (
+            {
+                "env": {"BODY": "${{ github.event.comment.body }}"},
+                "jobs": {"a": {"steps": []}},
+            },
+            ["workflow: the text of an issue or a comment"],
+        ),
+        (
+            {
+                "jobs": {
+                    "a": {
+                        "steps": [
+                            {"run": "true"},
+                            {
+                                "env": {"BODY": "${{ github.event.issue.body }}"},
+                                "run": "true",
+                            },
+                        ]
+                    }
+                }
+            },
+            ["a: step 2: the text of an issue or a comment"],
+        ),
+        # Its number and the title of a pull request are no text of an issue.
+        (
+            {
+                "jobs": {
+                    "a": {
+                        "steps": [
+                            {
+                                "env": {
+                                    "NUMBER": "${{ github.event.issue.number }}",
+                                    "TITLE": "${{ github.event.pull_request.title }}",
+                                },
+                                "run": "true",
+                            }
+                        ]
+                    }
+                }
+            },
+            [],
+        ),
+    ],
+)
+def test_a_value_that_reaches_a_script_past_its_environment_is_found(
+    workflow: dict[str, Any], found: list[str]
+) -> None:
+    assert values_in_scripts(workflow) == found
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_values_reach_a_script_only_through_its_environment(
+    projects: dict[str, Path], project: str
+) -> None:
+    # bash runs what an expression in a script expands to, such as a title that someone
+    # wrote (zizmor: template-injection); from the environment, the script reads a value
+    # as text. The text of an issue or a comment reaches no environment at all: a script
+    # reads it from the event or the API, where it can't pass for a variable of the
+    # runner. A repository whose tests walk its workflows leaves the blueprint's to
+    # these.
+    root = ROOT if project == "blueprint" else projects[project]
+    found = {
+        name: values_in_scripts(parse(text)) for name, text in workflows(root).items()
+    }
+    assert {name: flaws for name, flaws in found.items() if flaws} == {}
+
+
 WARM_UP = "Wait until Harden-Runner lets the hosts through"
 # The policy of the jobs that render the screenshots, which blocks once the settings
 # of the project name its hosts.
