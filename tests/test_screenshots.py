@@ -20,7 +20,9 @@ from shared import load_yaml
 from blueprint.cli import main
 from blueprint.screenshots import (
     COMPARED_FILES,
+    JOB_MINUTES,
     LARGEST,
+    MOST_MINUTES,
     REPORT,
     Correction,
     Kept,
@@ -1528,7 +1530,8 @@ def test_without_settings_one_job_renders_every_picture(tmp_path: Path) -> None:
     # records the traffic, as before the settings.
     assert settings(tmp_path) == Settings()
     assert plan(Settings()) == (
-        'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\n'
+        'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\nskip_wait=\n'
+        f"timeout_minutes={JOB_MINUTES}\nfailure_folder=\n"
     )
     # A file of comments alone sets nothing either.
     assert settings(settings_in(tmp_path, "# Nothing yet\n")) == Settings()
@@ -1555,12 +1558,52 @@ def test_the_settings_name_shards_files_and_hosts(tmp_path: Path) -> None:
         {"shard": "de.1", "id": "de.1"},
         {"shard": "timeline_2", "id": "timeline_2"},
     ]
-    # Hosts turn the block on, for every host but these and those of the jobs.
+    # Hosts turn the block on, for every host but these and those of the jobs; the
+    # script gets the time limit of the job, and a failed render keeps nothing.
     assert lines[1:] == [
         "policy=block",
         "hosts=ghcr.io:443 *.data.mcr.microsoft.com:443 apt.example:80",
+        "skip_wait=",
+        f"timeout_minutes={JOB_MINUTES}",
+        "failure_folder=",
     ]
     assert settings(root, Path("other.toml")) == Settings()
+
+
+def test_the_settings_skip_hosts_limit_the_script_and_keep_a_failure(
+    tmp_path: Path,
+) -> None:
+    root = settings_in(
+        tmp_path,
+        'hosts = ["ghcr.io:443", "launchpad.net:443", "launchpadlibrarian.net:443"]\n'
+        'skip_wait = ["launchpad.net:443"]\n'
+        "timeout_minutes = 21\n"
+        'failure_folder = "tests/e2e/artifacts"\n',
+    )
+    found = settings(root)
+    assert found == Settings(
+        hosts=("ghcr.io:443", "launchpad.net:443", "launchpadlibrarian.net:443"),
+        skip_wait=("launchpad.net:443",),
+        timeout_minutes=21,
+        failure_folder="tests/e2e/artifacts",
+    )
+    # The jobs still allow the host that they don't wait for.
+    assert plan(found).splitlines()[2:] == [
+        "hosts=ghcr.io:443 launchpad.net:443 launchpadlibrarian.net:443",
+        "skip_wait=launchpad.net:443",
+        "timeout_minutes=21",
+        "failure_folder=tests/e2e/artifacts",
+    ]
+    # From a minute up to the longest that leaves the steps after the script their
+    # time, and a folder at the top of the repository as well.
+    for minutes in (1, MOST_MINUTES):
+        root = settings_in(
+            tmp_path, f'timeout_minutes = {minutes}\nfailure_folder = "logs"\n'
+        )
+        assert settings(root) == Settings(
+            timeout_minutes=minutes, failure_folder="logs"
+        )
+    assert settings(settings_in(tmp_path, 'failure_folder = ""\n')) == Settings()
 
 
 @pytest.mark.parametrize(
@@ -1570,7 +1613,8 @@ def test_the_settings_name_shards_files_and_hosts(tmp_path: Path) -> None:
         (b'shards = ["\xff"]\n', r"is no TOML that the bot can read"),
         (
             "host = []\n",
-            r"sets host, which the bot doesn't know; it knows shards, files and hosts",
+            r"sets host, which the bot doesn't know; it knows shards, files, hosts, "
+            r"skip_wait, timeout_minutes and failure_folder\.",
         ),
         ('shards = "en"\n', r"shards is a list of strings"),
         ("files = [1]\n", r"files is a list of strings"),
@@ -1594,6 +1638,35 @@ def test_the_settings_name_shards_files_and_hosts(tmp_path: Path) -> None:
         ('hosts = ["ghcr.io:65536"]\n', r"is no host and port"),
         ('hosts = ["ghcr.io:443 evil.example:443"]\n', r"is no host and port"),
         ('hosts = ["-ghcr.io:443"]\n', r"is no host and port"),
+        # The jobs leave out of their wait only a host that the settings allow.
+        ('skip_wait = "ghcr.io:443"\n', r"skip_wait is a list of strings"),
+        (
+            'hosts = ["ghcr.io:443"]\nskip_wait = ["ghcr.io:80"]\n',
+            r"skip_wait names 'ghcr\.io:80', which hosts doesn't name",
+        ),
+        ('skip_wait = ["pypi.org:443"]\n', r"which hosts doesn't name"),
+        (
+            'hosts = ["ghcr.io:443"]\nskip_wait = ["ghcr.io:443", "ghcr.io:443"]\n',
+            r"skip_wait names ghcr\.io:443 twice",
+        ),
+        ('timeout_minutes = "21"\n', r"timeout_minutes is a whole number of minutes"),
+        ("timeout_minutes = 21.5\n", r"timeout_minutes is a whole number of minutes"),
+        ("timeout_minutes = true\n", r"timeout_minutes is a whole number of minutes"),
+        ("timeout_minutes = 0\n", r"timeout_minutes is 0, but the script may take"),
+        ("timeout_minutes = -5\n", r"from 1 to 45 minutes"),
+        (
+            f"timeout_minutes = {MOST_MINUTES + 1}\n",
+            rf"timeout_minutes is {MOST_MINUTES + 1}, .* in the job of {JOB_MINUTES}",
+        ),
+        ('failure_folder = ["logs"]\n', r"failure_folder is a string"),
+        ('failure_folder = "../logs"\n', r"the failure_folder '\.\./logs' is no path"),
+        ('failure_folder = "/tmp/logs"\n', r"is no path of plain names"),
+        ('failure_folder = "tests/e2e/artifacts/"\n', r"is no path of plain names"),
+        ('failure_folder = "."\n', r"is no path of plain names"),
+        ('failure_folder = "logs/*"\n', r"is no path of plain names"),
+        ('failure_folder = "a\\nb"\n', r"is no path of plain names"),
+        ('failure_folder = ".git"\n', r"repository outside \.git"),
+        ('failure_folder = ".git/logs"\n', r"repository outside \.git"),
     ],
 )
 def test_the_bot_refuses_settings_it_cant_take(
@@ -1964,7 +2037,8 @@ def test_the_commands_of_the_settings_and_the_shards(
     )
     assert main(["screenshots", "plan"], root=root) == 0
     assert capsys.readouterr().out == (
-        'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\n'
+        'shards=[{"shard":"","id":"all"}]\npolicy=audit\nhosts=\nskip_wait=\n'
+        f"timeout_minutes={JOB_MINUTES}\nfailure_folder=\n"
     )
     settings_in(
         root,
@@ -1973,6 +2047,7 @@ def test_the_commands_of_the_settings_and_the_shards(
     assert main(["screenshots", "plan"], root=root) == 0
     assert capsys.readouterr().out == (
         'shards=[{"shard":"en","id":"en"}]\npolicy=block\nhosts=ghcr.io:443\n'
+        f"skip_wait=\ntimeout_minutes={JOB_MINUTES}\nfailure_folder=\n"
     )
     # The shard's keep takes the file that the settings name.
     write(root, {TIMELINE: b'{"games": 2}\n', "docs/a.png": png(changed=1)})

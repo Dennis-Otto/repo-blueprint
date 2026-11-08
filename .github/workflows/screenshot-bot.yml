@@ -103,14 +103,27 @@ jobs:
           deadline=$(($(date +%s) + 120))
           for endpoint in $HOSTS; do
             host="${endpoint%:*}"
-            # A wildcard names no host to ask.
-            [[ "$host" == '*.'* ]] && continue
-            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+            port="${endpoint##*:}"
+            # A wildcard names no host to ask, and a job may leave out a host that keeps it
+            # waiting although none of its steps needs it at once.
+            [[ "$host" == '*.'* || " $SKIP_WAIT " == *" $endpoint "* ]] && continue
+            # Each host on its own port, by HTTP on 80 and by HTTPS on any other. Only a host
+            # that curl can't resolve, or can't reach in time, is blocked: one that answers at
+            # all, in whatever protocol, is through.
+            scheme=https
+            [[ "$port" == 80 ]] && scheme=http
+            while true; do
+              status=0
+              curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "$scheme://$host:$port/" || status=$?
+              case "$status" in
+                6 | 7 | 28) ;;
+                *) break ;;
+              esac
               if (($(date +%s) >= deadline)); then
-                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                echo "::warning::Harden-Runner still blocks $endpoint after two minutes; a step that needs it will fail, and the job can run again."
                 break
               fi
-              echo "Harden-Runner still blocks $host, waiting 3 s."
+              echo "Harden-Runner still blocks $endpoint, waiting 3 s."
               sleep 3
             done
           done
@@ -181,6 +194,9 @@ jobs:
       shards: ${{ steps.start.outputs.shards }}
       policy: ${{ steps.start.outputs.policy }}
       hosts: ${{ steps.start.outputs.hosts }}
+      skip_wait: ${{ steps.start.outputs.skip_wait }}
+      timeout_minutes: ${{ steps.start.outputs.timeout_minutes }}
+      failure_folder: ${{ steps.start.outputs.failure_folder }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -212,8 +228,9 @@ jobs:
             exit 0
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # The shards, the files and the hosts of .github/screenshots.toml; settings
-          # that the bot can't take fail here, with what is wrong.
+          # The shards, the files, the hosts, the time limit and the folder of a
+          # failure of .github/screenshots.toml; settings that the bot can't take fail
+          # here, with what is wrong.
           python3 "$tool" screenshots plan >> "$GITHUB_OUTPUT"
 
   render:
@@ -283,18 +300,34 @@ jobs:
             files.pythonhosted.org:443
             *.actions.githubusercontent.com:443
             ${{ needs.start.outputs.hosts }}
+          # Hosts of the project that keep a runner waiting, which its script asks
+          # for only later or tries again by itself.
+          SKIP_WAIT: ${{ needs.start.outputs.skip_wait }}
         run: |
           deadline=$(($(date +%s) + 120))
           for endpoint in $HOSTS; do
             host="${endpoint%:*}"
-            # A wildcard names no host to ask.
-            [[ "$host" == '*.'* ]] && continue
-            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+            port="${endpoint##*:}"
+            # A wildcard names no host to ask, and a job may leave out a host that keeps it
+            # waiting although none of its steps needs it at once.
+            [[ "$host" == '*.'* || " $SKIP_WAIT " == *" $endpoint "* ]] && continue
+            # Each host on its own port, by HTTP on 80 and by HTTPS on any other. Only a host
+            # that curl can't resolve, or can't reach in time, is blocked: one that answers at
+            # all, in whatever protocol, is through.
+            scheme=https
+            [[ "$port" == 80 ]] && scheme=http
+            while true; do
+              status=0
+              curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "$scheme://$host:$port/" || status=$?
+              case "$status" in
+                6 | 7 | 28) ;;
+                *) break ;;
+              esac
               if (($(date +%s) >= deadline)); then
-                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                echo "::warning::Harden-Runner still blocks $endpoint after two minutes; a step that needs it will fail, and the job can run again."
                 break
               fi
-              echo "Harden-Runner still blocks $host, waiting 3 s."
+              echo "Harden-Runner still blocks $endpoint, waiting 3 s."
               sleep 3
             done
           done
@@ -344,11 +377,16 @@ jobs:
           uv venv --quiet .venv-docs
           uv pip install --quiet --python .venv-docs --require-hashes -r "$requirements"
       # A shard renders and deletes only its own pictures; without shards, the script
-      # gets no name and renders every picture, as on your machine.
+      # gets no name and renders every picture, as on your machine. Within the time
+      # limit of the settings, or else that of the job; the script itself gets the
+      # SIGINT with which GitHub ends a step that runs out of time, so that it can
+      # stop its demo and say where it waited, and the step after it keeps the folder
+      # of the failure.
       - name: Render the pictures
+        timeout-minutes: ${{ fromJSON(needs.start.outputs.timeout_minutes) }}
         env:
           SCREENSHOTS_SHARD: ${{ matrix.shard }}
-        run: bash scripts/screenshots.sh
+        run: exec bash scripts/screenshots.sh
       - name: Compare the pictures with those of main
         id: keep
         env:
@@ -375,6 +413,17 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+      # What the script left in the folder that .github/screenshots.toml names, such
+      # as the screenshots and the logs of a section that failed, for a person to see,
+      # by the shard and the attempt; under a name that the job collect never takes.
+      - name: Keep the folder of the failure
+        if: failure() && needs.start.outputs.failure_folder != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: failed-render-${{ matrix.id }}-attempt-${{ github.run_attempt }}
+          path: ${{ needs.start.outputs.failure_folder }}
+          if-no-files-found: warn
+          retention-days: 7
 
   collect:
     name: collect the screenshots
@@ -507,14 +556,27 @@ jobs:
           deadline=$(($(date +%s) + 120))
           for endpoint in $HOSTS; do
             host="${endpoint%:*}"
-            # A wildcard names no host to ask.
-            [[ "$host" == '*.'* ]] && continue
-            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+            port="${endpoint##*:}"
+            # A wildcard names no host to ask, and a job may leave out a host that keeps it
+            # waiting although none of its steps needs it at once.
+            [[ "$host" == '*.'* || " $SKIP_WAIT " == *" $endpoint "* ]] && continue
+            # Each host on its own port, by HTTP on 80 and by HTTPS on any other. Only a host
+            # that curl can't resolve, or can't reach in time, is blocked: one that answers at
+            # all, in whatever protocol, is through.
+            scheme=https
+            [[ "$port" == 80 ]] && scheme=http
+            while true; do
+              status=0
+              curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "$scheme://$host:$port/" || status=$?
+              case "$status" in
+                6 | 7 | 28) ;;
+                *) break ;;
+              esac
               if (($(date +%s) >= deadline)); then
-                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                echo "::warning::Harden-Runner still blocks $endpoint after two minutes; a step that needs it will fail, and the job can run again."
                 break
               fi
-              echo "Harden-Runner still blocks $host, waiting 3 s."
+              echo "Harden-Runner still blocks $endpoint, waiting 3 s."
               sleep 3
             done
           done
