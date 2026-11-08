@@ -62,7 +62,7 @@ from workflow_steps import (
 import downstream
 import pins
 import reference
-from blueprint import bootstrap, ownership
+from blueprint import bootstrap, ownership, screenshots
 from blueprint.app import App, answered_app
 from blueprint.bot_health import (
     CRON,
@@ -1270,6 +1270,7 @@ WARM_UP = "Wait until Harden-Runner lets the hosts through"
 # The policy of the jobs that render the screenshots, which blocks once the settings
 # of the project name its hosts.
 BY_THE_SETTINGS = "${{ needs.start.outputs.policy }}"
+SKIPPED_BY_THE_SETTINGS = "${{ needs.start.outputs.skip_wait }}"
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -1305,7 +1306,12 @@ def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
                 None if policy == "block" else "needs.start.outputs.policy == 'block'"
             ), where
             allowed = hardening[0]["with"]["allowed-endpoints"]
-            assert warm_up["env"] == {"HOSTS": allowed}, where
+            # The settings of the project may leave hosts of their own out of it.
+            assert warm_up["env"] == (
+                {"HOSTS": allowed}
+                if policy == "block"
+                else {"HOSTS": allowed, "SKIP_WAIT": SKIPPED_BY_THE_SETTINGS}
+            ), where
             # Two minutes, and a last try of 5 s for each host, of a job of 5 minutes.
             assert warm_up["timeout-minutes"] == 4, where
             scripts.add(warm_up["run"])
@@ -1313,12 +1319,17 @@ def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
 
 
 def warm_up(
-    tmp_path: Path, blocked: int
+    tmp_path: Path,
+    blocked: int,
+    blocked_with: int = 7,
+    hosts: str = "api.github.com:443 *.actions.githubusercontent.com:443 github.com:443",
+    **variables: str,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     script = step_named(job_in(workflows(ROOT)["welcome.yml"], "welcome"), WARM_UP)[
         "run"
     ]
-    # curl fails the first times that it is asked, and each look at the clock takes 3 s.
+    # curl fails the first times that it is asked, with the code of a host that it
+    # can't reach unless the test names another, and each look at the clock takes 3 s.
     tries = tmp_path / "tries"
     tries.write_text("0", encoding="utf-8")
     clock = tmp_path / "clock"
@@ -1331,7 +1342,7 @@ def warm_up(
             "curl": (
                 f'n=$(( $(cat "{tries.as_posix()}") + 1 ))\n'
                 f'echo "$n" > "{tries.as_posix()}"\n'
-                f"(( n > {blocked} ))\n"
+                f"(( n > {blocked} )) || exit {blocked_with}\n"
             ),
             "date": (
                 f'now=$(cat "{clock.as_posix()}")\n'
@@ -1340,11 +1351,18 @@ def warm_up(
             ),
             "sleep": "",
         },
-        HOSTS="api.github.com:443 *.actions.githubusercontent.com:443 github.com:443",
+        (),
+        HOSTS=hosts,
+        **variables,
     )
 
 
 PROBE = "curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "
+
+
+def probes(calls: list[str]) -> list[str]:
+    """The addresses that the warm-up asked, in their order."""
+    return [call.removeprefix(PROBE) for call in calls if call.startswith("curl ")]
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -1355,26 +1373,89 @@ def test_the_warm_up_asks_each_host_once_when_harden_runner_lets_it_through(
 
     assert result.returncode == 0, result.stderr
     # The wildcard names no host to ask.
-    assert [call for call in calls if call.startswith("curl")] == [
-        f"{PROBE}https://api.github.com/",
-        f"{PROBE}https://github.com/",
-    ]
+    assert probes(calls) == ["https://api.github.com:443/", "https://github.com:443/"]
     assert not any(call.startswith("sleep") for call in calls)
     assert "::warning::" not in result.stdout
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-def test_the_warm_up_asks_again_until_harden_runner_lets_the_host_through(
-    tmp_path: Path,
-) -> None:
-    result, calls = warm_up(tmp_path, 3)
+def test_the_warm_up_asks_each_host_on_its_own_port(tmp_path: Path) -> None:
+    # A host that the job allows only on port 80, such as a mirror of apt, is blocked
+    # on 443: asking there kept the job waiting two minutes and warned on every run.
+    result, calls = warm_up(
+        tmp_path, 0, hosts="archive.ubuntu.com:80 ghcr.io:443 git.example.org:9418"
+    )
 
     assert result.returncode == 0, result.stderr
-    assert calls.count(f"{PROBE}https://api.github.com/") == 4
-    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert probes(calls) == [
+        "http://archive.ubuntu.com:80/",
+        "https://ghcr.io:443/",
+        "https://git.example.org:9418/",
+    ]
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param(6, id="the name can't be resolved"),
+        pytest.param(7, id="the address can't be reached"),
+        pytest.param(28, id="no answer in time"),
+    ],
+)
+def test_the_warm_up_asks_again_until_harden_runner_lets_the_host_through(
+    tmp_path: Path, code: int
+) -> None:
+    result, calls = warm_up(tmp_path, 3, code)
+
+    assert result.returncode == 0, result.stderr
+    assert probes(calls).count("https://api.github.com:443/") == 4
+    assert probes(calls).count("https://github.com:443/") == 1
     assert calls.count("sleep 3") == 3
-    assert result.stdout.count("Harden-Runner still blocks api.github.com") == 3
+    assert result.stdout.count("Harden-Runner still blocks api.github.com:443") == 3
     assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param(35, id="another protocol than TLS"),
+        pytest.param(52, id="an empty answer"),
+        pytest.param(1, id="a protocol that curl doesn't speak"),
+    ],
+)
+def test_a_host_that_answers_in_another_way_is_through(
+    tmp_path: Path, code: int
+) -> None:
+    # Only the connection counts: a port that speaks no HTTP, such as one of SSH, would
+    # otherwise keep the job waiting for nothing.
+    result, calls = warm_up(tmp_path, 10_000, code, hosts="git.example.org:22")
+
+    assert result.returncode == 0, result.stderr
+    assert probes(calls) == ["https://git.example.org:22/"]
+    assert not any(call.startswith("sleep") for call in calls)
+    assert "Harden-Runner still blocks" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_warm_up_leaves_out_the_hosts_that_the_job_skips(tmp_path: Path) -> None:
+    # Only the very endpoints that SKIP_WAIT names, never one that merely starts the
+    # same or another port of the same host.
+    result, calls = warm_up(
+        tmp_path,
+        0,
+        hosts="ghcr.io:443 launchpad.net:443 launchpadlibrarian.net:443 "
+        "launchpad.net:80",
+        SKIP_WAIT="launchpad.net:443 brands.example.org:443",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert probes(calls) == [
+        "https://ghcr.io:443/",
+        "https://launchpadlibrarian.net:443/",
+        "http://launchpad.net:80/",
+    ]
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -1386,12 +1467,12 @@ def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
 
     assert result.returncode == 0, result.stderr
     # At most 40 tries of 3 s for the first host, and then one for each other host.
-    assert calls.count(f"{PROBE}https://api.github.com/") == 40
-    assert calls.count(f"{PROBE}https://github.com/") == 1
+    assert probes(calls).count("https://api.github.com:443/") == 40
+    assert probes(calls).count("https://github.com:443/") == 1
     assert calls.count("sleep 3") == 39
-    for host in ("api.github.com", "github.com"):
+    for endpoint in ("api.github.com:443", "github.com:443"):
         assert (
-            f"::warning::Harden-Runner still blocks {host} after two minutes"
+            f"::warning::Harden-Runner still blocks {endpoint} after two minutes"
             in result.stdout
         )
 
@@ -1669,7 +1750,7 @@ def test_every_call_of_the_api_asks_for_its_version(
     projects: dict[str, Path], project: str
 ) -> None:
     # A call without a version gets GitHub's default version, which changes when
-    # GitHub makes a newer one its default (decision 0124). The workflows of the issue
+    # GitHub makes a newer one its default (decision 0125). The workflows of the issue
     # assistant are copies of its own, which it keeps.
     root = ROOT if project == "blueprint" else projects[project]
     found = {
@@ -18825,9 +18906,16 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     (rendering,) = [
         step
         for step in render["steps"]
-        if step.get("run") == "bash scripts/screenshots.sh"
+        if step.get("run") == "exec bash scripts/screenshots.sh"
     ]
     assert rendering["env"] == {"SCREENSHOTS_SHARD": "${{ matrix.shard }}"}
+    # Within the time limit of the settings, or else that of the job, which the
+    # settings name for the script without a limit of its own.
+    assert rendering["timeout-minutes"] == (
+        "${{ fromJSON(needs.start.outputs.timeout_minutes) }}"
+    )
+    assert render["timeout-minutes"] == screenshots.JOB_MINUTES
+    assert screenshots.MOST_MINUTES <= screenshots.JOB_MINUTES - 15
     assert render["permissions"] == {"contents": "read"}
     assert "secrets." not in values_of(render)
     assert "environment" not in render
@@ -18837,8 +18925,23 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     )
     assert " screenshots keep " in scripts_of(render)
     assert "\nuv venv --quiet .venv-docs\n" in scripts_of(render)
-    (shard,) = steps_using(render, "actions/upload-artifact")
+    shard, failed = steps_using(render, "actions/upload-artifact")
     assert shard["with"]["name"] == "screenshots-${{ matrix.id }}"
+    # A failed shard keeps the folder that the settings name, for a person, under a
+    # name that the job collect doesn't take, by its shard and attempt.
+    assert render["steps"][-1] == failed
+    assert condition_of(failed) == (
+        "failure() && needs.start.outputs.failure_folder != ''"
+    )
+    assert failed["with"] == {
+        "name": "failed-render-${{ matrix.id }}-attempt-${{ github.run_attempt }}",
+        "path": "${{ needs.start.outputs.failure_folder }}",
+        "if-no-files-found": "warn",
+        "retention-days": 7,
+    }
+    assert not fnmatch.fnmatchcase(failed["with"]["name"], "screenshots-*")
+    for output in ("skip_wait", "timeout_minutes", "failure_folder"):
+        assert start["outputs"][output] == f"${{{{ steps.start.outputs.{output} }}}}"
     # Harden-Runner blocks every host but those of the steps and of the settings once
     # the settings name hosts, and only records the traffic without them.
     hardening = render["steps"][0]

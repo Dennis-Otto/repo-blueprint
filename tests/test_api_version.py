@@ -1,5 +1,5 @@
 """Every call of GitHub's REST API asks for the version that the blueprint is written
-for (decision 0124): the Python of the blueprint, which starts gh at a few places, and
+for (decision 0125): the Python of the blueprint, which starts gh at a few places, and
 the workflows, whose steps run gh api; tests/test_template.py checks the workflows of
 the blueprint and of each kind of project with calls_without_the_version()."""
 

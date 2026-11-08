@@ -30,7 +30,7 @@ concurrency:
 env:
   GH_TELEMETRY: "false"
   # Each call of its API asks for the version of the REST API that the steps are
-  # written for (decision 0124).
+  # written for (decision 0125).
   API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
@@ -67,14 +67,27 @@ jobs:
           deadline=$(($(date +%s) + 120))
           for endpoint in $HOSTS; do
             host="${endpoint%:*}"
-            # A wildcard names no host to ask.
-            [[ "$host" == '*.'* ]] && continue
-            until curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "https://$host/"; do
+            port="${endpoint##*:}"
+            # A wildcard names no host to ask, and a job may leave out a host that keeps it
+            # waiting although none of its steps needs it at once.
+            [[ "$host" == '*.'* || " $SKIP_WAIT " == *" $endpoint "* ]] && continue
+            # Each host on its own port, by HTTP on 80 and by HTTPS on any other. Only a host
+            # that curl can't resolve, or can't reach in time, is blocked: one that answers at
+            # all, in whatever protocol, is through.
+            scheme=https
+            [[ "$port" == 80 ]] && scheme=http
+            while true; do
+              status=0
+              curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "$scheme://$host:$port/" || status=$?
+              case "$status" in
+                6 | 7 | 28) ;;
+                *) break ;;
+              esac
               if (($(date +%s) >= deadline)); then
-                echo "::warning::Harden-Runner still blocks $host after two minutes; a step that needs it will fail, and the job can run again."
+                echo "::warning::Harden-Runner still blocks $endpoint after two minutes; a step that needs it will fail, and the job can run again."
                 break
               fi
-              echo "Harden-Runner still blocks $host, waiting 3 s."
+              echo "Harden-Runner still blocks $endpoint, waiting 3 s."
               sleep 3
             done
           done

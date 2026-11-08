@@ -32,7 +32,7 @@ PAGE = 100
 MINIMUM_GH = "2.48"
 # The version of GitHub's REST API that the blueprint is written for. Each call of the
 # API asks for it, as GitHub recommends, so that a newer version that becomes GitHub's
-# default changes no answer before the blueprint moves to it (decision 0124). The
+# default changes no answer before the blueprint moves to it (decision 0125). The
 # workflows ask with the same header, which tests/test_template.py keeps equal.
 API_VERSION = "2022-11-28"
 API_VERSION_HEADER = f"X-GitHub-Api-Version: {API_VERSION}"

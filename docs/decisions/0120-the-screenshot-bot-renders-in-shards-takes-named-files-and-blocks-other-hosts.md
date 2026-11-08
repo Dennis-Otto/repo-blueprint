@@ -1,6 +1,6 @@
 # The screenshot bot renders in shards, takes the files that a project names and blocks the hosts that it doesn't
 
-- Status: accepted
+- Status: accepted, amended by [0124](0124-the-wait-asks-each-host-on-its-own-port-and-a-project-limits-its-render.md), with which a project can leave hosts out of the wait, give its script a time limit and keep the folder of a failed render
 - Date: 2026-11-07
 
 ## Context
