@@ -204,8 +204,9 @@ def test_the_fake_gh_filters_json_with_jq_as_gh_does(
 
     assert done.returncode == 0, done.stderr
     # As gh prints what the filter makes, one result on each line: a string raw, null
-    # as an empty line and anything else as compact JSON.
-    assert done.stdout == 'a\n\nb\n{"x":[1,2]}\n'
+    # as an empty line and anything else as compact JSON. The call that asks for no
+    # version of the API fails before any answer.
+    assert done.stdout == 'gh failed with 1\na\n\nb\n{"x":[1,2]}\n'
 
 
 def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -> None:
