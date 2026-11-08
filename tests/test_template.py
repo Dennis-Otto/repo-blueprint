@@ -64,6 +64,7 @@ import pins
 import reference
 from blueprint import bootstrap, ownership, screenshots
 from blueprint.app import App, answered_app
+from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -4302,6 +4303,22 @@ def test_every_repository_checks_that_git_holds_no_binary_that_nobody_can_review
         (project / ".github/checks.toml").read_text(encoding="utf-8")
     )
     assert "OSPS-QA-05.02" in explained["step"]["Binary files"]["why"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_bytecode_of_the_tools_is_no_binary_file_of_git(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # Every repository runs the Python of .github/, also one of Node, whose bytecode the
+    # step Binary files named in the CI before .gitignore left it out in every kind.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    for cache in (".github/__pycache__", ".github/blueprint/__pycache__"):
+        (project / cache).mkdir(parents=True, exist_ok=True)
+        (project / cache / "cli.cpython-314.pyc").write_bytes(b"\xcb\r\r\n\0\0")
+    (project / "data.bin").write_bytes(b"data\0more")
+
+    assert binaries(project) == [Binary("data.bin", UNREVIEWABLE)]
 
 
 @pytest.mark.parametrize("kind", KINDS)
