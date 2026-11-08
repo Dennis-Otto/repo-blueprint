@@ -3551,6 +3551,14 @@ def test_the_checklist_asks_for_a_social_preview_of_the_project(root: Path) -> N
         encoding="utf-8",
     )
     assert social_preview(root).done is True
+    # The template's comment, which names the mark, stays once the panel is the
+    # project's own.
+    page.write_text(
+        "<!-- Then take out data-default-panel, render the picture -->\n"
+        '<div class="panel"><img class="card" src="card.png"></div>\n',
+        encoding="utf-8",
+    )
+    assert social_preview(root).done is True
     # A project that shows its preview without the page has nothing to replace.
     page.unlink()
     assert social_preview(root).done is True

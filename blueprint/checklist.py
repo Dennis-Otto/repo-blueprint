@@ -93,6 +93,9 @@ def social_preview(root: Path) -> Step:
     since the template knows no more of it: the project replaces it with itself."""
     page = root / SOCIAL_PREVIEW
     text = page.read_text(encoding="utf-8") if page.exists() else ""
+    # The template's comment names the mark that the project takes out: only the
+    # markup counts, not what a comment says of it.
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     return Step(
         "Social preview shows the project",
         not any(mark in text for mark in DEFAULT_PANELS),
