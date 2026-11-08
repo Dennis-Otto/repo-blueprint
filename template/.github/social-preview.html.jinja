@@ -1,3 +1,7 @@
+[%- set repo = owner ~ '/' ~ project_slug -%]
+[%- set image = 'ghcr.io/' ~ repo | lower -%]
+[%- set initials = (project_name.split() | map('first') | join)[:2] | upper | e -%]
+[%- set kind = {'home-assistant': 'Home Assistant integration', 'nextcloud-app': 'Nextcloud app', 'github-action': 'GitHub Action', 'python-package': 'Python package', 'node-package': 'Node package', 'chrome-extension': 'Chrome extension', 'cloudflare-worker': 'Cloudflare Worker', 'container': 'container image', 'generic': 'repository'}[project_type] -%]
 <!doctype html>
 <html lang="en">
 <head>
@@ -29,36 +33,249 @@ ul { margin-top: 40px; list-style: none; display: grid; gap: 16px; }
 li { font-size: 24px; color: #cbd5e1; display: flex; align-items: center; gap: 18px; }
 li::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px var(--accent); flex: none; }
 .panel { position: absolute; right: 64px; top: 50%; transform: translateY(-50%); width: 548px; }
-.card { background: #141a26; border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 20px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45), 0 0 70px color-mix(in srgb, var(--accent) 16%, transparent); }
+.card { background: #141a26; border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45), 0 0 70px color-mix(in srgb, var(--accent) 16%, transparent); }
 .muted { color: #8b95a7; }
 .mono { font-family: "JetBrains Mono", "Liberation Mono", monospace; }
-
-.checks { padding: 26px 30px; }
-.repo { display: flex; align-items: center; justify-content: space-between; font-size: 18px; color: #e2e8f0; padding-bottom: 16px; margin-bottom: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
-.branch { font-size: 14px; color: #8b95a7; border: 1px solid #334155; border-radius: 999px; padding: 2px 10px; }
-.check { display: flex; align-items: center; gap: 14px; font-size: 20px; line-height: 2.4; color: #cbd5e1; }
-.check svg { width: 22px; height: 22px; color: #4ade80; flex: none; }
-.check b { color: #f8fafc; font-weight: 600; }
+.ok { color: #4ade80; }
 .monogram { width: 96px; height: 96px; border-radius: 22px; display: grid; place-items: center; font-size: 42px; font-weight: 800; color: #0a0f1d;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 55%, white), var(--accent)); }
-
+.mini { width: 26px; height: 26px; border-radius: 7px; font-size: 12px; flex: none; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 15px 20px; background: #10151f; border-bottom: 1px solid rgba(255, 255, 255, 0.07); font-size: 14px; color: #8b95a7; }
+.bar i { width: 12px; height: 12px; border-radius: 50%; background: #334155; }
+.bar span { margin-left: 10px; }
+.foot { display: flex; align-items: center; gap: 12px; padding: 16px 26px; border-top: 1px solid rgba(255, 255, 255, 0.07); font-size: 15px; }
+.lines { display: grid; gap: 12px; }
+.lines i { display: block; height: 11px; border-radius: 6px; background: rgba(148, 163, 184, 0.16); }
+.switch { width: 40px; height: 22px; border-radius: 999px; background: var(--accent); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #0a0f1d; }
+[%- if project_type in ['github-action', 'python-package', 'node-package', 'container'] %]
+.term { padding: 20px 26px 24px; font-size: 16px; line-height: 1.8; color: #94a3b8; }
+.term div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.term b { color: #f8fafc; font-weight: 600; }
+.term .p { color: var(--accent); font-weight: 600; }
+.term .k { color: #c4b5fd; }
+.term .hl { margin: 2px -26px; padding: 2px 23px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cursor { display: inline-block; width: 10px; height: 20px; background: var(--accent); vertical-align: -4px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; background: #12351f; color: #86efac; border-radius: 999px; padding: 4px 12px; font-weight: 600; }
+.pill svg { width: 15px; height: 15px; }
+[%- elif project_type == 'cloudflare-worker' %]
+.http { padding: 22px 28px; font-size: 16px; line-height: 1.8; color: #94a3b8; }
+.http div { overflow-wrap: anywhere; }
+.http b { color: #f8fafc; font-weight: 600; }
+.http b.ok { color: #4ade80; }
+.label { font-family: "Inter", sans-serif; font-size: 14px; font-weight: 700; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 6px; }
+.arrow { display: flex; align-items: center; gap: 14px; padding: 16px 30px; font-size: 17px; font-weight: 600; color: var(--accent); }
+.arrow svg { width: 26px; height: 26px; flex: none; }
+[%- elif project_type == 'chrome-extension' %]
+.tabs { display: flex; align-items: flex-end; gap: 8px; padding: 12px 18px 0; background: #10151f; }
+.tabs i { width: 12px; height: 12px; border-radius: 50%; background: #334155; margin-bottom: 12px; }
+.tab { margin-left: 14px; display: flex; align-items: center; gap: 10px; background: #1b2232; border-radius: 10px 10px 0 0; padding: 10px 18px; font-size: 14px; color: #cbd5e1; }
+.tab span { width: 14px; height: 14px; border-radius: 4px; background: #475569; }
+.toolbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: #1b2232; color: #64748b; }
+.toolbar svg { width: 18px; height: 18px; flex: none; }
+.url { flex: 1; background: #10151f; border-radius: 999px; padding: 7px 16px; font-size: 14px; color: #94a3b8; }
+.current { padding: 4px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 0 0 2px var(--accent); }
+.page { position: relative; height: 290px; padding: 30px 28px; }
+.page .lines { width: 200px; }
+.page .lines i:first-child { height: 22px; width: 70%; margin-bottom: 8px; }
+.popup { position: absolute; top: 10px; right: 16px; width: 296px; padding: 18px 20px 20px; background: #1b2232; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55); }
+.popup .head { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 700; padding-bottom: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.row { display: flex; align-items: center; justify-content: space-between; padding-top: 14px; font-size: 16px; color: #cbd5e1; }
+[%- elif project_type == 'nextcloud-app' %]
+.header { display: flex; align-items: center; gap: 22px; height: 58px; padding: 0 22px; background: linear-gradient(90deg, #00679e, #0082c9); color: #fff; }
+.header svg { width: 22px; height: 22px; flex: none; }
+.header .cloud { width: 46px; height: 24px; margin-right: 6px; }
+.header .app { position: relative; display: grid; place-items: center; opacity: 0.75; }
+.header .current { opacity: 1; }
+.header .current::after { content: ""; position: absolute; bottom: -12px; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: #fff; }
+.header .mini { color: #00679e; background: #fff; }
+.header .me { margin-left: auto; width: 30px; height: 30px; border-radius: 50%; background: rgba(255, 255, 255, 0.85); }
+.body { display: flex; height: 300px; }
+.nav { width: 176px; padding: 16px 12px; background: #10151f; border-right: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #cbd5e1; }
+.nav div { padding: 8px 12px; border-radius: 999px; }
+.nav .new { background: #0082c9; color: #fff; font-weight: 600; margin-bottom: 8px; }
+.nav .on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: #fff; font-weight: 600; }
+.nav .end { margin-top: auto; color: #8b95a7; }
+.main { flex: 1; padding: 20px 26px; }
+.main .path { font-size: 13px; color: #8b95a7; margin-bottom: 8px; }
+.main h2 { font-size: 22px; font-weight: 700; margin-bottom: 22px; }
+.item { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.item span { width: 34px; height: 34px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 22%, transparent); flex: none; }
+.item .lines { flex: 1; gap: 8px; }
+.item .lines i:last-child { width: 60%; }
+[%- elif project_type == 'home-assistant' %]
+.ha { padding: 22px 26px 0; }
+.ha .head { display: flex; align-items: center; gap: 12px; font-size: 21px; font-weight: 600; margin-bottom: 8px; }
+.entity { display: flex; align-items: center; gap: 16px; padding: 13px 0; }
+.entity + .entity { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex: none; }
+.icon svg { width: 22px; height: 22px; }
+.entity .name { flex: 1; min-width: 0; font-size: 17px; color: #e2e8f0; }
+.entity .name div { margin-top: 3px; font-size: 13px; color: #8b95a7; overflow-wrap: anywhere; }
+.entity .state { font-size: 17px; color: #e2e8f0; }
+.ha .foot { margin: 6px -26px 0; }
+[%- else %]
+.readme .content { padding: 24px 30px 30px; }
+.readme h2 { font-size: 30px; font-weight: 700; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.09); }
+.readme h3 { font-size: 20px; font-weight: 700; margin: 26px 0 14px; }
+.badges { display: flex; gap: 8px; margin-bottom: 20px; }
+.badge { display: flex; font-size: 12px; border-radius: 4px; overflow: hidden; }
+.badge span { padding: 3px 7px; background: #475569; color: #f8fafc; }
+.badge span + span { background: #16a34a; }
+.badge.blue span + span { background: #2563eb; }
+.readme .code { padding: 12px 16px; border-radius: 8px; background: #10151f; font-size: 15px; color: #cbd5e1; overflow-wrap: anywhere; }
+[%- endif %]
 </style>
 </head>
 <body>
 <div class="left">
-  <div class="logo"><div class="monogram">{= (project_name.split() | map('first') | join)[:2] | upper | e =}</div></div>
+  <div class="logo"><div class="monogram">{= initials =}</div></div>
   <h1>{= project_name | e =}</h1>
 [% if project_type != 'generic' %]  <div class="subtitle">[% if project_type == 'home-assistant' %]for Home Assistant[% elif project_type == 'nextcloud-app' %]for Nextcloud[% elif project_type == 'github-action' %]GitHub Action[% elif project_type == 'python-package' %]Python package[% elif project_type == 'node-package' %]Node package[% elif project_type == 'chrome-extension' %]Chrome extension[% elif project_type == 'cloudflare-worker' %]Cloudflare Worker[% else %]Container image[% endif %]</div>
-[% endif %]  <p class="text">{= description | e =}</p>
+[% endif %]  <!-- Three short bullets, <ul><li>…</li></ul>, say more at a glance than one sentence. -->
+  <p class="text">{= description | e =}</p>
 </div>
-<div class="panel">
-  <div class="card checks">
-    <div class="repo"><span class="mono">{= owner =}/{= project_slug =}</span><span class="branch mono">main</span></div>
-    <div class="check"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M13.8 3.3a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4 0l-3.2-3.2a1 1 0 1 1 1.4-1.4l2.5 2.5 6.3-6.3a1 1 0 0 1 1.4 0z"/></svg><span><b>Checks</b> on every change</span></div>
-    <div class="check"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M13.8 3.3a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4 0l-3.2-3.2a1 1 0 1 1 1.4-1.4l2.5 2.5 6.3-6.3a1 1 0 0 1 1.4 0z"/></svg><span><b>CodeQL</b> · Scorecard · secret scan</span></div>
-    <div class="check"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M13.8 3.3a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4 0l-3.2-3.2a1 1 0 1 1 1.4-1.4l2.5 2.5 6.3-6.3a1 1 0 0 1 1.4 0z"/></svg><span><b>Releases</b> with SBOM and provenance</span></div>
-    <div class="check"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M13.8 3.3a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4 0l-3.2-3.2a1 1 0 1 1 1.4-1.4l2.5 2.5 6.3-6.3a1 1 0 0 1 1.4 0z"/></svg><span><b>Issue assistant</b> · Renovate</span></div>
+<!-- The blueprint's default panel: a drawing of what a {= kind =} shows, made from the
+     answers of copier copy, since the blueprint knows no more of the project. Replace it
+     with the project itself: a screenshot of what it shows[% if sample_code %], such as one that
+     scripts/screenshots.sh takes[% endif %], as <img src="../docs/images/….png">, or a faithful
+     drawing of what it really produces. Then take out data-default-panel, render the
+     picture with bash scripts/social-preview.sh and upload it under Settings → General →
+     Social preview; python3 .github/blueprint.py checklist reminds of it until then. -->
+<div class="panel" data-default-panel>
+[%- if project_type == 'github-action' %]
+  <div class="card">
+    <div class="bar"><i></i><i></i><i></i><span class="mono">.github/workflows/ci.yml</span></div>
+    <div class="term mono">
+      <div><span class="k">on</span>: push</div>
+      <div><span class="k">jobs</span>:</div>
+      <div>  <span class="k">build</span>:</div>
+      <div>    <span class="k">runs-on</span>: ubuntu-latest</div>
+      <div>    <span class="k">steps</span>:</div>
+      <div>      - <span class="k">uses</span>: actions/checkout@v5</div>
+      <div class="hl">      - <span class="k">uses</span>: <b>{= repo =}@v1</b></div>
+    </div>
+    <div class="foot"><span class="pill"><svg viewBox="0 0 16 16"><path fill="currentColor" d="M13.8 3.3a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4 0l-3.2-3.2a1 1 0 1 1 1.4-1.4l2.5 2.5 6.3-6.3a1 1 0 0 1 1.4 0z"/></svg>build</span><span class="muted">ran {= project_name | e =} in 4s</span></div>
   </div>
+[%- elif project_type == 'python-package' %]
+  <div class="card">
+    <div class="bar"><i></i><i></i><i></i><span class="mono">bash</span></div>
+    <div class="term mono">
+[%- if publish_to == 'pypi' %]
+      <div><span class="p">$</span> <b>pip install {= project_slug =}</b></div>
+[%- else %]
+      <div><span class="p">$</span> <b>pip install \</b></div>
+      <div><b>    git+https://github.com/{= repo =}</b></div>
+[%- endif %]
+      <div>Collecting {= project_slug =}</div>
+      <div><span class="ok">Successfully installed</span> {= project_slug =}-1.0.0</div>
+      <div><span class="p">$</span> <b>python</b></div>
+      <div><span class="p">&gt;&gt;&gt;</span> <b>import {= python_package =}</b></div>
+      <div><span class="p">&gt;&gt;&gt;</span> <span class="cursor"></span></div>
+    </div>
+  </div>
+[%- elif project_type == 'node-package' %]
+  <div class="card">
+    <div class="bar"><i></i><i></i><i></i><span class="mono">bash</span></div>
+    <div class="term mono">
+      <div><span class="p">$</span> <b>npm install [% if publish_to == 'npm' %]{= project_slug =}[% else %]github:{= repo =}[% endif %]</b></div>
+      <div><span class="ok">added 1 package</span> in 1s</div>
+      <div><span class="p">$</span> <b>node</b></div>
+      <div><span class="p">&gt;</span> <b>await import("{= project_slug =}")</b></div>
+      <div>[Module: null prototype] { … }</div>
+      <div><span class="p">&gt;</span> <span class="cursor"></span></div>
+    </div>
+  </div>
+[%- elif project_type == 'container' %]
+  <div class="card">
+    <div class="bar"><i></i><i></i><i></i><span class="mono">bash</span></div>
+    <div class="term mono">
+      <div><span class="p">$</span> <b>docker run --rm \</b></div>
+      <div><b>    {= image =}</b></div>
+      <div>latest: Pulling from {= repo | lower =}</div>
+      <div>Digest: sha256:9b2f4e…c41e</div>
+      <div><span class="ok">Status: Downloaded newer image</span></div>
+      <div><span class="cursor"></span></div>
+    </div>
+  </div>
+[%- elif project_type == 'cloudflare-worker' %]
+  <div class="card http mono">
+    <div class="label">REQUEST</div>
+    <div><b>GET</b> / HTTP/2</div>
+    <div>host: {= project_slug =}.{= owner | lower =}.workers.dev</div>
+  </div>
+  <div class="arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 14l7 7 7-7"/></svg>answered at Cloudflare's edge</div>
+  <div class="card http mono">
+    <div class="label">RESPONSE</div>
+    <div><b class="ok">HTTP/2 200</b></div>
+    <div>content-type: application/json</div>
+    <div>server: cloudflare</div>
+  </div>
+[%- elif project_type == 'chrome-extension' %]
+  <div class="card">
+    <div class="tabs"><i></i><i></i><i></i><div class="tab"><span></span>example.com</div></div>
+    <div class="toolbar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      <div class="url">example.com</div>
+      <div class="current"><div class="monogram mini">{= initials =}</div></div>
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 3a2 2 0 0 1 2 2v1h4a1 1 0 0 1 1 1v4h1a2 2 0 1 1 0 4h-1v4a1 1 0 0 1-1 1h-4v-1a2 2 0 1 0-4 0v1H4a1 1 0 0 1-1-1v-4h1a2 2 0 1 0 0-4H3V7a1 1 0 0 1 1-1h4V5a2 2 0 0 1 2-2z"/></svg>
+    </div>
+    <div class="page">
+      <div class="lines"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="popup">
+        <div class="head"><div class="monogram mini">{= initials =}</div>{= project_name | e =}</div>
+        <div class="row">On for this site<span class="switch"></span></div>
+        <div class="row muted">Options</div>
+      </div>
+    </div>
+  </div>
+[%- elif project_type == 'nextcloud-app' %]
+  <div class="card">
+    <div class="header">
+      <svg class="cloud" viewBox="0 0 46 24" fill="none" stroke="currentColor" stroke-width="3.2"><circle cx="7" cy="12" r="4.5"/><circle cx="23" cy="12" r="8"/><circle cx="39" cy="12" r="4.5"/></svg>
+      <span class="app"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>
+      <span class="app"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 12h14l-4.5-6-3.5 4.5-2.5-3z"/></svg></span>
+      <span class="app current"><span class="monogram mini">{= initials =}</span></span>
+      <span class="me"></span>
+    </div>
+    <div class="body">
+      <div class="nav">
+        <div class="new">+ New</div>
+        <div class="on">All</div>
+        <div>Recent</div>
+        <div>Shared</div>
+        <div class="end">Settings</div>
+      </div>
+      <div class="main">
+        <div class="path mono">/apps/{= nextcloud_app_id =}/</div>
+        <h2>{= project_name | e =}</h2>
+        <div class="item"><span></span><div class="lines"><i></i><i></i></div></div>
+        <div class="item"><span></span><div class="lines"><i></i><i></i></div></div>
+        <div class="item"><span></span><div class="lines"><i></i><i></i></div></div>
+      </div>
+    </div>
+  </div>
+[%- elif project_type == 'home-assistant' %]
+  <div class="card ha">
+    <div class="head"><div class="monogram mini">{= initials =}</div>{= project_name | e =}</div>
+    <div class="entity"><span class="icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm-1.2 12.6 6.1-6.1-1.4-1.4-4.7 4.7-2.3-2.3-1.4 1.4z"/></svg></span><div class="name">Status<div class="mono">sensor.{= ha_domain =}_status</div></div><span class="state">Connected</span></div>
+    <div class="entity"><span class="icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm-1 4v6l5 3 1-1.6-4-2.4V7z"/></svg></span><div class="name">Last update<div class="mono">sensor.{= ha_domain =}_last_update</div></div><span class="state">1 minute ago</span></div>
+    <div class="entity"><span class="icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 3h2v9h-2zm6.4 2.6 1.4 1.4A8 8 0 1 1 5.2 7l1.4-1.4a6 6 0 1 0 10.8 0z"/></svg></span><div class="name">Enabled<div class="mono">switch.{= ha_domain =}_enabled</div></div><span class="switch"></span></div>
+    <div class="foot muted">Settings → Devices &amp; services → {= project_name | e =}</div>
+  </div>
+[%- else %]
+  <div class="card readme">
+    <div class="bar"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.8a.7.7 0 0 1 .7.7v12.6a.7.7 0 0 1-.7.7h-2.5a.8.8 0 0 1 0-1.5h1.7v-2h-8a1 1 0 0 0-.5 1.9.8.8 0 0 1-.7 1.3A2.5 2.5 0 0 1 2 11.5zm10.5-1h-8a1 1 0 0 0-1 1v6.7c.3-.1.6-.2 1-.2h8z"/></svg><span class="mono">README.md</span></div>
+    <div class="content">
+      <h2>{= project_name | e =}</h2>
+      <div class="badges"><span class="badge"><span>CI</span><span>passing</span></span><span class="badge blue"><span>license</span><span>{= license =}</span></span></div>
+      <div class="lines"><i></i><i></i><i style="width: 64%"></i></div>
+      <h3>Installation</h3>
+      <div class="code mono">gh repo clone {= repo =}</div>
+    </div>
+  </div>
+[%- endif %]
 </div>
 </body>
 </html>
