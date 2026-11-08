@@ -32,6 +32,8 @@ from typing import Any
 from shared import load_yaml
 from shell import BASH, in_bash
 
+from blueprint.github import API_VERSION_HEADER
+
 ROOT = Path(__file__).parents[1]
 FAKE_GH = Path(__file__).with_name("fake_gh.py")
 
@@ -363,6 +365,7 @@ def run_step(
         "FAKE_GH_ANSWERS": (github / "answers.json").as_posix(),
         "FAKE_GH_LOG": paths["calls"].as_posix(),
         "FAKE_GH_USED": paths["used"].as_posix(),
+        "FAKE_GH_VERSION": API_VERSION_HEADER,
         **variables,
         **given,
     }
@@ -427,7 +430,7 @@ FIELDS = re.compile(
     r"\bgh api\b(?!.*(?:--method\b|(?<!\S)-X))"
     r"(?=.*\s(?:-[fF]|--field|--raw-field|--input)\s)"
 )
-QUERY = re.compile(r"""\bgh api graphql\b.*\bquery=["']?query\b""")
+QUERY = re.compile(r"""\bgh api(?: --header \S+)? graphql\b.*\bquery=["']?query\b""")
 
 
 def acts_of(script: str) -> list[str]:
@@ -459,3 +462,41 @@ def acting_steps(root: Path = ROOT) -> dict[tuple[str, str, str], list[str]]:
                 if acts:
                     found[(path.name, job_id, each.get("name") or each["id"])] = acts
     return found
+
+
+# A call of the API that doesn't ask right after `gh api` for the version of the API,
+# with the variable that the environment of its step sets (decision 0123).
+UNVERSIONED = re.compile(r'\bgh api\b(?! --header "\$API_VERSION_HEADER")')
+
+
+def api_calls(found: Mapping[str, Any]) -> list[tuple[str, str, str | None]]:
+    """Each line of a script of the parsed workflow that calls gh api, with its job and
+    step and the version of the API that the environment of that step sets, if any.
+    A comment calls nothing."""
+    calls = []
+    for job_id, settings in (found.get("jobs") or {}).items():
+        for number, each in enumerate(settings.get("steps") or [], 1):
+            env = {
+                **(found.get("env") or {}),
+                **(settings.get("env") or {}),
+                **(each.get("env") or {}),
+            }
+            where = f"{job_id}: {each.get('name') or f'step {number}'}"
+            calls += [
+                (where, line.strip(), env.get("API_VERSION_HEADER"))
+                for line in (each.get("run") or "").splitlines()
+                if not line.lstrip().startswith("#") and re.search(r"\bgh api\b", line)
+            ]
+    return calls
+
+
+def calls_without_the_version(found: Mapping[str, Any]) -> list[str]:
+    """Each call of gh api of the parsed workflow that doesn't ask for the version of
+    the API of blueprint/github.py, by its job and step, and why."""
+    problems = []
+    for where, line, version in api_calls(found):
+        if version != API_VERSION_HEADER:
+            problems.append(f"{where}: API_VERSION_HEADER is {version!r}: {line}")
+        elif UNVERSIONED.search(line):
+            problems.append(f"{where}: {line}")
+    return problems

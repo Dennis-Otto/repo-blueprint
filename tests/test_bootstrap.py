@@ -9,6 +9,7 @@ from pathlib import Path
 
 import preflight
 import pytest
+from shared import without_the_version
 
 from blueprint import bootstrap
 from blueprint.bootstrap import Answer, CreateError, create, doctor
@@ -72,7 +73,7 @@ class Shell:
     def __call__(
         self, arguments: Sequence[str], folder: Path
     ) -> subprocess.CompletedProcess[str]:
-        command = shlex.join(arguments)
+        command = shlex.join(without_the_version(arguments))
         self.calls.append(command)
         code, text = self.answers.get(command, (0, ""))
         return subprocess.CompletedProcess(

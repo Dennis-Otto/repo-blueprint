@@ -24,6 +24,9 @@ concurrency:
 # The GitHub CLI of the jobs sends no telemetry to GitHub.
 env:
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0123).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
   update:
@@ -209,7 +212,7 @@ jobs:
           fi
           # GitHub takes a name in any case, but the signature of a tag names the
           # repository as GitHub spells it.
-          source="$(gh api "repos/$source" --jq .full_name)"
+          source="$(gh api --header "$API_VERSION_HEADER" "repos/$source" --jq .full_name)"
           # Not the newest tag: the Release workflow pushes the tag before it publishes
           # the release, which may stay a draft or fail.
           tag="$(gh release view --repo "$source" --json tagName --jq .tagName)"
@@ -237,7 +240,7 @@ jobs:
           ask() {
             local attempt answer
             for attempt in 1 2 3; do
-              if answer="$(gh api "$@")"; then
+              if answer="$(gh api --header "$API_VERSION_HEADER" "$@")"; then
                 printf '%s\n' "$answer"
                 return 0
               fi

@@ -38,6 +38,9 @@ concurrency:
 env:
   # The GitHub CLI of the jobs sends no telemetry to GitHub.
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0123).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
   # The branch of the pull request, and the first line of its commit and its title.
   BRANCH: bot/diagrams
   HEADLINE: "docs: draw the diagrams anew"
@@ -250,10 +253,10 @@ jobs:
 
           # Points the branch of the pull request at a commit, new or moved.
           point() {
-            if gh api "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
-              gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
+            if gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
+              gh api --header "$API_VERSION_HEADER" --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
             else
-              gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
+              gh api --header "$API_VERSION_HEADER" --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
             fi
           }
           # The commit starts from the commit that was drawn, so that there is one pull
@@ -263,25 +266,25 @@ jobs:
           # branch starts anew, so that one which a failed run left behind can't stop
           # the next run.
           scratch="$BRANCH-next"
-          if gh api "repos/$GH_REPO/git/ref/heads/$scratch" > /dev/null 2>&1; then
-            gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
+          if gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$scratch" > /dev/null 2>&1; then
+            gh api --header "$API_VERSION_HEADER" --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           fi
-          gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$scratch" -f sha="$SHA" > /dev/null
+          gh api --header "$API_VERSION_HEADER" --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$scratch" -f sha="$SHA" > /dev/null
           tool=.github/blueprint.py
           [[ -f "$tool" ]] || tool=blueprint.py
           kept="$RUNNER_TEMP/diagrams"
           # The commit goes through GitHub's API as the release app: GitHub signs it, as
           # main requires, and it starts the checks. The sign-off names the app's
           # account, which is the author of the commit.
-          user_id="$(gh api "users/${APP_SLUG}[bot]" --jq .id)"
+          user_id="$(gh api --header "$API_VERSION_HEADER" "users/${APP_SLUG}[bot]" --jq .id)"
           body="Drawn by scripts/diagrams.sh --extract from the sources in docs/diagrams/: $URL
 
           Signed-off-by: ${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
           python3 "$tool" --repo "$GH_REPO" diagrams commit "$kept" --branch "$scratch" \
             --head "$SHA" --headline "$HEADLINE" --body "$body" > "$RUNNER_TEMP/commit.json"
-          commit="$(gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
+          commit="$(gh api --header "$API_VERSION_HEADER" graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
           point "$BRANCH" "$commit"
-          gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
+          gh api --header "$API_VERSION_HEADER" --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           python3 "$tool" diagrams report "$kept" --for pull-request > "$RUNNER_TEMP/body.md"
           if [[ -n "$open" ]]; then
             gh pr edit "$open" --body-file "$RUNNER_TEMP/body.md"

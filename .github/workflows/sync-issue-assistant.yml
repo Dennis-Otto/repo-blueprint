@@ -44,6 +44,9 @@ concurrency:
 env:
   # The GitHub CLI of the jobs sends no telemetry to GitHub.
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0123).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
   # The issue assistant, and the branch of the pull request.
   SOURCE: Dennis-Otto/issue-assistant
   BRANCH: bot/issue-assistant
@@ -99,7 +102,7 @@ jobs:
             echo "::error::The issue assistant has no published release to take over."
             exit 1
           fi
-          commit="$(ask api "repos/$SOURCE/commits/$tag" --jq .sha)"
+          commit="$(ask api --header "$API_VERSION_HEADER" "repos/$SOURCE/commits/$tag" --jq .sha)"
           {
             echo "tag=$tag"
             echo "commit=$commit"
@@ -147,7 +150,7 @@ jobs:
           ask() {
             local attempt answer
             for attempt in 1 2 3; do
-              if answer="$(gh api "$@")"; then
+              if answer="$(gh api --header "$API_VERSION_HEADER" "$@")"; then
                 printf '%s\n' "$answer"
                 return 0
               fi
@@ -413,7 +416,7 @@ jobs:
             # Someone else's commit stays: the bot leaves the branch alone, a newer
             # release too, until the pull request is merged or closed. Merges only bring
             # main into the branch, as those of the branch bot.
-            others="$(gh api "repos/$GH_REPO/pulls/$number/commits" --paginate \
+            others="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/pulls/$number/commits" --paginate \
               --jq ".[] | select((.parents | length) == 1 and .author.login != \"${APP_SLUG}[bot]\") | .sha")"
             if [[ -n "$others" ]]; then
               echo "Someone else committed to $BRANCH, so the bot leaves #$number as it is: merge or close it, and the next run brings the latest release." >> "$GITHUB_STEP_SUMMARY"
@@ -431,10 +434,10 @@ jobs:
 
           # Points a branch at a commit, new or moved.
           point() {
-            if gh api "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
-              gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
+            if gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
+              gh api --header "$API_VERSION_HEADER" --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
             else
-              gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
+              gh api --header "$API_VERSION_HEADER" --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
             fi
           }
           # The commit starts from the commit that was adopted, so that there is one pull
@@ -446,15 +449,15 @@ jobs:
           # The commit goes through GitHub's API as the release app: GitHub signs it, as
           # main requires, and it starts the checks. The sign-off names the app's
           # account, which is the author of the commit.
-          user_id="$(gh api "users/${APP_SLUG}[bot]" --jq .id)"
+          user_id="$(gh api --header "$API_VERSION_HEADER" "users/${APP_SLUG}[bot]" --jq .id)"
           body="Installed from the verified release $URL by the Issue assistant sync: $RUN
 
           Signed-off-by: ${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
           python3 sync_issue_assistant.py commit "$RUNNER_TEMP/sync" --repo "$GH_REPO" \
             --branch "$scratch" --head "$SHA" --headline "$headline" --body "$body" > "$RUNNER_TEMP/commit.json"
-          commit="$(gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
+          commit="$(gh api --header "$API_VERSION_HEADER" graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
           point "$BRANCH" "$commit"
-          gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
+          gh api --header "$API_VERSION_HEADER" --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           python3 sync_issue_assistant.py report "$RUNNER_TEMP/sync" --version "$TAG" --url "$URL" > "$RUNNER_TEMP/body.md"
           if [[ -n "$number" ]]; then
             gh pr edit "$number" --title "$headline" --body-file "$RUNNER_TEMP/body.md"

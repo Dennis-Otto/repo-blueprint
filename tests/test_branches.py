@@ -28,7 +28,7 @@ from blueprint.branches import (
     state_of,
     waiting,
 )
-from blueprint.github import Api, GitHubError, run_gh_as
+from blueprint.github import API_VERSION_HEADER, Api, GitHubError, run_gh_as
 from blueprint.update import LABEL
 
 REPO = "Dennis-Otto/demo"
@@ -2024,4 +2024,5 @@ def test_a_token_of_its_own_replaces_that_of_the_environment_for_the_cli(
 
     run_gh_as("the-token-of-the-job")(["api", "x"], "a body")
 
-    assert seen == [(["gh", "api", "x"], "the-token-of-the-job", "a body")]
+    command = ["gh", "api", "x", "--header", API_VERSION_HEADER]
+    assert seen == [(command, "the-token-of-the-job", "a body")]

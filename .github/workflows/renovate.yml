@@ -37,6 +37,9 @@ permissions: {}
 # The GitHub CLI of the jobs sends no telemetry to GitHub.
 env:
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0123).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
   validate:
@@ -287,7 +290,7 @@ jobs:
           for attempt in 1 2 3; do
             # Renovate, when it looked for the repositories itself, skipped the forks
             # and the archived ones as well.
-            if listing="$(gh api --paginate installation/repositories \
+            if listing="$(gh api --header "$API_VERSION_HEADER" --paginate installation/repositories \
               --jq '.repositories[] | select((.archived or .disabled or .fork) | not) | "\(.name) \(.private)"')"; then
               break
             fi
@@ -304,7 +307,7 @@ jobs:
           may_have_rules() {
             local answer
             [[ "$2" == true ]] && return 0
-            answer="$(gh api "repos/$GITHUB_REPOSITORY_OWNER/$1/contents/.github/renovate.json5" --silent 2>&1)" && return 0
+            answer="$(gh api --header "$API_VERSION_HEADER" "repos/$GITHUB_REPOSITORY_OWNER/$1/contents/.github/renovate.json5" --silent 2>&1)" && return 0
             [[ "$answer" != *"HTTP 404"* ]]
           }
           repositories=()
@@ -434,7 +437,7 @@ jobs:
           REPOSITORY: ${{ github.repository_owner }}/${{ matrix.repo }}
         run: |
           set -euo pipefail
-          reached="$(gh api --paginate installation/repositories --jq '.repositories[].full_name')"
+          reached="$(gh api --header "$API_VERSION_HEADER" --paginate installation/repositories --jq '.repositories[].full_name')"
           echo "The token of this run reaches:"
           echo "$reached"
           if [[ "$reached" != "$REPOSITORY" ]]; then
@@ -450,7 +453,7 @@ jobs:
           SLUG: ${{ steps.app.outputs.app-slug }}
         run: |
           user="${SLUG}[bot]"
-          id=$(gh api "users/$SLUG%5Bbot%5D" --jq .id)
+          id=$(gh api --header "$API_VERSION_HEADER" "users/$SLUG%5Bbot%5D" --jq .id)
           {
             echo "username=$user"
             echo "git-author=$user <$id+$user@users.noreply.github.com>"
