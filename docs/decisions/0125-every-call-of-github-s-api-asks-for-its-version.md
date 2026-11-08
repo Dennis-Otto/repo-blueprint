@@ -5,7 +5,7 @@
 
 ## Context
 
-GitHub versions its REST API by date. A request names its version in the header `X-GitHub-Api-Version`, and one without it gets the version that GitHub serves by default, which is `2022-11-28` today. On the day that GitHub makes a newer version its default, such a request gets other answers, with no change in the repository that sends it, and a bot finds out in a failed run.
+GitHub versions its REST API by date. A request names its version in the header `X-GitHub-Api-Version`. The GitHub CLI sends `2022-11-28` today without being asked, but that default is the CLI's, not the blueprint's: a newer GitHub CLI on the runner image can move it, and an older one may send no version at all, so that GitHub answers with the version it serves by default. On either day a request gets other answers, with no change in the repository that sends it, and a bot finds out in a failed run. The blueprint pins the version itself.
 
 The issue assistant asks for `2022-11-28` on every call ([Dennis-Otto/issue-assistant#239](https://github.com/Dennis-Otto/issue-assistant/issues/239)). The blueprint didn't: its workflows, which every repository gets, called `gh api` 110 times in 18 files without the header, and so did the Python of the blueprint, at the runners of `Api` in `blueprint/github.py`, which most of it calls, and at three places that start `gh api` themselves ([#690](https://github.com/Dennis-Otto/repo-blueprint/issues/690)).
 
@@ -14,7 +14,7 @@ The issue assistant asks for `2022-11-28` on every call ([Dennis-Otto/issue-assi
 1. **The header in the `env:` of each step** that runs `gh api`, as the issue assistant does for the two workflows of its own: 40 steps, and a new step that calls the API lacks it until someone adds it.
 2. **The header in the `env:` of each workflow** that calls `gh api`, beside `GH_TELEMETRY`, which every workflow that runs the GitHub CLI already sets there ([decision 0080](0080-jobs-with-secrets-or-tokens-that-write-block-every-host-they-dont-need.md)): one line in each of the 18 files, and every step of the workflow has it.
 3. **A wrapper** of `gh`, such as a function or an alias of `gh alias set` in each step, which adds the header: the GitHub CLI has no setting for a header of every call, and a wrapper hides what a step sends from someone who reads it.
-4. **Nothing:** the default stays `2022-11-28` until GitHub changes it.
+4. **Nothing:** the GitHub CLI keeps sending `2022-11-28` until a version of it, or GitHub, changes the default.
 
 ## Decision
 
@@ -27,4 +27,4 @@ Option 2.
 
 ## Consequences
 
-A newer default of GitHub changes no answer of a bot. The move to a newer version is one change: `API_VERSION` in `blueprint/github.py` and the line in each workflow, which the test keeps equal, after a read of the breaking changes of that version. The calls are longer by the header. The workflows that a project adds of its own aren't the blueprint's to check: such a workflow asks for the version the same way.
+A newer default of the GitHub CLI or of GitHub changes no answer of a bot. The move to a newer version is one change: `API_VERSION` in `blueprint/github.py` and the line in each workflow, which the test keeps equal, after a read of the breaking changes of that version. The calls are longer by the header. The workflows that a project adds of its own aren't the blueprint's to check: such a workflow asks for the version the same way.
