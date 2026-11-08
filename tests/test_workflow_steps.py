@@ -465,7 +465,7 @@ TESTED = {
     ): "test_workflow_steps.py",
     (
         "links.yml",
-        "links",
+        "issue",
         "Keep the issue of broken links current",
     ): "test_workflow_steps.py",
     (
@@ -2430,17 +2430,36 @@ def test_a_picture_bot_takes_only_its_own_pull_request(
 def test_the_link_check_keeps_one_issue_of_broken_links(
     tmp_path: Path, exit_code: str, open_number: str, call: str | None
 ) -> None:
-    report = step("links.yml", "links", "Keep the issue of broken links current")
-    assert report["if"] == "github.event_name == 'schedule'"
-    assert job("links.yml", "links")["permissions"] == {
-        "contents": "read",
-        "issues": "write",
+    # The check, which reaches every host that the documents link to, only reads; a
+    # job of its own after the weekly run writes the issue, and blocks every host but
+    # GitHub's.
+    assert job("links.yml", "links")["permissions"] == {"contents": "read"}
+    assert job("links.yml", "links")["outputs"] == {
+        "exit-code": "${{ steps.lychee.outputs.exit_code }}"
     }
+    kept = step("links.yml", "links", "Keep the report of the broken links")
+    assert kept["if"] == (
+        "github.event_name == 'schedule' && steps.lychee.outputs.exit_code != '0'"
+    )
+    assert kept["uses"].startswith("actions/upload-artifact@")
+    assert kept["with"]["name"] == "links"
+    assert kept["with"]["path"] == "${{ runner.temp }}/links.md"
+    issue = job("links.yml", "issue")
+    assert issue["needs"] == "links"
+    assert issue["if"] == "github.event_name == 'schedule'"
+    assert issue["permissions"] == {"issues": "write"}
+    taken = step("links.yml", "issue", "Take the report of the broken links")
+    assert taken["if"] == "needs.links.outputs.exit-code != '0'"
+    assert taken["with"] == {"name": "links", "path": "${{ runner.temp }}"}
+    report = step("links.yml", "issue", "Keep the issue of broken links current")
+    assert "if" not in report
+    assert report["env"]["EXIT_CODE"] == "${{ needs.links.outputs.exit-code }}"
+    assert report["env"]["REPORT"] == "${{ runner.temp }}/links.md"
 
     done = run_step(
         tmp_path,
         "links.yml",
-        "links",
+        "issue",
         "Keep the issue of broken links current",
         answers=[
             Answer(r"issue list --state open --search .*", f"{open_number}\n"),

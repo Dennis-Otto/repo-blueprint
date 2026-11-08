@@ -360,7 +360,10 @@ Security or Advanced Security: there this check passes with a notice."""
 why = """The rules of `main` require that every language is analyzed, so that no security
 problem goes unseen."""
 fix = """Read the log of the check. A failure of the analysis is rarely caused by the
-change: run the check again, and if it fails again, open an issue with the log."""
+change: run the check again, and if it fails again, open an issue with the log. The job blocks every host but those
+it names: a call that it blocked shows in the summary of Harden-Runner. Run the check
+once more, and if the call stays blocked, add the host to `allowed-endpoints` and
+`HOSTS` of the job in the blueprint."""
 docs = "https://docs.github.com/en/code-security/code-scanning"
 autofix = """An analysis that breaks needs a look at its log; the change rarely causes
 it."""
@@ -386,7 +389,10 @@ code scanning; the log of the check says why. The analysis itself ran in
 `check (php)`, which shows its findings in its log."""
 why = """Code scanning shows each path at the lines of the pull request and keeps the
 alerts of `main` in the Security tab."""
-fix = """Run the check again; if it fails again, open an issue with the log."""
+fix = """Run the check again; if it fails again, open an issue with the log. The job blocks every host but those
+it names: a call that it blocked shows in the summary of Harden-Runner. Run the check
+once more, and if the call stays blocked, add the host to `allowed-endpoints` and
+`HOSTS` of the job in the blueprint."""
 docs = "https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github"
 autofix = """An upload that fails needs a look at its log; the change rarely causes
 it."""
@@ -507,7 +513,9 @@ error fails the check *zizmor*: a warning or a note stops the merge while the ch
 green, and shows in the merge box and as an annotation at its line. If the job *zizmor*
 of *Workflow security* failed, rather than the check of code scanning, the analysis
 broke and the merge waits for it: run the job again, and open an issue with its log if
-it fails again. In a pull request that changes no workflow, no
+it fails again. The job blocks every host but those it names: a call that it blocked
+shows in the summary of Harden-Runner, and one that stays blocked needs its host in
+`allowed-endpoints` and `HOSTS` of the job in the blueprint. In a pull request that changes no workflow, no
 action and not `.github/zizmor.yml`, an alert comes from an advisory of an action
 published since the last analysis of `main`: a maintainer starts the workflow
 *Workflow security* on `main`, which gives `main` the alert, and runs the checks
