@@ -1,6 +1,6 @@
 # Bots start from events, and their schedules are only a safety net
 
-- Status: accepted
+- Status: accepted, amended by [0128](0128-the-sync-bot-looks-for-a-release-of-the-issue-assistant-every-hour.md), with which the sync bot of the issue assistant looks on an hourly schedule, since no event of another repository can start it
 - Date: 2026-10-18
 
 ## Context

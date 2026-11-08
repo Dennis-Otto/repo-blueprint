@@ -21,10 +21,9 @@ name: Issue assistant sync
 
 on:
   schedule:
-    # At 20 past each full hour, away from the full hour at which GitHub starts the
-    # most schedules late, so that a fix of the issue assistant reaches the blueprint
-    # soon after its release (decision 0128); a run that GitHub starts late or drops
-    # leaves the release to the next one. A look that finds the latest release in the
+    # Away from the full hour, at which GitHub has the most schedules to start; it runs
+    # them as it can, often hours late, and a run that it drops leaves the release to
+    # the next one (decision 0128). A look that finds the latest release in the
     # blueprint and no branch of the bot ends after one job of a few seconds.
     - cron: "20 * * * *"
   workflow_dispatch:
@@ -120,9 +119,11 @@ jobs:
             echo "current=true" >> "$GITHUB_OUTPUT"
             echo "The blueprint has the issue assistant $tag, the latest release." >> "$GITHUB_STEP_SUMMARY"
             # Without the branch of the bot, there is no pull request to close either:
-            # the look ends here, without the job of the pull request and the release
-            # app. A question without an answer leaves it to that job.
-            if branches="$(ask api --header "$API_VERSION_HEADER" "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/$BRANCH" \
+            # a scheduled look ends here, without the job of the pull request and the
+            # release app. A question without an answer leaves it to that job, and so
+            # does a start by hand, which may close the issue of a failure of that job.
+            if [[ "$GITHUB_EVENT_NAME" == schedule ]] &&
+              branches="$(ask api --header "$API_VERSION_HEADER" "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/$BRANCH" \
               --jq "[.[] | select(.ref == \"refs/heads/$BRANCH\")] | length")" && [[ "$branches" == 0 ]]; then
               echo "idle=true" >> "$GITHUB_OUTPUT"
             fi

@@ -1045,7 +1045,12 @@ def test_the_sync_finds_the_latest_release(
 ) -> None:
     with_script(written(workspace(tmp_path), {".github/workflows/lint.yml": lint}))
 
-    result = run_step(tmp_path, FIND, plans={"release": ["fail"]})
+    result = run_step(
+        tmp_path,
+        FIND,
+        plans={"release": ["fail"]},
+        env={"GITHUB_EVENT_NAME": "schedule"},
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.outputs == {
@@ -1076,15 +1081,19 @@ MATCHING_REFS = "api repos/o/r/git/matching-refs/heads/bot/issue-assistant"
 @runs_the_script
 @needs_bash
 @pytest.mark.parametrize(
-    ("branches", "plans", "idle"),
+    ("event", "branches", "plans", "idle"),
     [
-        ((), {}, True),
-        (("bot/issue-assistant",), {}, False),
-        ((), {"branch": ["fail", "fail", "fail"]}, False),
+        ("schedule", (), {}, True),
+        ("schedule", ("bot/issue-assistant",), {}, False),
+        ("schedule", (), {"branch": ["fail", "fail", "fail"]}, False),
+        # A start by hand always runs the job of the pull request, which may close
+        # the issue of a failure of that job that the idle looks would leave open.
+        ("workflow_dispatch", (), {}, False),
     ],
 )
 def test_the_hourly_look_ends_without_the_pull_request_when_it_has_nothing_to_do(
     tmp_path: Path,
+    event: str,
     branches: tuple[str, ...],
     plans: dict[str, list[str]],
     idle: bool,
@@ -1096,7 +1105,13 @@ def test_the_hourly_look_ends_without_the_pull_request_when_it_has_nothing_to_do
         written(workspace(tmp_path), {".github/workflows/lint.yml": CURRENT_LINT})
     )
 
-    result = run_step(tmp_path, FIND, plans=plans, answers={"branches": branches})
+    result = run_step(
+        tmp_path,
+        FIND,
+        plans=plans,
+        answers={"branches": branches},
+        env={"GITHUB_EVENT_NAME": event},
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.outputs == {
@@ -1106,7 +1121,7 @@ def test_the_hourly_look_ends_without_the_pull_request_when_it_has_nothing_to_do
         "current": "true",
         **({"idle": "true"} if idle else {}),
     }
-    asked = 3 if plans else 1
+    asked = 0 if event != "schedule" else 3 if plans else 1
     assert result.commands == [
         RELEASE_VIEW,
         f"api repos/{SOURCE}/commits/v1.3.1 --jq .sha",
@@ -1145,6 +1160,7 @@ def test_the_hourly_look_counts_the_branch_of_the_bot_alone(
         WORKFLOW.name,
         *FIND,
         answers=[listed, *github({})],
+        env={"GITHUB_EVENT_NAME": "schedule"},
         stubs={"sleep": workflow_steps.recording("sleep"), "python3": PYTHON3},
     )
 
