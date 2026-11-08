@@ -22,7 +22,7 @@ Change the answer [`issue_assistant_ai`](reference/questions.md#issue_assistant_
 uvx --from copier==9.19.1 copier update --defaults --vcs-ref=:current: --data issue_assistant_ai=false
 ```
 
-The settings bot then sets the variable [`ISSUE_ASSISTANT_AI`](reference/variables.md#issue_assistant_ai) to `off`, the environment `issue-assistant` asks for no secret, and `SUPPORT.md` tells reporters that no AI reads their issues. Labels, reminders, closing with the release and the commands of the maintainer work as before. Deleting the secret `CLAUDE_CODE_OAUTH_TOKEN` stops the AI at once as well, but the checklist then asks for it again. `--data issue_assistant_ai=true` turns the AI on later.
+The settings bot then sets the variable [`ISSUE_ASSISTANT_AI`](reference/variables.md#issue_assistant_ai) to `off`, the environment `issue-assistant` asks for no secret, and `SUPPORT.md` tells reporters that no AI reads their issues. Labels, reminders, closing with the release and the commands of the maintainer work as before. Deleting the secret `CLAUDE_CODE_OAUTH_TOKEN` stops the AI at once as well, but the checklist then asks for it again. `--data issue_assistant_ai=true` turns the AI on later. The README is yours, so the update leaves the badge of the issue assistant in it: take out its line `[![issues: triaged by issue assistant](…)](https://dennis-otto.github.io/issue-assistant/)` by hand, and copy it back from the [README of the issue assistant](https://github.com/Dennis-Otto/issue-assistant#show-that-you-use-it) when you turn the AI on again.
 
 ## How do I stop the updates of the blueprint from merging themselves?
 

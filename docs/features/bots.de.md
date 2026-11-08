@@ -4,7 +4,7 @@ Die Bots der Issues und Pull Requests, was sie startet und was sie kosten, und d
 
 ## Issues
 
-Eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält.
+Eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, Labels, Duplikate, Erinnerungen und das Schließen mit dem Release, das den Fix enthält. Mit der KI zeigt das README eines neuen Repositorys das Badge *issues: triaged by issue assistant*, das auf die Website des Issue-Assistenten verlinkt, wie sein README es anbietet.
 
 **Womit:** Der [Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant).
 
