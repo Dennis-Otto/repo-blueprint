@@ -45,7 +45,7 @@ env:
   # The GitHub CLI of the jobs sends no telemetry to GitHub.
   GH_TELEMETRY: "false"
   # Each call of its API asks for the version of the REST API that the steps are
-  # written for (decision 0123).
+  # written for (decision 0124).
   API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
   # The issue assistant, and the branch of the pull request.
   SOURCE: Dennis-Otto/issue-assistant
@@ -67,7 +67,7 @@ jobs:
       changed: ${{ steps.adopt.outputs.changed }}
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -286,7 +286,7 @@ jobs:
       contents: read
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-sudo-and-containers: true

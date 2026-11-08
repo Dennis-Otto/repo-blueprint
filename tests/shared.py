@@ -59,7 +59,7 @@ def load_yaml(text: str) -> Any:
 def without_the_version(arguments: Sequence[str]) -> list[str]:
     """The command as the simulated shells of the tests write it down: a call of gh api
     without the version of the API that it asks for at its end, and a call that
-    doesn't ask for it fails the test (decision 0123)."""
+    doesn't ask for it fails the test (decision 0124)."""
     command = list(arguments)
     if command[:2] != ["gh", "api"]:
         return command

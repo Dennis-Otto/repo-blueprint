@@ -58,7 +58,7 @@ env:
   # The GitHub CLI of the jobs sends no telemetry to GitHub.
   GH_TELEMETRY: "false"
   # Each call of its API asks for the version of the REST API that the steps are
-  # written for (decision 0123).
+  # written for (decision 0124).
   API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
   # The branch of the pull request, and the first line of its commits and its title.
   BRANCH: bot/screenshots
@@ -87,7 +87,7 @@ jobs:
       contents: read
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-sudo-and-containers: true
@@ -186,7 +186,7 @@ jobs:
       hosts: ${{ steps.start.outputs.hosts }}
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
       # The newest commit of the branch, not that of the event: a run that waited for
@@ -240,7 +240,7 @@ jobs:
       # the hosts of the steps of the job, for the code, uv, the packages of Python
       # and the artifacts.
       - name: Block the hosts that the project doesn't name
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: ${{ needs.start.outputs.policy }}
           allowed-endpoints: >-
@@ -253,6 +253,23 @@ jobs:
             files.pythonhosted.org:443
             *.actions.githubusercontent.com:443
             ${{ needs.start.outputs.hosts }}
+      # GitHub's DNS experiment on some of its runners hides the lookups of the job from
+      # Harden-Runner, which then blocks the hosts of the job and of the runner until the
+      # time limit (step-security/harden-runner#708). Harden-Runner takes it away unless
+      # its feature flags say no; a job that keeps sudo makes sure (decision 0123).
+      - name: Let Harden-Runner see the DNS lookups
+        if: needs.start.outputs.policy == 'block'
+        run: |
+          dropins=(/etc/systemd/resolved.conf.d/90-egress-proxy.conf /run/systemd/resolved.conf.d/90-egress-proxy.conf)
+          if [[ ! -e ${dropins[0]} && ! -e ${dropins[1]} ]] && ! grep -qs 127.0.0.100 /etc/resolv.conf; then
+            exit 0
+          fi
+          echo "::notice::GitHub's DNS experiment is on this runner; taking it out of the way of Harden-Runner."
+          sudo rm -f "${dropins[@]}"
+          sudo systemctl restart systemd-resolved
+          sudo ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+          sudo systemctl stop egress-dns-resolver.service egress-outbound-proxy.service || true
+          sudo resolvectl flush-caches || true
       - name: Wait until Harden-Runner lets the hosts through
         if: needs.start.outputs.policy == 'block'
         # The runner may have asked for an address past Harden-Runner, which then blocks
@@ -376,7 +393,7 @@ jobs:
       stale: ${{ steps.collect.outputs.stale }}
     steps:
       - name: Record the network traffic of the job
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
       # blueprint.py, which checks what each shard kept, and the settings, which name
@@ -472,7 +489,7 @@ jobs:
       contents: read
     steps:
       - name: Block every host that the job doesn't need
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-sudo-and-containers: true

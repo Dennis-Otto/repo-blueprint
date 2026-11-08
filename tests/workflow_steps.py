@@ -465,7 +465,7 @@ def acting_steps(root: Path = ROOT) -> dict[tuple[str, str, str], list[str]]:
 
 
 # A call of the API that doesn't ask right after `gh api` for the version of the API,
-# with the variable that the environment of its step sets (decision 0123).
+# with the variable that the environment of its step sets (decision 0124).
 UNVERSIONED = re.compile(r'\bgh api\b(?! --header "\$API_VERSION_HEADER")')
 
 
