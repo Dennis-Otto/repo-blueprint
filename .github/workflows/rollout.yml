@@ -30,6 +30,9 @@ permissions: {}
 # The GitHub CLI of the jobs sends no telemetry to GitHub.
 env:
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0125).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
   plan:
@@ -125,7 +128,7 @@ jobs:
               # that GitHub dates before the start of the run, as it did in the hour that
               # repeats when the clocks of the US go back. A job that GitHub skipped made
               # nothing public, whatever its dates say.
-              publish="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
+              publish="$(gh api --header "$API_VERSION_HEADER" "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
                 --jq '.jobs[] | select(.name == "publish the release" and .conclusion != "skipped" and .completed_at != null) | "\(.started_at) \(.completed_at)"')"
             fi
           }
@@ -230,7 +233,7 @@ jobs:
           set -euo pipefail
           # GitHub fails for a moment now and then, so it asks three times.
           for attempt in 1 2 3; do
-            if listing="$(gh api --paginate installation/repositories \
+            if listing="$(gh api --header "$API_VERSION_HEADER" --paginate installation/repositories \
               --jq '.repositories[] | select(.archived | not) | .full_name')"; then
               break
             fi
@@ -422,7 +425,7 @@ jobs:
           # repository has no blueprint bot; any other is an error. gh fails on every
           # answer but a success, so the first line, with the status, tells.
           for attempt in 1 2 3; do
-            status="$(gh api --include --silent "repos/$REPOSITORY/contents/.github/workflows/blueprint-update.yml" 2>/dev/null |
+            status="$(gh api --header "$API_VERSION_HEADER" --include --silent "repos/$REPOSITORY/contents/.github/workflows/blueprint-update.yml" 2>/dev/null |
               awk 'NR == 1 { print $2 }')" || true
             if [[ "$status" == 200 || "$status" == 404 ]] || ((attempt == 3)); then
               break

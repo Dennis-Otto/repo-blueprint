@@ -21,6 +21,9 @@ concurrency:
 # The GitHub CLI of the jobs sends no telemetry to GitHub.
 env:
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0125).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
   cleanup:
@@ -91,17 +94,17 @@ jobs:
             if grep -qxF "$branch" <<<"$used"; then
               continue
             fi
-            ahead="$(gh api "repos/$GH_REPO/compare/$DEFAULT...$branch" --jq .ahead_by)"
+            ahead="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/compare/$DEFAULT...$branch" --jq .ahead_by)"
             if [[ "$ahead" == 0 ]]; then
-              gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$branch" --silent
+              gh api --header "$API_VERSION_HEADER" --method DELETE "repos/$GH_REPO/git/refs/heads/$branch" --silent
               deleted+=("$branch")
             else
-              date="$(gh api "repos/$GH_REPO/commits/$branch" --jq .commit.committer.date)"
+              date="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/commits/$branch" --jq .commit.committer.date)"
               if [[ "$date" < "$month_ago" ]]; then
                 kept+=("$branch, $ahead commit(s) that $DEFAULT doesn't have, last on ${date%%T*}")
               fi
             fi
-          done < <(gh api "repos/$GH_REPO/branches" --paginate --jq '.[] | select(.protected | not) | .name')
+          done < <(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/branches" --paginate --jq '.[] | select(.protected | not) | .name')
           # The backticks are Markdown of the summary, not the shell's.
           # shellcheck disable=SC2016
           {

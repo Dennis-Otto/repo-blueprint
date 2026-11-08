@@ -50,6 +50,8 @@ from shell import BASH, in_bash
 from workflow_steps import (
     RUN_URL,
     Answer,
+    api_calls,
+    calls_without_the_version,
     condition_of,
     exact,
     job_in,
@@ -1741,6 +1743,24 @@ def test_the_github_cli_sends_no_telemetry(
             continue
         if re.search(r"GH_TOKEN|blueprint\.py", text):
             assert parse(text).get("env", {}).get("GH_TELEMETRY") == "false", name
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_call_of_the_api_asks_for_its_version(
+    projects: dict[str, Path], project: str
+) -> None:
+    # A call without a version gets GitHub's default version, which changes when
+    # GitHub makes a newer one its default (decision 0125). The workflows of the issue
+    # assistant are copies of its own, which it keeps.
+    root = ROOT if project == "blueprint" else projects[project]
+    found = {
+        name: parse(text)
+        for name, text in workflows(root).items()
+        if name not in ISSUE_ASSISTANT_WORKFLOWS
+    }
+    assert any(api_calls(each) for each in found.values())
+    problems = {name: calls_without_the_version(each) for name, each in found.items()}
+    assert problems == {name: [] for name in found}
 
 
 def test_the_next_runner_runs_the_variants_every_week(
@@ -16539,7 +16559,9 @@ def test_the_release_of_a_merge_that_failed_runs_once_more() -> None:
     assert job["permissions"] == {"actions": "write"}
     script = script_of(job, "Run the failed jobs of the release once more")
     # It looks at the run first: a release that runs again already is left alone.
-    look = script.index('gh api "repos/$GH_REPO/actions/runs/$RUN"')
+    look = script.index(
+        'gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN"'
+    )
     assert look < script.index('gh run rerun "$RUN" --failed')
     assert all("${{" not in step.get("run", "") for step in job["steps"])
 
@@ -18855,8 +18877,8 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     # one group, and the newest of those that wait replaces an older one.
     assert "github.event_name != 'workflow_dispatch'" in condition_of(plan)
     assert (
-        'gh api --method POST "repos/$GH_REPO/actions/workflows/screenshot-bot.yml/'
-        'dispatches" -f ref=main'
+        'gh api --header "$API_VERSION_HEADER" --method POST '
+        '"repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main'
     ) in scripts_of(plan)
     assert plan["permissions"] == {"actions": "write", "contents": "read"}
     assert "secrets." not in values_of(plan)
@@ -19011,7 +19033,8 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     assert "actions" not in app_permissions(opener)
     assert " screenshots overtaken " in scripts_of(opener)
     assert (
-        'GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \\\n    '
+        'GH_TOKEN="$ACTIONS_TOKEN" gh api --header "$API_VERSION_HEADER" '
+        "--method POST \\\n    "
         '"repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main'
     ) in scripts_of(opener)
     for job in (plan, start, render, collector, opener):

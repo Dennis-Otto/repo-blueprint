@@ -70,14 +70,17 @@ jobs:
           echo "literal=$LITERAL job=$FROM_JOB given=$GIVEN token=$GH_TOKEN url=$URL"
           env | grep '^UNREAD='
       - name: Calls
+        env:
+          API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
         run: |
-          gh api /repos/o/r/thing --jq .name
-          gh api /repos/o/r/thing --jq .name
-          printf 'from stdin' | gh api graphql --input -
+          gh api --header "$API_VERSION_HEADER" /repos/o/r/thing --jq .name
+          gh api --header "$API_VERSION_HEADER" /repos/o/r/thing --jq .name
+          printf 'from stdin' | gh api --header "$API_VERSION_HEADER" graphql --input -
           printf 'a body' > body.md
           gh pr comment 1 --body-file body.md
           gh issue view 2 || echo "gh failed with $?"
-          gh api repos/o/r/raw
+          gh api repos/o/r/unversioned || echo "gh failed with $?"
+          gh api --header "$API_VERSION_HEADER" repos/o/r/raw
           {
             echo "text<<END"
             printf 'two\\nlines\\n'
@@ -151,10 +154,15 @@ def test_the_fake_gh_answers_as_planned_and_writes_down_every_call(
 
     assert done.returncode == 0, done.stderr
     # Each answer once, then the next; the arguments as bash passed them, also one that
-    # starts with /, which Git Bash would make a Windows path of; a call without an
-    # answer fails.
-    assert done.stdout == 'first\nsecond\ngh failed with 1\n{"a": 1}\n'
+    # starts with /, which Git Bash would make a Windows path of, and without the
+    # version of the API that a call of gh api asks for. A call without an answer
+    # fails, and so does a call of gh api that asks for no version.
+    assert (
+        done.stdout == 'first\nsecond\ngh failed with 1\ngh failed with 1\n{"a": 1}\n'
+    )
     assert "fake gh: no answer for: gh issue view 2" in done.stderr
+    no_version = "fake gh: gh api asks for no version: gh api repos/o/r/unversioned"
+    assert no_version in done.stderr
     assert done.commands == [
         "api /repos/o/r/thing --jq .name",
         "api /repos/o/r/thing --jq .name",
@@ -176,9 +184,7 @@ def test_the_fake_gh_filters_json_with_jq_as_gh_does(
     tmp_path: Path, demo: Path
 ) -> None:
     (demo / ".github/workflows/demo.yml").write_text(
-        DEMO.replace(
-            "gh api repos/o/r/raw", "gh api repos/o/r/raw --jq '.[] | .name, .id'"
-        ),
+        DEMO.replace(" repos/o/r/raw\n", " repos/o/r/raw --jq '.[] | .name, .id'\n"),
         encoding="utf-8",
     )
     done = run_step(
@@ -198,8 +204,9 @@ def test_the_fake_gh_filters_json_with_jq_as_gh_does(
 
     assert done.returncode == 0, done.stderr
     # As gh prints what the filter makes, one result on each line: a string raw, null
-    # as an empty line and anything else as compact JSON.
-    assert done.stdout == 'a\n\nb\n{"x":[1,2]}\n'
+    # as an empty line and anything else as compact JSON. The call that asks for no
+    # version of the API fails before any answer.
+    assert done.stdout == 'gh failed with 1\na\n\nb\n{"x":[1,2]}\n'
 
 
 def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -> None:
@@ -311,6 +318,10 @@ def test_a_job_its_permissions_and_conditions_come_from_the_parsed_workflow(
         step("demo.yml", "demo", "Two", demo)
 
 
+# A call of gh api as the steps write it, with the version of the API.
+VERSIONED = 'gh api --header "$API_VERSION_HEADER"'
+
+
 @pytest.mark.parametrize(
     ("script", "acts"),
     [
@@ -343,6 +354,11 @@ def test_a_job_its_permissions_and_conditions_come_from_the_parsed_workflow(
         ('# gh api "repos/$GH_REPO/issues" -f title=x', []),
         ("gh api --method=GET search/issues -f q=x", []),
         ("gh api graphql -f query='query { viewer { login } }'", []),
+        # With the version of the API, as the steps call it.
+        (f"{VERSIONED} graphql -f query='query {{ viewer {{ login }} }}'", []),
+        (f"{VERSIONED} graphql -F owner=o -f query='query {{ x }}'", []),
+        (f'{VERSIONED} graphql --input "$RUNNER_TEMP/commit.json"', ["writes"]),
+        (f'{VERSIONED} "repos/$GH_REPO/issues" -f title="$title"', ["writes"]),
         ('gh api -X GET search/issues -f q="$query"', []),
         ('gh pr list --json number\n# gh pr merge "$number"', []),
     ],

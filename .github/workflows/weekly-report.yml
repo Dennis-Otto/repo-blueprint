@@ -21,6 +21,9 @@ concurrency:
 # The GitHub CLI of the jobs sends no telemetry to GitHub.
 env:
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0125).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
   report:
@@ -95,13 +98,13 @@ jobs:
         run: |
           # The variables of the queries are GraphQL's, not the shell's.
           # shellcheck disable=SC2016
-          read -r repository category < <(gh api graphql \
+          read -r repository category < <(gh api --header "$API_VERSION_HEADER" graphql \
             -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
             -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id discussionCategories(first: 50) { nodes { id name } } } }' \
             --jq '.data.repository | "\(.id) \(.discussionCategories.nodes[] | select(.name == "General") | .id)"')
           # A job that hung after this step gets a second try, which must not post twice.
           # shellcheck disable=SC2016
-          titles="$(gh api graphql \
+          titles="$(gh api --header "$API_VERSION_HEADER" graphql \
             -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
             -f query='query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { discussions(first: 10, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { title } } } }' \
             --jq '.data.repository.discussions.nodes[].title')"
@@ -110,7 +113,7 @@ jobs:
             exit 0
           fi
           # shellcheck disable=SC2016
-          gh api graphql -F repository="$repository" -F category="$category" -F title="$TITLE" \
+          gh api --header "$API_VERSION_HEADER" graphql -F repository="$repository" -F category="$category" -F title="$TITLE" \
             -F body=@"$RUNNER_TEMP/report.md" \
             -f query='mutation($repository: ID!, $category: ID!, $title: String!, $body: String!) { createDiscussion(input: {repositoryId: $repository, categoryId: $category, title: $title, body: $body}) { discussion { url } } }' \
             --jq '.data.createDiscussion.discussion.url'

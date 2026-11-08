@@ -18,6 +18,7 @@ from typing import Any
 
 import preflight
 import pytest
+from shared import without_the_version
 
 import blueprint.bootstrap
 import blueprint.checklist
@@ -3102,7 +3103,7 @@ class Shell:
     def __call__(
         self, arguments: Sequence[str], folder: Path
     ) -> subprocess.CompletedProcess[str]:
-        command = " ".join(arguments)
+        command = " ".join(without_the_version(arguments))
         self.calls.append((command, len(self.github.calls)))
         code, text = self.answers.get(command, (0, ""))
         return subprocess.CompletedProcess(

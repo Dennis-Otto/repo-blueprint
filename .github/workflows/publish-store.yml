@@ -56,6 +56,9 @@ concurrency:
 env:
   # The GitHub CLI would send its telemetry to a host that no job may reach.
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0125).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
 
 jobs:
   status:
@@ -374,7 +377,7 @@ jobs:
           # the artifact that this workflow kept of its delivery, or else its release.
           submitted="$(jq -r '.submittedItemRevisionStatus.distributionChannels[0].crxVersion // empty' "$status")"
           if [[ -n "$submitted" ]]; then
-            at="$(gh api "repos/$GH_REPO/actions/artifacts?name=chrome-web-store-v$submitted&per_page=100" \
+            at="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/artifacts?name=chrome-web-store-v$submitted&per_page=100" \
               --jq '[.artifacts[].created_at] | max // empty' 2>/dev/null || true)"
             from=delivery
             if [[ -z "$at" ]]; then

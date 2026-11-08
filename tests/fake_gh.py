@@ -8,7 +8,9 @@ arguments of the call, joined by spaces, answers it: with `out` on stdout, `err`
 stderr and `code` as the exit code, or with `json` through the filter of --jq, as gh
 prints the answer of the API. An answer with `once` answers one call only, so that a
 later one answers the next. A call without an answer fails, as an unexpected call of
-the real gh would do harm.
+the real gh would do harm, and so does a call of gh api that doesn't ask right after
+`api` for the version of the API in $FAKE_GH_VERSION, as every step asks with
+--header "$API_VERSION_HEADER": the answers and the log hold the call without it.
 """
 
 from __future__ import annotations
@@ -87,6 +89,12 @@ def shown(value: Any) -> str:
 
 
 def main(arguments: list[str]) -> int:
+    if arguments[:1] == ["api"]:
+        if arguments[1:3] != ["--header", os.environ["FAKE_GH_VERSION"]]:
+            joined = " ".join(arguments)
+            sys.stderr.write(f"fake gh: gh api asks for no version: gh {joined}\n")
+            return 1
+        arguments = arguments[:1] + arguments[3:]
     joined = " ".join(arguments)
     answers = json.loads(Path(os.environ["FAKE_GH_ANSWERS"]).read_text("utf-8"))
     used_file = Path(os.environ["FAKE_GH_USED"])

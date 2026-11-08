@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from shared import without_the_version
 
 from blueprint import app as app_module
 from blueprint import cli
@@ -136,7 +137,7 @@ class Shell:
     def __call__(
         self, arguments: Sequence[str], folder: Path, stdin: str = ""
     ) -> subprocess.CompletedProcess[str]:
-        line = shlex.join(arguments)
+        line = shlex.join(without_the_version(arguments))
         self.calls.append(line)
         if stdin:
             self.stdin[line] = stdin

@@ -44,7 +44,7 @@ from xml.etree import ElementTree
 
 from blueprint.bot_health import CRON, Cron
 from blueprint.coverage_comment import Coverage, percent
-from blueprint.github import Api, GitHubError
+from blueprint.github import API_VERSION_HEADER, Api, GitHubError
 
 BLUEPRINT = "Dennis-Otto/repo-blueprint"
 SCORECARD_API = "https://api.scorecard.dev/projects/github.com/"
@@ -378,7 +378,10 @@ class HistoryError(Exception):
 def gh_download(path: str) -> bytes:
     """The bytes at path of GitHub's API, such as the zip of an artifact."""
     return subprocess.run(  # pragma: no cover - the tests simulate gh
-        ["gh", "api", path], capture_output=True, check=True, timeout=DOWNLOAD_TIMEOUT
+        ["gh", "api", path, "--header", API_VERSION_HEADER],
+        capture_output=True,
+        check=True,
+        timeout=DOWNLOAD_TIMEOUT,
     ).stdout
 
 

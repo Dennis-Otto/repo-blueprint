@@ -58,6 +58,9 @@ concurrency:
 env:
   # The GitHub CLI of the jobs sends no telemetry to GitHub.
   GH_TELEMETRY: "false"
+  # Each call of its API asks for the version of the REST API that the steps are
+  # written for (decision 0125).
+  API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"
   # The branch of the pull request, and the first line of its commits and its title.
   BRANCH: bot/screenshots
   HEADLINE: "docs: update the screenshots"
@@ -167,7 +170,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh api --method POST "repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main
+          gh api --header "$API_VERSION_HEADER" --method POST "repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main
           echo "The bot started a run of this workflow by hand, which renders \`main\` once the render before it ended." >> "$GITHUB_STEP_SUMMARY"
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends
@@ -592,7 +595,7 @@ jobs:
           SHA: ${{ needs.start.outputs.sha }}
         run: |
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$(gh api "repos/$GH_REPO/compare/$SHA...main" --jq .behind_by)" == 0 ]]
+          [[ "$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/compare/$SHA...main" --jq .behind_by)" == 0 ]]
       # blueprint.py, which checks what the job collect kept, the settings, which name
       # the files besides pictures that it takes, and the Markdown of the pages, whose
       # named sizes it corrects; none of the pictures of main. Of the commit that the
@@ -703,11 +706,11 @@ jobs:
           # rendered would conflict over each picture or page that main changed since.
           # Then the bot leaves the branch and the pull request as they are, and renders
           # main anew, as the commit that it renders is the newest one.
-          gh api "repos/$GH_REPO/compare/$SHA...main" \
+          gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/compare/$SHA...main" \
             --jq '{behind_by, files: [.files[]? | {filename, previous_filename}]}' > "$RUNNER_TEMP/compared.json"
           if python3 "$tool" --repo "$GH_REPO" screenshots overtaken "$kept" \
             --compared "$RUNNER_TEMP/compared.json" >> "$GITHUB_STEP_SUMMARY"; then
-            GH_TOKEN="$ACTIONS_TOKEN" gh api --method POST \
+            GH_TOKEN="$ACTIONS_TOKEN" gh api --header "$API_VERSION_HEADER" --method POST \
               "repos/$GH_REPO/actions/workflows/screenshot-bot.yml/dispatches" -f ref=main
             echo "The bot started a new run of this workflow, which renders main anew." >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -718,10 +721,10 @@ jobs:
 
           # Points the branch of the pull request at a commit, new or moved.
           point() {
-            if gh api "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
-              gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
+            if gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$1" > /dev/null 2>&1; then
+              gh api --header "$API_VERSION_HEADER" --method PATCH "repos/$GH_REPO/git/refs/heads/$1" -f sha="$2" -F force=true > /dev/null
             else
-              gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
+              gh api --header "$API_VERSION_HEADER" --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$1" -f sha="$2" > /dev/null
             fi
           }
           # The commits start from the commit that was rendered, so that there is one
@@ -731,15 +734,15 @@ jobs:
           # GitHub. That branch starts anew, so that one which a failed run left
           # behind can't stop the next run.
           scratch="$BRANCH-next"
-          if gh api "repos/$GH_REPO/git/ref/heads/$scratch" > /dev/null 2>&1; then
-            gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
+          if gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/git/ref/heads/$scratch" > /dev/null 2>&1; then
+            gh api --header "$API_VERSION_HEADER" --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           fi
-          gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$scratch" -f sha="$SHA" > /dev/null
+          gh api --header "$API_VERSION_HEADER" --method POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$scratch" -f sha="$SHA" > /dev/null
           # The commits go through GitHub's API as the release app: GitHub signs them,
           # as main requires, and they start the checks. The sign-off names the app's
           # account, which is the author of the commits. A large set of pictures goes
           # in several commits, each below the size of one request.
-          user_id="$(gh api "users/${APP_SLUG}[bot]" --jq .id)"
+          user_id="$(gh api --header "$API_VERSION_HEADER" "users/${APP_SLUG}[bot]" --jq .id)"
           body="Rendered by scripts/screenshots.sh on $SHA, the pictures whose pixels changed and the files of .github/screenshots.toml that changed: $URL
 
           Signed-off-by: ${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>"
@@ -748,10 +751,10 @@ jobs:
           for ((part = 1; part <= parts; part++)); do
             python3 "$tool" --repo "$GH_REPO" screenshots commit "$kept" --branch "$scratch" \
               --head "$head" --headline "$HEADLINE" --body "$body" --part "$part" > "$RUNNER_TEMP/commit.json"
-            head="$(gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
+            head="$(gh api --header "$API_VERSION_HEADER" graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)"
           done
           point "$BRANCH" "$head"
-          gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
+          gh api --header "$API_VERSION_HEADER" --method DELETE "repos/$GH_REPO/git/refs/heads/$scratch" > /dev/null
           python3 "$tool" --repo "$GH_REPO" screenshots report "$kept" --sha "$SHA" --run "$URL" > "$RUNNER_TEMP/body.md"
           if [[ -n "$open" ]]; then
             gh pr edit "$open" --title "$HEADLINE" --body-file "$RUNNER_TEMP/body.md"

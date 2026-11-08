@@ -12,12 +12,14 @@ import os
 import shutil
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+
+from blueprint.github import API_VERSION_HEADER
 
 # How long a process waits for a folder that another one makes; a render takes
 # seconds, and pytest-timeout ends the test long before.
@@ -52,6 +54,17 @@ YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 def load_yaml(text: str) -> Any:
     """What yaml.safe_load reads, with the fastest parser that PyYAML has."""
     return yaml.load(text, Loader=YAML_LOADER)
+
+
+def without_the_version(arguments: Sequence[str]) -> list[str]:
+    """The command as the simulated shells of the tests write it down: a call of gh api
+    without the version of the API that it asks for at its end, and a call that
+    doesn't ask for it fails the test (decision 0125)."""
+    command = list(arguments)
+    if command[:2] != ["gh", "api"]:
+        return command
+    assert command[-2:] == ["--header", API_VERSION_HEADER], f"no version: {command}"
+    return command[:-2]
 
 
 def git_environment(repository: Path) -> dict[str, str]:
