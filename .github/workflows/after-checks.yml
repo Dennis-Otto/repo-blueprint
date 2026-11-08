@@ -396,6 +396,19 @@ jobs:
               printf '–'
             fi
           }
+          # A text on one line for a warning of the run, which keeps no control
+          # character and no percent sign, the start of an escape of the runner's.
+          plain() {
+            printf '%s' "$1" | tr -d '%' | tr '\000-\037\177' ' '
+          }
+          # A log keeps the colors of the commands that its steps ran. Since v2.97.0,
+          # gh api prints a raw answer with such escape sequences only with
+          # --allow-escape-sequences, and fails without it; an older gh knows no such
+          # option and prints the log as it is.
+          allow=()
+          if [[ "$(gh help api)" == *--allow-escape-sequences* ]]; then
+            allow=(--allow-escape-sequences)
+          fi
           # Each job that failed in the first attempt, or ran out of time there, with
           # the step that broke, its tests and the first error that it reported. An
           # attempt that a newer run cancelled, as one that the bot for cancelled checks
@@ -422,8 +435,13 @@ jobs:
             if [[ "$conclusion" == cancelled ]] && ! grep -q "has exceeded the maximum execution time" <<<"$errors"; then
               continue
             fi
-            log="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/jobs/$id/logs" 2>/dev/null |
-              sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9-]+T[0-9:.]+Z //')"
+            # A log that GitHub doesn't give, such as that of a job that never started,
+            # leaves the row without its tests, and a warning of the run says why.
+            if ! log="$(gh api --header "$API_VERSION_HEADER" "${allow[@]}" "repos/$GH_REPO/actions/jobs/$id/logs" 2> "$RUNNER_TEMP/log-error")"; then
+              echo "::warning::The log of the job $(plain "$name") couldn't be read, so the report names none of its tests: $(plain "$(head -n 1 "$RUNNER_TEMP/log-error")")"
+              log=""
+            fi
+            log="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9-]+T[0-9:.]+Z //' <<<"$log")"
             # The tests that pytest names in the log. Other tests, such as those of a
             # browser, write the marker and the name of each test or step as it starts:
             # the one that the log names last before its first error failed, and the
