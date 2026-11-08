@@ -1,4 +1,4 @@
-# The tools that the workflows and .github/sign-tag.sh download and check by their
+# The tools that the workflows and the scripts of .github download and check by their
 # sha256, each pinned below a line "# renovate:": the address of the download, in which
 # {version} stands for the version, and the version and sha256 that the files pin.
 # Renovate moves a version, and python3 pins.py then writes the sha256 of the new
@@ -19,6 +19,11 @@ sha256 = "b2049ae1bff43d9dc82831c2833005005eb62d5180cd518892af93fc8e23ddc5"
 url = "https://github.com/ChristophWurst/krankerl/releases/download/v{version}/krankerl_{version}_amd64.deb"
 version = "0.14.0"
 sha256 = "9bee5a756a83c5a6b1f040e9a2ade9e902e4a57211afc174cd8ac5c4f913958f"
+
+[download."lycheeverse/lychee"]
+url = "https://github.com/lycheeverse/lychee/releases/download/lychee-v{version}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+version = "0.24.2"
+sha256 = "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a"
 
 [download."nextcloud/server"]
 url = "https://download.nextcloud.com/server/releases/nextcloud-{version}.zip"

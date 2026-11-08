@@ -6,7 +6,8 @@ starts this file with the Python of the tests. The test plans its answers in the
 $FAKE_GH_ANSWERS, a JSON list in which the first answer whose `args` match all the
 arguments of the call, joined by spaces, answers it: with `out` on stdout, `err` on
 stderr and `code` as the exit code, or with `json` through the filter of --jq, as gh
-prints the answer of the API. An answer with `once` answers one call only, so that a
+prints the answer of the API; to gh release download with --output, `out` goes into
+that file, as the asset does. An answer with `once` answers one call only, so that a
 later one answers the next. A call without an answer fails, as an unexpected call of
 the real gh would do harm, and so does a call of gh api that doesn't ask right after
 `api` for the version of the API in $FAKE_GH_VERSION, as every step asks with
@@ -114,12 +115,29 @@ def main(arguments: list[str]) -> int:
         if "json" in answer:
             out, failed, failure = filtered(answer["json"], arguments)
             err, code = err + failed, failure or code
+        # gh release download --output writes the asset into that file, as gh does,
+        # when the answer is no error.
+        target = downloaded_to(arguments)
+        if target and not int(code):
+            Path(target).write_bytes(out.encode())
+            out = ""
         # Bytes, so that Python on Windows ends no line with CRLF, as gh doesn't.
         sys.stdout.buffer.write(out.encode())
         sys.stderr.buffer.write(err.encode())
         return int(code)
     sys.stderr.write(f"fake gh: no answer for: gh {joined}\n")
     return 1
+
+
+def downloaded_to(arguments: list[str]) -> str:
+    """The file of --output of gh release download, which gets the asset: empty for any
+    other call, and for "-", which is stdout."""
+    if arguments[:2] != ["release", "download"]:
+        return ""
+    for option, value in itertools.pairwise(arguments):
+        if option in ("--output", "-O") and value != "-":
+            return value
+    return ""
 
 
 if __name__ == "__main__":

@@ -113,16 +113,28 @@ jobs:
           path: .lycheecache
           key: lychee-${{ github.run_id }}
           restore-keys: lychee-
+      # .github/lychee.sh downloads lychee through the API, with the token of the job,
+      # which lychee takes for the links to GitHub as well (decision 0127). The weekly
+      # run keeps an issue of the broken links instead of failing.
       - name: Check the links of the documentation
         id: lychee
         if: steps.documents.outputs.files != ''
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: --config lychee.toml --no-progress --cache --max-cache-age 1d ${{ steps.documents.outputs.files }}
-          output: ${{ runner.temp }}/links.md
-          fail: ${{ github.event_name != 'schedule' }}
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          FILES: ${{ steps.documents.outputs.files }}
+          EVERY: ${{ steps.documents.outputs.every }}
+        run: |
+          options=()
+          [[ "$EVENT" != schedule ]] || options+=(--no-fail)
           # A changed document may have no link at all.
-          failIfEmpty: ${{ steps.documents.outputs.every == 'true' }}
+          [[ "$EVERY" == true ]] || options+=(--may-find-none)
+          # The names of the documents, each in quotes, as the step before wrote them,
+          # which lychee reads as patterns of its own.
+          eval "documents=($FILES)"
+          bash .github/lychee.sh "${options[@]}" "$RUNNER_TEMP/links.md" \
+            --config lychee.toml --no-progress --cache --max-cache-age 1d "${documents[@]}"
       - name: Keep the issue of broken links current
         if: github.event_name == 'schedule'
         env:
