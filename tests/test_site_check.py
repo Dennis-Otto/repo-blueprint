@@ -732,7 +732,7 @@ def test_the_job_that_publishes_asks_the_website_for_its_pages(
     result = run_step(
         tmp_path,
         workflow,
-        "deploy",
+        "website",
         "Ask the published website for its pages",
         env={
             "PAGE_URL": PAGE_URL,

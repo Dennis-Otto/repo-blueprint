@@ -1,3 +1,19 @@
 [%- from "includes/replace.jinja" import replaced with context -%]
+[#- CodeQL may fetch the dependencies of Go, Java or Kotlin, and Rust from hosts that no
+    run of a repository made from the blueprint has shown yet: with one of them, the job
+    only records its traffic, which SECURITY.md says, until a run has (decision 0129). -#]
+[%- set recording = languages | select("in", ["go", "java-kotlin", "rust"]) | list -%]
 [%- set languages = "          # The languages of this repository; the blueprint sets them for each kind of project.\n          languages: python, actions\n" -%]
-{= replaced(".github/workflows/codeql.yml", [[languages, "          languages: " ~ codeql_languages[1:-1] ~ "\n"]]) -=}
+[%- set pairs = [[languages, "          languages: " ~ codeql_languages[1:-1] ~ "\n"]] -%]
+[%- set cuts = [] -%]
+[%- if recording -%]
+[%- set pairs = pairs + [
+  ["      - name: Block every host that the job doesn't need\n", "      - name: Record the network traffic of the job\n"],
+  ["          egress-policy: block\n", "          egress-policy: audit\n"],
+] -%]
+[%- set cuts = [
+  ["          disable-sudo-and-containers: true\n", "      - uses: actions/checkout@"],
+  ["      - name: Wait until Harden-Runner has removed Docker\n", "      # The PR coach:"],
+] -%]
+[%- endif -%]
+{= replaced(".github/workflows/codeql.yml", pairs, cuts) -=}

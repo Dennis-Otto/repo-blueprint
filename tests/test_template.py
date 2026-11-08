@@ -765,56 +765,23 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
             assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
 
 
-# The jobs that hold a secret or a token that may write, yet record their network
-# traffic instead of blocking it, each with its reason. Every other such job blocks
-# every host that it doesn't need (decision 0080).
-AUDITED_PRIVILEGED_JOBS = {
-    (
-        "release.yml",
-        "pypi",
-    ): "no repository delivers to PyPI yet: no run measured its hosts",
-    (
-        "release.yml",
-        "npm",
-    ): "no repository delivers to npm yet: no run measured its hosts",
-    (
-        "build-image.yml",
-        "image",
-    ): "Docker builds the image and reaches the registries of its base images",
-    (
-        "renovate.yml",
-        "renovate",
-    ): "Renovate reaches the registry of every package manager",
-    (
-        "docs.yml",
-        "deploy",
-    ): "it asks the published website, on a domain of the repository's own",
-    (
-        "dashboard.yml",
-        "deploy",
-    ): "it asks the published website, on a domain of the repository's own",
-    ("links.yml", "links"): "it checks the links to every host that the pages name",
-    (
-        "codeql.yml",
-        "codeql",
-    ): "CodeQL downloads its packs, and the job only uploads findings",
-    (
-        "zizmor.yml",
-        "zizmor",
-    ): "zizmor asks GitHub and the advisories, and the job only uploads findings",
-    (
-        "scorecard.yml",
-        "analysis",
-    ): "Scorecard asks a dozen services, and the job only uploads findings",
-    (
-        "ci-php.yml",
-        "taint-report",
-    ): "Psalm runs after Composer, and the job only uploads findings",
-    (
-        "ci.yml",
-        "taint-report",
-    ): "Psalm runs after Composer, and the job only uploads findings",
-}
+# The jobs that SECURITY.md names as holding a secret or a token that may write, yet
+# only recording their network traffic, each with its reason there; every other such
+# job blocks every host that it doesn't need (decisions 0080 and 0129). The Renovate
+# of the blueprint is named by the repository of the blueprint, where it runs.
+RECORDING = re.compile(
+    r"^  - `([\w.-]+\.yml)`(?: of \[[^\]]+\]\(https://github\.com/[^)]+\))?,"
+    r" job `([\w-]+)`[,:] \S",
+    re.MULTILINE,
+)
+
+
+def recording_jobs(root: Path) -> set[tuple[str, str]]:
+    """The jobs that hold a secret or a token that may write and only record, as the
+    SECURITY.md of a project names them."""
+    return set(RECORDING.findall((root / "SECURITY.md").read_text(encoding="utf-8")))
+
+
 # Where PUBLISH_TO delivers a release, as copier.yml derives it from the kind.
 PUBLISH_TARGETS = (
     "hacs",
@@ -865,51 +832,183 @@ def test_every_privileged_job_blocks_the_hosts_that_it_doesnt_need(
     # the signing key of a Nextcloud app, an OIDC token or a token that may write
     # could send them anywhere; audit mode only records it.
     root = ROOT if project == "blueprint" else projects[project]
-    flows = workflows(root)
+    named = recording_jobs(root)
+    target = delivery_of(root)
     audited = set()
-    for name, text in flows.items():
-        if name in ISSUE_ASSISTANT_WORKFLOWS:
-            continue
-        parsed = parse(text)
-        for job_id, job in parsed["jobs"].items():
-            # A job that calls a workflow: its jobs block, here or in their repository.
-            if "uses" in job or not privileged(job, parsed.get("permissions")):
-                continue
-            where = f"{name}: {job_id}"
-            hardening = steps_using(job, "step-security/harden-runner")
-            assert hardening == [job["steps"][0]], f"{where}: harden-runner first"
-            policy = hardening[0]["with"]
-            if (name, job_id) in AUDITED_PRIVILEGED_JOBS:
+    for name, job_id, job, runs_for in privileged_jobs(root):
+        where = f"{name}: {job_id}"
+        hardening = steps_using(job, "step-security/harden-runner")
+        assert hardening == [job["steps"][0]], f"{where}: harden-runner first"
+        policy = hardening[0]["with"]
+        if policy["egress-policy"] == "audit":
+            assert policy == {"egress-policy": "audit"}, where
+            # One that runs here only for another delivery, the project doesn't name.
+            if not runs_for or target in runs_for:
                 audited.add((name, job_id))
-                assert policy == {"egress-policy": "audit"}, where
-                continue
-            assert policy["egress-policy"] == "block", where
-            assert hardening[0]["name"] == "Block every host that the job doesn't need"
-            # No sudo and no Docker, but where the Nextcloud app installs krankerl.
-            sudo = policy["disable-sudo-and-containers"]
-            assert sudo is True or (
+            continue
+        assert policy["egress-policy"] == "block", where
+        assert hardening[0]["name"] == "Block every host that the job doesn't need"
+        # No sudo and no Docker, but where the Nextcloud app installs krankerl, and in
+        # Scorecard, which runs as an action in a container of its own.
+        sudo = policy.get("disable-sudo-and-containers")
+        assert (
+            sudo is True
+            or (
                 name == "build-release.yml"
                 and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
-            ), where
-            endpoints = policy["allowed-endpoints"]
-            for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
-                assert ENDPOINT.fullmatch(endpoint), f"{where}: {endpoint}"
-            # Every host that a step downloads from with curl, for the PUBLISH_TO that
-            # the step runs for, or for one of them where it runs for every one.
-            for step in job["steps"]:
-                condition = re.search(
-                    r"env\.PUBLISH_TO == '([a-z-]+)'", str(step.get("if", ""))
-                )
-                targets = [condition[1]] if condition else PUBLISH_TARGETS
-                for call in CURL.findall(step.get("run", "")):
-                    for host in re.findall(r"https://([a-z0-9.-]+)/", call):
-                        assert any(
-                            reaches(allowed_hosts(endpoints, target), host)
-                            for target in targets
-                        ), f"{where}: {host}"
-    # No reason stays for a job that blocks, or that is gone.
-    if project == "blueprint":
-        assert audited == {key for key in AUDITED_PRIVILEGED_JOBS if key[0] in flows}
+            )
+            or (name, job_id, sudo) == ("scorecard.yml", "analysis", None)
+        ), where
+        endpoints = policy["allowed-endpoints"]
+        for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
+            assert ENDPOINT.fullmatch(endpoint), f"{where}: {endpoint}"
+        # Every host that a step downloads from with curl, for the PUBLISH_TO that
+        # the step runs for, or for one of them where it runs for every one.
+        for step in job["steps"]:
+            condition = re.search(
+                r"env\.PUBLISH_TO == '([a-z-]+)'", str(step.get("if", ""))
+            )
+            targets = [condition[1]] if condition else PUBLISH_TARGETS
+            for call in CURL.findall(step.get("run", "")):
+                for host in re.findall(r"https://([a-z0-9.-]+)/", call):
+                    assert any(
+                        reaches(allowed_hosts(endpoints, target), host)
+                        for target in targets
+                    ), f"{where}: {host}"
+    # SECURITY.md names every job that only records, and none that blocks, that is
+    # gone or that runs only for another delivery, but the Renovate of the blueprint,
+    # which runs in its repository for one that takes it (hub).
+    hub = project == "blueprint" or answers_of(root)["renovate_runner"] == "hub"
+    assert named == audited | ({("renovate.yml", "renovate")} if hub else set())
+    # A package that publishes nowhere names no registry (issue 446).
+    deliveries = {
+        "pypi": ("release.yml", "pypi"),
+        "npm": ("release.yml", "npm"),
+        "ghcr": ("build-image.yml", "image"),
+    }
+    assert {job for key, job in deliveries.items() if key != target}.isdisjoint(named)
+
+
+# A delivery that a job runs for, by its condition on PUBLISH_TO.
+DELIVERY = re.compile(r"vars\.PUBLISH_TO == '([a-z-]+)'")
+
+
+def privileged_jobs(
+    root: Path,
+) -> Iterator[tuple[str, str, Mapping[str, Any], set[str]]]:
+    """Each job of a project's workflows that holds a secret, an OIDC token or a token
+    that may write, with its workflow, its id and the deliveries that it runs for,
+    none where it runs for each: by its own condition, or by that of the jobs that
+    call its workflow. Not those of the issue assistant's templates, and not those
+    that call a workflow, whose jobs block, here or in their repository."""
+    flows = {name: parse(text) for name, text in workflows(root).items()}
+    called: dict[str, set[str]] = {}
+    for parsed in flows.values():
+        for job in parsed["jobs"].values():
+            uses = str(job.get("uses", ""))
+            if uses.startswith("./.github/workflows/"):
+                targets = set(DELIVERY.findall(str(job.get("if", "")))) or {""}
+                called.setdefault(uses.rsplit("/", 1)[1], set()).update(targets)
+    for name, parsed in flows.items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        # A workflow that a job calls for every delivery runs for each.
+        by_callers = called.get(name, set())
+        for job_id, job in parsed["jobs"].items():
+            if "uses" in job or not privileged(job, parsed.get("permissions")):
+                continue
+            targets = set(DELIVERY.findall(str(job.get("if", ""))))
+            if not targets and "" not in by_callers:
+                targets = by_callers
+            yield name, job_id, job, targets
+
+
+def delivery_of(project: Path) -> str:
+    """Where a project delivers its releases, as PUBLISH_TO of its settings says."""
+    settings = Settings.load(project / ".github/repository.toml")
+    return str(settings.variables["PUBLISH_TO"])
+
+
+def answers_of(project: Path) -> Mapping[str, Any]:
+    """The answers of a rendered project."""
+    return downstream.read(project / ".copier-answers.yml")
+
+
+@pytest.mark.parametrize("runner", ["self", "mend"])
+def test_security_md_names_the_renovate_that_only_records_where_it_runs(
+    tmp_path: Path, runner: str
+) -> None:
+    # Renovate of a workflow in the repository itself only records, as the one of the
+    # blueprint does; the Mend Renovate app runs outside the workflows.
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner=runner,
+        **OCTO_APP,
+    )
+
+    audited = {
+        (name, job_id)
+        for name, job_id, job, targets in privileged_jobs(project)
+        if steps_using(job, "step-security/harden-runner")[0]["with"]["egress-policy"]
+        == "audit"
+        and (not targets or "pypi" in targets)
+    }
+    assert delivery_of(project) == "pypi"
+    assert ("release.yml", "pypi") in audited
+    assert recording_jobs(project) == audited
+    assert (("renovate.yml", "renovate") in audited) == (runner == "self")
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    assert "repo-blueprint), job `renovate`" not in security
+
+
+@pytest.mark.parametrize("language", ["go", "java-kotlin", "rust", None])
+def test_codeql_only_records_where_it_may_fetch_the_dependencies_of_the_code(
+    tmp_path: Path, language: str | None
+) -> None:
+    # CodeQL may fetch the dependencies of Go, Java or Kotlin, and Rust from hosts that
+    # no run has shown yet: with one of them, its job only records, and SECURITY.md
+    # names it; with the others, it blocks every host but GitHub's (decision 0129).
+    chosen = ["python", language] if language else ["python"]
+    answers: dict[str, Any] = {"languages": chosen}
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner="mend",
+        **answers,
+        **OCTO_APP,
+    )
+
+    codeql = job_in(
+        (project / ".github/workflows/codeql.yml").read_text(encoding="utf-8"), "codeql"
+    )
+    initialized = step_in(codeql, "Initialize the analysis")
+    assert initialized["with"]["languages"] == ", ".join([*chosen, "actions"])
+    hardening = codeql["steps"][0]
+    names = names_of(codeql)
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    recording = {("release.yml", "pypi")}
+    if language:
+        assert hardening["name"] == "Record the network traffic of the job"
+        assert hardening["with"] == {"egress-policy": "audit"}
+        # Nothing waits for hosts that the job names, or for Docker that it keeps.
+        assert names[1].startswith("actions/checkout@")
+        assert WAIT_FOR_DOCKER not in names
+        assert "website, zizmor and Scorecard: each" in security
+        recording.add(("codeql.yml", "codeql"))
+    else:
+        assert hardening["name"] == "Block every host that the job doesn't need"
+        assert hardening["with"]["egress-policy"] == "block"
+        assert names[1] == "Wait until Harden-Runner lets the hosts through"
+        assert WAIT_FOR_DOCKER in names
+        assert "website, CodeQL, zizmor and Scorecard: each" in security
+    assert recording_jobs(project) == recording
 
 
 WAIT_FOR_DOCKER = "Wait until Harden-Runner has removed Docker"
@@ -17555,9 +17654,10 @@ def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_wee
     folder = ROOT if kind == "blueprint" else projects[kind]
     docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     # The check builds the website, and on main the same job hands it to GitHub Pages:
-    # no job builds it a second time, and the required check keeps its name.
+    # no job builds it a second time, and the required check keeps its name. The job
+    # deploy publishes it, and the job website asks the published website.
     parsed = parse(docs)
-    assert list(parsed["jobs"]) == ["docs", "deploy"]
+    assert list(parsed["jobs"]) == ["docs", "deploy", "website"]
     job = job_in(parsed, "docs")
     assert job["name"] == "docs"
     assert job["outputs"]["publish"] == "${{ steps.site.outputs.publish }}"
@@ -17725,9 +17825,21 @@ def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
             if step.get("name", "").startswith("Take the website that GitHub Pages")
         )
         attested = step_in(deploy, "Attest the provenance of the website")
-        asked = step_in(deploy, "Ask the published website for its pages")
         assert steps.index(published) < steps.index(taken) < steps.index(attested)
-        assert steps.index(attested) < steps.index(asked)
+        # The job that holds the tokens for GitHub Pages and Sigstore reaches only
+        # their hosts; one of its own, without a token, asks the published website,
+        # on whatever domain it has.
+        assert deploy["outputs"] == {
+            "page_url": "${{ steps.deployment.outputs.page_url }}"
+        }
+        assert published["id"] == "deployment"
+        website = job_in(text, "website")
+        assert website["name"] == "ask the published website"
+        assert website["needs"] == [before, "deploy"]
+        assert website["permissions"] == {}
+        asked = step_in(website, "Ask the published website for its pages")
+        assert asked["env"]["PAGE_URL"] == "${{ needs.deploy.outputs.page_url }}"
+        assert "Ask the published" not in " ".join(names_of(deploy))
         assert taken["uses"].startswith("actions/download-artifact@")
         assert taken["with"]["name"] == "github-pages"
         assert attested["uses"].startswith("actions/attest-build-provenance@")
