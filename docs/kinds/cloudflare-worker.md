@@ -61,9 +61,9 @@ They happen in Cloudflare, so the checklist names the first two as one step that
 
 <!-- --8<-- [start:real-repository] -->
 
-[Dennis Otto Pager](https://github.com/Dennis-Otto/dennis-otto-pager) is made from the blueprint: a private Telegram pager for the repositories of its maintainer, which tells them only what needs them and acts on it with a button.
+[Repo Pager](https://github.com/Dennis-Otto/repo-pager) is made from the blueprint: a private Telegram pager that each maintainer runs for their own repositories, which tells them only what needs them and acts on it with a button.
 
-The Variants workflow tries every pull request of the blueprint that changes what the answers of Dennis Otto Pager render on them, before it merges.
+The Variants workflow tries every pull request of the blueprint that changes what the answers of Repo Pager render on them, before it merges.
 
 <!-- --8<-- [end:real-repository] -->
 
