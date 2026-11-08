@@ -7,6 +7,21 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.12.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.3...v1.12.0) (2026-11-08)
+
+
+### Features
+
+* a container image reaches SLSA Build Level 3 in an isolated workflow ([#681](https://github.com/Dennis-Otto/repo-blueprint/issues/681)) ([1c7eb3c](https://github.com/Dennis-Otto/repo-blueprint/commit/1c7eb3c0ecbf51a6980318c075666d2b09c06a04))
+* a new repository's README shows the badge of the issue assistant ([#686](https://github.com/Dennis-Otto/repo-blueprint/issues/686)) ([bb87554](https://github.com/Dennis-Otto/repo-blueprint/commit/bb875541053266edca7747862aad1086a07aed4a))
+* the screenshot bot renders in parallel shards, commits files besides pictures and keeps to an allowlist of hosts ([#678](https://github.com/Dennis-Otto/repo-blueprint/issues/678)) ([abcc298](https://github.com/Dennis-Otto/repo-blueprint/commit/abcc298c3cb9d00c7ee19401fba9617f49000b6c))
+* the website lists other owners' repositories made with the blueprint ([#679](https://github.com/Dennis-Otto/repo-blueprint/issues/679)) ([fee4b67](https://github.com/Dennis-Otto/repo-blueprint/commit/fee4b67af188525018318b1cbcd1c97ec154ec4d))
+
+
+### Bug fixes
+
+* the Windows check passes on main again ([#682](https://github.com/Dennis-Otto/repo-blueprint/issues/682)) ([de7899c](https://github.com/Dennis-Otto/repo-blueprint/commit/de7899c0566cf595463dcb5aa955365c0dd98c59))
+
 ## [1.11.3](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.2...v1.11.3) (2026-11-05)
 
 ### Bug fixes
