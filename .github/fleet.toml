@@ -89,16 +89,16 @@ what_de = "eine Nextcloud-App"
 pitch_de = "die Volltextsuche von Paperless-ngx in der Suche von Nextcloud."
 
 [[repository]]
-name = "dennis-otto-pager"
+name = "repo-pager"
 kind = "cloudflare-worker"
 rollout = 7
 canary = true
-title = "Dennis Otto Pager"
+title = "Repo Pager"
 what = "a Cloudflare Worker in TypeScript"
-pitch = "a private Telegram pager for the repositories of its maintainer, which tells them only what needs them and acts on it with a button."
-title_de = "Dennis Otto Pager"
+pitch = "a private Telegram pager that each maintainer runs for their own repositories, which tells them only what needs them and acts on it with a button."
+title_de = "Repo Pager"
 what_de = "ein Cloudflare Worker in TypeScript"
-pitch_de = "ein privater Telegram-Pager für die Repositories seines Maintainers, der nur meldet, was ihn braucht, und es per Button erledigt."
+pitch_de = "ein privater Telegram-Pager, den jeder Maintainer für seine eigenen Repositories betreibt und der nur meldet, was ihn braucht, und es per Button erledigt."
 
 [[repository]]
 name = "dennis-otto.github.io"

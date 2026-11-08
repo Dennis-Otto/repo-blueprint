@@ -3,7 +3,7 @@ name: Issue assistant sync
 # The sync bot of the issue assistant, in the blueprint alone. The four workflows of
 # the issue assistant and its firewall policy are templates of its release, with which
 # the check issue-assistant compares every repository; the blueprint keeps the copies
-# in .github/ that every repository made from it renders. Once a day, and on
+# in .github/ that every repository made from it renders. On its schedule, and on
 # demand, this workflow takes the latest published release of the issue assistant and,
 # once it has verified that the release workflow of the issue assistant made it, runs
 # install of that release in the root of the blueprint, takes over its firewall policy
@@ -21,7 +21,11 @@ name: Issue assistant sync
 
 on:
   schedule:
-    - cron: "20 5 * * *"
+    # Away from the full hour, at which GitHub has the most schedules to start; it runs
+    # them as it can, often hours late, and a run that it drops leaves the release to
+    # the next one (decision 0128). A look that finds the latest release in the
+    # blueprint and no branch of the bot ends after one job of a few seconds.
+    - cron: "20 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -65,6 +69,7 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       url: ${{ steps.release.outputs.url }}
       changed: ${{ steps.adopt.outputs.changed }}
+      idle: ${{ steps.release.outputs.idle }}
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -113,6 +118,15 @@ jobs:
           if [[ "$pinned" == "$commit $tag" ]]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
             echo "The blueprint has the issue assistant $tag, the latest release." >> "$GITHUB_STEP_SUMMARY"
+            # Without the branch of the bot, there is no pull request to close either:
+            # a scheduled look ends here, without the job of the pull request and the
+            # release app. A question without an answer leaves it to that job, and so
+            # does a start by hand, which may close the issue of a failure of that job.
+            if [[ "$GITHUB_EVENT_NAME" == schedule ]] &&
+              branches="$(ask api --header "$API_VERSION_HEADER" "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/$BRANCH" \
+              --jq "[.[] | select(.ref == \"refs/heads/$BRANCH\")] | length")" && [[ "$branches" == 0 ]]; then
+              echo "idle=true" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
           # GitHub calls the release latest by its date or by hand, not by its version:
@@ -274,8 +288,12 @@ jobs:
   pull-request:
     name: keep the pull request of the release
     needs: adopt
-    # Once the release was adopted, to open, update or close the pull request.
-    if: vars.RELEASE_AUTOMATION_CLIENT_ID != '' && github.event_name != 'pull_request' && inputs.dry_run != true
+    # Once the release was adopted, to open, update or close the pull request; not
+    # when the blueprint has the latest release and the bot has no branch, since then
+    # there is nothing to open or close.
+    if: >-
+      vars.RELEASE_AUTOMATION_CLIENT_ID != '' && github.event_name != 'pull_request' && inputs.dry_run != true &&
+      needs.adopt.outputs.idle != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     # The environment holds the private key of the release app; only main may use it.

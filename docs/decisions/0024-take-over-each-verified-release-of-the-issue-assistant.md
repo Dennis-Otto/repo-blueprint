@@ -1,6 +1,6 @@
 # Take over each verified release of the issue assistant with a bot of the blueprint, not with Renovate
 
-- Status: accepted
+- Status: accepted, amended by [0128](0128-the-sync-bot-looks-for-a-release-of-the-issue-assistant-every-hour.md), with which the sync bot looks for a release every hour
 - Date: 2026-10-14
 
 ## Context
@@ -23,7 +23,7 @@ Installing runs in a job without secrets. The job of the pull request has the re
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/how-a-release-of-the-issue-assistant-reaches-every-repository.dark.svg">
-  <img src="../images/diagrams/how-a-release-of-the-issue-assistant-reaches-every-repository.svg" alt="How a release of the issue assistant reaches every repository: Every morning, the sync bot of the blueprint takes the latest published release of the issue assistant and verifies it: the release must be immutable, GitHub's attestation of it must hold, its tag must point at a commit of the main branch of the issue assistant, and its release workflow must have signed the tag. Any other release fails the run, and nothing changes. Otherwise the bot runs install of the release in the root of the blueprint, which writes the four workflows and the firewall policy of the release and moves every pin of the action, and keeps one pull request with the result, which merges itself once every check passes. The next release of the blueprint brings it to every repository with the blueprint bot.">
+  <img src="../images/diagrams/how-a-release-of-the-issue-assistant-reaches-every-repository.svg" alt="How a release of the issue assistant reaches every repository: Every hour, the sync bot of the blueprint takes the latest published release of the issue assistant and verifies it: the release must be immutable, GitHub's attestation of it must hold, its tag must point at a commit of the main branch of the issue assistant, and its release workflow must have signed the tag. Any other release fails the run, and nothing changes. Otherwise the bot runs install of the release in the root of the blueprint, which writes the four workflows and the firewall policy of the release and moves every pin of the action, and keeps one pull request with the result, which merges itself once every check passes. The next release of the blueprint brings it to every repository with the blueprint bot.">
 </picture>
 
 ## Consequences
