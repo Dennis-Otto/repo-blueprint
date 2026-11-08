@@ -51,13 +51,14 @@ Most problems explain themselves where they happen: a check that fails says in i
 ```sh
 git fetch origin main
 git switch --force-create executable-scripts FETCH_HEAD
+chmod +x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
 git update-index --chmod=+x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
 git commit --signoff --message 'chore: make the hook and the scripts executable'
 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
 gh pr create --fill
 ```
 
-A container also has `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` shows the mode of each file, `100755` for one that is executable. In Git Bash on Windows, the line with `scripts/*.sh` names each script.
+`chmod +x` makes the files executable on the disk, on Linux, on macOS and in the dev container, and `git update-index --chmod=+x` in the commit, on Windows too. The rules of `main` ask for a signature on every commit: turn `commit.gpgsign` on or add `--gpg-sign` to the commit, and the check *signed commits* names a commit without one and how to sign it again. A container also has `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` shows the mode of each file, `100755` for one that is executable. In Git Bash on Windows, the line with `scripts/*.sh` names each script.
 
 ## An update of the blueprint conflicts
 

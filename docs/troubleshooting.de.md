@@ -51,13 +51,14 @@ Die meisten Probleme erklären sich dort, wo sie auftreten: Eine Prüfung, die s
 ```sh
 git fetch origin main
 git switch --force-create executable-scripts FETCH_HEAD
+chmod +x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
 git update-index --chmod=+x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
 git commit --signoff --message 'chore: make the hook and the scripts executable'
 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
 gh pr create --fill
 ```
 
-Ein Container hat außerdem `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` zeigt den Modus jeder Datei, `100755` für eine ausführbare. In Git Bash unter Windows nennt die Zeile mit `scripts/*.sh` jedes Skript.
+`chmod +x` macht die Dateien auf der Platte ausführbar, unter Linux, macOS und im Dev-Container, und `git update-index --chmod=+x` sie im Commit, auch unter Windows. Die Regeln von `main` verlangen eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Ein Container hat außerdem `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` zeigt den Modus jeder Datei, `100755` für eine ausführbare. In Git Bash unter Windows nennt die Zeile mit `scripts/*.sh` jedes Skript.
 
 ## Ein Update des Blueprints hat Konflikte
 

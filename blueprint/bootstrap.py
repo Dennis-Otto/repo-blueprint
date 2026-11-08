@@ -261,12 +261,26 @@ def local_plan(root: Path, repo: str, run: Runner) -> Plan:
             )
     else:
         plan.steps.append(["git", "add", "--all"])
-        # Those of the kind of the copy, which has only the files of its kind.
-        executables = [name for name in EXECUTABLES if (root / name).is_file()]
-        if executables:
+        if executables := scripts_of(root):
             plan.steps.append(["git", "update-index", "--chmod=+x", "--", *executables])
         plan.steps.append(["git", "commit", "--signoff", "--message", MESSAGE])
     return plan
+
+
+def scripts_of(root: Path) -> list[str]:
+    """The names of EXECUTABLES that the copy has: those of its kind, which has only
+    the files of its kind."""
+    return [name for name in EXECUTABLES if (root / name).is_file()]
+
+
+def executable_on_disk(root: Path) -> None:
+    """Gives the scripts of the copy their executable bits on the disk too, as the
+    commit records them, so that the disk and the index agree: Git with core.fileMode
+    would see the copy changed after the first commit, and a create that goes on from
+    there would refuse it. Windows keeps no such bits, and the call changes nothing."""
+    for name in scripts_of(root):
+        path = root / name
+        path.chmod(path.stat().st_mode | 0o111)
 
 
 def no_baseline(root: Path) -> None:
@@ -643,6 +657,7 @@ def create(
         return None
     if plan.commits:
         no_baseline(root)
+        executable_on_disk(root)
     if plan.resume:
         print(f"Going on with {repo} on GitHub, from the first step that is left:")
     else:

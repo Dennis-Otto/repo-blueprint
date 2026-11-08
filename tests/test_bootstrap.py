@@ -953,6 +953,15 @@ def test_the_first_commit_is_signed_off_on_main_with_every_file(
                 os.name == "nt", reason="Windows has no executable files"
             ),
         ),
+        # A copy that reached Linux without its bits: create gives them on the disk too.
+        pytest.param(
+            "true",
+            0o644,
+            id="Linux without the bits",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows has no executable files"
+            ),
+        ),
     ],
 )
 def test_the_real_git_commits_the_scripts_as_executable(
