@@ -60,6 +60,16 @@ def test_pictures_videos_fonts_documents_and_fuzz_inputs_pass(path: str) -> None
 
 
 @pytest.mark.parametrize(
+    "path", ["tests/data/letter.docx", "tests/data/sheet.XLSX", "docs/book.epub"]
+)
+def test_a_document_that_is_a_zip_passes_by_its_name(path: str) -> None:
+    assert problem(path, b"PK\x03\x04\x14\0\0\0") == ""
+    # Only as a zip: another program or archive with such a name still fails.
+    assert problem(path, ELF) == PROGRAM
+    assert problem(path, b"\x1f\x8b\x08\0") == PROGRAM
+
+
+@pytest.mark.parametrize(
     "path", ["data.bin", "lib/thing.pyc", "tests/fuzz/corpus/x", "README"]
 )
 def test_any_other_binary_file_fails(path: str) -> None:
@@ -109,6 +119,7 @@ def test_the_command_names_each_file_and_the_fix(
     assert lines[:2] == [f"a.dat: {UNREVIEWABLE}", f"bin/tool: {PROGRAM}"]
     assert lines[2].startswith("Remove the 2 file(s) from Git: a release builds what")
     assert "OSPS-QA-05.01 and 05.02" in lines[2]
+    assert "Delete a file that isn't in Git yet" in lines[2]
     assert len(lines) == 3
 
 

@@ -10,7 +10,7 @@ Repo Blueprint is maintained by Dennis Otto.
 
 Nobody gets access on their own. GitHub gives a new collaborator no access until a maintainer invites them by hand and they accept, in an organization with the role that the invitation names, and the settings as code give no person any access. Nobody needs access to propose a change: a pull request from a fork is enough.
 
-Before a person gets escalated permissions, such as the right to push, to merge or to administer the repository, the secrets of its environments, its apps or its security advisories, the maintainers review them: a record of contributions to the project that the maintainers reviewed, an identity that the maintainers can trace, two-factor authentication on their account on GitHub and verified signatures on their commits. A person gets the least access that their task needs, named in the table above in the pull request that grants it, and loses it when the task ends; the secrets that they could use are replaced then, as [SECURITY.md](SECURITY.md#secrets-and-credentials) says.
+Before a person gets escalated permissions, such as the right to push, to merge or to administer the repository, the secrets of its environments, its apps or its security advisories, the maintainers review them: a record of contributions to the project that the maintainers reviewed, an identity that the maintainers can trace, two-factor authentication on their account on GitHub and verified signatures on their commits. A person gets the least access that their task needs, recorded in a public issue or pull request of the project, and loses it when the task ends; the secrets that they could use are replaced then, as [SECURITY.md](SECURITY.md#secrets-and-credentials) says.
 
 ## Roles and responsibilities
 

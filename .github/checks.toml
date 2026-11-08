@@ -929,8 +929,10 @@ fix = """Remove the file from Git and build it from its sources where it is need
 release builds what it ships, and a tool that a check or a test needs comes from its
 package manager, or as a download that its workflow checks by its checksum. Data of a
 test that must be binary goes into the inputs of the fuzz tests or is written by the
-test itself. `git rm` takes a file out of Git, and `git rm --cached` keeps it on your
-machine."""
+test itself, unless it starts like a program or an archive. `git rm` takes a file out of
+Git, and `git rm --cached` keeps it on your machine. A file that isn't in Git yet, such as
+one that a tool wrote, is deleted, or ignored in `.gitignore` when the tool writes it
+again."""
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0129-the-blueprint-answers-what-it-guarantees-of-the-baseline-and-of-gold.md"
 autofix = """No command knows whether a binary file goes, becomes a source or is built
 elsewhere; a person decides."""

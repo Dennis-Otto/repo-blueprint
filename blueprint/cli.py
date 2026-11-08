@@ -884,7 +884,8 @@ def binaries_command(root: Path) -> int:
         f"Remove the {len(found)} file(s) from Git: a release builds what it ships from "
         "the sources, and a tool that a check needs comes from its package manager or a "
         "download pinned by its checksum, as the OSPS Baseline of OpenSSF asks "
-        "(OSPS-QA-05.01 and 05.02)."
+        "(OSPS-QA-05.01 and 05.02). Delete a file that isn't in Git yet, or ignore it "
+        "in .gitignore when a tool writes it."
     )
     return 1
 

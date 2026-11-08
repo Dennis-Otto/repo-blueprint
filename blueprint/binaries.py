@@ -5,7 +5,9 @@ binary file that nobody can review (OSPS-QA-05.01 and OSPS-QA-05.02). A release 
 what it ships from the sources, so a program, a library, compiled code or an archive has
 no place in Git, whatever the name of its file says. A person reviews a picture, a
 video, a sound, a font or a document by looking at it, and the inputs of the fuzz tests
-in fuzz/ are data of the tests, so these may be binary.
+in fuzz/ are data of the tests, so these may be binary; a document of Office, of
+OpenDocument or an EPUB is a zip, which passes with the name of such a document. An input
+of the fuzz tests that starts like a program or an archive fails as one.
 """
 
 from __future__ import annotations
@@ -49,6 +51,10 @@ MEDIA = frozenset(
         ".woff2",
     }
 )
+# The documents of Office, of OpenDocument and EPUB, which are zip files and pass with
+# the first bytes of one.
+ZIPPED = frozenset({".docx", ".epub", ".odp", ".ods", ".odt", ".pptx", ".xlsx"})
+ZIP = b"PK\x03\x04"
 # The folder of the inputs of the fuzz tests, which may be any bytes.
 FUZZ = "fuzz/"
 # The first bytes of a program, a library, compiled code or an archive: ELF, the
@@ -66,7 +72,7 @@ EXECUTABLE = (
     b"\xca\xfe\xba\xbe",
     b"\0asm",
     b"!<arch>\n",
-    b"PK\x03\x04",
+    ZIP,
     b"\x1f\x8b",
     b"BZh",
     b"\xfd7zXZ\0",
@@ -111,9 +117,10 @@ def problem(path: str, start: bytes) -> str:
     """What is wrong with a file that starts with these bytes, or nothing."""
     if b"\0" not in start:
         return ""
+    suffix = PurePosixPath(path).suffix.lower()
     if start.startswith(EXECUTABLE):
-        return PROGRAM
-    if PurePosixPath(path).suffix.lower() in MEDIA or path.startswith(FUZZ):
+        return "" if suffix in ZIPPED and start.startswith(ZIP) else PROGRAM
+    if suffix in MEDIA or path.startswith(FUZZ):
         return ""
     return UNREVIEWABLE
 
