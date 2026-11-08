@@ -5,23 +5,23 @@ config:
 ---
 flowchart TB
     accTitle: The larger steps of the blueprint
-    accDescr: 0.1 to 0.3 brought seven kinds of projects, the settings as code and the release bot; 0.4 and 0.5 the settings bot, Renovate and the beta channel; 0.6 to 0.8 the websites, SLSA Build Level 3 and signed tags; 0.9 and 0.10 the Rollout of every release, the branch bot and checks that get going again; 0.11 and 0.12 the diagrams that every app shows, the PR coach and the bot-health bot. The next release brings the blueprint for any owner, the screenshot bot and one report on every pull request; next come pages for every question, visual changes in pull requests and more kinds of projects.
+    accDescr: 0.1 to 0.8 brought seven kinds of projects, the settings as code, the release bot, the websites and SLSA Build Level 3; 0.9 to 0.13 the Rollout of every release, the PR coach and the blueprint for any owner; 1.0 made it stable, with a policy of versions; 1.1 to 1.5 brought the Chrome extension, the settings app and one list of the repositories; 1.6 to 1.9 titles and lock files that fix themselves, several further languages and the accessibility check at the width of a phone; 1.10 to 1.13 the Cloudflare Worker, /fix on forks and container images at SLSA Build Level 3. Next come visual changes and commands in pull requests, more kinds of projects and a website that shows the blueprint.
 
     subgraph done ["Done"]
         direction TB
-        early["`**0.1 – 0.3**<br>seven kinds of projects<br>settings as code<br>release bot`"]
-        middle["`**0.4 – 0.5**<br>settings bot<br>Renovate<br>beta channel`"]
-        late["`**0.6 – 0.8**<br>websites<br>SLSA Build Level 3<br>signed tags`"]
-        rollout["`**0.9 – 0.10**<br>Rollout of every release<br>branch bot<br>checks that restart`"]
-        recent["`**0.11 – 0.12**<br>diagrams in every app<br>PR coach<br>bot-health bot`"]
-        early --> middle --> late --> rollout --> recent
+        early["`**0.1 – 0.8**<br>seven kinds of projects<br>settings as code, release bot<br>websites, SLSA Build Level 3`"]
+        rollout["`**0.9 – 0.13**<br>Rollout of every release<br>PR coach<br>blueprint for any owner`"]
+        stable["`**1.0**<br>stable<br>a policy of versions`"]
+        kinds["`**1.1 – 1.5**<br>Chrome extension<br>settings app<br>one list of the repositories`"]
+        heal["`**1.6 – 1.9**<br>titles and lock files that fix themselves<br>several further languages<br>accessibility on a phone`"]
+        latest["`**1.10 – 1.13**<br>Cloudflare Worker<br>/fix on forks<br>SLSA Build Level 3 images`"]
+        early --> rollout --> stable --> kinds --> heal --> latest
     end
 
-    soon(["`**The next release**<br>any owner, one command<br>the screenshot bot<br>one report per pull request`"])
-    next(["`**Next**<br>pages for every question<br>visual changes in pull requests<br>more kinds of projects`"])
-    done --> soon --> next
+    next(["`**Next**<br>visual changes in pull requests<br>commands in pull requests<br>more kinds of projects<br>a website that shows the blueprint`"])
+    done --> next
 
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     classDef plan fill:#526cfe2e,stroke:#526cfe,stroke-width:2px,stroke-dasharray:6 4
-    class early,middle,late,rollout,recent,soon done
+    class early,rollout,stable,kinds,heal,latest done
     class next plan
