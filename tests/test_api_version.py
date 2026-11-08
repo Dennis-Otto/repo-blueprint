@@ -115,6 +115,10 @@ def test_lists_that_start_with_another_word_are_no_calls_of_gh() -> None:
     assert kinds_of_gh('words = ["git", "push"]; empty = []; first = ("api",)') == []
 
 
+# mutmut's copy holds the mutants of each function next to it, so a module with
+# mutants, such as blueprint/bootstrap.py when a pull request changes it, has each of
+# its calls of gh many times there.
+@pytest.mark.mutation_unsafe
 def test_every_call_of_the_api_in_the_python_asks_for_the_version() -> None:
     kinds = {
         path.relative_to(ROOT).as_posix(): kinds_of_gh(path.read_text("utf-8"))
