@@ -18367,6 +18367,13 @@ def test_every_website_is_checked_for_its_accessibility(
         assert not name or locked["integrity"].startswith("sha512-"), name
     ignored = (root / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/.github/a11y/node_modules/" in ignored
+    # A page that leads to another address is checked itself, not the page where it
+    # leads, which may be of another website: CONTRIBUTING.md says so.
+    contributing = (root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert (
+        "A page that leads to another address, by its refresh or its script, such as a "
+        "page of an old address, is checked as it shows before it leaves,"
+    ) in contributing
     # The check docs runs it after the build and fails on what it finds: a pull
     # request on the pages that differ from the digest of main, main and the weekly
     # run on every page, which keep that digest for the pull requests.
