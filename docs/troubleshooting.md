@@ -1,5 +1,5 @@
 ---
-description: "What to do when something in a repository of Repo Blueprint doesn't work: a create that stops at its preflight or midway, an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
+description: "What to do when something in a repository of Repo Blueprint doesn't work: a create that stops at its preflight or midway, a script that is not executable, an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
 ---
 
 # Troubleshooting
@@ -39,6 +39,25 @@ Most problems explain themselves where they happen: a check that fails says in i
 **Why:** `gh repo create` makes the repository on GitHub and adds `origin` before it pushes, so a push or settings that failed leave a repository that is there.
 
 **What to do:** run `python3 .github/blueprint.py create` again. When `origin` pushes to the repository of the answers, and GitHub has it, `create` goes on from the first step that is left: the push of `main` when GitHub has no branch `main` yet, signed in by gh as `gh repo create --push` is, then `settings apply` and the checklist, which change only what differs. A folder that pushes to another repository is no new copy, and `create` refuses it.
+
+## A script or the hook is not executable
+
+**What you see:** the check fails in its step *Git hooks* with `.githooks/pre-push: is not executable, so git skips it`, or `./scripts/check.sh` answers `Permission denied` on Linux, on macOS or in the dev container.
+
+**Why:** Git runs a hook, and a shell a script by its path, only when its file is executable, which Git records as the mode `100755`. Windows has no such mode, so Git for Windows records a new file as a plain one, `100644`. `create` records every file that the template marks executable as such before the first commit, and Copier keeps the mode of a file that Git has already, but a repository that the `create` of an older release made on Windows has plain files, and so has a script that `copier update` by hand on Windows adds as a new file. The blueprint bot updates on Linux, where the mode comes along.
+
+**What to do:** record the files as executable on a branch and merge that in a pull request, on any platform, such as for the hook and the scripts of the blueprint:
+
+```sh
+git fetch origin main
+git switch --force-create executable-scripts FETCH_HEAD
+git update-index --chmod=+x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
+git commit --signoff --message 'chore: make the hook and the scripts executable'
+git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
+gh pr create --fill
+```
+
+A container also has `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` shows the mode of each file, `100755` for one that is executable. In Git Bash on Windows, the line with `scripts/*.sh` names each script.
 
 ## An update of the blueprint conflicts
 
