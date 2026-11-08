@@ -53,7 +53,11 @@ def text_without_an_encoding(source: str) -> list[int]:
             and not (isinstance(value, ast.Constant) and not value.value)
             for value in text
         )
-        if as_text and "encoding" not in options:
+        encoding = options.get("encoding")
+        unnamed = encoding is None or (
+            isinstance(encoding, ast.Constant) and encoding.value is None
+        )
+        if as_text and unnamed:
             lines.append(node.lineno)
     return lines
 
@@ -67,6 +71,7 @@ def text_without_an_encoding(source: str) -> list[int]:
         ('subprocess.Popen(["gh"], text=as_text)', [1]),
         ('run(["gh"], text=True)', [1]),
         ('x = 1\nsubprocess.call(["gh"], text=True, **options)', [2]),
+        ('subprocess.run(["gh"], text=True, encoding=None)', [1]),
         ('subprocess.run(["gh"], text=True, encoding="utf-8")', []),
         ('subprocess.run(["gh"], encoding="utf-8")', []),
         ('subprocess.run(["gh"], capture_output=True)', []),
