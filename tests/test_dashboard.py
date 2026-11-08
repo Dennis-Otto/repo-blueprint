@@ -1992,7 +1992,7 @@ def test_the_job_that_publishes_asks_for_the_data_of_the_dashboard(
     result = run_step(
         tmp_path,
         "dashboard.yml",
-        "deploy",
+        "website",
         "Ask the published dashboard for its data",
         env={
             "PAGE_URL": "https://owner.github.io/repo-blueprint/",

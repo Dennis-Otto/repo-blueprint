@@ -521,11 +521,21 @@ def frames(data: bytes) -> list[tuple[tuple[int, int], bytes]]:
     return found
 
 
-def compared(before: bytes, after: bytes) -> list[tuple[Size, bytes, bytes]] | None:
+Frames = list[tuple[tuple[int, int], bytes]]
+Pairs = list[tuple[Size, bytes, bytes]]
+Most = tuple[Size, bytes, "Image.Image"]
+
+
+def compared(before: bytes, after: bytes) -> Pairs | None:
     """The frames of two pictures side by side, as the size of each pair and the
     pixels of the frame before and after, or None when their sizes or numbers of
     frames differ."""
-    old, new = frames(before), frames(after)
+    return paired(frames(before), frames(after))
+
+
+def paired(old: Frames, new: Frames) -> Pairs | None:
+    """The frames of two pictures that frames read, side by side as compared gives
+    them, or None when their sizes or numbers of frames differ."""
     if len(old) != len(new) or any(a[0] != b[0] for a, b in zip(old, new, strict=True)):
         return None
     return [(size, a, b) for (size, a), (_, b) in zip(old, new, strict=True)]
@@ -550,14 +560,25 @@ def changed_share(before: bytes, after: bytes) -> float | None:
     """The share of the pixels that changed, 0 when the pictures look the same, and
     None when their sizes or numbers of frames differ."""
     pairs = compared(before, after)
-    if pairs is None:
-        return None
+    return None if pairs is None else changes(pairs)[0]
+
+
+def changes(pairs: Pairs) -> tuple[float, Most | None]:
+    """The share of the pixels that changed between the frames of pairs, and the pair
+    of frames with the most changed pixels, as its size, the pixels after and the
+    mask of the changes, or None when no pixel changed. Each mask is counted once."""
     total = changed = 0
+    most: tuple[int, Most] | None = None
     for size, first, second in pairs:
         total += size[0] * size[1]
-        if first != second:
-            changed += changed_pixels(size, first, second).histogram()[255]
-    return changed / total
+        if first == second:
+            continue
+        mask = changed_pixels(size, first, second)
+        count = mask.histogram()[255]
+        changed += count
+        if most is None or count > most[0]:
+            most = (count, (size, second, mask))
+    return changed / total, None if most is None else most[1]
 
 
 def scaled(length: int, longest: int) -> int:
@@ -609,19 +630,17 @@ def difference(before: bytes, after: bytes) -> bytes | None:
     around each place of change keeps a change of a single pixel in sight when a
     phone shows the picture scaled down to about SHOWN pixels wide. None when the
     sizes or numbers of frames differ or no pixel changed."""
+    pairs = compared(before, after)
+    most = None if pairs is None else changes(pairs)[1]
+    return None if most is None else drawing(most)
+
+
+def drawing(most: Most) -> bytes:
+    """The picture of the difference that difference draws, of the pair of frames
+    that changes found with the most changed pixels."""
     from PIL import Image, ImageDraw
 
-    most: tuple[int, Size, bytes, Image.Image] | None = None
-    for size, first, second in compared(before, after) or []:
-        if first == second:
-            continue
-        mask = changed_pixels(size, first, second)
-        count = mask.histogram()[255]
-        if most is None or count > most[0]:
-            most = (count, size, second, mask)
-    if most is None:
-        return None
-    _, size, pixels, mask = most
+    size, pixels, mask = most
     shown = Image.new("RGBA", size, "white")
     shown.alpha_composite(Image.frombytes("RGBa", size, pixels).convert("RGBA"))
     # A quarter of the darkness of each pixel on white, from 191 to 255: the index 0
@@ -809,15 +828,19 @@ def keep(root: Path, folder: Path | None = None, files: Sequence[str] = ()) -> K
             pictures.append(Picture(path, "new"))
             continue
         before = committed(root, path)
-        if same_pixels(before, data):
+        # Pillow reads both pictures once, for the comparison, the share and the
+        # picture of the difference; a file it can't read differs from every other.
+        read: tuple[Frames, Frames] | None
+        try:
+            read = frames(before), frames(data)
+        except (OSError, ValueError):
+            read = None
+        if before == data or (read is not None and read[0] == read[1]):
             (root / path).write_bytes(before)
             continue
-        try:
-            share = changed_share(before, data)
-        except (OSError, ValueError):
-            share = None
-        # Only for the folder; Pillow read both pictures already.
-        drawn = difference(before, data) if folder is not None and share else None
+        pairs = None if read is None else paired(*read)
+        share, most = (None, None) if pairs is None else changes(pairs)
+        drawn = drawing(most) if folder is not None and most is not None else None
         if drawn is not None:
             drawings[path] = drawn
         pictures.append(
@@ -850,7 +873,7 @@ def reported_size(value: Any) -> Size | None:
 def drawn_by_keep(folder: Path, picture: Picture) -> bool:
     """Whether the picture of the difference that a report names for a picture, if it
     names one, is as keep draws it: a PNG at the diff of a changed picture, and no
-    link."""
+    link, neither the file nor a folder on its way from folder."""
     if picture.diff is None:
         return True
     drawn = folder / picture.diff
@@ -858,7 +881,7 @@ def drawn_by_keep(folder: Path, picture: Picture) -> bool:
         picture.status == "changed"
         and picture.kind == "picture"
         and picture.diff == diff_path(picture.path)
-        and not drawn.is_symlink()
+        and drawn.resolve() == folder.resolve() / picture.diff
         and drawn.is_file()
         and looks_like_its_kind(picture.diff, drawn.read_bytes())
     )

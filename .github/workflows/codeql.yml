@@ -46,10 +46,60 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - name: Record the network traffic of the job
+      # For Python, JavaScript or TypeScript, Ruby and the workflows, CodeQL reaches only
+      # GitHub. A repository with Go, Java or Kotlin, or Rust only records the traffic of
+      # the job instead, as its SECURITY.md says: CodeQL may fetch the dependencies of
+      # that code from hosts that no run has shown yet (decision 0130).
+      - name: Block every host that the job doesn't need
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          disable-sudo-and-containers: true
+          allowed-endpoints: >-
+            api.github.com:443
+            github.com:443
+            uploads.github.com:443
+            release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+      - name: Wait until Harden-Runner lets the hosts through
+        # The runner may have asked for an address past Harden-Runner, which then blocks
+        # that address for as long as systemd-resolved keeps it, up to a minute.
+        timeout-minutes: 4
+        env:
+          HOSTS: >-
+            api.github.com:443
+            github.com:443
+            uploads.github.com:443
+            release-assets.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+        run: |
+          deadline=$(($(date +%s) + 120))
+          for endpoint in $HOSTS; do
+            host="${endpoint%:*}"
+            port="${endpoint##*:}"
+            # A wildcard names no host to ask, and a job may leave out a host that keeps it
+            # waiting although none of its steps needs it at once.
+            [[ "$host" == '*.'* || " $SKIP_WAIT " == *" $endpoint "* ]] && continue
+            # Each host on its own port, by HTTP on 80 and by HTTPS on any other. Only a host
+            # that curl can't resolve, or can't reach in time, is blocked: one that answers at
+            # all, in whatever protocol, is through.
+            scheme=https
+            [[ "$port" == 80 ]] && scheme=http
+            while true; do
+              status=0
+              curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "$scheme://$host:$port/" || status=$?
+              case "$status" in
+                6 | 7 | 28) ;;
+                *) break ;;
+              esac
+              if (($(date +%s) >= deadline)); then
+                echo "::warning::Harden-Runner still blocks $endpoint after two minutes; a step that needs it will fail, and the job can run again."
+                break
+              fi
+              echo "Harden-Runner still blocks $endpoint, waiting 3 s."
+              sleep 3
+            done
+          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -108,6 +158,16 @@ jobs:
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: ${{ runner.temp }}/codeql
+      - name: Wait until Harden-Runner has removed Docker
+        # Harden-Runner removes Docker with apt-get in the background; a job that ends
+        # before it finishes hangs in "Cleaning up orphan processes" until its timeout.
+        if: always()
+        run: |
+          for _ in {1..120}; do
+            pgrep -x 'apt-get|dpkg' >/dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::Harden-Runner still removes Docker after two minutes; the job may hang until its timeout."
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure

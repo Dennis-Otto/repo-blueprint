@@ -1006,6 +1006,24 @@ def test_the_bot_refuses_a_link_as_a_difference(tmp_path: Path) -> None:
         kept(folder)
 
 
+def test_the_bot_refuses_a_difference_in_a_linked_folder(tmp_path: Path) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"docs/a.png": png()},
+        [Picture("docs/a.png", "changed", 0.25, diff="diff/docs/a.png")],
+    )
+    (folder / "diff").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.png").write_bytes(png())
+    try:
+        os.symlink(outside, folder / "diff/docs", target_is_directory=True)
+    except OSError:
+        pytest.skip("this system makes no symbolic links")
+    with pytest.raises(ValueError, match="which is no PNG that keep drew for it"):
+        kept(folder)
+
+
 def test_the_bot_refuses_a_link(tmp_path: Path) -> None:
     folder = folder_with(tmp_path, {}, [Picture("docs/a.png", "new")])
     (folder / "files/docs").mkdir(parents=True)
