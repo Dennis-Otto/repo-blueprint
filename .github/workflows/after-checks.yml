@@ -397,9 +397,10 @@ jobs:
             fi
           }
           # A text on one line for a warning of the run, which keeps no control
-          # character and no percent sign, the start of an escape of the runner's.
+          # character and escapes each percent sign, the start of an escape of the
+          # runner's, as %25, which the run shows as a percent sign again.
           plain() {
-            printf '%s' "$1" | tr -d '%' | tr '\000-\037\177' ' '
+            printf '%s' "$1" | tr '\000-\037\177' ' ' | sed 's/%/%25/g'
           }
           # A log keeps the colors of the commands that its steps ran. Since v2.97.0,
           # gh api prints a raw answer with such escape sequences only with

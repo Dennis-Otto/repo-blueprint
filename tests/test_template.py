@@ -16275,8 +16275,9 @@ def test_the_flaky_test_bot_warns_of_a_log_that_it_cannot_read(
     tmp_path: Path,
 ) -> None:
     # The step went on with an empty log and said nothing of why; now a warning of the
-    # run names the job, on one line without the percent sign of a runner's escape,
-    # and the reason of gh, and the row has the error of the job without a test.
+    # run names the job, on one line with its percent sign escaped as %25, which the
+    # runner shows as a percent sign again, and the reason of gh, and the row has the
+    # error of the job without a test.
     done = run_after_the_checks(
         tmp_path,
         "report",
@@ -16300,7 +16301,7 @@ def test_the_flaky_test_bot_warns_of_a_log_that_it_cannot_read(
 
     assert done.returncode == 0, done.stderr
     assert (
-        "::warning::The log of the job test (100 ) couldn't be read, so the report"
+        "::warning::The log of the job test (100 %25) couldn't be read, so the report"
         " names none of its tests: gh: Not Found (HTTP 404)\n"
     ) in done.stdout
     assert (
