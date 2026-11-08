@@ -4885,6 +4885,13 @@ def test_every_link_to_a_heading_of_the_blueprint_finds_it() -> None:
             links.setdefault((link["path"] or "README.md", link["anchor"]), name)
     assert ("docs/features/settings.md", "settings-as-code") in links
     assert ("SECURITY.md", "verify-a-release") in links
+    # The roadmap leads each of its steps to its section of the changelog, whose
+    # heading is a link: GitHub takes the anchor from the text that it shows.
+    assert ("CHANGELOG.md", "100-2026-10-19") in links
+    assert anchors(
+        "## [1.0.0](https://github.com/o/r/compare/v0.13.3...v1.0.0) (2026-10-19)\n"
+        "## Unreleased\n"
+    ) == {"100-2026-10-19", "unreleased"}
     # GitHub draws #readme with a script, at the top of the README.
     broken = {
         f"{target}#{anchor}": name
@@ -7567,10 +7574,18 @@ def best_practices(project: Path) -> dict[str, str]:
     return answers
 
 
+# A link of Markdown in a heading, such as [1.0.0](https://…/compare/v0.13.3...v1.0.0).
+LINK_IN_HEADING = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
 def anchors(markdown: str) -> set[str]:
-    """The anchors of the headings of a Markdown file, as GitHub makes them."""
+    """The anchors of the headings of a Markdown file, as GitHub makes them: from the
+    text that a heading shows, so of a link in it only its text, as of the version
+    that heads each release of the changelog."""
     return {
-        re.sub(r"[^\w\- ]", "", title.strip().lower()).replace(" ", "-")
+        re.sub(
+            r"[^\w\- ]", "", LINK_IN_HEADING.sub(r"\1", title).strip().lower()
+        ).replace(" ", "-")
         for title in re.findall(r"^#{1,6} (.+)$", markdown, re.MULTILINE)
     }
 
