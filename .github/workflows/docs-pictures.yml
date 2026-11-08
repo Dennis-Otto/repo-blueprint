@@ -13,7 +13,8 @@ name: Docs pictures
 # starts it for one that conflicts (decision 0118). The recording waits for the
 # network, so a frame that repeats the one before counts once and the time each frame
 # shows not at all.
-# A failed run keeps an issue of the bot-health bot open until a run passes again.
+# A failed run keeps an issue of the bot-health bot open until the jobs that failed
+# pass again in a run.
 # It runs in the blueprint only; every repository has the Screenshots workflow.
 # https://github.com/Dennis-Otto/repo-blueprint
 
