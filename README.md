@@ -19,7 +19,7 @@ Repo Blueprint is a [Copier](https://copier.readthedocs.io/) template for nine k
 
 - **Tested on every change.** `scripts/check.sh` runs the same checks on your machine and in the CI, with full coverage of the code. The PR coach explains every check that fails, and the fix bot commits what a command can fix.
 - **Released and signed by a bot.** Merging the release pull request publishes the release with SBOM and signed provenance of SLSA Build Level 3, container images too, then verifies it as users can.
-- **Secure from the first commit.** CodeQL, OpenSSF Scorecard, a secret scan and an audit of the workflows run from the start, every action is pinned to a commit hash, and about 90 to 100 answers of OpenSSF Best Practices are filled in.
+- **Secure from the first commit.** CodeQL, OpenSSF Scorecard, a secret scan and an audit of the workflows run from the start, every action is pinned to a commit hash, and about 100 answers of OpenSSF Best Practices and of its OSPS Baseline are filled in.
 - **Up to date by itself.** Renovate updates the dependencies, the settings bot keeps the settings as code, and the blueprint bot brings every release of the blueprint as a pull request that its checks test before it merges; each public repository [made with the blueprint](#made-with-the-blueprint) takes every release this way.
 
 <!-- --8<-- [end:pitch] -->

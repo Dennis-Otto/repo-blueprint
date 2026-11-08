@@ -916,6 +916,27 @@ commands = ["python3 .github/blueprint.py migrate --fix"]
 docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#a-release-moves-a-file-of-the-project"
 autofix = ["{blueprint} migrate --fix"]
 
+[step."Binary files"]
+problem = """Git holds a binary file that nobody can review: a program, a library,
+compiled code or an archive, by its first bytes whatever its name, or another binary
+file that is no picture, video, sound, font or document and no input of the fuzz tests
+in `fuzz/`; the log names each file."""
+why = """A binary in the repository hides what it does from every review, and one that
+was built elsewhere can't be traced to its sources: the OSPS Baseline of OpenSSF allows
+neither (OSPS-QA-05.01 and OSPS-QA-05.02), and the answers of `.bestpractices.json`
+promise it."""
+fix = """Remove the file from Git and build it from its sources where it is needed: a
+release builds what it ships, and a tool that a check or a test needs comes from its
+package manager, or as a download that its workflow checks by its checksum. Data of a
+test that must be binary goes into the inputs of the fuzz tests or is written by the
+test itself, unless it starts like a program or an archive. `git rm` takes a file out of
+Git, and `git rm --cached` keeps it on your machine. A file that isn't in Git yet, such as
+one that a tool wrote, is deleted, or ignored in `.gitignore` when the tool writes it
+again."""
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/0129-the-blueprint-answers-what-it-guarantees-of-the-baseline-and-of-gold.md"
+autofix = """No command knows whether a binary file goes, becomes a source or is built
+elsewhere; a person decides."""
+
 [step."Changelog fragments"]
 problem = """A fragment in `changelog.d/` is one that the release can't take in: a name
 that it reads differently, no entry, text outside a heading, a `## ` heading, or a

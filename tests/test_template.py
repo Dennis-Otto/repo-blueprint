@@ -65,6 +65,7 @@ import pins
 import reference
 from blueprint import bootstrap, ownership, screenshots
 from blueprint.app import App, answered_app
+from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -4121,6 +4122,11 @@ def pages_step(check: str) -> str:
     return check[start : check.index('step "Changelog fragments"', start)]
 
 
+def binaries_step(check: str) -> str:
+    start = check.index('step "Binary files"')
+    return check[start : check.index('step "Changelog fragments"', start)]
+
+
 def fragments_step(check: str) -> str:
     start = check.index('step "Changelog fragments"')
     return check[start : check.index('step "Accepted advisories"', start)]
@@ -4272,6 +4278,95 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "docker" not in fragments_step(check)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_git_holds_no_binary_that_nobody_can_review(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the files of the project, with the Python and blueprint.py of the pages,
+    # the same in every kind of project and in the blueprint, which the CI never skips.
+    assert (
+        check.index('\nstep "Files of the project"\n')
+        < check.index('\nstep "Binary files"\n')
+        < check.index('\nstep "Changelog fragments"\n')
+    )
+    assert binaries_step(check) == binaries_step(generic) == binaries_step(own)
+    assert '  "$python" "$tool" binaries\n' in binaries_step(check)
+    assert "which this runner lacks" in binaries_step(check)
+    # What OSPS-QA-05.01 and 05.02 of .bestpractices.json point to.
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    assert "The step *Binary files* of `scripts/check.sh` fails" in security
+    explained = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    assert "OSPS-QA-05.02" in explained["step"]["Binary files"]["why"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_bytecode_of_the_tools_is_no_binary_file_of_git(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # Every repository runs the Python of .github/, also one of Node, whose bytecode the
+    # step Binary files named in the CI before .gitignore left it out in every kind.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    for cache in (".github/__pycache__", ".github/blueprint/__pycache__"):
+        (project / cache).mkdir(parents=True, exist_ok=True)
+        (project / cache / "cli.cpython-314.pyc").write_bytes(b"\xcb\r\r\n\0\0")
+    (project / "data.bin").write_bytes(b"data\0more")
+
+    assert binaries(project) == [Binary("data.bin", UNREVIEWABLE)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_documents_its_dependencies_secrets_access_and_reviews(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # What OSPS-DO-06.01, OSPS-BR-07.02, OSPS-AC-02.01, OSPS-GV-04.01 and the code
+    # review standards and small tasks of the gold level stand on, in every kind.
+    project = projects[kind]
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for part in ("**Selecting.**", "**Obtaining.**", "**Tracking.**"):
+        assert part in security.split("## Dependencies", 1)[1], part
+    secrets = security.split("## Secrets and credentials", 1)[1].split("\n## ", 1)[0]
+    for part in ("**Storing.**", "**Accessing.**", "**Rotating.**", "never in Git"):
+        assert part in secrets, part
+    assert "the token of Claude for the issue assistant" in secrets
+    access = governance.split("## Maintainers and access", 1)[1].split("\n## ", 1)[0]
+    assert "until a maintainer invites them by hand" in access
+    assert "Before a person gets escalated permissions" in access
+    reviews = governance.split("## Reviews", 1)[1].split("\n## ", 1)[0]
+    for part in (
+        "How a pull request is reviewed",
+        "What the review checks",
+        "What is acceptable",
+    ):
+        assert part in reviews, part
+    assert "https://github.com/Dennis-Otto/demo-project/contribute" in contributing
+
+
+def test_a_project_without_the_ai_names_no_token_of_claude_among_its_secrets(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="generic",
+        issue_assistant_ai=False,
+    )
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+
+    assert "## Secrets and credentials" in security
+    assert "token of Claude" not in security
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -7558,6 +7653,23 @@ PROJECT_SPECIFIC = {
     # The check of the website only reports for now, and the user interface of an app
     # or of the cards of an integration is the project's own.
     "accessibility_best_practices",
+    # The other repositories of a project: N/A only when every release builds from
+    # this one alone, which only the owner knows.
+    "osps_qa_04_01",
+    "osps_qa_04_02",
+    # A statement in each source file: REUSE.toml gives them for every file at once.
+    "copyright_per_file",
+    "license_per_file",
+    # The coverage that the files of the project ask for, of the code that it measures,
+    # and a build that only a project can make reproducible.
+    "test_statement_coverage90",
+    "test_branch_coverage80",
+    "build_reproducible",
+    # What only the people of a project can say.
+    "security_review",
+    "contributors_unassociated",
+    "two_person_review",
+    "secure_2FA",
 }
 # Every answer of a repository: none of them can do without these.
 GUARANTEED = {
@@ -7581,6 +7693,15 @@ GUARANTEED = {
     "osps_vm_02_01",
     "osps_vm_04_02",
     "osps_vm_06_02",
+    # The rules of GOVERNANCE.md and SECURITY.md, and the step Binary files.
+    "small_tasks",
+    "code_review_standards",
+    "osps_ac_02_01",
+    "osps_br_07_02",
+    "osps_do_06_01",
+    "osps_gv_04_01",
+    "osps_qa_05_01",
+    "osps_qa_05_02",
 }
 
 
