@@ -26,6 +26,7 @@ import tomllib
 import warnings
 import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from html.parser import HTMLParser
 from pathlib import Path
 from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple, cast
@@ -81,7 +82,9 @@ from blueprint.changelog import Fragment, release_changelog
 from blueprint.checklist import (
     CHROME_WEB_STORE_ITEM,
     CHROME_WEB_STORE_SIGN_IN,
+    DEFAULT_PANEL,
     RELEASE_APP_PERMISSIONS,
+    social_preview,
 )
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers, signed_off, watched
@@ -7154,6 +7157,10 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`scripts/screenshots.sh` renders the social preview" not in contributing
     assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
+    # Nor does its social preview, which still shows the drawing of its kind.
+    preview = (project / ".github/social-preview.html").read_text(encoding="utf-8")
+    assert "data-default-panel" in preview
+    assert "screenshots.sh" not in preview
     assert "\n- `.github/screenshots.toml`, which this project adds" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
@@ -7782,6 +7789,14 @@ def test_a_package_that_publishes_nowhere_speaks_of_no_registry(
     assert "gh attestation verify <asset> --repo" in security
     contributing = (nowhere / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "creates the release with its SBOM and signed provenance." in contributing
+    # Its social preview installs it from GitHub.
+    install = words[0]
+    preview = (nowhere / ".github/social-preview.html").read_text(encoding="utf-8")
+    assert install in (published / ".github/social-preview.html").read_text(
+        encoding="utf-8"
+    )
+    assert install not in preview
+    assert "Dennis-Otto/demo-project</b>" in preview
 
     # The release and the settings say the same, and the update keeps the answer.
     def settings(project: Path) -> dict[str, Any]:
@@ -18613,6 +18628,121 @@ def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
                     (match["depName"], match["currentValue"], match["currentDigest"])
                 )
     assert found == [image.groups()]
+
+
+# What the default panel of the social preview shows for each kind of project, made
+# from the answers of Projects: the first text belongs to that kind alone, and the
+# style that only its panel needs.
+PANELS = {
+    "home-assistant": (
+        "sensor.demo_project_status",
+        "switch.demo_project_enabled",
+        "Settings → Devices &amp; services → Demo Project",
+        ".entity {",
+    ),
+    "nextcloud-app": (
+        "/apps/demo_project/",
+        "<h2>Demo Project</h2>",
+        '<span class="app current"><span class="monogram mini">DP</span></span>',
+        ".header {",
+    ),
+    "github-action": (
+        "<b>Dennis-Otto/demo-project@v1</b>",
+        '<span class="mono">.github/workflows/ci.yml</span>',
+        "ran Demo Project in 4s",
+        ".term .hl {",
+    ),
+    "python-package": (
+        "<b>pip install demo-project</b>",
+        "<b>import demo_project</b>",
+        "Successfully installed</span> demo-project-1.0.0",
+        ".term {",
+    ),
+    "node-package": (
+        "<b>npm install demo-project</b>",
+        '<b>await import("demo-project")</b>',
+        "[Module: null prototype] { … }",
+        ".term {",
+    ),
+    "chrome-extension": (
+        '<div class="row">On for this site<span class="switch"></span></div>',
+        '<div class="monogram mini">DP</div>Demo Project</div>',
+        '<div class="url">example.com</div>',
+        ".popup {",
+    ),
+    "cloudflare-worker": (
+        "host: demo-project.dennis-otto.workers.dev",
+        "answered at Cloudflare's edge",
+        "server: cloudflare",
+        ".http {",
+    ),
+    "container": (
+        "<b>    ghcr.io/dennis-otto/demo-project</b>",
+        "latest: Pulling from dennis-otto/demo-project",
+        "Status: Downloaded newer image",
+        ".term {",
+    ),
+    "generic": (
+        "gh repo clone Dennis-Otto/demo-project",
+        '<span class="mono">README.md</span>',
+        "<h2>Demo Project</h2>",
+        ".readme h2 {",
+    ),
+}
+
+
+class Tags(HTMLParser):
+    """The elements of a page that are still open, which fails on one that closes
+    another: a template that renders a panel shows no broken page."""
+
+    VOID = frozenset({"meta", "link", "img", "br"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.open: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in self.VOID:
+            self.open.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        assert self.open.pop() == tag, tag
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_social_preview_shows_a_drawing_of_the_project(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # Not the blueprint's checks, the same in every repository, but what a project of
+    # its kind shows, made from its answers: the template knows no more of it. The
+    # panel says that it's the default, and the checklist asks for the project itself
+    # until the panel is replaced.
+    project = projects[kind]
+    preview = (project / ".github/social-preview.html").read_text(encoding="utf-8")
+
+    for text in PANELS[kind]:
+        assert text in preview, text
+    for other, texts in PANELS.items():
+        assert (texts[0] in preview) == (other == kind), other
+    for old in ("CodeQL", "<b>Checks</b> on every change", "Issue assistant"):
+        assert old not in preview, old
+    assert preview.startswith("<!doctype html>\n")
+    assert '<div class="monogram">DP</div>' in preview
+    assert (
+        f'<p class="text">A {kind} of the tests, with &#34;quotes&#34; and Ümlauts.</p>'
+        in preview
+    )
+    assert f'<div class="panel" {DEFAULT_PANEL}>' in preview
+    assert "Replace it\n     with the project itself" in preview
+    assert "such as one that\n     scripts/screenshots.sh takes" in preview
+    assert "bash scripts/social-preview.sh" in preview
+    tags = Tags()
+    tags.feed(preview)
+    tags.close()
+    assert tags.open == []
+    step = social_preview(project)
+    assert step.text == "Social preview shows the project"
+    assert step.done is False
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the

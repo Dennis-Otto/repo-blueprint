@@ -33,6 +33,7 @@ from blueprint.checklist import (
     release_app_name,
     renovate,
     reuse_compliant,
+    social_preview,
 )
 from blueprint.github import Api, GitHubError, Response
 from blueprint.settings import (
@@ -3464,6 +3465,9 @@ def test_the_checklist_of_a_new_repository(
     (root / ".github/FUNDING.yml").write_text(
         "github: [Dennis-Otto]\n", encoding="utf-8"
     )
+    (root / ".github/social-preview.html").write_text(
+        '<div class="panel" data-default-panel>\n', encoding="utf-8"
+    )
 
     assert run(github, root, "checklist") == 1
 
@@ -3473,7 +3477,11 @@ def test_the_checklist_of_a_new_repository(
     assert "✔ Community profile complete (100 %)" in out
     assert "app connect --key-file FILE" in out
     assert "· Settings → General → Features: Sponsorships on" in out
-    assert "✘ Social preview uploaded" in out
+    # The drawing of its kind first, which the project replaces before the upload.
+    assert out.index("✘ Social preview shows the project") < out.index(
+        "✘ Social preview uploaded"
+    )
+    assert "a faithful drawing of what it produces, without data-default-panel" in out
     assert "✘ OpenSSF Best Practices badge" in out
     assert "✘ OpenSSF Baseline badge" in out
     # Without a project, the form of a new one, which reads .bestpractices.json.
@@ -3507,10 +3515,45 @@ def test_the_checklist_of_a_finished_repository(
     assert "✔ Secrets of the environments set" in out
     assert "✔ Community profile complete (100 %)" in out
     assert "✔ Renovate runs: it has opened a pull request" in out
+    assert "✔ Social preview shows the project" in out
     assert "Sponsorships" not in out
     assert "✔ Registered with the REUSE API" in out
     assert "✔ OpenSSF Best Practices badge in the README" in out
     assert "✔ OpenSSF Baseline badge in the README" in out
+
+
+def test_the_checklist_asks_for_a_social_preview_of_the_project(root: Path) -> None:
+    # A new repository starts with a drawing of its kind of project, made from its
+    # answers; the step is done once the project shows itself.
+    page = root / ".github/social-preview.html"
+    page.write_text(
+        '<!doctype html>\n<div class="panel" data-default-panel>\n', encoding="utf-8"
+    )
+
+    step = social_preview(root)
+
+    assert step.text == "Social preview shows the project"
+    assert step.done is False
+    assert step.how.startswith(
+        ".github/social-preview.html still shows the blueprint's default panel"
+    )
+    assert "bash scripts/social-preview.sh" in step.how
+
+    # A repository made before keeps the card of the blueprint's checks that came
+    # first, the same in every repository.
+    page.write_text(
+        '<div class="panel">\n  <div class="card checks">\n', encoding="utf-8"
+    )
+    assert social_preview(root).done is False
+
+    page.write_text(
+        '<!doctype html>\n<img class="card" src="../docs/images/card.png">\n',
+        encoding="utf-8",
+    )
+    assert social_preview(root).done is True
+    # A project that shows its preview without the page has nothing to replace.
+    page.unlink()
+    assert social_preview(root).done is True
 
 
 @pytest.mark.parametrize(
@@ -3645,7 +3688,7 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 12
+        assert len(texts) == 13
     else:
         assert any(text in step for step in texts)
 
