@@ -1,5 +1,5 @@
 ---
-description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein create, das bei seiner Vorabprüfung oder mittendrin anhält, ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
+description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein create, das bei seiner Vorabprüfung oder mittendrin anhält, ein Skript, das nicht ausführbar ist, ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
 ---
 
 # Fehlerbehebung
@@ -39,6 +39,26 @@ Die meisten Probleme erklären sich dort, wo sie auftreten: Eine Prüfung, die s
 **Warum:** `gh repo create` legt das Repository auf GitHub an und fügt `origin` hinzu, bevor es pusht, deshalb hinterlassen ein Push oder Einstellungen, die scheiterten, ein Repository, das da ist.
 
 **Was zu tun ist:** Starte `python3 .github/blueprint.py create` noch einmal. Pusht `origin` zum Repository der Antworten, und GitHub hat es, macht `create` beim ersten Schritt weiter, der noch fehlt: dem Push von `main`, wenn GitHub noch keinen Branch `main` hat, angemeldet durch gh wie bei `gh repo create --push`, dann `settings apply` und die Checkliste, die nur ändern, was abweicht. Ein Ordner, der zu einem anderen Repository pusht, ist keine neue Kopie, und `create` lehnt ihn ab.
+
+## Ein Skript oder der Hook ist nicht ausführbar
+
+**Was du siehst:** Die Prüfung scheitert in ihrem Schritt *Git hooks* mit `.githooks/pre-push: is not executable, so git skips it`, oder `./scripts/check.sh` antwortet unter Linux, unter macOS oder im Dev-Container mit `Permission denied`.
+
+**Warum:** Git führt einen Hook, und eine Shell ein Skript über seinen Pfad, nur aus, wenn seine Datei ausführbar ist, was Git als Modus `100755` festhält. Windows hat keinen solchen Modus, deshalb hält Git für Windows eine neue Datei als einfache fest, `100644`. `create` hält jede Datei, die die Vorlage als ausführbar markiert, vor dem ersten Commit als ausführbar fest, und Copier behält den Modus einer Datei, die Git schon hat, aber ein Repository, das `create` eines älteren Releases unter Windows angelegt hat, hat einfache Dateien, ebenso ein Skript, das `copier update` von Hand unter Windows als neue Datei hinzufügt. Der Blueprint-Bot aktualisiert unter Linux, wo der Modus mitkommt.
+
+**Was zu tun ist:** Halte die Dateien auf einem Branch als ausführbar fest und führe das in einem Pull Request zusammen, auf jeder Plattform, etwa für den Hook und die Skripte des Blueprints:
+
+```sh
+git fetch origin main
+git switch --force-create executable-scripts FETCH_HEAD
+chmod +x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
+git update-index --chmod=+x .githooks/pre-push .devcontainer/setup.sh .github/blueprint.py .github/sign-tag.sh scripts/*.sh
+git commit --signoff --message 'chore: make the hook and the scripts executable'
+git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --set-upstream origin HEAD
+gh pr create --fill
+```
+
+`chmod +x` macht die Dateien auf der Platte ausführbar, unter Linux, macOS und im Dev-Container, und `git update-index --chmod=+x` sie im Commit, auch unter Windows. Die Regeln von `main` verlangen eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Ein Container hat außerdem `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` zeigt den Modus jeder Datei, `100755` für eine ausführbare. In Git Bash unter Windows nennt die Zeile mit `scripts/*.sh` jedes Skript.
 
 ## Ein Update des Blueprints hat Konflikte
 
