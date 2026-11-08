@@ -175,7 +175,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 
 - **Website:** The documentation in `docs/` as a website with search and a light and a dark theme, in English and German.
 - **Diagrams:** Every diagram is a picture of its Mermaid source, so that the GitHub app shows it too.
-- **Screenshots:** A bot renews the pictures of the project, only when their pixels change.
+- **Screenshots:** A bot renews the pictures of the project, only when their pixels change, and draws the changed pixels of each in red.
 
 ### [Settings as code](docs/features/settings.md)
 
