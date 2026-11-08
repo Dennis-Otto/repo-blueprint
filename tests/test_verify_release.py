@@ -837,7 +837,8 @@ def test_a_complete_release_verifies_with_every_check_of_the_step(
     # The bundle and the statement are what the others are checked with. Each asset is
     # checked twice: in GitHub, and with the bundle that a user gets with the release.
     signer = "--signer-workflow o/r/.github/workflows/build-release.yml"
-    assert done.commands == [
+    assert re.fullmatch(GITSIGN_DOWNLOAD, done.commands[3])
+    assert done.commands[:3] + done.commands[4:] == [
         f"api repos/o/r/releases/tags/{TAG}",
         f"api repos/o/r/commits/{TAG} --jq .sha",
         SIGNED_COMMIT,
@@ -935,7 +936,7 @@ def test_a_download_of_gitsign_that_github_fails_for_a_while_is_tried_again(
     done = verify(tmp_path, downloads=(1, 1, 1, 0))
 
     assert done.returncode == 0, done.stdout + done.stderr
-    assert len(done.called("release download v")) == 4
+    assert len(done.called(GITSIGN_DOWNLOAD)) == 4
     assert [call for call in done.stubbed if call.startswith("sleep ")][:3] == [
         "sleep 10",
         "sleep 20",

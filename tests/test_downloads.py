@@ -616,10 +616,11 @@ def run_with_lychee(
     files: Mapping[str, str] | None = None,
 ) -> StepResult:
     """Runs the step with the scripts of .github and a stand-in for the lychee that a
-    step before installed."""
+    check before installed, executable, so that nothing is downloaded."""
     assert LYCHEE_VERSION
     stub(tmp_path / "stubs", "report", report)
     stub(tmp_path / "stubs", "code", f"{code}\n")
+    stub(tmp_path / f"runner/lychee-{LYCHEE_VERSION[1]}", "lychee", FAKE_LYCHEE)
     return run_step(
         tmp_path,
         workflow,
@@ -629,9 +630,10 @@ def run_with_lychee(
         files={
             ".github/lychee.sh": (ROOT / ".github/lychee.sh").read_text("utf-8"),
             ".github/download.sh": (ROOT / ".github/download.sh").read_text("utf-8"),
-            f"$RUNNER_TEMP/lychee-{LYCHEE_VERSION[1]}/lychee": FAKE_LYCHEE,
             **(files or {}),
         },
+        # A download, which none of these tests plans, waits for nothing.
+        stubs={"sleep": recording("sleep")},
     )
 
 
