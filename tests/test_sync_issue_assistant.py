@@ -796,10 +796,13 @@ def adopt_job() -> dict[str, Any]:
     return workflow_steps.job(WORKFLOW.name, "adopt")
 
 
-def test_the_sync_runs_every_morning_by_hand_and_for_its_pull_requests() -> None:
+def test_the_sync_runs_every_hour_by_hand_and_for_its_pull_requests() -> None:
     parsed = workflow_steps.workflow(WORKFLOW.name)
     events = parsed["on"]
-    assert events["schedule"] == [{"cron": "20 5 * * *"}]
+    # At 20 past each full hour, so that a release reaches the blueprint soon after it
+    # is published, and never on the full hour, at which GitHub starts the most
+    # schedules late.
+    assert events["schedule"] == [{"cron": "20 * * * *"}]
     assert "dry_run" in events["workflow_dispatch"]["inputs"]
     # A pull request that changes the bot runs it as a dry run.
     assert events["pull_request"]["paths"][:3] == [
@@ -852,9 +855,13 @@ def test_the_job_of_the_pull_request_runs_nothing_of_the_release() -> None:
     # The release app, in the environment that only main may use, and never in a pull
     # request or a dry run.
     assert pull["environment"]["name"] == "release"
+    # Nor in an hourly look that has nothing to open or close.
     assert condition_of(pull) == (
         "vars.RELEASE_AUTOMATION_CLIENT_ID != '' && github.event_name != 'pull_request'"
-        " && inputs.dry_run != true"
+        " && inputs.dry_run != true && needs.adopt.outputs.idle != 'true'"
+    )
+    assert workflow_steps.job(WORKFLOW.name, "adopt")["outputs"]["idle"] == (
+        "${{ steps.release.outputs.idle }}"
     )
     token = step_in(pull, "Create a token of the release app")
     assert token["with"]["permission-workflows"] == "write"
@@ -900,13 +907,17 @@ def bad_gateway(pattern: str) -> Answer:
 
 def planned(kind: str, outcome: str, tag: str) -> Answer:
     """The answer of gh for an outcome that the test planned for a kind of call: the
-    latest release, its attestation, or whether it is immutable."""
+    latest release, its attestation, whether it is immutable, or the branch of the
+    bot."""
     if kind == "release":
         assert outcome == "fail", outcome
         return bad_gateway(r"release view .*")
     if kind == "immutable":
         assert outcome == "fail", outcome
         return bad_gateway(rf"api repos/{SOURCE}/releases/tags/v1\.3\.1 .*")
+    if kind == "branch":
+        assert outcome == "fail", outcome
+        return bad_gateway(r"api repos/o/r/git/matching-refs/.*")
     assert kind == "attestation", kind
     verify = r"release verify .*"
     if outcome == "fail":
@@ -930,7 +941,8 @@ def github(
     one call each, then the usual ones. GitHub has the latest release tag at commit,
     immutable or not, status against the main of the issue assistant, the open pull
     requests of the bot, each as its number and its title, the commits of others on
-    its branch, and of the branches of the blueprint those named."""
+    its branch, and of the branches of the blueprint those named, of which the filter
+    of --jq counts the branch of the bot."""
     once = [
         dataclasses.replace(planned(kind, outcome, tag), once=True)
         for kind, outcomes in plans.items()
@@ -943,6 +955,10 @@ def github(
         Answer(rf"api repos/{SOURCE}/commits/.*", f"{commit}\n"),
         Answer(rf"api repos/{SOURCE}/releases/tags/v1\.3\.1 .*", f"{immutable}\n"),
         Answer(rf"api repos/{SOURCE}/compare/.*", f"{status}\n"),
+        Answer(
+            r"api repos/o/r/git/matching-refs/heads/bot/issue-assistant --jq .*",
+            f"{branches.count('bot/issue-assistant')}\n",
+        ),
         Answer(r"pr list .*", open_pulls),
         Answer(r"pr (?:close|merge|edit|create) .*"),
         exact("api users/app[bot] --jq .id", "42\n"),
@@ -1036,7 +1052,7 @@ def test_the_sync_finds_the_latest_release(
         "tag": "v1.3.1",
         "commit": NEW,
         "url": URL,
-        **({"current": "true"} if current else {}),
+        **({"current": "true", "idle": "true"} if current else {}),
     }
     assert result.summary == (
         "The blueprint has the issue assistant v1.3.1, the latest release.\n"
@@ -1050,6 +1066,90 @@ def test_the_sync_finds_the_latest_release(
         f"api repos/{SOURCE}/commits/v1.3.1 --jq .sha",
     ]
     assert slept(result) == ["sleep 10"]
+
+
+CURRENT_LINT = LINT.replace(pin(OLD, "v1.2.2"), pin(NEW, "v1.3.1"))
+BRANCH_FILTER = '[.[] | select(.ref == "refs/heads/bot/issue-assistant")] | length'
+MATCHING_REFS = "api repos/o/r/git/matching-refs/heads/bot/issue-assistant"
+
+
+@runs_the_script
+@needs_bash
+@pytest.mark.parametrize(
+    ("branches", "plans", "idle"),
+    [
+        ((), {}, True),
+        (("bot/issue-assistant",), {}, False),
+        ((), {"branch": ["fail", "fail", "fail"]}, False),
+    ],
+)
+def test_the_hourly_look_ends_without_the_pull_request_when_it_has_nothing_to_do(
+    tmp_path: Path,
+    branches: tuple[str, ...],
+    plans: dict[str, list[str]],
+    idle: bool,
+) -> None:
+    # The blueprint has the latest release. Without the branch of the bot, there is no
+    # pull request to close, so its job with the release app doesn't run; a branch,
+    # or a question about it that GitHub didn't answer, leaves it to that job.
+    with_script(
+        written(workspace(tmp_path), {".github/workflows/lint.yml": CURRENT_LINT})
+    )
+
+    result = run_step(tmp_path, FIND, plans=plans, answers={"branches": branches})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.outputs == {
+        "tag": "v1.3.1",
+        "commit": NEW,
+        "url": URL,
+        "current": "true",
+        **({"idle": "true"} if idle else {}),
+    }
+    asked = 3 if plans else 1
+    assert result.commands == [
+        RELEASE_VIEW,
+        f"api repos/{SOURCE}/commits/v1.3.1 --jq .sha",
+        *[f"{MATCHING_REFS} --jq {BRANCH_FILTER}"] * asked,
+    ]
+    assert slept(result) == (["sleep 10", "sleep 20"] if plans else [])
+
+
+@runs_the_script
+@needs_bash
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the filter of gh needs jq")
+@pytest.mark.parametrize(
+    ("refs", "idle"),
+    [
+        ([], True),
+        # The scratch branch of a commit, which shares the name's start, is no branch
+        # of a pull request.
+        (["bot/issue-assistant-next"], True),
+        (["bot/issue-assistant", "bot/issue-assistant-next"], False),
+    ],
+)
+def test_the_hourly_look_counts_the_branch_of_the_bot_alone(
+    tmp_path: Path, refs: list[str], idle: bool
+) -> None:
+    with_script(
+        written(workspace(tmp_path), {".github/workflows/lint.yml": CURRENT_LINT})
+    )
+    # GitHub lists every branch whose name starts with that of the bot.
+    listed = Answer(
+        rf"{MATCHING_REFS} --jq .*",
+        json=[{"ref": f"refs/heads/{name}", "object": {"sha": NEW}} for name in refs],
+    )
+
+    result = workflow_steps.run_step(
+        tmp_path,
+        WORKFLOW.name,
+        *FIND,
+        answers=[listed, *github({})],
+        stubs={"sleep": workflow_steps.recording("sleep"), "python3": PYTHON3},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.outputs.get("idle") == ("true" if idle else None)
 
 
 @runs_the_script
