@@ -73,6 +73,9 @@ LATE = timedelta(hours=6)
 # The daily look starts at most this many workflows whose schedule GitHub missed, so
 # that it doesn't take the runners of the account from the pull requests.
 MOST_STARTS = 4
+# How many earlier runs that passed the daily look reads when the latest passed
+# without a job that failed, so that its requests stay few.
+LOOK_BACK = 5
 # The failed jobs that an issue lists, and the length of a line from a log.
 MOST_JOBS = 10
 LONGEST = 200
@@ -492,15 +495,31 @@ def not_passed_again(api: Api, repo: str, run: Run, issue: Issue) -> list[str]:
         return []
     # The latest try of each job, also of one that a second try of the failed jobs
     # left as it was.
-    legs: dict[str, set[str]] = {}
-    for job in api.get_all(
-        f"repos/{repo}/actions/runs/{run.id}/jobs?filter=latest&per_page=100"
-    ):
-        legs.setdefault(base_name(str(job["name"])), set()).add(
-            str(job.get("conclusion") or "")
+    jobs = [
+        (str(job["name"]), str(job.get("conclusion") or ""))
+        for job in api.get_all(
+            f"repos/{repo}/actions/runs/{run.id}/jobs?filter=latest&per_page=100"
         )
-    names = {base_name(str(job["name"])) for job in failed}
-    return sorted(name for name in names if legs.get(name, set()) != {PASSED})
+    ]
+    missing = set()
+    for job in failed:
+        name = str(job["name"])
+        base = base_name(name)
+        if base == name:
+            # A job outside a matrix is only itself, not a matrix that shares its name,
+            # such as e2e beside e2e (Home Assistant beta).
+            legs = {conclusion for other, conclusion in jobs if other == name}
+        else:
+            # A leg: every leg of its matrix, or the matrix as GitHub names it when it
+            # skipped it as a whole.
+            legs = {
+                conclusion
+                for other, conclusion in jobs
+                if other == base or other.startswith(f"{base} (")
+            }
+        if legs != {PASSED}:
+            missing.add(base)
+    return sorted(missing)
 
 
 def run_again(api: Api, repo: str, run: Run) -> str | None:
@@ -861,6 +880,42 @@ def ran_as_scheduled(
     )
 
 
+def passed_before(
+    api: Api,
+    repo: str,
+    branch: str,
+    runs: Sequence[Run],
+    finished: Run,
+    issues: Mapping[str, Issue],
+    now: datetime,
+    note: str,
+    *,
+    after_checks: bool,
+) -> str:
+    """The note of the latest finished run, or of an earlier one that closes the issue
+    when the latest passed without a job that failed. The daily look stands in for
+    an end of a run that GitHub lost, which may be that of a run before the latest,
+    as one that rendered before a push that only planned; it looks at the
+    LOOK_BACK latest of them that came after the failure."""
+    if not note.startswith("passes, but without"):
+        return note
+    since = int(issues[finished.key].state.get("run") or 0)
+    earlier = [
+        run
+        for run in runs
+        if run.id != finished.id
+        and run.id > since
+        and run.status == "completed"
+        and run.conclusion == PASSED
+        and not (after_checks and run.event == "workflow_run")
+    ][:LOOK_BACK]
+    for run in earlier:
+        closed = look_at(api, repo, branch, run, issues, now, second_try=False)
+        if closed.startswith("passes again"):
+            return closed
+    return note
+
+
 def look_after(
     api: Api,
     repo: str,
@@ -906,7 +961,19 @@ def look_after(
         # and bot health doesn't watch its end.
         second_try = finished.name in CHECKED_BEFORE_THE_MERGE
         notes.append(
-            look_at(api, repo, branch, finished, issues, now, second_try=second_try)
+            passed_before(
+                api,
+                repo,
+                branch,
+                runs,
+                finished,
+                issues,
+                now,
+                look_at(
+                    api, repo, branch, finished, issues, now, second_try=second_try
+                ),
+                after_checks=after_checks,
+            )
         )
     if workflow["state"] == "disabled_inactivity":
         api.put(f"repos/{repo}/actions/workflows/{workflow['id']}/enable")

@@ -644,6 +644,31 @@ def test_a_leg_of_a_matrix_that_failed_needs_every_leg_to_pass(
         )
 
 
+@pytest.mark.parametrize(
+    ("jobs", "closes"),
+    [
+        # A matrix whose name starts like the job is another job, and its skipped
+        # legs don't keep the issue open.
+        ([("e2e", "success"), ("e2e (Home Assistant beta)", "skipped")], True),
+        ([("e2e", "skipped"), ("e2e (Home Assistant beta)", "success")], False),
+        ([("e2e (Home Assistant beta)", "success")], False),
+    ],
+)
+def test_a_job_outside_a_matrix_counts_only_by_its_own_name(
+    github: FakeGitHub, jobs: list[tuple[str, str]], closes: bool
+) -> None:
+    number = screenshots_failed(github, ("e2e", "failure"))
+
+    result = screenshots_passed(github, *jobs)
+
+    if closes:
+        assert result == f"Screenshots: passes again: closed #{number}."
+    else:
+        assert result == (
+            f"Screenshots: passes, but without the job `e2e` that failed in #{number}."
+        )
+
+
 def test_a_run_that_passes_without_an_issue_changes_nothing(
     github: FakeGitHub,
 ) -> None:
@@ -1136,45 +1161,63 @@ def test_the_daily_look_closes_an_issue_only_when_the_jobs_that_failed_pass(
     github: FakeGitHub, tmp_path: Path
 ) -> None:
     path = ".github/workflows/w{}.yml"
-    github.workflows = [workflow(1, "Docs pictures"), workflow(2, "Screenshots")]
+    github.workflows = [
+        workflow(1, "Docs pictures"),
+        workflow(2, "Screenshots"),
+        workflow(3, "Visual"),
+    ]
     github.workflow_runs = {
         1: [
             run_of(12, name="Docs pictures", path=path.format(1), conclusion="success")
         ],
-        # A push that only planned, after a run that rendered and passed: the end of
-        # that run would have closed the issue, the latest run doesn't.
+        # A push that only planned, after a run that rendered and passed, whose end
+        # GitHub lost: the earlier run closes the issue.
         2: [
             run_of(23, name="Screenshots", path=path.format(2), conclusion="success"),
             run_of(22, name="Screenshots", path=path.format(2), conclusion="success"),
         ],
+        # Only runs that planned, and one that rendered before the failure.
+        3: [
+            run_of(33, name="Visual", path=path.format(3), conclusion="success"),
+            run_of(32, name="Visual", path=path.format(3), conclusion="success"),
+            run_of(30, name="Visual", path=path.format(3), conclusion="success"),
+        ],
     }
     pictures = github.add_issue(path.format(1), run=11, attempt=1, failed=1)
     screenshots = github.add_issue(path.format(2), run=21, attempt=1, failed=2)
+    visual = github.add_issue(path.format(3), run=31, attempt=1, failed=1)
     github.jobs[(11, 1)] = [job_of_a_run(1, "render", "failure")]
     github.jobs[(12, 1)] = [job_of_a_run(2, "render", "success")]
-    github.jobs[(21, 1)] = [
-        job_of_a_run(3, PLAN, "success"),
-        job_of_a_run(4, RENDER, "failure"),
-    ]
-    github.jobs[(22, 1)] = [
-        job_of_a_run(5, PLAN, "success"),
-        job_of_a_run(6, RENDER, "success"),
-    ]
-    github.jobs[(23, 1)] = [
-        job_of_a_run(7, PLAN, "success"),
-        job_of_a_run(8, RENDER, "skipped"),
-    ]
+    for run in (21, 31):
+        github.jobs[(run, 1)] = [
+            job_of_a_run(run * 10, PLAN, "success"),
+            job_of_a_run(run * 10 + 1, RENDER, "failure"),
+        ]
+    for run, rendered in ((22, "success"), (23, "skipped"), (30, "success")):
+        github.jobs[(run, 1)] = [
+            job_of_a_run(run * 10, PLAN, "success"),
+            job_of_a_run(run * 10 + 1, RENDER, rendered),
+        ]
+    for run in (32, 33):
+        github.jobs[(run, 1)] = [
+            job_of_a_run(run * 10, PLAN, "success"),
+            job_of_a_run(run * 10 + 1, RENDER, "skipped"),
+        ]
 
     summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
 
     assert healthy
     assert summary.splitlines()[6:] == [
         f"| `Docs pictures` | passes again: closed #{pictures} |",
-        f"| `Screenshots` | passes, but without the job `{RENDER}` that failed in "
-        f"#{screenshots} |",
+        f"| `Screenshots` | passes again: closed #{screenshots} |",
+        f"| `Visual` | passes, but without the job `{RENDER}` that failed in "
+        f"#{visual} |",
     ]
     assert github.issues[pictures]["state"] == "closed"
-    assert github.issues[screenshots]["state"] == "open"
+    assert github.issues[screenshots]["state"] == "closed"
+    assert github.issues[visual]["state"] == "open"
+    # The run before the failure isn't read.
+    assert not [path for _, path in github.calls if "/runs/30/" in path]
 
 
 LINT = SCHEDULED.replace("  schedule:", "  pull_request:\n  schedule:")

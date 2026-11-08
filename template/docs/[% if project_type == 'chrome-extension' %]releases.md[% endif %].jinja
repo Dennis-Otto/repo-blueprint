@@ -142,7 +142,7 @@ The daily sign-in keeps the refresh token in use, so Google doesn't expire it af
 
 ## When a run fails
 
-A failed run names the reason and the fix in its summary and in an annotation, and the bot-health sweep of the night opens an issue with the label `bot-failure`, which the next run that passes closes:
+A failed run names the reason and the fix in its summary and in an annotation, and the bot-health sweep of the night opens an issue with the label `bot-failure`, which closes once a run passes in which the job that failed ran again and passed; a daily run without a new release skips the package and leaves the issue open:
 
 - **A variable or a secret is missing:** set it as [the first listing](#the-first-listing) and [the sign-in](#sign-in-without-a-stored-secret) say.
 - **Google turned the refresh token away** (`invalid_grant`), or **doesn't know the OAuth client:** [sign in without a stored secret](#sign-in-without-a-stored-secret), or set the secrets of [the refresh token](#sign-in-with-a-refresh-token) again.
