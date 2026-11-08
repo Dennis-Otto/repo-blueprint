@@ -825,7 +825,15 @@ test("a page that leads to another address is checked as it shows, and the summa
   assert.ok(one.lines.includes("It checked 1 page(s) that lead to another address, by a refresh or a script, as they show before they leave, and followed none: `refresh.html` to https://website.test/other/games.html."));
 });
 
-test("a frame of a page loads its own page, which the page doesn't leave for", async (t) => {
+suite("the accessibility check", { concurrency: CONCURRENCY }, () => {
+  for (const { name, fn } of tests) {
+    nodeTest(name, fn);
+  }
+});
+
+// axe-core gives up on a frame that takes it more than a second to load into, and drops
+// its findings without a word, so this test runs alone, after the others, on idle cores.
+nodeTest("a frame of a page loads its own page, which the page doesn't leave for", async (t) => {
   const built = await mkdtemp(path.join(tmpdir(), "a11y-frames-"));
   t.after(() => rm(built, { recursive: true, force: true }));
   await writeFile(path.join(built, "framed.html"), styled('<iframe title="Faint" src="faint.html"></iframe>'));
@@ -834,10 +842,4 @@ test("a frame of a page loads its own page, which the page doesn't leave for", a
 
   assert.deepEqual(failing(findings, "framed.html", "color-contrast"), ["light"]);
   assert.deepEqual(redirects, []);
-});
-
-suite("the accessibility check", { concurrency: CONCURRENCY }, () => {
-  for (const { name, fn } of tests) {
-    nodeTest(name, fn);
-  }
 });
