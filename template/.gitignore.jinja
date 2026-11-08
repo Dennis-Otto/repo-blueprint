@@ -33,10 +33,13 @@ credentials*.json
 /site/
 /.venv-docs/
 /.cache/
-[% if stack in ['python', 'home-assistant'] %]
-# Python
+
+# The bytecode of Python, also of the tools that every repository runs, such as
+# .github/blueprint.py, which the step Binary files of scripts/check.sh would name
 __pycache__/
 *.py[cod]
+[% if stack in ['python', 'home-assistant'] %]
+# Python
 /.venv/
 /.coverage
 /.coverage.*

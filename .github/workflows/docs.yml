@@ -20,8 +20,8 @@ name: Docs
 # locked tools of .github/a11y/: on a pull request those that differ from main, by the
 # digest that main keeps in the cache, and on main and every week every page. A serious
 # or critical violation fails the check, unless .github/a11y-accepted.toml accepts it
-# with its reason. The job that publishes the website signs its provenance and asks the
-# published website for its pages.
+# with its reason. The job that publishes the website signs its provenance, and the job
+# website, which holds no token, asks the published website for its pages.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:

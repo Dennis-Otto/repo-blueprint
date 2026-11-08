@@ -65,6 +65,7 @@ import pins
 import reference
 from blueprint import bootstrap, ownership, screenshots
 from blueprint.app import App, answered_app
+from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -767,7 +768,7 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
 
 # The jobs that SECURITY.md names as holding a secret or a token that may write, yet
 # only recording their network traffic, each with its reason there; every other such
-# job blocks every host that it doesn't need (decisions 0080 and 0129). The Renovate
+# job blocks every host that it doesn't need (decisions 0080 and 0130). The Renovate
 # of the blueprint is named by the repository of the blueprint, where it runs.
 RECORDING = re.compile(
     r"^  - `([\w.-]+\.yml)`(?: of \[[^\]]+\]\(https://github\.com/[^)]+\))?,"
@@ -848,16 +849,11 @@ def test_every_privileged_job_blocks_the_hosts_that_it_doesnt_need(
             continue
         assert policy["egress-policy"] == "block", where
         assert hardening[0]["name"] == "Block every host that the job doesn't need"
-        # No sudo and no Docker, but where the Nextcloud app installs krankerl, and in
-        # Scorecard, which runs as an action in a container of its own.
+        # No sudo and no Docker, but where the Nextcloud app installs krankerl.
         sudo = policy.get("disable-sudo-and-containers")
-        assert (
-            sudo is True
-            or (
-                name == "build-release.yml"
-                and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
-            )
-            or (name, job_id, sudo) == ("scorecard.yml", "analysis", None)
+        assert sudo is True or (
+            name == "build-release.yml"
+            and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
         ), where
         endpoints = policy["allowed-endpoints"]
         for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
@@ -971,7 +967,7 @@ def test_codeql_only_records_where_it_may_fetch_the_dependencies_of_the_code(
 ) -> None:
     # CodeQL may fetch the dependencies of Go, Java or Kotlin, and Rust from hosts that
     # no run has shown yet: with one of them, its job only records, and SECURITY.md
-    # names it; with the others, it blocks every host but GitHub's (decision 0129).
+    # names it; with the others, it blocks every host but GitHub's (decision 0130).
     chosen = ["python", language] if language else ["python"]
     answers: dict[str, Any] = {"languages": chosen}
     project = render(
@@ -993,22 +989,54 @@ def test_codeql_only_records_where_it_may_fetch_the_dependencies_of_the_code(
     hardening = codeql["steps"][0]
     names = names_of(codeql)
     security = (project / "SECURITY.md").read_text(encoding="utf-8")
-    recording = {("release.yml", "pypi")}
+    recording = {("release.yml", "pypi"), ("scorecard.yml", "analysis")}
     if language:
         assert hardening["name"] == "Record the network traffic of the job"
         assert hardening["with"] == {"egress-policy": "audit"}
         # Nothing waits for hosts that the job names, or for Docker that it keeps.
         assert names[1].startswith("actions/checkout@")
         assert WAIT_FOR_DOCKER not in names
-        assert "website, zizmor and Scorecard: each" in security
+        assert "website and zizmor: each" in security
         recording.add(("codeql.yml", "codeql"))
     else:
         assert hardening["name"] == "Block every host that the job doesn't need"
         assert hardening["with"]["egress-policy"] == "block"
         assert names[1] == "Wait until Harden-Runner lets the hosts through"
         assert WAIT_FOR_DOCKER in names
-        assert "website, CodeQL, zizmor and Scorecard: each" in security
+        assert "website, CodeQL and zizmor: each" in security
     assert recording_jobs(project) == recording
+
+
+# The actions that the Scorecard API accepts in the job that publishes its results
+# (verify_workflow.go of ossf/scorecard-infra): a step without `uses`, such as one that
+# waits for the hosts of Harden-Runner, makes the API refuse the results and the job fail.
+SCORECARD_ACTIONS = {
+    "actions/checkout",
+    "actions/create-github-app-token",
+    "actions/upload-artifact",
+    "github/codeql-action/upload-sarif",
+    "ossf/scorecard-action",
+    "step-security/harden-runner",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_job_of_scorecard_has_only_the_steps_that_its_api_accepts(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    found = []
+    for name, text in workflows(root).items():
+        for job_id, job in parse(text)["jobs"].items():
+            steps = job.get("steps", [])
+            uses = [str(step.get("uses", "")).split("@")[0] for step in steps]
+            if "ossf/scorecard-action" not in uses:
+                continue
+            found.append((name, job_id))
+            for step, action in zip(steps, uses, strict=True):
+                assert "run" not in step, f"{name}: {job_id}: {step.get('name')}"
+                assert action in SCORECARD_ACTIONS, f"{name}: {job_id}: {action}"
+    assert found == [("scorecard.yml", "analysis")]
 
 
 WAIT_FOR_DOCKER = "Wait until Harden-Runner has removed Docker"
@@ -4220,6 +4248,11 @@ def pages_step(check: str) -> str:
     return check[start : check.index('step "Changelog fragments"', start)]
 
 
+def binaries_step(check: str) -> str:
+    start = check.index('step "Binary files"')
+    return check[start : check.index('step "Changelog fragments"', start)]
+
+
 def fragments_step(check: str) -> str:
     start = check.index('step "Changelog fragments"')
     return check[start : check.index('step "Accepted advisories"', start)]
@@ -4371,6 +4404,95 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "docker" not in fragments_step(check)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_git_holds_no_binary_that_nobody_can_review(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the files of the project, with the Python and blueprint.py of the pages,
+    # the same in every kind of project and in the blueprint, which the CI never skips.
+    assert (
+        check.index('\nstep "Files of the project"\n')
+        < check.index('\nstep "Binary files"\n')
+        < check.index('\nstep "Changelog fragments"\n')
+    )
+    assert binaries_step(check) == binaries_step(generic) == binaries_step(own)
+    assert '  "$python" "$tool" binaries\n' in binaries_step(check)
+    assert "which this runner lacks" in binaries_step(check)
+    # What OSPS-QA-05.01 and 05.02 of .bestpractices.json point to.
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    assert "The step *Binary files* of `scripts/check.sh` fails" in security
+    explained = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    assert "OSPS-QA-05.02" in explained["step"]["Binary files"]["why"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_bytecode_of_the_tools_is_no_binary_file_of_git(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # Every repository runs the Python of .github/, also one of Node, whose bytecode the
+    # step Binary files named in the CI before .gitignore left it out in every kind.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    for cache in (".github/__pycache__", ".github/blueprint/__pycache__"):
+        (project / cache).mkdir(parents=True, exist_ok=True)
+        (project / cache / "cli.cpython-314.pyc").write_bytes(b"\xcb\r\r\n\0\0")
+    (project / "data.bin").write_bytes(b"data\0more")
+
+    assert binaries(project) == [Binary("data.bin", UNREVIEWABLE)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_documents_its_dependencies_secrets_access_and_reviews(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # What OSPS-DO-06.01, OSPS-BR-07.02, OSPS-AC-02.01, OSPS-GV-04.01 and the code
+    # review standards and small tasks of the gold level stand on, in every kind.
+    project = projects[kind]
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for part in ("**Selecting.**", "**Obtaining.**", "**Tracking.**"):
+        assert part in security.split("## Dependencies", 1)[1], part
+    secrets = security.split("## Secrets and credentials", 1)[1].split("\n## ", 1)[0]
+    for part in ("**Storing.**", "**Accessing.**", "**Rotating.**", "never in Git"):
+        assert part in secrets, part
+    assert "the token of Claude for the issue assistant" in secrets
+    access = governance.split("## Maintainers and access", 1)[1].split("\n## ", 1)[0]
+    assert "until a maintainer invites them by hand" in access
+    assert "Before a person gets escalated permissions" in access
+    reviews = governance.split("## Reviews", 1)[1].split("\n## ", 1)[0]
+    for part in (
+        "How a pull request is reviewed",
+        "What the review checks",
+        "What is acceptable",
+    ):
+        assert part in reviews, part
+    assert "https://github.com/Dennis-Otto/demo-project/contribute" in contributing
+
+
+def test_a_project_without_the_ai_names_no_token_of_claude_among_its_secrets(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="generic",
+        issue_assistant_ai=False,
+    )
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+
+    assert "## Secrets and credentials" in security
+    assert "token of Claude" not in security
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -7657,6 +7779,23 @@ PROJECT_SPECIFIC = {
     # The check of the website only reports for now, and the user interface of an app
     # or of the cards of an integration is the project's own.
     "accessibility_best_practices",
+    # The other repositories of a project: N/A only when every release builds from
+    # this one alone, which only the owner knows.
+    "osps_qa_04_01",
+    "osps_qa_04_02",
+    # A statement in each source file: REUSE.toml gives them for every file at once.
+    "copyright_per_file",
+    "license_per_file",
+    # The coverage that the files of the project ask for, of the code that it measures,
+    # and a build that only a project can make reproducible.
+    "test_statement_coverage90",
+    "test_branch_coverage80",
+    "build_reproducible",
+    # What only the people of a project can say.
+    "security_review",
+    "contributors_unassociated",
+    "two_person_review",
+    "secure_2FA",
 }
 # Every answer of a repository: none of them can do without these.
 GUARANTEED = {
@@ -7680,6 +7819,15 @@ GUARANTEED = {
     "osps_vm_02_01",
     "osps_vm_04_02",
     "osps_vm_06_02",
+    # The rules of GOVERNANCE.md and SECURITY.md, and the step Binary files.
+    "small_tasks",
+    "code_review_standards",
+    "osps_ac_02_01",
+    "osps_br_07_02",
+    "osps_do_06_01",
+    "osps_gv_04_01",
+    "osps_qa_05_01",
+    "osps_qa_05_02",
 }
 
 

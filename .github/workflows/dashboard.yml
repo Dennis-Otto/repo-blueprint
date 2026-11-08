@@ -102,7 +102,7 @@ jobs:
         timeout-minutes: 5
         run: mkdocs build --strict
       # What the hooks of the website promise, as the check docs checks it, and the
-      # further languages, whose home pages the job that publishes asks for.
+      # further languages, whose home pages the job website asks for.
       - name: Check what the hooks of the website promise
         id: promises
         timeout-minutes: 5

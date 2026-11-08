@@ -24,85 +24,10 @@ jobs:
       security-events: write
       id-token: write
     steps:
-      - name: Block every host that the job doesn't need
+      - name: Record the network traffic of the job
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
-          egress-policy: block
-          allowed-endpoints: >-
-            api.github.com:443
-            github.com:443
-            codeload.github.com:443
-            api.deps.dev:443
-            api.osv.dev:443
-            api.scorecard.dev:443
-            www.bestpractices.dev:443
-            oss-fuzz-build-logs.storage.googleapis.com:443
-            fulcio.sigstore.dev:443
-            rekor.sigstore.dev:443
-            tuf-repo-cdn.sigstore.dev:443
-            *.actions.githubusercontent.com:443
-      # GitHub's DNS experiment on some of its runners hides the lookups of the job from
-      # Harden-Runner, which then blocks the hosts of the job and of the runner until the
-      # time limit (step-security/harden-runner#708). Harden-Runner takes it away unless
-      # its feature flags say no; a job that keeps sudo makes sure (decision 0123).
-      - name: Let Harden-Runner see the DNS lookups
-        run: |
-          dropins=(/etc/systemd/resolved.conf.d/90-egress-proxy.conf /run/systemd/resolved.conf.d/90-egress-proxy.conf)
-          if [[ ! -e ${dropins[0]} && ! -e ${dropins[1]} ]] && ! grep -qs 127.0.0.100 /etc/resolv.conf; then
-            exit 0
-          fi
-          echo "::notice::GitHub's DNS experiment is on this runner; taking it out of the way of Harden-Runner."
-          sudo rm -f "${dropins[@]}"
-          sudo systemctl restart systemd-resolved
-          sudo ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-          sudo systemctl stop egress-dns-resolver.service egress-outbound-proxy.service || true
-          sudo resolvectl flush-caches || true
-      - name: Wait until Harden-Runner lets the hosts through
-        # The runner may have asked for an address past Harden-Runner, which then blocks
-        # that address for as long as systemd-resolved keeps it, up to a minute.
-        timeout-minutes: 4
-        env:
-          HOSTS: >-
-            api.github.com:443
-            github.com:443
-            codeload.github.com:443
-            api.deps.dev:443
-            api.osv.dev:443
-            api.scorecard.dev:443
-            www.bestpractices.dev:443
-            oss-fuzz-build-logs.storage.googleapis.com:443
-            fulcio.sigstore.dev:443
-            rekor.sigstore.dev:443
-            tuf-repo-cdn.sigstore.dev:443
-            *.actions.githubusercontent.com:443
-        run: |
-          deadline=$(($(date +%s) + 120))
-          for endpoint in $HOSTS; do
-            host="${endpoint%:*}"
-            port="${endpoint##*:}"
-            # A wildcard names no host to ask, and a job may leave out a host that keeps it
-            # waiting although none of its steps needs it at once.
-            [[ "$host" == '*.'* || " $SKIP_WAIT " == *" $endpoint "* ]] && continue
-            # Each host on its own port, by HTTP on 80 and by HTTPS on any other. Only a host
-            # that curl can't resolve, or can't reach in time, is blocked: one that answers at
-            # all, in whatever protocol, is through.
-            scheme=https
-            [[ "$port" == 80 ]] && scheme=http
-            while true; do
-              status=0
-              curl --silent --head --connect-timeout 3 --max-time 5 --output /dev/null "$scheme://$host:$port/" || status=$?
-              case "$status" in
-                6 | 7 | 28) ;;
-                *) break ;;
-              esac
-              if (($(date +%s) >= deadline)); then
-                echo "::warning::Harden-Runner still blocks $endpoint after two minutes; a step that needs it will fail, and the job can run again."
-                break
-              fi
-              echo "Harden-Runner still blocks $endpoint, waiting 3 s."
-              sleep 3
-            done
-          done
+          egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

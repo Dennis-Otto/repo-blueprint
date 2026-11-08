@@ -1,6 +1,6 @@
 # Jobs with secrets or tokens that write block every host they don't need
 
-- Status: accepted, amended by [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md), by which every job that blocks first waits until Harden-Runner lets its hosts through, and by [0129](0129-jobs-that-reach-any-host-hold-no-token-that-writes.md), by which CodeQL, zizmor, Scorecard, the taint report and the publication of the website block too and `SECURITY.md` names the jobs that still only record
+- Status: accepted, amended by [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md), by which every job that blocks first waits until Harden-Runner lets its hosts through, and by [0130](0130-jobs-that-reach-any-host-hold-no-token-that-writes.md), by which CodeQL, zizmor, the taint report and the publication of the website block too and `SECURITY.md` names the jobs that still only record
 - Date: 2026-10-25
 
 ## Context
