@@ -7,6 +7,18 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.13.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.12.0...v1.13.0) (2026-11-08)
+
+### Features
+
+- **The screenshot bot can leave slow hosts out of its wait, give the script a time limit and keep what a failed render left:** `.github/screenshots.toml` can set three more keys. `skip_wait`, such as `["launchpad.net:443"]`, names hosts of `hosts` that the jobs don't wait for before the script runs, such as one that often keeps a runner waiting and that the script needs only later; the jobs still allow them. `timeout_minutes`, such as `21`, gives the script a time limit of 1 to 45 minutes, 45 without it, which always ends before the hour of the job, so that a hung render fails and keeps its folder; the script itself gets the signal with which GitHub ends it and has about ten seconds to stop its demo and say where it waited. `failure_folder`, such as `"tests/e2e/artifacts"`, is a folder that a failed shard keeps as the artifact `failed-render-<shard>-attempt-<attempt>` for seven days, for you to see what went wrong. The render still has no secrets, and the pull request never takes that folder ([#693](https://github.com/Dennis-Otto/repo-blueprint/issues/693)).
+
+### Bug fixes
+
+- **The bots ask GitHub for the version of its API:** every call of `gh api` in the workflows and in `blueprint.py` now sends `X-GitHub-Api-Version: 2022-11-28`, as GitHub recommends, so that the answers stay the same when the GitHub CLI or GitHub moves to a newer version of its REST API ([#690](https://github.com/Dennis-Otto/repo-blueprint/issues/690)). A workflow that a project adds of its own can ask the same way: `API_VERSION_HEADER: "X-GitHub-Api-Version: 2022-11-28"` in its `env:`, and `gh api --header "$API_VERSION_HEADER" …` for each call.
+- **A job behind Harden-Runner no longer hangs when StepSecurity's API is busy:** on some of GitHub's runners, a job that blocks every host that it doesn't need could still hang until its time limit when Harden-Runner couldn't fetch its feature flags, because StepSecurity's API answered `429`. The workflows move to Harden-Runner v2.22.4, which takes GitHub's DNS experiment out of its way then too, and a job that blocks and keeps `sudo`, the render of the screenshot bot and the build of a Nextcloud app, also takes it away itself, right after Harden-Runner. A workflow of your project's own that pins Harden-Runner gets v2.22.4 from Renovate, or take it at once; one that blocks and keeps `sudo` can copy the step *Let Harden-Runner see the DNS lookups* from `.github/workflows/screenshot-bot.yml` right after Harden-Runner ([#689](https://github.com/Dennis-Otto/repo-blueprint/issues/689)).
+- **A job no longer waits two minutes for a host on another port than 443:** a job behind Harden-Runner asked each of its hosts on port 443 before its first step, also one that it may reach only on another port, such as a mirror of apt on port 80, and so waited two minutes and warned on every run. It now asks each host on its own port, by HTTP on 80 and by HTTPS on any other, and a host that answers at all counts as reachable ([#693](https://github.com/Dennis-Otto/repo-blueprint/issues/693)).
+
 ## [1.12.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.11.3...v1.12.0) (2026-11-08)
 
 ### Features
