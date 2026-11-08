@@ -1,0 +1,263 @@
+TAP version 13
+# Subtest: the accessibility check
+    # Subtest: every page is checked in the scheme that the system or the toggle shows
+    ok 1 - every page is checked in the scheme that the system or the toggle shows
+      ---
+      duration_ms: 11162.853689
+      type: 'test'
+      ...
+    # Subtest: a page that shows its scheme a moment after it loaded is waited for
+    ok 2 - a page that shows its scheme a moment after it loaded is waited for
+      ---
+      duration_ms: 4463.603767
+      type: 'test'
+      ...
+    # Subtest: the text inside a fold of the page of the automation is checked as well
+    ok 3 - the text inside a fold of the page of the automation is checked as well
+      ---
+      duration_ms: 3399.352179
+      type: 'test'
+      ...
+    # Subtest: the pages named are checked alone
+    ok 4 - the pages named are checked alone
+      ---
+      duration_ms: 1518.946037
+      type: 'test'
+      ...
+    # Subtest: an annotation names the Markdown of a page, also of a further language
+    ok 5 - an annotation names the Markdown of a page, also of a further language
+      ---
+      duration_ms: 8.014053
+      type: 'test'
+      ...
+    # Subtest: a value of an annotation keeps its lines and its separators
+    ok 6 - a value of an annotation keeps its lines and its separators
+      ---
+      duration_ms: 0.358267
+      type: 'test'
+      ...
+    # Subtest: a new violation fails, as an annotation at its Markdown or at mkdocs.yml
+    ok 7 - a new violation fails, as an annotation at its Markdown or at mkdocs.yml
+      ---
+      duration_ms: 2267.674257
+      type: 'test'
+      ...
+    # Subtest: without a runner, a violation shows as a line of the log, from a Chrome of its own in each browser
+    ok 8 - without a runner, a violation shows as a line of the log, from a Chrome of its own in each browser
+      ---
+      duration_ms: 4105.293046
+      type: 'test'
+      ...
+    # Subtest: a violation that the file accepts passes with its reason, and only that one
+    ok 9 - a violation that the file accepts passes with its reason, and only that one
+      ---
+      duration_ms: 6461.612463
+      type: 'test'
+      ...
+    # Subtest: an accepted violation that is gone is named, on a page that was checked or that no longer exists
+    ok 10 - an accepted violation that is gone is named, on a page that was checked or that no longer exists
+      ---
+      duration_ms: 6761.838192
+      type: 'test'
+      ...
+    # Subtest: an entry of a page that this run didn't check says nothing
+    ok 11 - an entry of a page that this run didn't check says nothing
+      ---
+      duration_ms: 1.04195
+      type: 'test'
+      ...
+    # Subtest: the error about a file that isn't TOML keeps the error of the parser as its cause
+    ok 12 - the error about a file that isn't TOML keeps the error of the parser as its cause
+      ---
+      duration_ms: 1.236079
+      type: 'test'
+      ...
+    # Subtest: an entry without its reason, or a file that isn't one, stops the check
+    ok 13 - an entry without its reason, or a file that isn't one, stops the check
+      ---
+      duration_ms: 136.420006
+      type: 'test'
+      ...
+    # Subtest: a repository without the file of accepted violations has none, and a file that can't be read stops the check
+    ok 14 - a repository without the file of accepted violations has none, and a file that can't be read stops the check
+      ---
+      duration_ms: 53.900131
+      type: 'test'
+      ...
+    # Subtest: the line baseline accepts what a run of every page finds, once
+    ok 15 - the line baseline accepts what a run of every page finds, once
+      ---
+      duration_ms: 8370.059323
+      type: 'test'
+      ...
+    # Subtest: the line baseline on a website without a violation goes as well, also outside a runner
+    ok 16 - the line baseline on a website without a violation goes as well, also outside a runner
+      ---
+      duration_ms: 3142.530821
+      type: 'test'
+      ...
+    # Subtest: a run of some pages with the line baseline reports, and writes nothing
+    ok 17 - a run of some pages with the line baseline reports, and writes nothing
+      ---
+      duration_ms: 3393.75991
+      type: 'test'
+      ...
+    # Subtest: REPORT_ONLY reports a violation as a warning
+    ok 18 - REPORT_ONLY reports a violation as a warning
+      ---
+      duration_ms: 1158.994164
+      type: 'test'
+      ...
+    # Subtest: the digest leaves out the date of a page and names what every page shares
+    ok 19 - the digest leaves out the date of a page and names what every page shares
+      ---
+      duration_ms: 21.45607
+      type: 'test'
+      ...
+    # Subtest: only a page that differs, or a new one, needs the check, unless what all share differs
+    ok 20 - only a page that differs, or a new one, needs the check, unless what all share differs
+      ---
+      duration_ms: 0.828561
+      type: 'test'
+      ...
+    # Subtest: a digest that is missing, broken or of another format counts as none
+    ok 21 - a digest that is missing, broken or of another format counts as none
+      ---
+      duration_ms: 19.354342
+      type: 'test'
+      ...
+    # Subtest: a pull request checks the pages that differ from the digest of main alone
+    ok 22 - a pull request checks the pages that differ from the digest of main alone
+      ---
+      duration_ms: 9925.836046
+      type: 'test'
+      ...
+    # Subtest: a page without a translation stays out when it differs as well
+    ok 23 - a page without a translation stays out when it differs as well
+      ---
+      duration_ms: 1347.240129
+      type: 'test'
+      ...
+    # Subtest: what the check can't run with stops it with the status 2
+    ok 24 - what the check can't run with stops it with the status 2
+      ---
+      duration_ms: 29.873481
+      type: 'test'
+      ...
+    # Subtest: the website answers from its folder, and other servers are refused and named
+    ok 25 - the website answers from its folder, and other servers are refused and named
+      ---
+      duration_ms: 1511.202385
+      type: 'test'
+      ...
+    # Subtest: a website without a home page has no address of its own
+    ok 26 - a website without a home page has no address of its own
+      ---
+      duration_ms: 2510.838543
+      type: 'test'
+      ...
+    # Subtest: a website with a home page without a canonical address is served as well
+    ok 27 - a website with a home page without a canonical address is served as well
+      ---
+      duration_ms: 1665.516165
+      type: 'test'
+      ...
+    # Subtest: a lesser violation fails nothing, and the summary counts it
+    ok 28 - a lesser violation fails nothing, and the summary counts it
+      ---
+      duration_ms: 1338.606746
+      type: 'test'
+      ...
+    # Subtest: the summary lists three elements of a rule and counts the others
+    ok 29 - the summary lists three elements of a rule and counts the others
+      ---
+      duration_ms: 2683.405564
+      type: 'test'
+      ...
+    # Subtest: two rules on one page follow each other by name
+    ok 30 - two rules on one page follow each other by name
+      ---
+      duration_ms: 1861.990908
+      type: 'test'
+      ...
+    # Subtest: a page that scrolls sideways on a phone fails, and names the widest element that overflows
+    ok 31 - a page that scrolls sideways on a phone fails, and names the widest element that overflows
+      ---
+      duration_ms: 3334.713169
+      type: 'test'
+      ...
+    # Subtest: a violation of another rule leaves out what fixes a page that scrolls sideways
+    ok 32 - a violation of another rule leaves out what fixes a page that scrolls sideways
+      ---
+      duration_ms: 2310.376805
+      type: 'test'
+      ...
+    # Subtest: a page that scrolls sideways on a phone passes when the file accepts it
+    ok 33 - a page that scrolls sideways on a phone passes when the file accepts it
+      ---
+      duration_ms: 3573.536704
+      type: 'test'
+      ...
+    # Subtest: what fits on a phone, wraps or scrolls in a frame of its own doesn't scroll the page
+    ok 34 - what fits on a phone, wraps or scrolls in a frame of its own doesn't scroll the page
+      ---
+      duration_ms: 5912.15432
+      type: 'test'
+      ...
+    # Subtest: the element that a page names is the widest of those that overflow
+    ok 35 - the element that a page names is the widest of those that overflow
+      ---
+      duration_ms: 6466.384262
+      type: 'test'
+      ...
+    # Subtest: the script of the website gives the focus to what scrolls sideways on a phone
+    ok 36 - the script of the website gives the focus to what scrolls sideways on a phone
+      ---
+      duration_ms: 7616.551032
+      type: 'test'
+      ...
+    # Subtest: a table takes the focus once a window turns too narrow for it, and not before
+    ok 37 - a table takes the focus once a window turns too narrow for it, and not before
+      ---
+      duration_ms: 823.955271
+      type: 'test'
+      ...
+    # Subtest: the layout of a phone gets its own violations, with the width where they fail
+    ok 38 - the layout of a phone gets its own violations, with the width where they fail
+      ---
+      duration_ms: 2878.813016
+      type: 'test'
+      ...
+    # Subtest: the command line runs the check when node starts the file
+    ok 39 - the command line runs the check when node starts the file
+      ---
+      duration_ms: 944.785024
+      type: 'test'
+      ...
+    # Subtest: a page that leads to another address is checked as it shows, and the summary says where it leads
+    ok 40 - a page that leads to another address is checked as it shows, and the summary says where it leads
+      ---
+      duration_ms: 3889.505332
+      type: 'test'
+      ...
+    # Subtest: a frame of a page loads its own page, which the page doesn't leave for
+    ok 41 - a frame of a page loads its own page, which the page doesn't leave for
+      ---
+      duration_ms: 2462.08596
+      type: 'test'
+      ...
+    1..41
+ok 1 - the accessibility check
+  ---
+  duration_ms: 60737.33164
+  type: 'suite'
+  ...
+1..1
+# tests 41
+# suites 1
+# pass 41
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 61928.076175

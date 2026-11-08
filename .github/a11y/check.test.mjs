@@ -80,6 +80,9 @@ const QUICK = { schemeTimeout: 200 };
 const ONE = { browsers: BROWSERS.slice(0, 1) };
 // The browsers at the width of a phone, where a page may scroll sideways.
 const PHONES = { browsers: BROWSERS.filter(({ screen }) => screen.width < 1280) };
+// The browser of the dark scheme at the width of a desktop, where the faint text of the
+// pages of Material's kind shows.
+const DARK = { browsers: BROWSERS.filter(({ scheme, screen }) => scheme === "dark" && screen.width === 1280) };
 
 // Two tests run at the same time, each in folders of its own: test() collects them for
 // the suite at the end of this file. A check opens pages at the same time already, one
@@ -154,7 +157,7 @@ test("a page that shows its scheme a moment after it loaded is waited for", asyn
   const late = page("Its palette shows a moment later.", FOLLOWS)
     .replace("show(index);", "addEventListener(\"load\", () => setTimeout(() => show(index), 1_000));");
   await writeFile(path.join(built, "late.html"), late);
-  const { findings } = await checkSite(browser, built);
+  const { findings } = await checkSite(browser, built, [], null, DARK);
 
   assert.deepEqual(failing(findings, "late.html", "color-contrast"), ["dark"]);
   assert.deepEqual(failing(findings, "late.html", "color-scheme"), []);
@@ -166,7 +169,7 @@ test("the text inside a fold of the page of the automation is checked as well", 
   const fold = '<details class="blueprint-fold"><summary>Title</summary><p>Faint words.</p></details>';
   await writeFile(path.join(folded, "index.html"), page("", FOLLOWS).replace("<p></p>", fold));
 
-  const { findings } = await checkSite(browser, folded);
+  const { findings } = await checkSite(browser, folded, [], null, DARK);
 
   const faint = findings.find((finding) => finding.rule === "color-contrast");
   assert.equal(faint.scheme, "dark");
@@ -722,7 +725,8 @@ test("the script of the website gives the focus to what scrolls sideways on a ph
   await writeFile(path.join(built, "code.html"), framed(`<pre><code style="display: block; overflow-x: auto">${WORD}</code></pre>`));
   // A fold is closed when the page loads, so nothing in it can scroll yet.
   await writeFile(path.join(built, "fold.html"), framed(`<details class="blueprint-fold"><summary>Fold</summary>${FRAME}</details>`));
-  const { findings } = await checkSite(browser, built);
+  // At the width of a phone in each scheme, and of a desktop, where the table fits.
+  const { findings } = await checkSite(browser, built, [], null, { browsers: [...ONE.browsers, ...PHONES.browsers] });
 
   const rule = "scrollable-region-focusable";
   // Without the script, the frame fails on a phone alone, where the table doesn't fit.
