@@ -103,6 +103,10 @@ from blueprint.settings import (
     Settings,
     allows,
     check_environments,
+    event_policy,
+    target_workflows,
+    unlisted_targets,
+    workflow_triggers,
 )
 from blueprint.site_check import check as check_site
 from blueprint.social_preview import DEFAULT_PANEL
@@ -2321,6 +2325,60 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
         name = pattern.removesuffix("@*").casefold()
         assert name in named or run_in_turn(pattern, named), pattern
     assert patterns == sorted(patterns, key=str.casefold)
+
+
+# The workflows that start on pull_request_target, each for a reason that the list of
+# the settings names: a token that writes, or the release app, also for a pull request
+# of a fork or before a maintainer approved its runs (decision 0136).
+TARGETS = [
+    ".github/workflows/area-labels.yml",
+    ".github/workflows/dependabot-automerge.yml",
+    ".github/workflows/issue-lifecycle.yml",
+    ".github/workflows/pull-request-title.yml",
+    ".github/workflows/update-branches.yml",
+    ".github/workflows/welcome.yml",
+]
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_event_policy_lets_exactly_the_workflows_on_pull_request_target_start(
+    projects: dict[str, Path], project: str
+) -> None:
+    # GitHub blocks pull_request_target in a public repository from 2 December 2026,
+    # unless an Actions event policy allows it.
+    root = ROOT if project == "blueprint" else projects[project]
+    settings = Settings.load(root / ".github/repository.toml")
+    listed = settings.actions["pull_request_target"]
+    assert target_workflows(settings.triggers) == TARGETS
+    # The settings bot keeps the policy for each of them, with every event that starts
+    # one, as an event rule allows only the events that it names; no other workflow
+    # may start on it.
+    assert unlisted_targets(listed, settings.triggers) == []
+    policy = event_policy(listed, settings.triggers)
+    assert policy is not None
+    assert policy["enforcement"] == "active"
+    assert policy["conditions"] == {
+        "workflow_path": {"include": TARGETS, "exclude": []}
+    }
+    [rule] = policy["rules"]
+    assert rule["type"] == "restrict_action_events"
+    assert rule["parameters"]["allowed_events"] == sorted(
+        {event for path in TARGETS for event in settings.triggers[path]}
+    )
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_settings_read_the_events_of_every_workflow_as_yaml_does(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    triggers = workflow_triggers(root)
+    assert triggers
+    for path, events in triggers.items():
+        data = load_yaml((root / path).read_text(encoding="utf-8"))
+        # The parser of libyaml reads a bare key on as true, as YAML 1.1 does.
+        on = data["on"] if "on" in data else data[True]
+        assert events == ([on] if isinstance(on, str) else list(on)), path
 
 
 # The workflow and the job that send the analysis of each tool of code scanning.

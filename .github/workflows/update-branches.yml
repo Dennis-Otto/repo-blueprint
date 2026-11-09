@@ -40,6 +40,9 @@ on:
     branches: [main]
   # Turning auto-merge on gives a pull request its place in the line at once, and
   # turning it off moves the line on.
+  # GitHub blocks the event in a public repository unless the event policy of the
+  # settings allows it, which it does for each workflow that pull_request_target of
+  # [actions] in .github/repository.toml lists (decision 0136).
   pull_request_target:
     types: [auto_merge_enabled, auto_merge_disabled]
   # A required check that fails moves the line on to the next pull request.

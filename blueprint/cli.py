@@ -115,6 +115,7 @@ from blueprint.pages import (
 from blueprint.pr_report import about as pr_parts
 from blueprint.settings import (
     CONFIG,
+    TARGET,
     ConfigError,
     Settings,
     apply,
@@ -126,6 +127,7 @@ from blueprint.settings import (
     offered_only,
     read_plan,
     unlisted_actions,
+    unlisted_targets,
     widen_selected_actions,
 )
 from blueprint.site_check import annotation as site_annotation
@@ -1290,11 +1292,13 @@ def settings_command(
 def actions_command(api: Api, root: Path, path: Path) -> int:
     """settings actions: 0 when the list of the allowed actions in the settings as code
     lets every action and reusable workflow that the workflows run start, also those
-    that these run in turn; 1 when it lacks one, or GitHub refused the file of one.
-    The check of the Lint workflow: it reads the public files of the actions and none
-    of the settings on GitHub, which the token of a pull request may not read."""
+    that these run in turn, and the event policy every workflow that starts on
+    pull_request_target; 1 when a list lacks one, or GitHub refused the file of an
+    action. The check of the Lint workflow: it reads the public files of the actions
+    and none of the settings on GitHub, which the token of a pull request may not
+    read."""
     settings = Settings.load(root / path, root)
-    # The blueprint renders the list of every repository from its template.
+    # The blueprint renders the lists of every repository from its template.
     listed_in = (
         "template/.github/repository.toml.jinja and .github/repository.toml"
         if (root / "copier.yml").is_file() and (root / "template").is_dir()
@@ -1303,13 +1307,18 @@ def actions_command(api: Api, root: Path, path: Path) -> int:
     found = unlisted_actions(api, settings.actions, settings.workflows, listed_in)
     # The path as the documentation writes it, with slashes on Windows too.
     config = path.as_posix()
-    if not found:
+    blocked = target_annotations(root, settings, listed_in)
+    if not found and not blocked:
         print(
             "GitHub starts every action that the workflows run, also those that"
-            f" these run in turn, by [actions] of {config}."
+            f" these run in turn, by [actions] of {config}, and every workflow that"
+            f" starts on {TARGET}."
         )
         return 0
-    print(f"GitHub won't start a workflow that runs these, by [actions] of {config}:")
+    if found:
+        print(
+            f"GitHub won't start a workflow that runs these, by [actions] of {config}:"
+        )
     annotations = []
     for item in found:
         file = settings.workflows[item.via]
@@ -1326,9 +1335,46 @@ def actions_command(api: Api, root: Path, path: Path) -> int:
                 "Allowed actions", message, file, line_of(text, item.via)
             )
         )
+    if blocked:
+        print(
+            "GitHub blocks these workflows in a public repository from 2 December"
+            f" 2026, as {TARGET} of [actions] of {config} lacks them:"
+        )
+        for annotation in blocked:
+            print(f"- {annotation.message}")
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        print("\n".join(annotate.commands(annotations)))
+        print("\n".join(annotate.commands(annotations + blocked)))
     return 1
+
+
+def target_annotations(
+    root: Path, settings: Settings, listed_in: str
+) -> list[annotate.Annotation]:
+    """An annotation at its event for each workflow that starts on
+    pull_request_target but that the list of the event policy lacks: GitHub blocks it
+    in a public repository, and a person decides whether it may start on the event or
+    moves it to pull_request."""
+    annotations = []
+    for file in unlisted_targets(settings.actions.get(TARGET, []), settings.triggers):
+        lines = (root / file).read_text(encoding="utf-8").splitlines()
+        # The event below on, the first line outside a comment that names it.
+        line = next(
+            (
+                number
+                for number, content in enumerate(lines, 1)
+                if TARGET in content.split("#", 1)[0]
+            ),
+            0,
+        )
+        message = (
+            f"{file} starts on {TARGET}, which GitHub blocks in a public repository"
+            " from 2 December 2026 unless a policy allows it: start it on pull_request"
+            " where it needs neither a token that writes nor a secret for a pull"
+            f" request of a fork, or add {json.dumps(file)} to {TARGET} of [actions]"
+            f" in {listed_in}"
+        )
+        annotations.append(annotate.Annotation("Allowed events", message, file, line))
+    return annotations
 
 
 def widen_command(api: Api, repo: str, settings: Settings, path: Path) -> int:

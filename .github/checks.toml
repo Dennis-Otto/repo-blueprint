@@ -78,22 +78,33 @@ problem = """A workflow runs an action or a reusable workflow that the list of t
 actions, `[actions.selected]` of `.github/repository.toml`, lacks: one that the workflow
 names, or one that such an action runs in turn at the commit of its pin, often since an
 update of the action. Or a step runs an image of Docker with `docker://`, or GitHub
-refused the file of an action, so what it runs in turn is unknown."""
+refused the file of an action, so what it runs in turn is unknown. Or a workflow starts
+on `pull_request_target`, and `pull_request_target` of `[actions]`, the list of the
+workflows that the event policy of the settings lets start on it, lacks it."""
 why = """GitHub starts a workflow only when the list allows every action that it runs, also
 in turn. One that the list lacks stops the whole workflow with a startup failure, on
 `main` after the merge or in every repository after a release of the blueprint, and no
-check of the workflow reports it."""
+check of the workflow reports it. From 2 December 2026, GitHub also blocks every
+workflow that starts on `pull_request_target` in a public repository, unless an Actions
+event policy allows it: such a workflow runs with a token that may write, also for a
+pull request of a fork, so the policy of the settings allows it only for the workflows
+that the list names."""
 fix = """Add the pattern that each annotation names, such as `owner/repo@*`, to
 `patterns_allowed` of `[actions.selected]` in `.github/repository.project.toml` (in the
 blueprint itself, in `template/.github/repository.toml.jinja` and
 `.github/repository.toml`). Run an image in a `run:` step with `docker run` instead of
-`docker://`. When GitHub refused a file, run the check again. The check runs on your
+`docker://`. When GitHub refused a file, run the check again. Start a workflow that
+needs neither a token that writes nor a secret for a pull request of a fork on
+`pull_request` instead of `pull_request_target`; add one that does, and that checks out
+and runs nothing of the pull request, to `pull_request_target` of `[actions]` in the
+same file. The check runs on your
 machine with the GitHub CLI (in the blueprint itself, the tool is `blueprint.py` without
 `.github/`):"""
 commands = ["python3 .github/blueprint.py settings actions"]
 docs = "CONTRIBUTING.md#coding-standards"
-autofix = """Whether an action may run is a decision of trust that a person makes for the
-project, and the bot never widens the list of the allowed actions."""
+autofix = """Whether an action may run, and whether a workflow may start on
+`pull_request_target`, is a decision of trust that a person makes for the project, and
+the bot never widens the list of the allowed actions or that of the event policy."""
 
 [check.reuse]
 title = "The license of every file"

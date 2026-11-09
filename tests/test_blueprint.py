@@ -50,6 +50,7 @@ from blueprint.settings import (
     apply_environments,
     apply_labels,
     apply_pages,
+    apply_policies,
     check_actions,
     check_community,
     check_environments,
@@ -68,6 +69,7 @@ from blueprint.settings import (
     run_by,
     tag_creation_ruleset,
     tag_ruleset,
+    workflow_events,
 )
 
 REPO = "Dennis-Otto/demo"
@@ -174,6 +176,92 @@ ACTOR_TYPES = {
     "Team",
     "DeployKey",
 }
+
+
+# The events that an event rule of an Actions policy may allow, as GitHub's REST API
+# names them (https://docs.github.com/en/rest/actions/policies).
+POLICY_EVENTS = {
+    "branch_protection_rule",
+    "check_run",
+    "check_suite",
+    "create",
+    "delete",
+    "deployment",
+    "deployment_status",
+    "discussion",
+    "discussion_comment",
+    "fork",
+    "gollum",
+    "image_version",
+    "issue_comment",
+    "issues",
+    "label",
+    "merge_group",
+    "milestone",
+    "page_build",
+    "project",
+    "project_card",
+    "project_column",
+    "public",
+    "pull_request",
+    "pull_request_review",
+    "pull_request_review_comment",
+    "pull_request_target",
+    "push",
+    "registry_package",
+    "release",
+    "repository_dispatch",
+    "schedule",
+    "status",
+    "watch",
+    "workflow_call",
+    "workflow_dispatch",
+    "workflow_run",
+}
+# How GitHub answers a request of the policies of a private repository on GitHub Free,
+# as it answered Dennis-Otto/pull-request-target-probe on 9 November 2026.
+POLICIES_REFUSAL = (
+    "Upgrade to GitHub Pro or make this repository public to enable this feature."
+)
+
+
+def policy_problems(body: Any, create: bool) -> list[str]:
+    """What GitHub would refuse in an Actions policy that blueprint.py sends: a
+    create needs its name and its enforcement, and every part has the form of the
+    REST API."""
+    problems = []
+    if set(body) - {"name", "enforcement", "conditions", "rules"}:
+        problems.append(f"the fields {sorted(body)}")
+    if create and not isinstance(body.get("name"), str):
+        problems.append(f"name {body.get('name')!r}")
+    if (create or "enforcement" in body) and body.get("enforcement") not in (
+        "disabled",
+        "active",
+        "evaluate",
+    ):
+        problems.append(f"enforcement {body.get('enforcement')!r}")
+    # GitHub offers evaluate only with GitHub Enterprise.
+    if body.get("enforcement") == "evaluate":
+        problems.append("evaluate without GitHub Enterprise")
+    path = body.get("conditions", {}).get("workflow_path")
+    if "conditions" in body and (
+        set(body["conditions"]) != {"workflow_path"}
+        or set(path) != {"include", "exclude"}
+        or not all(isinstance(item, str) for item in path["include"] + path["exclude"])
+        or not path["include"] + path["exclude"]
+        or "~ALL" in path["exclude"]
+    ):
+        problems.append(f"conditions {body['conditions']!r}")
+    for rule in body.get("rules", []):
+        events = rule.get("parameters", {}).get("allowed_events")
+        if (
+            rule.get("type") != "restrict_action_events"
+            or set(rule) != {"type", "parameters"}
+            or not isinstance(events, list)
+            or set(events) - POLICY_EVENTS
+        ):
+            problems.append(f"rule {rule!r}")
+    return problems
 
 
 def ruleset_problems(body: Any) -> list[str]:
@@ -305,6 +393,10 @@ class FakeGitHub:
         self.file_queries: list[dict[str, str]] = []
         self.fork_approval = "first_time_contributors"
         self.rulesets: dict[int, dict[str, Any]] = {}
+        # The Actions policies of the repository, and one of its organization, which
+        # the list names only with has_parents.
+        self.policies: dict[int, dict[str, Any]] = {}
+        self.parent_policies: list[dict[str, Any]] = []
         self.variables: dict[str, str] = {"RELEASE_AUTOMATION_CLIENT_ID": "outdated"}
         self.environments: dict[str, dict[str, Any]] = {}
         # The status with which GitHub refuses a write of an environment that names
@@ -429,6 +521,7 @@ class FakeGitHub:
             (r"/actions/permissions/selected-actions", self.selected_actions),
             (r"/actions/permissions", self.actions_permissions),
             (r"/rulesets(?:/(\d+))?", self.ruleset),
+            (r"/actions/policies(?:/(\d+))?", self.policy),
             (r"/actions/variables(?:/(\w+))?", self.variable),
             (r"/environments/([\w-]+)", self.environment),
             (r"/labels(?:/(.+))?", self.label),
@@ -572,6 +665,41 @@ class FakeGitHub:
             self.next_id += 1
             return 201, body
         self.rulesets[int(number or 0)] = body
+        return 200, body
+
+    def policy(self, method: str, body: Any, number: str | None) -> tuple[int, Any]:
+        """The Actions policies, which GitHub offers a private repository only on a
+        paid plan. A policy that GitHub answers has the fields of its own as well."""
+        if self.repo.get("private"):
+            return 403, {"message": POLICIES_REFUSAL}
+        if method == "GET" and number is None:
+            parents = "has_parents=false" not in self.calls[-1][1]
+            own = [
+                {"id": key, **value, "source_type": "Repository"}
+                for key, value in self.policies.items()
+            ]
+            listed = own + (self.parent_policies if parents else [])
+            return 200, {"total_count": len(listed), "policies": listed}
+        if number is not None and int(number) not in self.policies:
+            return 404, {"message": "Not Found"}
+        if method == "GET":
+            return 200, {
+                "id": int(number or 0),
+                "target": "actions",
+                "source_type": "Repository",
+                **self.policies[int(number or 0)],
+            }
+        if method == "DELETE":
+            del self.policies[int(number or 0)]
+            return 204, None
+        problems = policy_problems(body, create=method == "POST")
+        if problems:
+            return 422, {"message": "Invalid request.", "errors": problems}
+        if method == "POST":
+            self.policies[self.next_id] = body
+            self.next_id += 1
+            return 201, body
+        self.policies[int(number or 0)].update(body)
         return 200, body
 
     def variable(self, method: str, body: Any, name: str | None) -> tuple[int, Any]:
@@ -2155,7 +2283,8 @@ def test_the_lint_passes_when_the_list_allows_every_action_that_runs(
 
     assert capsys.readouterr().out == (
         "GitHub starts every action that the workflows run, also those that these"
-        " run in turn, by [actions] of .github/repository.toml.\n"
+        " run in turn, by [actions] of .github/repository.toml, and every workflow"
+        " that starts on pull_request_target.\n"
     )
 
 
@@ -2267,6 +2396,338 @@ def test_the_lint_fails_when_github_answers_no_query(
     # so it is asked once more.
     assert out.count("refused its file (GitHub answered 502: simulated failure)") == 3
     assert github.calls == [("POST", "graphql")] * 2
+
+
+# --------------------------------------------------------------------------- policies
+
+# Workflows of a repository: two that start on pull_request_target, one of them also on
+# another event, and one that doesn't.
+TITLE = """name: Pull request title
+on:
+  pull_request_target:
+    types: [opened, edited]
+  # By hand as well.
+  workflow_dispatch:
+jobs: {}
+"""
+WELCOME = "name: Welcome\non: pull_request_target\njobs: {}\n"
+CHECKS = "name: CI\non: [push, pull_request]\njobs: {}\n"
+LISTED = (
+    'pull_request_target = [".github/workflows/title.yml",'
+    ' ".github/workflows/welcome.yml"]\n'
+)
+
+
+def with_workflows(root: Path, listed: str = LISTED, **files: str) -> None:
+    """The configuration, whose [actions] lists the workflows that may start on
+    pull_request_target, and the workflows of the repository by their names."""
+    config = CONFIG.replace(
+        'fork_pr_approval = "all_external_contributors"\n',
+        'fork_pr_approval = "all_external_contributors"\n' + listed,
+    )
+    (root / ".github/repository.toml").write_text(config, encoding="utf-8")
+    folder = root / ".github/workflows"
+    folder.mkdir(exist_ok=True)
+    for path in folder.iterdir():
+        path.unlink()
+    workflows = files or {"title": TITLE, "welcome": WELCOME, "ci": CHECKS}
+    for name, text in workflows.items():
+        (folder / f"{name}.yml").write_text(text, encoding="utf-8")
+
+
+def wanted_policy() -> dict[str, Any]:
+    return {
+        "name": "Allow pull_request_target",
+        "enforcement": "active",
+        "conditions": {
+            "workflow_path": {
+                "include": [
+                    ".github/workflows/title.yml",
+                    ".github/workflows/welcome.yml",
+                ],
+                "exclude": [],
+            }
+        },
+        "rules": [
+            {
+                "type": "restrict_action_events",
+                "parameters": {
+                    "allowed_events": ["pull_request_target", "workflow_dispatch"]
+                },
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "events"),
+    [
+        ("on: push\n", ["push"]),
+        ("'on': \"push\" # quoted\n", ["push"]),
+        ("on: [push, 'pull_request_target']\n", ["push", "pull_request_target"]),
+        ("on: []\n", []),
+        # Unfinished, as no workflow is: what stands there.
+        ("on: [push, pull_request\n", ["push", "pull_request"]),
+        (
+            "on: {push: {branches: [main, 'a,b']}, pull_request_target: }\n",
+            ["push", "pull_request_target"],
+        ),
+        (
+            'name: x\n"on": # the events\n  push:\n    branches: [main]\n\n'
+            "  # A comment.\n  'pull_request_target':\n    types: [opened]\n"
+            "jobs:\n  pull_request:\n",
+            ["push", "pull_request_target"],
+        ),
+        ("on:\n- push\n- schedule\njobs: {}\n", ["push", "schedule"]),
+        ("on:\n  - push\n  - workflow_dispatch\n", ["push", "workflow_dispatch"]),
+        ("on:\njobs: {}\n", []),
+        ("jobs:\n  a:\n    on: push\n", []),
+        ("# on: push\nonly: true\n", []),
+    ],
+)
+def test_the_events_of_a_workflow_in_every_style_of_yaml(
+    text: str, events: list[str]
+) -> None:
+    assert workflow_events(text) == events
+
+
+def test_the_settings_keep_a_policy_for_the_workflows_on_pull_request_target(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_workflows(root)
+    # One of the organization above, of the same name, is none of these settings.
+    github.parent_policies = [{"id": 99, "name": "Allow pull_request_target"}]
+
+    assert run(github, root, "settings", "check") == 1
+    assert (
+        'policy pull_request_target: GitHub has "missing", the configuration wants'
+        ' "present"'
+    ) in capsys.readouterr().out
+
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+
+    # Only the listed workflows, with every event that starts them; CI isn't one.
+    assert list(github.policies.values()) == [wanted_policy()]
+    assert run(github, root, "settings", "check") == 0
+    assert "policy" not in capsys.readouterr().out
+    # The repository's own policies, and then the one by its id.
+    listing = f"repos/{REPO}/actions/policies?has_parents=false&per_page=100"
+    assert ("GET", listing) in github.calls
+    assert ("GET", f"repos/{REPO}/actions/policies/1") in github.calls
+
+
+@pytest.mark.parametrize(
+    ("change", "difference"),
+    [
+        ({"enforcement": "disabled"}, "enforcement disabled"),
+        (
+            {"conditions": {"workflow_path": {"include": [], "exclude": []}}},
+            "workflows []",
+        ),
+        (
+            {
+                "conditions": {
+                    "workflow_path": {
+                        "include": [
+                            ".github/workflows/welcome.yml",
+                            ".github/workflows/title.yml",
+                        ],
+                        "exclude": [".github/workflows/ci.yml"],
+                    }
+                }
+            },
+            "excluded workflows ['.github/workflows/ci.yml']",
+        ),
+        ({"rules": []}, "rules []"),
+        (
+            {
+                "rules": [
+                    {
+                        "type": "restrict_action_events",
+                        "parameters": {"allowed_events": ["pull_request_target"]},
+                    }
+                ]
+            },
+            "events ['pull_request_target']",
+        ),
+        (
+            {"rules": [{"type": "restrict_actions_actors", "parameters": {}}]},
+            "rules ['restrict_actions_actors']",
+        ),
+    ],
+)
+def test_a_policy_that_differs_comes_back_to_the_settings(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    change: dict[str, Any],
+    difference: str,
+) -> None:
+    with_workflows(root)
+    github.policies[7] = {**wanted_policy(), **change}
+
+    assert run(github, root, "settings", "check") == 1
+    assert (
+        f'policy pull_request_target: GitHub has "{difference}", the configuration'
+        ' wants "as configured"'
+    ) in capsys.readouterr().out
+
+    run(github, root, "settings", "apply")
+
+    assert github.policies == {7: wanted_policy()}
+    assert ("PUT", f"repos/{REPO}/actions/policies/7") in github.calls
+
+
+def test_the_policy_goes_once_no_listed_workflow_starts_on_the_event(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The title check moved to pull_request and the welcome went; the list may still
+    # name both.
+    with_workflows(root, title=TITLE.replace("_target", ""), ci=CHECKS)
+    github.policies[7] = wanted_policy()
+    github.policies[8] = {**wanted_policy(), "name": "Someone else's"}
+
+    assert run(github, root, "settings", "check") == 1
+    assert (
+        'policy pull_request_target: GitHub has "present", the configuration wants'
+        ' "absent"'
+    ) in capsys.readouterr().out
+
+    run(github, root, "settings", "apply")
+
+    assert list(github.policies) == [8]
+    run(github, root, "settings", "check")
+    assert "policy" not in capsys.readouterr().out
+
+
+def test_a_policy_that_is_gone_already_is_left_alone(github: FakeGitHub) -> None:
+    # Someone deleted it between the check and the apply.
+    drift = [Drift("policy pull_request_target", "absent", "present")]
+
+    apply_policies(Api(github), REPO, [], {}, drift)
+
+    assert github.policies == {}
+    assert [method for method, _ in github.calls] == ["GET"]
+
+
+def test_a_workflow_on_pull_request_target_that_the_list_lacks_is_named(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    with_workflows(root, 'pull_request_target = [".github/workflows/title.yml"]\n')
+
+    assert run(github, root, "settings", "apply") == 1
+
+    # The settings bot names it and leaves it out: a person decides.
+    out = capsys.readouterr().out
+    assert (
+        "policy pull_request_target lacks .github/workflows/welcome.yml:"
+        ' GitHub has "missing", the configuration wants "listed"\n'
+        "      .github/workflows/welcome.yml starts on pull_request_target, which"
+        " GitHub blocks in a public repository from 2 December 2026 unless a policy"
+        " allows it: start it on pull_request where it needs neither a token that"
+        " writes nor a secret for a pull request of a fork, or add"
+        ' ".github/workflows/welcome.yml" to pull_request_target of [actions] in'
+        " .github/repository.project.toml\n"
+    ) in out
+    [policy] = github.policies.values()
+    assert policy["conditions"]["workflow_path"]["include"] == [
+        ".github/workflows/title.yml"
+    ]
+    # The check lint of a pull request names it at its event, from the files alone.
+    github.calls.clear()
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    assert out.startswith(
+        "GitHub blocks these workflows in a public repository from 2 December 2026,"
+        " as pull_request_target of [actions] of .github/repository.toml lacks them:\n"
+        "- .github/workflows/welcome.yml starts on pull_request_target, which GitHub"
+        " blocks"
+    )
+    assert (
+        "::error file=.github/workflows/welcome.yml,line=2,title=Allowed events::"
+        ".github/workflows/welcome.yml starts on pull_request_target"
+    ) in out
+    assert not github.calls
+
+
+def test_the_lint_of_the_blueprint_names_both_lists_of_the_policy(
+    github: FakeGitHub,
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    # Named in a comment before the event, which isn't where it starts.
+    with_workflows(root, "", welcome="# pull_request_target\n" + TITLE)
+    (root / "copier.yml").write_text("{}\n", encoding="utf-8")
+    (root / "template").mkdir()
+
+    assert run(github, root, "settings", "actions") == 1
+
+    out = capsys.readouterr().out
+    assert (
+        '".github/workflows/welcome.yml" to pull_request_target of [actions] in'
+        " template/.github/repository.toml.jinja and .github/repository.toml\n"
+    ) in out
+    assert "::error" not in out
+
+
+def test_a_private_repository_on_github_free_has_no_policies(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.repo["private"] = True
+    with_workflows(root)
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+    capsys.readouterr()
+
+    # GitHub blocks pull_request_target only in a public repository: a notice.
+    assert run(github, root, "settings", "apply") == 0
+
+    out = capsys.readouterr().out
+    assert (
+        'policy pull_request_target: GitHub has "not offered", the configuration'
+        ' wants "present"'
+    ) in out
+    assert f'answered "{POLICIES_REFUSAL}"' in out
+    # Nothing to say where nothing needs the policy.
+    with_workflows(root, ci=CHECKS)
+
+    assert run(github, root, "settings", "check") == 0
+    assert "policy" not in capsys.readouterr().out
+
+
+def test_a_refusal_of_the_policies_that_is_not_the_plan_still_fails(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_workflows(root)
+    listing = f"repos/{REPO}/actions/policies?has_parents=false&per_page=100"
+    github.fail[("GET", listing)] = 403
+
+    assert run(github, root, "settings", "check") == 2
+
+    assert "GitHub answered 403: simulated failure" in capsys.readouterr().err
+
+
+def test_a_refused_policy_names_the_permission_of_the_app(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_workflows(root)
+    github.fail[("POST", f"repos/{REPO}/actions/policies")] = 403
+
+    assert run(github, root, "settings", "apply") == 2
+
+    assert (
+        "the policies could not be applied: GitHub answered 403: simulated failure;"
+        " the token may lack the permission Administration (read and write)"
+    ) in capsys.readouterr().err
 
 
 def test_one_query_reads_the_files_of_many_actions_at_once(github: FakeGitHub) -> None:
@@ -2382,6 +2843,14 @@ def test_the_patterns_follow_those_of_github(reference: str, allowed: bool) -> N
     [
         ('allowed_actions = "some"\n', "allowed_actions of [actions] is one of all"),
         ('allowed_actions = "selected"\n', "needs the table [actions.selected]"),
+        (
+            'pull_request_target = ".github/workflows/welcome.yml"\n',
+            "pull_request_target of [actions] lists the workflows that may start on",
+        ),
+        (
+            'pull_request_target = ["welcome.yml"]\n',
+            " such as \".github/workflows/welcome.yml\", not ['welcome.yml']",
+        ),
     ],
 )
 def test_actions_that_may_run_as_github_knows_them(
