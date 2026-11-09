@@ -262,6 +262,23 @@ A `requirements*.txt` that is no lock file, such as `docs/requirements.txt` for 
 
 **What to do:** pull the branch before you push again, read the draft, and say in its place what changes for users. To keep the bot out of a pull request, give it the label `no-bot-fixes`. A draft that you delete stays deleted: the check then asks for an entry again, and explains how to write one.
 
+## The refresh of the lock files waits
+
+**What you see:** a pull request of Renovate's weekly refresh, such as `chore(deps): lock file maintenance` or `chore(deps): refresh pip-compile outputs`, doesn't merge: the check dependency-review fails at its step *Check the age of what the refresh of the lock files brings*, which names each version younger than a week, or a branch of the refresh begins with `renovate/review-`.
+
+**Why:** the refresh merges by itself only from versions at least a week old, as every other update waits a week after its release ([decision 0136](decisions/0136-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md)). Renovate gives npm `--before=` a week ago, and after Renovate, `python3 .github/blueprint.py locks --refresh` compiles the lock files of pip-compile again from uploads a week old, keeping what `main` pins. A younger version comes when the project asks for one, such as the fix of a vulnerability of the last days in `package.json`, or when that compile failed, which the pull request shows as an artifact error of Renovate. Composer can't keep to that age, and its authors set its dates, so its refresh waits for you on `renovate/review-lock-file-maintenance`; so does the refresh of pip-compile under the Mend Renovate app, which runs no command of the blueprint.
+
+**What to do:** nothing for a young version: run the check again once each version is a week old, or let Renovate build the refresh anew on the next Monday. A refresh on `renovate/review-…` waits for your review: merge it when its versions are fine. A lock file of another package manager, whose versions the check can't date, gets a rule in `.github/renovate.json5` that lets its refresh wait:
+
+```json5
+{
+  matchManagers: ["poetry"],
+  matchUpdateTypes: ["lockFileMaintenance"],
+  additionalBranchPrefix: "review-",
+  automerge: false,
+},
+```
+
 ## A lock file no longer matches its source
 
 **What you see:** the step *Lock files match their sources* of `scripts/check.sh` fails and names each file and pin, such as `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`

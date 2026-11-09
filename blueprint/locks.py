@@ -25,7 +25,9 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from itertools import takewhile
 from pathlib import Path, PurePosixPath
 
@@ -312,6 +314,38 @@ def header_of(content: str) -> str:
     return "".join(takewhile(lambda line: line.startswith("#"), lines))
 
 
+def compile_onto(
+    path: Path, content: str, options: list[str], uv: str, constraints: str = ""
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """uv's answer to a compile of the lock file at path with these options, and the
+    lock file that it wrote, without a header: onto a copy that holds content, whose
+    pins uv prefers and whose hashes it keeps, and with constraints, the lines of a
+    file of constraints, when there are any. The command is arguments for uv, never a
+    line for a shell, and the file at path stays as it is."""
+    with tempfile.TemporaryDirectory(prefix="locks-") as folder:
+        copy = Path(folder, path.name)
+        copy.write_bytes(content.encode("utf-8"))
+        bounds = []
+        if constraints:
+            file = Path(folder, "constraints.txt")
+            file.write_text(constraints, encoding="utf-8")
+            bounds.append(f"--constraint={file}")
+        result = subprocess.run(
+            [
+                *(uv, "pip", "compile", *options, *bounds, "--no-header", "--quiet"),
+                f"--python={sys.executable}",
+                f"--output-file={copy}",
+            ],
+            cwd=path.parent,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        body = copy.read_bytes().decode("utf-8")
+    return result, body
+
+
 def compare(root: Path, name: str, uv: str) -> Compared:
     """Compiles the lock file root/name again with the command in its header and says
     what differs. uv compiles onto a copy of the file, whose pins it prefers and whose
@@ -331,22 +365,7 @@ def compare(root: Path, name: str, uv: str) -> Compared:
     options = compile_options(header, content)
     if options is None:
         return Compared(name, note=NO_PYTHON)
-    with tempfile.TemporaryDirectory(prefix="locks-") as folder:
-        copy = Path(folder, path.name)
-        copy.write_bytes(content.encode("utf-8"))
-        result = subprocess.run(
-            [
-                *(uv, "pip", "compile", *options, "--no-header", "--quiet"),
-                f"--python={sys.executable}",
-                f"--output-file={copy}",
-            ],
-            cwd=path.parent,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-        body = copy.read_bytes().decode("utf-8")
+    result, body = compile_onto(path, content, options, uv)
     if result.returncode:
         if NOT_REACHED.search(result.stderr):
             return Compared(name, note="a package index that uv didn't reach")
@@ -364,3 +383,104 @@ def compare(root: Path, name: str, uv: str) -> Compared:
         *(f"{pin} has no hash" for pin in sorted(lost_hashes)),
     )
     return Compared(name, differences, (header_of(content) + body).encode("utf-8"))
+
+
+# ---------------------------------------------------------------- the weekly refresh
+
+# The refresh keeps to versions as old as every other update of Renovate waits for,
+# the minimumReleaseAge of .github/renovate-blueprint.json5 (decision 0136).
+AGE = timedelta(days=7)
+# What uv says of a file that it can't take a week back alone.
+OWN_CUTOFF = "an --exclude-newer of its own, which the refresh keeps"
+
+
+def cutoff(now: datetime) -> datetime:
+    """The newest upload that the refresh takes: a week before the start of the day of
+    now, in UTC, so that every run of Renovate on one day compiles alike and none
+    builds a new refresh right after one merged."""
+    day = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return day - AGE
+
+
+def stamp(moment: datetime) -> str:
+    """A moment as uv takes it, in UTC."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def refreshed(root: Path) -> list[str]:
+    """The lock files of pip-compile that differ from HEAD: in Renovate's checkout of
+    a branch of the refresh, those that it compiled anew."""
+    changed = set(git(root, "diff", "--name-only", "-z", "HEAD", "--").split("\0"))
+    return [name for name in lock_files(root) if name in changed]
+
+
+def by_name(pins: Iterable[str]) -> dict[str, set[str]]:
+    """The versions that the pins name for each package; none for a pin by address."""
+    versions: dict[str, set[str]] = {}
+    for pin in pins:
+        name, separator, version = pin.partition("==")
+        if separator:
+            versions.setdefault(name, set()).add(version)
+    return versions
+
+
+def pins_of_head(root: Path, name: str) -> dict[str, set[str]]:
+    """What the lock file root/name pins in HEAD; nothing for a file that HEAD
+    doesn't have, or one with a line that is no pin."""
+    try:
+        content = git(root, "show", f"HEAD:{name}")
+    except subprocess.CalledProcessError:
+        return {}
+    pins = read_pins(content)
+    return by_name(pins.pinned) if pins else {}
+
+
+def refresh(root: Path, name: str, uv: str, now: datetime) -> Compared:
+    """Compiles the lock file root/name again, which Renovate's refresh moved to the
+    newest version of every package, from uploads at least a week before the day of
+    now. A package that the refresh pins as HEAD does keeps its pin, also a young one
+    such as the fix of a vulnerability that came at once; a package that it moved
+    stays at least at the version of HEAD, so that no fix goes back, and uv says so
+    when no version both that new and a week old exists. The differences are the
+    pins of the refresh that the week took back."""
+    path = root / name
+    if path.is_symlink():
+        return Compared(name, note="a link, which the refresh doesn't write through")
+    content = path.read_bytes().decode("utf-8")
+    header = HEADER.match(content)
+    if not header or why_renovate_skips(root, name):
+        return Compared(name, note=UNREADABLE)
+    pins = read_pins(content)
+    if pins is None:
+        return Compared(name, note=f"{NO_PIN}, such as an index")
+    options = compile_options(header, content)
+    if options is None:
+        return Compared(name, note=NO_PYTHON)
+    if any(option.startswith("--exclude-newer") for option in options):
+        return Compared(name, note=OWN_CUTOFF)
+    head = pins_of_head(root, name)
+    kept = sorted(
+        package
+        for package, versions in by_name(pins.pinned).items()
+        if versions & head.get(package, set())
+    )
+    floors = "".join(
+        f"{package}>={next(iter(versions))}\n"
+        for package, versions in sorted(head.items())
+        if package not in kept and len(versions) == 1
+    )
+    options += [
+        f"--exclude-newer={stamp(cutoff(now))}",
+        *(f"--exclude-newer-package={package}={stamp(now)}" for package in kept),
+    ]
+    result, body = compile_onto(path, content, options, uv, floors)
+    if result.returncode:
+        return Compared(name, failure=result.stderr.rstrip())
+    found = read_pins(body)
+    if found is None:
+        return Compared(name, failure=f"uv answered with {NO_PIN}:\n{body.rstrip()}")
+    return Compared(
+        name,
+        tuple(sorted(pins.pinned - found.pinned)),
+        (header_of(content) + body).encode("utf-8"),
+    )

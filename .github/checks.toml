@@ -440,6 +440,28 @@ docs = "https://docs.github.com/en/code-security/supply-chain-security/understan
 autofix = """Which version or which other dependency fits the project is the decision
 of a person."""
 
+[check."age of the refresh"]
+title = "The age of what the refresh of the lock files brings"
+problem = """Renovate's weekly refresh of the lock files adds a version released less than
+a week ago, or one whose release PyPI or the registry of npm doesn't name, or it changes
+a file whose versions the check can't date; the log names each one."""
+why = """The refresh merges by itself only from versions at least a week old, as every
+other update waits a week after its release: in that week a version published from a
+hijacked account is usually found and withdrawn before it reaches the repository.
+Renovate and `blueprint.py locks --refresh` keep the refresh to that age; a younger
+version comes when the project asks for one, such as the fix of a vulnerability in
+`package.json`, or when the compile of the refresh failed."""
+fix = """Nothing to do for a young version: run the check again once each version is a
+week old, or let Renovate build the refresh anew in its next weekly window, the next
+Monday. The fix of a vulnerability comes at once anyway, in a pull request of its own. A
+lock file of another package manager, whose versions the check can't date, gets a rule in
+`.github/renovate.json5` with `matchManagers` for its manager, `matchUpdateTypes:
+["lockFileMaintenance"]`, `additionalBranchPrefix: "review-"` and `automerge: false`, so
+that its refresh waits for you on a branch of its own."""
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/troubleshooting.md#the-refresh-of-the-lock-files-waits"
+autofix = """Time makes a version old enough, and only a person decides that a younger
+one may merge."""
+
 [check.gitleaks]
 title = "The secret scan"
 problem = """Gitleaks found what looks like a secret, such as a token, a key or a

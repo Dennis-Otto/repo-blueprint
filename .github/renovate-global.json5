@@ -12,11 +12,17 @@
   platformCommit: "enabled",
   // The package managers write the lock files with their scripts switched off.
   allowScripts: false,
-  // The one command that a rule may run after an update: pins.py of the blueprint,
-  // which writes the sha256 of a tool that Renovate moved to a new release. It runs
-  // without a shell and without the bot's environment, but the checkout it runs in
-  // still holds the token of the release app in .git/config: pins.py runs nothing
-  // that it downloads, and a change of it is reviewed like one of a workflow.
-  allowedCommands: ["^python3 pins\\.py$"],
+  // The commands that a rule may run after an update. They run without a shell and
+  // without the bot's environment, but the checkout they run in still holds the
+  // token of the release app in .git/config, so a change of one is reviewed like one
+  // of a workflow. blueprint.py of the repository compiles the lock files of
+  // pip-compile of the weekly refresh again from versions a week old, with uv, as
+  // Renovate itself compiles them in the same checkout (decision 0136).
+  allowedCommands: [
+    "^python3 (?:\\.github/)?blueprint\\.py locks --refresh$",
+    // The blueprint's own pins.py writes the sha256 of a tool that Renovate moved to
+    // a new release, and runs nothing that it downloads.
+    "^python3 pins\\.py$",
+  ],
   binarySource: "install",
 }

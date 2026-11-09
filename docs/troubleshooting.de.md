@@ -262,6 +262,23 @@ Eine `requirements*.txt`, die keine Lock-Datei ist, etwa `docs/requirements.txt`
 
 **Was zu tun ist:** Hole den Branch, bevor du wieder pushst, lies den Entwurf und sage an seiner Stelle, was sich für die Nutzer ändert. Um den Bot von einem Pull Request fernzuhalten, gib ihm das Label `no-bot-fixes`. Ein Entwurf, den du löschst, bleibt gelöscht: Die Prüfung verlangt dann wieder einen Eintrag und erklärt, wie du ihn schreibst.
 
+## Die Auffrischung der Lock-Dateien wartet
+
+**Was du siehst:** Ein Pull Request der wöchentlichen Auffrischung von Renovate, etwa `chore(deps): lock file maintenance` oder `chore(deps): refresh pip-compile outputs`, merged sich nicht: Die Prüfung dependency-review scheitert an ihrem Schritt *Check the age of what the refresh of the lock files brings*, der jede Version nennt, die jünger als eine Woche ist, oder ein Branch der Auffrischung beginnt mit `renovate/review-`.
+
+**Warum:** Die Auffrischung merged sich nur aus Versionen selbst, die mindestens eine Woche alt sind, so wie jedes andere Update eine Woche nach seinem Release wartet ([Entscheidung 0136](decisions/0136-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md)). Renovate gibt npm `--before=` vor einer Woche mit, und nach Renovate kompiliert `python3 .github/blueprint.py locks --refresh` die Lock-Dateien von pip-compile erneut aus Uploads einer Woche und behält, was `main` pinnt. Eine jüngere Version kommt, wenn das Projekt nach einer verlangt, etwa nach der Behebung einer Schwachstelle der letzten Tage in `package.json`, oder wenn dieses Kompilieren gescheitert ist, was der Pull Request als Artefakt-Fehler von Renovate zeigt. Composer kann dieses Alter nicht einhalten, und seine Daten setzen die Autoren, also wartet seine Auffrischung auf `renovate/review-lock-file-maintenance` auf dich; ebenso die von pip-compile mit der Mend-Renovate-App, die keinen Befehl des Blueprints ausführt.
+
+**Was zu tun ist:** Bei einer jungen Version nichts: Führe die Prüfung erneut aus, sobald jede Version eine Woche alt ist, oder lass Renovate die Auffrischung am nächsten Montag neu bauen. Eine Auffrischung auf `renovate/review-…` wartet auf dein Review: Merge sie, wenn ihre Versionen in Ordnung sind. Eine Lock-Datei eines anderen Paketmanagers, deren Versionen die Prüfung nicht datieren kann, bekommt eine Regel in `.github/renovate.json5`, mit der ihre Auffrischung wartet:
+
+```json5
+{
+  matchManagers: ["poetry"],
+  matchUpdateTypes: ["lockFileMaintenance"],
+  additionalBranchPrefix: "review-",
+  automerge: false,
+},
+```
+
 ## Eine Lock-Datei passt nicht mehr zu ihrer Quelle
 
 **Was du siehst:** Der Schritt *Lock files match their sources* von `scripts/check.sh` scheitert und nennt jede Datei und jede Festlegung, etwa `requirements-dev.txt: no longer matches its sources: they ask for ruff==0.15.1; they no longer ask for ruff==0.14.0.`
