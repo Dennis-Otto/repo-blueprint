@@ -1852,6 +1852,8 @@ def test_the_description_of_the_pull_request(tmp_path: Path) -> None:
     )
     assert "| `.github/social-preview.png` | changed | 100 % |" in text
     assert "upload it under **Settings → General → Social preview**" in text
+    # A private repository shows no social preview, and its look asks for nothing.
+    assert "the bot-health bot of a public repository keeps the issue" in text
     assert "leaves out" not in text
     assert "diff/" not in text
     assert text.endswith(f"keeps the pictures for three days: {RUN}\n")

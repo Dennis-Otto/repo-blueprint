@@ -129,7 +129,7 @@ Mit `issue_assistant_ai` analysiert der Issue-Assistent jedes neue Issue mit Cla
 python3 .github/blueprint.py checklist
 ```
 
-Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview, hochgeladen und aktuell, und die Badges. Ein privates Repository bekommt dazu den Schritt *GitHub Code Security on*, neutral ohne sie, da der Plan seines Besitzers sie vielleicht nicht bietet. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
+Sie zeigt, was für einen Menschen bleibt und welche Schritte erledigt sind: die Release-App, die Einstellungen, die Secrets, die Installation, Renovate, das Community-Profil, die Social-Preview, hochgeladen und aktuell, und die Badges. Ein privates Repository bekommt dazu den Schritt *GitHub Code Security on*, neutral ohne sie, da der Plan seines Besitzers sie vielleicht nicht bietet, und sein Schritt der Social-Preview bleibt neutral, bis das Repository öffentlich ist, da GitHub die Social-Preview nur für ein öffentliches zeigt. Sobald jeder Schritt seinen Haken hat, kümmert sich das Repository um sich selbst.
 
 ## 8. Die Settings-App (optional)
 
