@@ -991,6 +991,27 @@ commands = ["python3 .github/blueprint.py fragments --fix"]
 docs = "CONTRIBUTING.md#the-changelog"
 autofix = ["{blueprint} fragments --fix"]
 
+[step."Records of decisions"]
+problem = """Two records of `docs/decisions/` share a number, the numbers skip one, a file
+of the folder is no record, named `NNNN-its-title.md`, or the index
+`docs/decisions/README.md` lists a record twice, misses one, names a file that the
+folder doesn't have, names a record by another number or lists the records out of
+order; the log names each number and file, and the next free number."""
+why = """Two pull requests that each take the next free number for a record merge
+without a conflict of Git, since their files have different names. Without this step,
+both reach `main`, a link to the number leads to either record, and the index lists one
+of them twice or misses one."""
+fix = """When another pull request took your number first, give your record the next
+free number that the log names, in the name of its file, in its row of the index and in
+each link to it; which record moves is yours to choose, so no command renames one. The
+command fixes what only the index gets wrong: the number of a row, the row of a renamed
+record, a row twice, a missing row from the title and status of its record, and the
+order of the rows; then commit what changed (in the blueprint itself, the tool is
+`blueprint.py` without `.github/`):"""
+commands = ["python3 .github/blueprint.py decisions --fix"]
+docs = "CONTRIBUTING.md#records-of-decisions"
+autofix = ["{blueprint} decisions --fix"]
+
 [step."Accepted advisories"]
 problem = """`.github/renovate-accepted.json5` has other rules of Renovate than the versions
 that an `osv-scanner.toml` accepts with every advisory, or an `osv-scanner.toml` is one

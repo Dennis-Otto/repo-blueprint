@@ -381,6 +381,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Pages in one column",
         "Files of the project",
         "Changelog fragments",
+        "Records of decisions",
         "Accepted advisories",
         "Lock files",
         "Lock files match their sources",

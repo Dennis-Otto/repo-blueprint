@@ -4502,6 +4502,11 @@ def binaries_step(check: str) -> str:
 
 def fragments_step(check: str) -> str:
     start = check.index('step "Changelog fragments"')
+    return check[start : check.index('step "Records of decisions"', start)]
+
+
+def decisions_step(check: str) -> str:
+    start = check.index('step "Records of decisions"')
     return check[start : check.index('step "Accepted advisories"', start)]
 
 
@@ -4651,6 +4656,150 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "docker" not in fragments_step(check)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_the_numbers_of_its_records_of_decisions(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the fragments, with the Python and blueprint.py of the pages, the same in
+    # every kind of project and in the blueprint, which the CI never skips.
+    assert (
+        check.index('\nstep "Pages in one column"\n')
+        < check.index('\nstep "Changelog fragments"\n')
+        < check.index('\nstep "Records of decisions"\n')
+        < check.index('\nstep "Accepted advisories"\n')
+    )
+    assert decisions_step(check) == decisions_step(generic) == decisions_step(own)
+    assert '  "$python" "$tool" decisions\n' in decisions_step(check)
+    assert "which this runner lacks" in decisions_step(check)
+    # The fix bot fixes the index, and the PR coach explains the rest.
+    explained = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    step = explained["step"]["Records of decisions"]
+    assert step["autofix"] == ["{blueprint} decisions --fix"]
+    assert step["commands"] == ["python3 .github/blueprint.py decisions --fix"]
+    assert step["docs"] == "CONTRIBUTING.md#records-of-decisions"
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "\n### Records of decisions\n" in contributing
+    assert "`python3 .github/blueprint.py decisions --fix` fixes" in contributing
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert "The step *Records of decisions* of `scripts/check.sh` fails" in agents
+    index = (project / "docs/decisions/README.md").read_text(encoding="utf-8")
+    assert "The step *Records of decisions* of `scripts/check.sh` fails" in index
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_records_of_a_new_repository_pass_their_check(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # On a copy, which git knows, as the step lists the files of git.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+
+    result = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "decisions"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "Each of the 1 record(s) of docs/decisions/ has a number of its own, and its "
+        "index lists each once, in order.\n"
+    )
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_two_records_of_one_number(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, the step of the pages, which finds the Python, and the step.
+    script = (
+        check[: check.index('step "Text files"')]
+        + pages_step(check)
+        + decisions_step(check)
+    )
+    (project / "scripts/decisions.sh").write_text(
+        script, encoding="utf-8", newline="\n"
+    )
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    # The Python of the tests first, without the variables of a run of the CI.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("CI", "GITHUB_ACTIONS")
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/decisions.sh"],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    decisions = project / "docs/decisions"
+    passed = step()
+    # A pull request added 0002 without its row, and fixes it with the command.
+    (decisions / "0002-the-oldest-release.md").write_text(
+        "# The oldest release\n\n- Status: accepted\n", encoding="utf-8"
+    )
+    missing = step()
+    fix = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "decisions", "--fix"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    fixed = step()
+    # Then main, merged into it, brings a record of the same number.
+    (decisions / "0002-a-website.md").write_text("# A website\n", encoding="utf-8")
+    clash = step()
+
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+    assert missing.returncode == 1, missing.stdout + missing.stderr
+    assert (
+        "docs/decisions: the index misses 0002-the-oldest-release.md\n"
+        "python3 .github/blueprint.py decisions --fix fixes what only the index gets"
+    ) in missing.stdout
+    assert fix.returncode == 0, fix.stdout + fix.stderr
+    index = (decisions / "README.md").read_text(encoding="utf-8")
+    assert index.endswith(
+        "| [0002](0002-the-oldest-release.md) | The oldest release | accepted |\n"
+    )
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+    assert clash.returncode == 1, clash.stdout + clash.stderr
+    assert (
+        "docs/decisions: 0002 is the number of 2 records: 0002-a-website.md, "
+        "0002-the-oldest-release.md\n"
+    ) in clash.stdout
+    assert "the next free number, 0003, in the name of its file" in clash.stdout
+    # The PR coach explains the step that stopped it.
+    assert "Two records of `docs/decisions/` share a number" in clash.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -14255,6 +14404,7 @@ def test_every_project_fixes_what_a_command_can_fix(
         "Pages in one column",
         "Files of the project",
         "Changelog fragments",
+        "Records of decisions",
         "Accepted advisories",
         "Lock files",
         "Lock files match their sources",
