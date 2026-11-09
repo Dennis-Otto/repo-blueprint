@@ -3,8 +3,10 @@
 # and the output of Copier, the files and workflows of a new repository that the
 # recording lists, the image that records it, the social preview, of which the home
 # page of the website shows a smaller copy, the dashboard that the screenshot shows,
-# and the browser and the Playwright that photograph the dashboard and the pages of
-# GitHub. One pattern on each line, as the paths of a workflow; ! leaves files out.
+# the browser and the Playwright that photograph the dashboard and the pages of
+# GitHub, and the code of keep and its Pillow, which draw the picture of a
+# difference. One pattern on each line, as the paths of a workflow; ! leaves files
+# out.
 copier.yml
 template/**
 .github/workflows/**
@@ -14,3 +16,5 @@ stacks/copier/**
 dashboard.py
 .github/social-preview/Dockerfile
 stacks/screenshots/requirements-browser.txt
+blueprint/screenshots.py
+stacks/screenshots/requirements.txt
