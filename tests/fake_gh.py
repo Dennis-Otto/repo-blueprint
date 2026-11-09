@@ -12,6 +12,12 @@ later one answers the next. A call without an answer fails, as an unexpected cal
 the real gh would do harm, and so does a call of gh api that doesn't ask right after
 `api` for the version of the API in $FAKE_GH_VERSION, as every step asks with
 --header "$API_VERSION_HEADER": the answers and the log hold the call without it.
+
+It is the gh of the runners, which since v2.97.0 prints a raw answer of gh api, one
+without --jq or --template, with terminal escape sequences, such as the colors of a
+job's log, only with --allow-escape-sequences, and fails without it. With $FAKE_GH_CLI
+set to an older version, such as 2.96.0, it knows no such option and prints the answer
+as it is. gh help api tells which of the two it is.
 """
 
 from __future__ import annotations
@@ -27,6 +33,48 @@ from typing import Any
 # The options whose value gh reads as a file, "-" for stdin, and the fields whose
 # value after @ it reads so.
 FILES = ("--body-file", "--input", "--notes-file", "-F", "--field")
+# The gh of ubuntu-24.04 in November 2026, and the first version that guards gh api
+# against terminal escape sequences (GHSA-3m3g-3wcr-px46).
+RUNNER_GH = "2.103.3"
+GUARDED_SINCE = (2, 97, 0)
+ALLOW = "--allow-escape-sequences"
+# The options of gh api that print through a filter, whose output gh guards on its
+# own, rather than the raw answer.
+FILTERS = ("--jq", "-q", "--template", "-t")
+REFUSED = (
+    "the response contains terminal escape sequences;"
+    f" pass {ALLOW} to output it anyway\n"
+)
+
+
+def guarded() -> bool:
+    """Whether this gh guards gh api against terminal escape sequences: the gh of the
+    runners does, and so does the version in $FAKE_GH_CLI from v2.97.0 on."""
+    version = os.environ.get("FAKE_GH_CLI") or RUNNER_GH
+    return tuple(int(part) for part in version.split(".")) >= GUARDED_SINCE
+
+
+def help_of_api() -> str:
+    """What gh help api prints, as far as the steps read it: its options."""
+    allow = f"      {ALLOW}   Allow printing terminal escape sequences\n"
+    return (
+        "USAGE\n  gh api <endpoint> [flags]\n\nFLAGS\n"
+        + (allow if guarded() else "")
+        + "  -H, --header key:value         Add a HTTP request header\n"
+        + "  -q, --jq string                Query to select values from the response\n"
+    )
+
+
+def refused(arguments: list[str], out: str) -> bool:
+    """Whether a guarded gh refuses to print this raw answer of gh api: it has terminal
+    escape sequences, and the call neither filters it nor allows them."""
+    return (
+        guarded()
+        and arguments[:1] == ["api"]
+        and "\x1b" in out
+        and ALLOW not in arguments
+        and not any(word in FILTERS for word in arguments)
+    )
 
 
 def read(arguments: list[str]) -> dict[str, str]:
@@ -103,6 +151,15 @@ def main(arguments: list[str]) -> int:
     record = {"args": arguments, "read": read(arguments)}
     with Path(os.environ["FAKE_GH_LOG"]).open("a", encoding="utf-8") as log:
         log.write(json.dumps(record) + "\n")
+    # What the version of gh decides, not the plan of the test.
+    if arguments == ["help", "api"]:
+        sys.stdout.write(help_of_api())
+        return 0
+    if arguments[:1] == ["api"] and ALLOW in arguments and not guarded():
+        sys.stderr.write(
+            f"unknown flag: {ALLOW}\n\nUsage:  gh api <endpoint> [flags]\n"
+        )
+        return 1
     for index, answer in enumerate(answers):
         if answer["once"] and str(index) in used:
             continue
@@ -115,6 +172,8 @@ def main(arguments: list[str]) -> int:
         if "json" in answer:
             out, failed, failure = filtered(answer["json"], arguments)
             err, code = err + failed, failure or code
+        elif refused(arguments, out):
+            out, err, code = "", REFUSED, 1
         # gh release download --output writes the asset into that file, as gh does,
         # when the answer is no error.
         target = downloaded_to(arguments)

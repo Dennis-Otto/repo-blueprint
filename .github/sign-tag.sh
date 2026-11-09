@@ -98,7 +98,7 @@ verify() {
 }
 
 # gitsign through the API with the token in GH_TOKEN, which survives an outage of
-# GitHub's downloads without a token (decision 0127).
+# GitHub's downloads without a token (decision 0132).
 gitsign="$RUNNER_TEMP/gitsign"
 if ! retry gh release download "v$version" --repo sigstore/gitsign \
   --pattern "gitsign_${version}_linux_amd64" --output "$gitsign" --clobber; then

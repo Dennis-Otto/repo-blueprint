@@ -1,4 +1,4 @@
-# The answers of https://github.com/Dennis-Otto/dennis-otto-pager,
+# The answers of https://github.com/Dennis-Otto/repo-pager,
 # as its .copier-answers.yml has them, without _commit and _src_path. The Variants
 # workflow makes a repository with them and updates one from the latest release,
 # and the Downstream workflow warns when they differ from those of the repository:
@@ -8,14 +8,14 @@ copyright: 2026 Dennis Otto
 description: A Telegram bot on a Cloudflare Worker that tells its maintainer only
   what needs them in their GitHub repositories, and acts on it with a button.
 discussions: true
-homepage: https://dennis-otto.github.io/dennis-otto-pager/
+homepage: https://dennis-otto.github.io/repo-pager/
 issue_assistant_ai: true
 languages:
 - javascript-typescript
 license: MIT
 owner: Dennis-Otto
-project_name: Dennis Otto Pager
-project_slug: dennis-otto-pager
+project_name: Repo Pager
+project_slug: repo-pager
 project_type: cloudflare-worker
 release_app: dennis-otto-release-automation
 release_app_client_id: Iv23liP9PIEHOV74AiIA
@@ -23,7 +23,7 @@ release_app_id: '4739928'
 renovate_runner: hub
 sample_code: false
 sponsor: Dennis-Otto
-successor: false
+successor: true
 test_marker: ''
 test_workflows: ''
 topics: cloudflare-workers, cloudflare, typescript, telegram-bot, github-webhooks,

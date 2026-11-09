@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **`blueprint.py` works on Windows with any text from GitHub:** `python .github/blueprint.py checklist`, `settings` and every other command that asks GitHub read the answers of the GitHub CLI in the code page of Windows, such as cp1252, which has no character for many an emoji. A pull request or a comment with one, such as 🔐, made the checklist crash with `UnicodeDecodeError` and then `AttributeError`, and a request that sent one to GitHub waited for ever. `blueprint.py` now reads and writes the text of the GitHub CLI in UTF-8 on every machine, as Linux and macOS did already ([#701](https://github.com/Dennis-Otto/repo-blueprint/issues/701)).

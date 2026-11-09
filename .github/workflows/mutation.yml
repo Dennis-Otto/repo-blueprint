@@ -321,7 +321,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           composer install --no-interaction --prefer-dist --no-progress
-          # Through the API with the token of the job, checked by its sha256 (decision 0127).
+          # Through the API with the token of the job, checked by its sha256 (decision 0132).
           bash .github/download.sh infection/infection "$INFECTION_VERSION" infection.phar \
             "$RUNNER_TEMP/infection.phar" "$INFECTION_SHA256"
       - name: Run the mutants against the tests

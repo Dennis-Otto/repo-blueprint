@@ -174,7 +174,7 @@ jobs:
           # would, not with the verify of sign-tag.sh, one of the scripts it checks.
           # gitsign through the API with the token of the job, which survives an outage
           # of GitHub's downloads without a token, five times, 10, 20, 40 and 80 seconds
-          # apart, as .github/download.sh does (decision 0127).
+          # apart, as .github/download.sh does (decision 0132).
           gitsign="$RUNNER_TEMP/gitsign"
           for wait in 10 20 40 80 0; do
             if gh release download "v$GITSIGN_VERSION" --repo sigstore/gitsign \

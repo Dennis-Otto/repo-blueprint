@@ -8,7 +8,7 @@
 #   bash .github/lychee.sh [--no-fail] [--may-find-none] report.md [lychee arguments]
 # lychee comes from its release on GitHub, at the version below and checked by its
 # sha256, through .github/download.sh and once in a job. The action downloaded it
-# without a token, which failed for hours on 8 November 2026 (decision 0127).
+# without a token, which failed for hours on 8 November 2026 (decision 0132).
 # https://github.com/Dennis-Otto/repo-blueprint
 set -euo pipefail
 

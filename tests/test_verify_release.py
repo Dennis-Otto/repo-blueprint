@@ -55,7 +55,7 @@ SIGNED_COMMIT = f"api repos/o/r/commits/{COMMIT} --jq .commit.verification.verif
 TRUSTED_RUN = " --source-ref refs/heads/main --deny-self-hosted-runners"
 GITSIGN_VERSION = step(WORKFLOW, "verify", STEP)["env"]["GITSIGN_VERSION"]
 # The download of gitsign through the API, which survives an outage of GitHub's
-# downloads without a token (decision 0127).
+# downloads without a token (decision 0132).
 GITSIGN_DOWNLOAD = (
     re.escape(
         f"release download v{GITSIGN_VERSION} --repo sigstore/gitsign"

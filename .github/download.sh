@@ -7,7 +7,7 @@
 # gh downloads it through the API, with the token in GH_TOKEN: on 8 November 2026,
 # GitHub's downloads without a token, from the page of a release, timed out for hours
 # and failed the checks of every repository, while those through the API kept working
-# (decision 0127). After an error of the network or of GitHub, it tries again, five
+# (decision 0132). After an error of the network or of GitHub, it tries again, five
 # times in all, 10, 20, 40 and 80 seconds apart; when the release or the asset
 # doesn't exist, or the token is refused, it stops at once.
 # https://github.com/Dennis-Otto/repo-blueprint

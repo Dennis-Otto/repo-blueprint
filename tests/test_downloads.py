@@ -1,5 +1,5 @@
 """Tests of the downloads that survive an outage of GitHub's downloads without a token,
-as on 8 November 2026 (decision 0127): .github/download.sh, which downloads an asset
+as on 8 November 2026 (decision 0132): .github/download.sh, which downloads an asset
 of a release through the API and tries again after an error of GitHub,
 .github/lychee.sh, which runs lychee as its action ran it, and the steps of the
 workflows that download with them. Each runs in bash, with stand-ins for gh, sleep

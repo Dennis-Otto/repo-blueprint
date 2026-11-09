@@ -330,7 +330,7 @@ jobs:
       # the SBOMs and krankerl for a Nextcloud app. .github/download.sh of the commit
       # that runs this workflow, as above, downloads them through the API with the token
       # of the job, which survives an outage of GitHub's downloads without a token
-      # (decision 0127), before the checkout and in a step of its own, so that no step
+      # (decision 0132), before the checkout and in a step of its own, so that no step
       # that builds the project has the token.
       - name: Download the tools of the build
         env:

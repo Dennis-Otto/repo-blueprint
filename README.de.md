@@ -21,7 +21,7 @@ Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für ne
 
 - **Getestet bei jeder Änderung.** `scripts/check.sh` führt dieselben Prüfungen auf deinem Rechner und in der CI aus, mit voller Abdeckung des Codes. Der PR-Coach erklärt jede Prüfung, die scheitert, und der Fix-Bot committet, was ein Befehl beheben kann.
 - **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3, auch für Container-Images, und prüft es danach so, wie seine Nutzer es können.
-- **Sicher ab dem ersten Commit.** CodeQL, OpenSSF Scorecard, ein Secret-Scan und eine Prüfung der Workflows laufen von Anfang an, jede Action ist auf einen Commit-Hash festgelegt, und etwa 90 bis 100 Antworten von OpenSSF Best Practices sind ausgefüllt.
+- **Sicher ab dem ersten Commit.** CodeQL, OpenSSF Scorecard, ein Secret-Scan und eine Prüfung der Workflows laufen von Anfang an, jede Action ist auf einen Commit-Hash festgelegt, und etwa 100 Antworten von OpenSSF Best Practices und seiner OSPS Baseline sind ausgefüllt.
 - **Von selbst aktuell.** Renovate aktualisiert die Abhängigkeiten, der Einstellungs-Bot hält die Einstellungen als Code, und der Blueprint-Bot bringt jede Version des Blueprints als Pull Request, den seine Prüfungen testen, bevor er merged; jedes öffentliche Repository, das [mit dem Blueprint gebaut](#mit-dem-blueprint-gebaut) ist, bekommt so jede Version.
 
 <!-- --8<-- [end:pitch] -->
@@ -68,7 +68,7 @@ Sieben öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code un
 - **[Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant)**, eine GitHub Action: eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, geprüft von einem Job ohne KI, bevor sie erscheint. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/issue-assistant/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/issue-assistant)
 - **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**, eine Nextcloud-App: die Dokumente von Paperless-ngx in Nextcloud Files, nach Korrespondent, Typ und Jahr. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-sync/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-sync)
 - **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**, eine Nextcloud-App: die Volltextsuche von Paperless-ngx in der Suche von Nextcloud. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-unified-search/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-unified-search)
-- **[Dennis Otto Pager](https://github.com/Dennis-Otto/dennis-otto-pager)**, ein Cloudflare Worker in TypeScript: ein privater Telegram-Pager für die Repositories seines Maintainers, der nur meldet, was ihn braucht, und es per Button erledigt. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/dennis-otto-pager/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/dennis-otto-pager)
+- **[Repo Pager](https://github.com/Dennis-Otto/repo-pager)**, ein Cloudflare Worker in TypeScript: ein privater Telegram-Pager, den jeder Maintainer für seine eigenen Repositories betreibt und der nur meldet, was ihn braucht, und es per Button erledigt. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/repo-pager/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/repo-pager)
 - **[dennis-otto.github.io](https://github.com/Dennis-Otto/dennis-otto.github.io)**, ein Repository ohne Build: die Website mit jedem Projekt seines Eigentümers. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/dennis-otto.github.io/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/dennis-otto.github.io)
 
 [Das Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) zeigt jedes davon auf einen Blick: die Version des Blueprints, auf der es ist, seine Prüfungen, seine Releases und seine Scorecard.
@@ -177,7 +177,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 
 - **Website:** Die Dokumentation in `docs/` als Website mit Suche und einem hellen und einem dunklen Theme, auf Deutsch und Englisch.
 - **Diagramme:** Jedes Diagramm ist ein Bild seiner Mermaid-Quelle, damit auch die GitHub-App es zeigt.
-- **Screenshots:** Ein Bot erneuert die Bilder des Projekts, nur wenn sich ihre Pixel ändern.
+- **Screenshots:** Ein Bot erneuert die Bilder des Projekts, nur wenn sich ihre Pixel ändern, und zeichnet die geänderten Pixel jedes Bildes rot ein.
 
 ### [Einstellungen als Code](docs/features/settings.de.md)
 

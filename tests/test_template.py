@@ -26,6 +26,7 @@ import tomllib
 import warnings
 import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from html.parser import HTMLParser
 from pathlib import Path
 from types import CodeType, SimpleNamespace
 from typing import Any, NamedTuple, cast
@@ -64,6 +65,7 @@ import pins
 import reference
 from blueprint import bootstrap, ownership, screenshots
 from blueprint.app import App, answered_app
+from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     CRON,
     FAILED,
@@ -81,7 +83,9 @@ from blueprint.changelog import Fragment, release_changelog
 from blueprint.checklist import (
     CHROME_WEB_STORE_ITEM,
     CHROME_WEB_STORE_SIGN_IN,
+    DEFAULT_PANEL,
     RELEASE_APP_PERMISSIONS,
+    social_preview,
 )
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers, signed_off, watched
@@ -762,56 +766,23 @@ def test_every_job_runs_on_a_runner_named_with_its_version(
             assert runner == RUNNER or (name, runner) in exceptions, f"{name}: {runner}"
 
 
-# The jobs that hold a secret or a token that may write, yet record their network
-# traffic instead of blocking it, each with its reason. Every other such job blocks
-# every host that it doesn't need (decision 0080).
-AUDITED_PRIVILEGED_JOBS = {
-    (
-        "release.yml",
-        "pypi",
-    ): "no repository delivers to PyPI yet: no run measured its hosts",
-    (
-        "release.yml",
-        "npm",
-    ): "no repository delivers to npm yet: no run measured its hosts",
-    (
-        "build-image.yml",
-        "image",
-    ): "Docker builds the image and reaches the registries of its base images",
-    (
-        "renovate.yml",
-        "renovate",
-    ): "Renovate reaches the registry of every package manager",
-    (
-        "docs.yml",
-        "deploy",
-    ): "it asks the published website, on a domain of the repository's own",
-    (
-        "dashboard.yml",
-        "deploy",
-    ): "it asks the published website, on a domain of the repository's own",
-    ("links.yml", "links"): "it checks the links to every host that the pages name",
-    (
-        "codeql.yml",
-        "codeql",
-    ): "CodeQL downloads its packs, and the job only uploads findings",
-    (
-        "zizmor.yml",
-        "zizmor",
-    ): "zizmor asks GitHub and the advisories, and the job only uploads findings",
-    (
-        "scorecard.yml",
-        "analysis",
-    ): "Scorecard asks a dozen services, and the job only uploads findings",
-    (
-        "ci-php.yml",
-        "taint-report",
-    ): "Psalm runs after Composer, and the job only uploads findings",
-    (
-        "ci.yml",
-        "taint-report",
-    ): "Psalm runs after Composer, and the job only uploads findings",
-}
+# The jobs that SECURITY.md names as holding a secret or a token that may write, yet
+# only recording their network traffic, each with its reason there; every other such
+# job blocks every host that it doesn't need (decisions 0080 and 0130). The Renovate
+# of the blueprint is named by the repository of the blueprint, where it runs.
+RECORDING = re.compile(
+    r"^  - `([\w.-]+\.yml)`(?: of \[[^\]]+\]\(https://github\.com/[^)]+\))?,"
+    r" job `([\w-]+)`[,:] \S",
+    re.MULTILINE,
+)
+
+
+def recording_jobs(root: Path) -> set[tuple[str, str]]:
+    """The jobs that hold a secret or a token that may write and only record, as the
+    SECURITY.md of a project names them."""
+    return set(RECORDING.findall((root / "SECURITY.md").read_text(encoding="utf-8")))
+
+
 # Where PUBLISH_TO delivers a release, as copier.yml derives it from the kind.
 PUBLISH_TARGETS = (
     "hacs",
@@ -862,51 +833,210 @@ def test_every_privileged_job_blocks_the_hosts_that_it_doesnt_need(
     # the signing key of a Nextcloud app, an OIDC token or a token that may write
     # could send them anywhere; audit mode only records it.
     root = ROOT if project == "blueprint" else projects[project]
-    flows = workflows(root)
+    named = recording_jobs(root)
+    target = delivery_of(root)
     audited = set()
-    for name, text in flows.items():
+    for name, job_id, job, runs_for in privileged_jobs(root):
+        where = f"{name}: {job_id}"
+        hardening = steps_using(job, "step-security/harden-runner")
+        assert hardening == [job["steps"][0]], f"{where}: harden-runner first"
+        policy = hardening[0]["with"]
+        if policy["egress-policy"] == "audit":
+            assert policy == {"egress-policy": "audit"}, where
+            # One that runs here only for another delivery, the project doesn't name.
+            if not runs_for or target in runs_for:
+                audited.add((name, job_id))
+            continue
+        assert policy["egress-policy"] == "block", where
+        assert hardening[0]["name"] == "Block every host that the job doesn't need"
+        # No sudo and no Docker, but where the Nextcloud app installs krankerl.
+        sudo = policy.get("disable-sudo-and-containers")
+        assert sudo is True or (
+            name == "build-release.yml"
+            and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
+        ), where
+        endpoints = policy["allowed-endpoints"]
+        for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
+            assert ENDPOINT.fullmatch(endpoint), f"{where}: {endpoint}"
+        # Every host that a step downloads from with curl, for the PUBLISH_TO that
+        # the step runs for, or for one of them where it runs for every one.
+        for step in job["steps"]:
+            condition = re.search(
+                r"env\.PUBLISH_TO == '([a-z-]+)'", str(step.get("if", ""))
+            )
+            targets = [condition[1]] if condition else PUBLISH_TARGETS
+            for call in CURL.findall(step.get("run", "")):
+                for host in re.findall(r"https://([a-z0-9.-]+)/", call):
+                    assert any(
+                        reaches(allowed_hosts(endpoints, target), host)
+                        for target in targets
+                    ), f"{where}: {host}"
+    # SECURITY.md names every job that only records, and none that blocks, that is
+    # gone or that runs only for another delivery, but the Renovate of the blueprint,
+    # which runs in its repository for one that takes it (hub).
+    hub = project == "blueprint" or answers_of(root)["renovate_runner"] == "hub"
+    assert named == audited | ({("renovate.yml", "renovate")} if hub else set())
+    # A package that publishes nowhere names no registry (issue 446).
+    deliveries = {
+        "pypi": ("release.yml", "pypi"),
+        "npm": ("release.yml", "npm"),
+        "ghcr": ("build-image.yml", "image"),
+    }
+    assert {job for key, job in deliveries.items() if key != target}.isdisjoint(named)
+
+
+# A delivery that a job runs for, by its condition on PUBLISH_TO.
+DELIVERY = re.compile(r"vars\.PUBLISH_TO == '([a-z-]+)'")
+
+
+def privileged_jobs(
+    root: Path,
+) -> Iterator[tuple[str, str, Mapping[str, Any], set[str]]]:
+    """Each job of a project's workflows that holds a secret, an OIDC token or a token
+    that may write, with its workflow, its id and the deliveries that it runs for,
+    none where it runs for each: by its own condition, or by that of the jobs that
+    call its workflow. Not those of the issue assistant's templates, and not those
+    that call a workflow, whose jobs block, here or in their repository."""
+    flows = {name: parse(text) for name, text in workflows(root).items()}
+    called: dict[str, set[str]] = {}
+    for parsed in flows.values():
+        for job in parsed["jobs"].values():
+            uses = str(job.get("uses", ""))
+            if uses.startswith("./.github/workflows/"):
+                targets = set(DELIVERY.findall(str(job.get("if", "")))) or {""}
+                called.setdefault(uses.rsplit("/", 1)[1], set()).update(targets)
+    for name, parsed in flows.items():
         if name in ISSUE_ASSISTANT_WORKFLOWS:
             continue
-        parsed = parse(text)
+        # A workflow that a job calls for every delivery runs for each.
+        by_callers = called.get(name, set())
         for job_id, job in parsed["jobs"].items():
-            # A job that calls a workflow: its jobs block, here or in their repository.
             if "uses" in job or not privileged(job, parsed.get("permissions")):
                 continue
-            where = f"{name}: {job_id}"
-            hardening = steps_using(job, "step-security/harden-runner")
-            assert hardening == [job["steps"][0]], f"{where}: harden-runner first"
-            policy = hardening[0]["with"]
-            if (name, job_id) in AUDITED_PRIVILEGED_JOBS:
-                audited.add((name, job_id))
-                assert policy == {"egress-policy": "audit"}, where
+            targets = set(DELIVERY.findall(str(job.get("if", ""))))
+            if not targets and "" not in by_callers:
+                targets = by_callers
+            yield name, job_id, job, targets
+
+
+def delivery_of(project: Path) -> str:
+    """Where a project delivers its releases, as PUBLISH_TO of its settings says."""
+    settings = Settings.load(project / ".github/repository.toml")
+    return str(settings.variables["PUBLISH_TO"])
+
+
+def answers_of(project: Path) -> Mapping[str, Any]:
+    """The answers of a rendered project."""
+    return downstream.read(project / ".copier-answers.yml")
+
+
+@pytest.mark.parametrize("runner", ["self", "mend"])
+def test_security_md_names_the_renovate_that_only_records_where_it_runs(
+    tmp_path: Path, runner: str
+) -> None:
+    # Renovate of a workflow in the repository itself only records, as the one of the
+    # blueprint does; the Mend Renovate app runs outside the workflows.
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner=runner,
+        **OCTO_APP,
+    )
+
+    audited = {
+        (name, job_id)
+        for name, job_id, job, targets in privileged_jobs(project)
+        if steps_using(job, "step-security/harden-runner")[0]["with"]["egress-policy"]
+        == "audit"
+        and (not targets or "pypi" in targets)
+    }
+    assert delivery_of(project) == "pypi"
+    assert ("release.yml", "pypi") in audited
+    assert recording_jobs(project) == audited
+    assert (("renovate.yml", "renovate") in audited) == (runner == "self")
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    assert "repo-blueprint), job `renovate`" not in security
+
+
+@pytest.mark.parametrize("language", ["go", "java-kotlin", "rust", None])
+def test_codeql_only_records_where_it_may_fetch_the_dependencies_of_the_code(
+    tmp_path: Path, language: str | None
+) -> None:
+    # CodeQL may fetch the dependencies of Go, Java or Kotlin, and Rust from hosts that
+    # no run has shown yet: with one of them, its job only records, and SECURITY.md
+    # names it; with the others, it blocks every host but GitHub's (decision 0130).
+    chosen = ["python", language] if language else ["python"]
+    answers: dict[str, Any] = {"languages": chosen}
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner="mend",
+        **answers,
+        **OCTO_APP,
+    )
+
+    codeql = job_in(
+        (project / ".github/workflows/codeql.yml").read_text(encoding="utf-8"), "codeql"
+    )
+    initialized = step_in(codeql, "Initialize the analysis")
+    assert initialized["with"]["languages"] == ", ".join([*chosen, "actions"])
+    hardening = codeql["steps"][0]
+    names = names_of(codeql)
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    recording = {("release.yml", "pypi"), ("scorecard.yml", "analysis")}
+    if language:
+        assert hardening["name"] == "Record the network traffic of the job"
+        assert hardening["with"] == {"egress-policy": "audit"}
+        # Nothing waits for hosts that the job names, or for Docker that it keeps.
+        assert names[1].startswith("actions/checkout@")
+        assert WAIT_FOR_DOCKER not in names
+        assert "website and zizmor: each" in security
+        recording.add(("codeql.yml", "codeql"))
+    else:
+        assert hardening["name"] == "Block every host that the job doesn't need"
+        assert hardening["with"]["egress-policy"] == "block"
+        assert names[1] == "Wait until Harden-Runner lets the hosts through"
+        assert WAIT_FOR_DOCKER in names
+        assert "website, CodeQL and zizmor: each" in security
+    assert recording_jobs(project) == recording
+
+
+# The actions that the Scorecard API accepts in the job that publishes its results
+# (verify_workflow.go of ossf/scorecard-infra): a step without `uses`, such as one that
+# waits for the hosts of Harden-Runner, makes the API refuse the results and the job fail.
+SCORECARD_ACTIONS = {
+    "actions/checkout",
+    "actions/create-github-app-token",
+    "actions/upload-artifact",
+    "github/codeql-action/upload-sarif",
+    "ossf/scorecard-action",
+    "step-security/harden-runner",
+}
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_job_of_scorecard_has_only_the_steps_that_its_api_accepts(
+    projects: dict[str, Path], project: str
+) -> None:
+    root = ROOT if project == "blueprint" else projects[project]
+    found = []
+    for name, text in workflows(root).items():
+        for job_id, job in parse(text)["jobs"].items():
+            steps = job.get("steps", [])
+            uses = [str(step.get("uses", "")).split("@")[0] for step in steps]
+            if "ossf/scorecard-action" not in uses:
                 continue
-            assert policy["egress-policy"] == "block", where
-            assert hardening[0]["name"] == "Block every host that the job doesn't need"
-            # No sudo and no Docker, but where the Nextcloud app installs krankerl.
-            sudo = policy["disable-sudo-and-containers"]
-            assert sudo is True or (
-                name == "build-release.yml"
-                and sudo == "${{ vars.PUBLISH_TO != 'nextcloud-appstore' }}"
-            ), where
-            endpoints = policy["allowed-endpoints"]
-            for endpoint in PER_TARGET.sub(lambda found: found[2], endpoints).split():
-                assert ENDPOINT.fullmatch(endpoint), f"{where}: {endpoint}"
-            # Every host that a step downloads from with curl, for the PUBLISH_TO that
-            # the step runs for, or for one of them where it runs for every one.
-            for step in job["steps"]:
-                condition = re.search(
-                    r"env\.PUBLISH_TO == '([a-z-]+)'", str(step.get("if", ""))
-                )
-                targets = [condition[1]] if condition else PUBLISH_TARGETS
-                for call in CURL.findall(step.get("run", "")):
-                    for host in re.findall(r"https://([a-z0-9.-]+)/", call):
-                        assert any(
-                            reaches(allowed_hosts(endpoints, target), host)
-                            for target in targets
-                        ), f"{where}: {host}"
-    # No reason stays for a job that blocks, or that is gone.
-    if project == "blueprint":
-        assert audited == {key for key in AUDITED_PRIVILEGED_JOBS if key[0] in flows}
+            found.append((name, job_id))
+            for step, action in zip(steps, uses, strict=True):
+                assert "run" not in step, f"{name}: {job_id}: {step.get('name')}"
+                assert action in SCORECARD_ACTIONS, f"{name}: {job_id}: {action}"
+    assert found == [("scorecard.yml", "analysis")]
 
 
 WAIT_FOR_DOCKER = "Wait until Harden-Runner has removed Docker"
@@ -4120,6 +4250,11 @@ def pages_step(check: str) -> str:
     return check[start : check.index('step "Changelog fragments"', start)]
 
 
+def binaries_step(check: str) -> str:
+    start = check.index('step "Binary files"')
+    return check[start : check.index('step "Changelog fragments"', start)]
+
+
 def fragments_step(check: str) -> str:
     start = check.index('step "Changelog fragments"')
     return check[start : check.index('step "Accepted advisories"', start)]
@@ -4271,6 +4406,95 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "docker" not in fragments_step(check)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_that_git_holds_no_binary_that_nobody_can_review(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the files of the project, with the Python and blueprint.py of the pages,
+    # the same in every kind of project and in the blueprint, which the CI never skips.
+    assert (
+        check.index('\nstep "Files of the project"\n')
+        < check.index('\nstep "Binary files"\n')
+        < check.index('\nstep "Changelog fragments"\n')
+    )
+    assert binaries_step(check) == binaries_step(generic) == binaries_step(own)
+    assert '  "$python" "$tool" binaries\n' in binaries_step(check)
+    assert "which this runner lacks" in binaries_step(check)
+    # What OSPS-QA-05.01 and 05.02 of .bestpractices.json point to.
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    assert "The step *Binary files* of `scripts/check.sh` fails" in security
+    explained = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    assert "OSPS-QA-05.02" in explained["step"]["Binary files"]["why"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_bytecode_of_the_tools_is_no_binary_file_of_git(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # Every repository runs the Python of .github/, also one of Node, whose bytecode the
+    # step Binary files named in the CI before .gitignore left it out in every kind.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    for cache in (".github/__pycache__", ".github/blueprint/__pycache__"):
+        (project / cache).mkdir(parents=True, exist_ok=True)
+        (project / cache / "cli.cpython-314.pyc").write_bytes(b"\xcb\r\r\n\0\0")
+    (project / "data.bin").write_bytes(b"data\0more")
+
+    assert binaries(project) == [Binary("data.bin", UNREVIEWABLE)]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_documents_its_dependencies_secrets_access_and_reviews(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # What OSPS-DO-06.01, OSPS-BR-07.02, OSPS-AC-02.01, OSPS-GV-04.01 and the code
+    # review standards and small tasks of the gold level stand on, in every kind.
+    project = projects[kind]
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+    governance = (project / "GOVERNANCE.md").read_text(encoding="utf-8")
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for part in ("**Selecting.**", "**Obtaining.**", "**Tracking.**"):
+        assert part in security.split("## Dependencies", 1)[1], part
+    secrets = security.split("## Secrets and credentials", 1)[1].split("\n## ", 1)[0]
+    for part in ("**Storing.**", "**Accessing.**", "**Rotating.**", "never in Git"):
+        assert part in secrets, part
+    assert "the token of Claude for the issue assistant" in secrets
+    access = governance.split("## Maintainers and access", 1)[1].split("\n## ", 1)[0]
+    assert "until a maintainer invites them by hand" in access
+    assert "Before a person gets escalated permissions" in access
+    reviews = governance.split("## Reviews", 1)[1].split("\n## ", 1)[0]
+    for part in (
+        "How a pull request is reviewed",
+        "What the review checks",
+        "What is acceptable",
+    ):
+        assert part in reviews, part
+    assert "https://github.com/Dennis-Otto/demo-project/contribute" in contributing
+
+
+def test_a_project_without_the_ai_names_no_token_of_claude_among_its_secrets(
+    tmp_path: Path,
+) -> None:
+    project = render(
+        tmp_path,
+        project_name="Demo Project",
+        description="A demo.",
+        project_type="generic",
+        issue_assistant_ai=False,
+    )
+    security = (project / "SECURITY.md").read_text(encoding="utf-8")
+
+    assert "## Secrets and credentials" in security
+    assert "token of Claude" not in security
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -5655,7 +5879,7 @@ def test_no_download_of_a_release_on_github_goes_without_a_token(
 ) -> None:
     # GitHub's downloads without a token, from the page of a release, timed out for
     # hours on 8 November 2026 and failed the checks of every repository, while the
-    # API kept working (decision 0127): an asset of a release comes through the API,
+    # API kept working (decision 0132): an asset of a release comes through the API,
     # with gh and the token of the job, and no action downloads one without it, as the
     # one of lychee did.
     folder = ROOT if kind == "blueprint" else projects[kind]
@@ -7216,6 +7440,10 @@ def test_an_existing_repository_takes_no_sample_code(tmp_path: Path, kind: str) 
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`scripts/screenshots.sh` renders the social preview" not in contributing
     assert "\n- The screenshot bot (`screenshot-bot.yml`)" in contributing
+    # Nor does its social preview, which still shows the drawing of its kind.
+    preview = (project / ".github/social-preview.html").read_text(encoding="utf-8")
+    assert "data-default-panel" in preview
+    assert "screenshots.sh" not in preview
     assert "\n- `.github/screenshots.toml`, which this project adds" in contributing
     # No sample test either: a Nextcloud app gets only the files that its psalm.xml
     # and phpunit.xml name, which belong to the blueprint.
@@ -7595,6 +7823,23 @@ PROJECT_SPECIFIC = {
     # The check of the website only reports for now, and the user interface of an app
     # or of the cards of an integration is the project's own.
     "accessibility_best_practices",
+    # The other repositories of a project: N/A only when every release builds from
+    # this one alone, which only the owner knows.
+    "osps_qa_04_01",
+    "osps_qa_04_02",
+    # A statement in each source file: REUSE.toml gives them for every file at once.
+    "copyright_per_file",
+    "license_per_file",
+    # The coverage that the files of the project ask for, of the code that it measures,
+    # and a build that only a project can make reproducible.
+    "test_statement_coverage90",
+    "test_branch_coverage80",
+    "build_reproducible",
+    # What only the people of a project can say.
+    "security_review",
+    "contributors_unassociated",
+    "two_person_review",
+    "secure_2FA",
 }
 # Every answer of a repository: none of them can do without these.
 GUARANTEED = {
@@ -7618,6 +7863,15 @@ GUARANTEED = {
     "osps_vm_02_01",
     "osps_vm_04_02",
     "osps_vm_06_02",
+    # The rules of GOVERNANCE.md and SECURITY.md, and the step Binary files.
+    "small_tasks",
+    "code_review_standards",
+    "osps_ac_02_01",
+    "osps_br_07_02",
+    "osps_do_06_01",
+    "osps_gv_04_01",
+    "osps_qa_05_01",
+    "osps_qa_05_02",
 }
 
 
@@ -7844,6 +8098,14 @@ def test_a_package_that_publishes_nowhere_speaks_of_no_registry(
     assert "gh attestation verify <asset> --repo" in security
     contributing = (nowhere / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "creates the release with its SBOM and signed provenance." in contributing
+    # Its social preview installs it from GitHub.
+    install = words[0]
+    preview = (nowhere / ".github/social-preview.html").read_text(encoding="utf-8")
+    assert install in (published / ".github/social-preview.html").read_text(
+        encoding="utf-8"
+    )
+    assert install not in preview
+    assert "Dennis-Otto/demo-project</b>" in preview
 
     # The release and the settings say the same, and the update keeps the answer.
     def settings(project: Path) -> dict[str, Any]:
@@ -15488,13 +15750,15 @@ def run_after_the_checks(
     answers: Mapping[str, object],
     stubs: Mapping[str, str] | None = None,
     files: Mapping[str, str] | None = None,
+    root: Path = workflow_steps.ROOT,
     **variables: str,
 ) -> workflow_steps.StepResult:
     """Runs a step of a bot after the checks, as GitHub does, with the fake gh, which
     answers as gh_answers() says, these stubs of other commands, and these files of
     the workspace or of $RUNNER_TEMP; the run is run 5 of CI (python) for the commit
     abc1234def of the branch feature of o/r, which ended on 12 October 2026, unless the
-    variables say otherwise."""
+    variables say otherwise. The workflow is the blueprint's, or that of the project
+    at root."""
     return workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
@@ -15512,6 +15776,7 @@ def run_after_the_checks(
         },
         stubs=stubs,
         files=files,
+        root=root,
     )
 
 
@@ -15521,11 +15786,14 @@ def run_a_bot_after_the_checks(
     step: str,
     answers: Mapping[str, object],
     stubs: Mapping[str, str] | None = None,
+    root: Path = workflow_steps.ROOT,
     **variables: str,
 ) -> tuple[list[str], str, dict[str, str]]:
     """Runs a step of a bot after the checks, which passes; returns the calls of gh,
     the summary of the step and what gh was given to write."""
-    done = run_after_the_checks(tmp_path, job, step, answers, stubs, None, **variables)
+    done = run_after_the_checks(
+        tmp_path, job, step, answers, stubs, None, root, **variables
+    )
     assert done.returncode == 0, done.stderr
     return done.commands, done.summary, written_by(done)
 
@@ -16124,6 +16392,105 @@ def test_the_flaky_test_bot_names_the_step_the_test_and_the_error(
         for call in calls
     )
     assert "\n".join(FLAKY_ROWS) in summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    ("gh", "allowed"),
+    [("", True), ("2.97.0", True), ("2.96.0", False)],
+    ids=["runner", "first-guarded", "older"],
+)
+def test_the_flaky_test_bot_reads_a_log_with_colors_with_every_gh(
+    tmp_path: Path, gh: str, allowed: bool
+) -> None:
+    # #735: since v2.97.0, gh api fails on a raw answer with terminal escape sequences,
+    # such as the colors of a log, without --allow-escape-sequences, which an older gh
+    # doesn't know; the report named no test of the logs of the runners.
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+        FAKE_GH_CLI=gh,
+    )
+
+    assert written["issue-comment"] == FLAKY_REPORT
+    option = "--allow-escape-sequences " if allowed else ""
+    assert f"api {option}repos/o/r/actions/jobs/11/logs" in calls
+    assert all(
+        ("--allow-escape-sequences" in call) == allowed
+        for call in calls
+        if call.endswith("/logs")
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_warns_of_a_log_that_it_cannot_read(
+    tmp_path: Path,
+) -> None:
+    # The step went on with an empty log and said nothing of why; now a warning of the
+    # run names the job, on one line with its percent sign escaped as %25, which the
+    # runner shows as a percent sign again, and the reason of gh, and the row has the
+    # error of the job without a test.
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11, "test (100 %)", "failure", ("Run the tests", "failure")
+                    )
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/11/logs.error": "gh: Not Found (HTTP 404)\n",
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert (
+        "::warning::The log of the job test (100 %25) couldn't be read, so the report"
+        " names none of its tests: gh: Not Found (HTTP 404)\n"
+    ) in done.stdout
+    assert (
+        "| [`test (100 %)`](https://github.com/o/r/actions/runs/5/job/11)"
+        f" | `Run the tests` | {NOTHING} | `{EXITED}` |"
+    ) in done.summary
+
+
+@WITH_JQ
+@pytest.mark.parametrize("kind", ["python-package", "home-assistant"])
+def test_the_flaky_test_bot_of_a_project_reads_a_log_with_colors(
+    projects: Mapping[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # The workflow of a project is the blueprint's, with the workflows and the marker
+    # of the project: its report names the tests of a log with colors as well.
+    calls, _, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        root=projects[kind],
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert written["issue-comment"] == FLAKY_REPORT
+    assert "api --allow-escape-sequences repos/o/r/actions/jobs/11/logs" in calls
 
 
 @WITH_JQ
@@ -17705,9 +18072,10 @@ def test_the_docs_workflow_builds_the_website_once_and_keeps_its_downloads_a_wee
     folder = ROOT if kind == "blueprint" else projects[kind]
     docs = (folder / ".github/workflows/docs.yml").read_text(encoding="utf-8")
     # The check builds the website, and on main the same job hands it to GitHub Pages:
-    # no job builds it a second time, and the required check keeps its name.
+    # no job builds it a second time, and the required check keeps its name. The job
+    # deploy publishes it, and the job website asks the published website.
     parsed = parse(docs)
-    assert list(parsed["jobs"]) == ["docs", "deploy"]
+    assert list(parsed["jobs"]) == ["docs", "deploy", "website"]
     job = job_in(parsed, "docs")
     assert job["name"] == "docs"
     assert job["outputs"]["publish"] == "${{ steps.site.outputs.publish }}"
@@ -17883,9 +18251,21 @@ def test_the_job_that_publishes_the_website_signs_and_asks_for_it(
             if step.get("name", "").startswith("Take the website that GitHub Pages")
         )
         attested = step_in(deploy, "Attest the provenance of the website")
-        asked = step_in(deploy, "Ask the published website for its pages")
         assert steps.index(published) < steps.index(taken) < steps.index(attested)
-        assert steps.index(attested) < steps.index(asked)
+        # The job that holds the tokens for GitHub Pages and Sigstore reaches only
+        # their hosts; one of its own, without a token, asks the published website,
+        # on whatever domain it has.
+        assert deploy["outputs"] == {
+            "page_url": "${{ steps.deployment.outputs.page_url }}"
+        }
+        assert published["id"] == "deployment"
+        website = job_in(text, "website")
+        assert website["name"] == "ask the published website"
+        assert website["needs"] == [before, "deploy"]
+        assert website["permissions"] == {}
+        asked = step_in(website, "Ask the published website for its pages")
+        assert asked["env"]["PAGE_URL"] == "${{ needs.deploy.outputs.page_url }}"
+        assert "Ask the published" not in " ".join(names_of(deploy))
         assert taken["uses"].startswith("actions/download-artifact@")
         assert taken["with"]["name"] == "github-pages"
         assert attested["uses"].startswith("actions/attest-build-provenance@")
@@ -18573,6 +18953,13 @@ def test_every_website_is_checked_for_its_accessibility(
         assert not name or locked["integrity"].startswith("sha512-"), name
     ignored = (root / ".gitignore").read_text(encoding="utf-8").split("\n")
     assert "/.github/a11y/node_modules/" in ignored
+    # A page that leads to another address is checked itself, not the page where it
+    # leads, which may be of another website: CONTRIBUTING.md says so.
+    contributing = (root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert (
+        "A page that leads to another address, by its refresh or its script, such as a "
+        "page of an old address, is checked as it shows before it leaves,"
+    ) in contributing
     # The check docs runs it after the build and fails on what it finds: a pull
     # request on the pages that differ from the digest of main, main and the weekly
     # run on every page, which keep that digest for the pull requests.
@@ -18804,6 +19191,121 @@ def test_renovate_keeps_the_renderer_of_the_diagrams_current() -> None:
                     (match["depName"], match["currentValue"], match["currentDigest"])
                 )
     assert found == [image.groups()]
+
+
+# What the default panel of the social preview shows for each kind of project, made
+# from the answers of Projects: the first text belongs to that kind alone, and the
+# style that only its panel needs.
+PANELS = {
+    "home-assistant": (
+        "sensor.demo_project_status",
+        "switch.demo_project_enabled",
+        "Settings → Devices &amp; services → Demo Project",
+        ".entity {",
+    ),
+    "nextcloud-app": (
+        "/apps/demo_project/",
+        "<h2>Demo Project</h2>",
+        '<span class="app current"><span class="monogram mini">DP</span></span>',
+        ".header {",
+    ),
+    "github-action": (
+        "<b>Dennis-Otto/demo-project@v1</b>",
+        '<span class="mono">.github/workflows/ci.yml</span>',
+        "ran Demo Project in 4s",
+        ".term .hl {",
+    ),
+    "python-package": (
+        "<b>pip install demo-project</b>",
+        "<b>import demo_project</b>",
+        "Successfully installed</span> demo-project-1.0.0",
+        ".term {",
+    ),
+    "node-package": (
+        "<b>npm install demo-project</b>",
+        '<b>await import("demo-project")</b>',
+        "[Module: null prototype] { … }",
+        ".term {",
+    ),
+    "chrome-extension": (
+        '<div class="row">On for this site<span class="switch"></span></div>',
+        '<div class="monogram mini">DP</div>Demo Project</div>',
+        '<div class="url">example.com</div>',
+        ".popup {",
+    ),
+    "cloudflare-worker": (
+        "host: demo-project.dennis-otto.workers.dev",
+        "answered at Cloudflare's edge",
+        "server: cloudflare",
+        ".http {",
+    ),
+    "container": (
+        "<b>    ghcr.io/dennis-otto/demo-project</b>",
+        "latest: Pulling from dennis-otto/demo-project",
+        "Status: Downloaded newer image",
+        ".term {",
+    ),
+    "generic": (
+        "gh repo clone Dennis-Otto/demo-project",
+        '<span class="mono">README.md</span>',
+        "<h2>Demo Project</h2>",
+        ".readme h2 {",
+    ),
+}
+
+
+class Tags(HTMLParser):
+    """The elements of a page that are still open, which fails on one that closes
+    another: a template that renders a panel shows no broken page."""
+
+    VOID = frozenset({"meta", "link", "img", "br"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.open: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in self.VOID:
+            self.open.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        assert self.open.pop() == tag, tag
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_social_preview_shows_a_drawing_of_the_project(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # Not the blueprint's checks, the same in every repository, but what a project of
+    # its kind shows, made from its answers: the template knows no more of it. The
+    # panel says that it's the default, and the checklist asks for the project itself
+    # until the panel is replaced.
+    project = projects[kind]
+    preview = (project / ".github/social-preview.html").read_text(encoding="utf-8")
+
+    for text in PANELS[kind]:
+        assert text in preview, text
+    for other, texts in PANELS.items():
+        assert (texts[0] in preview) == (other == kind), other
+    for old in ("CodeQL", "<b>Checks</b> on every change", "Issue assistant"):
+        assert old not in preview, old
+    assert preview.startswith("<!doctype html>\n")
+    assert '<div class="monogram">DP</div>' in preview
+    assert (
+        f'<p class="text">A {kind} of the tests, with &#34;quotes&#34; and Ümlauts.</p>'
+        in preview
+    )
+    assert f'<div class="panel" {DEFAULT_PANEL}>' in preview
+    assert "Replace it\n     with the project itself" in preview
+    assert "such as one that\n     scripts/screenshots.sh takes" in preview
+    assert "bash scripts/social-preview.sh" in preview
+    tags = Tags()
+    tags.feed(preview)
+    tags.close()
+    assert tags.open == []
+    step = social_preview(project)
+    assert step.text == "Social preview shows the project"
+    assert step.done is False
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the

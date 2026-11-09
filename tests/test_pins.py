@@ -113,7 +113,7 @@ def test_every_file_downloads_a_tool_from_the_address_of_the_record() -> None:
     # pins.py downloads from the address of .github/pins.toml, so the workflows and
     # scripts must download the same file, with their variable for {version}: an
     # asset of a release on GitHub through the API, which survives an outage of
-    # GitHub's downloads without a token (decision 0127), by its repository, tag and
+    # GitHub's downloads without a token (decision 0132), by its repository, tag and
     # name, with .github/download.sh or gh, and any other file from its address.
     record = pins.load_record(ROOT)
     for pin in pins.find_pins(ROOT):
