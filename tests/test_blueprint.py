@@ -2468,6 +2468,15 @@ def wanted_policy() -> dict[str, Any]:
         ("on: []\n", []),
         # Unfinished, as no workflow is: what stands there.
         ("on: [push, pull_request\n", ["push", "pull_request"]),
+        # Over several lines, with a comment between them.
+        (
+            "on: [\n  push, # the main\n  pull_request_target\n]\njobs: {}\n",
+            ["push", "pull_request_target"],
+        ),
+        (
+            "on: {\n  pull_request_target: {},\n  push: {branches: [main]}\n}\n",
+            ["pull_request_target", "push"],
+        ),
         (
             "on: {push: {branches: [main, 'a,b']}, pull_request_target: }\n",
             ["push", "pull_request_target"],
@@ -2710,10 +2719,57 @@ def test_a_refusal_of_the_policies_that_is_not_the_plan_still_fails(
     with_workflows(root)
     listing = f"repos/{REPO}/actions/policies?has_parents=false&per_page=100"
     github.fail[("GET", listing)] = 403
+    permission = "the token may lack the permission Administration (read and write)"
 
-    assert run(github, root, "settings", "check") == 2
+    # It names the part and the permission.
+    assert run(github, root, "settings", "check") == 1
 
-    assert "GitHub answered 403: simulated failure" in capsys.readouterr().err
+    out = capsys.readouterr().out
+    assert (
+        'policy pull_request_target: GitHub has "unreadable", the configuration wants'
+        ' "present"\n      GitHub refused the policies: GitHub answered 403:'
+        f" simulated failure; {permission}"
+    ) in out
+
+    # The other parts are applied all the same, and nothing writes over the policy.
+    assert run(github, root, "settings", "apply") == 2
+
+    assert "the policies could not be applied: GitHub answered 403" in (
+        capsys.readouterr().err
+    )
+    assert github.variables["RELEASE_AUTOMATION_CLIENT_ID"] != "outdated"
+    assert github.rulesets
+    assert github.policies == {}
+    assert not [
+        call for call in github.calls if call[0] != "GET" and "actions/polic" in call[1]
+    ]
+
+
+def test_a_policy_that_github_refuses_to_show_is_named(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with_workflows(root)
+    github.policies[7] = wanted_policy()
+    github.fail[("GET", f"repos/{REPO}/actions/policies/7")] = 403
+
+    assert run(github, root, "settings", "check") == 1
+
+    assert (
+        'policy pull_request_target: GitHub has "unreadable", the configuration wants'
+        ' "present"\n      GitHub refused the policies: GitHub answered 403'
+    ) in capsys.readouterr().out
+    # Nothing needs the policy any more: the refusal is named all the same.
+    with_workflows(root, ci=CHECKS)
+    github.fail[
+        ("GET", f"repos/{REPO}/actions/policies?has_parents=false&per_page=100")
+    ] = 403
+
+    assert run(github, root, "settings", "check") == 1
+
+    assert (
+        'policy pull_request_target: GitHub has "unreadable", the configuration wants'
+        ' "absent"'
+    ) in capsys.readouterr().out
 
 
 def test_a_refused_policy_names_the_permission_of_the_app(

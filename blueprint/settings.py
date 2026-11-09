@@ -764,6 +764,13 @@ def flow_events(value: str) -> list[str]:
     return [name.strip().strip("\"'") for name in names if name.strip()]
 
 
+def flow_depth(value: str) -> int:
+    """How many brackets and braces of value are still open."""
+    return sum(value.count(char) for char in "[{") - sum(
+        value.count(char) for char in "]}"
+    )
+
+
 def workflow_events(text: str) -> list[str]:
     """The events that start a workflow, from the key on at its top level: one name,
     a list or a table of them in the flow style of YAML, or a table or a list below
@@ -775,6 +782,11 @@ def workflow_events(text: str) -> list[str]:
             continue
         value = match[1].strip()
         if value[:1] in ("[", "{"):
+            # A list or a table in the flow style may go on over the next lines.
+            for below in lines[index + 1 :]:
+                if flow_depth(value) <= 0:
+                    break
+                value += " " + below.strip()
             return flow_events(value)
         if value:
             return [value.strip("\"'")]
@@ -898,21 +910,37 @@ def check_policies(
     want = event_policy(listed, triggers)
     try:
         existing = own_policies(api, repo)
+        number = existing.get(EVENT_POLICY)
+        have = (
+            api.get(f"repos/{repo}/actions/policies/{number}") or {}
+            if want is not None and number is not None
+            else {}
+        )
     except GitHubError as error:
-        if not (private and refused_by_plan(error)):
-            raise
-        # A private repository on GitHub Free has no policies, and GitHub blocks
-        # pull_request_target only in a public one.
-        if want is None:
-            return drift
-        return [*drift, lacking(repo, Drift(POLICY, "present", UNOFFERED), error)]
+        if private and refused_by_plan(error):
+            # A private repository on GitHub Free has no policies, and GitHub
+            # blocks pull_request_target only in a public one.
+            if want is None:
+                return drift
+            return [*drift, lacking(repo, Drift(POLICY, "present", UNOFFERED), error)]
+        # Any other refusal, such as one of a token without the permission, names
+        # the part and fails the run, but keeps the other parts from being skipped:
+        # apply reads the policies again before it writes one.
+        return [
+            *drift,
+            Drift(
+                POLICY,
+                "present" if want is not None else "absent",
+                "unreadable",
+                manual=f"GitHub refused the policies: {error}{hint('policies', error)}",
+            ),
+        ]
     if want is None:
         return drift + (
             [Drift(POLICY, "absent", "present")] if EVENT_POLICY in existing else []
         )
-    if EVENT_POLICY not in existing:
+    if number is None:
         return [*drift, Drift(POLICY, "present", "missing")]
-    have = api.get(f"repos/{repo}/actions/policies/{existing[EVENT_POLICY]}") or {}
     differences = policy_differences(want, have)
     if differences:
         drift.append(Drift(POLICY, "as configured", "; ".join(differences)))

@@ -35,7 +35,7 @@ Option 4, after the mix that the maintainer chose on 9 November 2026: a workflow
 - **Drift.** `settings check` names every difference of the policy and every workflow that starts on the event but that the list lacks; `settings apply` creates, changes or deletes the policy of that name and never touches another, and the settings bot runs after every change of a workflow, so a new event of a listed workflow reaches the policy with its merge. A workflow that the list lacks stays out until a person lists it: whether a workflow may start on the event is a decision of trust.
 - **The check *lint*.** `settings actions` fails for such a workflow at the line of its event, from the files alone, so that a pull request that adds one hears of it before the merge; the explanation of the check *allowed-actions* says what to do.
 - **Private repositories.** GitHub offers no policies to a private repository on GitHub Free and blocks nothing there: the run names it as a notice, which fails nothing.
-- **Permission.** GitHub names no permission of a GitHub App for the policies; the settings bot names *Administration*, with which it writes the rest of the settings of Actions, when GitHub refuses one.
+- **Permission.** GitHub names no permission of a GitHub App for the policies; the settings bot names *Administration*, with which it writes the rest of the settings of Actions, when GitHub refuses to read or write one. A refused read fails the run as a difference of the policy alone, and the other parts of the settings are applied all the same.
 
 ## Consequences
 
