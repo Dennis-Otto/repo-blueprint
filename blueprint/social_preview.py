@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from blueprint import github
 from blueprint.github import Api
 
 # The page that scripts/social-preview.sh renders, and the picture that it renders.
@@ -41,6 +42,10 @@ HOST = "repository-images.githubusercontent.com"
 # and its sha256 differs all the same.
 LARGEST = 1024 * 1024
 TIMEOUT = 30
+# A host that times out or fails on its side once gets one more try after a pause, as
+# the requests to GitHub's API do, so that one bad answer doesn't fail the nightly look.
+ATTEMPTS = 2
+PAUSE = 5
 
 
 class Unreadable(Exception):
@@ -55,6 +60,8 @@ class Preview:
     picture: str
     uploaded: bool
     shown: str = ""
+    # Whether GitHub takes the committed picture at all: an upload is at most 1 MB.
+    fits: bool = True
 
     @property
     def current(self) -> bool:
@@ -85,15 +92,23 @@ def download(url: str, opener: Callable[..., Any] | None = None) -> bytes:
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "https" or parts.hostname != HOST:
         raise Unreadable(f"GitHub names {url}, not a picture on {HOST}")
-    try:
-        # The opener of urllib unless a test names another, at the time of the call.
-        with (opener or urllib.request.urlopen)(url, timeout=TIMEOUT) as response:
-            return bytes(response.read(LARGEST + 1))
-    except OSError as error:
-        if isinstance(error, urllib.error.HTTPError):
-            # The error is the answer too, and holds its body until it is closed.
-            error.close()
-        raise Unreadable(f"{url}: {error}") from error
+    attempt = 1
+    while True:
+        try:
+            # The opener of urllib unless a test names another, at the time of the call.
+            with (opener or urllib.request.urlopen)(url, timeout=TIMEOUT) as response:
+                return bytes(response.read(LARGEST + 1))
+        except OSError as error:
+            # A refusal of the host, such as 404, stays the same when asked again.
+            passing = True
+            if isinstance(error, urllib.error.HTTPError):
+                passing = error.code >= 500
+                # The error is the answer too, and holds its body until it is closed.
+                error.close()
+            if not passing or attempt >= ATTEMPTS:
+                raise Unreadable(f"{url}: {error}") from error
+        attempt += 1
+        github.sleep(PAUSE)
 
 
 def preview(
@@ -111,9 +126,14 @@ def preview(
     )["repository"]
     uploaded = bool(data["usesCustomOpenGraphImage"])
     path = root / PICTURE
-    picture = digest(path.read_bytes()) if path.is_file() else ""
+    data_of_picture = path.read_bytes() if path.is_file() else b""
+    picture = digest(data_of_picture) if path.is_file() else ""
+    fits = len(data_of_picture) <= LARGEST
     if not (picture and uploaded):
-        return Preview(picture, uploaded)
+        return Preview(picture, uploaded, fits=fits)
     return Preview(
-        picture, uploaded, digest(download(data["openGraphImageUrl"], opener))
+        picture,
+        uploaded,
+        digest(download(data["openGraphImageUrl"], opener)),
+        fits,
     )

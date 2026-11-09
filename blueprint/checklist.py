@@ -131,7 +131,13 @@ def social_preview_uploaded(
             page,
         )
     how = ""
-    if not found.uploaded:
+    if not found.fits:
+        how = (
+            f"{PICTURE} is larger than the 1 MB that GitHub takes for an upload:"
+            " render a smaller one, with fewer colors or a simpler screenshot, with"
+            f" bash scripts/social-preview.sh, then {upload}"
+        )
+    elif not found.uploaded:
         how = f"GitHub shows a card of its own: {upload}"
     elif not found.current:
         how = f"The uploaded picture is not {PICTURE} of this checkout: {upload}"

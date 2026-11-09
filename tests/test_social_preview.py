@@ -19,6 +19,7 @@ from blueprint.github import Api, GitHubError
 from blueprint.social_preview import (
     HOST,
     LARGEST,
+    PAUSE,
     PICTURE,
     TIMEOUT,
     Preview,
@@ -201,9 +202,61 @@ def test_an_answer_with_an_error_is_closed_and_unreadable() -> None:
     assert raised.value.__cause__ is error
 
 
-def test_a_host_that_does_not_answer_is_unreadable() -> None:
+def test_a_host_that_does_not_answer_twice_is_unreadable(waits: list[float]) -> None:
     with pytest.raises(Unreadable, match=re.escape(f"{UPLOAD}: timed out")):
         download(UPLOAD, failing(TimeoutError("timed out")))
+
+    # One more try after a pause, as the requests to GitHub's API make.
+    assert waits == [PAUSE]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("timed out"),
+        urllib.error.URLError("connection reset"),
+        urllib.error.HTTPError(UPLOAD, 503, "Unavailable", Message(), io.BytesIO()),
+    ],
+)
+def test_one_bad_answer_of_the_host_gets_one_more_try(
+    error: OSError, waits: list[float], tmp_path: Path
+) -> None:
+    seen: list[tuple[str, float]] = []
+    good = serving(PNG, seen)
+
+    def opener(url: str, timeout: float) -> Response:
+        if not waits:
+            raise error
+        response: Response = good(url, timeout)
+        return response
+
+    queries: list[str] = []
+    api = graphql(
+        {"usesCustomOpenGraphImage": True, "openGraphImageUrl": UPLOAD}, queries
+    )
+
+    assert preview(api, REPO, committed(tmp_path), opener).current
+    assert waits == [PAUSE]
+    assert seen == [(UPLOAD, TIMEOUT)]
+
+
+def test_a_refusal_of_the_host_gets_no_second_try(waits: list[float]) -> None:
+    error = urllib.error.HTTPError(UPLOAD, 403, "Forbidden", Message(), io.BytesIO())
+
+    with pytest.raises(Unreadable, match="HTTP Error 403: Forbidden"):
+        download(UPLOAD, failing(error))
+
+    assert waits == []
+
+
+def test_a_picture_larger_than_github_takes_does_not_fit(tmp_path: Path) -> None:
+    queries: list[str] = []
+    api = graphql(
+        {"usesCustomOpenGraphImage": False, "openGraphImageUrl": DRAWN}, queries
+    )
+
+    assert preview(api, REPO, committed(tmp_path, b"x" * LARGEST)).fits
+    assert not preview(api, REPO, committed(tmp_path, b"x" * (LARGEST + 1))).fits
 
 
 def test_the_settings_page_holds_the_social_preview() -> None:

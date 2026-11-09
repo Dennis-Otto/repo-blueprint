@@ -2091,6 +2091,25 @@ def test_a_social_preview_that_nobody_uploaded_gets_the_issue_too(
     assert "/blob/main/.github/social-preview.png?raw=true" in body
 
 
+def test_a_social_preview_larger_than_github_takes_asks_for_a_smaller_one(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # GitHub takes an upload of at most 1 MB: the issue asks for a smaller picture.
+    root = with_a_picture(tmp_path, b"x" * (1024 * 1024 + 1))
+    uploaded(github)
+
+    _, healthy = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+
+    assert healthy
+    assert (
+        "only from an upload, which no API offers:\n\n"
+        "`.github/social-preview.png` is larger than the 1 MB that GitHub takes for "
+        "an upload: first render a smaller one, with fewer colors or a simpler "
+        "screenshot, with `bash scripts/social-preview.sh`, and commit it.\n\n"
+        "1. Save [the picture]"
+    ) in github.issues[1]["body"]
+
+
 @pytest.mark.parametrize(
     "page",
     [

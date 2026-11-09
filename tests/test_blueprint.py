@@ -3638,6 +3638,26 @@ def test_the_uploaded_social_preview_is_the_committed_picture(
     )
 
 
+def test_a_social_preview_larger_than_github_takes_asks_for_a_smaller_one(
+    github: FakeGitHub, root: Path
+) -> None:
+    # GitHub takes an upload of at most 1 MB: this picture can never be uploaded.
+    (root / ".github/social-preview.png").write_bytes(b"x" * (1024 * 1024 + 1))
+    github.og_image, github.og_url = True, UPLOAD
+
+    step = social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"older"))
+
+    assert step == Step(
+        "Social preview uploaded and current",
+        False,
+        ".github/social-preview.png is larger than the 1 MB that GitHub takes for an"
+        " upload: render a smaller one, with fewer colors or a simpler screenshot,"
+        " with bash scripts/social-preview.sh, then upload"
+        " .github/social-preview.png under Settings → General → Social preview:"
+        f" https://github.com/{REPO}/settings",
+    )
+
+
 def test_the_checklist_names_a_social_preview_that_fell_behind(
     github: FakeGitHub,
     root: Path,

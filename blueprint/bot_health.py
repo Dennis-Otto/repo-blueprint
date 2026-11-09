@@ -1089,14 +1089,27 @@ def sweep(
 # ---------------------------------------------------------------- social preview
 
 
-def preview_body(repo: str, branch: str, commit: str, uploaded: bool) -> str:
+def preview_body(
+    repo: str, branch: str, commit: str, uploaded: bool, fits: bool = True
+) -> str:
     """What the issue asks for: the picture, where to upload it, and when it closes."""
     picture = f"https://github.com/{repo}/blob/{commit}/{PICTURE}?raw=true"
     shown = "an older social preview" if uploaded else "a card of its own"
+    # GitHub refuses an upload of more than 1 MB: such a picture is rendered anew first.
+    smaller = (
+        ""
+        if fits
+        else (
+            f"`{PICTURE}` is larger than the 1 MB that GitHub takes for an upload: "
+            "first render a smaller one, with fewer colors or a simpler screenshot, "
+            "with `bash scripts/social-preview.sh`, and commit it.\n\n"
+        )
+    )
     return (
         f"GitHub shows {shown} for links to this repository, not `{PICTURE}` of "
         f"`{branch}`. GitHub takes the social preview only from an upload, which no "
         "API offers:\n\n"
+        f"{smaller}"
         f"1. Save [the picture]({picture}).\n"
         "2. Upload it under [Settings → General → Social preview]"
         f"({settings_page(repo)}): **Edit** → **Upload an image…**\n\n"
@@ -1151,7 +1164,7 @@ def preview_report(
     commit = str(commits[0]["sha"]) if commits else branch
     body = (
         f"{marker({'key': PREVIEW, 'sha256': found.picture})}\n"
-        f"{preview_body(repo, branch, commit, found.uploaded)}"
+        f"{preview_body(repo, branch, commit, found.uploaded, found.fits)}"
     )
     if issue is None:
         number = open_issue(api, repo, PREVIEW_TITLE, body, [TYPE])
