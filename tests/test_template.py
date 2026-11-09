@@ -11775,6 +11775,8 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         "-          RENOVATE_REPOSITORIES: ${{ github.repository_owner }}/"
         "${{ matrix.repo }}",
         "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
+        "-        if: ${{ !cancelled() && steps.blocks.outcome != 'failure' }}",
+        "+        if: ${{ !cancelled() }}",
         "-          # A repository that didn't finish wrote no log, so the run isn't a"
         " quiet one.",
         "-          RESULT: ${{ needs.renovate.result }}",

@@ -12,6 +12,8 @@
 [%- set permissions = "      deployment: false\n    permissions:\n      contents: read\n" -%]
 [%- set issue = permissions ~ "      # The one issue with the warnings and errors of Renovate.\n      issues: write\n" -%]
 [%- set token = "          # For this repository alone: a package manager that runs code of a dependency\n          # while it writes a lock file can't push to another repository of the owner.\n          owner: ${{ github.repository_owner }}\n          repositories: ${{ matrix.repo }}\n" -%]
+[#- The one job of this repository keeps the issue of Renovate's problems itself and
+    blocks no host, so no step of Harden-Runner stops it before that step. -#]
 {= replaced(".github/workflows/renovate.yml", [
   [matrix, alone],
   ["      group: renovate-${{ matrix.repo }}\n", "      group: renovate\n"],
@@ -19,6 +21,7 @@
   [permissions, issue],
   [token, ""],
   ["${{ github.repository_owner }}/${{ matrix.repo }}", "${{ github.repository }}"],
+  ["        if: ${{ !cancelled() && steps.blocks.outcome != 'failure' }}\n", "        if: ${{ !cancelled() }}\n"],
   ["          # A repository that didn't finish wrote no log, so the run isn't a quiet one.\n          RESULT: ${{ needs.renovate.result }}\n", ""],
   ["          # download-artifact puts the files of a single artifact straight into its path,\n          # so with one leg's log there is no folder of the artifact.\n", ""],
   [' \\\n            "$RUNNER_TEMP"/problems/problems.json "$RUNNER_TEMP"/problems/*/problems.json \\\n            --result "$RESULT" --run "$RUN_URL" |', ' /tmp/renovate/problems.json --run "$RUN_URL" |'],
