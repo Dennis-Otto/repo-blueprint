@@ -78,12 +78,12 @@ from blueprint.bot_health import (
     Cron,
     after_pull_requests,
     own_issue,
+    preview_report,
 )
 from blueprint.changelog import Fragment, release_changelog
 from blueprint.checklist import (
     CHROME_WEB_STORE_ITEM,
     CHROME_WEB_STORE_SIGN_IN,
-    DEFAULT_PANEL,
     RELEASE_APP_PERMISSIONS,
     social_preview,
 )
@@ -103,6 +103,8 @@ from blueprint.settings import (
     check_environments,
 )
 from blueprint.site_check import check as check_site
+from blueprint.social_preview import DEFAULT_PANEL
+from blueprint.social_preview import HOST as PREVIEW_HOST
 from blueprint.stale_runs import checks_of
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
@@ -19133,6 +19135,33 @@ def test_the_social_preview_shows_a_drawing_of_the_project(
     step = social_preview(project)
     assert step.text == "Social preview shows the project"
     assert step.done is False
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_nightly_look_of_every_repository_compares_its_social_preview(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # GitHub serves the uploaded social preview from its host of uploads, which the
+    # nightly look of the bot-health bot reaches and waits for, besides GitHub's API;
+    # the job at the end of a run compares nothing and reaches GitHub alone.
+    project = projects[kind]
+    jobs = load_yaml(workflows(project)["bot-health.yml"])["jobs"]
+    hosts = ["api.github.com:443", "github.com:443"]
+    for job, reached in (("sweep", [*hosts, f"{PREVIEW_HOST}:443"]), ("run", hosts)):
+        block, wait = jobs[job]["steps"][:2]
+        assert block["with"]["allowed-endpoints"].split() == reached, job
+        assert wait["env"]["HOSTS"].split() == reached, job
+    assert "compare the social preview" in jobs["sweep"]["steps"][3]["name"]
+    # Its code comes with every copy, and a new repository, whose page shows the
+    # default panel of its kind and which holds no picture yet, asks for no upload.
+    assert (project / ".github/blueprint/social_preview.py").read_bytes() == (
+        ROOT / "blueprint/social_preview.py"
+    ).read_bytes()
+
+    def nothing(arguments: Sequence[str], body: str | None) -> Any:
+        raise AssertionError(f"unexpected request {arguments}")
+
+    assert preview_report(Api(nothing), "Dennis-Otto/demo", project, "main", None) == ""
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the

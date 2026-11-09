@@ -129,7 +129,7 @@ With `issue_assistant_ai`, the issue assistant analyzes each new issue with Clau
 python3 .github/blueprint.py checklist
 ```
 
-It shows what is left for a person and which steps are done: the release app, the settings, the secrets, the installation, Renovate, the community profile, the social preview and the badges. A private repository also gets the step *GitHub Code Security on*, neutral without it, since the plan of its owner may not offer it. Once every step has its tick, the repository looks after itself.
+It shows what is left for a person and which steps are done: the release app, the settings, the secrets, the installation, Renovate, the community profile, the social preview, uploaded and current, and the badges. A private repository also gets the step *GitHub Code Security on*, neutral without it, since the plan of its owner may not offer it. Once every step has its tick, the repository looks after itself.
 
 ## 8. The settings app (optional)
 
