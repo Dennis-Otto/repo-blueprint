@@ -59,8 +59,16 @@ case "$outcome" in
     exit 1
     ;;
   digest) echo "$DIGEST" ;;
-  # A call that stalls, as gh does when GitHub never answers.
-  stall) exec /usr/bin/sleep 30 ;;
+  # A call that stalls, as gh does when GitHub never answers. It writes down the
+  # command of timeout that runs it, then gives that timeout the signal of its clock,
+  # SIGALRM, which ends the call at once as the limit would after its seconds: the
+  # test waits for no limit, and the tries after the stall have the whole limit.
+  stall)
+    mapfile -t -d '' under <"/proc/$PPID/cmdline"
+    printf '%s\n' "under ${under[*]}" >> "$CALLS"
+    kill -ALRM "$PPID"
+    exec /usr/bin/sleep 30
+    ;;
   *)
     while (($# > 0)); do
       [[ "$1" != --output ]] || cp "$STUBS/asset" "$2"
@@ -200,10 +208,20 @@ def test_a_download_that_github_keeps_failing_names_the_outage(tmp_path: Path) -
     assert not file.exists()
 
 
-def test_a_download_that_stalls_is_tried_again(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("setting", "limit"),
+    [("", "300"), ("45", "45")],
+    ids=["by default", "with DOWNLOAD_TIMEOUT"],
+)
+def test_a_download_that_stalls_is_tried_again(
+    tmp_path: Path, setting: str, limit: str
+) -> None:
     # gh has no limit of its own: a call that GitHub never answers ends after
     # DOWNLOAD_TIMEOUT seconds and counts as an error of GitHub, so that the job tries
-    # again and names the outage instead of running until its own time is up.
+    # again and names the outage instead of running until its own time is up. The
+    # stand-in of gh ends its stall by the clock of its timeout, not by a short limit:
+    # with a limit of one second, the try after the stall, which has to download the
+    # asset within it, failed on a loaded machine (#775).
     file = tmp_path / "tool"
 
     result, calls = script(
@@ -213,13 +231,18 @@ def test_a_download_that_stalls_is_tried_again(tmp_path: Path) -> None:
         file.as_posix(),
         SHA256,
         plan=("stall", "asset"),
-        env={"DOWNLOAD_TIMEOUT": "1"},
+        env={"DOWNLOAD_TIMEOUT": setting},
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert file.read_bytes() == ASSET
-    assert calls == [download_call(file), "sleep 10", download_call(file)]
-    assert "GitHub didn't answer in 1 seconds." in result.stderr
+    assert calls == [
+        download_call(file),
+        f"under timeout --kill-after=10 {limit} {download_call(file)}",
+        "sleep 10",
+        download_call(file),
+    ]
+    assert f"GitHub didn't answer in {limit} seconds." in result.stderr
     assert "::error" not in result.stdout + result.stderr
 
 
