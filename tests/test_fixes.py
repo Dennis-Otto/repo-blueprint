@@ -150,6 +150,7 @@ def test_the_steps_of_the_checks_fix_themselves_in_order() -> None:
         ("Pages in one column", "{blueprint} pages --fix"),
         ("Files of the project", "{blueprint} migrate --fix"),
         ("Changelog fragments", "{blueprint} fragments --fix"),
+        ("Records of decisions", "{blueprint} decisions --fix"),
         ("Accepted advisories", "{blueprint} advisories --fix"),
         ("Lock files", "{blueprint} locks --fix"),
         ("Lock files match their sources", "{blueprint} locks --compile --fix"),

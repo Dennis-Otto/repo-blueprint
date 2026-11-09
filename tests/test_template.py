@@ -9,6 +9,7 @@ import contextlib
 import datetime
 import difflib
 import fnmatch
+import glob
 import hashlib
 import importlib.util
 import io
@@ -4501,6 +4502,11 @@ def binaries_step(check: str) -> str:
 
 def fragments_step(check: str) -> str:
     start = check.index('step "Changelog fragments"')
+    return check[start : check.index('step "Records of decisions"', start)]
+
+
+def decisions_step(check: str) -> str:
+    start = check.index('step "Records of decisions"')
     return check[start : check.index('step "Accepted advisories"', start)]
 
 
@@ -4650,6 +4656,150 @@ def test_every_repository_checks_every_fragment_of_its_changelog(
     assert "docker" not in fragments_step(check)
     contributing = (projects[kind] / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "`bash scripts/check.sh` checks every fragment" in contributing
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_repository_checks_the_numbers_of_its_records_of_decisions(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    generic = (projects["generic"] / "scripts/check.sh").read_text(encoding="utf-8")
+    own = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+
+    # After the fragments, with the Python and blueprint.py of the pages, the same in
+    # every kind of project and in the blueprint, which the CI never skips.
+    assert (
+        check.index('\nstep "Pages in one column"\n')
+        < check.index('\nstep "Changelog fragments"\n')
+        < check.index('\nstep "Records of decisions"\n')
+        < check.index('\nstep "Accepted advisories"\n')
+    )
+    assert decisions_step(check) == decisions_step(generic) == decisions_step(own)
+    assert '  "$python" "$tool" decisions\n' in decisions_step(check)
+    assert "which this runner lacks" in decisions_step(check)
+    # The fix bot fixes the index, and the PR coach explains the rest.
+    explained = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    step = explained["step"]["Records of decisions"]
+    assert step["autofix"] == ["{blueprint} decisions --fix"]
+    assert step["commands"] == ["python3 .github/blueprint.py decisions --fix"]
+    assert step["docs"] == "CONTRIBUTING.md#records-of-decisions"
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "\n### Records of decisions\n" in contributing
+    assert "`python3 .github/blueprint.py decisions --fix` fixes" in contributing
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert "The step *Records of decisions* of `scripts/check.sh` fails" in agents
+    index = (project / "docs/decisions/README.md").read_text(encoding="utf-8")
+    assert "The step *Records of decisions* of `scripts/check.sh` fails" in index
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_records_of_a_new_repository_pass_their_check(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # On a copy, which git knows, as the step lists the files of git.
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+
+    result = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "decisions"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "Each of the 1 record(s) of docs/decisions/ has a number of its own, and its "
+        "index lists each once, in order.\n"
+    )
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_checks_fail_on_two_records_of_one_number(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    assert BASH
+    project = shutil.copytree(projects["generic"], tmp_path / "repository")
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, the step of the pages, which finds the Python, and the step.
+    script = (
+        check[: check.index('step "Text files"')]
+        + pages_step(check)
+        + decisions_step(check)
+    )
+    (project / "scripts/decisions.sh").write_text(
+        script, encoding="utf-8", newline="\n"
+    )
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    # The Python of the tests first, without the variables of a run of the CI.
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("CI", "GITHUB_ACTIONS")
+    }
+    environment["PATH"] = os.pathsep.join(
+        [str(Path(sys.executable).parent), environment.get("PATH", "")]
+    )
+
+    def step() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [BASH, "scripts/decisions.sh"],
+            cwd=project,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    decisions = project / "docs/decisions"
+    passed = step()
+    # A pull request added 0002 without its row, and fixes it with the command.
+    (decisions / "0002-the-oldest-release.md").write_text(
+        "# The oldest release\n\n- Status: accepted\n", encoding="utf-8"
+    )
+    missing = step()
+    fix = subprocess.run(
+        [sys.executable, ".github/blueprint.py", "decisions", "--fix"],
+        cwd=project,
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    fixed = step()
+    # Then main, merged into it, brings a record of the same number.
+    (decisions / "0002-a-website.md").write_text("# A website\n", encoding="utf-8")
+    clash = step()
+
+    assert passed.returncode == 0, passed.stdout + passed.stderr
+    assert missing.returncode == 1, missing.stdout + missing.stderr
+    assert (
+        "docs/decisions: the index misses 0002-the-oldest-release.md\n"
+        "python3 .github/blueprint.py decisions --fix fixes what only the index gets"
+    ) in missing.stdout
+    assert fix.returncode == 0, fix.stdout + fix.stderr
+    index = (decisions / "README.md").read_text(encoding="utf-8")
+    assert index.endswith(
+        "| [0002](0002-the-oldest-release.md) | The oldest release | accepted |\n"
+    )
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+    assert clash.returncode == 1, clash.stdout + clash.stderr
+    assert (
+        "docs/decisions: 0002 is the number of 2 records: 0002-a-website.md, "
+        "0002-the-oldest-release.md\n"
+    ) in clash.stdout
+    assert "the next free number, 0003, in the name of its file" in clash.stdout
+    # The PR coach explains the step that stopped it.
+    assert "Two records of `docs/decisions/` share a number" in clash.stdout
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -5615,7 +5765,10 @@ def choose_the_documents_to_check(
     return outputs, summary.read_text(encoding="utf-8")
 
 
-EVERY_DOCUMENT = {"files": "'./**/*.md' './docs/**/*.html'", "every": "true"}
+EVERY_DOCUMENT = {
+    "files": "'./**/*.md' './.github/**/*.md' './docs/**/*.html'",
+    "every": "true",
+}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -5682,6 +5835,48 @@ def test_the_link_check_of_a_pull_request_reads_the_documents_it_changes(
     assert chosen == outputs
     if not outputs:
         assert "changes no document" in summary
+
+
+def documents_read_by(patterns: str, documents: list[str], folder: Path) -> set[str]:
+    """The documents that the patterns of lychee read, as lychee 0.24 expands them: **
+    and * pass over a hidden folder or file, whose name starts with a dot, unless the
+    pattern names it, so ./**/*.md reads no .github/pull_request_template.md (lychee
+    --dump-inputs). Python's glob does the same, in a folder of empty documents."""
+    for name in documents:
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).touch()
+    return {
+        Path(found).as_posix()
+        for pattern in shlex.split(patterns)
+        for found in glob.glob(pattern, root_dir=folder, recursive=True)
+    }
+
+
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
+def test_the_full_link_check_reads_every_document_that_a_pull_request_checks(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    # main, the weekly run and a pull request that changes the rules read every
+    # document that a pull request reads when it changes it, also those in .github/,
+    # such as the template of a pull request: a link there that breaks later would
+    # never show otherwise (#769). exclude_path leaves out the same ones of both.
+    for index, project in enumerate((ROOT, *projects.values())):
+        skips = lychee_skips(project)
+        documents = [
+            name
+            for name in files_of(project)
+            if (name.endswith(".md") or re.fullmatch(r"docs/.+\.html", name))
+            and name != "CHANGELOG.md"
+            and not name.startswith("changelog.d/")
+            and not skips(f"./{name}")
+        ]
+        assert ".github/pull_request_template.md" in documents, project
+        read = documents_read_by(
+            EVERY_DOCUMENT["files"], documents, tmp_path / str(index)
+        )
+        assert set(documents) <= read, (project, sorted(set(documents) - read))
 
 
 def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:
@@ -6240,6 +6435,142 @@ def test_no_download_of_a_release_on_github_goes_without_a_token(
             ROOT / ".github" / name
         ).read_text(encoding="utf-8")
     assert downloads > 0
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_weekly_sbom_takes_syft_through_the_api_as_the_release_does(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # anchore/sbom-action ran the installer of syft from raw.githubusercontent.com,
+    # which downloads syft from the page of its release without a token, as no step
+    # may since GitHub's outage of 8 November 2026 (decision 0133). The weekly SBOM
+    # takes the syft of the SBOMs of a release instead, through the API with the
+    # token of the job and checked by the same sha256, which Renovate moves with it.
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    workflows = folder / ".github/workflows"
+    for path in sorted(workflows.glob("*.yml")):
+        assert "anchore/sbom-action" not in path.read_text(encoding="utf-8"), path.name
+    # It leaves the allowed actions, as the action of lychee did.
+    settings = (folder / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "anchore/sbom-action" not in settings
+    workflow = (workflows / "sbom.yml").read_text(encoding="utf-8")
+    job = job_with(workflow, "Download syft")
+    release = job_with(
+        (workflows / "build-release.yml").read_text(encoding="utf-8"),
+        "Download the tools of the build",
+    )
+    pins = ("SBOM_SYFT_VERSION", "SBOM_SYFT_SHA256")
+    assert {name: job["env"][name] for name in pins} == {
+        name: release["env"][name] for name in pins
+    }
+    # After the checkout, whose .github/download.sh it runs, and before syft. Only
+    # the download has the token; syft reads the files of the repository without it.
+    names = names_of(job)
+    checkout = next(
+        i for i, name in enumerate(names) if name.startswith("actions/checkout@")
+    )
+    assert (
+        checkout < names.index("Download syft") < names.index("Generate the SPDX SBOM")
+    )
+    assert [
+        name
+        for name, step in zip(names, job["steps"], strict=True)
+        if "GH_TOKEN" in (step.get("env") or {})
+    ] == ["Download syft"]
+    assert step_named(job, "Download syft")["env"] == {
+        "GH_TOKEN": "${{ github.token }}"
+    }
+    assert "github.token" not in values_of(step_named(job, "Generate the SPDX SBOM"))
+    assert "timeout-minutes" in step_named(job, "Download syft")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_weekly_sbom_describes_the_repository_at_its_commit(
+    tmp_path: Path,
+) -> None:
+    workflow = (ROOT / ".github/workflows/sbom.yml").read_text(encoding="utf-8")
+    job = job_with(workflow, "Download syft")
+    version = job["env"]["SBOM_SYFT_VERSION"]
+    # The stand-in of .github/download.sh writes the archive of the release into the
+    # file that it names, with a stand-in of syft that writes the SBOM it's asked for.
+    syft = (
+        b"#!/usr/bin/env bash\n"
+        b'echo "syft $* ($SYFT_SOURCE_NAME $SYFT_SOURCE_VERSION'
+        b' $SYFT_CHECK_FOR_APP_UPDATE)" >> "$CALLS"\n'
+        b'for argument; do [[ "$argument" != spdx-json=* ]] ||'
+        b' echo "{}" > "${argument#spdx-json=}"; done\n'
+    )
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+        for name, content in (("README.md", b"syft\n"), ("syft", syft)):
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            member.mode = 0o755
+            tar.addfile(member, io.BytesIO(content))
+    (tmp_path / "syft.tar.gz").write_bytes(archive.getvalue())
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/download.sh").write_text(
+        'echo "download.sh $*" >> "$CALLS"\n'
+        'mkdir -p "$(dirname "$4")"\n'
+        'cp syft.tar.gz "$4"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    sha256 = "0" * 64
+    # A folder of its own, without a colon, which GNU tar would take for a host.
+    variables = {"RUNNER_TEMP": "temp", "SBOM_SYFT_VERSION": version}
+    (tmp_path / "download").mkdir()
+
+    download, calls = run_workflow_step(
+        tmp_path / "download",
+        script_of(job, "Download syft"),
+        tmp_path,
+        {},
+        SBOM_SYFT_SHA256=sha256,
+        **variables,
+    )
+
+    assert download.returncode == 0, download.stdout + download.stderr
+    assert calls == [
+        f"download.sh anchore/syft v{version} syft_{version}_linux_amd64.tar.gz"
+        f" temp/syft.tar.gz {sha256}"
+    ]
+    # Only syft comes out of the archive.
+    assert sorted(path.name for path in (tmp_path / "temp/syft").iterdir()) == ["syft"]
+
+    step = step_named(job, "Generate the SPDX SBOM")
+    assert step["env"] == {
+        "SYFT_SOURCE_NAME": "${{ github.event.repository.name }}",
+        "SYFT_SOURCE_VERSION": "${{ github.sha }}",
+        "SYFT_CHECK_FOR_APP_UPDATE": "false",
+    }
+    (tmp_path / "describe").mkdir()
+    describe, calls = run_workflow_step(
+        tmp_path / "describe",
+        step["run"],
+        tmp_path,
+        {},
+        SYFT_SOURCE_NAME="demo",
+        SYFT_SOURCE_VERSION="abc123",
+        SYFT_CHECK_FOR_APP_UPDATE="false",
+        **variables,
+    )
+
+    assert describe.returncode == 0, describe.stdout + describe.stderr
+    # The folder of the repository, by its name and commit, as SPDX.
+    assert calls == [
+        "syft scan dir:. --quiet --output spdx-json=temp/demo.spdx.json"
+        " (demo abc123 false)"
+    ]
+    assert (tmp_path / "temp/demo.spdx.json").read_text(encoding="utf-8") == "{}\n"
+    # The artifact of the run is that file, and a run without it fails.
+    upload = step_named(job, "Keep the SBOM as an artifact of the run")
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"] == {
+        "name": "${{ github.event.repository.name }}.spdx.json",
+        "path": "${{ runner.temp }}/${{ github.event.repository.name }}.spdx.json",
+        "if-no-files-found": "error",
+    }
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -9402,16 +9733,16 @@ def test_renovate_finds_every_version_that_a_workflow_or_script_pins(
             assert tag in (None, "^v(?<version>.+)$", *tags), path.name
             pinned += 1
     # gitsign in sign-tag.sh and verify-release.yml, krankerl and Nextcloud in the
-    # release of a Nextcloud app and syft for its SBOMs, which every kind has, krankerl
-    # in the checks of a Nextcloud app too, Infection in the mutation tests, and lychee
-    # in the check of the links of every kind.
+    # release of a Nextcloud app and syft for its SBOMs and the weekly one, which every
+    # kind has, krankerl in the checks of a Nextcloud app too, Infection in the mutation
+    # tests, and lychee in the check of the links of every kind.
     assert pinned == {
-        "blueprint": 8,
-        "nextcloud-app": 8,
-        "home-assistant": 7,
-        "github-action": 7,
-        "python-package": 7,
-    }.get(kind, 6)
+        "blueprint": 9,
+        "nextcloud-app": 9,
+        "home-assistant": 8,
+        "github-action": 8,
+        "python-package": 8,
+    }.get(kind, 7)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -14073,6 +14404,7 @@ def test_every_project_fixes_what_a_command_can_fix(
         "Pages in one column",
         "Files of the project",
         "Changelog fragments",
+        "Records of decisions",
         "Accepted advisories",
         "Lock files",
         "Lock files match their sources",

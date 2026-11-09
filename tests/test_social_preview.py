@@ -21,6 +21,7 @@ from blueprint.social_preview import (
     LARGEST,
     PAUSE,
     PICTURE,
+    PRIVATE,
     TIMEOUT,
     Preview,
     Unreadable,
@@ -73,7 +74,9 @@ def failing(error: OSError) -> Callable[..., Any]:
 
 
 def graphql(repository: dict[str, Any], queries: list[str], returncode: int = 0) -> Api:
-    """GitHub's GraphQL, which knows the social preview of one repository."""
+    """GitHub's GraphQL, which knows the social preview of one repository: a public
+    one unless the answer names another."""
+    repository = {"isPrivate": False, **repository}
 
     def runner(
         arguments: Sequence[str], body: str | None
@@ -109,8 +112,35 @@ def test_the_upload_is_current_when_it_is_the_committed_picture_byte_for_byte(
     assert seen == [(UPLOAD, TIMEOUT)]
     assert queries == [
         'query={ repository(owner: "Dennis-Otto", name: "demo") '
-        "{ usesCustomOpenGraphImage openGraphImageUrl } }"
+        "{ isPrivate usesCustomOpenGraphImage openGraphImageUrl } }"
     ]
+
+
+@pytest.mark.parametrize("uploaded", [True, False])
+def test_a_private_repository_shows_no_social_preview_to_compare(
+    tmp_path: Path, uploaded: bool
+) -> None:
+    # GitHub shares the upload only from a public repository, and may serve the
+    # upload of a private one to nobody without a token: nothing downloads it.
+    seen: list[tuple[str, float]] = []
+    api = graphql(
+        {
+            "isPrivate": True,
+            "usesCustomOpenGraphImage": uploaded,
+            "openGraphImageUrl": UPLOAD,
+        },
+        [],
+    )
+
+    found = preview(api, REPO, committed(tmp_path), serving(PNG, seen))
+
+    assert found == Preview(digest(PNG), uploaded, public=False)
+    assert not found.current
+    assert seen == []
+    assert PRIVATE == (
+        "The repository is private, and GitHub shows the social preview only for a"
+        " public repository"
+    )
 
 
 def test_an_upload_of_another_picture_is_not_current(tmp_path: Path) -> None:
