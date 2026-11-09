@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tomllib
 import webbrowser
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +21,7 @@ import blueprint
 from blueprint import (
     advisories,
     annotate,
+    decisions,
     dependabot,
     locks,
     mutation,
@@ -887,6 +888,67 @@ def binaries_command(root: Path) -> int:
         "(OSPS-QA-05.01 and 05.02). Delete a file that isn't in Git yet, or ignore it "
         "in .gitignore when a tool writes it."
     )
+    return 1
+
+
+def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
+    """What is wrong with the numbers of the records of the decisions and with their
+    index, one on each line, and in the CI also as annotations of the index; with
+    --fix, the index first, where only it is wrong."""
+    folder = decisions.FOLDER
+    names = decisions.names_of(root, folder)
+    if not names:
+        print(f"{folder}/ holds no records of decisions, so nothing to check.")
+        return 0
+    path = root / folder / decisions.INDEX
+    index = path.read_text(encoding="utf-8") if decisions.INDEX in names else None
+    if arguments.fix and index is not None and decisions.index_findings(names, index):
+        index = decisions.fixed(
+            index,
+            names,
+            lambda name: (root / folder / name).read_text(encoding="utf-8"),
+        )
+        path.write_text(index, encoding="utf-8", newline="\n")
+        print(f"{folder}/{decisions.INDEX}: the rows of the index are fixed")
+    records, strays = decisions.numbered(names)
+    numbers = strays + decisions.number_findings(records)
+    rows = [] if index is None else decisions.index_findings(names, index)
+    if not numbers and not rows:
+        count = sum(len(files) for files in records.values())
+        print(
+            f"Each of the {count} record(s) of {folder}/ has a number of its own"
+            + (
+                ", and its index lists each once, in order."
+                if index is not None
+                else f"; the folder has no index, {decisions.INDEX}."
+            )
+        )
+        return 0
+    for finding in numbers + rows:
+        print(f"{folder}: {finding}")
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        place = f"{folder}/{decisions.INDEX}" if index is not None else ""
+        for finding in numbers + rows:
+            print(annotate.Annotation("Records of decisions", finding, place).command())
+    if numbers:
+        print(
+            "Another pull request took the number first, or a file is no record: give "
+            "the record of your pull request the next free number, "
+            f"{decisions.next_free(records):04d}, in the name of its file, in its row "
+            f"of {folder}/{decisions.INDEX} and in each link to it. Only you can "
+            "choose which record moves, so no command renames one."
+        )
+    if rows and arguments.fix:
+        print(
+            "The rows that these lines name need you: a row of a file that the folder "
+            "doesn't have, or two rows of one record that say different things."
+        )
+    elif rows:
+        print(
+            f"{command(root)} decisions --fix fixes what only the index gets wrong: "
+            "the number of a row, the row of a renamed record, a row twice, a missing "
+            "row and the order of the rows."
+        )
     return 1
 
 
@@ -2253,6 +2315,17 @@ def add_pages_parsers(
         "compiled code, archives and every other one but pictures, videos, sounds, "
         "fonts, documents and the inputs of the fuzz tests",
     )
+    decisions_parser = commands.add_parser(
+        "decisions",
+        help="the records of docs/decisions/: a number of its own for each, the next "
+        "one after the last, and one row for each in the index, in order",
+    )
+    decisions_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="fix what only the index gets wrong first: the number of a row, the row "
+        "of a renamed record, a row twice, a missing row and the order of the rows",
+    )
     migrate_parser = commands.add_parser(
         "migrate",
         help="what the releases of the blueprint move in the files of the project, "
@@ -2321,6 +2394,26 @@ def parser() -> argparse.ArgumentParser:
     ):
         add(commands)
     return parser
+
+
+def files_command(arguments: argparse.Namespace, root: Path) -> int | None:
+    """A command that checks the files of the repository, as steps of scripts/check.sh
+    run them, and fixes them with --fix where it has one: its exit code, or None for
+    another command. A file that can't be read, or git that fails, is its error."""
+    commands: dict[str, Callable[[], int]] = {
+        "binaries": lambda: binaries_command(root),
+        "decisions": lambda: decisions_command(arguments, root),
+        "migrate": lambda: migrate_command(arguments, root),
+        "pages": lambda: pages_command(arguments, root),
+    }
+    run = commands.get(arguments.command)
+    if run is None:
+        return None
+    try:
+        return run()
+    except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
+        print(f"blueprint.py: {error}", file=sys.stderr)
+        return 2
 
 
 def standalone_command(
@@ -2444,24 +2537,9 @@ def standalone_command(
         except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
-    if arguments.command == "binaries":
-        try:
-            return binaries_command(root)
-        except (OSError, subprocess.CalledProcessError) as error:
-            print(f"blueprint.py: {error}", file=sys.stderr)
-            return 2
-    if arguments.command == "migrate":
-        try:
-            return migrate_command(arguments, root)
-        except (OSError, UnicodeDecodeError) as error:
-            print(f"blueprint.py: {error}", file=sys.stderr)
-            return 2
-    if arguments.command == "pages":
-        try:
-            return pages_command(arguments, root)
-        except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
-            print(f"blueprint.py: {error}", file=sys.stderr)
-            return 2
+    code = files_command(arguments, root)
+    if code is not None:
+        return code
     if arguments.command in (
         "changelog",
         "beta",
