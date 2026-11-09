@@ -1,6 +1,6 @@
 # The downloads of the workflows go through the API
 
-- Status: accepted
+- Status: accepted, followed up by [0134](0134-a-job-stops-when-harden-runner-doesnt-block.md), with which a job that blocks stops when the agent of Harden-Runner doesn't run
 - Date: 2026-11-08
 
 ## Context

@@ -1824,7 +1824,11 @@ def test_a_diagram_bot_that_fails_says_so_on_the_pull_request(
 ) -> None:
     # The failed check promised the bot's commit; without it, the pull request learns
     # what to do itself.
-    assert workflow_steps.condition_of(workflow_steps.step(*FAILED)) == "failure()"
+    # Not when Harden-Runner couldn't block, which stopped the job (decision 0134).
+    assert (
+        workflow_steps.condition_of(workflow_steps.step(*FAILED))
+        == "failure() && steps.blocks.outcome != 'failure'"
+    )
 
     result = run_step(
         FAILED,

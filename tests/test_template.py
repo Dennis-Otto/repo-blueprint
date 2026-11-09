@@ -1004,7 +1004,7 @@ def test_codeql_only_records_where_it_may_fetch_the_dependencies_of_the_code(
     else:
         assert hardening["name"] == "Block every host that the job doesn't need"
         assert hardening["with"]["egress-policy"] == "block"
-        assert names[1] == "Wait until Harden-Runner lets the hosts through"
+        assert names[1:3] == [MAKE_SURE, WARM_UP]
         assert WAIT_FOR_DOCKER in names
         assert "website, CodeQL and zizmor: each" in security
     assert recording_jobs(project) == recording
@@ -1078,9 +1078,13 @@ def test_every_job_without_docker_waits_until_harden_runner_has_removed_it(
                 if sudo is True
                 else "always() && vars.PUBLISH_TO != 'nextcloud-appstore'"
             ), where
-            # Only the steps that explain a failure come after it.
+            # Only the steps that explain a failure come after it, and not one that
+            # Harden-Runner stopped, which would run without the block.
             for step in job["steps"][index + 1 :]:
-                assert step.get("if") == "failure()", f"{where}: {step.get('name')}"
+                assert step.get("if") in (
+                    "failure()",
+                    "failure() && steps.blocks.outcome != 'failure'",
+                ), f"{where}: {step.get('name')}"
             scripts.add(wait["run"])
     assert len(scripts) <= 1, scripts
 
@@ -1400,6 +1404,8 @@ def test_values_reach_a_script_only_through_its_environment(
 
 
 WARM_UP = "Wait until Harden-Runner lets the hosts through"
+# The step that stops a job that blocks when Harden-Runner has no agent that blocks.
+MAKE_SURE = "Make sure that Harden-Runner blocks"
 # The policy of the jobs that render the screenshots, which blocks once the settings
 # of the project name its hosts.
 BY_THE_SETTINGS = "${{ needs.start.outputs.policy }}"
@@ -1427,11 +1433,15 @@ def test_every_job_that_blocks_waits_until_harden_runner_lets_its_hosts_through(
                 assert WARM_UP not in [step.get("name") for step in steps], where
                 continue
             # Before every step that could need a host, but the one that lets
-            # Harden-Runner see the lookups of DNS, and for just the hosts that the job
-            # allows, by the same words, so that they can't drift apart; where the
-            # settings of the project decide, only when they block.
+            # Harden-Runner see the lookups of DNS and the one that makes sure that it
+            # blocks, and for just the hosts that the job allows, by the same words, so
+            # that they can't drift apart; where the settings of the project decide,
+            # only when they block.
             after = steps.index(hardening[0]) + 1
             if steps[after].get("name") == SEE_LOOKUPS:
+                after += 1
+            # The step that makes sure that Harden-Runner blocks comes first.
+            if steps[after].get("name") == MAKE_SURE:
                 after += 1
             warm_up = steps[after]
             assert warm_up["name"] == WARM_UP, where
@@ -1608,6 +1618,237 @@ def test_the_warm_up_warns_after_two_minutes_and_leaves_the_failure_to_the_step(
             f"::warning::Harden-Runner still blocks {endpoint} after two minutes"
             in result.stdout
         )
+
+
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_every_job_that_blocks_stops_when_harden_runner_doesnt(
+    projects: dict[str, Path], project: str
+) -> None:
+    # Harden-Runner goes on without its agent when the agent can't be downloaded, as in
+    # GitHub's outage of 8 November 2026, so a job that blocks would reach every host
+    # with its secrets and tokens (decision 0134). Each one makes sure that the agent
+    # runs, right after Harden-Runner and the step that lets it see the lookups of DNS,
+    # before the warm-up and every other step that could need a host.
+    root = ROOT if project == "blueprint" else projects[project]
+    scripts = set()
+    for name, text in workflows(root).items():
+        if name in ISSUE_ASSISTANT_WORKFLOWS:
+            continue
+        for job_id, job in parse(text)["jobs"].items():
+            where = f"{name}: {job_id}"
+            steps = job.get("steps") or []
+            names = [step.get("name") for step in steps]
+            hardening = steps_using(job, "step-security/harden-runner")
+            policy = hardening[0]["with"]["egress-policy"] if hardening else None
+            if policy not in ("block", BY_THE_SETTINGS):
+                assert MAKE_SURE not in names, where
+                continue
+            assert names.count(MAKE_SURE) == 1, where
+            after = steps.index(hardening[0]) + 1
+            if names[after] == SEE_LOOKUPS:
+                after += 1
+            check = steps[after]
+            assert check["name"] == MAKE_SURE, where
+            assert names[after + 1] == WARM_UP, where
+            # Where the settings of the project decide, only when they block.
+            assert check.get("if") == (
+                None if policy == "block" else "needs.start.outputs.policy == 'block'"
+            ), where
+            assert "env" not in check, where
+            # Half a minute for an agent that is still starting.
+            assert check["timeout-minutes"] == 1, where
+            scripts.add(check["run"])
+            # The steps that run after a failure, such as those that explain it or
+            # comment, would run without the block: only the wait for the removal of
+            # Docker, which needs no host, runs after this step stopped the job.
+            assert check["id"] == "blocks", where
+            # A step that only follows a step after this one, which didn't run, needs
+            # no guard of its own.
+            later_ids = {found.get("id") for found in steps[after + 1 :]} - {None}
+            for later in steps[after + 1 :]:
+                condition = str(later.get("if", ""))
+                follows = set(
+                    re.findall(
+                        r"steps\.([\w-]+)\.(?:outcome == 'failure'|outputs\.)",
+                        condition,
+                    )
+                )
+                if (
+                    later.get("name") == WAIT_FOR_DOCKER
+                    or not re.search(r"always\(\)|failure\(\)|cancelled\(\)", condition)
+                    or (follows and follows <= later_ids and "||" not in condition)
+                ):
+                    continue
+                assert "steps.blocks.outcome != 'failure'" in condition, (
+                    where,
+                    later.get("name"),
+                )
+    assert len(scripts) <= 1, scripts
+    if project == "blueprint":
+        assert scripts
+
+
+def make_sure(
+    tmp_path: Path,
+    files: Mapping[str, str],
+    active: bool = True,
+    starts_after: int = 0,
+    installed: bool = True,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Runs the step with the folder of the agent in a folder of its own, which
+    Harden-Runner made unless it didn't install the agent, and with a systemctl that
+    finds the service of the agent active or not; with starts_after, the agent writes
+    its status at that call of sleep. The result, and the calls."""
+    script = step_named(job_in(workflows(ROOT)["welcome.yml"], "welcome"), MAKE_SURE)[
+        "run"
+    ]
+    runner = tmp_path / "runner"
+    if installed:
+        (runner / "home/agent").mkdir(parents=True)
+    for path, content in files.items():
+        (runner / path).parent.mkdir(parents=True, exist_ok=True)
+        (runner / path).write_text(content, encoding="utf-8")
+    root = runner.as_posix()
+    script = script.replace("/home/agent/", f"{root}/home/agent/")
+    sleeps = tmp_path / "sleeps"
+    sleeps.write_text("0", encoding="utf-8")
+    status = f"{root}/home/agent/agent.status"
+    starts = (
+        f'(( n < {starts_after} )) || printf Initialized > "{status}"\n'
+        if starts_after
+        else ""
+    )
+    return run_workflow_step(
+        tmp_path,
+        script,
+        tmp_path,
+        {
+            "systemctl": "" if active else "exit 3\n",
+            "sleep": (
+                f'n=$(( $(cat "{sleeps.as_posix()}") + 1 ))\n'
+                f'echo "$n" > "{sleeps.as_posix()}"\n{starts}'
+            ),
+        },
+    )
+
+
+AGENT = "home/agent/agent"
+AGENT_STATUS = "home/agent/agent.status"
+DOESNT_BLOCK = "::error title=Harden-Runner doesn't block::Harden-Runner "
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_goes_on_when_the_agent_of_harden_runner_blocks(
+    tmp_path: Path,
+) -> None:
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_STATUS: "Initialized"})
+
+    assert result.returncode == 0, result.stderr
+    assert calls == ["systemctl is-active --quiet agent"]
+    assert "::error" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_stops_at_once_when_the_agent_of_harden_runner_wasnt_downloaded(
+    tmp_path: Path,
+) -> None:
+    # As in paperless-sync on 8 November 2026: three answers 504, and Harden-Runner went
+    # on without its agent. No agent will come, so the job doesn't wait for one.
+    result, calls = make_sure(tmp_path, {})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}couldn't download its agent, mostly in an outage of GitHub "
+        "(https://www.githubstatus.com), so this job would reach every host"
+    ) in result.stdout
+    assert "That is no problem of the change: run the job again." in result.stdout
+    assert "The status of the agent: none" in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_stops_at_once_when_harden_runner_didnt_install_its_agent(
+    tmp_path: Path,
+) -> None:
+    # Harden-Runner returns before it makes the folder of the agent when StepSecurity
+    # answers that it is unavailable, or the repository skips it: no outage of GitHub.
+    result, calls = make_sure(tmp_path, {}, installed=False)
+
+    assert result.returncode == 1
+    assert calls == []
+    assert (
+        f"{DOESNT_BLOCK}didn't install its agent, as StepSecurity said that it is "
+        "unavailable or the repository skips it (the log of its step says which), "
+        "so this job would reach every host"
+    ) in result.stdout
+    assert "githubstatus" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_waits_for_an_agent_of_harden_runner_that_is_still_starting(
+    tmp_path: Path,
+) -> None:
+    result, calls = make_sure(tmp_path, {AGENT: ""}, starts_after=3)
+
+    assert result.returncode == 0, result.stderr
+    assert calls == ["sleep 1"] * 3 + ["systemctl is-active --quiet agent"]
+    assert "::error" not in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_stops_when_the_agent_of_harden_runner_doesnt_start(
+    tmp_path: Path,
+) -> None:
+    # Half a minute, then the job stops instead of running without its block.
+    result, calls = make_sure(tmp_path, {AGENT: ""})
+
+    assert result.returncode == 1
+    assert calls == ["sleep 1"] * 30
+    assert f"{DOESNT_BLOCK}has an agent that didn't start, so" in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_stops_when_the_agent_of_harden_runner_failed(tmp_path: Path) -> None:
+    # The agent says so in its status, and the log of the job shows it.
+    failed = "Error reading config file unexpected end of JSON input"
+    result, calls = make_sure(tmp_path, {AGENT: "", AGENT_STATUS: failed})
+
+    assert result.returncode == 1
+    assert calls == []
+    assert f"{DOESNT_BLOCK}has an agent that didn't start, so" in result.stdout
+    assert f"The status of the agent: {failed}" in result.stdout
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_job_stops_when_the_agent_of_harden_runner_stopped(tmp_path: Path) -> None:
+    # An agent that fails after it started takes its firewall away and ends.
+    result, calls = make_sure(
+        tmp_path, {AGENT: "", AGENT_STATUS: "Initialized"}, active=False
+    )
+
+    assert result.returncode == 1
+    assert calls == ["systemctl is-active --quiet agent"]
+    assert f"{DOESNT_BLOCK}has an agent that stopped, so" in result.stdout
+
+
+def test_a_check_whose_job_blocks_explains_a_harden_runner_that_doesnt() -> None:
+    # The PR coach shows the explanation of the check that failed, which would only
+    # speak of what the check looks at: one whose job blocks also says what the step
+    # that stops it without Harden-Runner means, and that it is no problem of the change.
+    catalog = Catalog.load(ROOT)
+    explained = set()
+    for text in workflows(ROOT).values():
+        for job_id, job in parse(text)["jobs"].items():
+            if MAKE_SURE not in [step.get("name") for step in job.get("steps") or []]:
+                continue
+            entry = catalog.check(str(job.get("name", job_id)))
+            if entry is None:
+                continue
+            assert f"*{MAKE_SURE}* stopped the job" in " ".join(
+                entry.problem.split()
+            ), entry.key
+            explained.add(entry.key)
+    assert "conventional title" in explained
 
 
 SEE_LOOKUPS = "Let Harden-Runner see the DNS lookups"
@@ -6379,7 +6620,9 @@ def test_code_scanning_shows_the_paths_of_the_taint_analysis() -> None:
         "sarif_file": "${{ runner.temp }}/psalm-taint/psalm-taint.sarif",
         "category": "psalm-taint",
     }
-    assert report["steps"][-1] == explain_step("taint report (php)")
+    assert report["steps"][-1] == for_the_job(
+        report, explain_step("taint report (php)")
+    )
     explained_under_their_comments(workflow)
 
 
@@ -8656,7 +8899,8 @@ def test_dependabot_merges_as_the_release_app(
             [
                 step
                 for step in job["steps"]
-                if "run" in step and step["name"] not in {WARM_UP, WAIT_FOR_DOCKER}
+                if "run" in step
+                and step["name"] not in {MAKE_SURE, WARM_UP, WAIT_FOR_DOCKER}
             ]
         )
         == 3
@@ -11531,6 +11775,8 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         "-          RENOVATE_REPOSITORIES: ${{ github.repository_owner }}/"
         "${{ matrix.repo }}",
         "+          RENOVATE_REPOSITORIES: ${{ github.repository }}",
+        "-        if: ${{ !cancelled() && steps.blocks.outcome != 'failure' }}",
+        "+        if: ${{ !cancelled() }}",
         "-          # A repository that didn't finish wrote no log, so the run isn't a"
         " quiet one.",
         "-          RESULT: ${{ needs.renovate.result }}",
@@ -11604,7 +11850,10 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
     # A pull request that changes the rules or a lock file gets the check of the
     # rules, which explains its failure; the PR coach follows it, also on a pull
     # request from a fork, and the flaky-test bot leaves it alone.
-    assert job_in(workflow, "validate")["steps"][-1] == explain_step("renovate rules")
+    validate = job_in(workflow, "validate")
+    assert validate["steps"][-1] == for_the_job(
+        validate, explain_step("renovate rules")
+    )
     assert Catalog.load(project).check("renovate rules")
     after = (project / ".github/workflows/after-checks.yml").read_text(encoding="utf-8")
     assert (
@@ -13191,6 +13440,15 @@ def explain_step(check: str, python: str = "python3") -> dict[str, Any]:
     }
 
 
+def for_the_job(job: Mapping[str, Any], step: dict[str, Any]) -> dict[str, Any]:
+    """The step as a job has it: one that makes sure that Harden-Runner blocks
+    explains no failure when that step stopped it, since it would run without the
+    block, and the step's own annotation says why (decision 0134)."""
+    if any(found.get("id") == "blocks" for found in job["steps"]):
+        return {**step, "if": f"{step['if']} && steps.blocks.outcome != 'failure'"}
+    return step
+
+
 def comments_before(workflow: str, step: str) -> list[str]:
     """The comment above each step of this name, in the order of the text of the
     workflow, where alone its comments are."""
@@ -13290,7 +13548,9 @@ def test_every_required_check_explains_its_failure(
                 re.M,
             )
             assert [name for _, name in failed] == PARTS[check], check
-            assert job["steps"][-1] == explain_parts_step(check, failed), check
+            assert job["steps"][-1] == for_the_job(
+                job, explain_parts_step(check, failed)
+            ), check
             for found, name in failed:
                 assert explained.check(name), name
                 # Each step runs also when one before it failed, so that the check
@@ -13300,7 +13560,7 @@ def test_every_required_check_explains_its_failure(
                     if name != PARTS[check][0]:
                         assert condition_of(reported).startswith("${{ !cancelled()")
         else:
-            assert job["steps"][-1] == explain_step(check), check
+            assert job["steps"][-1] == for_the_job(job, explain_step(check)), check
         before = job["steps"][:-1]
         checkouts = steps_using({"steps": before}, "actions/checkout")
         assert len(checkouts) == 1, check
@@ -13320,7 +13580,7 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
         " (${{ matrix.answers || matrix.kind }})"
     )
     assert variant["name"] == name
-    assert variant["steps"][-1] == explain_step(name)
+    assert variant["steps"][-1] == for_the_job(variant, explain_step(name))
     explained_under_their_comments(variants)
     # zizmor and the scanners of the pull requests, which aren't required checks,
     # explain theirs too, and so does the check of the rules of Renovate.
@@ -13331,13 +13591,15 @@ def test_the_checks_of_a_matrix_explain_each_failure() -> None:
         ("renovate", "validate", "renovate rules"),
     ):
         text = (ROOT / f".github/workflows/{workflow}.yml").read_text(encoding="utf-8")
-        assert job_in(text, job)["steps"][-1] == explain_step(check), workflow
+        found = job_in(text, job)
+        assert found["steps"][-1] == for_the_job(found, explain_step(check)), workflow
         explained_under_their_comments(text)
         assert Catalog.load(ROOT).check(check), check
     # And the checks on Windows, whose runner has python, not python3.
     windows = (ROOT / ".github/workflows/windows.yml").read_text(encoding="utf-8")
-    assert job_in(windows, "check")["steps"][-1] == explain_step(
-        "check (Windows)", "python"
+    checks = job_in(windows, "check")
+    assert checks["steps"][-1] == for_the_job(
+        checks, explain_step("check (Windows)", "python")
     )
     explained_under_their_comments(windows)
 
@@ -13497,7 +13759,7 @@ def test_the_check_of_the_signatures_starts_on_every_push_and_runs_nothing_of_th
     )
     assert "signed commits" not in settings["branch"]["required_checks"]
     # The coach starts after it, and explains it.
-    assert job["steps"][-1] == explain_step("signed commits")
+    assert job["steps"][-1] == for_the_job(job, explain_step("signed commits"))
     assert Catalog.load(root).check("signed commits")
     # A contributor learns it before the first push, apart from the sign-off.
     for name in ("CONTRIBUTING.md", ".github/pull_request_template.md", "AGENTS.md"):
@@ -13597,7 +13859,8 @@ def test_the_bot_for_replaced_commits_needs_no_runner_of_its_own(
     job = title["jobs"]["signatures"]
     step = next(s for s in job["steps"] if "stale-runs" in s.get("run", ""))
     assert condition_of(step) == (
-        "${{ !cancelled() && github.event.action == 'synchronize' }}"
+        "${{ !cancelled() && github.event.action == 'synchronize'"
+        " && steps.blocks.outcome != 'failure' }}"
     )
     assert "${{" not in step["run"]
     assert job["permissions"]["actions"] == "write"
@@ -13637,7 +13900,10 @@ def test_the_check_of_the_title_checks_the_changelog_as_well() -> None:
     )
     title = job_in(workflow, "title")
     assert "Require an entry in the changelog for a change for users" in names_of(title)
-    assert condition_of(step_in(title, "entry")) == "${{ !cancelled() }}"
+    assert (
+        condition_of(step_in(title, "entry"))
+        == "${{ !cancelled() && steps.blocks.outcome != 'failure' }}"
+    )
     assert condition_of(step_in(title, "fragments")).startswith("${{ !cancelled() &&")
     # It reads the files of the pull request through the API and sets its labels.
     assert title["permissions"]["pull-requests"] == "write"
@@ -14362,7 +14628,11 @@ def test_renovate_reports_its_problems_in_one_issue() -> None:
     assert logs in script
     assert '--result "$RESULT" --run "$RUN_URL"' in script
     assert step_in(report, step)["env"]["RESULT"] == "${{ needs.renovate.result }}"
-    assert condition_of(step_in(report, step)) == "${{ !cancelled() }}"
+    # Not when Harden-Runner couldn't block, which stopped the job (decision 0134).
+    assert (
+        condition_of(step_in(report, step))
+        == "${{ !cancelled() && steps.blocks.outcome != 'failure' }}"
+    )
 
 
 # jq, which gh runs for its option --jq: the steps that rely on its filters run with
@@ -16187,6 +16457,169 @@ def test_the_flaky_test_bot_compares_with_the_run_before_a_superseded_one(
     assert any(call.startswith("api repos/o/r/actions/runs/1/jobs ") for call in calls)
 
 
+# What a job says that the step "Make sure that Harden-Runner blocks" stopped.
+STOPPED_BY_THE_CHECK = (
+    "Harden-Runner couldn't download its agent, mostly in an outage of GitHub"
+    " (https://www.githubstatus.com), so this job would reach every host, and it stops"
+    " here instead. That is no problem of the change: run the job again."
+)
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_runs_a_job_again_that_harden_runner_stopped_twice(
+    tmp_path: Path,
+) -> None:
+    # An outage of GitHub that lasts over two commits stops the same job for both:
+    # that is no real failure of the tests (decision 0134).
+    answers: dict[str, object] = {
+        "repos/o/r/actions/runs/5/attempts/1/jobs": {
+            "jobs": [
+                job_of_a_run(11, "test (3.12)", "failure"),
+                job_of_a_run(12, "test (3.13)", "success"),
+            ]
+        },
+        "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+            STOPPED_BY_THE_CHECK, EXITED
+        ),
+        "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(2),
+        "repos/o/r/actions/runs/2/jobs": {
+            "jobs": [
+                job_of_a_run(21, "test (3.12)", "failure"),
+                job_of_a_run(22, "test (3.13)", "success"),
+            ]
+        },
+    }
+
+    calls, summary, _ = run_a_bot_after_the_checks(
+        tmp_path,
+        "rerun",
+        "Run the failed jobs once more",
+        answers,
+        CONCLUSION="failure",
+        WORKFLOW="3",
+        EVENT="pull_request",
+        HEAD_REPO="o/r",
+    )
+
+    assert "run rerun 5 --failed" in calls
+    assert "broke for the commit before" not in summary
+
+
+def test_the_bot_for_stopped_checks_takes_the_other_checks_once() -> None:
+    job = after_the_checks_job("stopped")
+    condition = condition_of(job)
+    assert "github.event.workflow_run.run_attempt == 1" in condition
+    assert "github.event.workflow_run.conclusion == 'failure'" in condition
+    # Not the tests, which the flaky-test bot runs again, nor the release.
+    assert '"Pull request title"' in condition
+    assert "github.event.workflow_run.name != 'Release'" in condition
+    assert "!github.event.repository.fork" in condition
+    assert job["permissions"] == {"actions": "write", "checks": "read"}
+    assert not steps_using(job, "actions/checkout")
+    assert all("${{" not in step.get("run", "") for step in job["steps"])
+
+
+def run_the_bot_for_stopped_checks(
+    tmp_path: Path, message: str, state: str = "completed 1"
+) -> tuple[list[str], str]:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "stopped",
+        "Run the jobs again that Harden-Runner stopped",
+        answers=[
+            Answer(
+                r"api repos/o/r/actions/runs/5/attempts/1/jobs --paginate --jq .+",
+                "11\n12\n",
+            ),
+            Answer(
+                r"api repos/o/r/check-runs/11/annotations --paginate"
+                r" --jq \.\[\]\.message",
+                f"{EXITED}\n",
+            ),
+            Answer(
+                r"api repos/o/r/check-runs/12/annotations --paginate"
+                r" --jq \.\[\]\.message",
+                f"{message}\n{EXITED}\n",
+            ),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", f"{state}\n"),
+            exact("run rerun 5 --failed"),
+        ],
+        env={"RUN": "5", "NAME": "Pull request title"},
+    )
+    assert done.returncode == 0, done.stderr
+    return done.commands, done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("message", "state", "again", "summary"),
+    [
+        # In an outage of GitHub, the required checks of a pull request don't stay red.
+        (STOPPED_BY_THE_CHECK, "completed 1", True, "the failed jobs run once more"),
+        # A failure of the change stays.
+        (EXITED, "completed 1", False, "it stays failed"),
+        # The bot-health bot was first.
+        (STOPPED_BY_THE_CHECK, "in_progress 2", False, "ran again already"),
+    ],
+)
+def test_the_bot_for_stopped_checks_runs_only_a_job_again_that_harden_runner_stopped(
+    tmp_path: Path, message: str, state: str, again: bool, summary: str
+) -> None:
+    calls, written = run_the_bot_for_stopped_checks(tmp_path, message, state)
+
+    assert ("run rerun 5 --failed" in calls) == again
+    assert summary in written
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_stopped_checks_tolerates_a_run_that_started_again(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "stopped",
+        "Run the jobs again that Harden-Runner stopped",
+        answers=[
+            Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
+            Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", "completed 1\n"),
+            Answer(
+                r"run rerun 5 --failed",
+                err="run 5 is already running",
+                code=1,
+            ),
+        ],
+        env={"RUN": "5", "NAME": "CodeQL"},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "CodeQL runs again already" in done.summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_stopped_checks_fails_when_github_refuses_the_rerun(
+    tmp_path: Path,
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "stopped",
+        "Run the jobs again that Harden-Runner stopped",
+        answers=[
+            Answer(r"api repos/o/r/actions/runs/5/attempts/1/jobs .+", "11\n"),
+            Answer(r"api repos/o/r/check-runs/11/annotations .+", STOPPED_BY_THE_CHECK),
+            Answer(r"api repos/o/r/actions/runs/5 --jq .+", "completed 1\n"),
+            Answer(r"run rerun 5 --failed", err="HTTP 403: forbidden", code=1),
+        ],
+        env={"RUN": "5", "NAME": "CodeQL"},
+    )
+
+    assert done.returncode == 1
+    assert "HTTP 403: forbidden" in done.stderr
+
+
 def variants_of_a_run(
     jobs: str, leg: str, messages: tuple[str, ...], first: int
 ) -> dict[str, object]:
@@ -16905,6 +17338,40 @@ def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_t
         f"| `Variants / update (generic)` | {NOTHING} | 1 | {LAST_RUN} |"
         in written["issue-create"].splitlines()
     )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_job_that_harden_runner_stopped(
+    tmp_path: Path,
+) -> None:
+    # An outage of GitHub is no flaky test (decision 0134).
+    calls, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11,
+                        "test (3.12)",
+                        "failure",
+                        ("Make sure that Harden-Runner blocks", "failure"),
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                STOPPED_BY_THE_CHECK, EXITED
+            ),
+            "issue list": [],
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert "nothing to report" in summary
+    assert written == {}
+    assert not any(call.startswith("issue ") for call in calls)
 
 
 @WITH_JQ
@@ -19483,10 +19950,11 @@ def test_the_nightly_look_of_every_repository_compares_its_social_preview(
     jobs = load_yaml(workflows(project)["bot-health.yml"])["jobs"]
     hosts = ["api.github.com:443", "github.com:443"]
     for job, reached in (("sweep", [*hosts, f"{PREVIEW_HOST}:443"]), ("run", hosts)):
-        block, wait = jobs[job]["steps"][:2]
+        block, check, wait = jobs[job]["steps"][:3]
+        assert check["name"] == MAKE_SURE, job
         assert block["with"]["allowed-endpoints"].split() == reached, job
         assert wait["env"]["HOSTS"].split() == reached, job
-    assert "compare the social preview" in jobs["sweep"]["steps"][3]["name"]
+    assert "compare the social preview" in jobs["sweep"]["steps"][4]["name"]
     # Its code comes with every copy, and a new repository, whose page shows the
     # default panel of its kind and which holds no picture yet, asks for no upload.
     assert (project / ".github/blueprint/social_preview.py").read_bytes() == (
@@ -19831,6 +20299,7 @@ def test_the_screenshot_bot_runs_no_code_with_a_token_that_writes() -> None:
     assert render["steps"][-1] == failed
     assert condition_of(failed) == (
         "failure() && needs.start.outputs.failure_folder != ''"
+        " && steps.blocks.outcome != 'failure'"
     )
     assert failed["with"] == {
         "name": "failed-render-${{ matrix.id }}-attempt-${{ github.run_attempt }}",
@@ -21551,9 +22020,10 @@ def test_the_assets_of_a_project_are_built_in_a_job_that_may_write_nothing() -> 
     assert node["with"]["node-version-file"] == (
         "${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}"
     )
-    # Without the hook, the job only waits for its hosts and checks out; after these
-    # steps come the explanation of a failure of the script and the wait for Docker.
-    for step in job["steps"][3:-2]:
+    # Without the hook, the job only makes sure that Harden-Runner blocks, waits for
+    # its hosts and checks out; after these steps come the explanation of a failure of
+    # the script and the wait for Docker.
+    for step in job["steps"][4:-2]:
         assert HOOK in step["if"], step
     (upload,) = steps_using(job, "actions/upload-artifact")
     assert upload["with"]["if-no-files-found"] == "error"
@@ -23181,7 +23651,8 @@ def test_the_changelog_check_reads_the_fragments_with_the_code_of_main() -> None
     # the PR coach after a failure.
     [checkout] = steps_using(job, "actions/checkout")
     assert condition_of(checkout) == (
-        "${{ !cancelled() && (steps.entry.outputs.fragments == 'true' || failure()) }}"
+        "${{ !cancelled() && (steps.entry.outputs.fragments == 'true' || failure())"
+        " && steps.blocks.outcome != 'failure' }}"
     )
     assert checkout["with"] == {
         "persist-credentials": False,

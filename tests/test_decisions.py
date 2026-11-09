@@ -128,6 +128,9 @@ def names_of(folder: str) -> list[str]:
     return sorted({Path(line).name for line in listed.splitlines()})
 
 
+# It asks Git for the files of the folder, which the copy of the mutation tests has no
+# Git for.
+@pytest.mark.mutation_unsafe
 @pytest.mark.parametrize("folder", FOLDERS)
 def test_every_record_has_a_number_of_its_own_and_one_row(folder: str) -> None:
     path = ROOT / folder
@@ -137,6 +140,9 @@ def test_every_record_has_a_number_of_its_own_and_one_row(folder: str) -> None:
     assert found == [], "\n".join([HOW_TO_FIX.format(folder=folder), *found])
 
 
+# It asks Git for the files of the folder, which the copy of the mutation tests has no
+# Git for.
+@pytest.mark.mutation_unsafe
 def test_the_folders_hold_records() -> None:
     # A test that finds no record passes on nothing.
     for folder in FOLDERS:
