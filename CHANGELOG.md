@@ -7,6 +7,23 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.15.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.14.0...v1.15.0) (2026-11-09)
+
+
+### Features
+
+* .bestpractices.json proposes the answers of the OSPS Baseline and of gold that the blueprint guarantees ([#720](https://github.com/Dennis-Otto/repo-blueprint/issues/720)) ([f5ed35c](https://github.com/Dennis-Otto/repo-blueprint/commit/f5ed35cc65e80c664f8c0e72f2fe276ffbccc1a4))
+* **checklist:** the maintainer hears when the uploaded social preview is out of date ([#737](https://github.com/Dennis-Otto/repo-blueprint/issues/737)) ([f8371a9](https://github.com/Dennis-Otto/repo-blueprint/commit/f8371a918f3ea71b025375098fc13b5db9a3a2bf))
+* **screenshots:** keep draws the changed pixels of every picture in red, WebP and GIF too, visible on a phone ([#733](https://github.com/Dennis-Otto/repo-blueprint/issues/733)) ([89f2c02](https://github.com/Dennis-Otto/repo-blueprint/commit/89f2c02ce36a41504fe00d7408d58916593ddcde))
+
+
+### Bug fixes
+
+* a release of the issue assistant reaches the blueprint within about an hour, not the next morning ([#728](https://github.com/Dennis-Otto/repo-blueprint/issues/728)) ([d72b130](https://github.com/Dennis-Otto/repo-blueprint/commit/d72b1306a2102e61df535cbefc6b62cad1c2f917))
+* **after-checks:** the report of flaky tests reads the job logs again with a current GitHub CLI ([#736](https://github.com/Dennis-Otto/repo-blueprint/issues/736)) ([60bebb5](https://github.com/Dennis-Otto/repo-blueprint/commit/60bebb51332e6dabf437b48c644ba23ab22fea99))
+* **ci:** the downloads of lychee and CodeQL survive a GitHub outage of unauthenticated downloads ([#718](https://github.com/Dennis-Otto/repo-blueprint/issues/718)) ([d2b2d37](https://github.com/Dennis-Otto/repo-blueprint/commit/d2b2d37e0cbb98530594c4c07cd780781460ca69))
+* SECURITY.md says which jobs Harden-Runner blocks, and more of them block ([#730](https://github.com/Dennis-Otto/repo-blueprint/issues/730)) ([ceba823](https://github.com/Dennis-Otto/repo-blueprint/commit/ceba823adfe18c90e9f65d31f0e618ff34c2936e))
+
 ## [1.14.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.13.0...v1.14.0) (2026-11-08)
 
 ### Features
