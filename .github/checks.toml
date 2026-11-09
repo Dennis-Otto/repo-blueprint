@@ -560,7 +560,7 @@ When the annotation *GitHub fails* says that lychee can't be downloaded, GitHub'
 failed for minutes, not your change: run the check again once GitHub works. lychee
 runs on your machine with Docker:"""
 commands = [
-  'docker run --rm -v "$PWD:/input" -w /input lycheeverse/lychee --config lychee.toml "./**/*.md"',
+  'docker run --rm -v "$PWD:/input" -w /input lycheeverse/lychee --config lychee.toml "./**/*.md" "./.github/**/*.md" "./docs/**/*.html"',
 ]
 autofix = """Where a link should lead, only a person knows."""
 

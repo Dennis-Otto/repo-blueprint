@@ -1,0 +1,3 @@
+### Bug fixes
+
+- **The full link check reads the documents in `.github/` too:** the check on `main`, the weekly run and a pull request that changes the rules of the links left out the Markdown files in `.github/`, such as `.github/pull_request_template.md` and `.github/agents.project.md`, because lychee's pattern `./**/*.md` passes over a hidden folder; only a pull request that changed one of them checked its links. Every run that checks every document now reads them as well, so a link there that breaks later shows up in the weekly issue of broken links ([#769](https://github.com/Dennis-Otto/repo-blueprint/issues/769)). The command of the PR coach that runs lychee on your machine reads them too.
