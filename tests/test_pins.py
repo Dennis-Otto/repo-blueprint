@@ -84,30 +84,55 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
             "ChristophWurst/krankerl",
             "nextcloud/server",
             "anchore/syft",
+            "lycheeverse/lychee",
         }
     )
     # gitsign in sign-tag.sh and in verify-release.yml, krankerl in the release and in
-    # the checks of a Nextcloud app, and syft for the SBOMs of the release.
+    # the checks of a Nextcloud app, syft for the SBOMs of the release, and lychee in
+    # the script that checks the links of the documents and of the website.
     assert sorted((pin.dep, pin.path) for pin in found) == [
         ("ChristophWurst/krankerl", ".github/workflows/build-release.yml"),
         ("ChristophWurst/krankerl", ".github/workflows/ci-php.yml"),
         ("anchore/syft", ".github/workflows/build-release.yml"),
         ("infection/infection", ".github/workflows/mutation.yml"),
+        ("lycheeverse/lychee", ".github/lychee.sh"),
         ("nextcloud/server", ".github/workflows/build-release.yml"),
         ("sigstore/gitsign", ".github/sign-tag.sh"),
         ("sigstore/gitsign", ".github/workflows/verify-release.yml"),
     ]
 
 
+# The address of an asset of a release on GitHub, which gh downloads by its parts.
+RELEASE_ASSET = re.compile(
+    r"https://github\.com/(?P<repository>[^/]+/[^/]+)/releases/download/"
+    r"(?P<tag>[^/]+)/(?P<asset>[^/]+)"
+)
+
+
 def test_every_file_downloads_a_tool_from_the_address_of_the_record() -> None:
     # pins.py downloads from the address of .github/pins.toml, so the workflows and
-    # scripts must download from the same one, with their variable for {version}.
+    # scripts must download the same file, with their variable for {version}: an
+    # asset of a release on GitHub through the API, which survives an outage of
+    # GitHub's downloads without a token (decision 0133), by its repository, tag and
+    # name, with .github/download.sh or gh, and any other file from its address.
     record = pins.load_record(ROOT)
     for pin in pins.find_pins(ROOT):
         text = (ROOT / pin.path).read_text(encoding="utf-8")
-        plain = re.sub(r"\$\{(\w+)\}", r"$\1", text)
+        plain = re.sub(r"\$\{(\w+)\}", r"$\1", text.replace("\\\n", " "))
+        plain = re.sub(r" {2,}", " ", plain)
         url = record[pin.dep].url.replace("{version}", f"${pin.name}")
-        assert f'"{url}"' in plain, (pin.path, url)
+        asset = RELEASE_ASSET.fullmatch(url)
+        if not asset:
+            assert f'"{url}"' in plain, (pin.path, url)
+            continue
+        page = f"github.com/{asset['repository']}/releases/download/"
+        assert page not in plain, (pin.path, page)
+        repository, tag, name = (re.escape(asset[part]) for part in asset.groupdict())
+        calls = (
+            rf'download\.sh"? {repository} "{tag}" "?{name}"? ',
+            rf'gh release download "{tag}" --repo {repository} --pattern "?{name}"? ',
+        )
+        assert any(re.search(call, plain) for call in calls), (pin.path, url)
 
 
 # ----------------------------------------------------------------- writing the sha256

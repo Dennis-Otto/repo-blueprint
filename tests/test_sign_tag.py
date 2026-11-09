@@ -77,7 +77,7 @@ case " $* " in
 esac
 exec "$REAL_GIT" "${arguments[@]}"
 """,
-    # gitsign, which the stub of curl downloads: it signs for git as the workflow in
+    # gitsign, which the stub of gh downloads: it signs for git as the workflow in
     # GITHUB_WORKFLOW_REF, unless the plan fails it, and checks a signed tag's identity.
     "gitsign": NEXT
     + """if [[ "$1" == verify-tag ]]; then
@@ -102,13 +102,14 @@ fi
 printf -- '-----BEGIN SIGNED MESSAGE-----\\nidentity https://github.com/%s issuer https://token.actions.githubusercontent.com\\n-----END SIGNED MESSAGE-----\\n' "$GITHUB_WORKFLOW_REF"
 printf '\\n[GNUPG:] SIG_CREATED D 1 8 00 0 STUB\\n' >&2
 """,
-    # The download of gitsign, which fails when the plan says so.
-    "curl": NEXT
+    # The download of gitsign through the API, which fails as GitHub failed on
+    # 8 November 2026 when the plan says so.
+    "gh": NEXT
     + """next download
-echo "curl $*" >> "$CALLS"
+echo "gh $*" >> "$CALLS"
 if [[ "$outcome" == fail ]]; then
-  echo "curl: (22) The requested URL returned error: 502" >&2
-  exit 22
+  echo "HTTP 504: Gateway Timeout (https://api.github.com/repos/sigstore/gitsign/releases/assets/1)" >&2
+  exit 1
 fi
 while (($# > 0)); do
   if [[ "$1" == --output ]]; then cp "$STUBS/gitsign" "$2"; fi
@@ -257,7 +258,12 @@ def test_the_tag_of_a_release_is_signed_at_its_commit(github: GitHub) -> None:
     message = github.git("cat-file", "tag", "v1.0.0")
     assert f"identity https://github.com/{RELEASE_WORKFLOW} " in message
     calls = github.calls.read_text(encoding="utf-8")
-    assert "--retry 5 --retry-all-errors --connect-timeout 15" in calls
+    # gitsign through the API, with the token of the job.
+    version = GITSIGN.version
+    assert (
+        f"gh release download v{version} --repo sigstore/gitsign"
+        f" --pattern gitsign_{version}_linux_amd64 --output "
+    ) in calls
     assert GITSIGN.sha256 in calls
     assert "sleep" not in calls
 
@@ -419,7 +425,11 @@ def test_github_that_keeps_failing_fails(
 @pytest.mark.parametrize(
     ("stub", "error"),
     [
-        ("download", f"gitsign {GITSIGN.version} could not be downloaded."),
+        (
+            "download",
+            f"gitsign {GITSIGN.version} could not be downloaded: GitHub failed three"
+            " times (https://www.githubstatus.com).",
+        ),
         (
             "checksum",
             f"The download of gitsign {GITSIGN.version} doesn't have the checksum",
@@ -430,7 +440,8 @@ def test_github_that_keeps_failing_fails(
 def test_without_gitsign_nothing_is_signed_or_verified(
     github: GitHub, stub: str, error: str, arguments: tuple[str, ...]
 ) -> None:
-    github.plan(stub, "fail")
+    # The download tries three times; a checksum that differs stops it at once.
+    github.plan(stub, "fail", "fail", "fail")
 
     result = github.sign_tag(*arguments, github.release)
 
@@ -440,6 +451,27 @@ def test_without_gitsign_nothing_is_signed_or_verified(
     assert github.git("tag", "--list") == ""
     calls = github.calls.read_text(encoding="utf-8").splitlines()
     assert not any(call.startswith(("fetch ", "ls-remote ", "sign ")) for call in calls)
+    tries = 3 if stub == "download" else 1
+    assert sum(call.startswith("gh release download ") for call in calls) == tries
+
+
+def test_a_download_of_gitsign_that_github_fails_for_a_moment_is_tried_again(
+    github: GitHub,
+) -> None:
+    # GitHub answered 504 for a while on 8 November 2026.
+    github.plan("download", "fail", "fail")
+
+    result = github.sign_tag("v1.0.0", github.release)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert github.tag("v1.0.0") == ("tag", github.release)
+    calls = github.calls.read_text(encoding="utf-8").splitlines()
+    downloads = [call for call in calls if call.startswith("gh release download ")]
+    assert len(downloads) == 3
+    assert [call for call in calls if call.startswith("sleep ")] == [
+        "sleep 10",
+        "sleep 20",
+    ]
 
 
 def test_a_signature_that_fails_for_a_moment_is_made_anew(github: GitHub) -> None:

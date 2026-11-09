@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The tools that the workflows of the blueprint download, pinned by version and sha256.
 
-The workflows and .github/sign-tag.sh download gitsign, Infection, krankerl,
-Nextcloud and syft at the version below a line "# renovate:", and check each
+The workflows and the scripts of .github download gitsign, Infection, krankerl,
+lychee, Nextcloud and syft at the version below a line "# renovate:", and check each
 download against the sha256 on the line after the version. Renovate moves the
 version, but can't know the checksum of the new release. .github/pins.toml records the address of each
 download and the version and sha256 that the files pin; after Renovate moved a
@@ -47,7 +47,7 @@ PIN = re.compile(
 )
 SHA256 = re.compile(r"[0-9a-f]{64}")
 HEADER = """\
-# The tools that the workflows and .github/sign-tag.sh download and check by their
+# The tools that the workflows and the scripts of .github download and check by their
 # sha256, each pinned below a line "# renovate:": the address of the download, in which
 # {version} stands for the version, and the version and sha256 that the files pin.
 # Renovate moves a version, and python3 pins.py then writes the sha256 of the new

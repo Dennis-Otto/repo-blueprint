@@ -2512,6 +2512,8 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".github/cspell-words.txt",
         ".vale.ini",
         ".github/sign-tag.sh",
+        ".github/download.sh",
+        ".github/lychee.sh",
         ".github/renovate-blueprint.json5",
         ".github/mkdocs-blueprint.yml",
         ".github/mkdocs_blueprint.py",
@@ -5333,6 +5335,10 @@ EVERY_DOCUMENT = {"files": "'./**/*.md' './docs/**/*.html'", "every": "true"}
             "pull_request",
             EVERY_DOCUMENT,
         ),
+        # So does a new lychee, such as an update of its version by Renovate, which
+        # changes no document.
+        ({".github/lychee.sh": "# 0.25.0\n"}, "pull_request", EVERY_DOCUMENT),
+        ({".github/download.sh": "# again\n"}, "pull_request", EVERY_DOCUMENT),
         # A document may link to a file that the pull request deletes or moves.
         ({"docs/guide.md": None}, "pull_request", EVERY_DOCUMENT),
         ({"docs/guide.md": "->docs/manual.md"}, "pull_request", EVERY_DOCUMENT),
@@ -5576,6 +5582,18 @@ def test_the_prose_hints_read_only_the_languages_they_know(
         assert not spelling_reads(cspell, document), document
 
 
+def test_a_new_lychee_starts_the_link_check() -> None:
+    # Renovate updates lychee in .github/lychee.sh and its sha256 in .github/pins.toml,
+    # and changes no document: the link check runs all the same, so that a release of
+    # lychee that breaks lychee.toml or an option fails here and never reaches the
+    # repositories of the blueprint.
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    for event in ("push", "pull_request"):
+        patterns = paths_of(links, event)
+        for path in (".github/lychee.sh", ".github/download.sh"):
+            assert runs_for(patterns, [path]), (event, path)
+
+
 def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
     links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
     job = job_in(links, "links")
@@ -5587,16 +5605,23 @@ def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
         "restore-keys": "lychee-",
     }
     check = step_in(job, "Check the links of the documentation")
-    assert check["with"]["args"] == (
-        "--config lychee.toml --no-progress --cache --max-cache-age 1d"
-        " ${{ steps.documents.outputs.files }}"
-    )
+    # lychee of .github/lychee.sh, which downloads it through the API, in the folder
+    # of the cache, with the documents that the step before chose.
+    assert check["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "EVENT": "${{ github.event_name }}",
+        "FILES": "${{ steps.documents.outputs.files }}",
+        "EVERY": "${{ steps.documents.outputs.every }}",
+    }
+    assert "working-directory" not in check
+    assert (
+        'bash .github/lychee.sh "${options[@]}" "$RUNNER_TEMP/links.md" \\\n'
+        "  --config lychee.toml --no-progress --cache --max-cache-age 1d"
+        ' "${documents[@]}"'
+    ) in check["run"]
     # Without a document to check, neither runs; a changed document may have no link.
     for step in (cache, check):
         assert condition_of(step) == "steps.documents.outputs.files != ''"
-    assert check["with"]["failIfEmpty"] == (
-        "${{ steps.documents.outputs.every == 'true' }}"
-    )
     # A pull request compares its documents with its base.
     [checkout] = steps_using(job, "actions/checkout")
     assert checkout["with"]["fetch-depth"] == (
@@ -5862,7 +5887,37 @@ def test_every_download_tries_again_after_a_passing_error(
                 downloads += 1
                 for option in DOWNLOAD:
                     assert option in command, f"{path.name}: curl {command}"
-    # The gitsign of the signed release tags, in every repository.
+    # The check of the published website, in every repository.
+    assert downloads > 0
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_no_download_of_a_release_on_github_goes_without_a_token(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # GitHub's downloads without a token, from the page of a release, timed out for
+    # hours on 8 November 2026 and failed the checks of every repository, while the
+    # API kept working (decision 0133): an asset of a release comes through the API,
+    # with gh and the token of the job, and no action downloads one without it, as the
+    # one of lychee did.
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    page = re.compile(
+        r"https://github\.com/[^/\s]+/[^/\s]+/releases/(?:download|latest)/"
+    )
+    downloads = 0
+    for pattern in SCRIPTS:
+        for path in sorted(folder.glob(pattern)):
+            text = path.read_text(encoding="utf-8")
+            for found in CURL.findall(text):
+                assert not page.search(found), f"{path.name}: curl {found}"
+            assert not re.search(r"^[^#\n]*\bwget\b", text, re.M), path.name
+            assert "lycheeverse/lychee-action" not in text, path.name
+            downloads += len(re.findall(r"\bgh release download\b", text))
+    # lychee and CodeQL in every repository.
+    for name in ("download.sh", "lychee.sh"):
+        assert (folder / ".github" / name).read_text(encoding="utf-8") == (
+            ROOT / ".github" / name
+        ).read_text(encoding="utf-8")
     assert downloads > 0
 
 
@@ -5893,31 +5948,32 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
     if cache != "empty":
         deb.parent.mkdir(parents=True)
         deb.write_bytes(package if cache == "krankerl" else b"a changed package\n")
-    script = script_of(
-        workflow, "Install krankerl, which builds the package of the app"
+    step = step_named(workflow, "Install krankerl, which builds the package of the app")
+    # .github/download.sh, through the API with the token of the job, which survives
+    # an outage of GitHub's downloads without a token; its stand-in writes the package
+    # into its folder, as the script makes it.
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/download.sh").write_text(
+        'echo "download.sh $*" >> "$CALLS"\n'
+        'mkdir -p "$(dirname "$4")"\n'
+        'echo "the package of krankerl" > "$4"\n',
+        encoding="utf-8",
+        newline="\n",
     )
+    sha256 = hashlib.sha256(package).hexdigest()
 
     result, calls = run_workflow_step(
         tmp_path,
-        script,
+        step["run"],
         tmp_path,
-        {
-            "curl": textwrap.dedent(
-                """\
-                while (($# > 0)); do
-                  if [[ "$1" == --output ]]; then echo "the package of krankerl" > "$2"; fi
-                  shift
-                done
-                """
-            ),
-            "sudo": "",
-        },
+        {"sudo": ""},
         RUNNER_TEMP=temp.as_posix(),
         KRANKERL_VERSION=version,
-        KRANKERL_SHA256=hashlib.sha256(package).hexdigest(),
+        KRANKERL_SHA256=sha256,
     )
 
-    downloads = [call for call in calls if call.startswith("curl ")]
+    downloads = [call for call in calls if call.startswith("download.sh ")]
     installs = [call for call in calls if call.startswith("sudo ")]
     if cache == "changed":
         # The checksum is checked for a package of the cache too.
@@ -5926,10 +5982,14 @@ def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
         assert installs == []
         return
     assert result.returncode == 0, result.stdout + result.stderr
-    assert len(downloads) == (1 if cache == "empty" else 0)
-    for download in downloads:
-        assert all(option in download for option in DOWNLOAD), download
-        assert f"--output {deb.as_posix()} " in download
+    assert downloads == (
+        [
+            f"download.sh ChristophWurst/krankerl v{version}"
+            f" krankerl_{version}_amd64.deb {deb.as_posix()} {sha256}"
+        ]
+        if cache == "empty"
+        else []
+    )
     assert installs == [f"sudo dpkg --install {deb.as_posix()}"]
 
 
@@ -8947,25 +9007,28 @@ def test_renovate_finds_every_version_that_a_workflow_or_script_pins(
             # The version as the files use it, without the v of the tag.
             assert re.fullmatch(r"\d+(\.\d+)+", match["currentValue"]), path.name
             tag = match["extractVersion"]
-            assert tag in (None, "^v(?<version>.+)$"), path.name
+            # lychee tags its releases lychee-v1.2.3.
+            tags = ("^lychee-v(?<version>.+)$",) if path.name == "lychee.sh" else ()
+            assert tag in (None, "^v(?<version>.+)$", *tags), path.name
             pinned += 1
     # gitsign in sign-tag.sh and verify-release.yml, krankerl and Nextcloud in the
     # release of a Nextcloud app and syft for its SBOMs, which every kind has, krankerl
-    # in the checks of a Nextcloud app too, and Infection in the mutation tests.
+    # in the checks of a Nextcloud app too, Infection in the mutation tests, and lychee
+    # in the check of the links of every kind.
     assert pinned == {
-        "blueprint": 7,
-        "nextcloud-app": 7,
-        "home-assistant": 6,
-        "github-action": 6,
-        "python-package": 6,
-    }.get(kind, 5)
+        "blueprint": 8,
+        "nextcloud-app": 8,
+        "home-assistant": 7,
+        "github-action": 7,
+        "python-package": 7,
+    }.get(kind, 6)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
 def test_the_downloads_of_the_workflows_follow_the_blueprint(
     projects: dict[str, Path], kind: str
 ) -> None:
-    # The workflows and .github/sign-tag.sh belong to the blueprint, which moves the
+    # The workflows and the scripts of .github belong to the blueprint, which moves the
     # tools they download together with their sha256; the next release brings both to
     # every repository. A repository's own Renovate would move only the version, and
     # the download would fail its checksum in the next release.
@@ -8983,6 +9046,7 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
             assert rule["matchFileNames"] == [
                 ".github/workflows/**",
                 ".github/sign-tag.sh",
+                ".github/lychee.sh",
             ]
             enabled = rule["enabled"]
             tasks = rule.get("postUpgradeTasks", tasks)
@@ -8996,7 +9060,12 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
     # the files it changed; the bot allows that one command and no other.
     assert tasks == {
         "commands": ["python3 pins.py"],
-        "fileFilters": [pins.RECORD, ".github/sign-tag.sh", ".github/workflows/*.yml"],
+        "fileFilters": [
+            pins.RECORD,
+            ".github/sign-tag.sh",
+            ".github/lychee.sh",
+            ".github/workflows/*.yml",
+        ],
         "executionMode": "branch",
     }
     bot = renovate_rules(
@@ -16084,6 +16153,112 @@ def test_the_flaky_test_bot_counts_no_failure_of_a_cancelled_run_before(
     assert ("broke for the commit before" in summary) != again
 
 
+# What gh says when GitHub fails for a moment, as for hours on 8 November 2026.
+GATEWAY_TIMEOUT = (
+    "HTTP 504: Gateway Timeout"
+    " (https://api.github.com/repos/o/r/actions/runs/5/attempts/1/jobs)\n"
+)
+JOBS_OF_THE_RUN = r"api repos/o/r/actions/runs/5/attempts/1/jobs .*"
+
+
+def rerun_a_flaky_test(tmp_path: Path, *first: Answer) -> workflow_steps.StepResult:
+    """The bot for flaky tests after a test of run 5 failed for the first time, with
+    the answers first before those of the run."""
+    return workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "rerun",
+        "Run the failed jobs once more",
+        answers=[
+            *first,
+            *gh_answers(
+                {
+                    "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                        "jobs": [job_of_a_run(11, "test (3.12)", "failure")]
+                    },
+                    "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+                }
+            ),
+        ],
+        env={
+            "RUN": "5",
+            "NAME": "CI (python)",
+            "CONCLUSION": "failure",
+            "WORKFLOW": "3",
+            "EVENT": "pull_request",
+            "BRANCH": "feature",
+            "HEAD_REPO": "o/r",
+            "SHA": "abc1234def",
+        },
+        stubs={"sleep": workflow_steps.recording("sleep")},
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_asks_again_when_github_fails_for_a_moment(
+    tmp_path: Path,
+) -> None:
+    done = rerun_a_flaky_test(
+        tmp_path,
+        Answer(JOBS_OF_THE_RUN, err=GATEWAY_TIMEOUT, code=1, once=True),
+        Answer(
+            "run rerun 5 --failed", err="HTTP 502: Bad Gateway\n", code=1, once=True
+        ),
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(JOBS_OF_THE_RUN)) == 2
+    assert done.called("run rerun") == ["run rerun 5 --failed"] * 2
+    assert done.stubbed == ["sleep 10", "sleep 10"]
+    assert "GitHub failed, so gh tries again in 10 seconds: HTTP 504" in done.stderr
+    assert done.summary == (
+        "The failed jobs of CI (python) run once more: a flaky test passes now.\n"
+    )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_fails_when_github_keeps_failing(tmp_path: Path) -> None:
+    done = rerun_a_flaky_test(
+        tmp_path, Answer(JOBS_OF_THE_RUN, err=GATEWAY_TIMEOUT, code=1)
+    )
+
+    assert done.returncode == 1
+    assert len(done.called(JOBS_OF_THE_RUN)) == 4
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert GATEWAY_TIMEOUT in done.stderr
+    assert not done.called("run rerun")
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_fails_at_once_when_github_refuses(tmp_path: Path) -> None:
+    refused = "HTTP 403: Resource not accessible by integration\n"
+    done = rerun_a_flaky_test(
+        tmp_path, Answer("run rerun 5 --failed", err=refused, code=1)
+    )
+
+    assert done.returncode == 1
+    assert refused in done.stderr
+    assert done.called("run rerun") == ["run rerun 5 --failed"]
+    assert done.stubbed == []
+    assert done.summary == ""
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_leaves_a_run_alone_that_runs_again_already(
+    tmp_path: Path,
+) -> None:
+    # A person or a try before started it again, as in paperless-sync's run
+    # 42469117135.
+    running = "run 5 cannot be rerun; This workflow is already running\n"
+    done = rerun_a_flaky_test(
+        tmp_path, Answer("run rerun 5 --failed", err=running, code=1)
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("run rerun") == ["run rerun 5 --failed"]
+    assert done.summary == "The failed jobs of CI (python) run once more already.\n"
+
+
 # The first attempt of a run of the tests, which passed when it ran again: a test that
 # failed, a job that ran out of time, one that failed in its build, one without a log,
 # and jobs that passed or that the failure of another cancelled.
@@ -17847,16 +18022,22 @@ def test_without_code_scanning_codeql_does_not_analyze(
     job = job_in((root / ".github/workflows/codeql.yml").read_text("utf-8"), "codeql")
     names = names_of(job)
     skip = names.index("Skip the analysis without GitHub Code Security")
-    assert names[skip + 1] == "Initialize the analysis"
+    assert names[skip + 1 : skip + 3] == [
+        "Download the CodeQL of the action unless the runner has it",
+        "Initialize the analysis",
+    ]
     assert condition_of(job["steps"][skip]) == WITHOUT_CODE_SCANNING
     analysis = [
         step
         for step in job["steps"]
         if step.get("uses", "").startswith("github/codeql-action/")
         or step.get("name")
-        == "File the results of each language under its own category"
+        in (
+            "Download the CodeQL of the action unless the runner has it",
+            "File the results of each language under its own category",
+        )
     ]
-    assert len(analysis) == 4
+    assert len(analysis) == 5
     for step in analysis:
         assert condition_of(step) == WITH_CODE_SCANNING, step
 
@@ -18019,30 +18200,38 @@ def test_the_check_docs_checks_the_website_that_it_built(
         "ADDRESS": "${{ runner.temp }}/address",
         "ROOT": "${{ steps.promises.outputs.root }}",
     }
-    # lychee of the Links workflow, without the network and away from its rules.
-    assert (
-        lychee["uses"]
-        == step_named(links, "Check the links of the documentation")["uses"]
+    # lychee of the Links workflow, from .github/lychee.sh, which downloads it through
+    # the API, without the network and away from its rules; it fails on a broken link
+    # and when it found none at all.
+    script = '"$GITHUB_WORKSPACE/.github/lychee.sh"'
+    assert 'bash .github/lychee.sh "${options[@]}" ' in script_of(
+        links, "Check the links of the documentation"
     )
-    assert lychee["uses"].startswith("lycheeverse/lychee-action@")
-    assert lychee["with"]["workingDirectory"] == "site"
-    assert lychee["with"]["args"] == (
-        "--offline --include-fragments --root-dir"
-        " ${{ runner.temp }}/address --no-progress '**/*.html'"
+    assert lychee["working-directory"] == "site"
+    assert lychee["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "ADDRESS": "${{ runner.temp }}/address",
+    }
+    assert lychee["run"] == (
+        f'bash {script} "$RUNNER_TEMP/website-links.md" \\\n'
+        "  --offline --include-fragments --root-dir \"$ADDRESS\" --no-progress '**/*.html'\n"
     )
-    assert "fail" not in lychee["with"]
     # llms.txt links full addresses, which lychee leaves out with --offline, so the
     # rule of site-check leads them to the files, unless the website has none.
     assert condition_of(website_map) == (
         f"${{{{ {built} && steps.promises.outputs.map != '' }}}}"
     )
-    assert website_map["uses"] == lychee["uses"]
-    assert website_map["with"]["workingDirectory"] == "site"
-    assert website_map["with"]["args"] == (
-        "--offline --no-progress --remap '${{ steps.promises.outputs.map }}' llms.txt"
+    assert website_map["working-directory"] == "site"
+    assert website_map["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "MAP": "${{ steps.promises.outputs.map }}",
+    }
+    assert website_map["run"] == (
+        f'bash {script} "$RUNNER_TEMP/website-map-links.md" \\\n'
+        '  --offline --no-progress --remap "$MAP" llms.txt\n'
     )
-    assert "fail" not in website_map["with"]
-    assert website_map["with"]["output"] != lychee["with"]["output"]
+    # Each its own report, and neither leaves out a broken link.
+    assert "--no-fail" not in lychee["run"] + website_map["run"]
     # The checks of the project alone, in a file that the blueprint never writes.
     assert project["run"] == "bash scripts/check-site.sh site"
     assert not (folder / "scripts/check-site.sh").exists()
@@ -22060,35 +22249,27 @@ def describe_the_release(
     **variables: str,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     """Runs the step that writes the SBOMs, with the stand-in for syft in the archive
-    of its release, which curl downloads and the step checks by its sha256, and with
-    the files of project as those that scripts/release-assets.sh built."""
+    of its release, which the step that downloads the tools of the build left in
+    $RUNNER_TEMP and the step checks by its sha256 again, and with the files of
+    project as those that scripts/release-assets.sh built."""
     build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
     pin = dict(re.findall(r"(SBOM_SYFT_(?:VERSION|SHA256)): (\S+)", build))
-    release = tmp_path / "release.tar.gz"
+    for folder in ("temp/project-assets", "assets"):
+        (tmp_path / folder).mkdir(parents=True)
+    release = tmp_path / "temp/syft.tar.gz"
     with tarfile.open(release, "w:gz") as tarred:
         data = FAKE_SYFT.encode()
         info = tarfile.TarInfo("syft")
         info.size = len(data)
         info.mode = 0o755
         tarred.addfile(info, io.BytesIO(data))
-    for folder in ("temp/project-assets", "assets"):
-        (tmp_path / folder).mkdir(parents=True)
     for name in project:
         (tmp_path / "temp/project-assets" / name).write_bytes(b"an asset\n")
     return run_workflow_step(
         tmp_path,
         script_of(build, "Describe it in the SBOMs, as SPDX and as CycloneDX"),
         tmp_path,
-        {
-            "curl": textwrap.dedent(
-                """\
-                while (($# > 0)); do
-                  if [[ "$1" == --output ]]; then cp release.tar.gz "$2"; fi
-                  shift
-                done
-                """
-            )
-        },
+        {},
         **{
             "RUNNER_TEMP": "temp",
             "ASSETS": "assets",
@@ -22123,8 +22304,6 @@ def test_the_sboms_name_the_release_by_its_version(
     result, calls = describe_the_release(tmp_path, publish_to)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    (download,) = [call for call in calls if call.startswith("curl ")]
-    assert "/anchore/syft/releases/download/v" in download
     # A package lists what it installs, as an image does; sources what they declare.
     (scan,) = [call for call in calls if call.startswith("syft ")]
     assert scan == (
@@ -22373,8 +22552,6 @@ def verify_a_hacs_release(
         if unattested
         else []
     )
-    gitsign = tmp_path / "gitsign"
-    gitsign.write_bytes(GITSIGN)
     release = {
         "tag_name": tag,
         "immutable": True,
@@ -22396,6 +22573,12 @@ def verify_a_hacs_release(
                 "true\n",
             ),
             exact(f"release download {tag}"),
+            # gitsign through the API.
+            Answer(
+                r"release download v\S+ --repo sigstore/gitsign --pattern \S+"
+                r" --output \S+ --clobber",
+                GITSIGN.decode(),
+            ),
             *missing,
             Answer(
                 r"attestation verify (?!oci://)\S+ --repo o/r --signer-workflow"
@@ -22430,13 +22613,6 @@ def verify_a_hacs_release(
             "GITSIGN_SHA256": hashlib.sha256(GITSIGN).hexdigest(),
         },
         stubs={
-            "curl": workflow_steps.recording(
-                "curl",
-                "while (($#)); do\n"
-                f'  [[ "$1" != --output ]] || cp "{gitsign.as_posix()}" "$2"\n'
-                "  shift\n"
-                "done",
-            ),
             # The signed tag of the release, in the repository that git init made.
             "git": workflow_steps.recording(
                 "git",

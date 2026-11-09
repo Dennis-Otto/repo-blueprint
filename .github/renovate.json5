@@ -95,18 +95,18 @@
       enabled: true,
     },
     {
-      // The tools that the workflows and .github/sign-tag.sh download and check by
+      // The tools that the workflows and the scripts of .github download and check by
       // their sha256, which every repository gets from here. Renovate can't know the
       // checksum of a new release: after it moved a version, pins.py downloads the
       // release and writes its sha256 beside the version and into .github/pins.toml,
       // so that the update merges on its own like any other.
       matchManagers: ["custom.regex"],
-      matchDepNames: ["sigstore/gitsign", "infection/infection", "ChristophWurst/krankerl", "nextcloud/server", "anchore/syft"],
-      matchFileNames: [".github/workflows/**", ".github/sign-tag.sh"],
+      matchDepNames: ["sigstore/gitsign", "infection/infection", "ChristophWurst/krankerl", "nextcloud/server", "anchore/syft", "lycheeverse/lychee"],
+      matchFileNames: [".github/workflows/**", ".github/sign-tag.sh", ".github/lychee.sh"],
       enabled: true,
       postUpgradeTasks: {
         commands: ["python3 pins.py"],
-        fileFilters: [".github/pins.toml", ".github/sign-tag.sh", ".github/workflows/*.yml"],
+        fileFilters: [".github/pins.toml", ".github/sign-tag.sh", ".github/lychee.sh", ".github/workflows/*.yml"],
         executionMode: "branch",
       },
     },

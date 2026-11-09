@@ -54,9 +54,18 @@ SIGNED_COMMIT = f"api repos/o/r/commits/{COMMIT} --jq .commit.verification.verif
 # that demands it, so a check without it fails.
 TRUSTED_RUN = " --source-ref refs/heads/main --deny-self-hosted-runners"
 GITSIGN_VERSION = step(WORKFLOW, "verify", STEP)["env"]["GITSIGN_VERSION"]
-GITSIGN_URL = (
-    "https://github.com/sigstore/gitsign/releases/download/"
-    f"v{GITSIGN_VERSION}/gitsign_{GITSIGN_VERSION}_linux_amd64"
+# The download of gitsign through the API, which survives an outage of GitHub's
+# downloads without a token (decision 0133).
+GITSIGN_DOWNLOAD = (
+    re.escape(
+        f"release download v{GITSIGN_VERSION} --repo sigstore/gitsign"
+        f" --pattern gitsign_{GITSIGN_VERSION}_linux_amd64 --output "
+    )
+    + r"\S+/gitsign --clobber"
+)
+GITHUB_504 = (
+    "HTTP 504: Gateway Timeout"
+    " (https://api.github.com/repos/sigstore/gitsign/releases/assets/1)\n"
 )
 PYTHON3 = 'exec "$FAKE_GH_PYTHON" "$@"\n'  # The Python of the tests, on every machine.
 # The signed statement of the bundle, which provenance.intoto.jsonl repeats.
@@ -155,6 +164,7 @@ def verify(
     stubs: Mapping[str, str] | None = None,
     signature: int = 0,
     pinned: str | None = None,
+    downloads: Sequence[int] = (0,),
     tag_type: str = "tag",
     fetched: int = 0,
     npm_has: str | None = None,
@@ -165,7 +175,9 @@ def verify(
     None for one that is missing, and what curl gets by its URL in served, with None for
     what fails. A planned answer goes before those of a complete release. gitsign ends
     with signature, against the checksum pinned or its own, git cat-file names the type
-    of the tag and git fetch ends with fetched, and npm has the integrity npm_has."""
+    of the tag and git fetch ends with fetched, and npm has the integrity npm_has.
+    The downloads of gitsign end with the codes of downloads, one after the other, the
+    last for every one after; an error is GitHub's 504."""
     version = tag.removeprefix("v")
     name = repository.partition("/")[2]
     write_files(
@@ -181,10 +193,7 @@ def verify(
     gitsign = "#!/usr/bin/env bash\n" + recording("gitsign", f"exit {signature}")
     write_files(
         tmp_path / "served",
-        {
-            served_as(url): content
-            for url, content in {GITSIGN_URL: gitsign, **(served or {})}.items()
-        },
+        {served_as(url): content for url, content in (served or {}).items()},
     )
     answered = {
         "tag_name": tag,
@@ -201,6 +210,16 @@ def verify(
         STEP,
         answers=[
             *answers,
+            *(
+                Answer(
+                    GITSIGN_DOWNLOAD,
+                    "" if code else gitsign,
+                    GITHUB_504 if code else "",
+                    code,
+                    once=index < len(downloads) - 1,
+                )
+                for index, code in enumerate(downloads)
+            ),
             api("release view --json tagName --jq .tagName", {"tagName": tag}),
             exact(f"api repos/{repository}/releases/tags/{tag}", json.dumps(answered)),
             api(f"api repos/{repository}/commits/{tag} --jq .sha", {"sha": COMMIT}),
@@ -474,9 +493,10 @@ PROBLEMS: dict[str, tuple[dict[str, Any], str]] = {
         f" tag {TAG} can't be checked.",
     ),
     "a gitsign that can't be downloaded": (
-        {"served": {GITSIGN_URL: None}},
-        f"gitsign {GITSIGN_VERSION} can't be downloaded, so the tag {TAG} can't be"
-        " checked.",
+        {"downloads": (1,)},
+        f"gitsign {GITSIGN_VERSION} can't be downloaded: GitHub failed five times in two"
+        " and a half minutes (https://www.githubstatus.com), so the tag"
+        f" {TAG} can't be checked. Run the check again once GitHub works.",
     ),
     "a tag that can't be fetched": (
         {"fetched": 1},
@@ -817,7 +837,8 @@ def test_a_complete_release_verifies_with_every_check_of_the_step(
     # The bundle and the statement are what the others are checked with. Each asset is
     # checked twice: in GitHub, and with the bundle that a user gets with the release.
     signer = "--signer-workflow o/r/.github/workflows/build-release.yml"
-    assert done.commands == [
+    assert re.fullmatch(GITSIGN_DOWNLOAD, done.commands[3])
+    assert done.commands[:3] + done.commands[4:] == [
         f"api repos/o/r/releases/tags/{TAG}",
         f"api repos/o/r/commits/{TAG} --jq .sha",
         SIGNED_COMMIT,
@@ -904,7 +925,24 @@ def test_a_gitsign_with_another_checksum_never_runs(tmp_path: Path) -> None:
 
     assert [call for call in done.stubbed if call.startswith("gitsign ")] == []
     # And nothing comes after it: the run has already failed for what it can't check.
-    assert not done.called("release download")
+    assert not done.called(f"release download {TAG}")
+
+
+@WITH_JQ
+def test_a_download_of_gitsign_that_github_fails_for_a_while_is_tried_again(
+    tmp_path: Path,
+) -> None:
+    # GitHub answered 504 for a while on 8 November 2026.
+    done = verify(tmp_path, downloads=(1, 1, 1, 0))
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert len(done.called(GITSIGN_DOWNLOAD)) == 4
+    assert [call for call in done.stubbed if call.startswith("sleep ")][:3] == [
+        "sleep 10",
+        "sleep 20",
+        "sleep 40",
+    ]
+    assert any(call.startswith("gitsign verify-tag ") for call in done.stubbed)
 
 
 @WITH_JQ

@@ -211,6 +211,26 @@ jobs:
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          # GitHub answers a call now and then with an error of its own, a 5xx, or not in
+          # time, and for minutes in an outage, as on 8 November 2026: each call of gh
+          # tries again then, four times in all, 10, 20 and 40 seconds apart, with what
+          # it printed only once it worked. Any other error, such as a refusal, stops it
+          # at once; the last one stays in $RUNNER_TEMP/gh-errors.
+          tried() {
+            local wait output
+            for wait in 10 20 40 0; do
+              if output="$("$@" 2>"$RUNNER_TEMP/gh-errors")"; then
+                printf '%s\n' "$output"
+                return 0
+              fi
+              if ((wait == 0)) || ! grep -qiE 'HTTP 5[0-9]{2}|timeout|timed out|connection reset|unexpected EOF' "$RUNNER_TEMP/gh-errors"; then
+                cat "$RUNNER_TEMP/gh-errors" >&2
+                return 1
+              fi
+              echo "GitHub failed, so gh tries again in $wait seconds: $(head -n 1 "$RUNNER_TEMP/gh-errors")" >&2
+              sleep "$wait"
+            done
+          }
           # The jobs of an attempt that failed or ran out of time, by name, given the
           # conclusion of the attempt: GitHub cancels a job at its time limit and says
           # so in an annotation. An attempt that a newer run cancelled broke nothing; it
@@ -220,7 +240,7 @@ jobs:
           # only the jobs it names.
           broken() {
             local jobs id conclusion name messages found=""
-            jobs="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
+            jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
               --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.id, .conclusion, .name] | @tsv')" ||
               return 1
             while IFS=$'\t' read -r -u 4 id conclusion name; do
@@ -228,7 +248,7 @@ jobs:
                 continue
               fi
               if [[ "$conclusion" == cancelled ]]; then
-                messages="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
+                messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
                   return 1
                 if grep -q "higher priority waiting request" <<<"$messages"; then
                   return 0
@@ -255,13 +275,13 @@ jobs:
           # can't be read, the jobs run once more.
           superseded() {
             local ids id messages
-            ids="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
+            ids="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
               --jq '.jobs[] | select(.conclusion == "cancelled") | .id')" || return 1
             while read -r -u 5 id; do
               if [[ -z "$id" ]]; then
                 continue
               fi
-              messages="$(gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
+              messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
                 return 1
               if grep -q "higher priority waiting request" <<<"$messages"; then
                 return 0
@@ -269,7 +289,7 @@ jobs:
             done 5<<<"$ids"
             return 1
           }
-          candidates="$(gh api --header "$API_VERSION_HEADER" --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
+          candidates="$(tried gh api --header "$API_VERSION_HEADER" --method GET "repos/$GH_REPO/actions/workflows/$WORKFLOW/runs" \
             -f branch="$BRANCH" -f event="$EVENT" -f status=completed -f per_page=30 \
             --jq ".workflow_runs | map(select(.id < $RUN and .head_sha != \"$SHA\" and .head_repository.full_name == \"$HEAD_REPO\")) | .[:5][] | [.id, .conclusion] | @tsv" ||
             true)"
@@ -290,7 +310,14 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          gh run rerun "$RUN" --failed
+          # A person or a try before may have started it again already, which is fine.
+          if ! tried gh run rerun "$RUN" --failed; then
+            if grep -q "already running" "$RUNNER_TEMP/gh-errors"; then
+              echo "The failed jobs of $NAME run once more already." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            exit 1
+          fi
           echo "The failed jobs of $NAME run once more: a flaky test passes now." >> "$GITHUB_STEP_SUMMARY"
       - name: Wait until Harden-Runner has removed Docker
         # Harden-Runner removes Docker with apt-get in the background; a job that ends

@@ -167,7 +167,9 @@ doesn't accept, at the Markdown of its page, or at
 `mkdocs.yml` for a page without one. When the log names a font or a script that Material
 couldn't download, its server had a hiccup: that usually passes when the job runs again,
 and a build that finds them in the cache of the week, which a push to `main` saves,
-downloads nothing."""
+downloads nothing. When the annotation *GitHub fails* says that lychee can't be
+downloaded, GitHub's API failed for minutes, not your change: run the check again once
+[githubstatus.com](https://www.githubstatus.com) shows GitHub working."""
 why = """A strict build keeps every link of the documentation working; a warning
 today is a broken page for a reader tomorrow. The checks of the built website see what
 the build doesn't: the links that a page writes in HTML, what a new version of
@@ -360,7 +362,9 @@ Security or Advanced Security: there this check passes with a notice."""
 why = """The rules of `main` require that every language is analyzed, so that no security
 problem goes unseen."""
 fix = """Read the log of the check. A failure of the analysis is rarely caused by the
-change: run the check again, and if it fails again, open an issue with the log. The job blocks every host but those
+change: run the check again, and if it fails again, open an issue with the log. When
+the annotation *GitHub fails* says that CodeQL can't be downloaded, GitHub's API failed
+for minutes: run the check again once GitHub works. The job blocks every host but those
 it names: a call that it blocked shows in the summary of Harden-Runner. Run the check
 once more, and if the call stays blocked, add the host to `allowed-endpoints` and
 `HOSTS` of the job in the blueprint."""
@@ -537,7 +541,9 @@ why = """A broken link leaves a reader stranded exactly where the document promi
 help."""
 fix = """Correct or remove each link that the summary lists. A link that only fails for
 the check, such as one behind a sign-in, goes into `.lycheeignore` with the reason.
-lychee runs on your machine with Docker:"""
+When the annotation *GitHub fails* says that lychee can't be downloaded, GitHub's API
+failed for minutes, not your change: run the check again once GitHub works. lychee
+runs on your machine with Docker:"""
 commands = [
   'docker run --rm -v "$PWD:/input" -w /input lycheeverse/lychee --config lychee.toml "./**/*.md"',
 ]
