@@ -101,7 +101,7 @@ jobs:
           python-version-file: .python-version
       # No leg runs without the plan, so a download of uv that hangs gives way to a
       # second attempt here too, as in the legs below.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         id: uv
         continue-on-error: true
         timeout-minutes: 2
@@ -112,7 +112,7 @@ jobs:
           prune-cache: true
           cache-dependency-glob: requirements-dev.txt
           cache-suffix: plan
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: steps.uv.outcome == 'failure'
         timeout-minutes: 5
         with:
@@ -196,7 +196,7 @@ jobs:
       # step ran out of its five minutes, in two legs at once (#179). So an attempt
       # that doesn't end within two minutes gives way to a second one, which takes
       # uv from its releases on GitHub instead; the job passes with either.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         id: uv
         continue-on-error: true
         timeout-minutes: 2
@@ -209,7 +209,7 @@ jobs:
             requirements-dev.txt
             stacks/**/requirements*.txt
           cache-suffix: ${{ matrix.kind }}
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: steps.uv.outcome == 'failure'
         timeout-minutes: 5
         with:
@@ -635,7 +635,7 @@ jobs:
         timeout-minutes: 5
         with:
           python-version-file: .python-version
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: steps.due.outputs.due == 'true'
         timeout-minutes: 5
         with:
