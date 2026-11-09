@@ -51,6 +51,13 @@ case "$outcome" in
     echo "${outcome#fail }" >&2
     exit 1
     ;;
+  # An error of the API with a body, such as a 502 of GitHub: gh writes the body to
+  # its output as it is, even with --jq, and fails.
+  bad\ gateway)
+    echo '{"message":"Server Error"}'
+    echo "gh: Server Error (HTTP 502)" >&2
+    exit 1
+    ;;
   digest) echo "$DIGEST" ;;
   # A call that stalls, as gh does when GitHub never answers.
   stall) exec /usr/bin/sleep 30 ;;
@@ -65,6 +72,7 @@ esac
 SLEEP = '#!/usr/bin/env bash\nprintf \'%s\\n\' "sleep $*" >> "$CALLS"\n'
 # What gh prints when GitHub fails, as it did on 8 November 2026, and when it refuses.
 TIMEOUT = "fail HTTP 504: Gateway Timeout (https://api.github.com/repos/o/tool/releases/assets/7)"
+BAD_GATEWAY = "bad gateway"
 UNREACHABLE = (
     'fail Get "https://api.github.com/repos/o/tool/releases/tags/v1.2.3": i/o timeout'
 )
@@ -288,6 +296,38 @@ def test_without_a_pin_the_digest_that_github_keeps_checks_the_download(
     # The version of the API of blueprint/github.py, as every call asks for it.
     assert calls == [DIGEST_CALL, "sleep 10", DIGEST_CALL, download_call(file)]
     assert file.read_bytes() == ASSET
+
+
+def test_the_answer_of_a_failed_try_never_reaches_the_result(tmp_path: Path) -> None:
+    # gh writes the body of an error of the API to its output, even with --jq: only
+    # the output of the try that worked is the digest, so that a second try that works
+    # downloads the asset, instead of failing on a digest with the error in front.
+    file = tmp_path / "tool"
+
+    result, calls = script(
+        tmp_path,
+        "download.sh",
+        *ARGUMENTS,
+        file.as_posix(),
+        plan=(BAD_GATEWAY, "digest", BAD_GATEWAY, "asset"),
+        env={"DIGEST": f"sha256:{SHA256}"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == [
+        DIGEST_CALL,
+        "sleep 10",
+        DIGEST_CALL,
+        download_call(file),
+        "sleep 10",
+        download_call(file),
+    ]
+    assert file.read_bytes() == ASSET
+    # The error stays in the log, and the body of the answer leaves the output alone.
+    assert result.stderr.count("gh: Server Error (HTTP 502)") == 2
+    assert result.stdout == (
+        "tool_1.2.3_linux_amd64 of o/tool v1.2.3 is downloaded and has its sha256.\n"
+    )
 
 
 @pytest.mark.parametrize("digest", ["", "sha512:abc", f"sha256:{SHA256[:-1]}"])
