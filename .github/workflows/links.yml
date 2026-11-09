@@ -5,7 +5,8 @@ name: Links
 # or of a page of HTML in docs/, and every week, since sites move without a change here.
 # A pull request checks the documents that it changes, so that a site that is down for a
 # moment fails only the pull requests that link to it; one that changes the rules or
-# moves or deletes a file checks every document, as main and the weekly run do. The
+# lychee itself, such as an update of its version in .github/lychee.sh, or moves or
+# deletes a file checks every document, as main and the weekly run do. The
 # answers of the sites stay in a cache for a day. A broken link fails the check of a
 # pull request; the weekly run keeps one issue with the broken links open until they are
 # fixed, and closes it then. lychee.toml holds the rules, .lycheeignore the exceptions
@@ -25,6 +26,8 @@ on:
       - lychee.toml
       - .lycheeignore
       - .github/workflows/links.yml
+      - .github/lychee.sh
+      - .github/download.sh
   pull_request:
     paths:
       - "**/*.md"
@@ -34,6 +37,8 @@ on:
       - lychee.toml
       - .lycheeignore
       - .github/workflows/links.yml
+      - .github/lychee.sh
+      - .github/download.sh
   schedule:
     - cron: "50 5 * * 1"
   workflow_dispatch:
@@ -87,12 +92,12 @@ jobs:
         run: |
           # The documents that a pull request adds or changes, since the merge base, so
           # none that only main changed, but the changelog. One that changes the rules,
-          # or moves or deletes a file that a document may link to, checks every
-          # document; no document links to a fragment of the changelog. lychee gets the
-          # names through a shell, so a name with another character checks every
-          # document too.
+          # or lychee itself in .github/lychee.sh, or moves or deletes a file that a
+          # document may link to, checks every document; no document links to a
+          # fragment of the changelog. lychee gets the names through a shell, so a name
+          # with another character checks every document too.
           if [[ "$EVENT" == pull_request ]] &&
-            [[ -z "$(git diff --name-only "origin/$BASE_REF...HEAD" -- lychee.toml .lycheeignore .github/workflows/links.yml)" ]] &&
+            [[ -z "$(git diff --name-only "origin/$BASE_REF...HEAD" -- lychee.toml .lycheeignore .github/workflows/links.yml .github/lychee.sh .github/download.sh)" ]] &&
             [[ -z "$(git diff --name-only --diff-filter=DR "origin/$BASE_REF...HEAD" -- . ':!changelog.d')" ]]; then
             mapfile -t changed < <(git diff --name-only --diff-filter=AM "origin/$BASE_REF...HEAD" -- '*.md' 'docs/*.html' ':!CHANGELOG.md' ':!changelog.d')
             if ((${#changed[@]} == 0)); then
@@ -117,7 +122,7 @@ jobs:
           key: lychee-${{ github.run_id }}
           restore-keys: lychee-
       # .github/lychee.sh downloads lychee through the API, with the token of the job,
-      # which lychee takes for the links to GitHub as well (decision 0132). The weekly
+      # which lychee takes for the links to GitHub as well (decision 0133). The weekly
       # run keeps an issue of the broken links instead of failing.
       - name: Check the links of the documentation
         id: lychee

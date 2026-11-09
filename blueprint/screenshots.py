@@ -1418,7 +1418,8 @@ def report(
         text += (
             f"\n`{SOCIAL_PREVIEW}` changed: once this pull request is merged, upload "
             "it under **Settings → General → Social preview**, where GitHub takes it "
-            "from.\n"
+            "from. Until GitHub shows it, the nightly look of the bot-health bot keeps "
+            "the issue *Upload the new social preview* open.\n"
         )
     extra = others(found)
     if extra:

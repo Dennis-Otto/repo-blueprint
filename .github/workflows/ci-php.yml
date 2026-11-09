@@ -120,7 +120,7 @@ jobs:
           path: ${{ runner.temp }}/krankerl
           key: krankerl-${{ env.KRANKERL_VERSION }}-${{ env.KRANKERL_SHA256 }}
       # Through the API with the token of the job, which survives an outage of GitHub's
-      # downloads without a token (decision 0132).
+      # downloads without a token (decision 0133).
       - name: Install krankerl, which builds the package of the app
         env:
           GH_TOKEN: ${{ github.token }}

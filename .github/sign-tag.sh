@@ -98,9 +98,10 @@ verify() {
 }
 
 # gitsign through the API with the token in GH_TOKEN, which survives an outage of
-# GitHub's downloads without a token (decision 0132).
+# GitHub's downloads without a token (decision 0133); gh waits without a limit, so a
+# call that stalls for five minutes ends and is tried again.
 gitsign="$RUNNER_TEMP/gitsign"
-if ! retry gh release download "v$version" --repo sigstore/gitsign \
+if ! retry timeout --kill-after=10 300 gh release download "v$version" --repo sigstore/gitsign \
   --pattern "gitsign_${version}_linux_amd64" --output "$gitsign" --clobber; then
   echo "::error::gitsign $version could not be downloaded: GitHub failed three times (https://www.githubstatus.com)."
   exit 2

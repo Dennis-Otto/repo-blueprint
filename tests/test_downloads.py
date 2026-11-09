@@ -1,5 +1,5 @@
 """Tests of the downloads that survive an outage of GitHub's downloads without a token,
-as on 8 November 2026 (decision 0132): .github/download.sh, which downloads an asset
+as on 8 November 2026 (decision 0133): .github/download.sh, which downloads an asset
 of a release through the API and tries again after an error of GitHub,
 .github/lychee.sh, which runs lychee as its action ran it, and the steps of the
 workflows that download with them. Each runs in bash, with stand-ins for gh, sleep
@@ -52,6 +52,8 @@ case "$outcome" in
     exit 1
     ;;
   digest) echo "$DIGEST" ;;
+  # A call that stalls, as gh does when GitHub never answers.
+  stall) exec /usr/bin/sleep 30 ;;
   *)
     while (($# > 0)); do
       [[ "$1" != --output ]] || cp "$STUBS/asset" "$2"
@@ -188,6 +190,29 @@ def test_a_download_that_github_keeps_failing_names_the_outage(tmp_path: Path) -
         "sleep 80",
     ]
     assert not file.exists()
+
+
+def test_a_download_that_stalls_is_tried_again(tmp_path: Path) -> None:
+    # gh has no limit of its own: a call that GitHub never answers ends after
+    # DOWNLOAD_TIMEOUT seconds and counts as an error of GitHub, so that the job tries
+    # again and names the outage instead of running until its own time is up.
+    file = tmp_path / "tool"
+
+    result, calls = script(
+        tmp_path,
+        "download.sh",
+        *ARGUMENTS,
+        file.as_posix(),
+        SHA256,
+        plan=("stall", "asset"),
+        env={"DOWNLOAD_TIMEOUT": "1"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert file.read_bytes() == ASSET
+    assert calls == [download_call(file), "sleep 10", download_call(file)]
+    assert "GitHub didn't answer in 1 seconds." in result.stderr
+    assert "::error" not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
@@ -894,23 +919,32 @@ def test_infection_comes_through_the_api(tmp_path: Path) -> None:
         tmp_path,
         "mutation.yml",
         "mutation",
-        "Install the locked tools and Infection",
+        "Download Infection",
         files={".github/download.sh": recording("download.sh")},
-        stubs={"composer": recording("composer")},
     )
 
     assert done.returncode == 0, done.stderr
     variables = job("mutation.yml", "mutation")["env"]
     version, sha256 = variables["INFECTION_VERSION"], variables["INFECTION_SHA256"]
     assert done.stubbed == [
-        "composer install --no-interaction --prefer-dist --no-progress",
         f"download.sh infection/infection {version} infection.phar"
         f" {done.runner_temp.as_posix()}/infection.phar {sha256}",
     ]
-    infection = step(
-        "mutation.yml", "mutation", "Install the locked tools and Infection"
-    )
+    infection = step("mutation.yml", "mutation", "Download Infection")
     assert infection["env"] == {"GH_TOKEN": "${{ github.token }}"}
+
+
+def test_no_step_that_installs_the_project_for_the_mutants_holds_the_token() -> None:
+    # composer install runs the Composer scripts and plugins of the project: Infection
+    # comes before it, in a step of its own, and the steps that run the project's code
+    # don't get the token of the job.
+    found = job("mutation.yml", "mutation")
+    names = [each.get("name") for each in found["steps"]]
+    assert names.index("Download Infection") < names.index("Install the locked tools")
+    for name in ("Install the locked tools", "Run the mutants against the tests"):
+        each = step("mutation.yml", "mutation", name)
+        assert "github.token" not in json.dumps(each.get("env", {})), name
+        assert "GITHUB_TOKEN" not in json.dumps(each.get("env", {})), name
 
 
 def test_the_fake_gh_writes_a_downloaded_asset_into_its_file(tmp_path: Path) -> None:

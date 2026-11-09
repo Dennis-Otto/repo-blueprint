@@ -78,12 +78,12 @@ from blueprint.bot_health import (
     Cron,
     after_pull_requests,
     own_issue,
+    preview_report,
 )
 from blueprint.changelog import Fragment, release_changelog
 from blueprint.checklist import (
     CHROME_WEB_STORE_ITEM,
     CHROME_WEB_STORE_SIGN_IN,
-    DEFAULT_PANEL,
     RELEASE_APP_PERMISSIONS,
     social_preview,
 )
@@ -103,6 +103,8 @@ from blueprint.settings import (
     check_environments,
 )
 from blueprint.site_check import check as check_site
+from blueprint.social_preview import DEFAULT_PANEL
+from blueprint.social_preview import HOST as PREVIEW_HOST
 from blueprint.stale_runs import checks_of
 from blueprint.versions import CONFIG, MANIFEST
 from blueprint.versions import files as versioned_files
@@ -5333,6 +5335,10 @@ EVERY_DOCUMENT = {"files": "'./**/*.md' './docs/**/*.html'", "every": "true"}
             "pull_request",
             EVERY_DOCUMENT,
         ),
+        # So does a new lychee, such as an update of its version by Renovate, which
+        # changes no document.
+        ({".github/lychee.sh": "# 0.25.0\n"}, "pull_request", EVERY_DOCUMENT),
+        ({".github/download.sh": "# again\n"}, "pull_request", EVERY_DOCUMENT),
         # A document may link to a file that the pull request deletes or moves.
         ({"docs/guide.md": None}, "pull_request", EVERY_DOCUMENT),
         ({"docs/guide.md": "->docs/manual.md"}, "pull_request", EVERY_DOCUMENT),
@@ -5574,6 +5580,18 @@ def test_the_prose_hints_read_only_the_languages_they_know(
     for document in further:
         assert not vale_styles(vale, document), document
         assert not spelling_reads(cspell, document), document
+
+
+def test_a_new_lychee_starts_the_link_check() -> None:
+    # Renovate updates lychee in .github/lychee.sh and its sha256 in .github/pins.toml,
+    # and changes no document: the link check runs all the same, so that a release of
+    # lychee that breaks lychee.toml or an option fails here and never reaches the
+    # repositories of the blueprint.
+    links = (ROOT / ".github/workflows/links.yml").read_text(encoding="utf-8")
+    for event in ("push", "pull_request"):
+        patterns = paths_of(links, event)
+        for path in (".github/lychee.sh", ".github/download.sh"):
+            assert runs_for(patterns, [path]), (event, path)
 
 
 def test_the_link_check_keeps_the_answers_of_the_sites_for_a_day() -> None:
@@ -5879,7 +5897,7 @@ def test_no_download_of_a_release_on_github_goes_without_a_token(
 ) -> None:
     # GitHub's downloads without a token, from the page of a release, timed out for
     # hours on 8 November 2026 and failed the checks of every repository, while the
-    # API kept working (decision 0132): an asset of a release comes through the API,
+    # API kept working (decision 0133): an asset of a release comes through the API,
     # with gh and the token of the job, and no action downloads one without it, as the
     # one of lychee did.
     folder = ROOT if kind == "blueprint" else projects[kind]
@@ -19306,6 +19324,33 @@ def test_the_social_preview_shows_a_drawing_of_the_project(
     step = social_preview(project)
     assert step.text == "Social preview shows the project"
     assert step.done is False
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_nightly_look_of_every_repository_compares_its_social_preview(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    # GitHub serves the uploaded social preview from its host of uploads, which the
+    # nightly look of the bot-health bot reaches and waits for, besides GitHub's API;
+    # the job at the end of a run compares nothing and reaches GitHub alone.
+    project = projects[kind]
+    jobs = load_yaml(workflows(project)["bot-health.yml"])["jobs"]
+    hosts = ["api.github.com:443", "github.com:443"]
+    for job, reached in (("sweep", [*hosts, f"{PREVIEW_HOST}:443"]), ("run", hosts)):
+        block, wait = jobs[job]["steps"][:2]
+        assert block["with"]["allowed-endpoints"].split() == reached, job
+        assert wait["env"]["HOSTS"].split() == reached, job
+    assert "compare the social preview" in jobs["sweep"]["steps"][3]["name"]
+    # Its code comes with every copy, and a new repository, whose page shows the
+    # default panel of its kind and which holds no picture yet, asks for no upload.
+    assert (project / ".github/blueprint/social_preview.py").read_bytes() == (
+        ROOT / "blueprint/social_preview.py"
+    ).read_bytes()
+
+    def nothing(arguments: Sequence[str], body: str | None) -> Any:
+        raise AssertionError(f"unexpected request {arguments}")
+
+    assert preview_report(Api(nothing), "Dennis-Otto/demo", project, "main", None) == ""
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the

@@ -174,10 +174,11 @@ jobs:
           # would, not with the verify of sign-tag.sh, one of the scripts it checks.
           # gitsign through the API with the token of the job, which survives an outage
           # of GitHub's downloads without a token, five times, 10, 20, 40 and 80 seconds
-          # apart, as .github/download.sh does (decision 0132).
+          # apart, as .github/download.sh does (decision 0133), and a call that stalls
+          # for five minutes ends, since gh waits without a limit.
           gitsign="$RUNNER_TEMP/gitsign"
           for wait in 10 20 40 80 0; do
-            if gh release download "v$GITSIGN_VERSION" --repo sigstore/gitsign \
+            if timeout --kill-after=10 300 gh release download "v$GITSIGN_VERSION" --repo sigstore/gitsign \
               --pattern "gitsign_${GITSIGN_VERSION}_linux_amd64" --output "$gitsign" --clobber; then
               break
             fi

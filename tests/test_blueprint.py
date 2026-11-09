@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.parse
+import urllib.request
 from collections.abc import Callable, Sequence
 from email.message import Message
 from pathlib import Path
@@ -34,6 +35,7 @@ from blueprint.checklist import (
     renovate,
     reuse_compliant,
     social_preview,
+    social_preview_uploaded,
 )
 from blueprint.github import Api, GitHubError, Response
 from blueprint.settings import (
@@ -310,6 +312,8 @@ class FakeGitHub:
         # may answer 422; 0 when it doesn't.
         self.refuses_bypass = 0
         self.og_image = False
+        # Where GitHub serves the social preview: the upload, or a card of its own.
+        self.og_url = "https://opengraph.githubassets.com/1/Dennis-Otto/demo"
         # The kind of account of the owner: "User" or "Organization".
         self.account = "User"
         self.community: dict[str, Any] = {
@@ -345,9 +349,11 @@ class FakeGitHub:
         if arguments[0] == "repo":
             return subprocess.CompletedProcess(arguments, 0, f"{REPO}\n", "")
         if arguments[1] == "graphql":
-            answer = {
-                "data": {"repository": {"usesCustomOpenGraphImage": self.og_image}}
+            repository = {
+                "usesCustomOpenGraphImage": self.og_image,
+                "openGraphImageUrl": self.og_url,
             }
+            answer = {"data": {"repository": repository}}
             return subprocess.CompletedProcess(arguments, 0, json.dumps(answer), "")
         if "--paginate" in arguments:
             return self.all_pages(arguments)
@@ -3562,6 +3568,111 @@ def test_the_checklist_asks_for_a_social_preview_of_the_project(root: Path) -> N
     # A project that shows its preview without the page has nothing to replace.
     page.unlink()
     assert social_preview(root).done is True
+
+
+UPLOAD = "https://repository-images.githubusercontent.com/1/2"
+
+
+def uploaded_as(data: bytes | OSError) -> Callable[..., Any]:
+    """GitHub's host of uploads, which serves the uploaded social preview."""
+
+    def opener(url: str, timeout: float) -> Any:
+        assert url == UPLOAD
+        if isinstance(data, OSError):
+            raise data
+        return io.BytesIO(data)
+
+    return opener
+
+
+def test_without_the_picture_an_upload_of_the_social_preview_is_enough(
+    github: FakeGitHub, root: Path
+) -> None:
+    step = social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"any"))
+
+    assert step == Step(
+        "Social preview uploaded (bash scripts/social-preview.sh renders it)",
+        False,
+        f"https://github.com/{REPO}/settings",
+    )
+    github.og_image, github.og_url = True, UPLOAD
+    assert social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"x")).done
+
+
+def test_the_uploaded_social_preview_is_the_committed_picture(
+    github: FakeGitHub, root: Path
+) -> None:
+    (root / ".github/social-preview.png").write_bytes(b"the picture")
+    upload = (
+        "upload .github/social-preview.png under Settings → General → Social"
+        f" preview: https://github.com/{REPO}/settings"
+    )
+
+    # Nobody uploaded it yet: GitHub shows a card that it draws itself.
+    step = social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"x"))
+    assert step == Step(
+        "Social preview uploaded and current",
+        False,
+        f"GitHub shows a card of its own: {upload}",
+    )
+    # An upload of an older picture.
+    github.og_image, github.og_url = True, UPLOAD
+    step = social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"older"))
+    assert step == Step(
+        "Social preview uploaded and current",
+        False,
+        "The uploaded picture is not .github/social-preview.png of this checkout:"
+        f" {upload}",
+    )
+    # The upload of this picture, byte for byte.
+    step = social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"the picture"))
+    assert step == Step("Social preview uploaded and current", True)
+    # An upload that can't be read leaves the step open, with the reason.
+    step = social_preview_uploaded(
+        Api(github), REPO, root, uploaded_as(TimeoutError("timed out"))
+    )
+    assert step.done is None
+    assert step.how == (
+        f"Couldn't read the uploaded picture ({UPLOAD}: timed out). Compare it with"
+        f" .github/social-preview.png, or {upload}"
+    )
+
+
+def test_a_social_preview_larger_than_github_takes_asks_for_a_smaller_one(
+    github: FakeGitHub, root: Path
+) -> None:
+    # GitHub takes an upload of at most 1 MB: this picture can never be uploaded.
+    (root / ".github/social-preview.png").write_bytes(b"x" * (1024 * 1024 + 1))
+    github.og_image, github.og_url = True, UPLOAD
+
+    step = social_preview_uploaded(Api(github), REPO, root, uploaded_as(b"older"))
+
+    assert step == Step(
+        "Social preview uploaded and current",
+        False,
+        ".github/social-preview.png is larger than the 1 MB that GitHub takes for an"
+        " upload: render a smaller one, with fewer colors or a simpler screenshot,"
+        " with bash scripts/social-preview.sh, then upload"
+        " .github/social-preview.png under Settings → General → Social preview:"
+        f" https://github.com/{REPO}/settings",
+    )
+
+
+def test_the_checklist_names_a_social_preview_that_fell_behind(
+    github: FakeGitHub,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (root / ".github/social-preview.png").write_bytes(b"the picture")
+    github.og_image, github.og_url = True, UPLOAD
+    monkeypatch.setattr(urllib.request, "urlopen", uploaded_as(b"older"))
+
+    run(github, root, "checklist")
+
+    out = capsys.readouterr().out
+    assert "✘ Social preview uploaded and current" in out
+    assert "The uploaded picture is not .github/social-preview.png" in out
 
 
 @pytest.mark.parametrize(

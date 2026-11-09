@@ -215,7 +215,7 @@ jobs:
       # workflow checks the links to other sites every week. It runs in site/, away
       # from lychee.toml and .lycheeignore, which are the rules of those links.
       # .github/lychee.sh downloads lychee through the API, with the token of the job,
-      # once in the job (decision 0132).
+      # once in the job (decision 0133).
       - name: Check the links and anchors of the website
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5

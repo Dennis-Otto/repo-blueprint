@@ -7,9 +7,10 @@
 # gh downloads it through the API, with the token in GH_TOKEN: on 8 November 2026,
 # GitHub's downloads without a token, from the page of a release, timed out for hours
 # and failed the checks of every repository, while those through the API kept working
-# (decision 0132). After an error of the network or of GitHub, it tries again, five
-# times in all, 10, 20, 40 and 80 seconds apart; when the release or the asset
-# doesn't exist, or the token is refused, it stops at once.
+# (decision 0133). After an error of the network or of GitHub, or when a call stalls
+# for DOWNLOAD_TIMEOUT seconds (300 by default), it tries again, five times in all, 10,
+# 20, 40 and 80 seconds apart; when the release or the asset doesn't exist, or the
+# token is refused, it stops at once.
 # https://github.com/Dennis-Otto/repo-blueprint
 set -euo pipefail
 
@@ -37,12 +38,21 @@ lasting='release not found|no assets match|HTTP 40[14]|HTTP 422|GH_TOKEN'
 errors="$(mktemp)"
 trap 'rm -f "$errors"' EXIT
 
+# gh waits for an answer without a limit, and GitHub's outage of 8 November 2026
+# began as timeouts: a call that stalls ends, and is tried again like an error.
+limit="${DOWNLOAD_TIMEOUT:-300}"
+
 # Runs the command of gh, and again after an error, with its errors in the log.
 tried() {
-  local wait
+  local wait status
   for wait in 10 20 40 80 0; do
-    if "$@" 2>"$errors"; then
+    status=0
+    timeout --kill-after=10 "$limit" "$@" 2>"$errors" || status=$?
+    if ((status == 0)); then
       return 0
+    fi
+    if ((status == 124 || status == 137)); then
+      echo "GitHub didn't answer in $limit seconds." >>"$errors"
     fi
     cat "$errors" >&2
     if grep -qE "$lasting" "$errors"; then
