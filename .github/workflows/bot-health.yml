@@ -18,7 +18,8 @@ name: Bot health
 # only when it passes Lint: it gets no issue, and an open one starts Lint by hand, so
 # that a run that passes closes it. The same look compares the social preview that
 # GitHub shows with .github/social-preview.png, which only a person can upload, and
-# keeps one issue open, Upload the new social preview, until they are the same. Runs
+# keeps one issue open, Upload the new social preview, until they are the same, in
+# a public repository only, since GitHub shows no social preview of a private one. Runs
 # of pull requests start nothing here.
 # It checks out the default branch only, for blueprint.py, never the code of a pull
 # request; blueprint.py bot-health holds the logic.
