@@ -6242,6 +6242,142 @@ def test_no_download_of_a_release_on_github_goes_without_a_token(
     assert downloads > 0
 
 
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_weekly_sbom_takes_syft_through_the_api_as_the_release_does(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # anchore/sbom-action ran the installer of syft from raw.githubusercontent.com,
+    # which downloads syft from the page of its release without a token, as no step
+    # may since GitHub's outage of 8 November 2026 (decision 0133). The weekly SBOM
+    # takes the syft of the SBOMs of a release instead, through the API with the
+    # token of the job and checked by the same sha256, which Renovate moves with it.
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    workflows = folder / ".github/workflows"
+    for path in sorted(workflows.glob("*.yml")):
+        assert "anchore/sbom-action" not in path.read_text(encoding="utf-8"), path.name
+    # It leaves the allowed actions, as the action of lychee did.
+    settings = (folder / ".github/repository.toml").read_text(encoding="utf-8")
+    assert "anchore/sbom-action" not in settings
+    workflow = (workflows / "sbom.yml").read_text(encoding="utf-8")
+    job = job_with(workflow, "Download syft")
+    release = job_with(
+        (workflows / "build-release.yml").read_text(encoding="utf-8"),
+        "Download the tools of the build",
+    )
+    pins = ("SBOM_SYFT_VERSION", "SBOM_SYFT_SHA256")
+    assert {name: job["env"][name] for name in pins} == {
+        name: release["env"][name] for name in pins
+    }
+    # After the checkout, whose .github/download.sh it runs, and before syft. Only
+    # the download has the token; syft reads the files of the repository without it.
+    names = names_of(job)
+    checkout = next(
+        i for i, name in enumerate(names) if name.startswith("actions/checkout@")
+    )
+    assert (
+        checkout < names.index("Download syft") < names.index("Generate the SPDX SBOM")
+    )
+    assert [
+        name
+        for name, step in zip(names, job["steps"], strict=True)
+        if "GH_TOKEN" in (step.get("env") or {})
+    ] == ["Download syft"]
+    assert step_named(job, "Download syft")["env"] == {
+        "GH_TOKEN": "${{ github.token }}"
+    }
+    assert "github.token" not in values_of(step_named(job, "Generate the SPDX SBOM"))
+    assert "timeout-minutes" in step_named(job, "Download syft")
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_weekly_sbom_describes_the_repository_at_its_commit(
+    tmp_path: Path,
+) -> None:
+    workflow = (ROOT / ".github/workflows/sbom.yml").read_text(encoding="utf-8")
+    job = job_with(workflow, "Download syft")
+    version = job["env"]["SBOM_SYFT_VERSION"]
+    # The stand-in of .github/download.sh writes the archive of the release into the
+    # file that it names, with a stand-in of syft that writes the SBOM it's asked for.
+    syft = (
+        b"#!/usr/bin/env bash\n"
+        b'echo "syft $* ($SYFT_SOURCE_NAME $SYFT_SOURCE_VERSION'
+        b' $SYFT_CHECK_FOR_APP_UPDATE)" >> "$CALLS"\n'
+        b'for argument; do [[ "$argument" != spdx-json=* ]] ||'
+        b' echo "{}" > "${argument#spdx-json=}"; done\n'
+    )
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+        for name, content in (("README.md", b"syft\n"), ("syft", syft)):
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            member.mode = 0o755
+            tar.addfile(member, io.BytesIO(content))
+    (tmp_path / "syft.tar.gz").write_bytes(archive.getvalue())
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github/download.sh").write_text(
+        'echo "download.sh $*" >> "$CALLS"\n'
+        'mkdir -p "$(dirname "$4")"\n'
+        'cp syft.tar.gz "$4"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    sha256 = "0" * 64
+    # A folder of its own, without a colon, which GNU tar would take for a host.
+    variables = {"RUNNER_TEMP": "temp", "SBOM_SYFT_VERSION": version}
+    (tmp_path / "download").mkdir()
+
+    download, calls = run_workflow_step(
+        tmp_path / "download",
+        script_of(job, "Download syft"),
+        tmp_path,
+        {},
+        SBOM_SYFT_SHA256=sha256,
+        **variables,
+    )
+
+    assert download.returncode == 0, download.stdout + download.stderr
+    assert calls == [
+        f"download.sh anchore/syft v{version} syft_{version}_linux_amd64.tar.gz"
+        f" temp/syft.tar.gz {sha256}"
+    ]
+    # Only syft comes out of the archive.
+    assert sorted(path.name for path in (tmp_path / "temp/syft").iterdir()) == ["syft"]
+
+    step = step_named(job, "Generate the SPDX SBOM")
+    assert step["env"] == {
+        "SYFT_SOURCE_NAME": "${{ github.event.repository.name }}",
+        "SYFT_SOURCE_VERSION": "${{ github.sha }}",
+        "SYFT_CHECK_FOR_APP_UPDATE": "false",
+    }
+    (tmp_path / "describe").mkdir()
+    describe, calls = run_workflow_step(
+        tmp_path / "describe",
+        step["run"],
+        tmp_path,
+        {},
+        SYFT_SOURCE_NAME="demo",
+        SYFT_SOURCE_VERSION="abc123",
+        SYFT_CHECK_FOR_APP_UPDATE="false",
+        **variables,
+    )
+
+    assert describe.returncode == 0, describe.stdout + describe.stderr
+    # The folder of the repository, by its name and commit, as SPDX.
+    assert calls == [
+        "syft scan dir:. --quiet --output spdx-json=temp/demo.spdx.json"
+        " (demo abc123 false)"
+    ]
+    assert (tmp_path / "temp/demo.spdx.json").read_text(encoding="utf-8") == "{}\n"
+    # The artifact of the run is that file, and a run without it fails.
+    upload = step_named(job, "Keep the SBOM as an artifact of the run")
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"] == {
+        "name": "${{ github.event.repository.name }}.spdx.json",
+        "path": "${{ runner.temp }}/${{ github.event.repository.name }}.spdx.json",
+        "if-no-files-found": "error",
+    }
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize("cache", ["empty", "krankerl", "changed"])
 def test_the_ci_of_a_nextcloud_app_takes_krankerl_from_its_cache(
@@ -9402,16 +9538,16 @@ def test_renovate_finds_every_version_that_a_workflow_or_script_pins(
             assert tag in (None, "^v(?<version>.+)$", *tags), path.name
             pinned += 1
     # gitsign in sign-tag.sh and verify-release.yml, krankerl and Nextcloud in the
-    # release of a Nextcloud app and syft for its SBOMs, which every kind has, krankerl
-    # in the checks of a Nextcloud app too, Infection in the mutation tests, and lychee
-    # in the check of the links of every kind.
+    # release of a Nextcloud app and syft for its SBOMs and the weekly one, which every
+    # kind has, krankerl in the checks of a Nextcloud app too, Infection in the mutation
+    # tests, and lychee in the check of the links of every kind.
     assert pinned == {
-        "blueprint": 8,
-        "nextcloud-app": 8,
-        "home-assistant": 7,
-        "github-action": 7,
-        "python-package": 7,
-    }.get(kind, 6)
+        "blueprint": 9,
+        "nextcloud-app": 9,
+        "home-assistant": 8,
+        "github-action": 8,
+        "python-package": 8,
+    }.get(kind, 7)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
