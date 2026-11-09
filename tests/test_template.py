@@ -85,6 +85,7 @@ from blueprint.checklist import (
     CHROME_WEB_STORE_ITEM,
     CHROME_WEB_STORE_SIGN_IN,
     RELEASE_APP_PERMISSIONS,
+    answer_steps,
     social_preview,
 )
 from blueprint.coach import Catalog, missing, undeclared
@@ -7314,6 +7315,72 @@ def test_every_project_tells_coding_agents_its_rules(
     claude = (project / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
     assert "@AGENTS.md" in claude
     assert "@.github/agents.project.md" in claude
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_tells_coding_agents_to_leave_the_files_of_the_blueprint_to_it(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    # The rule names the list that the check lint reads, which holds this file and the
+    # workflows of the blueprint, so that an agent can look a file up before it
+    # changes it.
+    never = section_of(agents, "## Never")
+    rule = "a file of the blueprint here, one that `.github/blueprint/owned.txt` lists"
+    assert rule in never
+    owned = (project / ".github/blueprint/owned.txt").read_text(encoding="utf-8")
+    assert {"AGENTS.md", ".github/workflows/lint.yml"} <= set(owned.splitlines())
+    # A test of issue-assistant that named the jobs of the blueprint's screenshot bot
+    # failed two of its five updates before it left the workflows of owned.txt alone:
+    # the tests and checks of a project leave them to the tests of the blueprint, which
+    # hold the rules of every workflow, such as these two, in every kind.
+    files = section_of(
+        agents, "## The files of this project and those of the blueprint"
+    )
+    assert (
+        "- **The tests and the checks of this project leave the files of the blueprint"
+        " to the blueprint,** whose own tests hold its rules for them in every repository"
+    ) in files
+    assert "skips those that `.github/blueprint/owned.txt` lists" in files
+    for held in (
+        test_every_action_is_pinned_to_a_commit,
+        test_every_checkout_keeps_no_token_and_one_that_others_start_runs_main,
+    ):
+        (kinds,) = [
+            mark.args[1]
+            for mark in held.__dict__["pytestmark"]
+            if mark.name == "parametrize"
+        ]
+        assert set(KINDS) <= set(kinds), held.__name__
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_project_changes_an_answer_on_the_release_that_it_is_on(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # A bare copier update brings the latest release as well and asks every question
+    # again, and main takes no push: an answer changes as the checklist, app register
+    # and the FAQ change it, on the release that _commit names, with every other answer
+    # kept, on a branch and in a pull request.
+    steps = answer_steps(["copier", "update"], ["--data", "name=value"])
+    (command,) = [shlex.join(step) for step in steps if step[0] == "copier"]
+    assert command == "copier update --defaults --vcs-ref=:current: --data name=value"
+    faq = (ROOT / "docs/faq.md").read_text(encoding="utf-8")
+    assert "\n## How do I change an answer later?\n" in faq
+    link = (
+        "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/faq.md"
+        "#how-do-i-change-an-answer-later"
+    )
+    project = projects[kind]
+    answers = (project / ".copier-answers.yml").read_text(encoding="utf-8")
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    for text in (answers, agents):
+        assert f"`{command}`" in text
+        assert link in text
+        assert "copier update --data" not in text
+    # The lines of the comment leave the answers as they are.
+    assert load_yaml(answers)["project_type"] == kind
 
 
 def test_the_blueprint_tells_coding_agents_its_rules() -> None:
