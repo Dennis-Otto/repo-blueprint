@@ -7,6 +7,21 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.15.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.15.0...v1.15.1) (2026-11-09)
+
+
+### Bug fixes
+
+* **ci:** a job whose Harden-Runner can't start its block no longer runs without it ([#755](https://github.com/Dennis-Otto/repo-blueprint/issues/755)) ([0a6ec29](https://github.com/Dennis-Otto/repo-blueprint/commit/0a6ec299ade462c9d66ddc7cc1282eb0bf38366d))
+* **ci:** the tools that third-party actions download come with the job's token where the action takes one ([#763](https://github.com/Dennis-Otto/repo-blueprint/issues/763)) ([61273a8](https://github.com/Dennis-Otto/repo-blueprint/commit/61273a822448cd191958de9a79010e47587577a0))
+* **deps:** update dependency uv to v0.13.6 ([#740](https://github.com/Dennis-Otto/repo-blueprint/issues/740)) ([60db614](https://github.com/Dennis-Otto/repo-blueprint/commit/60db614811076a7c372c995fbc8ba40a069a050c))
+* **deps:** update renovatebot/github-action action to v46.3.12 ([#748](https://github.com/Dennis-Otto/repo-blueprint/issues/748)) ([45cce06](https://github.com/Dennis-Otto/repo-blueprint/commit/45cce066cc966b11b7953263e1d34c3fdbaaa57d))
+* **deps:** update the actions ([#741](https://github.com/Dennis-Otto/repo-blueprint/issues/741)) ([cf8f2eb](https://github.com/Dennis-Otto/repo-blueprint/commit/cf8f2ebe73fa7f4a5040f510ec47d3f72b1e4f56))
+* **deps:** update the images ([#742](https://github.com/Dennis-Otto/repo-blueprint/issues/742)) ([a0cf290](https://github.com/Dennis-Otto/repo-blueprint/commit/a0cf2909f59245e9a22f4c79d20df714a35d63b5))
+* **deps:** update the issue assistant to v1.10.4 ([#764](https://github.com/Dennis-Otto/repo-blueprint/issues/764)) ([6000fd4](https://github.com/Dennis-Otto/repo-blueprint/commit/6000fd4e61eec793e8415cf7717ab71308967f2d))
+* **links:** the link check leaves out only the folders it names, not every file whose path holds their name ([#752](https://github.com/Dennis-Otto/repo-blueprint/issues/752)) ([007163e](https://github.com/Dennis-Otto/repo-blueprint/commit/007163e27c5f56797574171a273a7b43eec5fb1b))
+* the nightly look at the social preview works for a private repository too ([#761](https://github.com/Dennis-Otto/repo-blueprint/issues/761)) ([50c807e](https://github.com/Dennis-Otto/repo-blueprint/commit/50c807e29f32de9aac49bd4aa30f7f47e0529211))
+
 ## [1.15.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.14.0...v1.15.0) (2026-11-09)
 
 ### Features
