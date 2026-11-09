@@ -1,11 +1,11 @@
 name: Docs pictures
 
 # The picture bot of the blueprint's own documentation. scripts/docs-pictures.sh
-# records a copy of the latest release with Copier and photographs the dashboard of
-# the website, so the bot runs after a release that changed what they show: the
-# questions or the output of Copier, the files and workflows of a new repository, the
-# image of the recording or the dashboard, as .github/docs-pictures/paths.txt lists
-# them, and on demand. It renders the pictures without secrets, keeps those whose
+# records a copy of the latest release with Copier, photographs the dashboard of
+# the website and draws the picture of a difference, so the bot runs after a release
+# that changed what they show: the questions or the output of Copier, the files and
+# workflows of a new repository, the image of the recording or the dashboard, the code
+# of keep and its Pillow, as .github/docs-pictures/paths.txt lists them, and on demand. It renders the pictures without secrets, keeps those whose
 # pixels stayed the same (blueprint.py screenshots keep), and keeps one pull request
 # from the branch bot/pictures with the others, as the release app, which merges
 # itself once every check passes; as the screenshot bot, it renders main anew when
