@@ -33,7 +33,10 @@ lint or the types of the code, its tests and their coverage, the package or the
 website. The summary of the check names the step that stopped it. When that step
 comes before the checks, such as the one that installs the tools or pulls an image,
 a download failed or hung until the step ran out of its time: that usually passes
-when the job runs again, which the flaky-test bot does once by itself."""
+when the job runs again, which the flaky-test bot does once by itself. A job that failed
+without a single step never ran: GitHub couldn't start it, as in an outage of GitHub,
+and no bot runs it again while GitHub fails; run it again once
+[githubstatus.com](https://www.githubstatus.com) shows GitHub working."""
 why = """These are the checks that run on your machine as well, so a change that passes
 them here passes them everywhere, and every commit of `main` stays ready for a
 release."""
