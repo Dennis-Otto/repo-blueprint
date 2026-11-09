@@ -55,7 +55,7 @@ jobs:
         timeout-minutes: 5
         with:
           # renovate: datasource=pypi depName=uv
-          version: "0.13.5"
+          version: "0.13.6"
       - name: Run the checks
         run: bash scripts/check.sh
       # The fix bot: the commands of autofix in .github/checks.toml fix what they
