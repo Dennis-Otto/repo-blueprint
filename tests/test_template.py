@@ -7340,7 +7340,7 @@ def test_every_project_tells_coding_agents_to_leave_the_files_of_the_blueprint_t
     )
     assert (
         "- **The tests and the checks of this project leave the files of the blueprint"
-        " to the blueprint,** whose own tests hold its rules for them in every repository"
+        " to the blueprint,** whose own tests hold its rules for them in every kind of project"
     ) in files
     assert "skips those that `.github/blueprint/owned.txt` lists" in files
     for held in (
