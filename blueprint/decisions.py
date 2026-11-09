@@ -37,7 +37,10 @@ TEMPLATE = "0000-template.md"
 RECORD = re.compile(r"(?P<number>\d{4})-(?P<title>[a-z0-9]+(?:-[a-z0-9]+)*)\.md")
 # A row of the index, which names the record by its number and links its file, such as
 # | [0001](0001-record-decisions.md) | Record the decisions ... | accepted |
-ROW = re.compile(r"^\|\s*\[(?P<number>[^\]]*)\]\((?P<file>[^)]*)\)\s*\|", re.MULTILINE)
+# A link may start with ./, which belongs to the link and not to the name of the file.
+ROW = re.compile(
+    r"^\|\s*\[(?P<number>[^\]]*)\]\((?:\./)?(?P<file>[^)]*)\)\s*\|", re.MULTILINE
+)
 # The line below the head of a table of Markdown, such as | --- | --- | --- |.
 SEPARATOR = re.compile(r"\|(?:\s*:?-+:?\s*\|)+\s*")
 # The title of a record, its first heading, and its status, a line of the list below it.

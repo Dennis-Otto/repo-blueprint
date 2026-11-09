@@ -209,6 +209,19 @@ def test_the_fix_gives_a_row_the_number_of_its_file() -> None:
     assert fixed(index, FOLDER, text_of) == index_of(row(A), row(B), row(C))
 
 
+def test_a_row_may_link_its_record_with_dot_slash() -> None:
+    index = index_of(*(row(name).replace("](", "](./") for name in (A, B, C)))
+    assert findings(FOLDER, index) == []
+
+
+def test_the_fix_gives_a_row_with_dot_slash_the_number_of_its_file_in_place() -> None:
+    def dotted(file: str, number: str | None = None) -> str:
+        return row(file, number).replace("](", "](./")
+
+    index = index_of(dotted(A), dotted(B, "0003"), dotted(C))
+    assert fixed(index, FOLDER, text_of) == index_of(dotted(A), dotted(B), dotted(C))
+
+
 def test_the_fix_drops_a_second_copy_of_a_row() -> None:
     index = index_of(row(A), row(B), row(B), row(C))
     assert fixed(index, FOLDER, text_of) == index_of(row(A), row(B), row(C))
@@ -489,6 +502,24 @@ def test_the_command_leaves_a_clean_index_alone_on_a_fix(
 
     assert (root / "docs/decisions" / INDEX).read_text(encoding="utf-8") == index
     assert "fixed" not in capsys.readouterr().out
+
+
+def test_the_command_names_no_fix_that_changes_nothing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The row of a file that is gone, with no record of its title: only you can fix it.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    index = index_of(row(A), row("0002-gone.md"))
+    root = repository(tmp_path / "repository", folder_of(index, A))
+
+    assert main(["decisions", "--fix"], root=root) == 1
+
+    assert (root / "docs/decisions" / INDEX).read_text(encoding="utf-8") == index
+    out = capsys.readouterr().out
+    assert "fixed" not in out
+    assert "the index names 0002-gone.md, which is no record of the folder" in out
 
 
 def test_the_command_names_what_the_fix_leaves(

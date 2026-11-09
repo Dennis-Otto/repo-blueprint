@@ -903,13 +903,16 @@ def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
     path = root / folder / decisions.INDEX
     index = path.read_text(encoding="utf-8") if decisions.INDEX in names else None
     if arguments.fix and index is not None and decisions.index_findings(names, index):
-        index = decisions.fixed(
+        new = decisions.fixed(
             index,
             names,
             lambda name: (root / folder / name).read_text(encoding="utf-8"),
         )
-        path.write_text(index, encoding="utf-8", newline="\n")
-        print(f"{folder}/{decisions.INDEX}: the rows of the index are fixed")
+        # A fix that changes nothing, such as of a row whose file is gone, says nothing.
+        if new != index:
+            path.write_text(new, encoding="utf-8", newline="\n")
+            print(f"{folder}/{decisions.INDEX}: the rows of the index are fixed")
+            index = new
     records, strays = decisions.numbered(names)
     numbers = strays + decisions.number_findings(records)
     rows = [] if index is None else decisions.index_findings(names, index)
