@@ -350,6 +350,7 @@ class FakeGitHub:
             return subprocess.CompletedProcess(arguments, 0, f"{REPO}\n", "")
         if arguments[1] == "graphql":
             repository = {
+                "isPrivate": bool(self.repo.get("private")),
                 "usesCustomOpenGraphImage": self.og_image,
                 "openGraphImageUrl": self.og_url,
             }
@@ -3635,6 +3636,37 @@ def test_the_uploaded_social_preview_is_the_committed_picture(
     assert step.how == (
         f"Couldn't read the uploaded picture ({UPLOAD}: timed out). Compare it with"
         f" .github/social-preview.png, or {upload}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("picture", "title"),
+    [
+        (True, "Social preview uploaded and current"),
+        (False, "Social preview uploaded (bash scripts/social-preview.sh renders it)"),
+    ],
+)
+def test_a_private_repository_waits_with_the_upload_of_the_social_preview(
+    github: FakeGitHub, root: Path, picture: bool, title: str
+) -> None:
+    # GitHub shows the social preview only for a public repository: an upload, or one
+    # that fell behind, makes no difference until the repository is public.
+    if picture:
+        (root / ".github/social-preview.png").write_bytes(b"the picture")
+    github.repo["private"] = True
+    github.og_image, github.og_url = True, UPLOAD
+
+    step = social_preview_uploaded(
+        Api(github), REPO, root, uploaded_as(TimeoutError("timed out"))
+    )
+
+    assert step == Step(
+        title,
+        None,
+        "The repository is private, and GitHub shows the social preview only for a"
+        " public repository: once it is public, upload .github/social-preview.png"
+        " under Settings → General → Social preview:"
+        f" https://github.com/{REPO}/settings",
     )
 
 

@@ -147,6 +147,7 @@ class FakeGitHub:
         self.rerun_by_another: dict[str, Any] | None = None
         # The social preview, as GraphQL names it, and the commits of its picture.
         self.preview: dict[str, Any] = {
+            "isPrivate": False,
             "usesCustomOpenGraphImage": False,
             "openGraphImageUrl": "https://opengraph.githubassets.com/1/" + REPO,
         }
@@ -1981,7 +1982,7 @@ def with_a_picture(
 
 
 def uploaded(github: FakeGitHub) -> None:
-    github.preview = {"usesCustomOpenGraphImage": True, "openGraphImageUrl": UPLOAD}
+    github.preview.update(usesCustomOpenGraphImage=True, openGraphImageUrl=UPLOAD)
 
 
 def serving(data: bytes | OSError) -> Callable[..., Any]:
@@ -2148,6 +2149,57 @@ def test_an_issue_without_a_picture_to_upload_closes(
     # Without the picture, the look says nothing of it.
     summary, _ = sweep(api_of(github), REPO, tmp_path / "elsewhere", NOW)
     assert "Social preview" not in summary
+
+
+@pytest.mark.parametrize("upload", [True, False])
+def test_a_private_repository_waits_for_no_social_preview(
+    github: FakeGitHub, tmp_path: Path, upload: bool
+) -> None:
+    # GitHub shows the social preview only for a public repository and may serve the
+    # upload of a private one to nobody without a token: the look downloads nothing,
+    # passes, and opens no issue that asks for an upload which nobody would see.
+    root = with_a_picture(tmp_path)
+    if upload:
+        uploaded(github)
+    github.preview["isPrivate"] = True
+
+    summary, healthy = sweep(
+        api_of(github), REPO, root, NOW, serving(TimeoutError("timed out"))
+    )
+
+    assert healthy
+    assert preview_lines(summary) == [
+        *PREVIEW_HEADING,
+        "The repository is private, and GitHub shows the social preview only for a "
+        "public repository: the look compares nothing until it is public.",
+    ]
+    assert github.issues == {}
+
+
+def test_the_issue_of_a_repository_that_turned_private_closes(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    root = with_a_picture(tmp_path)
+    sweep(api_of(github), REPO, root, NOW)
+    assert github.issues[1]["state"] == "open"
+    github.preview["isPrivate"] = True
+
+    summary, healthy = sweep(api_of(github), REPO, root, NOW)
+
+    assert healthy
+    assert preview_lines(summary)[-1] == "The repository is private: closed #1."
+    assert github.issues[1]["state"] == "closed"
+    assert github.issues[1]["state_reason"] == "not_planned"
+    assert github.comments[1] == [
+        "The repository is private, and GitHub shows the social preview only for a "
+        "public repository: the nightly look asks for the upload again once it is "
+        "public."
+    ]
+
+    # Public again, the look asks for the upload once more.
+    github.preview["isPrivate"] = False
+    summary, _ = sweep(api_of(github), REPO, root, NOW)
+    assert preview_lines(summary)[-1].endswith(": opened #2.")
 
 
 @pytest.mark.parametrize(
