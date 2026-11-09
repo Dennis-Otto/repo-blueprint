@@ -1,6 +1,6 @@
 # Jobs that block wait for their hosts, and try again when they hang
 
-- Status: accepted, amended by [0123](0123-harden-runner-v2-22-4-and-a-job-with-sudo-takes-githubs-dns-experiment-away.md), with which every workflow takes Harden-Runner v2.22.4 and a job that blocks and keeps sudo takes GitHub's DNS experiment away itself, and by [0124](0124-the-wait-asks-each-host-on-its-own-port-and-a-project-limits-its-render.md), with which the wait asks each host on its own port
+- Status: accepted, amended by [0123](0123-harden-runner-v2-22-4-and-a-job-with-sudo-takes-githubs-dns-experiment-away.md), with which every workflow takes Harden-Runner v2.22.4 and a job that blocks and keeps sudo takes GitHub's DNS experiment away itself, and by [0124](0124-the-wait-asks-each-host-on-its-own-port-and-a-project-limits-its-render.md), with which the wait asks each host on its own port, and by [0134](0134-a-job-stops-when-harden-runner-doesnt-block.md), with which a job that blocks stops when Harden-Runner has no agent that blocks
 - Date: 2026-10-31
 
 ## Context
