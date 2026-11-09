@@ -6271,10 +6271,12 @@ def test_the_weekly_sbom_takes_syft_through_the_api_as_the_release_does(
     # After the checkout, whose .github/download.sh it runs, and before syft. Only
     # the download has the token; syft reads the files of the repository without it.
     names = names_of(job)
-    assert names.index("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1") < (
-        names.index("Download syft")
+    checkout = next(
+        i for i, name in enumerate(names) if name.startswith("actions/checkout@")
     )
-    assert names.index("Download syft") < names.index("Generate the SPDX SBOM")
+    assert (
+        checkout < names.index("Download syft") < names.index("Generate the SPDX SBOM")
+    )
     assert [
         name
         for name, step in zip(names, job["steps"], strict=True)
