@@ -11,14 +11,15 @@ files, before it reaches main."""
 from __future__ import annotations
 
 import re
+import subprocess
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from shared import ROOT, git_environment
 
-ROOT = Path(__file__).parents[1]
 # The records of the blueprint, and those that the template gives a new repository.
 FOLDERS = ["docs/decisions", "template/docs/decisions"]
 INDEX = "README.md"
@@ -94,11 +95,13 @@ def index_findings(names: Iterable[str], index: str) -> list[str]:
         for file in records[number]
         if file not in listed
     ]
+    # By the numbers alone: two records of one number are a clash, which the numbers
+    # name, not a row out of order.
     order = [file for _, file in rows]
     found += [
         f"the index lists {later} after {earlier}"
         for earlier, later in pairwise(order)
-        if later < earlier
+        if later[:4] < earlier[:4]
     ]
     return found
 
@@ -111,10 +114,24 @@ def findings(names: Iterable[str], index: str) -> list[str]:
     return found + number_findings(records) + index_findings(names, index)
 
 
+def names_of(folder: str) -> list[str]:
+    """The names of the files of a folder that Git tracks or would track, without those
+    that it ignores, such as the backup of an editor, as scripts/check.sh lists them."""
+    listed = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", folder],
+        cwd=ROOT,
+        env=git_environment(ROOT),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return sorted({Path(line).name for line in listed.splitlines()})
+
+
 @pytest.mark.parametrize("folder", FOLDERS)
 def test_every_record_has_a_number_of_its_own_and_one_row(folder: str) -> None:
     path = ROOT / folder
-    names = [entry.name for entry in path.iterdir()]
+    names = names_of(folder)
     index = (path / INDEX).read_text(encoding="utf-8")
     found = findings(names, index)
     assert found == [], "\n".join([HOW_TO_FIX.format(folder=folder), *found])
@@ -123,7 +140,7 @@ def test_every_record_has_a_number_of_its_own_and_one_row(folder: str) -> None:
 def test_the_folders_hold_records() -> None:
     # A test that finds no record passes on nothing.
     for folder in FOLDERS:
-        records, found = numbered(entry.name for entry in (ROOT / folder).iterdir())
+        records, found = numbered(names_of(folder))
         assert found == []
         assert 1 in records, folder
 
@@ -152,7 +169,8 @@ def test_a_folder_in_order_has_no_findings() -> None:
 def test_two_records_of_one_number_fail_with_their_files() -> None:
     # Two pull requests each took 0003, and main merged into the second one.
     clash = "0003-another.md"
-    index = index_of(row(A), row(B), row(clash), row(C))
+    # Its row came last, after the one of the record of main.
+    index = index_of(row(A), row(B), row(C), row(clash))
     assert findings([*FOLDER, clash], index) == [
         "0003 is the number of 2 records: 0003-another.md, 0003-c.md"
     ]
