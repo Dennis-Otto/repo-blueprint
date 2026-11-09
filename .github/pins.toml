@@ -12,8 +12,8 @@ sha256 = "2bc625472a08fea3bb6a57982c7d8b4978d1032251d305ceef3bf2ded0ca4483"
 
 [download."infection/infection"]
 url = "https://github.com/infection/infection/releases/download/{version}/infection.phar"
-version = "0.35.8"
-sha256 = "b2049ae1bff43d9dc82831c2833005005eb62d5180cd518892af93fc8e23ddc5"
+version = "0.35.9"
+sha256 = "c9b332af194380b2043eb6e309b308653f221073f41825b54e862fbef606a094"
 
 [download."ChristophWurst/krankerl"]
 url = "https://github.com/ChristophWurst/krankerl/releases/download/v{version}/krankerl_{version}_amd64.deb"

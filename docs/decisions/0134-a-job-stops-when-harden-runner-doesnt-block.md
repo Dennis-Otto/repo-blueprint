@@ -1,6 +1,6 @@
 # A job stops when Harden-Runner doesn't block
 
-- Status: accepted, amends [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md) and follows up [0133](0133-the-downloads-of-the-workflows-go-through-the-api.md)
+- Status: accepted, amends [0088](0088-jobs-that-block-wait-for-their-hosts-and-try-again-when-they-hang.md) and follows up [0133](0133-the-downloads-of-the-workflows-go-through-the-api.md); followed up by [0136](0136-an-outage-of-github-starts-no-bot-failure.md), with which the bots run no run again that GitHub couldn't start
 - Date: 2026-11-09
 
 ## Context
