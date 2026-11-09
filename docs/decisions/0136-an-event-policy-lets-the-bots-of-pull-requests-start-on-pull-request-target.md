@@ -37,9 +37,26 @@ Option 4, after the mix that the maintainer chose on 9 November 2026: a workflow
 - **Private repositories.** GitHub offers no policies to a private repository on GitHub Free and blocks nothing there: the run names it as a notice, which fails nothing.
 - **Permission.** GitHub names no permission of a GitHub App for the policies; the settings bot names *Administration*, with which it writes the rest of the settings of Actions, when GitHub refuses to read or write one. A refused read fails the run as a difference of the policy alone, and the other parts of the settings are applied all the same.
 
+## What was proven
+
+GitHub's documentation leaves open whether the condition takes the paths of the workflows as `blueprint.py` writes them, whether a targeted workflow keeps its other events, whether the API takes the version `2022-11-28` that `blueprint.py` sends, and in which form it answers a policy. If any of it were wrong, the policy could block every workflow of a repository, or every run of the settings bot could fail. So `Dennis-Otto/workflow-registration-test-a`, a public repository of the blueprint's owner made for such tests and archived again after it, proved the policy on 9 November 2026, from 21:30 to 22:00 UTC, before it reached any real repository. It had four workflows:
+
+- `a.yml`, on `pull_request_target`, the push to `main` and `workflow_dispatch`, listed;
+- `b.yml`, on `pull_request`, not listed;
+- `c.yml`, on `pull_request_target`, which calls the reusable workflow of the issue lifecycle of the issue assistant, as `issue-lifecycle.yml` does, listed;
+- `d.yml`, on `pull_request_target`, not listed.
+
+What the repository showed:
+
+- **The API takes the version of `blueprint.py`.** With `2022-11-28`, a `POST` of exactly the body that `event_policy()` makes, which includes `a.yml` and `c.yml` and allows `pull_request_target`, `push` and `workflow_dispatch`, answered `201`, a `PUT` `200`, and a `DELETE` `204`.
+- **The settings read what GitHub answers.** The list of the repository's own policies names each by its id and name alone, and the policy by its id gives back `conditions.workflow_path` with `include` and `exclude`, and `rules` with `type` and `parameters.allowed_events`, as they were sent: `policy_differences()` reads them, and a second check finds no difference. The fake of GitHub in `tests/test_blueprint.py` answers in the same form.
+- **Every workflow kept its events.** With the policy in place, `a.yml` started on each of its three events. `b.yml` started on `pull_request`: `workflow_path` limits the allowlist to the targeted workflows, and the others keep all of their events. `c.yml` started, and its job that calls the issue assistant's workflow was skipped by its own condition, not blocked by the policy. `d.yml` started as well, because outside a brownout GitHub's default policy only evaluates: until 2 December 2026, the block of a workflow that the list lacks shows only in the policy insights of the repository's settings.
+
+The proof used the token of the owner. Whether the settings app needs more than *Administration* for the policies shows the first run of its settings bot after the release, which names the part and the permission if it does.
+
 ## Consequences
 
-Once the release with this change has reached a repository and its settings bot has run, the six workflows keep starting after 2 December 2026, and no other workflow may start on the event. For a pull request of a fork nothing changes: the title check, its labels and the welcome come at once, the other checks after the approval of a maintainer, and the fix bot after the checks suggests its fixes as before. The brownout of 16 November 2026 shows whether GitHub reads the policy as its documentation describes, before the block stays.
+Once the release with this change has reached a repository and its settings bot has run, the six workflows keep starting after 2 December 2026, and no other workflow may start on the event. For a pull request of a fork nothing changes: the title check, its labels and the welcome come at once, the other checks after the approval of a maintainer, and the fix bot after the checks suggests its fixes as before. The proof showed the policy while GitHub's default policy only evaluated; the brownout of 16 November 2026, from 16:00 to 18:00 UTC, shows it while the block holds, in every repository that the release has reached by then.
 
 A repository whose settings bot can't write the policy fails its run of the settings, with the part and the permission; its owner runs `python3 .github/blueprint.py settings apply`. The way back is an empty list, which deletes the policy, after which GitHub blocks the event as its default does.
 

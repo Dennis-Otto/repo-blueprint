@@ -669,13 +669,15 @@ class FakeGitHub:
 
     def policy(self, method: str, body: Any, number: str | None) -> tuple[int, Any]:
         """The Actions policies, which GitHub offers a private repository only on a
-        paid plan. A policy that GitHub answers has the fields of its own as well."""
+        paid plan. The list names each policy by its id and name alone, and a policy
+        that GitHub answers by its id has the fields of its own as well, as a public
+        repository showed on 9 November 2026 (decision 0136)."""
         if self.repo.get("private"):
             return 403, {"message": POLICIES_REFUSAL}
         if method == "GET" and number is None:
             parents = "has_parents=false" not in self.calls[-1][1]
             own = [
-                {"id": key, **value, "source_type": "Repository"}
+                {"id": key, "name": value["name"]}
                 for key, value in self.policies.items()
             ]
             listed = own + (self.parent_policies if parents else [])
