@@ -5297,6 +5297,85 @@ def test_the_link_check_checks_the_anchors_that_it_can_see(
         assert not any(pattern.search(url) for pattern in excluded), url
 
 
+def lychee_skips(project: Path) -> Callable[[str], bool]:
+    """exclude_path of lychee.toml, as lychee 0.24 applies it: it leaves out a
+    document when one of the regular expressions matches anywhere in its path, as the
+    arguments of lychee name it, such as ./docs/guide.md for the pattern ./**/*.md."""
+    config = tomllib.loads((project / "lychee.toml").read_text(encoding="utf-8"))
+    rules = [re.compile(rule) for rule in config["exclude_path"]]
+    return lambda path: any(rule.search(path) for rule in rules)
+
+
+def test_the_link_check_leaves_out_only_the_folders_and_files_that_it_names(
+    projects: dict[str, Path],
+) -> None:
+    read = (
+        # A document whose name holds the name of a folder that the check leaves
+        # out: a bare word of exclude_path left out every one of them (#749).
+        "docs/decisions/0019-the-public-template.md",
+        "docs/decisions/0000-template.md",
+        ".github/pull_request_template.md",
+        "templates/SUPPORT-notice.md",
+        "docs/architecture/templates.md",
+        "docs/decisions/0026-build-the-website-once.md",
+        "docs/decisions/0004-prompts-without-a-vendor.md",
+        "docs/distribution.md",
+        "docs/decisions/0042-a-venv-for-each-python.md",
+        "docs/keep-a-CHANGELOG.md",
+        "docs/CHANGELOG.md.txt",
+        # Only the blueprint's own template/, at the root of the repository.
+        "docs/template/guide.md",
+        "README.md",
+    )
+    left_out = (
+        "CHANGELOG.md",
+        "packages/app/CHANGELOG.md",
+        "template/CLAUDE.md",
+        "template/docs/decisions/0000-template.md",
+        "LICENSES/MIT.md",
+        "node_modules/package/README.md",
+        "web/node_modules/package/README.md",
+        "vendor/package/README.md",
+        ".venv/lib/README.md",
+        "build/guide.md",
+        "docs/build/guide.md",
+        "dist/README.md",
+    )
+    # The rules of the blueprint and of every kind, for each document as the pattern
+    # ./**/*.md or the list of a pull request names it, and as one without ./ would.
+    for project in (ROOT, *projects.values()):
+        skips = lychee_skips(project)
+        for path in read:
+            assert not skips(path), (project, path)
+            assert not skips(f"./{path}"), (project, path)
+        for path in left_out:
+            assert skips(path), (project, path)
+            assert skips(f"./{path}"), (project, path)
+
+
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
+def test_the_link_check_reads_every_document_but_the_changelog_and_the_template(
+    projects: dict[str, Path],
+) -> None:
+    # Every document of the blueprint and of a new repository of every kind, such as
+    # docs/decisions/0000-template.md and the decisions with build in the name (#749).
+    for project in (ROOT, *projects.values()):
+        skips = lychee_skips(project)
+        documents = [
+            name
+            for name in files_of(project)
+            if name.endswith(".md") or re.fullmatch(r"docs/.+\.html", name)
+        ]
+        assert "docs/decisions/0000-template.md" in documents, project
+        assert {name for name in documents if skips(f"./{name}")} == {
+            name
+            for name in documents
+            if name == "CHANGELOG.md" or name.startswith("template/")
+        }, project
+
+
 BLUEPRINT_ANCHOR = re.compile(
     r"https://github\.com/Dennis-Otto/repo-blueprint"
     r"(?:/blob/main/(?P<path>[\w./-]+\.md))?#(?P<anchor>[\w-]+)"
