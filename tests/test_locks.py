@@ -463,8 +463,15 @@ class FakeUv:
             for part in command
             if part.startswith("--constraint=")
         ]
+        # uv names the file of constraints among the sources of a pin, by its path.
+        named = [
+            Path(part.removeprefix("--constraint=")).as_posix()
+            for part in command
+            if part.startswith("--constraint=")
+        ]
         if self.returncode == 0:
-            output.write_text(self.body, encoding="utf-8", newline="\n")
+            body = self.body.replace("{constraints}", named[0] if named else "")
+            output.write_text(body, encoding="utf-8", newline="\n")
         return subprocess.CompletedProcess(command, self.returncode, "", self.said)
 
 
@@ -1371,6 +1378,94 @@ def test_an_answer_of_uv_without_pins_fails_the_refresh(
         "uv answered with a line that is no pin of a package:\n"
         "--index-url https://example.org/simple\nalpha==1.0"
     )
+
+
+def test_the_refresh_leaves_its_file_of_constraints_out_of_the_sources() -> None:
+    source = "-c /tmp/locks-x1y2/constraints.txt"
+    other = "-c C:\\Temp\\locks-x1y2\\constraints.txt"
+    body = (
+        f"alpha==1.2\n    # via\n    #   {source}\n    #   -r requirements.in\n"
+        f"beta==2.0\n    # via\n    #   {other}\n    #   gamma\n    #   delta\n"
+        "gamma==3.1\n    # via\n    #   delta\n    #   -r requirements.in\n"
+        f"delta==4.0\n    # via\n    #   {source}\n"
+        f"epsilon==5.0  # via gamma, {source}, delta\n"
+        f"zeta==6.0  # via {source}\n"
+        f"    # via {source}\n"
+        "eta==7.0  # via -c constraints.txt\n"
+        f"theta==8.0\n    # via {source}, -r requirements.in"
+    )
+
+    assert locks.without_source(body, "locks-x1y2") == (
+        "alpha==1.2\n    # via -r requirements.in\n"
+        "beta==2.0\n    # via\n    #   gamma\n    #   delta\n"
+        "gamma==3.1\n    # via\n    #   delta\n    #   -r requirements.in\n"
+        "delta==4.0\n"
+        "epsilon==5.0  # via gamma, delta\n"
+        "zeta==6.0\n"
+        # A file of constraints of the project itself stays among the sources.
+        "eta==7.0  # via -c constraints.txt\n"
+        "theta==8.0\n    # via -r requirements.in"
+    )
+
+
+@needs_git
+def test_each_run_of_the_refresh_on_one_day_writes_the_same_lock_file(
+    tmp_path: Path, fake_uv: FakeUv
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\n",
+                "requirements.txt": lock(REQUIREMENTS_HEADER, "alpha==1.0"),
+            },
+        )
+    )
+    refreshed(root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==1.5"))
+    # uv names the file of constraints, in a new temporary folder each run, among
+    # the sources of alpha, which the refresh bounds by the version of main.
+    fake_uv.answers(
+        "alpha==1.2 \\\n"
+        f"    --hash=sha256:{'0' * 64}\n"
+        "    # via\n"
+        "    #   -c {constraints}\n"
+        "    #   -r requirements.in\n"
+    )
+
+    first = locks.refresh(root, "requirements.txt", "uv", NOW)
+    second = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    assert fake_uv.commands[0] != fake_uv.commands[1]
+    assert first.content == second.content
+    assert first.content.decode("utf-8") == lock(REQUIREMENTS_HEADER, "alpha==1.2")
+
+
+@needs_git
+def test_renovate_takes_a_refresh_that_the_week_took_back_to_main(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
+) -> None:
+    root = moved_by_the_refresh(tmp_path)
+    # No version of alpha newer than that of main is a week old: the compile gives
+    # main's lock file again, byte for byte.
+    fake_uv.answers(lock("", "alpha==1.0"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert "without alpha==1.5" in capsys.readouterr().out
+    content = lock(REQUIREMENTS_HEADER, "alpha==1.0")
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == content
+    # Renovate reads again only what git names as changed after its command: git
+    # still names the file, whose index holds Renovate's compile, so Renovate
+    # commits what the command wrote, not its own newest versions.
+    assert GIT
+    status = subprocess.run(
+        [GIT, "status", "--porcelain", "--", "requirements.txt"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == "MM requirements.txt\n"
 
 
 def moved_by_the_refresh(tmp_path: Path) -> Path:

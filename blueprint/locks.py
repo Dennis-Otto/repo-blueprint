@@ -343,7 +343,50 @@ def compile_onto(
             check=False,
         )
         body = copy.read_bytes().decode("utf-8")
-    return result, body
+    return result, without_source(body, Path(folder).name) if constraints else body
+
+
+def without_source(body: str, folder: str) -> str:
+    """The lock file body without the file of constraints in the temporary folder of
+    that name among the sources that uv names after `# via`: the folder differs in
+    every run and means nothing in the repository. A note that keeps one source of
+    several takes uv's form of one line again, `# via -r requirements.in`."""
+    source = re.compile(rf"-c \S*{re.escape(folder)}[/\\]constraints\.txt")
+    lines = body.splitlines(keepends=True)
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        via = re.fullmatch(r"(\s*)# via\n", line)
+        if via:
+            # uv's note of several sources, one below the other.
+            items = []
+            while index < len(lines) and lines[index].startswith(f"{via[1]}#   "):
+                items.append(lines[index])
+                index += 1
+            left = [item for item in items if not source.search(item)]
+            if len(left) == len(items):
+                kept += [line, *items]
+            elif len(left) == 1:
+                kept.append(f"{via[1]}# via {left[0].strip().removeprefix('#   ')}\n")
+            elif left:
+                kept += [line, *left]
+            continue
+        note = re.search(r"(\s*)# via (.*)$", line)
+        if note and source.search(note[2]):
+            # uv's note in one line, also with --annotation-style=line.
+            sources = [
+                part for part in note[2].split(", ") if not source.fullmatch(part)
+            ]
+            end = "\n" if line.endswith("\n") else ""
+            line = line[: note.start()] + (
+                f"{note[1]}# via {', '.join(sources)}{end}" if sources else end
+            )
+            if not line.strip():
+                continue
+        kept.append(line)
+    return "".join(kept)
 
 
 def compare(root: Path, name: str, uv: str) -> Compared:
@@ -484,3 +527,14 @@ def refresh(root: Path, name: str, uv: str, now: datetime) -> Compared:
         tuple(sorted(pins.pinned - found.pinned)),
         (header_of(content) + body).encode("utf-8"),
     )
+
+
+def write_refresh(root: Path, found: Compared) -> None:
+    """Writes the lock file that the refresh compiled again into Renovate's checkout.
+    Renovate reads after its command only the files that git names as changed, and
+    keeps its own compile of every other one: when the week takes each pin back to
+    that of HEAD, the file equals HEAD, and git would name it no more. Renovate's
+    compile goes into the index first, so that git names the file in either case and
+    Renovate takes what the command wrote."""
+    git(root, "add", "--", found.name)
+    (root / found.name).write_bytes(found.content)

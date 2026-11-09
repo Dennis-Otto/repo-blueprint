@@ -1179,7 +1179,7 @@ def locks_refresh_command(root: Path) -> int:
             print(f"{name}: uv can't compile it from versions a week old:")
             print(found.failure)
         elif found.differences:
-            (root / name).write_bytes(found.content)
+            locks.write_refresh(root, found)
             print(
                 f"{name}: compiled again from versions at least a week old, without "
                 f"{', '.join(found.differences)}."
@@ -1208,10 +1208,11 @@ def locks_age_command(base: str, root: Path) -> int:
             "at least a week old, as every other update waits a week, so this one "
             "waits: run the check again once each version is a week old, or let "
             "Renovate build the refresh anew in its next weekly window. A lock file "
-            "that the check can't date needs a rule in .github/renovate.json5 that "
-            'gives the refresh of its package manager additionalBranchPrefix "review-" '
-            "and automerge false, so that it waits for the maintainer on a branch of "
-            "its own."
+            "that the check can't date, such as a yarn.lock, needs a rule in "
+            ".github/renovate.json5 with matchFileNames for its name and "
+            'matchUpdateTypes ["lockFileMaintenance"] that gives its refresh '
+            'additionalBranchPrefix "review-" and automerge false, so that it waits '
+            "for the maintainer on a branch of its own."
         )
         return 1
     print(

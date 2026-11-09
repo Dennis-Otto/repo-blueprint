@@ -40,12 +40,14 @@ PAUSE = 5
 
 @dataclass(frozen=True, order=True)
 class Added:
-    """A version that the refresh adds to a lock file, by its package manager."""
+    """A version that the refresh adds to a lock file, by its package manager; or,
+    replaced, a version of base that the refresh takes out while the package stays."""
 
     file: str
     manager: str
     name: str
     version: str
+    replaced: bool = False
 
     def __str__(self) -> str:
         return f"{self.file}: {self.name} {self.version}"
@@ -111,9 +113,10 @@ READERS: dict[str, Callable[[str | None], set[tuple[str, str]] | None]] = {
 
 
 def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
-    """The versions that HEAD adds to the lock files of base, and the problems of the
-    files whose versions the check can't read: each file that the refresh changes is a
-    lock file of pip-compile or of npm, or the check can't date what it brings."""
+    """The versions that HEAD adds to the lock files of base, those of base that it
+    replaces with another version of the same package, and the problems of the files
+    whose versions the check can't read: each file that the refresh changes is a lock
+    file of pip-compile or of npm, or the check can't date what it brings."""
     changed = sorted(
         filter(None, git(root, "diff", "--name-only", "-z", base, "HEAD").split("\0"))
     )
@@ -139,6 +142,15 @@ def added(root: Path, base: str) -> tuple[list[Added], list[str]]:
         versions += [
             Added(name, manager, package, version)
             for package, version in sorted(new - old)
+        ]
+        # npm's refresh resolves each range anew from the versions a week old, and
+        # takes back a young version that main got within the range, such as the fix
+        # of a vulnerability: the refresh holds until that version is a week old.
+        staying = {package for package, _ in new}
+        versions += [
+            Added(name, manager, package, version, replaced=True)
+            for package, version in sorted(old - new)
+            if package in staying and version
         ]
     return versions, problems
 
@@ -224,12 +236,17 @@ def young(
             date = released(version, opener)
         except Undated as error:
             return f"{version}: the check can't learn its release: {error}."
-        if now - date < AGE:
+        if now - date >= AGE:
+            return ""
+        when = f"{date.astimezone(UTC):%Y-%m-%d %H:%M} UTC"
+        if version.replaced:
             return (
-                f"{version}: released {date.astimezone(UTC):%Y-%m-%d %H:%M} UTC, "
-                "less than a week ago."
+                f"{version.file}: the refresh replaces {version.name} "
+                f"{version.version}, which main has and which came out {when}, less "
+                "than a week ago, such as the fix of a vulnerability; the refresh "
+                "waits until it is a week old, so that it doesn't take the fix back."
             )
-        return ""
+        return f"{version}: released {when}, less than a week ago."
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         return [found for found in pool.map(judge, sorted(set(versions))) if found]
@@ -240,4 +257,5 @@ def check(
 ) -> tuple[int, list[str]]:
     """How many versions the refresh in HEAD adds to base, and what holds it."""
     versions, problems = added(root, base)
-    return len(versions), problems + young(versions, now, opener)
+    count = sum(not version.replaced for version in versions)
+    return count, problems + young(versions, now, opener)

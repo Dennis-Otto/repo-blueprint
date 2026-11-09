@@ -161,11 +161,14 @@ def test_the_check_finds_what_the_refresh_adds_to_each_lock_file(
     assert versions == [
         Added("requirements.txt", "pip", "alpha", "1.5"),
         Added("requirements.txt", "pip", "delta", ""),
+        # The versions of main that the refresh replaces, whose age counts too.
+        Added("requirements.txt", "pip", "alpha", "1.0", replaced=True),
         Added("web/package-lock.json", "npm", "@scope/kit", "2.0.0"),
         Added("web/package-lock.json", "npm", "bundled", "4.0.0"),
         Added("web/package-lock.json", "npm", "from-git", ""),
         Added("web/package-lock.json", "npm", "inner", "0.1.0"),
         Added("web/package-lock.json", "npm", "left-pad", "1.3.0"),
+        Added("web/package-lock.json", "npm", "left-pad", "1.2.0", replaced=True),
     ]
     assert problems == []
     assert str(versions[0]) == "requirements.txt: alpha 1.5"
@@ -357,7 +360,12 @@ def test_the_check_of_a_refresh_names_each_young_version(
     young = (datetime.now(UTC) - timedelta(days=2)).isoformat()
     opened_by_urllib(
         monkeypatch,
-        Registries({"https://pypi.org/pypi/alpha/1.5/json": pypi(young)}),
+        Registries(
+            {
+                "https://pypi.org/pypi/alpha/1.5/json": pypi(young),
+                "https://pypi.org/pypi/alpha/1.0/json": pypi(OLD),
+            }
+        ),
     )
 
     assert main(["locks", "--age", "HEAD~1"], root=root) == 1
@@ -376,6 +384,60 @@ def test_the_check_of_a_refresh_names_each_young_version(
     assert 'additionalBranchPrefix "review-"' in lines[2]
 
 
+@pytest.mark.parametrize(
+    ("name", "main_lock", "refresh_lock", "url", "answer"),
+    [
+        (
+            "web/package-lock.json",
+            npm_lock(registry("left-pad", "1.3.0")),
+            npm_lock(registry("left-pad", "1.2.0")),
+            "https://registry.npmjs.org/left-pad",
+            {"time": {"1.3.0": YOUNG, "1.2.0": OLD}},
+        ),
+        (
+            "requirements.txt",
+            HEADER + "alpha==1.3\n",
+            HEADER + "alpha==1.2\n",
+            "https://pypi.org/pypi/alpha/1.3/json",
+            pypi(YOUNG),
+        ),
+    ],
+    ids=["npm", "pip"],
+)
+def test_a_refresh_that_takes_back_a_young_version_of_main_waits(
+    tmp_path: Path,
+    name: str,
+    main_lock: str,
+    refresh_lock: str,
+    url: str,
+    answer: dict[str, Any],
+) -> None:
+    # main got left-pad 1.3.0 two days ago, such as the fix of a vulnerability
+    # within the range of package.json; npm's refresh, from versions a week old,
+    # resolves the range back to 1.2.0, which came out long ago.
+    root = refresh(
+        tmp_path,
+        {"requirements.in": "alpha\n", "web/package.json": "{}\n", name: main_lock},
+        {name: refresh_lock},
+    )
+    # The version that the refresh takes instead came out long ago.
+    answers = Registries(
+        {url: answer, "https://pypi.org/pypi/alpha/1.2/json": pypi(OLD)}
+    )
+
+    added, problems = lock_age.check(root, "HEAD~1", NOW, answers)
+
+    version = "1.3.0" if name.endswith(".json") else "1.3"
+    package = "left-pad" if name.endswith(".json") else "alpha"
+    assert added == 1
+    assert problems == [
+        f"{name}: the refresh replaces {package} {version}, which main has and which "
+        "came out 2026-11-07 08:15 UTC, less than a week ago, such as the fix of a "
+        "vulnerability; the refresh waits until it is a week old, so that it doesn't "
+        "take the fix back."
+    ]
+
+
 def test_the_check_passes_a_refresh_of_versions_a_week_old(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -387,7 +449,13 @@ def test_the_check_passes_a_refresh_of_versions_a_week_old(
         {"requirements.txt": HEADER + "alpha==1.5\n"},
     )
     opened_by_urllib(
-        monkeypatch, Registries({"https://pypi.org/pypi/alpha/1.5/json": pypi(OLD)})
+        monkeypatch,
+        Registries(
+            {
+                "https://pypi.org/pypi/alpha/1.5/json": pypi(OLD),
+                "https://pypi.org/pypi/alpha/1.0/json": pypi(OLD),
+            }
+        ),
     )
 
     assert main(["locks", "--age", "HEAD~1"], root=root) == 0
