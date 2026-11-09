@@ -9,8 +9,10 @@
 # and the dark theme: github-update-pull-request.png, an update of the blueprint with
 # its checks, github-release.png, the assets of a release with its SBOMs and its
 # provenance, and github-pr-coach.png, the comment of the PR coach with the coverage
-# of the tests. Run it again after the questions, the output of Copier, the social
-# preview, the dashboard or the pages of GitHub change.
+# of the tests; and screenshots-difference.png, the picture of the difference that
+# blueprint.py screenshots keep draws of the dashboard and a copy of it an hour later.
+# Run it again after the questions, the output of Copier, the social preview, the
+# dashboard, the pages of GitHub or the picture of a difference change.
 #
 # It needs Docker and the network: VHS records the terminal while Copier clones the
 # blueprint from GitHub, and the headless Chromium of the social preview's image
@@ -24,9 +26,11 @@ root="$(pwd -W 2>/dev/null || pwd)"
 recording="$(mktemp)"
 png="$(mktemp)"
 page="$(mktemp)"
+shown="$(mktemp)"
+difference="$(mktemp)"
 github="$(mktemp)"
 log="$(mktemp)"
-trap 'rm -f "$recording" "$png" "$page" "$github" "$log"' EXIT
+trap 'rm -f "$recording" "$png" "$page" "$shown" "$difference" "$github" "$log"' EXIT
 
 # VHS, git and Copier: the image comes from a Dockerfile, so that Renovate keeps it
 # current. Its build context is the repository, for the requirements of Copier.
@@ -76,18 +80,48 @@ saved="$(cygpath --mixed "$page" 2>/dev/null || echo "$page")"
 if curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
   --connect-timeout 10 --max-time 60 --output "$saved" "$dashboard" 2>"$log" &&
   grep --quiet '</head>' "$page" &&
-  sed "0,/<\/head>/s||<base href=\"$dashboard\"><style>main { max-width: none; }</style></head>|" "$page" |
+  sed "0,/<\/head>/s||<base href=\"$dashboard\"><style>main { max-width: none; }</style></head>|" "$page" >"$shown" &&
   docker run --rm --interactive "$browser" sh -c 'cat >/tmp/dashboard.html &&
     /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell \
     --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --window-size=1760,900 \
     --virtual-time-budget=10000 --screenshot=/tmp/dashboard.png file:///tmp/dashboard.html >&2 &&
-    cat /tmp/dashboard.png' >"$png" 2>>"$log" &&
+    cat /tmp/dashboard.png' <"$shown" >"$png" 2>>"$log" &&
   [[ -s "$png" ]]; then
   cp "$png" docs/images/dashboard.png
   echo "Rendered docs/images/dashboard.png."
 else
   cat "$log" >&2
   echo "Rendering $dashboard failed." >&2
+  exit 1
+fi
+
+# What keep of blueprint/screenshots.py draws when the pixels of a picture change,
+# for the page of the screenshot bot: .github/docs-pictures/difference_picture.py
+# turns the dashboard into the dashboard an hour later, after a workflow of one
+# repository failed, the browser photographs both pages as above, and the code of
+# keep draws the difference of the two pictures, with the Pillow of the screenshot
+# bot. The pictures share the container, so only what changed differs.
+if docker run --rm --interactive --volume "$root:/work:ro" --env PYTHONPATH=/work \
+  "$browser" sh -c 'pip install --quiet --disable-pip-version-check \
+    --root-user-action=ignore --break-system-packages --require-hashes \
+    -r /work/stacks/screenshots/requirements.txt >&2 &&
+    cat >/tmp/dashboard.html &&
+    python3 /work/.github/docs-pictures/difference_picture.py change \
+      </tmp/dashboard.html >/tmp/changed.html &&
+    for name in dashboard changed; do
+      /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell \
+        --no-sandbox --hide-scrollbars --force-device-scale-factor=1 --window-size=1760,900 \
+        --virtual-time-budget=10000 --screenshot="/tmp/$name.png" "file:///tmp/$name.html" >&2 ||
+        exit 1
+    done &&
+    python3 /work/.github/docs-pictures/difference_picture.py draw \
+      /tmp/dashboard.png /tmp/changed.png' <"$shown" >"$difference" 2>"$log" &&
+  [[ -s "$difference" ]]; then
+  cp "$difference" docs/images/screenshots-difference.png
+  echo "Rendered docs/images/screenshots-difference.png."
+else
+  cat "$log" >&2
+  echo "Drawing the difference of the dashboard failed." >&2
   exit 1
 fi
 
