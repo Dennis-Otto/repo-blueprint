@@ -9,6 +9,7 @@ import contextlib
 import datetime
 import difflib
 import fnmatch
+import glob
 import hashlib
 import importlib.util
 import io
@@ -5615,7 +5616,10 @@ def choose_the_documents_to_check(
     return outputs, summary.read_text(encoding="utf-8")
 
 
-EVERY_DOCUMENT = {"files": "'./**/*.md' './docs/**/*.html'", "every": "true"}
+EVERY_DOCUMENT = {
+    "files": "'./**/*.md' './.github/**/*.md' './docs/**/*.html'",
+    "every": "true",
+}
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -5682,6 +5686,48 @@ def test_the_link_check_of_a_pull_request_reads_the_documents_it_changes(
     assert chosen == outputs
     if not outputs:
         assert "changes no document" in summary
+
+
+def documents_read_by(patterns: str, documents: list[str], folder: Path) -> set[str]:
+    """The documents that the patterns of lychee read, as lychee 0.24 expands them: **
+    and * pass over a hidden folder or file, whose name starts with a dot, unless the
+    pattern names it, so ./**/*.md reads no .github/pull_request_template.md (lychee
+    --dump-inputs). Python's glob does the same, in a folder of empty documents."""
+    for name in documents:
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).touch()
+    return {
+        Path(found).as_posix()
+        for pattern in shlex.split(patterns)
+        for found in glob.glob(pattern, root_dir=folder, recursive=True)
+    }
+
+
+# It asks Git for the files of the repository, which the copy of the mutation tests
+# has none of.
+@pytest.mark.mutation_unsafe
+def test_the_full_link_check_reads_every_document_that_a_pull_request_checks(
+    tmp_path: Path, projects: dict[str, Path]
+) -> None:
+    # main, the weekly run and a pull request that changes the rules read every
+    # document that a pull request reads when it changes it, also those in .github/,
+    # such as the template of a pull request: a link there that breaks later would
+    # never show otherwise (#769). exclude_path leaves out the same ones of both.
+    for index, project in enumerate((ROOT, *projects.values())):
+        skips = lychee_skips(project)
+        documents = [
+            name
+            for name in files_of(project)
+            if (name.endswith(".md") or re.fullmatch(r"docs/.+\.html", name))
+            and name != "CHANGELOG.md"
+            and not name.startswith("changelog.d/")
+            and not skips(f"./{name}")
+        ]
+        assert ".github/pull_request_template.md" in documents, project
+        read = documents_read_by(
+            EVERY_DOCUMENT["files"], documents, tmp_path / str(index)
+        )
+        assert set(documents) <= read, (project, sorted(set(documents) - read))
 
 
 def test_the_checks_of_a_pull_request_compare_it_with_its_base_branch() -> None:

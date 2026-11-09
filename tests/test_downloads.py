@@ -712,14 +712,18 @@ def test_the_map_of_the_website_leads_its_addresses_to_its_files(
     ]
 
 
+# The patterns of every document, as the Links workflow names them.
+EVERY_DOCUMENT = "'./**/*.md' './.github/**/*.md' './docs/**/*.html'"
+
+
 @pytest.mark.parametrize(
     ("event", "files", "every", "code", "total", "ends"),
     [
         # The weekly run keeps the issue of broken links instead of failing.
-        ("schedule", "'./**/*.md' './docs/**/*.html'", "true", 2, 3, 0),
-        ("push", "'./**/*.md' './docs/**/*.html'", "true", 2, 3, 2),
+        ("schedule", EVERY_DOCUMENT, "true", 2, 3, 0),
+        ("push", EVERY_DOCUMENT, "true", 2, 3, 2),
         # Every document without a link: the check read none.
-        ("schedule", "'./**/*.md' './docs/**/*.html'", "true", 0, 0, 1),
+        ("schedule", EVERY_DOCUMENT, "true", 0, 0, 1),
         # A pull request checks the documents it changes, which may have no link.
         ("pull_request", "'./README.md' './docs/a.md' ", "", 0, 0, 0),
         ("pull_request", "'./README.md' ", "", 2, 1, 2),
