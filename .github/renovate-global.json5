@@ -17,7 +17,7 @@
   // token of the release app in .git/config, so a change of one is reviewed like one
   // of a workflow. blueprint.py of the repository compiles the lock files of
   // pip-compile of the weekly refresh again from versions a week old, with uv, as
-  // Renovate itself compiles them in the same checkout (decision 0136).
+  // Renovate itself compiles them in the same checkout (decision 0137).
   allowedCommands: [
     "^python3 (?:\\.github/)?blueprint\\.py locks --refresh$",
     // The blueprint's own pins.py writes the sha256 of a tool that Renovate moved to

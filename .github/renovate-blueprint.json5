@@ -127,7 +127,7 @@
     {
       // npm and pip-compile keep their refresh to versions at least a week old, as
       // every other update waits a week, so it merges by itself once every check
-      // passes (decision 0136 of the blueprint). From minimumReleaseAge, Renovate
+      // passes (decision 0137 of the blueprint). From minimumReleaseAge, Renovate
       // gives npm --before= a week ago, for this rule alone; the refresh has no
       // release date, so the age check of Renovate keeps no status, which would wait
       // for ever. The rule below compiles the lock files of pip-compile again. The

@@ -1,7 +1,7 @@
 """The age of the versions that the weekly refresh of the lock files brings.
 
 The refresh merges by itself only from versions at least a week old, as old as every
-other update of Renovate waits for (decision 0136): Renovate gives npm `--before=` a
+other update of Renovate waits for (decision 0137): Renovate gives npm `--before=` a
 week ago, and `blueprint.py locks --refresh` compiles the lock files of pip-compile
 again from uploads at least a week old. This check, a step of the check
 dependency-review of each pull request of the refresh, holds the pull request when a

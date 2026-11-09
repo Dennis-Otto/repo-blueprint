@@ -431,7 +431,7 @@ def compare(root: Path, name: str, uv: str) -> Compared:
 # ---------------------------------------------------------------- the weekly refresh
 
 # The refresh keeps to versions as old as every other update of Renovate waits for,
-# the minimumReleaseAge of .github/renovate-blueprint.json5 (decision 0136).
+# the minimumReleaseAge of .github/renovate-blueprint.json5 (decision 0137).
 AGE = timedelta(days=7)
 # What uv says of a file that it can't take a week back alone.
 OWN_CUTOFF = "an --exclude-newer of its own, which the refresh keeps"

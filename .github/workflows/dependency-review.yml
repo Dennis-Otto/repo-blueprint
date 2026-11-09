@@ -8,7 +8,7 @@ name: Dependency review
 # review: there the settings bot sets the variable DEPENDENCY_REVIEW to off, and the
 # check leaves the vulnerabilities of the lock files to OSV-Scanner. In a pull request
 # of Renovate's weekly refresh of the lock files, which merges by itself only from
-# versions at least a week old, it fails on a younger one as well (decision 0136).
+# versions at least a week old, it fails on a younger one as well (decision 0137).
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
