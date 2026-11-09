@@ -623,13 +623,25 @@ def watch_run(
         return f"{run.name}: not a run of `{branch}`, nothing to do."
     if run.status != "completed":
         return f"{run.name}: runs again, its next end counts."
-    if run.conclusion == "failure" and never_started(api, repo, run.id, run.attempt):
+    # The daily look watches the runs of the branch alone: the verification of a
+    # published release that GitHub couldn't start gets its second try or its report
+    # here, as any other failure.
+    if (
+        not published
+        and run.conclusion == "failure"
+        and never_started(api, repo, run.id, run.attempt)
+    ):
         # Another try while GitHub fails would only fail again, and mail again.
         if notices is not None:
             notices.append(couldnt_start(f"the run {run.id} of {run.name}"))
+        later = (
+            "the daily look runs it again"
+            if run.attempt == 1
+            else "the daily look reports it if its last attempt never started either"
+        )
         return (
             f"{run.name}: GitHub couldn't start {run.link()}, so there is nothing to "
-            "report; the daily look runs it again."
+            f"report; {later}."
         )
     issues = open_issues(api, repo)
     ref = run.branch if published else branch
@@ -1129,7 +1141,13 @@ def sweep(
     try:
         uploaded = preview_report(api, repo, root, branch, issues.get(PREVIEW), opener)
     except (GitHubError, Unreadable) as error:
-        uploaded, healthy = f"Couldn't compare it: {code(str(error))}", False
+        uploaded = f"Couldn't compare it: {code(str(error))}"
+        if isinstance(error, GitHubError) and error.unavailable:
+            # As for the workflows: the next look compares it (decision 0136).
+            if notices is not None and not notices:
+                notices.append(unreachable(error))
+        else:
+            healthy = False
     if uploaded:
         lines += ["", "#### Social preview", "", uploaded]
     return "\n".join(lines) + "\n", healthy

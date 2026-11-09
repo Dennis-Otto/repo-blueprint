@@ -17216,7 +17216,10 @@ def test_the_flaky_test_bot_leaves_a_run_alone_that_github_could_not_start(
         "rerun",
         "Run the failed jobs once more",
         answers=gh_answers(
-            {"repos/o/r/actions/runs/5/attempts/1/jobs": {"jobs": jobs}}
+            {
+                "repos/o/r/actions/runs/5/attempts/1/jobs": {"jobs": jobs},
+                "repos/o/r/check-runs/11/annotations": [],
+            }
         ),
         env={
             "RUN": "5",
@@ -17240,6 +17243,69 @@ def test_the_flaky_test_bot_leaves_a_run_alone_that_github_could_not_start(
         "No job of CI (python) failed in a step: GitHub couldn't start them, so the "
         "bot leaves the run alone.\n"
     )
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_runs_a_job_again_that_no_runner_took(
+    tmp_path: Path,
+) -> None:
+    # A job without a step that has an annotation broke: GitHub started the run, and
+    # the runner that never took the job may take it the second time.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "rerun",
+        "Run the failed jobs once more",
+        answers=gh_answers(
+            {
+                "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                    "jobs": [
+                        {**job_of_a_run(11, "test (3.12)", "failure"), "steps": []}
+                    ]
+                },
+                "repos/o/r/check-runs/11/annotations": annotations_of_a_job(
+                    "The job was not acquired by Runner of type hosted"
+                ),
+                "repos/o/r/actions/workflows/3/runs": runs_of_the_branch(),
+            }
+        ),
+        env={
+            "RUN": "5",
+            "NAME": "CI (python)",
+            "CONCLUSION": "failure",
+            "WORKFLOW": "3",
+            "EVENT": "pull_request",
+            "BRANCH": "feature",
+            "HEAD_REPO": "o/r",
+            "SHA": "abc1234def",
+        },
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("run rerun 5 --failed")
+    assert "::notice" not in done.stdout
+
+
+@WITH_JQ
+def test_the_pr_coach_reports_without_coverage_when_github_keeps_failing(
+    tmp_path: Path,
+) -> None:
+    # The coach runs after every check: an outage of GitHub fails none of its runs.
+    done = run_after_the_checks(
+        tmp_path,
+        "coach",
+        "Fetch the coverage reports of the head and of main",
+        {"run list.error": "HTTP 503: Service Unavailable"},
+        stubs={"sleep": workflow_steps.recording("sleep")},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert done.stdout.startswith(
+        "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 503"
+    )
+    assert "the coach reports without the coverage this time" in done.stdout
+    assert done.outputs == {}
 
 
 def test_after_the_checks_follows_no_bot() -> None:

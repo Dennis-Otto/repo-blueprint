@@ -1560,8 +1560,14 @@ def test_the_bot_leaves_a_release_alone_that_github_could_not_start(
 ) -> None:
     # As in GitHub's outage of 9 November 2026: another try while GitHub fails would
     # fail too, and the scheduled run of the release takes it up (decision 0136).
+    # The job without a step has no annotation either.
     done = rerun_the_release(
-        tmp_path, "completed", 1, exact("run rerun 77 --failed", code=1), jobs
+        tmp_path,
+        "completed",
+        1,
+        exact("run rerun 77 --failed", code=1),
+        jobs,
+        first=[Answer(r"api repos/o/r/check-runs/771/annotations .*", json=[])],
     )
 
     assert done.returncode == 0, done.stderr
@@ -1574,6 +1580,30 @@ def test_the_bot_leaves_a_release_alone_that_github_could_not_start(
         "GitHub couldn't start the release of abc1234, so the bot leaves it alone; "
         "the scheduled run of the release takes it up.\n"
     )
+
+
+@WITH_JQ
+def test_the_bot_runs_a_release_again_whose_job_no_runner_took(
+    tmp_path: Path,
+) -> None:
+    # A job without a step that has an annotation broke: GitHub started the run.
+    done = rerun_the_release(
+        tmp_path,
+        "completed",
+        1,
+        exact("run rerun 77 --failed"),
+        [{**FAILED_IN_A_STEP, "steps": []}],
+        first=[
+            Answer(
+                r"api repos/o/r/check-runs/771/annotations .*",
+                json=[{"message": "The job was not acquired by Runner of type hosted"}],
+            )
+        ],
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("run rerun 77 --failed")
+    assert "::notice" not in done.stdout
 
 
 @WITH_JQ

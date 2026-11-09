@@ -2966,6 +2966,20 @@ def test_a_call_that_stalls_ends_as_one_without_an_answer(
     assert GitHubError(0, result.stderr).unavailable
 
 
+def test_the_time_of_a_call_that_stalls_counts_against_the_budget(
+    waits: list[float],
+) -> None:
+    # Four calls of 90 seconds and their waits would outlast the job of a bot.
+    stalled = f"\x00gh: no answer from GitHub within {blueprint.github.CALL_TIME_LIMIT} seconds"
+    runner, calls = answers(*[stalled] * 4, codes=[1] * 4)
+
+    with pytest.raises(GitHubError) as error:
+        Api(runner).get("repos/x")
+    assert len(calls) == 2
+    assert waits == [10]
+    assert error.value.unavailable
+
+
 def test_a_query_of_graphql_is_asked_again_after_an_error_of_github(
     waits: list[float],
 ) -> None:
@@ -2992,6 +3006,15 @@ def test_a_query_of_graphql_is_asked_again_after_an_error_of_github(
         ),
         ("HTTP 401: Bad credentials (https://api.github.com/graphql)", 401, False),
         ("GraphQL: Could not resolve to a Repository", 0, False),
+        # GitHub's own failure, which GraphQL answers with 200, and a connection that
+        # broke off.
+        (
+            "GraphQL: Something went wrong while executing your query. Please "
+            "include `0400:1A2B` when reporting this issue.",
+            0,
+            True,
+        ),
+        ('Post "https://api.github.com/graphql": EOF', 0, True),
     ],
 )
 def test_a_command_of_gh_that_fails_names_the_status_of_github(

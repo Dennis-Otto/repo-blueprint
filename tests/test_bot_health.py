@@ -16,7 +16,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blueprint import cli
+from blueprint import branches, cli
 from blueprint.bot_health import (
     LABEL,
     LABEL_COLOR,
@@ -163,6 +163,7 @@ class FakeGitHub:
             "openGraphImageUrl": "https://opengraph.githubassets.com/1/" + REPO,
         }
         self.graphql_refused = False
+        self.graphql_error = "refused"
         self.picture_commits: list[dict[str, str]] = [{"sha": HEAD}]
         self.calls: list[tuple[str, str]] = []
 
@@ -173,7 +174,7 @@ class FakeGitHub:
             self.calls.append(("POST", "graphql"))
             answer = json.dumps({"data": {"repository": self.preview}})
             return subprocess.CompletedProcess(
-                arguments, int(self.graphql_refused), answer, "refused"
+                arguments, int(self.graphql_refused), answer, self.graphql_error
             )
         paged = "--paginate" in arguments
         method, path = ("GET", arguments[-1]) if paged else (arguments[3], arguments[4])
@@ -782,6 +783,23 @@ def test_the_verification_of_a_published_release_opens_the_issue(
     assert "Only a run for `v1.2.3` closes this issue" in github.issues[1]["body"]
 
 
+def test_a_verification_of_a_published_release_that_never_started_runs_again(
+    github: FakeGitHub,
+) -> None:
+    # The daily look watches the runs of the branch alone, so the end of the run
+    # gives the verification of a tag its second try.
+    github.runs[1] = run_of(
+        1, name="Release verification", event="release", branch="v1.2.3"
+    )
+    github.jobs[(1, 1)] = []
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result.startswith("Release verification: ")
+    assert "couldn't start" not in result
+    assert writes(github) != []
+
+
 def test_only_a_run_for_its_tag_closes_the_issue_of_a_published_release(
     github: FakeGitHub,
 ) -> None:
@@ -997,10 +1015,15 @@ def test_the_end_of_a_run_that_github_could_not_start_starts_nothing(
 
     result = watch_run(api_of(github), REPO, 1, NOW, notices)
 
+    later = (
+        "the daily look runs it again"
+        if attempt == 1
+        else "the daily look reports it if its last attempt never started either"
+    )
     assert result == (
         f"{name}: GitHub couldn't start [the run of 2026-10-13 09:00 UTC]"
         f"(https://github.com/{REPO}/actions/runs/1), so there is nothing to report; "
-        "the daily look runs it again."
+        f"{later}."
     )
     assert writes(github) == []
     assert notices == [
@@ -2457,6 +2480,32 @@ def test_a_social_preview_that_cannot_be_compared_fails_the_look(
     assert github.issues == {}
 
 
+@pytest.mark.parametrize("watched", [True, False], ids=["notices", "no notices"])
+def test_a_social_preview_that_github_fails_to_show_fails_no_look(
+    github: FakeGitHub, tmp_path: Path, waits: list[float], watched: bool
+) -> None:
+    # In an outage of GitHub, as for the workflows: the next look compares it.
+    root = with_a_picture(tmp_path)
+    uploaded(github)
+    github.graphql_refused = True
+    github.graphql_error = "gh: Bad Gateway (HTTP 502)"
+    notices: list[str] | None = [] if watched else None
+
+    summary, healthy = sweep(
+        api_of(github), REPO, root, NOW, serving(b"x"), notices=notices
+    )
+
+    assert healthy
+    assert preview_lines(summary)[-1].startswith(
+        "Couldn't compare it: `GitHub answered 502"
+    )
+    if notices is not None:
+        assert len(notices) == 1
+        assert notices[0].startswith(
+            "::notice title=GitHub is unavailable::GitHub kept failing"
+        )
+
+
 # ---------------------------------------------------------------- Renovate
 
 
@@ -2762,6 +2811,36 @@ def test_the_branch_bot_leaves_the_line_after_a_check_that_github_could_not_star
         "::notice title=GitHub is unavailable::GitHub couldn't start the run 5,"
     )
     assert writes(github) == []
+
+
+def test_the_branch_bot_reads_the_run_with_the_token_of_its_job(
+    github: FakeGitHub,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The token of the release app may not read runs, which a private repository
+    # refuses with 403; the token of the job may not read the annotations.
+    job = FakeGitHub()
+    job.runs[5] = run_of(5, name="Lint", event="pull_request", attempt=2)
+    job.jobs[(5, 2)] = [never_started(51, "lint")]
+    job.fail[("GET", f"repos/{REPO}/check-runs/51/annotations?per_page=50")] = 403
+    github.fail[("GET", f"repos/{REPO}/actions/runs/5/attempts/2")] = 403
+    github.fail[
+        ("GET", f"repos/{REPO}/actions/runs/5/attempts/2/jobs?per_page=100")
+    ] = 403
+    monkeypatch.setenv("ACTIONS_TOKEN", "the-token-of-the-job")
+    monkeypatch.setenv("BOT_ACCOUNT", "release-app[bot]")
+    monkeypatch.setattr(branches, "run_gh_as", lambda token: job)
+    command = ["--repo", REPO, "next-branch", "--after", "5", "--attempt", "2"]
+
+    assert cli.main(command, Api(github)) == 0
+
+    out, _ = capsys.readouterr()
+    assert out == "GitHub couldn't start the run 5, so the line stays as it is.\n\n"
+    assert ("GET", f"repos/{REPO}/check-runs/51/annotations?per_page=50") in (
+        github.calls
+    )
+    assert writes(github) == writes(job) == []
 
 
 @pytest.mark.parametrize(

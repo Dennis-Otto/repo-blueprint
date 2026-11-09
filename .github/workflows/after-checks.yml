@@ -291,16 +291,25 @@ jobs:
           # is the business of the bot for cancelled checks. In one that a person or a
           # time limit cancelled, only the jobs that ran out of time broke: a job that
           # waits for the others fails when they are cancelled. A job that failed without
-          # a step never ran: GitHub couldn't start it, as in its outage of 9 November
-          # 2026. With a third argument, only the jobs it names.
+          # a step and without an annotation never ran: GitHub couldn't start it, as in
+          # its outage of 9 November 2026. One without a step that has an annotation,
+          # such as a condition that GitHub couldn't evaluate or a job that no runner
+          # took, broke. With a third argument, only the jobs it names.
           broken() {
-            local jobs id conclusion name messages found=""
+            local jobs id conclusion name steps messages found=""
             jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$1/jobs" --paginate \
-              --jq '.jobs[] | select((.conclusion == "failure" and (.steps | length) > 0) or .conclusion == "cancelled") | [.id, .conclusion, .name] | @tsv')" ||
+              --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.id, .conclusion, .name, (.steps | length)] | @tsv')" ||
               return 1
-            while IFS=$'\t' read -r -u 4 id conclusion name; do
+            while IFS=$'\t' read -r -u 4 id conclusion name steps; do
               if [[ -z "$id" ]] || [[ "$conclusion" == failure && "$2" == cancelled ]]; then
                 continue
+              fi
+              if [[ "$conclusion" == failure && "$steps" == 0 ]]; then
+                messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
+                  return 1
+                if [[ -z "$messages" ]]; then
+                  continue
+                fi
               fi
               if [[ "$conclusion" == cancelled ]]; then
                 messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')" ||
@@ -901,10 +910,26 @@ jobs:
             done
           }
           # A release that GitHub couldn't start, as in its outage of 9 November 2026,
-          # failed in no step: another try while GitHub fails would fail too, and the
-          # scheduled run of the release takes it up.
-          started="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
-            --jq '.jobs[] | select(.conclusion == "failure" and (.steps | length) > 0) | .id')"
+          # failed in no step and with no annotation: another try while GitHub fails
+          # would fail too, and the scheduled run of the release takes it up. A job
+          # without a step that has an annotation, such as one that no runner took,
+          # broke.
+          jobs="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/actions/runs/$RUN/attempts/1/jobs" --paginate \
+            --jq '.jobs[] | select(.conclusion == "failure") | [.id, (.steps | length)] | @tsv')"
+          started=""
+          while IFS=$'\t' read -r -u 4 id steps; do
+            if [[ -z "$id" ]]; then
+              continue
+            fi
+            if [[ "$steps" == 0 ]]; then
+              messages="$(tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO/check-runs/$id/annotations" --paginate --jq '.[].message')"
+              if [[ -z "$messages" ]]; then
+                continue
+              fi
+            fi
+            started="$id"
+            break
+          done 4<<<"$jobs"
           if [[ -z "$started" ]]; then
             echo "::notice title=GitHub is unavailable::GitHub couldn't start the release of ${SHA:0:7}, as in an outage of GitHub (https://www.githubstatus.com), so the bot leaves it alone instead of trying again while GitHub fails; the scheduled run of the release takes it up."
             echo "GitHub couldn't start the release of ${SHA:0:7}, so the bot leaves it alone; the scheduled run of the release takes it up." >> "$GITHUB_STEP_SUMMARY"
@@ -1441,15 +1466,50 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          # The coach runs after every check of every pull request: one error of GitHub
+          # must not fail it, as in its outage of 9 November 2026. Each call of gh
+          # tries again after a 5xx or no answer, 10, 20 and 40 seconds apart, and when
+          # GitHub keeps failing, the coach reports without the coverage this time,
+          # with a notice instead of a failure (decision 0136).
+          outage="$RUNNER_TEMP/github-unavailable"
+          unavailable() {
+            local status=$?
+            if ((status)) && [[ -e "$outage" ]]; then
+              echo "::notice title=GitHub is unavailable::GitHub kept failing ($(head -n 1 "$RUNNER_TEMP/gh-errors")), as in an outage of GitHub (https://www.githubstatus.com), so the coach reports without the coverage this time; its next run catches up. Nothing to do for a person."
+              exit 0
+            fi
+          }
+          trap unavailable EXIT
+          tried() {
+            local wait output
+            rm -f "$outage"
+            for wait in 10 20 40 0; do
+              if output="$("$@" 2>"$RUNNER_TEMP/gh-errors")"; then
+                printf '%s\n' "$output"
+                return 0
+              fi
+              if ! grep -qiE 'HTTP 5[0-9]{2}|timeout|timed out|connection reset|unexpected EOF' "$RUNNER_TEMP/gh-errors"; then
+                cat "$RUNNER_TEMP/gh-errors" >&2
+                return 1
+              fi
+              if ((wait == 0)); then
+                touch "$outage"
+                cat "$RUNNER_TEMP/gh-errors" >&2
+                return 1
+              fi
+              echo "GitHub failed, so gh tries again in $wait seconds: $(head -n 1 "$RUNNER_TEMP/gh-errors")" >&2
+              sleep "$wait"
+            done
+          }
           # The newest run of the tests of the head that ended, and its workflow.
-          run="$(gh run list --commit "$SHA" --status completed --limit 100 \
+          run="$(tried gh run list --commit "$SHA" --status completed --limit 100 \
             --json databaseId,workflowDatabaseId,workflowName,conclusion \
             --jq 'first(.[] | select((.workflowName | startswith("CI (")) and (.conclusion == "success" or .conclusion == "failure"))) | "\(.databaseId) \(.workflowDatabaseId)"')"
           if [[ -z "$run" ]] || ! gh run download "${run% *}" --name coverage --dir "$RUNNER_TEMP/head"; then
             echo "No run of the tests of ${SHA:0:7} kept a coverage report so far." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          base="$(gh run list --workflow "${run#* }" --branch main --event push --status success \
+          base="$(tried gh run list --workflow "${run#* }" --branch main --event push --status success \
             --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [[ -n "$base" ]]; then
             gh run download "$base" --name coverage --dir "$RUNNER_TEMP/base" || true

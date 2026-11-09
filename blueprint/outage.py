@@ -36,19 +36,22 @@ def unreachable(error: GitHubError) -> str:
     )
 
 
-def never_started(api: Api, repo: str, run: int, attempt: int) -> bool:
+def never_started(
+    api: Api, repo: str, run: int, attempt: int, checks: Api | None = None
+) -> bool:
     """Whether GitHub ended the attempt of a failed run before any job of it began,
     as in its outage: then the run has no job at all, or every job that failed has no
     step and no annotation. A job whose condition or matrix GitHub couldn't evaluate
     has no step either, but an annotation that says why: that is a failure of the
-    workflow, and a person must fix it."""
+    workflow, and a person must fix it. `checks` reads the annotations where the
+    token of `api` may read the runs but not the checks."""
     data = api.get(
         f"repos/{repo}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100"
     )
     for job in (data or {}).get("jobs", []):
         if job.get("conclusion") not in FAILED:
             continue
-        if job.get("steps") or api.get(
+        if job.get("steps") or (checks or api).get(
             f"repos/{repo}/check-runs/{job['id']}/annotations?per_page=50"
         ):
             return False
@@ -65,10 +68,13 @@ def couldnt_start(run: str) -> str:
     )
 
 
-def failed_unstarted(api: Api, repo: str, run: int, attempt: int) -> bool:
+def failed_unstarted(
+    api: Api, repo: str, run: int, attempt: int, checks: Api | None = None
+) -> bool:
     """Whether the attempt of a run failed because GitHub couldn't start it, for a
-    bot that knows the run only by its id."""
+    bot that knows the run only by its id: `api` reads the run and its jobs, and
+    `checks`, if given, the annotations of the jobs."""
     data = api.get(f"repos/{repo}/actions/runs/{run}/attempts/{attempt}") or {}
     return data.get("conclusion") == "failure" and never_started(
-        api, repo, run, attempt
+        api, repo, run, attempt, checks
     )

@@ -2641,8 +2641,13 @@ def main(
         if arguments.command == "bot-health":
             return bot_health_command(api, repo, arguments, root)
         if arguments.command == "next-branch":
+            job = job_from(os.environ)
+            # The token of the release app may not read runs, which a private
+            # repository refuses: the token of the job reads the run and its jobs,
+            # and the app's the annotations, which the job's may not read.
+            reader = job.api if job else api
             if arguments.after and failed_unstarted(
-                api, repo, arguments.after, arguments.attempt
+                reader, repo, arguments.after, arguments.attempt, checks=api
             ):
                 # The failure of a check that GitHub never started says nothing about
                 # the pull request: the line stays as it is until the next event.
@@ -2652,7 +2657,7 @@ def main(
                     "stays as it is.\n"
                 )
                 return 0
-            outcome = next_branch(api, repo, job_from(os.environ), root)
+            outcome = next_branch(api, repo, job, root)
             for warning in (*outcome.warnings, *outcome.notices):
                 print(warning, file=sys.stderr)
             print(outcome.summary, end="")

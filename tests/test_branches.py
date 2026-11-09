@@ -1920,7 +1920,9 @@ def test_the_command_moves_the_line_after_a_check_that_failed_in_a_step(
 ) -> None:
     asked: list[tuple[int, int]] = []
 
-    def failed_unstarted(api: Api, repo: str, run: int, attempt: int) -> bool:
+    def failed_unstarted(
+        api: Api, repo: str, run: int, attempt: int, checks: Api | None = None
+    ) -> bool:
         asked.append((run, attempt))
         return False
 

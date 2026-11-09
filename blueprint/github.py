@@ -22,17 +22,22 @@ Json = Any
 OUTAGE_WAITS = (10, 20, 40)
 RATE_LIMIT_WAIT = 60
 # What gh prints when GitHub gave no answer at all: its connection timed out, broke
-# off or was refused, or the call outlasted CALL_TIME_LIMIT.
+# off (a bare EOF too) or was refused, or the call outlasted CALL_TIME_LIMIT; and the
+# error of GraphQL that GitHub answers with 200 when it fails itself.
 NO_ANSWER = re.compile(
     r"timed? ?out|deadline exceeded|connection (?:reset|refused)|unexpected EOF"
-    r"|no answer from GitHub",
-    re.IGNORECASE,
+    r"|: EOF$|no answer from GitHub"
+    r"|something went wrong while executing your query",
+    re.IGNORECASE | re.MULTILINE,
 )
+# What run_command prints for a call that outlasted CALL_TIME_LIMIT.
+STALLED = "no answer from GitHub within"
 # The status that gh names in the error of a command, such as "HTTP 502: Bad Gateway"
 # or "Not Found (HTTP 404)".
 HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
 # gh waits for an answer without a limit; a call that stalls this long in an outage
-# ends as one without an answer, so that it tries again before its job times out.
+# ends as one without an answer, so that it tries again before its job times out. The
+# time that it stalled counts against WAIT_BUDGET, as a wait does.
 CALL_TIME_LIMIT = 90
 # A longer wait, such as for a rate limit that resets in half an hour, would only hold
 # up the run: the request fails at once instead, and the next run tries again.
@@ -120,7 +125,7 @@ def run_command(
             command,
             1,
             "",
-            f"gh: no answer from GitHub within {CALL_TIME_LIMIT} seconds",
+            f"gh: {STALLED} {CALL_TIME_LIMIT} seconds",
         )
 
 
@@ -295,6 +300,20 @@ class Api:
         # The seconds that this Api may still wait before it tries a request again.
         self.budget: float = WAIT_BUDGET
 
+    def sent(
+        self,
+        arguments: Sequence[str],
+        payload: str | None,
+        read: Callable[[subprocess.CompletedProcess[str]], Answer],
+    ) -> Answer:
+        """The answer to one try of a request. A try that stalled took CALL_TIME_LIMIT
+        of the budget, so that a bot in an outage still ends long before its job's
+        time limit."""
+        answer = read(self.runner(arguments, payload))
+        if answer.status == 0 and STALLED in answer.message:
+            self.budget -= CALL_TIME_LIMIT
+        return answer
+
     def answer(
         self,
         arguments: Sequence[str],
@@ -307,7 +326,7 @@ class Api:
         change the answer and the budget allows it; GitHubError when GitHub refused it
         or kept failing. Without gateway, an error of GitHub is the answer: for a
         request that isn't safe to send twice."""
-        answer = read(self.runner(arguments, payload))
+        answer = self.sent(arguments, payload, read)
         tries = 1
         while answer.failed(missing_ok):
             wait = answer.wait(gateway, tries)
@@ -315,7 +334,7 @@ class Api:
                 break
             self.budget -= wait
             sleep(wait)
-            answer = read(self.runner(arguments, payload))
+            answer = self.sent(arguments, payload, read)
             tries += 1
         if answer.failed(missing_ok):
             raise GitHubError(answer.status, answer.message, error_codes(answer.data))
