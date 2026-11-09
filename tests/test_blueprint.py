@@ -23,6 +23,7 @@ from shared import without_the_version
 
 import blueprint.bootstrap
 import blueprint.checklist
+import blueprint.github
 from blueprint import cli
 from blueprint.checklist import (
     APP_NAME_LIMIT,
@@ -2263,10 +2264,10 @@ def test_the_lint_fails_when_github_answers_no_query(
     assert run(github, root, "settings", "actions") == 1
 
     out = capsys.readouterr().out
-    # Each action of the query, which a gateway timed out twice: a query only reads,
-    # so it is asked once more.
+    # Each action of the query, which a gateway timed out every time: a query only
+    # reads, so it is asked again, three times.
     assert out.count("refused its file (GitHub answered 502: simulated failure)") == 3
-    assert github.calls == [("POST", "graphql")] * 2
+    assert github.calls == [("POST", "graphql")] * 4
 
 
 def test_one_query_reads_the_files_of_many_actions_at_once(github: FakeGitHub) -> None:
@@ -2863,26 +2864,170 @@ def test_github_names_why_it_refused_the_fields() -> None:
     assert error.value.codes == ("already_exists",)
 
 
-@pytest.mark.parametrize("status", [502, 503, 504])
-def test_a_gateway_that_timed_out_is_asked_once_more(
-    status: int, waits: list[float]
-) -> None:
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_an_error_of_github_is_asked_again(status: int, waits: list[float]) -> None:
+    # The "Internal server error" of GitHub's outage of 9 November 2026 too.
     runner, calls = answers(
-        http(status, {"message": "Bad Gateway"}), http(200, {"id": 1})
+        http(status, {"message": "Internal server error"}), http(200, {"id": 1})
     )
 
     assert Api(runner).get("repos/x") == {"id": 1}
     assert len(calls) == 2
-    assert waits == [5]
+    assert waits == [10]
 
 
-def test_a_gateway_that_fails_twice_stops_the_request(waits: list[float]) -> None:
-    runner, calls = answers(*[http(502, {"message": "Bad Gateway"})] * 2)
+def test_an_error_of_github_is_asked_again_three_times_with_longer_waits(
+    waits: list[float],
+) -> None:
+    runner, calls = answers(
+        *[http(503, {"message": "Service unavailable"})] * 3, http(200, {"id": 1})
+    )
 
-    with pytest.raises(GitHubError, match="502: Bad Gateway"):
+    assert Api(runner).get("repos/x") == {"id": 1}
+    assert len(calls) == 4
+    assert waits == [10, 20, 40]
+
+
+def test_an_error_of_github_that_stays_stops_the_request(waits: list[float]) -> None:
+    runner, calls = answers(*[http(502, {"message": "Bad Gateway"})] * 4)
+
+    with pytest.raises(GitHubError, match="502: Bad Gateway") as error:
         Api(runner).put("repos/x/topics", {"names": []})
+    assert len(calls) == 4
+    assert waits == [10, 20, 40]
+    assert error.value.unavailable
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        'Get "https://api.github.com/repos/x": net/http: TLS handshake timeout',
+        "dial tcp 140.82.112.6:443: i/o timeout",
+        'Get "https://api.github.com/repos/x": context deadline exceeded',
+        "read tcp: connection reset by peer",
+        'Get "https://api.github.com/repos/x": unexpected EOF',
+    ],
+)
+def test_a_call_without_an_answer_is_asked_again(
+    error: str, waits: list[float]
+) -> None:
+    runner, calls = answers(f"\x00{error}", http(200, {"id": 1}), codes=[1, 0])
+
+    assert Api(runner).get("repos/x") == {"id": 1}
     assert len(calls) == 2
-    assert waits == [5]
+    assert waits == [10]
+
+
+def test_a_call_that_never_gets_an_answer_means_github_is_unavailable(
+    waits: list[float],
+) -> None:
+    runner, calls = answers(*["\x00dial tcp: i/o timeout"] * 4, codes=[1] * 4)
+
+    with pytest.raises(GitHubError) as error:
+        Api(runner).get("repos/x")
+    assert len(calls) == 4
+    assert error.value.status == 0
+    assert error.value.unavailable
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "unavailable"),
+    [
+        (500, "Internal server error", True),
+        (504, "Gateway Timeout", True),
+        (0, "gh: no answer from GitHub within 90 seconds", True),
+        (0, "gh: not logged in", False),
+        (403, "Resource not accessible by integration", False),
+        (404, "Not Found", False),
+        (422, "Validation Failed", False),
+    ],
+)
+def test_only_an_error_of_github_means_that_it_is_unavailable(
+    status: int, message: str, unavailable: bool
+) -> None:
+    assert GitHubError(status, message).unavailable is unavailable
+
+
+def test_a_call_that_stalls_ends_as_one_without_an_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limits: list[float] = []
+
+    def stalls(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        limits.append(options["timeout"])
+        raise subprocess.TimeoutExpired(command, options["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalls)
+
+    result = blueprint.github.run_gh(["api", "--include", "repos/x"], None)
+
+    assert limits == [blueprint.github.CALL_TIME_LIMIT]
+    assert result.returncode == 1
+    assert GitHubError(0, result.stderr).unavailable
+
+
+def test_the_time_of_a_call_that_stalls_counts_against_the_budget(
+    waits: list[float],
+) -> None:
+    # Four calls of 90 seconds and their waits would outlast the job of a bot.
+    stalled = f"\x00gh: no answer from GitHub within {blueprint.github.CALL_TIME_LIMIT} seconds"
+    runner, calls = answers(*[stalled] * 4, codes=[1] * 4)
+
+    with pytest.raises(GitHubError) as error:
+        Api(runner).get("repos/x")
+    assert len(calls) == 2
+    assert waits == [10]
+    assert error.value.unavailable
+
+
+def test_a_query_of_graphql_is_asked_again_after_an_error_of_github(
+    waits: list[float],
+) -> None:
+    runner, calls = answers(
+        "\x00gh: Something went wrong (HTTP 502)",
+        json.dumps({"data": {"viewer": {"login": "a"}}}),
+        codes=[1, 0],
+    )
+
+    assert Api(runner).graphql("{ viewer { login } }") == {"viewer": {"login": "a"}}
+    assert len(calls) == 2
+    assert waits == [10]
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "unavailable"),
+    [
+        ("HTTP 502: Bad Gateway (https://api.github.com/graphql)", 502, True),
+        ("gh: Something went wrong (HTTP 500)", 500, True),
+        (
+            "Post https://api.github.com/graphql: net/http: TLS handshake timeout",
+            0,
+            True,
+        ),
+        ("HTTP 401: Bad credentials (https://api.github.com/graphql)", 401, False),
+        ("GraphQL: Could not resolve to a Repository", 0, False),
+        # GitHub's own failure, which GraphQL answers with 200, and a connection that
+        # broke off.
+        (
+            "GraphQL: Something went wrong while executing your query. Please "
+            "include `0400:1A2B` when reporting this issue.",
+            0,
+            True,
+        ),
+        ('Post "https://api.github.com/graphql": EOF', 0, True),
+    ],
+)
+def test_a_command_of_gh_that_fails_names_the_status_of_github(
+    error: str, status: int, unavailable: bool
+) -> None:
+    runner, calls = answers(*[f"\x00{error}"] * 4, codes=[1] * 4)
+
+    with pytest.raises(GitHubError) as raised:
+        Api(runner).command(["pr", "list", "--json", "number"])
+    assert raised.value.status == status
+    assert raised.value.unavailable is unavailable
+    # Only an error of GitHub is asked again, three times.
+    assert len(calls) == (4 if unavailable else 1)
 
 
 def test_a_post_that_a_gateway_timed_out_is_not_sent_twice(
@@ -2907,7 +3052,7 @@ def test_a_post_that_only_reads_is_asked_once_more_after_a_gateway(
 
     assert response.data == {"a": 1}
     assert len(calls) == 2
-    assert waits == [5]
+    assert waits == [10]
 
 
 def test_a_run_stops_waiting_once_its_budget_is_spent(waits: list[float]) -> None:
@@ -3047,7 +3192,17 @@ def test_a_list_that_fails_on_a_gateway_is_read_once_more(waits: list[float]) ->
 
     assert Api(runner).get_all("repos/x/rulesets") == [{"id": 1}]
     assert len(calls) == 2
-    assert waits == [5]
+    assert waits == [10]
+
+
+def test_a_list_without_an_answer_is_read_again(waits: list[float]) -> None:
+    runner, calls = answers(
+        "\x00gh: context deadline exceeded", json.dumps([[{"id": 1}]]), codes=[1, 0]
+    )
+
+    assert Api(runner).get_all("repos/x/rulesets") == [{"id": 1}]
+    assert len(calls) == 2
+    assert waits == [10]
 
 
 @pytest.mark.parametrize(

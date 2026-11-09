@@ -126,7 +126,7 @@ def test_the_runners_of_gh_read_and_write_utf_8_on_every_machine(
         asked.append(options.get("encoding"))
         # A body that the code page can't write would never reach the end of gh's
         # input, and gh would wait for it for ever: the test gives up instead.
-        return started([sys.executable, "-c", GH], **options, timeout=60)
+        return started([sys.executable, "-c", GH], **{**options, "timeout": 60})
 
     monkeypatch.setattr(subprocess, "run", run)
 

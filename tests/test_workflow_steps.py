@@ -14,8 +14,10 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from shell import BASH
@@ -1493,7 +1495,10 @@ def test_the_failed_jobs_of_a_release_run_once_more(tmp_path: Path) -> None:
     assert done.returncode == 0, done.stderr
     # The log shows that GitHub took the rerun.
     assert confirmed in done.stdout
-    assert done.commands == [
+    assert done.commands[0].startswith(
+        "api repos/o/r/actions/runs/77/attempts/1/jobs --paginate --jq "
+    )
+    assert done.commands[1:] == [
         'api repos/o/r/actions/runs/77 --jq "\\(.status) \\(.run_attempt)"',
         "run rerun 77 --failed",
     ]
@@ -1502,17 +1507,37 @@ def test_the_failed_jobs_of_a_release_run_once_more(tmp_path: Path) -> None:
     )
 
 
+# A job of the release that failed in a step: GitHub started it.
+FAILED_IN_A_STEP = {
+    "id": 771,
+    "name": "release",
+    "conclusion": "failure",
+    "steps": [{"name": "Push the tag", "conclusion": "failure"}],
+}
+
+
 def rerun_the_release(
-    tmp_path: Path, status: str, attempt: int, rerun: Answer
+    tmp_path: Path,
+    status: str,
+    attempt: int,
+    rerun: Answer,
+    jobs: Sequence[Mapping[str, Any]] = (FAILED_IN_A_STEP,),
+    first: Sequence[Answer] = (),
 ) -> StepResult:
-    """The bot for failed releases after the first attempt of run 77 failed, with the
-    run as GitHub shows it now and the answer of its rerun."""
+    """The bot for failed releases after the first attempt of run 77 failed in jobs,
+    with the run as GitHub shows it now and the answer of its rerun, after the answers
+    first."""
     return run_step(
         tmp_path,
         "after-checks.yml",
         "release",
         "Run the failed jobs of the release once more",
         answers=[
+            *first,
+            Answer(
+                r"api repos/o/r/actions/runs/77/attempts/1/jobs --paginate --jq .*",
+                json={"jobs": list(jobs)},
+            ),
             Answer(
                 r"api repos/o/r/actions/runs/77 --jq .*",
                 json={"id": 77, "status": status, "run_attempt": attempt},
@@ -1520,6 +1545,85 @@ def rerun_the_release(
             rerun,
         ],
         env={"RUN": "77", "SHA": "abc1234def"},
+        stubs={"sleep": recording("sleep")},
+    )
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "jobs",
+    [[], [{**FAILED_IN_A_STEP, "steps": []}]],
+    ids=["no job", "a job without a step"],
+)
+def test_the_bot_leaves_a_release_alone_that_github_could_not_start(
+    tmp_path: Path, jobs: list[dict[str, Any]]
+) -> None:
+    # As in GitHub's outage of 9 November 2026: another try while GitHub fails would
+    # fail too, and the scheduled run of the release takes it up (decision 0136).
+    # The job without a step has no annotation either.
+    done = rerun_the_release(
+        tmp_path,
+        "completed",
+        1,
+        exact("run rerun 77 --failed", code=1),
+        jobs,
+        first=[Answer(r"api repos/o/r/check-runs/771/annotations .*", json=[])],
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert not done.called("run rerun")
+    assert done.stdout.startswith(
+        "::notice title=GitHub is unavailable::GitHub couldn't start the release of "
+        "abc1234"
+    )
+    assert done.summary == (
+        "GitHub couldn't start the release of abc1234, so the bot leaves it alone; "
+        "the scheduled run of the release takes it up.\n"
+    )
+
+
+@WITH_JQ
+def test_the_bot_runs_a_release_again_whose_job_no_runner_took(
+    tmp_path: Path,
+) -> None:
+    # A job without a step that has an annotation broke: GitHub started the run.
+    done = rerun_the_release(
+        tmp_path,
+        "completed",
+        1,
+        exact("run rerun 77 --failed"),
+        [{**FAILED_IN_A_STEP, "steps": []}],
+        first=[
+            Answer(
+                r"api repos/o/r/check-runs/771/annotations .*",
+                json=[{"message": "The job was not acquired by Runner of type hosted"}],
+            )
+        ],
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.called("run rerun 77 --failed")
+    assert "::notice" not in done.stdout
+
+
+@WITH_JQ
+def test_the_bot_for_failed_releases_ends_with_a_notice_when_github_keeps_failing(
+    tmp_path: Path,
+) -> None:
+    failing = Answer(
+        r"api repos/o/r/actions/runs/77/attempts/1/jobs .*",
+        err="HTTP 503: Service Unavailable\n",
+        code=1,
+    )
+    done = rerun_the_release(
+        tmp_path, "completed", 1, exact("run rerun 77 --failed"), first=[failing]
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert not done.called("run rerun")
+    assert "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 503" in (
+        done.stdout
     )
 
 

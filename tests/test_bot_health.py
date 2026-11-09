@@ -16,7 +16,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from blueprint import cli
+from blueprint import branches, cli
 from blueprint.bot_health import (
     LABEL,
     LABEL_COLOR,
@@ -111,13 +111,22 @@ def job_of_a_run(
     conclusion: str,
     steps: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
+    """A job that a runner took: it has a step at least, that of its set-up. One that
+    GitHub never started has none, as never_started() below makes it."""
+    steps = [("Set up job", "success")] if steps is None else steps
     return {
         "id": number,
         "name": name,
         "conclusion": conclusion,
         "html_url": f"https://github.com/{REPO}/actions/runs/1/job/{number}",
-        "steps": [{"name": step, "conclusion": result} for step, result in steps or []],
+        "steps": [{"name": step, "conclusion": result} for step, result in steps],
     }
+
+
+def never_started(number: int, name: str) -> dict[str, Any]:
+    """A job that GitHub failed before a runner took it, as in its outage of 9
+    November 2026: without a step, a runner and an annotation."""
+    return {**job_of_a_run(number, name, "failure", []), "runner_name": None}
 
 
 def failure(level: str, message: str) -> dict[str, str]:
@@ -138,6 +147,8 @@ class FakeGitHub:
         self.workflows: list[dict[str, Any]] = []
         self.workflow_runs: dict[int, list[dict[str, Any]]] = {}
         self.reruns: list[int] = []
+        # The runs that ran again as a whole.
+        self.reran: list[int] = []
         self.enabled: list[int] = []
         self.dispatched: list[tuple[int, Any]] = []
         self.others: dict[str, dict[str, Any] | int] = {}
@@ -152,6 +163,7 @@ class FakeGitHub:
             "openGraphImageUrl": "https://opengraph.githubassets.com/1/" + REPO,
         }
         self.graphql_refused = False
+        self.graphql_error = "refused"
         self.picture_commits: list[dict[str, str]] = [{"sha": HEAD}]
         self.calls: list[tuple[str, str]] = []
 
@@ -162,7 +174,7 @@ class FakeGitHub:
             self.calls.append(("POST", "graphql"))
             answer = json.dumps({"data": {"repository": self.preview}})
             return subprocess.CompletedProcess(
-                arguments, int(self.graphql_refused), answer, "refused"
+                arguments, int(self.graphql_refused), answer, self.graphql_error
             )
         paged = "--paginate" in arguments
         method, path = ("GET", arguments[-1]) if paged else (arguments[3], arguments[4])
@@ -195,6 +207,8 @@ class FakeGitHub:
             (r"", self.repository),
             (r"/actions/runs/(\d+)", self.run),
             (r"/actions/runs/(\d+)/rerun-failed-jobs", self.rerun),
+            (r"/actions/runs/(\d+)/rerun", self.rerun_all),
+            (r"/actions/runs/(\d+)/attempts/(\d+)", self.attempt),
             (r"/actions/runs/(\d+)/attempts/(\d+)/jobs\?per_page=100", self.run_jobs),
             (
                 r"/actions/runs/(\d+)/jobs\?filter=latest&per_page=100",
@@ -252,10 +266,35 @@ class FakeGitHub:
         self.reruns.append(int(number))
         return 201, {}
 
+    def rerun_all(self, method: str, body: Any, number: str) -> tuple[int, Any]:
+        assert method == "POST"
+        self.reran.append(int(number))
+        return 201, {}
+
+    def attempt(
+        self, method: str, body: Any, number: str, attempt: str
+    ) -> tuple[int, Any]:
+        run = self.runs.get(int(number))
+        if run is None or run["run_attempt"] != int(attempt):
+            return 404, {"message": "Not Found"}
+        return 200, run
+
     def run_jobs(
         self, method: str, body: Any, number: str, attempt: str
     ) -> tuple[int, Any]:
-        return 200, {"jobs": self.jobs.get((int(number), int(attempt)), [])}
+        key = (int(number), int(attempt))
+        if key in self.jobs:
+            return 200, {"jobs": self.jobs[key]}
+        # A run that failed in a job that the test doesn't name, which GitHub started.
+        runs = [self.runs.get(key[0])] + [
+            run for listed in self.workflow_runs.values() for run in listed
+        ]
+        failed = any(
+            run and run["id"] == key[0] and run["conclusion"] == "failure"
+            for run in runs
+        )
+        job = job_of_a_run(0, "a job", "failure", [("a step", "failure")])
+        return 200, {"jobs": [job] if failed else []}
 
     def latest_jobs(self, method: str, body: Any, number: str) -> tuple[int, Any]:
         # The latest attempt of each job: a second try of the failed jobs runs only
@@ -744,6 +783,23 @@ def test_the_verification_of_a_published_release_opens_the_issue(
     assert "Only a run for `v1.2.3` closes this issue" in github.issues[1]["body"]
 
 
+def test_a_verification_of_a_published_release_that_never_started_runs_again(
+    github: FakeGitHub,
+) -> None:
+    # The daily look watches the runs of the branch alone, so the end of the run
+    # gives the verification of a tag its second try.
+    github.runs[1] = run_of(
+        1, name="Release verification", event="release", branch="v1.2.3"
+    )
+    github.jobs[(1, 1)] = []
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result.startswith("Release verification: ")
+    assert "couldn't start" not in result
+    assert writes(github) != []
+
+
 def test_only_a_run_for_its_tag_closes_the_issue_of_a_published_release(
     github: FakeGitHub,
 ) -> None:
@@ -911,7 +967,204 @@ def test_a_finding_is_reported_without_a_second_try(
 
     assert result == f"{name}: fails: opened #1."
     assert github.reruns == []
-    assert "The run names no failed job; its page says why" in github.issues[1]["body"]
+    assert "a job" in github.issues[1]["body"]
+
+
+# The runs that GitHub ended before their jobs in its outage of 9 November 2026, from
+# 18:09 to 18:14 UTC, as the bots of the blueprint's repositories saw them: Bot health,
+# After the checks, Update branches, Findings and Issue lifecycle, by the dozen.
+OUTAGE = {
+    # Run 42672089408 of Bot health, "No jobs were run".
+    "no job": [],
+    # Run 42672085130 of Bot health: a job without a step, a runner or an annotation.
+    "a job that never started": [never_started(11, "look at the end of a bot's run")],
+    # Run 42671375200 of Findings, "All jobs were successful": GitHub never created
+    # the second job, and run 42671974188 of Bot health, whose one job skipped.
+    "only jobs that passed or skipped": [
+        job_of_a_run(
+            11, "Findings / Read the record of the reported alerts", "success"
+        ),
+        job_of_a_run(12, "look after every workflow", "skipped", []),
+    ],
+}
+
+
+@pytest.mark.parametrize("jobs", OUTAGE.values(), ids=OUTAGE)
+@pytest.mark.parametrize(
+    ("name", "path"),
+    [
+        ("Findings", FINDINGS),
+        ("Update branches", ".github/workflows/update-branches.yml"),
+        ("Release", RELEASE),
+    ],
+)
+@pytest.mark.parametrize("attempt", [1, 2])
+def test_the_end_of_a_run_that_github_could_not_start_starts_nothing(
+    github: FakeGitHub,
+    jobs: list[dict[str, Any]],
+    name: str,
+    path: str,
+    attempt: int,
+) -> None:
+    # Another try while GitHub fails would fail too, and an issue would mail about
+    # nothing that a person can fix (decision 0136).
+    github.runs[1] = run_of(1, name=name, path=path, attempt=attempt)
+    github.jobs[(1, attempt)] = jobs
+    github.add_issue(path, run=0, failed=1)
+    notices: list[str] = []
+
+    result = watch_run(api_of(github), REPO, 1, NOW, notices)
+
+    later = (
+        "the daily look runs it again"
+        if attempt == 1
+        else "the daily look reports it if its last attempt never started either"
+    )
+    assert result == (
+        f"{name}: GitHub couldn't start [the run of 2026-10-13 09:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/1), so there is nothing to report; "
+        f"{later}."
+    )
+    assert writes(github) == []
+    assert notices == [
+        f"::notice title=GitHub is unavailable::GitHub couldn't start the run 1 of "
+        f"{name}, as in an outage of GitHub (https://www.githubstatus.com), so the "
+        "bot leaves it alone instead of trying again while GitHub fails. Nothing of "
+        "the code or the bots failed."
+    ]
+
+
+def test_the_end_of_a_run_that_github_could_not_start_needs_no_list_of_notices(
+    github: FakeGitHub,
+) -> None:
+    github.runs[1] = run_of(1)
+    github.jobs[(1, 1)] = []
+
+    assert "GitHub couldn't start" in watch_run(api_of(github), REPO, 1, NOW)
+    assert writes(github) == []
+
+
+def test_a_job_without_a_step_that_says_why_it_failed_is_a_failure(
+    github: FakeGitHub,
+) -> None:
+    # GitHub couldn't evaluate the condition or the matrix of the job: the workflow
+    # is wrong, and a person must fix it.
+    github.runs[1] = run_of(1)
+    github.jobs[(1, 1)] = [never_started(11, "release")]
+    github.annotations[11] = [
+        failure("failure", "Error when evaluating 'strategy' for job 'release'.")
+    ]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Release: failed: runs the failed jobs once more."
+    assert github.reruns == [1]
+
+
+def test_a_failure_in_a_step_is_one_beside_a_job_that_never_started(
+    github: FakeGitHub,
+) -> None:
+    github.runs[1] = run_of(1)
+    github.jobs[(1, 1)] = [
+        never_started(11, "e2e"),
+        job_of_a_run(12, "test", "failure", [("Run the tests", "failure")]),
+    ]
+
+    assert watch_run(api_of(github), REPO, 1, NOW) == (
+        "Release: failed: runs the failed jobs once more."
+    )
+
+
+def lost_run(github: FakeGitHub, tmp_path: Path, number: int, attempt: int) -> None:
+    """A workflow whose latest run GitHub couldn't start."""
+    write(tmp_path, number, SCHEDULED)
+    github.workflows.append(workflow(number, f"Clean-up {number}"))
+    github.workflow_runs[number] = [
+        run_of(
+            number * 10,
+            name=f"Clean-up {number}",
+            path=f".github/workflows/w{number}.yml",
+            created=NOW - timedelta(hours=7),
+            attempt=attempt,
+        )
+    ]
+    github.jobs[(number * 10, attempt)] = []
+
+
+def test_the_daily_look_runs_a_run_again_that_github_could_not_start(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    lost_run(github, tmp_path, 1, attempt=1)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reran == [10]
+    assert github.issues == {}
+    assert github.dispatched == []
+    assert summary.splitlines()[6:] == [
+        "| `Clean-up 1` | GitHub couldn't start [the run of 2026-10-13 05:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/10): runs it again |"
+    ]
+
+
+def test_the_daily_look_runs_only_a_few_runs_again_at_once(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    for number in range(1, MOST_STARTS + 2):
+        lost_run(github, tmp_path, number, attempt=1)
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert len(github.reran) == MOST_STARTS
+    assert summary.splitlines()[-1].endswith(
+        f": runs it again in a later look, {MOST_STARTS} a day |"
+    )
+
+
+def test_the_daily_look_reports_a_run_that_github_could_not_start_again(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Its second try failed the same way: no outage lasts that long, so a person looks.
+    lost_run(github, tmp_path, 1, attempt=2)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reran == []
+    assert len(github.issues) == 1
+    assert "The run names no failed job" in github.issues[1]["body"]
+    assert "fails: opened #1" in summary
+
+
+def test_the_daily_look_waits_out_an_outage_of_github(
+    github: FakeGitHub, tmp_path: Path, waits: list[float]
+) -> None:
+    github.workflows = [workflow(1, "First"), workflow(2, "Second")]
+    for number in (1, 2):
+        github.fail[
+            (
+                "GET",
+                f"repos/{REPO}/actions/workflows/{number}/runs"
+                "?branch=main&exclude_pull_requests=true&per_page=50",
+            )
+        ] = 503
+    notices: list[str] = []
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW, notices=notices)
+
+    # The next day's look catches up; no failed run mails anyone.
+    assert healthy
+    assert summary.splitlines()[6] == (
+        "| `First` | couldn't look: `GitHub answered 503: simulated failure` |"
+    )
+    assert len(notices) == 1
+    assert notices[0].startswith(
+        "::notice title=GitHub is unavailable::GitHub kept failing (GitHub answered "
+        "503: simulated failure)"
+    )
+    # Every request is asked again, until the budget of the waits is spent.
+    assert waits == [10, 20, 40, 10, 20]
 
 
 def test_a_run_that_github_could_not_start_is_reported_at_once(
@@ -1722,13 +1975,13 @@ def test_the_daily_look_goes_on_after_an_error(
             f"repos/{REPO}/actions/workflows/1/runs"
             "?branch=main&exclude_pull_requests=true&per_page=50",
         )
-    ] = 502
+    ] = 403
 
     summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
 
     assert not healthy
     assert summary.splitlines()[6:] == [
-        "| `Broken` | couldn't look: `GitHub answered 502: simulated failure` |",
+        "| `Broken` | couldn't look: `GitHub answered 403: simulated failure` |",
         "| `Fine` | no finished run on `main` |",
     ]
 
@@ -2227,6 +2480,32 @@ def test_a_social_preview_that_cannot_be_compared_fails_the_look(
     assert github.issues == {}
 
 
+@pytest.mark.parametrize("watched", [True, False], ids=["notices", "no notices"])
+def test_a_social_preview_that_github_fails_to_show_fails_no_look(
+    github: FakeGitHub, tmp_path: Path, waits: list[float], watched: bool
+) -> None:
+    # In an outage of GitHub, as for the workflows: the next look compares it.
+    root = with_a_picture(tmp_path)
+    uploaded(github)
+    github.graphql_refused = True
+    github.graphql_error = "gh: Bad Gateway (HTTP 502)"
+    notices: list[str] | None = [] if watched else None
+
+    summary, healthy = sweep(
+        api_of(github), REPO, root, NOW, serving(b"x"), notices=notices
+    )
+
+    assert healthy
+    assert preview_lines(summary)[-1].startswith(
+        "Couldn't compare it: `GitHub answered 502"
+    )
+    if notices is not None:
+        assert len(notices) == 1
+        assert notices[0].startswith(
+            "::notice title=GitHub is unavailable::GitHub kept failing"
+        )
+
+
 # ---------------------------------------------------------------- Renovate
 
 
@@ -2461,6 +2740,127 @@ def test_the_issue_of_renovate_lists_a_few_problems(
 # ---------------------------------------------------------------- the command line
 
 
+def test_the_bot_ends_with_a_notice_when_github_keeps_failing(
+    github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.fail[("GET", f"repos/{REPO}/actions/runs/1")] = 500
+
+    assert (
+        cli.main(["--repo", REPO, "bot-health", "run", "1"], Api(github), tmp_path) == 0
+    )
+
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == (
+        "::notice title=GitHub is unavailable::GitHub kept failing (GitHub answered "
+        "500: simulated failure), as in an outage of GitHub "
+        "(https://www.githubstatus.com), so the bot did nothing this time; its next "
+        "run catches up. Nothing to do for a person.\n"
+    )
+
+    # A refusal is no outage: it fails as before.
+    github.fail[("GET", f"repos/{REPO}/actions/runs/1")] = 403
+    assert (
+        cli.main(["--repo", REPO, "bot-health", "run", "1"], Api(github), tmp_path) == 2
+    )
+    assert "blueprint.py: GitHub answered 403" in capsys.readouterr().err
+
+    # The daily look passes too, with the table and one notice.
+    github.workflows = [workflow(1, "First")]
+    github.fail[
+        (
+            "GET",
+            f"repos/{REPO}/actions/workflows/1/runs"
+            "?branch=main&exclude_pull_requests=true&per_page=50",
+        )
+    ] = 502
+    assert cli.main(["--repo", REPO, "bot-health", "sweep"], Api(github), tmp_path) == 0
+    out, err = capsys.readouterr()
+    assert "| `First` | couldn't look: `GitHub answered 502" in out
+    assert err.startswith("::notice title=GitHub is unavailable::GitHub kept failing")
+
+
+def test_the_command_line_tells_a_run_that_github_could_not_start(
+    github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.runs[1] = run_of(1)
+    github.jobs[(1, 1)] = []
+
+    assert (
+        cli.main(["--repo", REPO, "bot-health", "run", "1"], Api(github), tmp_path) == 0
+    )
+
+    out, err = capsys.readouterr()
+    assert "GitHub couldn't start" in out
+    assert err.startswith("::notice title=GitHub is unavailable::GitHub couldn't start")
+    assert "::notice" not in out
+
+
+def test_the_branch_bot_leaves_the_line_after_a_check_that_github_could_not_start(
+    github: FakeGitHub, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.runs[5] = run_of(5, name="Lint", event="pull_request", attempt=2)
+    github.jobs[(5, 2)] = [never_started(51, "lint")]
+    command = ["--repo", REPO, "next-branch", "--after", "5", "--attempt", "2"]
+
+    assert cli.main(command, Api(github)) == 0
+
+    out, err = capsys.readouterr()
+    assert out == "GitHub couldn't start the run 5, so the line stays as it is.\n\n"
+    assert err.startswith(
+        "::notice title=GitHub is unavailable::GitHub couldn't start the run 5,"
+    )
+    assert writes(github) == []
+
+
+def test_the_branch_bot_reads_the_run_with_the_token_of_its_job(
+    github: FakeGitHub,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The token of the release app may not read runs, which a private repository
+    # refuses with 403; the token of the job may not read the annotations.
+    job = FakeGitHub()
+    job.runs[5] = run_of(5, name="Lint", event="pull_request", attempt=2)
+    job.jobs[(5, 2)] = [never_started(51, "lint")]
+    job.fail[("GET", f"repos/{REPO}/check-runs/51/annotations?per_page=50")] = 403
+    github.fail[("GET", f"repos/{REPO}/actions/runs/5/attempts/2")] = 403
+    github.fail[
+        ("GET", f"repos/{REPO}/actions/runs/5/attempts/2/jobs?per_page=100")
+    ] = 403
+    monkeypatch.setenv("ACTIONS_TOKEN", "the-token-of-the-job")
+    monkeypatch.setenv("BOT_ACCOUNT", "release-app[bot]")
+    monkeypatch.setattr(branches, "run_gh_as", lambda token: job)
+    command = ["--repo", REPO, "next-branch", "--after", "5", "--attempt", "2"]
+
+    assert cli.main(command, Api(github)) == 0
+
+    out, _ = capsys.readouterr()
+    assert out == "GitHub couldn't start the run 5, so the line stays as it is.\n\n"
+    assert ("GET", f"repos/{REPO}/check-runs/51/annotations?per_page=50") in (
+        github.calls
+    )
+    assert writes(github) == writes(job) == []
+
+
+@pytest.mark.parametrize(
+    ("command", "waits"),
+    [
+        (["bot-health", "run", "1"], True),
+        (["bot-health", "sweep"], True),
+        (["next-branch"], True),
+        (["coach", "report", "abc"], True),
+        # A check must not pass because GitHub failed.
+        (["coach", "signatures", "1", "--base", "main"], False),
+        (["settings", "apply"], False),
+    ],
+)
+def test_only_the_bots_wait_out_an_outage_of_github(
+    command: list[str], waits: bool
+) -> None:
+    assert cli.waits_out_an_outage(cli.parser().parse_args(command)) is waits
+
+
 def test_the_command_line_of_the_bot(
     github: FakeGitHub,
     tmp_path: Path,
@@ -2481,7 +2881,7 @@ def test_the_command_line_of_the_bot(
             f"repos/{REPO}/actions/workflows/1/runs"
             "?branch=main&exclude_pull_requests=true&per_page=50",
         )
-    ] = 500
+    ] = 403
     assert cli.main([*arguments, "sweep"], Api(github), tmp_path) == 1
     assert "| `Broken` | couldn't look:" in capsys.readouterr().out
     github.workflows = []

@@ -1450,7 +1450,7 @@ def test_an_update_of_a_fork_whose_head_stays_starts_no_further_run(
 def test_a_failed_look_at_the_head_of_a_fork_starts_no_further_run() -> None:
     github = FakeGitHub(pull(7, cross=True, editable=True))
     github.behind = {7: 1}
-    github.fail[("GET", f"repos/{REPO}/pulls/7")] = 500
+    github.fail[("GET", f"repos/{REPO}/pulls/7")] = 403
 
     summary, warnings = with_job(github)
 
@@ -1736,7 +1736,7 @@ def test_only_runs_of_exactly_this_head_that_wait_are_approved() -> None:
 )
 def test_any_failed_request_means_no_approval(path: str) -> None:
     github = forked()
-    github.fail[("GET", path)] = 500
+    github.fail[("GET", path)] = 403
 
     summary, warnings = with_job(github)
 
@@ -1900,7 +1900,7 @@ def test_the_command_writes_the_summary_and_the_warnings(
     # One pull request that GitHub refuses: a warning for the run, which fails.
     github = FakeGitHub(pull(1))
     github.behind = {1: 1}
-    github.fail[("PUT", f"repos/{REPO}/pulls/1/update-branch")] = 500
+    github.fail[("PUT", f"repos/{REPO}/pulls/1/update-branch")] = 422
     assert cli.main(["--repo", REPO, "next-branch"], api=Api(github)) == 1
     out, err = capsys.readouterr()
     assert "GitHub refused a request" in out
@@ -1913,6 +1913,60 @@ def test_the_command_writes_the_summary_and_the_warnings(
     )
     _, err = capsys.readouterr()
     assert err.startswith("::warning::The branch bot couldn't handle #1:")
+
+
+def test_the_command_moves_the_line_after_a_check_that_failed_in_a_step(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[tuple[int, int]] = []
+
+    def failed_unstarted(
+        api: Api, repo: str, run: int, attempt: int, checks: Api | None = None
+    ) -> bool:
+        asked.append((run, attempt))
+        return False
+
+    monkeypatch.setattr(cli, "failed_unstarted", failed_unstarted)
+    github = FakeGitHub(pull(1))
+    github.behind = {1: 1}
+    command = ["--repo", REPO, "next-branch", "--after", "5", "--attempt", "2"]
+
+    assert cli.main(command, api=Api(github)) == 0
+    assert asked == [(5, 2)]
+    assert capsys.readouterr().out.startswith("### Branch bot\n")
+
+
+def test_the_command_passes_with_a_notice_when_github_fails(
+    capsys: pytest.CaptureFixture[str], waits: list[float]
+) -> None:
+    # As in GitHub's outage of 9 November 2026: the next run tries again, and no
+    # failed run mails anyone.
+    github = FakeGitHub(pull(1))
+    github.behind = {1: 1}
+    github.fail[("PUT", f"repos/{REPO}/pulls/1/update-branch")] = 500
+
+    assert cli.main(["--repo", REPO, "next-branch"], api=Api(github)) == 0
+    out, err = capsys.readouterr()
+    assert "GitHub failed: `GitHub answered 500" in notes(out)[1]
+    assert "the next run tries again" in notes(out)[1]
+    assert err.startswith(
+        "::notice title=GitHub is unavailable::The branch bot couldn't handle #1, "
+        "as GitHub failed: GitHub answered 500"
+    )
+    assert waits == [10, 20, 40]
+
+
+def test_the_command_ends_with_a_notice_when_github_keeps_failing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    github = FakeGitHub()
+    github.list_error = "gh: Internal server error (HTTP 500)"
+
+    assert cli.main(["--repo", REPO, "next-branch"], api=Api(github)) == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("::notice title=GitHub is unavailable::GitHub kept failing")
+    assert "Nothing to do for a person." in err
 
 
 def test_the_command_passes_when_github_refuses_something_about_a_fork(
