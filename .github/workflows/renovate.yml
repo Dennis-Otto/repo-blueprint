@@ -210,6 +210,7 @@ jobs:
           allowed-endpoints: >-
             api.github.com:443
       - name: Make sure that Harden-Runner blocks
+        id: blocks
         # Harden-Runner goes on without its agent when the agent can't be downloaded, as
         # in GitHub's outage of 8 November 2026, or doesn't start: the job would reach
         # every host. It stops here instead, so that it can run again (decision 0134).
@@ -223,7 +224,11 @@ jobs:
             sleep 1
           done
           status="$(cat /home/agent/agent.status 2>/dev/null || true)"
-          if [[ ! -e /home/agent/agent ]]; then
+          if [[ ! -d /home/agent/ ]]; then
+            # Harden-Runner returns before it makes the folder of the agent when
+            # StepSecurity says that it is unavailable, or the repository skips it.
+            why="didn't install its agent, as StepSecurity said that it is unavailable or the repository skips it (the log of its step says which),"
+          elif [[ ! -e /home/agent/agent ]]; then
             why="couldn't download its agent, mostly in an outage of GitHub (https://www.githubstatus.com),"
           elif [[ "$status" != Initialized ]]; then
             why="has an agent that didn't start,"
@@ -554,6 +559,7 @@ jobs:
             github.com:443
             results-receiver.actions.githubusercontent.com:443
       - name: Make sure that Harden-Runner blocks
+        id: blocks
         # Harden-Runner goes on without its agent when the agent can't be downloaded, as
         # in GitHub's outage of 8 November 2026, or doesn't start: the job would reach
         # every host. It stops here instead, so that it can run again (decision 0134).
@@ -567,7 +573,11 @@ jobs:
             sleep 1
           done
           status="$(cat /home/agent/agent.status 2>/dev/null || true)"
-          if [[ ! -e /home/agent/agent ]]; then
+          if [[ ! -d /home/agent/ ]]; then
+            # Harden-Runner returns before it makes the folder of the agent when
+            # StepSecurity says that it is unavailable, or the repository skips it.
+            why="didn't install its agent, as StepSecurity said that it is unavailable or the repository skips it (the log of its step says which),"
+          elif [[ ! -e /home/agent/agent ]]; then
             why="couldn't download its agent, mostly in an outage of GitHub (https://www.githubstatus.com),"
           elif [[ "$status" != Initialized ]]; then
             why="has an agent that didn't start,"
@@ -629,7 +639,7 @@ jobs:
       # failure, and the bot then skips that file in every run: one issue lists them
       # and closes after three runs in a row without a problem.
       - name: Keep the issue of Renovate's problems current
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.blocks.outcome != 'failure' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

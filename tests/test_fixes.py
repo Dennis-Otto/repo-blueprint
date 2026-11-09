@@ -3840,6 +3840,7 @@ def test_a_weekly_run_starts_the_fix_bot_only_when_it_fails() -> None:
     issue = step_in(bot, "Keep the issue of the fix bot of main current")
     assert condition_of(issue) == (
         "always() && github.event.workflow_run.event != 'pull_request'"
+        " && steps.blocks.outcome != 'failure'"
     )
 
 
@@ -4193,7 +4194,8 @@ def test_a_failed_job_after_a_run_that_did_not_fail_says_nothing_without_a_findi
         "failure() && github.event.workflow_run.event == 'pull_request' && "
         "(github.event.workflow_run.conclusion == 'failure' || "
         "steps.collect.outputs.stopped == 'true' || "
-        "steps.collect.outputs.action != '')"
+        "steps.collect.outputs.action != '') && "
+        "steps.blocks.outcome != 'failure'"
     )
 
 

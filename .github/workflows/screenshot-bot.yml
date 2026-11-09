@@ -98,6 +98,7 @@ jobs:
             api.github.com:443
             github.com:443
       - name: Make sure that Harden-Runner blocks
+        id: blocks
         # Harden-Runner goes on without its agent when the agent can't be downloaded, as
         # in GitHub's outage of 8 November 2026, or doesn't start: the job would reach
         # every host. It stops here instead, so that it can run again (decision 0134).
@@ -111,7 +112,11 @@ jobs:
             sleep 1
           done
           status="$(cat /home/agent/agent.status 2>/dev/null || true)"
-          if [[ ! -e /home/agent/agent ]]; then
+          if [[ ! -d /home/agent/ ]]; then
+            # Harden-Runner returns before it makes the folder of the agent when
+            # StepSecurity says that it is unavailable, or the repository skips it.
+            why="didn't install its agent, as StepSecurity said that it is unavailable or the repository skips it (the log of its step says which),"
+          elif [[ ! -e /home/agent/agent ]]; then
             why="couldn't download its agent, mostly in an outage of GitHub (https://www.githubstatus.com),"
           elif [[ "$status" != Initialized ]]; then
             why="has an agent that didn't start,"
@@ -318,6 +323,7 @@ jobs:
           sudo systemctl stop egress-dns-resolver.service egress-outbound-proxy.service || true
           sudo resolvectl flush-caches || true
       - name: Make sure that Harden-Runner blocks
+        id: blocks
         if: needs.start.outputs.policy == 'block'
         # Harden-Runner goes on without its agent when the agent can't be downloaded, as
         # in GitHub's outage of 8 November 2026, or doesn't start: the job would reach
@@ -332,7 +338,11 @@ jobs:
             sleep 1
           done
           status="$(cat /home/agent/agent.status 2>/dev/null || true)"
-          if [[ ! -e /home/agent/agent ]]; then
+          if [[ ! -d /home/agent/ ]]; then
+            # Harden-Runner returns before it makes the folder of the agent when
+            # StepSecurity says that it is unavailable, or the repository skips it.
+            why="didn't install its agent, as StepSecurity said that it is unavailable or the repository skips it (the log of its step says which),"
+          elif [[ ! -e /home/agent/agent ]]; then
             why="couldn't download its agent, mostly in an outage of GitHub (https://www.githubstatus.com),"
           elif [[ "$status" != Initialized ]]; then
             why="has an agent that didn't start,"
@@ -478,7 +488,7 @@ jobs:
       # as the screenshots and the logs of a section that failed, for a person to see,
       # by the shard and the attempt; under a name that the job collect never takes.
       - name: Keep the folder of the failure
-        if: failure() && needs.start.outputs.failure_folder != ''
+        if: failure() && needs.start.outputs.failure_folder != '' && steps.blocks.outcome != 'failure'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: failed-render-${{ matrix.id }}-attempt-${{ github.run_attempt }}
@@ -605,6 +615,7 @@ jobs:
             github.com:443
             results-receiver.actions.githubusercontent.com:443
       - name: Make sure that Harden-Runner blocks
+        id: blocks
         # Harden-Runner goes on without its agent when the agent can't be downloaded, as
         # in GitHub's outage of 8 November 2026, or doesn't start: the job would reach
         # every host. It stops here instead, so that it can run again (decision 0134).
@@ -618,7 +629,11 @@ jobs:
             sleep 1
           done
           status="$(cat /home/agent/agent.status 2>/dev/null || true)"
-          if [[ ! -e /home/agent/agent ]]; then
+          if [[ ! -d /home/agent/ ]]; then
+            # Harden-Runner returns before it makes the folder of the agent when
+            # StepSecurity says that it is unavailable, or the repository skips it.
+            why="didn't install its agent, as StepSecurity said that it is unavailable or the repository skips it (the log of its step says which),"
+          elif [[ ! -e /home/agent/agent ]]; then
             why="couldn't download its agent, mostly in an outage of GitHub (https://www.githubstatus.com),"
           elif [[ "$status" != Initialized ]]; then
             why="has an agent that didn't start,"

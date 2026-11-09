@@ -423,6 +423,11 @@ TESTED = {
     ("after-checks.yml", "rerun", "Run the failed jobs once more"): "test_template.py",
     (
         "after-checks.yml",
+        "stopped",
+        "Run the jobs again that Harden-Runner stopped",
+    ): "test_template.py",
+    (
+        "after-checks.yml",
         "report",
         "Add the jobs that failed at first to the issue of flaky tests",
     ): "test_template.py",
