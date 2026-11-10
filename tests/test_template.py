@@ -7899,14 +7899,19 @@ def test_the_setup_on_windows_fits_the_kind(
     agents = (project / "AGENTS.md").read_text(encoding="utf-8")
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     home_assistant = kind == "home-assistant"
-    # Home Assistant runs on Linux and macOS alone: on Windows, pip stops at the
-    # winrt-runtime of bleak, which the lock file of Linux doesn't pin, and pytest at
-    # the fcntl of the runner of Home Assistant. So an integration sends Windows to
-    # WSL 2 or the dev container, in AGENTS.md and CONTRIBUTING.md alike, and never
-    # to Git Bash, which every other kind takes.
+    # The lock file of an integration is compiled for Linux: on Windows, pip stops at
+    # the winrt-runtime of bleak, and pytest at the fcntl of the runner of Home
+    # Assistant; on macOS, pip stops at the pyobjc-core of bleak. So an integration
+    # sends Windows to WSL 2 or the dev container and macOS to the dev container, in
+    # AGENTS.md and CONTRIBUTING.md alike, and never to Git Bash, which every other
+    # kind takes.
     phrases = [
-        "Home Assistant runs on Linux and macOS, not on Windows",
-        "pins no `winrt-runtime`, which bleak needs on Windows alone",
+        "Home Assistant runs on Linux and macOS, but",
+        "run on Linux alone",
+        "compiled for Linux",
+        "the `winrt-runtime` that bleak needs on Windows",
+        "the `pyobjc-core` that it needs on macOS",
+        "On macOS, run",
         "imports `fcntl`, a module of Python for Unix alone",
         "pytest-homeassistant-custom-component imports",
         "WSL 2",
@@ -7932,6 +7937,11 @@ def test_the_setup_on_windows_fits_the_kind(
         for phrase in phrases:
             assert (phrase in text) == home_assistant, phrase
     assert ("On Windows, run them in Git Bash" in agents) != home_assistant
+    # The preview of the website runs on Windows, the strict build of the checks not.
+    assert (
+        "The preview runs on Windows and macOS that way, but `bash scripts/check.sh`"
+        " runs on Linux alone" in contributing
+    ) == home_assistant
     launcher = (
         "On Windows, run them in Git Bash, with `py -3` in place of `python3` and"
         " `.venv/Scripts/` in place of `.venv/bin/`."
