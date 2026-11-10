@@ -8,7 +8,10 @@ watched workflow ends on the default branch, the bot runs its failed jobs once m
 if a second try can pass, and otherwise keeps one issue per workflow current, with
 the failed jobs, their steps and their first errors; a run that passes closes it
 once every job that failed ran again in it and passed, so a run that skipped such a
-job, as one that only plans, leaves it open.
+job, as one that only plans, leaves it open. A bot of events, such as Welcome, also
+for a pull request, and a workflow that keeps an issue of its own get neither a second
+try nor an issue, unless Harden-Runner stopped a job of their first attempt: then
+their failed jobs run once more (decision 0141).
 Once a day it looks at the latest run of every workflow, those of the project too,
 in case GitHub lost an event, and starts a workflow whose schedule GitHub missed or
 switched off. A failure of Lint, which main runs only each week, counts only at the
@@ -53,7 +56,7 @@ LABEL_DESCRIPTION = (
 )
 # The label of the issue that waits for a step that only a person can take, such as
 # the upload of the social preview, which no API offers: nothing fails there
-# (decision 0140).
+# (decision 0141).
 STEP = "manual-step"
 STEP_COLOR = "1d76db"
 STEP_DESCRIPTION = (
@@ -73,15 +76,25 @@ PULL_REQUESTS = frozenset({"pull_request", "pull_request_target"})
 VERIFICATION = "Release verification"
 FAILED = frozenset({"failure", "timed_out", "startup_failure"})
 OUT_OF_TIME = "The job has exceeded the maximum execution time"
+# The annotation with which the step "Make sure that Harden-Runner blocks" stops a job
+# whose Harden-Runner doesn't block, mostly in an outage of GitHub (decision 0134).
+STOPPED = "would reach every host, and it stops here instead"
 PASSED = "success"
 # A second try only hides or repeats their failure: Findings fails while an alert is
 # open, Mutation takes hours to measure the same again, and the property tests and the
-# fuzzing failed on an input that they found.
+# fuzzing failed on an input that they found. Not so when Harden-Runner stopped every
+# job that failed: then the second try repeats nothing.
 ONE_TRY = frozenset({"Findings", "Mutation", "Property tests", "Fuzzing"})
 # Workflows that keep an issue of their own about their failures; a workflow of the
 # project says so in a comment line of its own, `# bot-health: own-issue`. The daily
 # look still starts one whose schedule GitHub missed or switched off.
 OWN_ISSUE = frozenset({"Diagrams", "Newest Node", "Newest Python", "Next runner"})
+# The bots of events: a pull request or a comment on one starts them, also one of a
+# fork, and a failure shows on that pull request. Like the workflows that keep an issue
+# of their own, they get no issue of the bot, and they run again only when
+# Harden-Runner stopped them, which no later event of theirs makes up for (decision
+# 0141).
+EVENT_BOTS = frozenset({"Area labels", "Commands", "Dependabot maintenance", "Welcome"})
 OWN_ISSUE_LINE = re.compile(r"^[ \t]*#[ \t]*bot-health:[ \t]*own-issue\b", re.MULTILINE)
 # The runs that do what a schedule does. A push may start the same workflow, but its
 # run may leave out what only the schedule does, such as the tests of the coming
@@ -523,6 +536,36 @@ def ran_out_of_time(api: Api, repo: str, run: Run) -> bool:
     )
 
 
+def stopped_by_harden_runner(
+    api: Api, repo: str, run: Run, *, every: bool = False
+) -> bool:
+    """Whether the step that makes sure that Harden-Runner blocks stopped a job of the
+    run that failed, as its annotation says, or with every, each job that failed."""
+    stopped = [
+        any(
+            STOPPED in str(annotation.get("message"))
+            for annotation in annotations_of(api, repo, int(job["id"]))
+        )
+        for job in jobs_of(api, repo, run.id, run.attempt)
+        if job.get("conclusion") == "failure"
+    ]
+    return any(stopped) and (all(stopped) or not every)
+
+
+def second_try_can_pass(api: Api, repo: str, run: Run) -> bool:
+    """Whether a second try of the failed jobs can pass: at the first attempt of a run
+    that started, and for a workflow of one try only when Harden-Runner stopped each
+    job that failed, as the second try then repeats nothing of the failure."""
+    if run.deserves_second_try():
+        return True
+    return (
+        run.attempt == 1
+        and run.conclusion == "failure"
+        and run.name in ONE_TRY
+        and stopped_by_harden_runner(api, repo, run, every=True)
+    )
+
+
 def base_name(job: str) -> str:
     """The name of a job without the values of its matrix, such as render for
     render (en, 3/4), which another run may give other values or other legs."""
@@ -574,8 +617,9 @@ def not_passed_again(api: Api, repo: str, run: Run, issue: Issue) -> list[str]:
     return sorted(missing)
 
 
-def run_again(api: Api, repo: str, run: Run) -> str | None:
-    """Runs the failed jobs once more; None when GitHub refuses and no one else did."""
+def run_again(api: Api, repo: str, run: Run) -> bool | None:
+    """Runs the failed jobs once more: True when it did, False when another bot was
+    quicker, and None when GitHub refused and no one else did."""
     try:
         api.post(f"repos/{repo}/actions/runs/{run.id}/rerun-failed-jobs", {})
     except GitHubError:
@@ -583,9 +627,9 @@ def run_again(api: Api, repo: str, run: Run) -> str | None:
         latest = api.get(f"repos/{repo}/actions/runs/{run.id}") or {}
         newer = int(latest.get("run_attempt") or 1) > run.attempt
         if newer or latest.get("status") != "completed":
-            return "failed: another bot runs it again"
+            return False
         return None
-    return "failed: runs the failed jobs once more"
+    return True
 
 
 def look_at(
@@ -631,11 +675,15 @@ def look_at(
     if run.conclusion not in FAILED:
         return f"ended as {run.conclusion or run.status}: no failure"
     note = ""
-    if run.deserves_second_try():
+    if second_try_can_pass(api, repo, run):
         if second_try:
             tried = run_again(api, repo, run)
             if tried is not None:
-                return tried
+                return (
+                    "failed: runs the failed jobs once more"
+                    if tried
+                    else "failed: another bot runs it again"
+                )
             note = " (GitHub refused to run it again)"
         elif now - run.updated < SECOND_TRY_TIME:
             return "failed: its second try may still come"
@@ -680,6 +728,36 @@ def watch_run(
     issues = open_issues(api, repo)
     ref = run.branch if published else branch
     return f"{run.name}: {look_at(api, repo, ref, run, issues, now, second_try=True)}."
+
+
+def watch_stop(api: Api, repo: str, run_id: int) -> tuple[str, bool]:
+    """The end of a run of a bot of events or of a workflow that keeps an issue of its
+    own, as the event of GitHub reports it, also one of a pull request or of a fork:
+    its failed jobs run once more when Harden-Runner stopped one of them at the first
+    attempt, and any other end stays theirs. False when GitHub refused that try."""
+    data = api.get(f"repos/{repo}/actions/runs/{run_id}")
+    if data is None:
+        return f"GitHub doesn't know the run {run_id}.", True
+    run = Run.of(data)
+    if run.status != "completed" or run.attempt > 1:
+        return f"{run.name}: runs again already, nothing to do.", True
+    if run.conclusion != "failure":
+        return f"{run.name}: ended as {run.conclusion}, nothing to do.", True
+    if not stopped_by_harden_runner(api, repo, run):
+        return (
+            f"{run.name}: Harden-Runner stopped no job of {run.link()}, which stays "
+            "failed.",
+            True,
+        )
+    tried = run_again(api, repo, run)
+    if tried is None:
+        return (
+            f"{run.name}: Harden-Runner stopped a job of {run.link()}, and GitHub "
+            "refused to run it again.",
+            False,
+        )
+    again = "its failed jobs run once more" if tried else "another bot runs it again"
+    return f"{run.name}: Harden-Runner stopped a job of {run.link()}, so {again}.", True
 
 
 # ---------------------------------------------------------------- the daily look

@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import workflow_steps
 from hypothesis import given
 from hypothesis import strategies as st
 
 from blueprint import branches, cli
 from blueprint.bot_health import (
+    EVENT_BOTS,
     LABEL,
     LABEL_COLOR,
     LABEL_DESCRIPTION,
@@ -36,6 +38,7 @@ from blueprint.bot_health import (
     STEP,
     STEP_COLOR,
     STEP_DESCRIPTION,
+    STOPPED,
     WEEKDAYS,
     Cron,
     Problem,
@@ -57,6 +60,7 @@ from blueprint.bot_health import (
     started_after,
     sweep,
     watch_run,
+    watch_stop,
 )
 from blueprint.github import Api, GitHubError
 
@@ -973,6 +977,190 @@ def test_a_finding_is_reported_without_a_second_try(
     assert "a job" in github.issues[1]["body"]
 
 
+# The annotation of the step "Make sure that Harden-Runner blocks" of a job whose agent
+# GitHub's outage of 8 November 2026 kept from downloading (decision 0134).
+STOPPED_JOB = failure(
+    "failure",
+    "Harden-Runner couldn't download its agent, mostly in an outage of GitHub "
+    "(https://www.githubstatus.com), so this job would reach every host, and it "
+    "stops here instead. That is no problem of the change: run the job again.",
+)
+
+
+def stopped_job(number: int, name: str) -> dict[str, Any]:
+    return job_of_a_run(
+        number,
+        name,
+        "failure",
+        [("Set up job", "success"), ("Make sure that Harden-Runner blocks", "failure")],
+    )
+
+
+def test_the_bot_reads_the_annotation_of_the_step_that_stops_a_job() -> None:
+    # The step of every job that blocks, of which the job of Welcome is the one that a
+    # workflow of a project copies, and the bot after the checks reads the same words.
+    check = workflow_steps.step(
+        "welcome.yml", "welcome", "Make sure that Harden-Runner blocks"
+    )
+    assert STOPPED in check["run"]
+    assert STOPPED in STOPPED_JOB["message"]
+    again = workflow_steps.step(
+        "after-checks.yml", "stopped", "Run the jobs again that Harden-Runner stopped"
+    )
+    assert f'grep -qF "{STOPPED}"' in again["run"]
+
+
+@pytest.mark.parametrize("name", sorted(ONE_TRY))
+def test_a_workflow_of_one_try_that_harden_runner_stopped_gets_its_second_try(
+    github: FakeGitHub, name: str
+) -> None:
+    # The failure was none of the workflow's, so the second try repeats nothing of it,
+    # as for the job of Mutation that keeps its issue, after the hours of its mutants.
+    github.runs[1] = run_of(1, name=name, path=FINDINGS)
+    github.jobs[(1, 1)] = [
+        job_of_a_run(11, "mutation", "success"),
+        stopped_job(12, "mutation issue"),
+    ]
+    github.annotations[12] = [STOPPED_JOB]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == f"{name}: failed: runs the failed jobs once more."
+    assert github.reruns == [1]
+    assert github.issues == {}
+
+
+def test_a_workflow_of_one_try_with_another_failure_gets_no_second_try(
+    github: FakeGitHub,
+) -> None:
+    # A second try would measure the mutants again, for hours.
+    github.runs[1] = run_of(1, name="Mutation", path=FINDINGS)
+    github.jobs[(1, 1)] = [
+        job_of_a_run(11, "mutation", "failure", [("Run the mutants", "failure")]),
+        stopped_job(12, "mutation issue"),
+    ]
+    github.annotations[12] = [STOPPED_JOB]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Mutation: fails: opened #1."
+    assert github.reruns == []
+
+
+@pytest.mark.parametrize("name", sorted(EVENT_BOTS | OWN_ISSUE))
+@pytest.mark.parametrize(
+    ("event", "head"),
+    [
+        ("pull_request_target", "a-fork/demo"),
+        ("pull_request_target", REPO),
+        ("issue_comment", REPO),
+        ("push", REPO),
+        ("schedule", REPO),
+    ],
+)
+def test_a_bot_that_harden_runner_stopped_runs_again(
+    github: FakeGitHub, name: str, event: str, head: str
+) -> None:
+    github.runs[1] = run_of(1, name=name, event=event, head=head, branch="a-branch")
+    github.jobs[(1, 1)] = [
+        job_of_a_run(11, "check", "failure", [("Run the checks", "failure")]),
+        stopped_job(12, "report"),
+    ]
+    github.annotations[12] = [failure("warning", "Node 26 is out"), STOPPED_JOB]
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert result == (
+        f"{name}: Harden-Runner stopped a job of [the run of 2026-10-13 09:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/1), so its failed jobs run once more."
+    )
+    assert done
+    # No issue of the bot: the pull request shows the failure, or the workflow's own
+    # issue does.
+    assert writes(github) == [
+        ("POST", f"repos/{REPO}/actions/runs/1/rerun-failed-jobs")
+    ]
+
+
+def test_a_bot_that_failed_for_another_reason_stays_failed(github: FakeGitHub) -> None:
+    github.runs[1] = run_of(1, name="Welcome", event="pull_request_target")
+    github.jobs[(1, 1)] = [
+        job_of_a_run(11, "welcome", "failure", [("Welcome", "failure")]),
+        # A job that the failure cancelled says nothing, whatever its annotations.
+        job_of_a_run(12, "other", "cancelled", [("Wait", "cancelled")]),
+    ]
+    github.annotations[11] = [failure("failure", "GitHub answered 403: Forbidden")]
+    github.annotations[12] = [STOPPED_JOB]
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert result == (
+        "Welcome: Harden-Runner stopped no job of [the run of 2026-10-13 09:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/1), which stays failed."
+    )
+    assert done
+    assert writes(github) == []
+
+
+@pytest.mark.parametrize(
+    ("run", "result"),
+    [
+        (
+            run_of(1, name="Welcome", status="in_progress", conclusion=None),
+            "Welcome: runs again already, nothing to do.",
+        ),
+        (
+            run_of(1, name="Welcome", attempt=2),
+            "Welcome: runs again already, nothing to do.",
+        ),
+        (
+            run_of(1, name="Welcome", conclusion="cancelled"),
+            "Welcome: ended as cancelled, nothing to do.",
+        ),
+    ],
+)
+def test_a_bot_that_ran_again_or_did_not_fail_is_left_alone(
+    github: FakeGitHub, run: dict[str, Any], result: str
+) -> None:
+    github.runs[1] = run
+    github.jobs[(1, 1)] = [stopped_job(12, "welcome")]
+    github.annotations[12] = [STOPPED_JOB]
+
+    assert watch_stop(api_of(github), REPO, 1) == (result, True)
+    assert writes(github) == []
+
+
+def test_a_bot_that_another_bot_runs_again_first_is_theirs(github: FakeGitHub) -> None:
+    github.runs[1] = run_of(1, name="Area labels", event="pull_request_target")
+    github.jobs[(1, 1)] = [stopped_job(12, "labels")]
+    github.annotations[12] = [STOPPED_JOB]
+    github.rerun_by_another = run_of(1, name="Area labels", attempt=2)
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert result.endswith(", so another bot runs it again.")
+    assert done
+
+
+def test_a_bot_that_github_refuses_to_run_again_fails(github: FakeGitHub) -> None:
+    github.runs[1] = run_of(1, name="Area labels", event="pull_request_target")
+    github.jobs[(1, 1)] = [stopped_job(12, "labels")]
+    github.annotations[12] = [STOPPED_JOB]
+    github.rerun_by_another = run_of(1, name="Area labels")
+
+    result, done = watch_stop(api_of(github), REPO, 1)
+
+    assert result.endswith(", and GitHub refused to run it again.")
+    assert not done
+
+
+def test_a_stopped_run_that_github_does_not_know(github: FakeGitHub) -> None:
+    assert watch_stop(api_of(github), REPO, 7) == (
+        "GitHub doesn't know the run 7.",
+        True,
+    )
+
+
 # The runs that GitHub ended before their jobs in its outage of 9 November 2026, from
 # 18:09 to 18:14 UTC, as the bots of the blueprint's repositories saw them: Bot health,
 # After the checks, Update branches, Findings and Issue lifecycle, by the dozen.
@@ -1328,9 +1516,12 @@ def test_the_names_of_the_workflows_exist() -> None:
         for path in (ROOT / ".github/workflows").glob("*.yml")
         if (match := re.search(r"^name: (.+)$", path.read_text("utf-8"), re.M))
     }
-    assert names >= ONE_TRY | OWN_ISSUE
+    assert names >= ONE_TRY | OWN_ISSUE | EVENT_BOTS
     # Each keeps an issue of its own, and a second one would repeat it.
     assert {"Diagrams", "Newest Node", "Newest Python", "Next runner"} <= OWN_ISSUE
+    # A workflow is one or the other, and the bot gives a second try to either only
+    # when Harden-Runner stopped it.
+    assert not OWN_ISSUE & EVENT_BOTS
 
 
 # ---------------------------------------------------------------- the daily look
@@ -2836,6 +3027,29 @@ def test_the_bot_ends_with_a_notice_when_github_keeps_failing(
     out, err = capsys.readouterr()
     assert "| `First` | couldn't look: `GitHub answered 502" in out
     assert err.startswith("::notice title=GitHub is unavailable::GitHub kept failing")
+
+
+def test_the_command_line_runs_a_bot_again_that_harden_runner_stopped(
+    github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.runs[1] = run_of(1, name="Welcome", event="pull_request_target")
+    github.jobs[(1, 1)] = [stopped_job(12, "welcome")]
+    github.annotations[12] = [STOPPED_JOB]
+    command = ["--repo", REPO, "bot-health", "stopped", "1"]
+
+    assert cli.main(command, Api(github), tmp_path) == 0
+    assert capsys.readouterr().out.endswith(", so its failed jobs run once more.\n")
+    assert github.reruns == [1]
+
+    # A second try that GitHub refuses fails the bot, as a refused write does.
+    github.rerun_by_another = run_of(1, name="Welcome", event="pull_request_target")
+    assert cli.main(command, Api(github), tmp_path) == 1
+    assert capsys.readouterr().out.endswith(", and GitHub refused to run it again.\n")
+
+    # And GitHub that keeps failing ends it with a notice, as every bot-health bot.
+    github.fail[("GET", f"repos/{REPO}/actions/runs/1")] = 502
+    assert cli.main(command, Api(github), tmp_path) == 0
+    assert capsys.readouterr().err.startswith("::notice title=GitHub is unavailable::")
 
 
 def test_the_command_line_tells_a_run_that_github_could_not_start(

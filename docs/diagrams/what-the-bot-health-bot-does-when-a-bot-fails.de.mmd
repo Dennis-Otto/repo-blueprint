@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: Was der Bot für den Zustand der Bots tut, wenn ein Bot fehlschlägt
-    accDescr: Wenn ein Lauf eines Bots oder eines geplanten Workflows auf dem Standardbranch endet, sieht der Bot ihn sich an; Läufe von Pull Requests starten nichts. Ein erster Fehlschlag, den ein zweiter Versuch beheben kann, führt seine fehlgeschlagenen Jobs einmal neu aus. Ein Fehlschlag, der bleibt, öffnet ein Issue für den Workflow oder aktualisiert es, mit den fehlgeschlagenen Jobs, ihren Schritten und ihren ersten Fehlern. Ein Lauf, der besteht, schließt das Issue, sobald jeder Job, der fehlschlug, in ihm erneut lief und bestand, in jedem Zweig einer Matrix; ein Lauf, der einen solchen Job übersprang, oder einer ohne ihn lässt das Issue offen. Jede Nacht sieht sich der Bot den letzten Lauf jedes Workflows an, falls GitHub ein Ereignis verloren hat, überlässt aber einen Workflow, der ein eigenes Issue hält, diesem Issue. Er startet einen Workflow, dessen Zeitplan GitHub verpasst oder abgeschaltet hat: einen ohne Lauf seines Zeitplans oder von Hand seit der Zeit seines Zeitplans, gleich welche Pushes ihn seitdem ausgeführt haben.
+    accDescr: Wenn ein Lauf eines Bots oder eines geplanten Workflows auf dem Standardbranch endet, sieht der Bot ihn sich an; andere Läufe von Pull Requests starten nichts. Schlägt ein Bot von Ereignissen, etwa Welcome, oder ein Workflow mit eigenem Issue bei seinem ersten Versuch fehl, auch in einem Pull Request oder einem Fork, laufen seine fehlgeschlagenen Jobs ohne Issue einmal neu, wenn Harden-Runner einen von ihnen gestoppt hat; sonst bleibt er fehlgeschlagen, wo sich das zeigt. Ein erster Fehlschlag, den ein zweiter Versuch beheben kann, führt seine fehlgeschlagenen Jobs einmal neu aus. Ein Fehlschlag, der bleibt, öffnet ein Issue für den Workflow oder aktualisiert es, mit den fehlgeschlagenen Jobs, ihren Schritten und ihren ersten Fehlern. Ein Lauf, der besteht, schließt das Issue, sobald jeder Job, der fehlschlug, in ihm erneut lief und bestand, in jedem Zweig einer Matrix; ein Lauf, der einen solchen Job übersprang, oder einer ohne ihn lässt das Issue offen. Jede Nacht sieht sich der Bot den letzten Lauf jedes Workflows an, falls GitHub ein Ereignis verloren hat, überlässt aber einen Workflow, der ein eigenes Issue hält, diesem Issue. Er startet einen Workflow, dessen Zeitplan GitHub verpasst oder abgeschaltet hat: einen ohne Lauf seines Zeitplans oder von Hand seit der Zeit seines Zeitplans, gleich welche Pushes ihn seitdem ausgeführt haben.
 
     run(["Ein Lauf eines Bots endet<br>auf main"])
     nightly(["Jede Nacht<br>der letzte Lauf jedes Workflows"])
@@ -19,6 +19,10 @@ flowchart TB
     issue["Ein Issue für den Workflow<br>die fehlgeschlagenen Jobs · ihre Schritte<br>ihre ersten Fehler"]
     closed["Schließt das Issue<br>besteht wieder im Lauf"]
     missed["Startet einen Workflow,<br>dessen Zeitplan GitHub verpasst hat"]
+    event(["Ein Bot von Ereignissen oder mit eigenem Issue<br>schlägt beim ersten Versuch fehl<br>auch in einem Pull Request oder Fork"])
+    stopped{"Hat Harden-Runner<br>einen Job gestoppt?"}
+    retried["Führt die fehlgeschlagenen Jobs<br>einmal neu aus, ohne Issue"]
+    stays["Bleibt fehlgeschlagen,<br>wo sich das zeigt"]
 
     run --> passed
     nightly --> own
@@ -32,10 +36,13 @@ flowchart TB
     first -- "ja" --> again
     again -. "sein Ende" .-> run
     first -- "nein" --> issue
+    event --> stopped
+    stopped -- "ja" --> retried
+    stopped -- "nein" --> stays
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class run,nightly,again,missed bot
-    class issue,waits person
+    class run,nightly,again,missed,event,retried bot
+    class issue,waits,stays person
     class closed,left done
