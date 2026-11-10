@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -439,6 +440,7 @@ class FakeUv:
         self.commands: list[list[str]] = []
         self.folders: list[Path] = []
         self.preferred: list[str] = []
+        self.constraints: list[str] = []
         self.real = subprocess.run
 
     def answers(self, body: str = "", returncode: int = 0, said: str = "") -> None:
@@ -456,8 +458,20 @@ class FakeUv:
         self.folders.append(Path(options["cwd"]))
         output = Path(command[-1].removeprefix("--output-file="))
         self.preferred.append(output.read_text(encoding="utf-8"))
+        self.constraints += [
+            Path(part.removeprefix("--constraint=")).read_text(encoding="utf-8")
+            for part in command
+            if part.startswith("--constraint=")
+        ]
+        # uv names the file of constraints among the sources of a pin, by its path.
+        named = [
+            Path(part.removeprefix("--constraint=")).as_posix()
+            for part in command
+            if part.startswith("--constraint=")
+        ]
         if self.returncode == 0:
-            output.write_text(self.body, encoding="utf-8", newline="\n")
+            body = self.body.replace("{constraints}", named[0] if named else "")
+            output.write_text(body, encoding="utf-8", newline="\n")
         return subprocess.CompletedProcess(command, self.returncode, "", self.said)
 
 
@@ -1152,6 +1166,422 @@ def test_sources_that_contradict_themselves_fail_with_the_real_uv(
 
     assert "requirements.txt: uv can't compile its sources:" in capsys.readouterr().out
     assert (root / "requirements.txt").read_text(encoding="utf-8") == content
+
+
+# ---------------------------------------------------------------- the weekly refresh
+
+# A run of Renovate on a Monday afternoon, whose refresh takes uploads up to the
+# Monday before.
+NOW = datetime(2026, 11, 9, 15, 30, tzinfo=UTC)
+CUTOFF = "--exclude-newer=2026-11-02T00:00:00Z"
+# A pin by address, which has no version to keep or to bound.
+DELTA = "delta @ https://example.org/delta-1.0-py3-none-any.whl"
+
+
+def committed(root: Path) -> Path:
+    """The repository with its files in a commit, as main has them."""
+    assert GIT
+    subprocess.run([GIT, "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        [
+            *(GIT, "-c", "user.name=Test", "-c", "user.email=test@example.com"),
+            *("commit", "--quiet", "--no-gpg-sign", "-m", "main"),
+        ],
+        cwd=root,
+        check=True,
+    )
+    return root
+
+
+def refreshed(root: Path, name: str, content: str) -> None:
+    """A lock file as Renovate's refresh wrote it into its checkout."""
+    (root / name).write_text(content, encoding="utf-8", newline="\n")
+
+
+def asked(fake: FakeUv) -> list[str]:
+    """What the one call of the fake uv asked for, without the paths of this machine
+    and without the file of constraints, whose lines FakeUv keeps."""
+    return [
+        option for option in options_of(fake) if not option.startswith("--constraint=")
+    ]
+
+
+def test_the_refresh_takes_the_uploads_of_a_week_before_the_day() -> None:
+    late = datetime(2026, 11, 9, 23, 59, tzinfo=UTC)
+    assert locks.cutoff(late) == datetime(2026, 11, 2, tzinfo=UTC)
+    # A moment of another zone counts by its day in UTC.
+    berlin = timezone(timedelta(hours=1))
+    early = datetime(2026, 11, 10, 0, 30, tzinfo=berlin)
+    assert locks.cutoff(early) == datetime(2026, 11, 2, tzinfo=UTC)
+    assert locks.stamp(early) == "2026-11-09T23:30:00Z"
+
+
+@needs_git
+def test_the_refresh_compiles_what_renovate_moved_from_versions_a_week_old(
+    tmp_path: Path, fake_uv: FakeUv
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\nbeta\ngamma\n",
+                "requirements.txt": lock(
+                    REQUIREMENTS_HEADER, "alpha==1.0", "beta==2.0", "gamma==3.0", DELTA
+                ),
+            },
+        )
+    )
+    # Renovate's refresh moved alpha and gamma to their newest versions; beta, such
+    # as the fix of a vulnerability of three days ago, has none newer.
+    content = lock(REQUIREMENTS_HEADER, "alpha==1.5", "beta==2.0", "gamma==3.1", DELTA)
+    refreshed(root, "requirements.txt", content)
+    fake_uv.answers(lock("", "alpha==1.2", "beta==2.0", "gamma==3.1", DELTA))
+
+    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    # alpha 1.5 is younger than a week: uv took 1.2 instead, and kept the rest.
+    assert found.differences == ("alpha==1.5",)
+    assert found.content.decode("utf-8") == lock(
+        REQUIREMENTS_HEADER, "alpha==1.2", "beta==2.0", "gamma==3.1", DELTA
+    )
+    assert not found.failure
+    # uv prefers what the refresh pins, takes no upload of the last week, keeps the
+    # pin of main also when it is younger, and takes no version below that of main:
+    # the fix of a vulnerability neither waits nor goes back.
+    assert fake_uv.preferred == [content]
+    assert asked(fake_uv) == [
+        *("--generate-hashes", "--python-version=3.12", "requirements.in"),
+        f"--python-platform={locks.SYSTEM}",
+        CUTOFF,
+        "--exclude-newer-package=beta=2026-11-09T15:30:00Z",
+        "--no-header",
+        "--quiet",
+    ]
+    assert fake_uv.constraints == ["alpha>=1.0\ngamma>=3.0\n"]
+
+
+@needs_git
+def test_a_lock_file_that_the_refresh_adds_has_no_pins_of_main(
+    tmp_path: Path, fake_uv: FakeUv
+) -> None:
+    root = committed(repository(tmp_path, {"requirements.in": "alpha\n"}))
+    refreshed(root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==1.5"))
+    subprocess.run(["git", "add", "requirements.txt"], cwd=root, check=True)
+    fake_uv.answers(lock("", "alpha==1.5"))
+
+    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    assert found.differences == ()
+    assert asked(fake_uv)[-3:] == [CUTOFF, "--no-header", "--quiet"]
+    assert fake_uv.constraints == []
+
+
+@needs_git
+@pytest.mark.parametrize(
+    "main_pins",
+    [
+        "--index-url https://example.org/simple\nalpha==1.0\n",
+        "alpha==1.0 ; python_version < '3.13'\nalpha==2.0 ; python_version >= '3.13'\n",
+    ],
+    ids=["an index, which is no pin", "two versions, each for one Python"],
+)
+def test_the_refresh_bounds_no_package_whose_version_in_main_is_unclear(
+    tmp_path: Path, fake_uv: FakeUv, main_pins: str
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\n",
+                "requirements.txt": REQUIREMENTS_HEADER + main_pins,
+            },
+        )
+    )
+    refreshed(root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==2.5"))
+    fake_uv.answers(lock("", "alpha==2.1"))
+
+    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    assert found.differences == ("alpha==2.5",)
+    assert fake_uv.constraints == []
+
+
+@needs_git
+@pytest.mark.parametrize(
+    ("header", "pins", "note"),
+    [
+        (WITHOUT_EQUAL_SIGN, "alpha==1.0\n", locks.UNREADABLE),
+        (
+            REQUIREMENTS_HEADER,
+            "--index-url https://example.org/simple\nalpha==1.0\n",
+            "a line that is no pin of a package, such as an index",
+        ),
+        (
+            REQUIREMENTS_HEADER.replace(" --python-version=3.12", ""),
+            "alpha==1.0\n",
+            locks.NO_PYTHON,
+        ),
+        (
+            REQUIREMENTS_HEADER.replace(
+                " requirements.in", " --exclude-newer=2026-01-01 requirements.in"
+            ),
+            "alpha==1.0\n",
+            locks.OWN_CUTOFF,
+        ),
+    ],
+    ids=["unreadable", "no pin", "no Python", "a cutoff of its own"],
+)
+def test_the_refresh_leaves_a_file_that_it_cant_compile_as_renovate_wrote_it(
+    tmp_path: Path, fake_uv: FakeUv, header: str, pins: str, note: str
+) -> None:
+    name = (
+        "requirements-test.txt" if header == WITHOUT_EQUAL_SIGN else "requirements.txt"
+    )
+    root = repository(tmp_path, {"requirements.in": "alpha\n", name: header + pins})
+
+    found = locks.refresh(root, name, "uv", NOW)
+
+    assert found.note == note
+    assert fake_uv.commands == []
+
+
+@needs_git
+def test_the_refresh_writes_through_no_link(tmp_path: Path, fake_uv: FakeUv) -> None:
+    root = repository(tmp_path, {"requirements.in": "alpha\n", "other.txt": "a\n"})
+    try:
+        (root / "requirements.txt").symlink_to(root / "other.txt")
+    except OSError:
+        pytest.skip("this machine makes no links without more rights")
+
+    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    assert found.note == "a link, which the refresh doesn't write through"
+    assert fake_uv.commands == []
+
+
+@needs_git
+def test_an_answer_of_uv_without_pins_fails_the_refresh(
+    tmp_path: Path, fake_uv: FakeUv
+) -> None:
+    root = repository(
+        tmp_path,
+        {
+            "requirements.in": "alpha\n",
+            "requirements.txt": lock(REQUIREMENTS_HEADER, "alpha==1.0"),
+        },
+    )
+    fake_uv.answers("--index-url https://example.org/simple\nalpha==1.0\n")
+
+    found = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    assert found.failure == (
+        "uv answered with a line that is no pin of a package:\n"
+        "--index-url https://example.org/simple\nalpha==1.0"
+    )
+
+
+def test_the_refresh_leaves_its_file_of_constraints_out_of_the_sources() -> None:
+    source = "-c /tmp/locks-x1y2/constraints.txt"
+    other = "-c C:\\Temp\\locks-x1y2\\constraints.txt"
+    body = (
+        f"alpha==1.2\n    # via\n    #   {source}\n    #   -r requirements.in\n"
+        f"beta==2.0\n    # via\n    #   {other}\n    #   gamma\n    #   delta\n"
+        "gamma==3.1\n    # via\n    #   delta\n    #   -r requirements.in\n"
+        f"delta==4.0\n    # via\n    #   {source}\n"
+        f"epsilon==5.0  # via gamma, {source}, delta\n"
+        f"zeta==6.0  # via {source}\n"
+        f"    # via {source}\n"
+        "eta==7.0  # via -c constraints.txt\n"
+        f"theta==8.0\n    # via {source}, -r requirements.in"
+    )
+
+    assert locks.without_source(body, "locks-x1y2") == (
+        "alpha==1.2\n    # via -r requirements.in\n"
+        "beta==2.0\n    # via\n    #   gamma\n    #   delta\n"
+        "gamma==3.1\n    # via\n    #   delta\n    #   -r requirements.in\n"
+        "delta==4.0\n"
+        "epsilon==5.0  # via gamma, delta\n"
+        "zeta==6.0\n"
+        # A file of constraints of the project itself stays among the sources.
+        "eta==7.0  # via -c constraints.txt\n"
+        "theta==8.0\n    # via -r requirements.in"
+    )
+
+
+@needs_git
+def test_each_run_of_the_refresh_on_one_day_writes_the_same_lock_file(
+    tmp_path: Path, fake_uv: FakeUv
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\n",
+                "requirements.txt": lock(REQUIREMENTS_HEADER, "alpha==1.0"),
+            },
+        )
+    )
+    refreshed(root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==1.5"))
+    # uv names the file of constraints, in a new temporary folder each run, among
+    # the sources of alpha, which the refresh bounds by the version of main.
+    fake_uv.answers(
+        "alpha==1.2 \\\n"
+        f"    --hash=sha256:{'0' * 64}\n"
+        "    # via\n"
+        "    #   -c {constraints}\n"
+        "    #   -r requirements.in\n"
+    )
+
+    first = locks.refresh(root, "requirements.txt", "uv", NOW)
+    second = locks.refresh(root, "requirements.txt", "uv", NOW)
+
+    assert fake_uv.commands[0] != fake_uv.commands[1]
+    assert first.content == second.content
+    assert first.content.decode("utf-8") == lock(REQUIREMENTS_HEADER, "alpha==1.2")
+
+
+@needs_git
+def test_renovate_takes_a_refresh_that_the_week_took_back_to_main(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
+) -> None:
+    root = moved_by_the_refresh(tmp_path)
+    # No version of alpha newer than that of main is a week old: the compile gives
+    # main's lock file again, byte for byte.
+    fake_uv.answers(lock("", "alpha==1.0"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert "without alpha==1.5" in capsys.readouterr().out
+    content = lock(REQUIREMENTS_HEADER, "alpha==1.0")
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == content
+    # Renovate reads again only what git names as changed after its command: git
+    # still names the file, whose index holds Renovate's compile, so Renovate
+    # commits what the command wrote, not its own newest versions.
+    assert GIT
+    status = subprocess.run(
+        [GIT, "status", "--porcelain", "--", "requirements.txt"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == "MM requirements.txt\n"
+
+
+def moved_by_the_refresh(tmp_path: Path) -> Path:
+    """A repository whose main pins alpha 1.0 in two lock files, one of which
+    Renovate's refresh moved to alpha 1.5."""
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\n",
+                "requirements.txt": lock(REQUIREMENTS_HEADER, "alpha==1.0"),
+                "docs/requirements.in": "alpha\n",
+                "docs/requirements.txt": lock(REQUIREMENTS_HEADER, "alpha==1.0"),
+            },
+        )
+    )
+    refreshed(root, "requirements.txt", lock(REQUIREMENTS_HEADER, "alpha==1.5"))
+    return root
+
+
+@needs_git
+def test_renovate_compiles_the_files_of_its_refresh_again_from_versions_a_week_old(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
+) -> None:
+    root = moved_by_the_refresh(tmp_path)
+    fake_uv.answers(lock("", "alpha==1.2"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert capsys.readouterr().out == (
+        "requirements.txt: compiled again from versions at least a week old, "
+        "without alpha==1.5.\n"
+    )
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == lock(
+        REQUIREMENTS_HEADER, "alpha==1.2"
+    )
+    # The lock file that the refresh didn't move stays out of its branch.
+    assert len(fake_uv.commands) == 1
+    assert (root / "docs/requirements.txt").read_text(encoding="utf-8") == lock(
+        REQUIREMENTS_HEADER, "alpha==1.0"
+    )
+
+
+@needs_git
+def test_a_refresh_of_versions_a_week_old_stays_as_it_is(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
+) -> None:
+    root = moved_by_the_refresh(tmp_path)
+    fake_uv.answers(lock("", "alpha==1.5"))
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert capsys.readouterr().out == (
+        "requirements.txt: every version of the refresh is at least a week old.\n"
+    )
+
+
+@needs_git
+def test_a_refresh_that_moved_no_lock_file_of_pip_compile_compiles_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
+) -> None:
+    root = committed(
+        repository(
+            tmp_path,
+            {
+                "requirements.in": "alpha\n",
+                "requirements.txt": lock(REQUIREMENTS_HEADER, "alpha==1.0"),
+            },
+        )
+    )
+
+    assert main(["locks", "--refresh"], root=root) == 0
+
+    assert capsys.readouterr().out == (
+        "No lock file of pip-compile differs from HEAD: the refresh moved none.\n"
+    )
+    assert fake_uv.commands == []
+
+
+@needs_git
+def test_a_refresh_without_uv_keeps_the_newest_versions_and_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = moved_by_the_refresh(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda name, **options: None)
+
+    assert main(["locks", "--refresh"], root=root) == 1
+
+    assert "uv is not installed here" in capsys.readouterr().out
+
+
+@needs_git
+def test_a_refresh_that_uv_cant_compile_keeps_the_newest_versions_and_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], fake_uv: FakeUv
+) -> None:
+    root = moved_by_the_refresh(tmp_path)
+    fake_uv.answers(returncode=1, said="No solution found when resolving.\n")
+    (root / "docs/requirements.txt").write_text(
+        WITHOUT_EQUAL_SIGN.replace("requirements-test", "requirements") + "alpha==2\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    assert main(["locks", "--refresh"], root=root) == 1
+
+    out = capsys.readouterr().out
+    assert out.startswith(
+        "docs/requirements.txt: left as Renovate refreshed it, for a command that "
+        "Renovate can't read, which the step Lock files explains.\n"
+        "requirements.txt: uv can't compile it from versions a week old:\n"
+        "No solution found when resolving.\n"
+    )
+    assert "the check dependency-review holds its pull request" in out
+    assert (root / "requirements.txt").read_text(encoding="utf-8") == lock(
+        REQUIREMENTS_HEADER, "alpha==1.5"
+    )
 
 
 # ---------------------------------------------------------------- in the checks
