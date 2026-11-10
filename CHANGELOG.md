@@ -7,6 +7,22 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.17.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.16.0...v1.17.0) (2026-11-10)
+
+
+### Features
+
+* the dev container runs ShellCheck too ([#805](https://github.com/Dennis-Otto/repo-blueprint/issues/805)) ([b9c73ff](https://github.com/Dennis-Otto/repo-blueprint/commit/b9c73ffc8db1934d7f6ec942b9991867b1115f21))
+
+
+### Bug fixes
+
+* **ci:** every workflow that Harden-Runner stops runs again by itself ([#811](https://github.com/Dennis-Otto/repo-blueprint/issues/811)) ([6c5c542](https://github.com/Dennis-Otto/repo-blueprint/commit/6c5c5420dc90bb9da5e7cf7428f738f96df615aa))
+* **ci:** the secret scan runs gitleaks of its release through the API ([#808](https://github.com/Dennis-Otto/repo-blueprint/issues/808)) ([1c32289](https://github.com/Dennis-Otto/repo-blueprint/commit/1c32289bc976288d2f7f8fafbb0afa422c9d0020))
+* **deps:** update the issue assistant to v1.10.5 ([#803](https://github.com/Dennis-Otto/repo-blueprint/issues/803)) ([4ebb0ce](https://github.com/Dennis-Otto/repo-blueprint/commit/4ebb0ce1ca9669de64f87ab7c438ce4ceecca2ef))
+* **release:** the release of a Nextcloud app survives an outage of GitHub's unauthenticated downloads ([#802](https://github.com/Dennis-Otto/repo-blueprint/issues/802)) ([7c5a391](https://github.com/Dennis-Otto/repo-blueprint/commit/7c5a391da1632e78bff66722a8a1d7f5cee5d54d))
+* the issue to upload a new social preview gets a label that fits it ([#809](https://github.com/Dennis-Otto/repo-blueprint/issues/809)) ([0ed6f1e](https://github.com/Dennis-Otto/repo-blueprint/commit/0ed6f1ec63c847c46f05beaff8c6bfa59b65e391))
+
 ## [1.16.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.15.1...v1.16.0) (2026-11-10)
 
 ### Features
