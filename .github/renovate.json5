@@ -200,7 +200,7 @@
       // one that the dev container of every repository installs, from
       // stacks/devcontainer/requirements.txt, move together, as a fix that reaches every
       // repository: tests/test_template.py keeps their versions equal.
-      matchDepNames: ["shellcheck-py"],
+      matchPackageNames: ["shellcheck-py"],
       semanticCommitType: "fix",
       groupName: "ShellCheck",
     },

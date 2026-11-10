@@ -5599,7 +5599,7 @@ def test_the_shellcheck_of_the_dev_container_is_that_of_the_blueprint() -> None:
     grouped = [rule for rule in rules if rule.get("groupName") == "ShellCheck"]
     assert grouped == [
         {
-            "matchDepNames": ["shellcheck-py"],
+            "matchPackageNames": ["shellcheck-py"],
             "semanticCommitType": "fix",
             "groupName": "ShellCheck",
         }
