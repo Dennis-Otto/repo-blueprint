@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: What the bot-health bot does when a bot fails
-    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; runs of pull requests start nothing. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue once every job that failed ran again in it and passed, in every leg of a matrix; a run that skipped such a job, or one without it, leaves the issue open. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, but leaves a workflow that keeps an issue of its own to that issue. It starts a workflow whose schedule GitHub missed or switched off: one with no run of its schedule or by hand since the time of its schedule, whatever pushes ran it since.
+    accDescr: When a run of a bot or a scheduled workflow ends on the default branch, the bot-health bot looks at it; other runs of pull requests start nothing. When a bot of events, such as Welcome, or a workflow that keeps an issue of its own fails at its first attempt, also in a pull request or a fork, its failed jobs run once more without an issue if Harden-Runner stopped one of them; otherwise it stays failed where that shows. A first failure that a second try can fix runs its failed jobs once more. A failure that stays opens one issue for the workflow, or updates it, with the failed jobs, their steps and their first errors. A run that passes closes the issue once every job that failed ran again in it and passed, in every leg of a matrix; a run that skipped such a job, or one without it, leaves the issue open. Every night, the bot looks at the latest run of every workflow, in case GitHub lost an event, but leaves a workflow that keeps an issue of its own to that issue. It starts a workflow whose schedule GitHub missed or switched off: one with no run of its schedule or by hand since the time of its schedule, whatever pushes ran it since.
 
     run(["A run of a bot ends<br>on main"])
     nightly(["Every night<br>the latest run of every workflow"])
@@ -19,6 +19,10 @@ flowchart TB
     issue["One issue for the workflow<br>the failed jobs · their steps<br>their first errors"]
     closed["Closes the issue<br>passes again in the run"]
     missed["Starts a workflow<br>whose schedule GitHub missed"]
+    event(["A bot of events or with an issue of its own<br>fails at its first attempt<br>also in a pull request or a fork"])
+    stopped{"Harden-Runner<br>stopped a job?"}
+    retried["Runs the failed jobs<br>once more, without an issue"]
+    stays["Stays failed<br>where that shows"]
 
     run --> passed
     nightly --> own
@@ -32,10 +36,13 @@ flowchart TB
     first -- "yes" --> again
     again -. "its end" .-> run
     first -- "no" --> issue
+    event --> stopped
+    stopped -- "yes" --> retried
+    stopped -- "no" --> stays
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class run,nightly,again,missed bot
-    class issue,waits person
+    class run,nightly,again,missed,event,retried bot
+    class issue,waits,stays person
     class closed,left done

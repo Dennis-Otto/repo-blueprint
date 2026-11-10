@@ -69,12 +69,14 @@ from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
     CRON,
+    EVENT_BOTS,
     FAILED,
     LABEL,
     LABELS,
     OWN_ISSUE,
     RENOVATE_LABEL,
     STEP,
+    STOPPED,
     TYPE,
     Cron,
     after_pull_requests,
@@ -15432,6 +15434,7 @@ BLUEPRINT_BOTS = {
     "Dashboard",
     "Docs pictures",
     "Issue assistant sync",
+    "Next runner",
     "Renovate",
     "Rollout",
     "Weekly report",
@@ -15469,17 +15472,22 @@ def test_the_bot_health_bot_watches_every_bot(
     else:
         assert not watched & BLUEPRINT_BOTS
     # Every workflow on a schedule that pull requests don't run, whose every run is
-    # one of the default branch; Diagrams, Newest Python, Newest Node and the Next
-    # runner keep an issue of their own.
-    for name, text in names_of_workflows(root).items():
+    # one of the default branch.
+    named = names_of_workflows(root)
+    for name, text in named.items():
         events = set(triggers(text))
         if "schedule" in events and not events & {
             "pull_request",
             "pull_request_target",
         }:
-            assert name in watched | OWN_ISSUE | {"Bot health"}, name
+            assert name in watched | {"Bot health"}, name
+    # And every bot of events and workflow that keeps an issue of its own, such as
+    # Diagrams, which run once more when Harden-Runner stopped them (decision 0141).
+    assert set(named) & (EVENT_BOTS | OWN_ISSUE) <= watched
+    assert {"Area labels", "Commands", "Dependabot maintenance", "Welcome"} <= watched
     # Not the checks of pull requests, each of whose runs would start a run of the
-    # bot that skips: the daily look covers their runs on the default branch.
+    # bot that skips: the daily look covers their runs on the default branch, and
+    # the bot after the checks runs them again when Harden-Runner stopped them.
     assert not watched & OTHER_CHECKS
     assert "Bot health" not in watched
 
@@ -15541,6 +15549,46 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     )
     assert ends
     assert set(json.loads(ends[1])) == FAILED | {"success", "cancelled"}
+    # It leaves the bots of events and the workflows that keep an issue of their own
+    # to the job stopped, which takes exactly those, also of a pull request or of a
+    # fork, at the end of a first attempt that failed.
+    left = re.search(
+        r"!contains\(fromJSON\('(\[[^\]]+\])'\), github\.event\.workflow_run\.name\)",
+        condition,
+    )
+    assert left
+    assert set(json.loads(left[1])) == EVENT_BOTS | OWN_ISSUE
+    # None of them runs on pull_request: such a run is a fork's workflow of that name.
+    named = names_of_workflows(ROOT)
+    for name in EVENT_BOTS | OWN_ISSUE:
+        assert "pull_request" not in triggers(named[name]), name
+    stopped = job_in(text, "stopped")
+    taken = condition_of(stopped)
+    assert taken == (
+        "github.event_name == 'workflow_run' && "
+        "!github.event.repository.fork && "
+        "github.event.workflow_run.event != 'pull_request' && "
+        f"contains(fromJSON('{left[1]}'), github.event.workflow_run.name) && "
+        "github.event.workflow_run.conclusion == 'failure' && "
+        "github.event.workflow_run.run_attempt == 1"
+    )
+    # It runs failed jobs again and reads their annotations, and writes nothing else.
+    assert stopped["permissions"] == {
+        "actions": "write",
+        "checks": "read",
+        "contents": "read",
+    }
+    assert stopped["concurrency"]["group"] == (
+        "${{ github.workflow }}-stopped-${{ github.event.workflow_run.id }}"
+    )
+    [checkout] = steps_using(stopped, "actions/checkout")
+    assert checkout["with"]["persist-credentials"] is False
+    assert "ref" not in checkout["with"]
+    [command] = [step for step in stopped["steps"] if "bot-health" in str(step)]
+    assert 'bot-health stopped "$RUN"' in command["run"]
+    assert command["env"]["RUN"] == "${{ github.event.workflow_run.id }}"
+    # The step that stops a job says so in the words that the bot looks for.
+    assert STOPPED in step_in(stopped, MAKE_SURE)["run"]
     assert "github.event_name != 'workflow_run'" in condition_of(job_in(text, "sweep"))
     # One run at a time per workflow, set on the job: a run that skips, for a pull
     # request, never replaces the waiting one for the default branch.
