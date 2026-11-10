@@ -6516,6 +6516,12 @@ NEXTCLOUD_PHP = {
 }
 
 
+# The PHP that each runner ships with its extensions and Composer, as the readme of
+# its image says (https://github.com/actions/runner-images/tree/main/images/ubuntu):
+# a runner that the jobs move to gets its line here.
+RUNNER_PHP = {"ubuntu-24.04": "8.3"}
+
+
 def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> None:
     build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
     nextcloud = re.search(r"^ +NEXTCLOUD_VERSION: (\d+)\.", build, re.MULTILINE)
@@ -6525,22 +6531,60 @@ def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> No
         f"Nextcloud {major}: add the PHP it runs on to NEXTCLOUD_PHP, from "
         f"https://github.com/nextcloud/server/blob/v{major}.0.0/lib/versioncheck.php"
     )
-    setup = step_named(build, "Set up PHP for the signing of the Nextcloud app")
-    php = re.fullmatch(r"(\d+\.\d+)", setup["with"]["php-version"])
-    assert php
+    job = job_with(build, "Sign the Nextcloud app")
+    runner = job["runs-on"]
+    assert runner in RUNNER_PHP, f"{runner}: add the PHP that it ships to RUNNER_PHP"
+    php = RUNNER_PHP[runner]
 
     def minor(version: str) -> tuple[int, ...]:
         return tuple(int(part) for part in version.split("."))
 
     oldest, newest = NEXTCLOUD_PHP[major]
-    assert minor(oldest) <= minor(php[1]) <= minor(newest), (
-        f"Nextcloud {major} runs on PHP {oldest} to {newest}, not on {php[1]}"
+    assert minor(oldest) <= minor(php) <= minor(newest), (
+        f"Nextcloud {major} runs on PHP {oldest} to {newest}, not on {php}, which "
+        f"{runner} ships: move the job to a runner that ships a PHP that it runs on"
     )
     # The last PHP that setup-php sets up is the one that occ runs on.
-    job = job_with(build, "Sign the Nextcloud app")
+    setup = step_named(build, "Set up PHP for the signing of the Nextcloud app")
     sign = names_of(job).index("Sign the Nextcloud app")
     assert job["steps"].index(setup) < sign
     assert not steps_using({"steps": job["steps"][sign:]}, "shivammathur/setup-php")
+
+
+def test_the_release_signs_a_nextcloud_app_on_the_php_of_the_runner() -> None:
+    # The job blocks every host but GitHub's. For any php-version but pre-installed,
+    # setup-php updates PHP to its latest patch on an image of GitHub for Ubuntu,
+    # which has no ppa:ondrej/php, even for the version that the runner ships; it
+    # downloads that PHP, and Composer, from the pages of releases on github.com
+    # without a token, and then from mirrors that the job blocks: in an outage of
+    # those downloads, as on 8 November 2026, the build of the release would fail
+    # (#800).
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    setup = step_named(build, "Set up PHP for the signing of the Nextcloud app")
+    assert setup["with"]["php-version"] == "pre-installed", (
+        "only for pre-installed does setup-php download no PHP (decision 0133)"
+    )
+    assert setup["with"]["coverage"] == "none"
+    # The Composer of the runner, which a project's krankerl.toml may run: one of
+    # setup-php would come from a release on github.com, and setup-php would write
+    # the token of the job, which may write the contents, into its auth.json, where
+    # the steps that build the project could read it.
+    assert setup["with"]["tools"] == "none"
+    # A runner image with another PHP fails the build loudly, before the signing,
+    # by the lib/versioncheck.php of NEXTCLOUD_VERSION.
+    job = job_with(build, "Sign the Nextcloud app")
+    names = names_of(job)
+    check = names.index("Build the Nextcloud app")
+    assert names.index(setup["name"]) < check < names.index("Sign the Nextcloud app")
+    script = job["steps"][check]["run"]
+    unzip = script.index('unzip -q "$RUNNER_TEMP/nextcloud.zip"')
+    versioncheck = script.index(
+        'if ! php "$RUNNER_TEMP/server/nextcloud/lib/versioncheck.php" > /dev/null; then'
+    )
+    assert unzip < versioncheck
+    branch = script[versioncheck:].split("\nfi\n", 1)[0]
+    assert "::error::" in branch
+    assert "exit 1" in branch
 
 
 # Each curl of a script or of a step, with the lines it continues on; not one that a
