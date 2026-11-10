@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **A download that works on its second try no longer fails on the answer of the first:** when GitHub answered the question for the sha256 of a release's asset with an error, such as a 502, `.github/download.sh` tried again as it should, but the body of the error, which gh writes to its output, ended up in front of the sha256 of the second try. The download then failed with "GitHub keeps no sha256", although the second try had worked. Each try now keeps its output to itself, and only the try that works gives the sha256 ([#772](https://github.com/Dennis-Otto/repo-blueprint/issues/772)).

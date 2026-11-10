@@ -1,3 +1,0 @@
-### Bug fixes
-
-- **A passing error of the network no longer fails the audit of a Nextcloud app:** when the advisories of Packagist didn't answer in time, `composer audit` in the step *Composer* of `scripts/check.sh` stopped with `curl error 28` and failed the checks, although no package was vulnerable; the same run passed on its second try. The audit now tries again 5 and then 10 seconds later when Composer couldn't reach Packagist, and fails only when it stays out of reach three times, with what to do then. A vulnerable or abandoned package still fails the step at once ([#796](https://github.com/Dennis-Otto/repo-blueprint/issues/796)).
