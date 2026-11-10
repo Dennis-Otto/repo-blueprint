@@ -56,7 +56,7 @@ LABEL_DESCRIPTION = (
 )
 # The label of the issue that waits for a step that only a person can take, such as
 # the upload of the social preview, which no API offers: nothing fails there
-# (decision 0141).
+# (decision 0140).
 STEP = "manual-step"
 STEP_COLOR = "1d76db"
 STEP_DESCRIPTION = (
@@ -540,15 +540,26 @@ def stopped_by_harden_runner(
     api: Api, repo: str, run: Run, *, every: bool = False
 ) -> bool:
     """Whether the step that makes sure that Harden-Runner blocks stopped a job of the
-    run that failed, as its annotation says, or with every, each job that failed."""
-    stopped = [
-        any(
-            STOPPED in str(annotation.get("message"))
+    run that failed, as its annotation says, or with every, each job that failed, of
+    which a job that ran out of its time is one that Harden-Runner didn't stop."""
+    stopped = []
+    for job in jobs_of(api, repo, run.id, run.attempt):
+        conclusion = job.get("conclusion")
+        if conclusion not in ("failure", "timed_out", "cancelled"):
+            continue
+        messages = [
+            str(annotation.get("message"))
             for annotation in annotations_of(api, repo, int(job["id"]))
+        ]
+        if conclusion == "cancelled":
+            # A job that GitHub cancelled at its time limit failed, one that a person,
+            # a newer run or a failed leg of its matrix cancelled didn't.
+            if every and any(OUT_OF_TIME in message for message in messages):
+                stopped.append(False)
+            continue
+        stopped.append(
+            conclusion == "failure" and any(STOPPED in message for message in messages)
         )
-        for job in jobs_of(api, repo, run.id, run.attempt)
-        if job.get("conclusion") == "failure"
-    ]
     return any(stopped) and (all(stopped) or not every)
 
 

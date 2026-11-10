@@ -15558,11 +15558,16 @@ def test_the_bot_health_bot_acts_on_runs_of_the_default_branch_only() -> None:
     )
     assert left
     assert set(json.loads(left[1])) == EVENT_BOTS | OWN_ISSUE
+    # None of them runs on pull_request: such a run is a fork's workflow of that name.
+    named = names_of_workflows(ROOT)
+    for name in EVENT_BOTS | OWN_ISSUE:
+        assert "pull_request" not in triggers(named[name]), name
     stopped = job_in(text, "stopped")
     taken = condition_of(stopped)
     assert taken == (
         "github.event_name == 'workflow_run' && "
         "!github.event.repository.fork && "
+        "github.event.workflow_run.event != 'pull_request' && "
         f"contains(fromJSON('{left[1]}'), github.event.workflow_run.name) && "
         "github.event.workflow_run.conclusion == 'failure' && "
         "github.event.workflow_run.run_attempt == 1"

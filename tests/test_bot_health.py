@@ -1047,6 +1047,47 @@ def test_a_workflow_of_one_try_with_another_failure_gets_no_second_try(
     assert github.reruns == []
 
 
+@pytest.mark.parametrize(
+    ("conclusion", "annotations"),
+    [("timed_out", []), ("cancelled", [failure("failure", OUT_OF_TIME)])],
+)
+def test_a_workflow_of_one_try_whose_job_ran_out_of_time_gets_no_second_try(
+    github: FakeGitHub, conclusion: str, annotations: list[dict[str, str]]
+) -> None:
+    # A part of the mutants that hit its time limit would run for hours again.
+    github.runs[1] = run_of(1, name="Mutation", path=FINDINGS)
+    github.jobs[(1, 1)] = [
+        job_of_a_run(11, "mutation (1/4)", conclusion),
+        job_of_a_run(12, "mutation report", "success"),
+        stopped_job(13, "mutation issue"),
+    ]
+    github.annotations[11] = annotations
+    github.annotations[13] = [STOPPED_JOB]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Mutation: fails: opened #1."
+    assert github.reruns == []
+
+
+def test_a_workflow_of_one_try_with_a_leg_that_its_matrix_cancelled_gets_its_second_try(
+    github: FakeGitHub,
+) -> None:
+    # A leg that the stop of another cancelled failed through the stop alone.
+    github.runs[1] = run_of(1, name="Mutation", path=FINDINGS)
+    github.jobs[(1, 1)] = [
+        stopped_job(11, "mutation (1/4)"),
+        job_of_a_run(12, "mutation (2/4)", "cancelled"),
+    ]
+    github.annotations[11] = [STOPPED_JOB]
+    github.annotations[12] = [failure("failure", "The operation was canceled.")]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    assert result == "Mutation: failed: runs the failed jobs once more."
+    assert github.reruns == [1]
+
+
 @pytest.mark.parametrize("name", sorted(EVENT_BOTS | OWN_ISSUE))
 @pytest.mark.parametrize(
     ("event", "head"),

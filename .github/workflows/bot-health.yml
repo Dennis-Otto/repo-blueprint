@@ -184,10 +184,13 @@ jobs:
     name: run a bot again that Harden-Runner stopped
     # The bots of events and the workflows that keep an issue of their own, whose runs
     # the job run leaves alone: also a run of a pull request or of a fork, which runs
-    # the workflow of its base again, at its first attempt only (decision 0141).
+    # the workflow of its base again, at its first attempt only (decision 0141). None
+    # of them runs on pull_request, so such a run is a workflow of a fork's own, which
+    # only took the name of one of them.
     if: >-
       github.event_name == 'workflow_run' &&
       !github.event.repository.fork &&
+      github.event.workflow_run.event != 'pull_request' &&
       contains(fromJSON('["Area labels", "Commands", "Dependabot maintenance", "Welcome", "Diagrams", "Newest Node", "Newest Python", "Next runner"]'), github.event.workflow_run.name) &&
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.run_attempt == 1
