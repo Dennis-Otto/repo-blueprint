@@ -7495,12 +7495,15 @@ def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
         ((2,), (), 2),
     ],
 )
+# In the CI, Composer also writes its error as a command of the runner.
+@pytest.mark.parametrize("actions", [False, True])
 def test_composer_audit_tries_again_only_after_an_error_of_the_network(
     projects: dict[str, Path],
     tmp_path: Path,
     codes: tuple[int, ...],
     pauses: tuple[int, ...],
     code: int,
+    actions: bool,
 ) -> None:
     check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
     start = check.index('step "Composer"')
@@ -7526,6 +7529,9 @@ def test_composer_audit_tries_again_only_after_an_error_of_the_network(
           code="${{codes[$(grep -c '^composer audit' "$CALLS") - 1]}}"
           if ((code == 100)); then
             echo "{timeout}" >&2
+            if [[ "${{GITHUB_ACTIONS:-}}" == true ]]; then
+              echo "::error ::{timeout}"
+            fi
           fi
           exit "$code"
         fi
@@ -7536,6 +7542,7 @@ def test_composer_audit_tries_again_only_after_an_error_of_the_network(
         "bash scripts/composer.sh\n",
         repository,
         {"composer": fake, "sleep": ""},
+        GITHUB_ACTIONS="true" if actions else "false",
     )
 
     output = result.stdout + result.stderr
@@ -7556,7 +7563,23 @@ def test_composer_audit_tries_again_only_after_an_error_of_the_network(
         " without its advisories; run the checks again once packagist.org answers.\n"
     )
     assert result.stderr.endswith(gone) is (code == 100), result.stderr
-    assert result.stderr.count(timeout) == codes.count(100)
+    # Composer's error of each try, which the CI shows with the rest of its output.
+    assert output.splitlines().count(timeout) == codes.count(100), output
+    # The runner takes no command of a try that goes again, such as the annotation of
+    # its error, which would stay on the check after the next try passes; only the
+    # last try's.
+    commands = [line for line in result.stdout.splitlines() if line.startswith("::")]
+    tries = []
+    for index, line in enumerate(commands):
+        if line.startswith("::stop-commands::"):
+            token = line.removeprefix("::stop-commands::")
+            assert token, commands
+            end = commands.index(f"::{token}::", index)
+            tries.append(commands[index + 1 : end])
+    error = f"::error ::{timeout}"
+    assert tries == ([[error]] * len(pauses) if actions else []), commands
+    assert commands.count(error) == (codes.count(100) if actions else 0), commands
+    assert (commands[-1:] == [error]) is (actions and code == 100), commands
 
 
 # It starts the tool, which in the copy of the mutation tests is the code with the

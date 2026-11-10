@@ -1225,10 +1225,10 @@ advisories of Packagist, three times in a row, as the log says then."""
 why = """A broken `composer.json` breaks every install, `composer install` stops at a lock
 file that lacks a package, and a vulnerable package ships its vulnerability with the
 app. Without the advisories, the audit can't tell whether a package is vulnerable."""
-fix = """Fix what `composer validate` names, lock the packages of `composer.json` again
-with the least change, which keeps every other package at its version, and update a
-vulnerable package. When Packagist stayed out of reach, run the checks again once
-packagist.org answers:"""
+fix = """When Packagist stayed out of reach, run the checks again once packagist.org
+answers. Otherwise fix what `composer validate` names, lock the packages of
+`composer.json` again with the least change, which keeps every other package at its
+version, and update a vulnerable package:"""
 commands = [
   "composer validate --strict",
   "composer update --minimal-changes",
