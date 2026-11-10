@@ -2490,6 +2490,12 @@ def wanted_policy() -> dict[str, Any]:
             "jobs:\n  pull_request:\n",
             ["push", "pull_request_target"],
         ),
+        # A list as far in as the keys of the table belongs to the key above it.
+        (
+            "on:\n  pull_request_target:\n    types: [opened]\n  schedule:\n"
+            '  - cron: "5 6 * * 4"\n  push:\n',
+            ["pull_request_target", "schedule", "push"],
+        ),
         ("on:\n- push\n- schedule\njobs: {}\n", ["push", "schedule"]),
         ("on:\n  - push\n  - workflow_dispatch\n", ["push", "workflow_dispatch"]),
         ("on:\njobs: {}\n", []),

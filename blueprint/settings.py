@@ -792,16 +792,21 @@ def workflow_events(text: str) -> list[str]:
             return [value.strip("\"'")]
         events: list[str] = []
         indent: int | None = None
+        listed = False
         for below in lines[index + 1 :]:
             if not below:
                 continue
             depth = len(below) - len(below.lstrip())
+            item = below.lstrip().startswith("-")
             # A list may stand as far in as on itself; any other key ends the table.
-            if depth == 0 and not below.startswith("-"):
+            if depth == 0 and not item:
                 break
-            indent = depth if indent is None else indent
+            if indent is None:
+                # The first entry decides: a list of names, or a table of them.
+                indent, listed = depth, item
             found = EVENT.match(below.strip())
-            if depth == indent and found:
+            # In a table, a list as far in as its keys is the value of the key above.
+            if depth == indent and item == listed and found:
                 events.append(found[1])
         return events
     return []
