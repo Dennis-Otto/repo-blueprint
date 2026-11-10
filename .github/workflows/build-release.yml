@@ -518,13 +518,22 @@ jobs:
       # The occ of NEXTCLOUD_VERSION signs the app and stops on a PHP that this
       # Nextcloud doesn't run on, as its lib/versioncheck.php says: Nextcloud 35 runs
       # on PHP 8.3 to 8.5. The PHP of the app itself is that of appinfo/info.xml.
+      # PHP 8.3 is the one of the runner, with these extensions and Composer, which
+      # setup-php finds there and downloads nothing for: a PHP that the runner lacks,
+      # and Composer, would come from the pages of releases on github.com without a
+      # token, and then from mirrors that this job blocks, so an outage of those
+      # downloads would fail the build of the release (decision 0133). tools: none
+      # keeps the Composer of the runner, which a project's krankerl.toml may run, and
+      # keeps the token of the job out of the auth.json of Composer, where the steps
+      # that build the project could read it.
       - name: Set up PHP for the signing of the Nextcloud app
         if: env.PUBLISH_TO == 'nextcloud-appstore'
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
-          php-version: "8.4"
+          php-version: "8.3"
           extensions: dom, libxml, mbstring, xml, zip
           coverage: none
+          tools: none
       # The private key is only in the step that signs, which runs nothing of the
       # project and removes the key also when it fails: the build, the downloads and
       # the project's own checks of its package run without it.

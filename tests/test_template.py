@@ -6366,6 +6366,34 @@ def test_the_release_signs_a_nextcloud_app_on_a_php_that_its_occ_runs_on() -> No
     assert not steps_using({"steps": job["steps"][sign:]}, "shivammathur/setup-php")
 
 
+# The PHP that each runner ships with its extensions and Composer, as the readme of
+# its image says (https://github.com/actions/runner-images/tree/main/images/ubuntu):
+# a runner that the jobs move to gets its line here.
+RUNNER_PHP = {"ubuntu-24.04": "8.3"}
+
+
+def test_the_release_signs_a_nextcloud_app_on_the_php_of_the_runner() -> None:
+    # The job blocks every host but GitHub's. setup-php downloads a PHP that the
+    # runner lacks, and Composer, from the pages of releases on github.com without a
+    # token, and then from mirrors that the job blocks: in an outage of those
+    # downloads, as on 8 November 2026, the build of the release would fail (#800).
+    build = (ROOT / ".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    job = job_with(build, "Sign the Nextcloud app")
+    runner = job["runs-on"]
+    assert runner in RUNNER_PHP, f"{runner}: add the PHP that it ships to RUNNER_PHP"
+    setup = step_named(build, "Set up PHP for the signing of the Nextcloud app")
+    assert setup["with"]["php-version"] == RUNNER_PHP[runner], (
+        f"{runner} ships PHP {RUNNER_PHP[runner]}, which setup-php finds there and "
+        "downloads nothing for; when the occ of NEXTCLOUD_VERSION doesn't run on it, "
+        "the job moves to a runner that ships a PHP that it runs on (decision 0133)"
+    )
+    # The Composer of the runner, which a project's krankerl.toml may run: one of
+    # setup-php would come from a release on github.com, and setup-php would write
+    # the token of the job, which may write the contents, into its auth.json, where
+    # the steps that build the project could read it.
+    assert setup["with"]["tools"] == "none"
+
+
 # Each curl of a script or of a step, with the lines it continues on; not one that a
 # comment names.
 CURL = re.compile(r"^[^#\n]*?\bcurl ((?:.*\\\n)*.*)$", re.MULTILINE)
