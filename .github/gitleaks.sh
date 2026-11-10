@@ -6,8 +6,9 @@
 # in its report and its log. It fails on a finding and when gitleaks fails itself.
 #   bash .github/gitleaks.sh [base head]
 # A pull request that changes gitleaks or its rules, in .github/gitleaks.sh,
-# .gitleaks.toml or .gitleaksignore, has the whole history scanned, so that a new rule
-# fails the pull request that brings it rather than the weekly scan after it.
+# .gitleaks.toml or .gitleaksignore, has the whole history of its head scanned, so that
+# a new rule fails the pull request that brings it rather than the weekly scan after it;
+# the branches of others stay out of it, so that only its own history decides.
 # gitleaks comes from its release on GitHub, at the version below and checked by its
 # sha256, through .github/download.sh and once in a job, with the token in GH_TOKEN,
 # which gitleaks itself doesn't get. Its action downloaded it without a token, which
@@ -37,7 +38,8 @@ what="the whole history"
 if (($# == 2)); then
   rules="$(git diff --name-only "$1...$2" -- .github/gitleaks.sh .gitleaks.toml .gitleaksignore)"
   if [[ -n "$rules" ]]; then
-    what="the whole history, since the pull request changes gitleaks or its rules"
+    range=(--log-opts "$2")
+    what="the whole history of the pull request, since it changes gitleaks or its rules"
   else
     range=(--log-opts "$1..$2")
     what="the commits of the pull request"

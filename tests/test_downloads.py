@@ -942,10 +942,11 @@ def test_a_pull_request_that_changes_the_rules_scans_the_whole_history(
     assert result.returncode == 0, result.stdout + result.stderr
     assert calls == [
         SCAN.format(runner=runner.as_posix())
-        + f" [.] in {tmp_path.name} token none none"
+        + f" [--log-opts] [{head}] [.] in {tmp_path.name} token none none"
     ]
     assert (
-        "scans the whole history, since the pull request changes gitleaks or its rules."
+        "scans the whole history of the pull request, since it changes gitleaks or its"
+        " rules."
     ) in result.stdout
 
 
