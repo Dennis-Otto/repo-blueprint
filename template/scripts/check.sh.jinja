@@ -471,7 +471,25 @@ step "Package"
 
 step "Composer"
 composer validate --strict
-composer audit
+# Again after a passing error of the network, such as a timeout of the advisories of
+# Packagist, 5 and then 10 seconds later. Composer ends with 100 only when it can't
+# reach a repository: a vulnerable or abandoned package fails at once, as does any
+# other error.
+for pause in 5 10 ""; do
+  audit=0
+  composer audit || audit=$?
+  if ((audit != 100)) || [[ -z "$pause" ]]; then
+    break
+  fi
+  echo "Packagist didn't answer; composer audit tries again in $pause seconds."
+  sleep "$pause"
+done
+if ((audit == 100)); then
+  echo "Packagist stayed out of reach, and composer audit can't check the packages without its advisories; run the checks again once packagist.org answers." >&2
+fi
+if ((audit != 0)); then
+  exit "$audit"
+fi
 
 step "App metadata"
 xsd="$(mktemp)"

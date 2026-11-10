@@ -7476,6 +7476,89 @@ def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
     assert list(temporary.iterdir()) == []
 
 
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("codes", "pauses", "code"),
+    [
+        ((0,), (), 0),
+        # The advisories of Packagist timed out once and failed the checks of
+        # Dennis-Otto/paperless-unified-search on 8 November 2026 (#346): Composer
+        # ends with 100 when it can't reach a repository, and the audit goes again.
+        ((100, 0), (5,), 0),
+        ((100, 100, 0), (5, 10), 0),
+        # Out of reach three times, the step fails: the audit never ran.
+        ((100, 100, 100), (5, 10), 100),
+        # A vulnerable or abandoned package fails at once, and so does any other
+        # error of Composer.
+        ((1,), (), 1),
+        ((100, 1), (5,), 1),
+        ((2,), (), 2),
+    ],
+)
+def test_composer_audit_tries_again_only_after_an_error_of_the_network(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    codes: tuple[int, ...],
+    pauses: tuple[int, ...],
+    code: int,
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Composer"')
+    composer = check[start : check.index('step "App metadata"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (repository / "scripts/composer.sh").write_text(
+        check[: check.index('step "Text files"')] + composer,
+        encoding="utf-8",
+        newline="\n",
+    )
+    # Each audit ends with the next of the codes, and before a 100 Composer writes
+    # its error after a timeout of the advisories.
+    timeout = (
+        "curl error 28 while downloading https://packagist.org/api/security-advisories/:"
+        " Connection timed out after 10006 milliseconds"
+    )
+    fake = textwrap.dedent(
+        f"""\
+        codes=({" ".join(map(str, codes))})
+        if [[ "$1" == audit ]]; then
+          code="${{codes[$(grep -c '^composer audit' "$CALLS") - 1]}}"
+          if ((code == 100)); then
+            echo "{timeout}" >&2
+          fi
+          exit "$code"
+        fi
+        """
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/composer.sh\n",
+        repository,
+        {"composer": fake, "sleep": ""},
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == code, output
+    # Each audit, with a pause before the next one.
+    assert calls == [
+        "composer validate --strict",
+        *[call for pause in pauses for call in ("composer audit", f"sleep {pause}")],
+        "composer audit",
+    ], output
+    assert [line for line in result.stdout.splitlines() if "tries again" in line] == [
+        f"Packagist didn't answer; composer audit tries again in {pause} seconds."
+        for pause in pauses
+    ], output
+    # Composer's own error, then what to do about it.
+    gone = (
+        "Packagist stayed out of reach, and composer audit can't check the packages"
+        " without its advisories; run the checks again once packagist.org answers.\n"
+    )
+    assert result.stderr.endswith(gone) is (code == 100), result.stderr
+    assert result.stderr.count(timeout) == codes.count(100)
+
+
 # It starts the tool, which in the copy of the mutation tests is the code with the
 # mutants, and the variables of mutmut switch them in that process too.
 @pytest.mark.mutation_unsafe
