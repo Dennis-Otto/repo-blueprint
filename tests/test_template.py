@@ -2329,7 +2329,7 @@ def test_only_the_listed_actions_run(projects: dict[str, Path], project: str) ->
 
 # The workflows that start on pull_request_target, each for a reason that the list of
 # the settings names: a token that writes, or the release app, also for a pull request
-# of a fork or before a maintainer approved its runs (decision 0137).
+# of a fork or before a maintainer approved its runs (decision 0138).
 TARGETS = [
     ".github/workflows/area-labels.yml",
     ".github/workflows/dependabot-automerge.yml",
@@ -2834,6 +2834,13 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
             )
         if name == "SECURITY.md":
             own = as_an_action(own)
+        if name == ".github/renovate-blueprint.json5":
+            # The blueprint runs its blueprint.py from its root, where every
+            # repository has it as .github/blueprint.py.
+            own = own.replace(
+                "python3 blueprint.py locks --refresh",
+                "python3 .github/blueprint.py locks --refresh",
+            )
         assert own == (project / name).read_text(encoding="utf-8"), name
 
 
@@ -9558,8 +9565,61 @@ def renovate_rules(text: str) -> dict[str, Any]:
     return rules
 
 
+# What decides how the weekly refresh of the lock files of a package manager merges.
+REFRESH_KEYS = (
+    "minimumReleaseAge",
+    "automerge",
+    "updateNotScheduled",
+    "additionalBranchPrefix",
+    "statusCheckWhen",
+    "postUpgradeTasks",
+)
+
+
+def refresh_of(
+    rules: dict[str, Any], own: dict[str, Any], manager: str
+) -> dict[str, Any]:
+    """What the rules set for the weekly refresh of the lock files of a package
+    manager: each rule that could apply to it, the last one with a say."""
+    found = {key: rules[key] for key in REFRESH_KEYS if key in rules}
+    for rule in [*rules["packageRules"], *own.get("packageRules", [])]:
+        # A refresh has no dependency, datasource or version of its own to match.
+        about_a_dependency = any(
+            key.startswith("match")
+            and key not in ("matchUpdateTypes", "matchManagers", "matchFileNames")
+            for key in rule
+        )
+        types = rule.get("matchUpdateTypes", ["lockFileMaintenance"])
+        managers = rule.get("matchManagers", [manager])
+        if (
+            "lockFileMaintenance" in types
+            and manager in managers
+            and not about_a_dependency
+        ):
+            found |= {key: rule[key] for key in REFRESH_KEYS if key in rule}
+    return found
+
+
+# The weekly refresh of the lock files of a package manager that keeps it to versions
+# at least a week old merges by itself; any other waits for the maintainer on a branch
+# of its own, which the check of the age leaves alone.
+MERGES_BY_ITSELF = {
+    "minimumReleaseAge": "7 days",
+    "automerge": True,
+    "updateNotScheduled": False,
+    "additionalBranchPrefix": "",
+    "statusCheckWhen": {"minimumReleaseAge": "never"},
+}
+WAITS = {
+    "minimumReleaseAge": None,
+    "automerge": False,
+    "updateNotScheduled": False,
+    "additionalBranchPrefix": "review-",
+}
+
+
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
-def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
+def test_the_weekly_refresh_of_the_lock_files_merges_by_itself_from_versions_a_week_old(
     projects: dict[str, Path], kind: str
 ) -> None:
     root = ROOT if kind == "blueprint" else projects[kind]
@@ -9573,37 +9633,99 @@ def test_the_weekly_refresh_of_the_lock_files_waits_for_the_maintainer(
         "enabled": True,
         "schedule": shared["schedule"],
     }
-    # The refresh brings the newest version of every indirect dependency, also one of
-    # minutes ago, without the week of waiting: so it never merges on its own. A rule
-    # that could apply to it decides, the last one with a say.
-    automerge = shared.get("automerge", False)
-    rules = [*shared["packageRules"], *own.get("packageRules", [])]
-    refresh = [
-        rule
-        for rule in rules
-        if rule.get("matchUpdateTypes") == ["lockFileMaintenance"]
-    ]
-    # Renovate builds it anew only in its window: a change of main after the review
-    # doesn't bring versions that the maintainer hasn't seen.
-    assert refresh == [
-        {
-            "matchUpdateTypes": ["lockFileMaintenance"],
-            "minimumReleaseAge": None,
-            "automerge": False,
-            "updateNotScheduled": False,
-        }
-    ]
-    for rule in rules:
-        # A refresh has no dependency, datasource or version of its own to match.
-        about_a_dependency = any(
-            key.startswith("match")
-            and key not in ("matchUpdateTypes", "matchManagers", "matchFileNames")
-            for key in rule
+    # npm takes --before= from minimumReleaseAge, and blueprint.py compiles the lock
+    # files of pip-compile again, both from versions a week old: their refresh merges
+    # by itself. Composer and any other package manager can't keep to that age, so
+    # theirs waits. Renovate builds a refresh anew only in its window, so that what
+    # merges is what the checks and the maintainer saw; the branch bot keeps it up to
+    # date with main, as Renovate does in its window.
+    blueprint = "blueprint.py" if kind == "blueprint" else ".github/blueprint.py"
+    for manager in ("npm", "pip-compile"):
+        refresh = refresh_of(shared, own, manager)
+        tasks = refresh.pop("postUpgradeTasks", None)
+        assert refresh == MERGES_BY_ITSELF, manager
+        assert tasks == (
+            {
+                "commands": [f"python3 {blueprint} locks --refresh"],
+                "fileFilters": ["**/requirements*.txt"],
+                "executionMode": "branch",
+                "installTools": {"python": {}, "uv": {}},
+            }
+            if manager == "pip-compile"
+            else None
         )
-        types = rule.get("matchUpdateTypes", ["lockFileMaintenance"])
-        if "lockFileMaintenance" in types and not about_a_dependency:
-            automerge = rule.get("automerge", automerge)
-    assert automerge is False
+    assert shared["rebaseWhen"] == "behind-base-branch"
+    for manager in ("composer", "poetry", "bundler"):
+        assert refresh_of(shared, own, manager) == WAITS, manager
+    # The age of a refresh, and the command after it, are for the refresh alone: the
+    # fix of a vulnerability still comes at once and merges on its own.
+    assert shared["vulnerabilityAlerts"] == {
+        "minimumReleaseAge": None,
+        "schedule": ["at any time"],
+        "automerge": True,
+    }
+    for rule in [*shared["packageRules"], *own.get("packageRules", [])]:
+        if {"postUpgradeTasks", "statusCheckWhen", "additionalBranchPrefix"} & set(
+            rule
+        ) and "pins.py" not in str(rule):
+            assert rule["matchUpdateTypes"] == ["lockFileMaintenance"], rule
+    # The Renovate of the blueprint, which runs for every repository of its owner,
+    # runs the command of the refresh and no other of blueprint.py.
+    bot = renovate_rules(
+        (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
+    )
+    command = f"python3 {blueprint} locks --refresh"
+    allowed = [rule for rule in bot["allowedCommands"] if re.search(rule, command)]
+    assert allowed == [r"^python3 (?:\.github/)?blueprint\.py locks --refresh$"]
+    assert not re.search(allowed[0], f"python3 {blueprint} locks --fix")
+    # The check dependency-review holds a refresh that merges by itself when a version
+    # younger than a week comes anyway, on the branches that Renovate names it, alone
+    # or in a group; one that waits begins with review- and stays out.
+    review = job_in(
+        (root / ".github/workflows/dependency-review.yml").read_text(encoding="utf-8"),
+        "dependency-review",
+    )
+    age = step_in(review, "age")
+    branches = re.findall(r"startsWith\(github\.head_ref, '([^']+)'\)", age["if"])
+    assert branches == [
+        "renovate/lock-file-maintenance",
+        "renovate/pip-compile-refresh",
+    ]
+    assert not any(
+        f"renovate/{WAITS['additionalBranchPrefix']}".startswith(branch)
+        for branch in branches
+    )
+    assert (
+        "github.event.pull_request.head.repo.full_name == github.repository"
+        in age["if"]
+    )
+    assert age["run"].endswith('python3 "$script" locks --age HEAD^1\n')
+    # The merge of the pull request with its parents, the first of which is its base.
+    [checkout] = steps_using(review, "actions/checkout")
+    assert checkout["with"]["fetch-depth"] == 2
+
+
+def test_the_mend_app_keeps_npm_alone_to_versions_a_week_old(tmp_path: Path) -> None:
+    project = render(
+        tmp_path / "project",
+        project_name="Demo Project",
+        description="A project of another owner.",
+        project_type="python-package",
+        owner="octo-org",
+        renovate_runner="mend",
+    )
+
+    shared = renovate_rules(
+        (project / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    )
+    own = renovate_rules(
+        (project / ".github/renovate.json5").read_text(encoding="utf-8")
+    )
+    # The Mend Renovate app runs no command of the blueprint, so the refresh of
+    # pip-compile waits for the maintainer; npm takes --before= from Renovate itself.
+    assert refresh_of(shared, own, "npm") == MERGES_BY_ITSELF
+    assert refresh_of(shared, own, "pip-compile") == WAITS
+    assert "postUpgradeTasks" not in str(shared)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -9869,12 +9991,18 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
     bot = renovate_rules(
         (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
     )
-    assert bot["allowedCommands"] == ["^python3 pins\\.py$"]
-    assert all(
-        re.search(allowed, command)
+    # Besides the command of the weekly refresh of the lock files, which every
+    # repository has.
+    assert bot["allowedCommands"] == [
+        r"^python3 (?:\.github/)?blueprint\.py locks --refresh$",
+        r"^python3 pins\.py$",
+    ]
+    assert [
+        allowed
         for command in tasks["commands"]
         for allowed in bot["allowedCommands"]
-    )
+        if re.search(allowed, command)
+    ] == [r"^python3 pins\.py$"]
     assert "allowShellExecutorForPostUpgradeCommands" not in bot
     for pin in pins.find_pins(ROOT):
         assert any(fnmatch.fnmatchcase(pin.path, name) for name in tasks["fileFilters"])
@@ -12227,13 +12355,15 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
         run["env"]
     )
     # The settings of the bot of the blueprint, without the command of its pins.py,
-    # which no repository has.
+    # which no repository has; the command of the weekly refresh stays.
     own = (ROOT / ".github/renovate-global.json5").read_text(encoding="utf-8")
-    start = own.index("  // The one command that a rule may run after an update")
-    end = own.index("\n", own.index("  allowedCommands: ")) + 1
+    start = own.index("    // The blueprint's own pins.py")
+    end = own.index("\n", own.index('"^python3 pins')) + 1
     bot = (project / ".github/renovate-global.json5").read_text(encoding="utf-8")
     assert bot == own[:start] + own[end:]
-    assert "allowedCommands" not in bot
+    assert renovate_rules(bot)["allowedCommands"] == [
+        r"^python3 (?:\.github/)?blueprint\.py locks --refresh$"
+    ]
     # Renovate updates the Renovate of the workflow on its line "# renovate:" alone,
     # by the same rule as in the blueprint.
     rules = (project / ".github/renovate-blueprint.json5").read_text("utf-8")
@@ -13928,6 +14058,7 @@ PARTS = {
     ],
     "conventional title": ["conventional title", "changelog"],
     "home-assistant": ["hacs", "hassfest"],
+    "dependency-review": ["dependency-review", "age of the refresh"],
 }
 
 

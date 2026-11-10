@@ -672,7 +672,7 @@ class FakeGitHub:
         """The Actions policies, which GitHub offers a private repository only on a
         paid plan. The list names each policy by its id and name alone, and a policy
         that GitHub answers by its id has the fields of its own as well, as a public
-        repository showed on 9 November 2026 (decision 0137)."""
+        repository showed on 9 November 2026 (decision 0138)."""
         if self.repo.get("private"):
             return 403, {"message": POLICIES_REFUSAL}
         if method == "GET" and number is None:

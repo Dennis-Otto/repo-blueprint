@@ -726,7 +726,7 @@ def check_actions_config(actions: dict[str, Json]) -> None:
 # --------------------------------------------------------------------------- policies
 
 # The event that GitHub blocks in a public repository from 2 December 2026, unless an
-# Actions event policy allows it (decision 0137). A workflow that starts on it runs as
+# Actions event policy allows it (decision 0138). A workflow that starts on it runs as
 # the default branch has it, with a token that may write and the secrets, also for a
 # pull request of a fork. TARGET of [actions] lists the workflows that may.
 TARGET = "pull_request_target"

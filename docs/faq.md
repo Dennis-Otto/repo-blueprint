@@ -31,7 +31,7 @@ Set the repository variable [`BLUEPRINT_AUTOMERGE`](reference/variables.md#bluep
 The other bots that merge their own pull requests have switches of their own:
 
 - **The upstream bot of a Nextcloud app** waits with [`UPSTREAM_AUTOMERGE`](reference/variables.md#upstream_automerge) set to `off`.
-- **Renovate** merges what the rules of `.github/renovate.json5` let it, which a rule with `"automerge": false` stops for the packages that it names; the weekly refresh of the lock files waits for you anyway.
+- **Renovate** merges what the rules of `.github/renovate.json5` let it, which a rule with `"automerge": false` stops for the packages that it names; the weekly refresh of the lock files merges by itself only from versions at least a week old, and that of Composer waits for you.
 
 ## Can a repository be private, and what does it cost?
 

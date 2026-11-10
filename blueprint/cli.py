@@ -23,6 +23,7 @@ from blueprint import (
     annotate,
     decisions,
     dependabot,
+    lock_age,
     locks,
     mutation,
     screenshots,
@@ -1124,7 +1125,12 @@ def dependabot_command(
 def locks_command(arguments: argparse.Namespace, root: Path) -> int:
     """Whether Renovate can compile each lock file of pip-compile again with the
     command in its header; with --fix, it puts the = between each option and its
-    value first. With --compile, whether each one still pins what its sources ask for."""
+    value first. With --compile, whether each one still pins what its sources ask for;
+    --refresh and --age keep the weekly refresh to versions at least a week old."""
+    if arguments.refresh:
+        return locks_refresh_command(root)
+    if arguments.age:
+        return locks_age_command(arguments.age, root)
     if arguments.compile:
         return locks_compile_command(arguments, root)
     names, skipped = locks.check(root)
@@ -1152,6 +1158,74 @@ def locks_command(arguments: argparse.Namespace, root: Path) -> int:
         )
     else:
         print("No file here is a lock file of pip-compile, which Renovate compiles.")
+    return 0
+
+
+def locks_refresh_command(root: Path) -> int:
+    """The lock files of pip-compile that Renovate's weekly refresh moved to the newest
+    versions, compiled again from versions at least a week old: Renovate runs it in
+    the branch of the refresh, after it compiled them (decision 0137)."""
+    names = locks.refreshed(root)
+    if not names:
+        print("No lock file of pip-compile differs from HEAD: the refresh moved none.")
+        return 0
+    uv = shutil.which("uv")
+    if uv is None:
+        print(
+            "uv is not installed here, so the refresh keeps the newest versions; "
+            "Renovate installs it for this command by the rule of the refresh."
+        )
+        return 1
+    now = datetime.now(UTC)
+    failed = False
+    for name in names:
+        found = locks.refresh(root, name, uv, now)
+        if found.note:
+            print(f"{name}: left as Renovate refreshed it, for {found.note}.")
+        elif found.failure:
+            failed = True
+            print(f"{name}: uv can't compile it from versions a week old:")
+            print(found.failure)
+        elif found.differences:
+            locks.write_refresh(root, found)
+            print(
+                f"{name}: compiled again from versions at least a week old, without "
+                f"{', '.join(found.differences)}."
+            )
+        else:
+            print(f"{name}: every version of the refresh is at least a week old.")
+    if failed:
+        print(
+            "The refresh keeps the newest versions of these files, and the check "
+            "dependency-review holds its pull request for the maintainer while one of "
+            "them is younger than a week."
+        )
+        return 1
+    return 0
+
+
+def locks_age_command(base: str, root: Path) -> int:
+    """Whether each version that the refresh in HEAD adds to the lock files of base
+    is at least a week old, as the refresh merges by itself only then."""
+    added, problems = lock_age.check(root, base, datetime.now(UTC))
+    for problem in problems:
+        print(problem)
+    if problems:
+        print(
+            "The weekly refresh of the lock files merges by itself only from versions "
+            "at least a week old, as every other update waits a week, so this one "
+            "waits: run the check again once each version is a week old, or let "
+            "Renovate build the refresh anew in its next weekly window. A lock file "
+            "that the check can't date, such as a yarn.lock, needs a rule in "
+            ".github/renovate.json5 with matchFileNames for its name and "
+            'matchUpdateTypes ["lockFileMaintenance"] that gives its refresh '
+            'additionalBranchPrefix "review-" and automerge false, so that it waits '
+            "for the maintainer on a branch of its own."
+        )
+        return 1
+    print(
+        f"Each of the {added} version(s) that the refresh adds is at least a week old."
+    )
     return 0
 
 
@@ -2358,6 +2432,18 @@ def add_locks_parsers(
         help="compile each lock file again with the command in its header, for its "
         "Python and on the versions that it pins, and say which no longer matches "
         "its sources",
+    )
+    locks_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="compile the lock files that differ from HEAD again from versions at "
+        "least a week old, as Renovate runs it after its weekly refresh",
+    )
+    locks_parser.add_argument(
+        "--age",
+        metavar="BASE",
+        help="whether each version that HEAD adds to the lock files of BASE is at "
+        "least a week old, as the weekly refresh merges by itself only then",
     )
 
 

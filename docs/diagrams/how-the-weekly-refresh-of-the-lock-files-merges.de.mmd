@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    wrappingWidth: 400
+---
+flowchart TB
+    accTitle: Wie die wöchentliche Auffrischung der Lock-Dateien merged
+    accDescr: Montags frischt Renovate die Lock-Dateien jedes Paketmanagers auf. npm nimmt nur Versionen, die mindestens eine Woche zuvor erschienen sind. Nach Renovate kompiliert blueprint.py die Lock-Dateien von pip-compile erneut aus Uploads, die mindestens eine Woche alt sind, und behält, was main pinnt, etwa die Behebung einer Schwachstelle. Die Prüfung dependency-review fragt PyPI und die Registry von npm, wann jede Version erschienen ist, die die Auffrischung hinzufügt. Sobald jede mindestens eine Woche alt ist und alle Prüfungen grün sind, merged sich die Auffrischung selbst; eine jüngere hält sie an, und die Prüfung nennt sie. Die Auffrischung von Composer und jedem anderen Paketmanager, der dieses Alter nicht einhalten kann, wartet auf einem eigenen Branch auf den Maintainer.
+
+    monday(["Renovate frischt die Lock-Dateien auf, montags"])
+    npm["npm: nur Versionen, die eine<br>Woche zuvor erschienen sind"]
+    pip["pip-compile: blueprint.py kompiliert<br>sie erneut aus Uploads einer Woche<br>und behält, was main pinnt"]
+    other["Composer und jeder andere:<br>die neuesten Versionen"]
+    age{"Ist jede Version, die die Auffrischung<br>hinzufügt, eine Woche alt?"}
+    merge["Merged sich selbst, sobald<br>alle Prüfungen grün sind"]
+    held["Wartet, und die Prüfung<br>nennt jede jüngere"]
+    maintainer["Wartet auf den Maintainer,<br>auf renovate/review-…"]
+
+    monday --> npm --> age
+    monday --> pip --> age
+    monday --> other --> maintainer
+    age -- "ja" --> merge
+    age -- "nein" --> held
+
+    classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
+    classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
+    classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
+    class monday,npm,pip,other,age bot
+    class held,maintainer person
+    class merge done
