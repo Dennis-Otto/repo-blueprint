@@ -196,6 +196,15 @@
       enabled: false,
     },
     {
+      // The ShellCheck of the blueprint's own checks, in requirements-dev.txt, and the
+      // one that the dev container of every repository installs, from
+      // stacks/devcontainer/requirements.txt, move together, as a fix that reaches every
+      // repository: tests/test_template.py keeps their versions equal.
+      matchPackageNames: ["shellcheck-py"],
+      semanticCommitType: "fix",
+      groupName: "ShellCheck",
+    },
+    {
       // The browser of the screenshots and the Playwright that drives it move
       // together: the image of .github/social-preview/Dockerfile holds the browsers of
       // one version of Playwright, stacks/screenshots/requirements-browser.txt the
