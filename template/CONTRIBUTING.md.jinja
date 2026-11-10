@@ -70,7 +70,12 @@ A decision that shapes the project gets a record in [`docs/decisions/`](docs/dec
 bash scripts/check.sh[% elif stack == 'node' %]npm ci --ignore-scripts
 bash scripts/check.sh[% else %]bash scripts/check.sh[% endif %]
 ```
+[% if stack == 'home-assistant' %]
+Home Assistant runs on Linux and macOS, not on Windows, and so do the tests of the integration: `homeassistant/runner.py` imports `fcntl`, a module of Python for Unix alone, and pytest-homeassistant-custom-component imports that runner as pytest starts. The setup stops even earlier there: `requirements-test.txt`, compiled on Linux, pins no `winrt-runtime`, which bleak needs on Windows alone, and `pip install --require-hashes` refuses every package without its pin and hash. An install with `--no-deps` or without the hashes doesn't help, since pytest still can't start. What works on Windows:
 
+- **WSL 2:** a clone in the Linux file system of the distribution, such as `~/{= project_slug =}`, with Python {= python_version =} installed there, takes the commands above as they are. Stay out of `/mnt/c/` and the other drives of Windows there: git and the tests are slow on them, and a worktree that Git for Windows made names its main checkout by a path of Windows, which git on Linux can't follow.
+- **The dev container** of `.devcontainer/`, below, which Docker runs on your machine: in VS Code, or with the CLI of dev containers, `devcontainer up --workspace-folder .` and then `devcontainer exec --workspace-folder . bash scripts/check.sh`. It takes a clone as well, not such a worktree, whose path of Windows the container can't follow either. GitHub Codespaces runs it in the cloud.
+[% endif %]
 To run them before every push on its own, turn on the hook of the repository once:
 
 ```sh
