@@ -1,6 +1,6 @@
 # A request to GitHub tries once more, and a write that GitHub refused fails
 
-- Status: accepted
+- Status: accepted, amended by [0136](0136-an-outage-of-github-starts-no-bot-failure.md), with which a request tries again three times after an error of GitHub, a 500 too, 10, 20 and 40 seconds apart, and a bot that GitHub keeps failing ends with a notice
 - Date: 2026-10-18
 
 ## Context

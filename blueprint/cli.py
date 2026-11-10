@@ -100,6 +100,7 @@ from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
 from blueprint.migrate import migrate
 from blueprint.notices import third_party_notices
+from blueprint.outage import couldnt_start, failed_unstarted, unreachable
 from blueprint.overrides import write_overrides
 from blueprint.ownership import check as ownership_check
 from blueprint.pages import (
@@ -350,12 +351,17 @@ def bot_health_command(
     api: Api, repo: str, arguments: argparse.Namespace, root: Path
 ) -> int:
     now = datetime.now(UTC)
+    notices: list[str] = []
     if arguments.action == "run":
-        print(watch_run(api, repo, arguments.run_id, now))
+        print(watch_run(api, repo, arguments.run_id, now, notices))
+        for notice in notices:
+            print(notice, file=sys.stderr)
         return 0
     if arguments.action == "sweep":
-        summary, healthy = sweep(api, repo, root, now)
+        summary, healthy = sweep(api, repo, root, now, notices=notices)
         print(summary, end="")
+        for notice in notices:
+            print(notice, file=sys.stderr)
         return 0 if healthy else 1
     complete = arguments.result == "success"
     logs = map(Path, arguments.log)
@@ -1744,6 +1750,19 @@ def add_update_parsers(
         help="pass even when GitHub refused a request, with the warnings alone, as "
         "in a run that shows as a check of a pull request",
     )
+    next_branch_parser.add_argument(
+        "--after",
+        type=int,
+        metavar="RUN",
+        help="the run of a check whose end started the bot: when GitHub couldn't "
+        "start it, the line stays as it is",
+    )
+    next_branch_parser.add_argument(
+        "--attempt",
+        type=int,
+        default=1,
+        help="the attempt of that run (default: 1)",
+    )
     stale_runs_parser = commands.add_parser(
         "stale-runs",
         help="cancel the runs of the checks of commits that no open pull request has "
@@ -2608,6 +2627,15 @@ def standalone_command(
     return None
 
 
+def waits_out_an_outage(arguments: argparse.Namespace) -> bool:
+    """Whether the command is a bot that ends with a notice, not a failure, when GitHub
+    keeps failing: its next event or run does what it couldn't (decision 0136). A
+    check, such as that of the signatures, still fails, as it must not pass unseen."""
+    return arguments.command in ("bot-health", "next-branch") or (
+        arguments.command == "coach" and arguments.action == "report"
+    )
+
+
 def main(
     argv: Sequence[str] | None = None, api: Api | None = None, root: Path = Path()
 ) -> int:
@@ -2659,7 +2687,23 @@ def main(
         if arguments.command == "bot-health":
             return bot_health_command(api, repo, arguments, root)
         if arguments.command == "next-branch":
-            outcome = next_branch(api, repo, job_from(os.environ), root)
+            job = job_from(os.environ)
+            # The token of the release app may not read runs, which a private
+            # repository refuses: the token of the job reads the run and its jobs,
+            # and the app's the annotations, which the job's may not read.
+            reader = job.api if job else api
+            if arguments.after and failed_unstarted(
+                reader, repo, arguments.after, arguments.attempt, checks=api
+            ):
+                # The failure of a check that GitHub never started says nothing about
+                # the pull request: the line stays as it is until the next event.
+                print(couldnt_start(f"the run {arguments.after}"), file=sys.stderr)
+                print(
+                    f"GitHub couldn't start the run {arguments.after}, so the line "
+                    "stays as it is.\n"
+                )
+                return 0
+            outcome = next_branch(api, repo, job, root)
             for warning in (*outcome.warnings, *outcome.notices):
                 print(warning, file=sys.stderr)
             print(outcome.summary, end="")
@@ -2701,5 +2745,12 @@ def main(
         CatalogError,
         CreateError,
     ) as error:
+        if (
+            isinstance(error, GitHubError)
+            and error.unavailable
+            and waits_out_an_outage(arguments)
+        ):
+            print(unreachable(error), file=sys.stderr)
+            return 0
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2
