@@ -5580,6 +5580,35 @@ def test_the_lock_file_of_the_dev_container_pins_shellcheck_alone() -> None:
     )
 
 
+def test_the_shellcheck_of_the_dev_container_is_that_of_the_blueprint() -> None:
+    # The dev container of every repository runs the ShellCheck that the blueprint's
+    # own checks run; Renovate moves both in one pull request.
+    versions = {
+        name: re.findall(
+            r"^shellcheck-py==(\S+) \\$",
+            (ROOT / name).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        for name in ("requirements-dev.txt", "stacks/devcontainer/requirements.txt")
+    }
+    assert len(set(map(tuple, versions.values()))) == 1
+    assert len(versions["requirements-dev.txt"]) == 1
+    rules = renovate_rules(
+        (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    )["packageRules"]
+    grouped = [rule for rule in rules if rule.get("groupName") == "ShellCheck"]
+    assert grouped == [
+        {
+            "matchDepNames": ["shellcheck-py"],
+            "semanticCommitType": "fix",
+            "groupName": "ShellCheck",
+        }
+    ]
+    # After every rule of the files that hold it, so that none of them takes it into
+    # a group of its own.
+    assert rules.index(grouped[0]) == len(rules) - 2
+
+
 def remapper(project: Path) -> Callable[[str], str]:
     """The remaps of lychee.toml, as lychee applies them: the first rule whose regular
     expression matches a link changes it."""

@@ -10,7 +10,7 @@ README, Beitragsleitfaden mit den Coding-Standards und der Regel, dass jede Änd
 
 ## Entwicklung
 
-Ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prüfungen und der Website, und ein Hook, der sie vor jedem Push ausführt, unter Linux, macOS und Windows: `scripts/check.sh` schlägt fehl, wenn Git ihn überspringen würde. Kein Image eines Dev-Containers hat ShellCheck, also installiert der Container es beim Erstellen, mit seinen Hashes gepinnt in `.devcontainer/shellcheck-requirements.txt`, und `scripts/check.sh` prüft die Shell-Skripte dort wie in der CI.
+Ein Dev-Container für VS Code und GitHub Codespaces mit den Werkzeugen der Prüfungen und der Website, und ein Hook, der sie vor jedem Push ausführt, unter Linux, macOS und Windows: `scripts/check.sh` schlägt fehl, wenn Git ihn überspringen würde. Kein Image eines Dev-Containers hat ShellCheck, also installiert der Container es beim Erstellen, mit seinen Hashes gepinnt in `.devcontainer/shellcheck-requirements.txt`, und `scripts/check.sh` prüft die Shell-Skripte dort mit dieser Version, derselben, die die Prüfungen des Blueprints selbst ausführen.
 
 **Womit:** `.devcontainer/`, `.githooks/pre-push`.
 
