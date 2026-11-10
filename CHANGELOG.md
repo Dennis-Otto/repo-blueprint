@@ -7,6 +7,27 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.16.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.15.1...v1.16.0) (2026-11-10)
+
+
+### Features
+
+* **deps:** the weekly refresh of the lock files merges by itself, from versions at least a week old ([#791](https://github.com/Dennis-Otto/repo-blueprint/issues/791)) ([220a335](https://github.com/Dennis-Otto/repo-blueprint/commit/220a33549fcffdbca49bcaeaba3f050347eae65c))
+* every repository checks that two records of a decision can't share a number ([#773](https://github.com/Dennis-Otto/repo-blueprint/issues/773)) ([7a416d3](https://github.com/Dennis-Otto/repo-blueprint/commit/7a416d31de2303382e12e92a351fb34b1d71326f))
+
+
+### Bug fixes
+
+* **ci:** a failed try of a download no longer leaks into its result ([#774](https://github.com/Dennis-Otto/repo-blueprint/issues/774)) ([4b62398](https://github.com/Dennis-Otto/repo-blueprint/commit/4b623985005e1a6f3be24100c91c3918040674ba))
+* **ci:** an outage of GitHub no longer makes every bot fail and mail you ([#785](https://github.com/Dennis-Otto/repo-blueprint/issues/785)) ([0cb3b1c](https://github.com/Dennis-Otto/repo-blueprint/commit/0cb3b1c81333259364b912fef3795e81d65f50f4))
+* **deps:** update dependency anchore/syft to v1.56.0 ([#789](https://github.com/Dennis-Otto/repo-blueprint/issues/789)) ([c742f43](https://github.com/Dennis-Otto/repo-blueprint/commit/c742f43d84a299e260d39592b5d8980d7c7a2f8f))
+* **deps:** update dependency infection/infection to v0.35.9 ([#788](https://github.com/Dennis-Otto/repo-blueprint/issues/788)) ([0f8b720](https://github.com/Dennis-Otto/repo-blueprint/commit/0f8b72029a43715cc6eb0afee8b29d5be7bc56c4))
+* **deps:** update minlag/mermaid-cli:12.0.1 docker digest to 18938e5 ([#787](https://github.com/Dennis-Otto/repo-blueprint/issues/787)) ([b3d3dc2](https://github.com/Dennis-Otto/repo-blueprint/commit/b3d3dc20c2f68e63086f0979a7b2ff347cce3556))
+* **links:** the full link check reads the documents in .github too ([#770](https://github.com/Dennis-Otto/repo-blueprint/issues/770)) ([00ae292](https://github.com/Dennis-Otto/repo-blueprint/commit/00ae292abbbdcfa9644b2daf7f964d2217f5a56c))
+* **php:** composer audit tries again after a network error ([#797](https://github.com/Dennis-Otto/repo-blueprint/issues/797)) ([9c67436](https://github.com/Dennis-Otto/repo-blueprint/commit/9c67436f43da9dee285fabe34657f74ed21a1f3e))
+* **php:** the coding standard no longer reads the tools in node_modules ([#793](https://github.com/Dennis-Otto/repo-blueprint/issues/793)) ([66437cc](https://github.com/Dennis-Otto/repo-blueprint/commit/66437cc6932a48aac4b945d1e356853bfd61ffb1))
+* the bots of pull requests keep working after GitHub blocks pull_request_target ([#784](https://github.com/Dennis-Otto/repo-blueprint/issues/784)) ([62e5a4a](https://github.com/Dennis-Otto/repo-blueprint/commit/62e5a4aed94855c0d2c81a070354fcc9b695047a))
+
 ## [1.15.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.15.0...v1.15.1) (2026-11-09)
 
 ### Bug fixes
