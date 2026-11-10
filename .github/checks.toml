@@ -1168,7 +1168,8 @@ fix = """Fix each line that ShellCheck names; its wiki explains every rule. A li
 needs the construct on purpose gets `# shellcheck disable=SC…` above it, with the
 reason. A runner without ShellCheck installs it before the checks, such as with
 `sudo apt-get install shellcheck` or the hash-pinned `shellcheck-py` of the Python
-tools; the runners of Linux of GitHub have it. ShellCheck checks every script of the
+tools; the runners of Linux of GitHub have it, and the dev container installs it as
+it is created. ShellCheck checks every script of the
 repository with:"""
 commands = ["shellcheck $(git ls-files '*.sh')"]
 docs = "https://www.shellcheck.net/wiki/"

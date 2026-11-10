@@ -10,7 +10,7 @@ README, contributing guide with the coding standards and the rule that every cha
 
 ## Development
 
-A dev container for VS Code and GitHub Codespaces with the tools of the checks and of the website, and a hook that runs them before every push, on Linux, macOS and Windows: `scripts/check.sh` fails when Git would skip it.
+A dev container for VS Code and GitHub Codespaces with the tools of the checks and of the website, and a hook that runs them before every push, on Linux, macOS and Windows: `scripts/check.sh` fails when Git would skip it. No image of a dev container has ShellCheck, so the container installs it as it is created, pinned with its hashes in `.devcontainer/shellcheck-requirements.txt`, and `scripts/check.sh` checks the shell scripts there as in the CI.
 
 **How:** `.devcontainer/`, `.githooks/pre-push`.
 
