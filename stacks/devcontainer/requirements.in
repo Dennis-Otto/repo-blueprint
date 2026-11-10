@@ -1,0 +1,12 @@
+# ShellCheck, which the step Shell scripts of scripts/check.sh runs and the images of
+# the dev containers lack. .devcontainer/setup.sh installs it from the hash-pinned
+# requirements.txt, which every repository gets as
+# .devcontainer/shellcheck-requirements.txt. shellcheck-py has no dependencies and
+# holds the binary in a wheel for Linux on x86-64; on Arm, as in Docker on a Mac with
+# Apple silicon, pip builds it from its source, whose hash the lock file pins as well,
+# and the build downloads the release of ShellCheck and checks its sha256. Only the
+# tools of that build, setuptools and setuptools-download, come from PyPI without
+# hashes there, as they do for requirements-dev.txt on Arm. Renovate compiles it again
+# with the command in the header of requirements.txt, together with requirements-dev.txt.
+# https://github.com/Dennis-Otto/repo-blueprint
+shellcheck-py

@@ -2829,9 +2829,14 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         own = (ROOT / name).read_text(encoding="utf-8")
         if name == ".devcontainer/setup.sh":
             # The blueprint keeps the tools of the website in stacks/docs/, from where
-            # every repository gets them as .github/docs-requirements.txt.
+            # every repository gets them as .github/docs-requirements.txt, and
+            # ShellCheck in stacks/devcontainer/, which every repository gets as
+            # .devcontainer/shellcheck-requirements.txt.
             own = own.replace(
                 "stacks/docs/requirements-docs.txt", ".github/docs-requirements.txt"
+            ).replace(
+                "stacks/devcontainer/requirements.txt",
+                ".devcontainer/shellcheck-requirements.txt",
             )
         if name == "SECURITY.md":
             own = as_an_action(own)
@@ -3366,6 +3371,15 @@ def test_every_project_has_a_dev_container(
     assert "git config core.hooksPath .githooks" in setup
     # Where Git ignores the modes of the files, the hook gets its mode on disk.
     assert "chmod +x .githooks/*" in setup
+    # ShellCheck, which no image of a dev container has, from the hash-pinned lock
+    # file of the blueprint, which every kind gets as it is.
+    assert (project / ".devcontainer/shellcheck-requirements.txt").read_text(
+        encoding="utf-8"
+    ) == (ROOT / "stacks/devcontainer/requirements.txt").read_text(encoding="utf-8")
+    assert (
+        '\n"$shellcheck_venv/bin/pip" install --require-hashes'
+        " -r .devcontainer/shellcheck-requirements.txt\n"
+    ) in setup
     requirements = {
         "home-assistant": "requirements-test.txt",
         "python-package": "requirements-dev.txt",
@@ -5416,14 +5430,8 @@ def test_the_dev_container_makes_the_hook_executable_where_git_ignores_modes(
     git("config", "core.fileMode", file_mode)
     git("add", "--all")
     git("commit", "--quiet", "--message", "chore: start")
-    # Without mkdocs.yml, the set-up installs nothing.
-    setup = subprocess.run(
-        [BASH, ".devcontainer/setup.sh"],
-        cwd=repository,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
+    # Without mkdocs.yml, the set-up installs ShellCheck alone.
+    setup, _ = set_up_the_dev_container(repository, tmp_path)
 
     assert setup.returncode == 0, setup.stdout + setup.stderr
     assert git("config", "core.hooksPath") == ".githooks\n"
@@ -5431,6 +5439,175 @@ def test_the_dev_container_makes_the_hook_executable_where_git_ignores_modes(
     # that the set-up changes nothing that Git would see.
     assert bool(hook.stat().st_mode & 0o111) == (file_mode == "false")
     assert git("status", "--porcelain") == ""
+
+
+# The stubs of the commands with which the set-up of a dev container installs: each
+# writes the command that it got into $CALLS, a line for each. sudo runs nothing, its
+# install only finds the file that it would copy, and the venv of python and python3
+# has a pip that installs nothing but leaves a command of ShellCheck beside itself.
+DEV_CONTAINER_STUBS = {
+    "sudo": """\
+printf 'sudo %s\\n' "$*" >> "$CALLS"
+if [[ "$1" == install ]]; then
+  [[ -f "${@: -2:1}" ]]
+fi
+""",
+    "python": """\
+printf '%s %s\\n' "${0##*/}" "$*" >> "$CALLS"
+if [[ "$1 $2" == "-m venv" ]]; then
+  mkdir -p "$3/bin"
+  cp "$STUBS/pip-of-a-venv" "$3/bin/pip"
+fi
+""",
+    "pip-of-a-venv": """\
+printf 'pip %s\\n' "$*" >> "$CALLS"
+touch "${0%/*}/shellcheck"
+""",
+}
+
+
+def set_up_the_dev_container(
+    repository: Path, tmp_path: Path
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Runs .devcontainer/setup.sh in the repository with the stubs of the commands
+    that install, and its temporary folders in tmp_path/tmp, which it must leave
+    empty. It gives back the commands that the stubs got, with the temporary folder
+    as $TMPDIR/venv."""
+    assert BASH
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    for name, script in {
+        **DEV_CONTAINER_STUBS,
+        "python3": DEV_CONTAINER_STUBS["python"],
+    }.items():
+        (stubs / name).write_text(
+            f"#!/usr/bin/env bash\n{script}", encoding="utf-8", newline="\n"
+        )
+        (stubs / name).chmod(0o755)
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    calls = tmp_path / "calls.txt"
+    calls.touch()
+    setup = subprocess.run(
+        in_bash(".devcontainer/setup.sh"),
+        cwd=repository,
+        env={
+            **os.environ,
+            "STUBS": stubs.as_posix(),
+            "CALLS": calls.as_posix(),
+            "TMPDIR": temporary.as_posix(),
+        },
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert not list(temporary.iterdir())
+    # mktemp names a folder tmp.XXXXXXXXXX in $TMPDIR, which Git Bash writes as a
+    # path of its own.
+    ran = calls.read_text(encoding="utf-8")
+    return setup, re.sub(r"\S*/tmp/tmp\.\w+", "$TMPDIR/venv", ran).splitlines()
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.skipif(BASH is None, reason="the set-up runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("kind", ["generic", "python-package"])
+def test_the_dev_container_installs_shellcheck_pinned_with_its_hashes(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    # No image of a dev container has ShellCheck, which the step Shell scripts of
+    # scripts/check.sh then skips there. The set-up installs it from the lock file of
+    # the dev container, in a venv of its own, outside the checkout, whose pins never
+    # meet those of the project, and puts only its binary on the PATH.
+    project = projects[kind]
+    repository = tmp_path / "repository"
+    for name in (".devcontainer/setup.sh", ".gitignore", ".githooks/pre-push"):
+        (repository / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(project / name, repository / name)
+    for command in (
+        ["init", "--quiet"],
+        ["add", "--all"],
+        ["commit", "--quiet", "--message", "chore: start"],
+    ):
+        subprocess.run(["git", *IDENTITY, *command], cwd=repository, check=True)
+
+    setup, calls = set_up_the_dev_container(repository, tmp_path)
+
+    assert setup.returncode == 0, setup.stdout + setup.stderr
+    project_tools = {
+        # The image of a Python project has Python, and the tools of the project go
+        # into .venv first.
+        "python-package": [
+            "python -m venv .venv",
+            "pip install --require-hashes -r requirements-dev.txt",
+        ],
+        # The other images get Python's venv first.
+        "generic": [
+            "sudo apt-get update",
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes"
+            " --no-install-recommends python3-venv",
+        ],
+    }
+    assert calls == [
+        *project_tools[kind],
+        "python3 -m venv $TMPDIR/venv",
+        "pip install --require-hashes -r .devcontainer/shellcheck-requirements.txt",
+        "sudo install -m 0755 $TMPDIR/venv/bin/shellcheck /usr/local/bin/shellcheck",
+    ]
+    # Nothing of it stays in the checkout.
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--ignored"],
+        cwd=repository,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    assert status == ("!! .venv/\n" if kind == "python-package" else "")
+
+
+def test_the_lock_file_of_the_dev_container_pins_shellcheck_alone() -> None:
+    # shellcheck-py has no dependencies, and Renovate keeps the lock file current.
+    wanted = (ROOT / "stacks/devcontainer/requirements.in").read_text(encoding="utf-8")
+    assert [line for line in wanted.splitlines() if not line.startswith("#")] == [
+        "shellcheck-py"
+    ]
+    lock = (ROOT / "stacks/devcontainer/requirements.txt").read_text(encoding="utf-8")
+    pins = re.findall(r"^(\S+)==\S+ \\$", lock, re.MULTILINE)
+    assert pins == ["shellcheck-py"]
+    assert re.search(
+        r"^shellcheck-py==\S+ \\\n(?:    --hash=sha256:[0-9a-f]{64} \\\n)+"
+        r"    --hash=sha256:[0-9a-f]{64}\n",
+        lock,
+        re.MULTILINE,
+    )
+
+
+def test_the_shellcheck_of_the_dev_container_is_that_of_the_blueprint() -> None:
+    # The dev container of every repository runs the ShellCheck that the blueprint's
+    # own checks run; Renovate moves both in one pull request.
+    versions = {
+        name: re.findall(
+            r"^shellcheck-py==(\S+) \\$",
+            (ROOT / name).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        for name in ("requirements-dev.txt", "stacks/devcontainer/requirements.txt")
+    }
+    assert len(set(map(tuple, versions.values()))) == 1
+    assert len(versions["requirements-dev.txt"]) == 1
+    rules = renovate_rules(
+        (ROOT / ".github/renovate.json5").read_text(encoding="utf-8")
+    )["packageRules"]
+    grouped = [rule for rule in rules if rule.get("groupName") == "ShellCheck"]
+    assert grouped == [
+        {
+            "matchPackageNames": ["shellcheck-py"],
+            "semanticCommitType": "fix",
+            "groupName": "ShellCheck",
+        }
+    ]
+    # After every rule of the files that hold it, so that none of them takes it into
+    # a group of its own.
+    assert rules.index(grouped[0]) == len(rules) - 2
 
 
 def remapper(project: Path) -> Callable[[str], str]:
@@ -22808,11 +22985,13 @@ def test_the_dev_container_sets_up_the_tools_of_the_website(
         "\n  .venv-docs/bin/pip install --require-hashes -r .github/docs-requirements.txt\n"
         in tools
     )
-    # The images of the Python projects have Python; the others get its venv first.
-    python = "python3-venv" not in tools
+    # The images of the Python projects have Python; the others get its venv first,
+    # before ShellCheck, which needs it as well.
+    python = "python3-venv" not in setup
     assert python == (kind in {"home-assistant", "github-action", "python-package"})
+    assert "apt-get" not in tools
     if not python:
-        assert tools.index("sudo apt-get update") < tools.index("python3 -m venv")
+        assert setup.index("sudo apt-get update") < setup.index("python3 -m venv")
     # Last, so that the hook of the checks is set up even when they fail to install.
     assert setup.index("git config core.hooksPath") < setup.index(".venv-docs")
 
