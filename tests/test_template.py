@@ -71,10 +71,10 @@ from blueprint.bot_health import (
     CRON,
     FAILED,
     LABEL,
-    LABEL_COLOR,
-    LABEL_DESCRIPTION,
+    LABELS,
     OWN_ISSUE,
     RENOVATE_LABEL,
+    STEP,
     TYPE,
     Cron,
     after_pull_requests,
@@ -15521,9 +15521,15 @@ def test_every_repository_has_the_labels_of_the_bot_health_bot(
     labels = {label["name"]: label for label in tomllib.loads(text)["label"]}
 
     assert {TYPE, RENOVATE_LABEL} <= set(labels)
-    # The bot creates the label where a repository's own labels.toml lacks it.
-    assert labels[LABEL]["color"] == LABEL_COLOR
-    assert labels[LABEL]["description"] == LABEL_DESCRIPTION
+    # The bot creates its labels where a repository's own labels.toml lacks them:
+    # bot-failure, and manual-step for the upload of the social preview.
+    assert set(LABELS) == {LABEL, STEP}
+    for name, (color, description) in LABELS.items():
+        assert labels[name]["color"] == color, name
+        assert labels[name]["description"] == description, name
+        assert labels[name]["group"] == "release", name
+        # GitHub takes a description of 100 characters at most.
+        assert len(description) <= 100, name
 
 
 def test_renovate_reports_its_problems_in_one_issue() -> None:

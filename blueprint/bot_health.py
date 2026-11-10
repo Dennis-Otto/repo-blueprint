@@ -16,7 +16,8 @@ head of main: a pull request reaches main only when it passes Lint. A run that G
 couldn't start, as in its outage of 9 November 2026, is no failure of the bot: its end
 starts nothing, and the daily look runs it again once (decision 0136). The same look
 keeps one issue open while the social preview that GitHub shows is not the committed
-.github/social-preview.png, which only a person can upload. In the blueprint, it also
+.github/social-preview.png, which only a person can upload; its label is manual-step,
+not bot-failure, since nothing fails there. In the blueprint, it also
 keeps one issue with the warnings and errors in the log of Renovate.
 """
 
@@ -50,6 +51,20 @@ LABEL_DESCRIPTION = (
     "A bot or a scheduled workflow fails on the default branch; "
     "closes when it passes again"
 )
+# The label of the issue that waits for a step that only a person can take, such as
+# the upload of the social preview, which no API offers: nothing fails there
+# (decision 0139).
+STEP = "manual-step"
+STEP_COLOR = "1d76db"
+STEP_DESCRIPTION = (
+    "A bot waits for a step that only a person can take, such as an upload; "
+    "closes once it is done"
+)
+# The color and description of the labels of the bot, by name.
+LABELS = {
+    LABEL: (LABEL_COLOR, LABEL_DESCRIPTION),
+    STEP: (STEP_COLOR, STEP_DESCRIPTION),
+}
 # The type of these issues, which every repository has among its labels.
 TYPE = "maintenance"
 PULL_REQUESTS = frozenset({"pull_request", "pull_request_target"})
@@ -243,13 +258,25 @@ class Issue:
     state: dict[str, Any]
 
 
-def open_issues(api: Api, repo: str) -> dict[str, Issue]:
-    """The open issues of the bot by the key in their state: the path of a workflow,
-    with the tag of a published release for its verification, or renovate. Where a key has several, because two runs of the bot opened one each
-    at the same moment, the newest one stays and the older ones close."""
+def open_issues(
+    api: Api, repo: str, labels: Iterable[str] = (LABEL,)
+) -> dict[str, Issue]:
+    """The open issues of the bot with one of the labels, by the key in their state:
+    the path of a workflow, with the tag of a published release for its
+    verification, renovate or social-preview. Where a key has several, because two
+    runs of the bot opened one each at the same moment, the newest one stays and the
+    older ones close."""
     found: dict[str, Issue] = {}
-    listed = api.get(f"repos/{repo}/issues?labels={LABEL}&state=open&per_page=100")
-    for item in listed or []:
+    listed = {
+        int(item["number"]): item
+        for label in labels
+        for item in api.get(
+            f"repos/{repo}/issues?labels={label}&state=open&per_page=100"
+        )
+        or []
+    }
+    # The newest first, also across the labels; an issue with both counts once.
+    for number, item in sorted(listed.items(), reverse=True):
         body = str(item.get("body") or "")
         match = MARKER.search(body)
         if "pull_request" in item or not match:
@@ -261,7 +288,6 @@ def open_issues(api: Api, repo: str) -> dict[str, Issue]:
         key = state.get("key")
         if not isinstance(key, str):
             continue
-        number = int(item["number"])
         if key in found:
             close_issue(
                 api,
@@ -276,14 +302,22 @@ def open_issues(api: Api, repo: str) -> dict[str, Issue]:
 
 
 def open_issue(
-    api: Api, repo: str, title: str, body: str, labels: Iterable[str]
+    api: Api,
+    repo: str,
+    title: str,
+    body: str,
+    labels: Iterable[str],
+    label: str = LABEL,
 ) -> int:
+    """Opens an issue of the bot with its label, bot-failure or manual-step, and
+    the other labels."""
     # The label of a repository whose .github/labels.toml, its own, lacks it.
-    if not api.exists(f"repos/{repo}/labels/{LABEL}"):
+    if not api.exists(f"repos/{repo}/labels/{label}"):
+        color, description = LABELS[label]
         try:
             api.post(
                 f"repos/{repo}/labels",
-                {"name": LABEL, "color": LABEL_COLOR, "description": LABEL_DESCRIPTION},
+                {"name": label, "color": color, "description": description},
             )
         except GitHubError as error:
             # The run for another workflow created it a moment ago.
@@ -292,7 +326,7 @@ def open_issue(
     response = api.request(
         "POST",
         f"repos/{repo}/issues",
-        {"title": title, "body": body, "labels": [LABEL, *labels]},
+        {"title": title, "body": body, "labels": [label, *labels]},
     )
     return int(response.data["number"])
 
@@ -1083,7 +1117,9 @@ def sweep(
     failing, as in an outage, is no failure of the bot: the next day's look catches
     up, and notices gets one notice about it."""
     branch = default_branch(api, repo)
-    issues = open_issues(api, repo)
+    # The issue of the social preview has the label manual-step, or bot-failure
+    # where an earlier release opened it.
+    issues = open_issues(api, repo, (LABEL, STEP))
     listed = api.get(f"repos/{repo}/actions/workflows?per_page=100")
     workflows = sorted(
         (listed or {}).get("workflows", []), key=lambda item: str(item["name"]).lower()
@@ -1246,7 +1282,7 @@ def preview_report(
         f"{preview_body(repo, branch, commit, found.uploaded, found.fits)}"
     )
     if issue is None:
-        number = open_issue(api, repo, PREVIEW_TITLE, body, [TYPE])
+        number = open_issue(api, repo, PREVIEW_TITLE, body, [TYPE], STEP)
         return f"GitHub shows another picture than `{PICTURE}`: opened #{number}."
     api.patch(f"repos/{repo}/issues/{issue.number}", {"body": body})
     return f"`{PICTURE}` changed again: updated #{issue.number}."

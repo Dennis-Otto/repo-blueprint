@@ -33,6 +33,9 @@ from blueprint.bot_health import (
     QUIET_RUNS,
     RENOVATE,
     RENOVATE_TITLE,
+    STEP,
+    STEP_COLOR,
+    STEP_DESCRIPTION,
     WEEKDAYS,
     Cron,
     Problem,
@@ -215,7 +218,7 @@ class FakeGitHub:
                 self.latest_jobs,
             ),
             (r"/check-runs/(\d+)/annotations\?per_page=50", self.job_annotations),
-            (r"/issues\?labels=bot-failure&state=open&per_page=100", self.open_list),
+            (r"/issues\?labels=([\w-]+)&state=open&per_page=100", self.open_list),
             (r"/issues", self.new_issue),
             (r"/issues/(\d+)", self.issue),
             (r"/issues/(\d+)/comments", self.comment),
@@ -308,11 +311,11 @@ class FakeGitHub:
     def job_annotations(self, method: str, body: Any, job: str) -> tuple[int, Any]:
         return 200, self.annotations.get(int(job), [])
 
-    def open_list(self, method: str, body: Any) -> tuple[int, Any]:
+    def open_list(self, method: str, body: Any, label: str) -> tuple[int, Any]:
         listed = [
             issue
             for issue in self.issues.values()
-            if issue["state"] == "open" and LABEL in issue["labels"]
+            if issue["state"] == "open" and label in issue["labels"]
         ]
         return 200, sorted(listed, key=lambda issue: -issue["number"])
 
@@ -2222,6 +2225,7 @@ def test_the_workflows_of_the_blueprint_start_as_their_schedules_do(
 # ---------------------------------------------------------------- social preview
 
 UPLOAD = "https://repository-images.githubusercontent.com/1/2"
+PICTURE_SHA = hashlib.sha256(b"the picture").hexdigest()
 PREVIEW_HEADING = ["", "#### Social preview", ""]
 
 
@@ -2270,7 +2274,16 @@ def test_the_daily_look_keeps_one_issue_until_github_shows_the_new_social_previe
     ]
     issue = github.issues[1]
     assert issue["title"] == PREVIEW_TITLE == "Upload the new social preview"
-    assert issue["labels"] == [LABEL, "maintenance"]
+    # Nothing fails: a step waits for a person, and the label says so.
+    assert issue["labels"] == [STEP, "maintenance"]
+    # The label, for a repository whose labels.toml lacks it.
+    assert github.labels[STEP] == {
+        "name": STEP,
+        "color": STEP_COLOR,
+        "description": STEP_DESCRIPTION,
+    }
+    assert len(STEP_DESCRIPTION) <= 100
+    assert LABEL not in github.labels
     assert github.state_of(1) == {
         "key": "social-preview",
         "sha256": hashlib.sha256(b"the picture").hexdigest(),
@@ -2328,6 +2341,51 @@ def test_the_daily_look_keeps_one_issue_until_github_shows_the_new_social_previe
     summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"the next picture"))
     assert preview_lines(summary)[-1] == "GitHub shows `.github/social-preview.png`."
     assert writes(github) == [("POST", "graphql")]
+
+
+def test_an_issue_of_the_social_preview_from_before_its_label_closes_as_well(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # An issue that an earlier release opened with the label bot-failure keeps its
+    # labels, so that the pager, which pages it as a bot-failure issue, also hears
+    # of its end.
+    root = with_a_picture(tmp_path)
+    number = github.add_issue("social-preview", sha256=PICTURE_SHA)
+    uploaded(github)
+
+    summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+    assert preview_lines(summary)[-1] == (
+        f"GitHub shows another picture than `.github/social-preview.png`: #{number}."
+    )
+    assert len(github.issues) == 1
+
+    summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"the picture"))
+    assert preview_lines(summary)[-1] == (
+        f"GitHub shows `.github/social-preview.png` now: closed #{number}."
+    )
+    assert github.issues[number]["state"] == "closed"
+    assert github.issues[number]["labels"] == [LABEL]
+
+
+def test_the_issue_of_the_social_preview_counts_once_with_both_labels(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    root = with_a_picture(tmp_path)
+    older = github.add_issue("social-preview", sha256=PICTURE_SHA)
+    newer = github.add_issue("social-preview", sha256=PICTURE_SHA)
+    # Someone gave the newer issue the label of the step as well: it is listed twice,
+    # and still the one that stays.
+    github.issues[newer]["labels"] = [STEP, LABEL]
+    uploaded(github)
+
+    summary, _ = sweep(api_of(github), REPO, root, NOW, serving(b"older"))
+
+    assert preview_lines(summary)[-1] == (
+        f"GitHub shows another picture than `.github/social-preview.png`: #{newer}."
+    )
+    assert github.issues[newer]["state"] == "open"
+    assert github.issues[older]["state"] == "closed"
+    assert github.comments[older] == [f"Continued in #{newer}."]
 
 
 def test_a_social_preview_that_nobody_uploaded_gets_the_issue_too(
