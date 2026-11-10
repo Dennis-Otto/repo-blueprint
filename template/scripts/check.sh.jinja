@@ -471,7 +471,41 @@ step "Package"
 
 step "Composer"
 composer validate --strict
-composer audit
+# Again after a passing error of the network, such as a timeout of the advisories of
+# Packagist, 5 and then 10 seconds later. Composer ends with 100 only when it can't
+# reach a repository: a vulnerable or abandoned package fails at once, as does any
+# other error. In the CI, Composer writes an error of the network as an annotation of
+# the check, which would stay even after the next try passes and then read as the cause
+# of a later failure: the runner takes no command of a try that goes again.
+audit_log="$(mktemp)"
+for pause in 5 10 ""; do
+  audit=0
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    composer audit >"$audit_log" 2>&1 || audit=$?
+    if ((audit == 100)) && [[ -n "$pause" ]]; then
+      token="composer-audit-$RANDOM$RANDOM$RANDOM"
+      echo "::stop-commands::$token"
+      cat "$audit_log"
+      echo "::$token::"
+    else
+      cat "$audit_log"
+    fi
+  else
+    composer audit || audit=$?
+  fi
+  if ((audit != 100)) || [[ -z "$pause" ]]; then
+    break
+  fi
+  echo "Packagist didn't answer; composer audit tries again in $pause seconds."
+  sleep "$pause"
+done
+rm -f "$audit_log"
+if ((audit == 100)); then
+  echo "Packagist stayed out of reach, and composer audit can't check the packages without its advisories; run the checks again once packagist.org answers." >&2
+fi
+if ((audit != 0)); then
+  exit "$audit"
+fi
 
 step "App metadata"
 xsd="$(mktemp)"

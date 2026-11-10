@@ -7534,6 +7534,112 @@ def test_the_ci_checks_the_metadata_of_a_nextcloud_app_in_any_case(
     assert list(temporary.iterdir()) == []
 
 
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize(
+    ("codes", "pauses", "code"),
+    [
+        ((0,), (), 0),
+        # The advisories of Packagist timed out once and failed the checks of
+        # Dennis-Otto/paperless-unified-search on 8 November 2026 (#346): Composer
+        # ends with 100 when it can't reach a repository, and the audit goes again.
+        ((100, 0), (5,), 0),
+        ((100, 100, 0), (5, 10), 0),
+        # Out of reach three times, the step fails: the audit never ran.
+        ((100, 100, 100), (5, 10), 100),
+        # A vulnerable or abandoned package fails at once, and so does any other
+        # error of Composer.
+        ((1,), (), 1),
+        ((100, 1), (5,), 1),
+        ((2,), (), 2),
+    ],
+)
+# In the CI, Composer also writes its error as a command of the runner.
+@pytest.mark.parametrize("actions", [False, True])
+def test_composer_audit_tries_again_only_after_an_error_of_the_network(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    codes: tuple[int, ...],
+    pauses: tuple[int, ...],
+    code: int,
+    actions: bool,
+) -> None:
+    check = (projects["nextcloud-app"] / "scripts/check.sh").read_text(encoding="utf-8")
+    start = check.index('step "Composer"')
+    composer = check[start : check.index('step "App metadata"', start)]
+    repository = tmp_path / "repository"
+    (repository / "scripts").mkdir(parents=True)
+    # Its set-up, such as set -euo pipefail and the folder it runs in, and the step.
+    (repository / "scripts/composer.sh").write_text(
+        check[: check.index('step "Text files"')] + composer,
+        encoding="utf-8",
+        newline="\n",
+    )
+    # Each audit ends with the next of the codes, and before a 100 Composer writes
+    # its error after a timeout of the advisories.
+    timeout = (
+        "curl error 28 while downloading https://packagist.org/api/security-advisories/:"
+        " Connection timed out after 10006 milliseconds"
+    )
+    fake = textwrap.dedent(
+        f"""\
+        codes=({" ".join(map(str, codes))})
+        if [[ "$1" == audit ]]; then
+          code="${{codes[$(grep -c '^composer audit' "$CALLS") - 1]}}"
+          if ((code == 100)); then
+            echo "{timeout}" >&2
+            if [[ "${{GITHUB_ACTIONS:-}}" == true ]]; then
+              echo "::error ::{timeout}"
+            fi
+          fi
+          exit "$code"
+        fi
+        """
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        "bash scripts/composer.sh\n",
+        repository,
+        {"composer": fake, "sleep": ""},
+        GITHUB_ACTIONS="true" if actions else "false",
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == code, output
+    # Each audit, with a pause before the next one.
+    assert calls == [
+        "composer validate --strict",
+        *[call for pause in pauses for call in ("composer audit", f"sleep {pause}")],
+        "composer audit",
+    ], output
+    assert [line for line in result.stdout.splitlines() if "tries again" in line] == [
+        f"Packagist didn't answer; composer audit tries again in {pause} seconds."
+        for pause in pauses
+    ], output
+    # Composer's own error, then what to do about it.
+    gone = (
+        "Packagist stayed out of reach, and composer audit can't check the packages"
+        " without its advisories; run the checks again once packagist.org answers.\n"
+    )
+    assert result.stderr.endswith(gone) is (code == 100), result.stderr
+    # Composer's error of each try, which the CI shows with the rest of its output.
+    assert output.splitlines().count(timeout) == codes.count(100), output
+    # The runner takes no command of a try that goes again, such as the annotation of
+    # its error, which would stay on the check after the next try passes; only the
+    # last try's.
+    commands = [line for line in result.stdout.splitlines() if line.startswith("::")]
+    tries = []
+    for index, line in enumerate(commands):
+        if line.startswith("::stop-commands::"):
+            token = line.removeprefix("::stop-commands::")
+            assert token, commands
+            end = commands.index(f"::{token}::", index)
+            tries.append(commands[index + 1 : end])
+    error = f"::error ::{timeout}"
+    assert tries == ([[error]] * len(pauses) if actions else []), commands
+    assert commands.count(error) == (codes.count(100) if actions else 0), commands
+    assert (commands[-1:] == [error]) is (actions and code == 100), commands
+
+
 # It starts the tool, which in the copy of the mutation tests is the code with the
 # mutants, and the variables of mutmut switch them in that process too.
 @pytest.mark.mutation_unsafe
