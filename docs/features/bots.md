@@ -20,6 +20,14 @@ Every pull request gets the labels of the areas whose files it changes, by the p
 
 **How:** `area-labels.yml`.
 
+## The bots of pull requests from forks
+
+GitHub starts a workflow on `pull_request_target` as `main` has it, with a token that may write, also for a pull request of a fork and before a maintainer has approved its runs; a workflow on `pull_request` gets a token that only reads for a fork's pull request, and waits for that approval. So six workflows start on `pull_request_target`: the title check with its label and the job *signed commits*, the area labels, the welcome, the branch bot, the auto-merge of Dependabot's updates and the issue lifecycle. None of them checks out or runs anything of the pull request. Every other check starts on `pull_request`, and the bots after the checks, such as the fix bot and the PR coach, on `workflow_run`.
+
+From 2 December 2026, GitHub blocks `pull_request_target` in every public repository, unless an Actions event policy allows it. The settings bot keeps the policy *Allow pull_request_target* in every repository, which lets exactly these six start on it ([settings as code](settings.md)), so a pull request of a fork goes on as before: its title check, its labels and the welcome come at once, its other checks after the approval of a maintainer, and the fix bot suggests its fixes. Without the policy, these workflows would no longer start, the required check *conventional title* among them, and no pull request could merge; until the settings bot has applied it, `python3 .github/blueprint.py settings apply` of an administrator does (decision 0138).
+
+**How:** `pull_request_target` of `[actions]` in `.github/repository.toml`.
+
 ## Branches
 
 The branch bot keeps the pull requests that wait for auto-merge in a line, Renovate's too, and brings one at a time up to date with `main`, right after a merge and when auto-merge is turned on, so that each merges once its checks pass and no check runs for a pull request that can't merge next.

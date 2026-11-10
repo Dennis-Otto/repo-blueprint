@@ -20,6 +20,14 @@ Jeder Pull Request bekommt die Labels der Bereiche, deren Dateien er ändert, na
 
 **Womit:** `area-labels.yml`.
 
+## Die Bots der Pull Requests aus Forks
+
+GitHub startet einen Workflow mit `pull_request_target` so, wie `main` ihn hat, mit einem Token, das schreiben darf, auch für einen Pull Request aus einem Fork und bevor ein Maintainer seine Läufe freigegeben hat; ein Workflow mit `pull_request` bekommt für den Pull Request eines Forks ein Token, das nur liest, und wartet auf diese Freigabe. Deshalb starten sechs Workflows mit `pull_request_target`: die Prüfung des Titels mit ihrem Label und dem Job *signed commits*, die Bereichs-Labels, die Begrüßung, der Branch-Bot, das Auto-Merge der Updates von Dependabot und der Lebenszyklus der Issues. Keiner von ihnen checkt etwas aus dem Pull Request aus oder führt es aus. Jede andere Prüfung startet mit `pull_request`, und die Bots nach den Prüfungen, etwa der Fix-Bot und der PR-Coach, mit `workflow_run`.
+
+Ab dem 2. Dezember 2026 blockiert GitHub `pull_request_target` in jedem öffentlichen Repository, außer eine Actions-Richtlinie für Events erlaubt es. Der Settings-Bot hält in jedem Repository die Richtlinie *Allow pull_request_target*, die genau diese sechs damit starten lässt ([Einstellungen als Code](settings.md)), sodass ein Pull Request aus einem Fork weitergeht wie bisher: Seine Prüfung des Titels, seine Labels und die Begrüßung kommen sofort, seine übrigen Prüfungen nach der Freigabe eines Maintainers, und der Fix-Bot schlägt seine Korrekturen vor. Ohne die Richtlinie starteten diese Workflows nicht mehr, darunter die Pflichtprüfung *conventional title*, und kein Pull Request könnte mergen; bis der Settings-Bot sie angelegt hat, tut es `python3 .github/blueprint.py settings apply` eines Administrators (Entscheidung 0138).
+
+**Womit:** `pull_request_target` in `[actions]` von `.github/repository.toml`.
+
 ## Branches
 
 Der Branch-Bot stellt die Pull Requests, die auf Auto-Merge warten, in eine Reihe, auch die von Renovate, und bringt einen nach dem anderen auf den Stand von `main`, gleich nach einem Merge und wenn Auto-Merge angeschaltet wird, damit jeder nach grünen Prüfungen merged und keine Prüfung für einen Pull Request läuft, der nicht als Nächster mergen kann.
