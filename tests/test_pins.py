@@ -85,17 +85,19 @@ def test_every_download_of_the_blueprint_has_the_sha256_of_its_version() -> None
             "nextcloud/server",
             "anchore/syft",
             "lycheeverse/lychee",
+            "gitleaks/gitleaks",
         }
     )
     # gitsign in sign-tag.sh and in verify-release.yml, krankerl in the release and in
     # the checks of a Nextcloud app, syft for the SBOMs of the release and the weekly
-    # one of the repository, and lychee in the script that checks the links of the
-    # documents and of the website.
+    # one of the repository, lychee in the script that checks the links of the
+    # documents and of the website, and gitleaks in the one of the secret scan.
     assert sorted((pin.dep, pin.path) for pin in found) == [
         ("ChristophWurst/krankerl", ".github/workflows/build-release.yml"),
         ("ChristophWurst/krankerl", ".github/workflows/ci-php.yml"),
         ("anchore/syft", ".github/workflows/build-release.yml"),
         ("anchore/syft", ".github/workflows/sbom.yml"),
+        ("gitleaks/gitleaks", ".github/gitleaks.sh"),
         ("infection/infection", ".github/workflows/mutation.yml"),
         ("lycheeverse/lychee", ".github/lychee.sh"),
         ("nextcloud/server", ".github/workflows/build-release.yml"),

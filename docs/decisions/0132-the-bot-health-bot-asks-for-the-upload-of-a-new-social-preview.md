@@ -1,6 +1,6 @@
 # The bot-health bot asks for the upload of a new social preview
 
-- Status: accepted, amended by [0139](0139-a-step-that-waits-for-a-person-has-a-label-of-its-own.md)
+- Status: accepted, amended by [0140](0140-a-step-that-waits-for-a-person-has-a-label-of-its-own.md)
 - Date: 2026-11-09
 
 ## Context

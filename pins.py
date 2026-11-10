@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The tools that the workflows of the blueprint download, pinned by version and sha256.
 
-The workflows and the scripts of .github download gitsign, Infection, krankerl,
-lychee, Nextcloud and syft at the version below a line "# renovate:", and check each
+The workflows and the scripts of .github download gitsign, gitleaks, Infection,
+krankerl, lychee, Nextcloud and syft at the version below a line "# renovate:", and check each
 download against the sha256 on the line after the version. Renovate moves the
 version, but can't know the checksum of the new release. .github/pins.toml records the address of each
 download and the version and sha256 that the files pin; after Renovate moved a

@@ -53,7 +53,7 @@ LABEL_DESCRIPTION = (
 )
 # The label of the issue that waits for a step that only a person can take, such as
 # the upload of the social preview, which no API offers: nothing fails there
-# (decision 0139).
+# (decision 0140).
 STEP = "manual-step"
 STEP_COLOR = "1d76db"
 STEP_DESCRIPTION = (
