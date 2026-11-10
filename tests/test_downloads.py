@@ -818,6 +818,379 @@ def test_the_links_of_the_documents_are_checked_by_their_patterns(
     ]
 
 
+# .github/gitleaks.sh
+
+GITLEAKS_VERSION = re.search(
+    r"^version=(\S+)$", (ROOT / ".github/gitleaks.sh").read_text(encoding="utf-8"), re.M
+)
+assert GITLEAKS_VERSION
+# gitleaks, which writes down its arguments, each in brackets, the folder it runs in and
+# the tokens it sees, writes $STUBS/report as its report, if there is one, and ends with
+# the code in $STUBS/code.
+FAKE_GITLEAKS = r"""#!/usr/bin/env bash
+printf 'gitleaks' >> "$CALLS"
+printf ' [%s]' "$@" >> "$CALLS"
+printf ' in %s token %s %s\n' "${PWD##*/}" "${GH_TOKEN:-none}" "${GITHUB_TOKEN:-none}" >> "$CALLS"
+while (($# > 0)); do
+  [[ "$1" != --report-path || ! -f "$STUBS/report" ]] || cp "$STUBS/report" "$2"
+  shift
+done
+exit "$(cat "$STUBS/code" 2>/dev/null || echo 0)"
+"""
+SCAN = (
+    "gitleaks [git] [--redact] [--verbose] [--no-banner] [--exit-code] [2]"
+    " [--report-format] [json] [--report-path] [{runner}/gitleaks.json]"
+)
+
+
+def run_gitleaks(
+    tmp_path: Path,
+    *arguments: str,
+    report: object = None,
+    code: int = 0,
+    env: Mapping[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
+    """Runs .github/gitleaks.sh with gitleaks in its folder of $RUNNER_TEMP, as a scan
+    before installed it, in tmp_path; the result, the calls and the folder of the
+    runner."""
+    runner = tmp_path / "runner"
+    assert GITLEAKS_VERSION
+    stub(runner / f"gitleaks-{GITLEAKS_VERSION[1]}", "gitleaks", FAKE_GITLEAKS)
+    stubs = tmp_path / "stubs"
+    if report is not None:
+        stub(stubs, "report", json.dumps(report))
+    stub(stubs, "code", f"{code}\n")
+    (runner / "summary").touch()
+    variables = {
+        "RUNNER_TEMP": runner.as_posix(),
+        "GITHUB_STEP_SUMMARY": (runner / "summary").as_posix(),
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "o/r",
+        **(env or {}),
+    }
+    result, calls = script(tmp_path, "gitleaks.sh", *arguments, env=variables)
+    return result, calls, runner
+
+
+def git(root: Path, *arguments: str) -> str:
+    done = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.org",
+            "-c",
+            "commit.gpgsign=false",
+            *arguments,
+        ],
+        cwd=root,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return done.stdout.strip()
+
+
+def pull_request(root: Path, changed: str) -> tuple[str, str]:
+    """A repository in root whose pull request changes the file changed; the commits
+    of its base and its head."""
+    git(root, "init", "--quiet")
+    (root / "README.md").write_text("A project\n", encoding="utf-8")
+    git(root, "add", "README.md")
+    git(root, "commit", "--quiet", "--message", "The base")
+    base = git(root, "rev-parse", "HEAD")
+    (root / changed).parent.mkdir(parents=True, exist_ok=True)
+    (root / changed).write_text("A change\n", encoding="utf-8")
+    git(root, "add", changed)
+    git(root, "commit", "--quiet", "--message", "The pull request")
+    return base, git(root, "rev-parse", "HEAD")
+
+
+def test_gitleaks_scans_the_commits_of_a_pull_request(tmp_path: Path) -> None:
+    base, head = pull_request(tmp_path, "src/app.py")
+
+    result, calls, runner = run_gitleaks(
+        tmp_path, base, head, env={"GH_TOKEN": "of-the-job", "GITHUB_TOKEN": "too"}
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Those after the base up to the head, with every secret redacted, and without
+    # the token of the job, which only the download needs.
+    assert calls == [
+        SCAN.format(runner=runner.as_posix())
+        + f" [--log-opts] [{base}..{head}] [.] in {tmp_path.name} token none none"
+    ]
+    assert GITLEAKS_VERSION
+    version = GITLEAKS_VERSION[1]
+    assert f"gitleaks {version} scans the commits of the pull request." in result.stdout
+    assert (runner / "summary").read_text(encoding="utf-8") == (
+        f"gitleaks {version} found no secret in the commits of the pull request.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "rules", [".github/gitleaks.sh", ".gitleaks.toml", ".gitleaksignore"]
+)
+def test_a_pull_request_that_changes_the_rules_scans_the_whole_history(
+    tmp_path: Path, rules: str
+) -> None:
+    base, head = pull_request(tmp_path, rules)
+
+    result, calls, runner = run_gitleaks(tmp_path, base, head)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == [
+        SCAN.format(runner=runner.as_posix())
+        + f" [.] in {tmp_path.name} token none none"
+    ]
+    assert (
+        "scans the whole history, since the pull request changes gitleaks or its rules."
+    ) in result.stdout
+
+
+def test_gitleaks_scans_the_whole_history_without_a_pull_request(
+    tmp_path: Path,
+) -> None:
+    result, calls, runner = run_gitleaks(tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == [
+        SCAN.format(runner=runner.as_posix())
+        + f" [.] in {tmp_path.name} token none none"
+    ]
+    assert GITLEAKS_VERSION
+    assert (runner / "summary").read_text(encoding="utf-8") == (
+        f"gitleaks {GITLEAKS_VERSION[1]} found no secret in the whole history.\n"
+    )
+
+
+COMMIT = "54c2df848f2b9c5e5f010dec7170b38f8365f10e"
+# Findings as gitleaks 8.30 reports them in JSON with --redact: one in a file whose
+# name a workflow command, a link and HTML each have to escape.
+FINDINGS = [
+    {
+        "RuleID": "generic-api-key",
+        "Description": "Detected a Generic API Key.",
+        "StartLine": 3,
+        "EndLine": 3,
+        "Match": "key = REDACTED",
+        "Secret": "REDACTED",
+        "File": "src/__init__.py",
+        "Commit": COMMIT,
+        "Author": "Someone",
+        "Email": "someone@example.org",
+        "Fingerprint": f"{COMMIT}:src/__init__.py:generic-api-key:3",
+    },
+    {
+        "RuleID": "curl-auth-user",
+        "Description": "Discovered a token in a curl command & more.",
+        "StartLine": 451,
+        "EndLine": 452,
+        "Match": "curl --user REDACTED",
+        "Secret": "REDACTED",
+        "File": "docs/a b,c:d%e<f>.md",
+        "Commit": COMMIT,
+        "Author": "Someone",
+        "Email": "someone@example.org",
+        "Fingerprint": f"{COMMIT}:docs/a b,c:d%e<f>.md:curl-auth-user:451",
+    },
+]
+
+
+@WITH_JQ
+def test_each_finding_is_an_annotation_and_a_row_of_the_summary(
+    tmp_path: Path,
+) -> None:
+    result, _, runner = run_gitleaks(tmp_path, report=FINDINGS, code=2)
+
+    assert result.returncode == 1
+    # At the line of the file, with the fingerprint that .gitleaksignore takes.
+    assert (
+        "::error file=src/__init__.py,line=3,endLine=3,title=gitleaks%3A"
+        " generic-api-key::Detected a Generic API Key. in commit 54c2df8. Revoke the"
+        " secret, or add its fingerprint to .gitleaksignore if it is none:"
+        f" {COMMIT}:src/__init__.py:generic-api-key:3\n"
+        "::error file=docs/a b%2Cc%3Ad%25e<f>.md,line=451,endLine=452,title=gitleaks%3A"
+        " curl-auth-user::Discovered a token in a curl command & more. in commit"
+        " 54c2df8. Revoke the secret, or add its fingerprint to .gitleaksignore if it is"
+        f" none: {COMMIT}:docs/a b,c:d%25e<f>.md:curl-auth-user:451\n"
+    ) in result.stdout
+    blob = f"https://github.com/o/r/blob/{COMMIT}"
+    assert (runner / "summary").read_text(encoding="utf-8") == (
+        "## gitleaks found 2 secrets in the whole history\n\n<table>\n"
+        "<tr><th>Rule</th><th>Line</th><th>Commit</th><th>Fingerprint for"
+        " <code>.gitleaksignore</code></th></tr>\n"
+        "<tr><td>generic-api-key: Detected a Generic API Key.</td>"
+        f'<td><a href="{blob}/src/__init__.py#L3">src/__init__.py:3</a></td>'
+        f'<td><a href="https://github.com/o/r/commit/{COMMIT}">54c2df8</a></td>'
+        f"<td><code>{COMMIT}:src/__init__.py:generic-api-key:3</code></td></tr>\n"
+        "<tr><td>curl-auth-user: Discovered a token in a curl command &amp; more.</td>"
+        f'<td><a href="{blob}/docs/a%20b%2Cc%3Ad%25e%3Cf%3E.md#L451">'
+        "docs/a b,c:d%e&lt;f&gt;.md:451</a></td>"
+        f'<td><a href="https://github.com/o/r/commit/{COMMIT}">54c2df8</a></td>'
+        f"<td><code>{COMMIT}:docs/a b,c:d%e&lt;f&gt;.md:curl-auth-user:451</code>"
+        "</td></tr>\n</table>\n\n"
+    )
+
+
+@WITH_JQ
+def test_one_finding_is_one_secret(tmp_path: Path) -> None:
+    base, head = pull_request(tmp_path, "src/app.py")
+
+    result, _, runner = run_gitleaks(tmp_path, base, head, report=FINDINGS[:1], code=2)
+
+    assert result.returncode == 1
+    assert (
+        (runner / "summary")
+        .read_text(encoding="utf-8")
+        .startswith("## gitleaks found 1 secret in the commits of the pull request\n")
+    )
+
+
+@pytest.mark.parametrize(("code", "report"), [(1, None), (2, None), (126, [])])
+def test_gitleaks_that_fails_itself_says_that_it_found_nothing(
+    tmp_path: Path, code: int, report: object
+) -> None:
+    result, _, runner = run_gitleaks(tmp_path, report=report, code=code)
+
+    assert result.returncode == 1
+    assert GITLEAKS_VERSION
+    version = GITLEAKS_VERSION[1]
+    assert (
+        f"::error title=gitleaks failed::gitleaks {version} ended with exit code"
+        f" {code} before the end of its scan, which is no finding of a secret: its log"
+        " says why.\n"
+    ) in result.stdout
+    assert (runner / "summary").read_text(encoding="utf-8") == (
+        f"gitleaks {version} ended with exit code {code} before the end of its scan;"
+        " its log says why.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("arguments", "error"),
+    [
+        (("a" * 40,), "Usage: bash .github/gitleaks.sh [base head]"),
+        (("a" * 40, "b" * 40, "c" * 40), "Usage: bash .github/gitleaks.sh"),
+        (("main", "b" * 40), "main is no commit. Usage:"),
+        (("a" * 40, "--output=/tmp/x"), "--output=/tmp/x is no commit."),
+        (("a" * 39, "b" * 40), f"{'a' * 39} is no commit."),
+        (("A" * 40, "b" * 40), f"{'A' * 40} is no commit."),
+    ],
+)
+def test_gitleaks_sh_takes_two_commits_or_none(
+    tmp_path: Path, arguments: tuple[str, ...], error: str
+) -> None:
+    result, calls, _ = run_gitleaks(tmp_path, *arguments)
+
+    assert result.returncode == 2
+    assert error in result.stderr
+    assert calls == []
+
+
+def gitleaks_release() -> bytes:
+    """The archive of a release of gitleaks, with the stand-in for gitleaks."""
+    data = io.BytesIO()
+    with tarfile.open(fileobj=data, mode="w:gz") as archive:
+        for name, content in (
+            ("LICENSE", b"MIT\n"),
+            ("README.md", b"gitleaks\n"),
+            ("gitleaks", FAKE_GITLEAKS.encode()),
+        ):
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            info.mode = 0o755
+            archive.addfile(info, io.BytesIO(content))
+    return data.getvalue()
+
+
+def test_gitleaks_comes_from_its_release_once_in_a_job(tmp_path: Path) -> None:
+    release = gitleaks_release()
+    # The scripts of a repository whose pin is the sha256 of this release.
+    root = tmp_path / "repository"
+    (root / ".github").mkdir(parents=True)
+    shutil.copy(ROOT / ".github/download.sh", root / ".github/download.sh")
+    text = (ROOT / ".github/gitleaks.sh").read_text(encoding="utf-8")
+    pinned = re.sub(
+        r"^sha256=[0-9a-f]{64}$",
+        f"sha256={hashlib.sha256(release).hexdigest()}",
+        text,
+        count=1,
+        flags=re.M,
+    )
+    assert pinned != text
+    (root / ".github/gitleaks.sh").write_bytes(pinned.encode())
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    (runner / "summary").touch()
+    env = {
+        # By its path in the folder of the test, which tar of Git for Windows reads as a
+        # path, where it takes C:/… for a host; on the runners it is /home/runner/….
+        "RUNNER_TEMP": "runner",
+        "GITHUB_STEP_SUMMARY": (runner / "summary").as_posix(),
+        "GH_TOKEN": "of-the-job",
+    }
+    assert GITLEAKS_VERSION
+    version = GITLEAKS_VERSION[1]
+
+    for _ in range(2):
+        result, calls = script(
+            tmp_path,
+            "gitleaks.sh",
+            plan=(TIMEOUT, "asset"),
+            asset=release,
+            env=env,
+            root=root,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    # Through the API, once, and again after an error of GitHub: the second scan of
+    # the job takes the gitleaks of the first, which never sees the token.
+    download = (
+        f"gh release download v{version} --repo gitleaks/gitleaks --pattern"
+        f" gitleaks_{version}_linux_x64.tar.gz --output runner/gitleaks.tar.gz --clobber"
+    )
+    assert [call for call in calls if call.startswith("gh ")] == [download, download]
+    scans = [call for call in calls if call.startswith("gitleaks ")]
+    assert len(scans) == 2
+    assert all(scan.endswith(" token none none") for scan in scans)
+    assert sorted(path.name for path in (runner / f"gitleaks-{version}").iterdir()) == [
+        "gitleaks"
+    ]
+    assert not (runner / "gitleaks.tar.gz").exists()
+
+
+@pytest.mark.parametrize(
+    ("base", "head", "arguments"),
+    [
+        ("a" * 40, "b" * 40, f" [{'a' * 40}] [{'b' * 40}]"),
+        # The weekly scan, and one by hand, of the whole history.
+        ("", "", ""),
+    ],
+)
+def test_the_secret_scan_hands_the_commits_of_a_pull_request_to_gitleaks(
+    tmp_path: Path, base: str, head: str, arguments: str
+) -> None:
+    done = run_step(
+        tmp_path,
+        "secret-scan.yml",
+        "gitleaks",
+        "Scan tracked history for exposed secrets",
+        env={"BASE_SHA": base, "HEAD_SHA": head},
+        # A stand-in that writes down its arguments, each in brackets.
+        files={
+            ".github/gitleaks.sh": (
+                'line=gitleaks.sh\nfor argument; do line+=" [$argument]"; done\n'
+                'echo "$line" >> "$STUB_CALLS"\n'
+            )
+        },
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == [f"gitleaks.sh{arguments}"]
+
+
 # CodeQL, from the tool cache of the runner or through the API.
 
 CODEQL_STEP = "Download the CodeQL of the action unless the runner has it"

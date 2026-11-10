@@ -482,8 +482,9 @@ one may merge."""
 [check.gitleaks]
 title = "The secret scan"
 problem = """Gitleaks found what looks like a secret, such as a token, a key or a
-password, in a commit of the pull request; the log names the file, the line and the
-commit."""
+password, in a commit of the pull request; the summary and an annotation name the file,
+the line, the commit and the fingerprint. An annotation *gitleaks failed* means instead
+that gitleaks stopped before the end of its scan, for the reason in the log."""
 why = """Git keeps every commit, also after a later commit removes the secret, and a
 secret that is public can be abused within minutes."""
 fix = """Revoke the secret where it was issued first: it is public now. If it is no

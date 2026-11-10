@@ -2814,6 +2814,7 @@ def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
         ".vale.ini",
         ".github/sign-tag.sh",
         ".github/download.sh",
+        ".github/gitleaks.sh",
         ".github/lychee.sh",
         ".github/renovate-blueprint.json5",
         ".github/mkdocs-blueprint.yml",
@@ -6538,12 +6539,56 @@ def test_no_download_of_a_release_on_github_goes_without_a_token(
             assert not re.search(r"^[^#\n]*\bwget\b", text, re.M), path.name
             assert "lycheeverse/lychee-action" not in text, path.name
             downloads += len(re.findall(r"\bgh release download\b", text))
-    # lychee and CodeQL in every repository.
-    for name in ("download.sh", "lychee.sh"):
+    # lychee, gitleaks and CodeQL in every repository.
+    for name in ("download.sh", "lychee.sh", "gitleaks.sh"):
         assert (folder / ".github" / name).read_text(encoding="utf-8") == (
             ROOT / ".github" / name
         ).read_text(encoding="utf-8")
     assert downloads > 0
+
+
+@pytest.mark.parametrize("kind", ["blueprint", *KINDS])
+def test_the_secret_scan_runs_gitleaks_of_its_release_through_the_api(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # gitleaks/gitleaks-action downloaded gitleaks from the page of its release without
+    # a token, unchecked and at the version that the action pins, and asks a repository
+    # of an organization for a license (decision 0139). The secret scan runs the
+    # gitleaks of .github/gitleaks.sh instead, which Renovate moves with its sha256.
+    folder = ROOT if kind == "blueprint" else projects[kind]
+    workflows = folder / ".github/workflows"
+    for path in sorted(workflows.glob("*.yml")):
+        assert "gitleaks/gitleaks-action" not in path.read_text("utf-8"), path.name
+    assert "gitleaks/gitleaks-action" not in (
+        folder / ".github/repository.toml"
+    ).read_text(encoding="utf-8")
+    workflow = (workflows / "secret-scan.yml").read_text(encoding="utf-8")
+    assert parse(workflow)["permissions"] == {"contents": "read"}
+    job = job_in(workflow, "gitleaks")
+    assert job["name"] == "gitleaks"
+    # The whole history, without the token in the folder of the repository.
+    checkout = job["steps"][1]
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
+    names = names_of(job)
+    scan = step_in(job, "Scan tracked history for exposed secrets")
+    assert names.index(scan["name"]) == 2
+    assert "uses" not in scan
+    # The token only downloads gitleaks, which scans the commits of a pull request,
+    # or without one every commit.
+    assert scan["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+        "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+    }
+    assert scan["run"] == (
+        'if [[ -n "$BASE_SHA" ]]; then\n'
+        '  bash .github/gitleaks.sh "$BASE_SHA" "$HEAD_SHA"\n'
+        "else\n"
+        "  bash .github/gitleaks.sh\n"
+        "fi\n"
+    )
+    assert names[3:] == ["Explain the failure"]
 
 
 @pytest.mark.parametrize("kind", ["blueprint", *KINDS])
@@ -10146,14 +10191,15 @@ def test_renovate_finds_every_version_that_a_workflow_or_script_pins(
     # gitsign in sign-tag.sh and verify-release.yml, krankerl and Nextcloud in the
     # release of a Nextcloud app and syft for its SBOMs and the weekly one, which every
     # kind has, krankerl in the checks of a Nextcloud app too, Infection in the mutation
-    # tests, and lychee in the check of the links of every kind.
+    # tests, and lychee in the check of the links and gitleaks in the secret scan of
+    # every kind.
     assert pinned == {
-        "blueprint": 9,
-        "nextcloud-app": 9,
-        "home-assistant": 8,
-        "github-action": 8,
-        "python-package": 8,
-    }.get(kind, 7)
+        "blueprint": 10,
+        "nextcloud-app": 10,
+        "home-assistant": 9,
+        "github-action": 9,
+        "python-package": 9,
+    }.get(kind, 8)
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -10179,6 +10225,7 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
                 ".github/workflows/**",
                 ".github/sign-tag.sh",
                 ".github/lychee.sh",
+                ".github/gitleaks.sh",
             ]
             enabled = rule["enabled"]
             tasks = rule.get("postUpgradeTasks", tasks)
@@ -10196,6 +10243,7 @@ def test_the_downloads_of_the_workflows_follow_the_blueprint(
             pins.RECORD,
             ".github/sign-tag.sh",
             ".github/lychee.sh",
+            ".github/gitleaks.sh",
             ".github/workflows/*.yml",
         ],
         "executionMode": "branch",
