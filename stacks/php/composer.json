@@ -20,7 +20,7 @@
 		"nextcloud/coding-standard": "^1.5",
 		"nextcloud/ocp": "^33.0",
 		"phpunit/phpunit": "^12.5",
-		"vimeo/psalm": "^6.0"
+		"vimeo/psalm": "^7.0"
 	},
 	"scripts": {
 		"check": "bash scripts/check.sh",
