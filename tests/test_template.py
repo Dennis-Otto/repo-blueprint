@@ -7377,6 +7377,25 @@ def test_php_cs_fixer_starts_from_the_cache_of_the_ci(
     assert "\n  vendor/bin/php-cs-fixer fix --dry-run --diff\n" in check
 
 
+def test_php_cs_fixer_checks_only_what_git_keeps(projects: dict[str, Path]) -> None:
+    project = projects["nextcloud-app"]
+    config = (project / ".php-cs-fixer.dist.php").read_text(encoding="utf-8")
+    # A tool that a project installs with npm into a folder of its own, such as
+    # scripts/eslint/node_modules/ behind a .gitignore of its own, holds PHP files
+    # that are no code of the app: once it was there, the next local run failed the
+    # coding standard on them. php-cs-fixer leaves out what any .gitignore of the app
+    # ignores, the build and the packages of Composer among them.
+    finder = (
+        "\n$config\n\t->getFinder()\n\t->ignoreVCSIgnored(true)\n\t->in(__DIR__);\n"
+    )
+    assert finder in config
+    # notPath() matches any part of a path: notPath('build') also left out a file of
+    # the app such as lib/Command/Rebuild.php.
+    assert "notPath" not in config
+    ignored = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert {"/vendor/", "/build/"} <= set(ignored)
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("ci", "reachable", "code", "message"),
