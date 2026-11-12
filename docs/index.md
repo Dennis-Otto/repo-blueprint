@@ -50,7 +50,7 @@ hide:
 
     ---
 
-    Renovate, which the blueprint runs a few times a day: actions, dependencies and images a week after their release, on Mondays, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows. Routine updates, and the weekly refresh of the lock files from versions a week old, merge themselves once every check passes. Renovate keeps no issue open.
+    Renovate, which the blueprint runs a few times a day: actions and dependencies a week after their release and an image whose registry gives no date of its release at its next run, on Mondays, and at once an update that fixes a vulnerability or the new commit of a branch that an action follows. Routine updates, and the weekly refresh of the lock files from versions a week old, merge themselves once every check passes. Renovate keeps no issue open.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 
