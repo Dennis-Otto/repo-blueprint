@@ -11466,11 +11466,26 @@ def test_the_blueprint_bot_keeps_one_pull_request(
         < update.index("git add --all")
     )
     assert "GH_TOKEN" not in update
+    # What the blueprint rendered for the version before, with the answers of the
+    # repository, rendered before the update changes them: the bot tells from it the
+    # changes of the repository that the update drops without a marker.
+    recopy = update.index("copier recopy --defaults --overwrite --quiet")
+    assert (
+        update.index('cp .copier-answers.yml "$rendered/"')
+        < recopy
+        < update.index("copier update --")
+    )
+    assert (
+        '--vcs-ref "$(sed -n \'s/^_commit: *//p\' .copier-answers.yml)" "$rendered"'
+        in update
+    )
+    assert 'rendered="$RUNNER_TEMP/blueprint-rendered"' in update
     assert steps.index(update) < steps.index(commit)
     assert 'tool="$RUNNER_TEMP/blueprint-tool"' in commit
     assert "APP: ${{ steps.app.outputs.app-slug }}" in commit
     assert '--app "${APP}[bot]"' in commit
     assert '--run-id "$GITHUB_RUN_ID"' in commit
+    assert '--rendered "$RUNNER_TEMP/blueprint-rendered"' in commit
     # The workflow no longer puts the branch back on main, which closed the pull
     # request, nor scans the whole repository for markers.
     for gone in ("force", "createCommitOnBranch", "git grep", "gh pr merge"):
@@ -11489,6 +11504,7 @@ def test_the_blueprint_bot_keeps_one_pull_request(
     assert result.returncode == 0, result.stderr
     assert "--app APP" in result.stdout
     assert "--source SOURCE" in result.stdout
+    assert "--rendered RENDERED" in result.stdout
     # Its description shows the written notes of every release that it brings, with
     # the changelog of the tool that every kind has, and references that still lead
     # to the issues of the blueprint.
