@@ -6,7 +6,8 @@ request for it open on the branch blueprint/update. A newer release moves that b
 on to a new commit on main, so the pull request stays the same one; a branch with
 commits of anyone else stays as it is. Its description shows the notes of every
 release that the update brings, the releases it skipped too, the files it changes and
-what to do about a conflict.
+what to do about a conflict and about a change of the repository that the update
+drops.
 """
 
 from __future__ import annotations
@@ -80,27 +81,70 @@ def answered_release(text: str) -> str:
 @dataclass(frozen=True)
 class Change:
     """A file that the update staged, with its mode in HEAD and in the index: a new
-    file has the mode 000000 before, and a deleted one after."""
+    file has the mode 000000 before, and a deleted one after. Original is its blob in
+    HEAD, and binary says that Git diffs it as binary, not line by line."""
 
     path: str
     before: str
     mode: str
     blob: str
+    original: str = ""
+    binary: bool = False
 
     @property
     def deleted(self) -> bool:
         return self.mode == ABSENT
 
 
+def binary_paths(root: Path) -> set[str]:
+    """The staged files that Git diffs as binary, by its own rules and those of the
+    repository's .gitattributes: --numstat counts their lines as -."""
+    output = git(
+        root, "diff-index", "--cached", "--no-renames", "--numstat", "-z", "HEAD"
+    )
+    entries = (entry.split("\t", 2) for entry in output.decode().split("\0")[:-1])
+    return {path for added, deleted, path in entries if added == deleted == "-"}
+
+
 def staged_changes(root: Path) -> list[Change]:
     """Every file whose index differs from HEAD."""
     output = git(root, "diff-index", "--cached", "--no-renames", "-z", "HEAD")
     fields = output.decode().split("\0")[:-1]
+    binary = binary_paths(root)
     changes = []
     for meta, path in zip(fields[0::2], fields[1::2], strict=True):
-        before, mode, _, sha, _ = meta.removeprefix(":").split(" ")
-        changes.append(Change(path, before, mode, sha))
+        before, mode, original, sha, _ = meta.removeprefix(":").split(" ")
+        changes.append(Change(path, before, mode, sha, original, path in binary))
     return changes
+
+
+def rendered_alike(root: Path, change: Change, rendered: Path) -> bool:
+    """Whether the file in HEAD is the one that the blueprint rendered before, in the
+    folder rendered: the blob that `git add` makes of the rendered file, with the
+    filters of the repository for its path, is the one in HEAD."""
+    copy = rendered / change.path
+    if not copy.is_file():
+        return False
+    sha = git(root, "hash-object", f"--path={change.path}", "--", str(copy))
+    return sha.decode().strip() == change.original
+
+
+def dropped_changes(
+    root: Path, changes: Sequence[Change], rendered: Path | None
+) -> tuple[str, ...]:
+    """The files of the blueprint that the update deletes, or replaces as binary,
+    which this repository had changed. `copier update` merges a change of the
+    repository line by line into a text file that the release keeps; every other file
+    it takes from the release as it is, without a marker. A renamed file is a deleted
+    one under its old name. Without the rendering of the version before, the bot can't
+    tell a changed file from one as the blueprint made it, so every such file counts."""
+    return tuple(
+        change.path
+        for change in changes
+        if change.before != ABSENT
+        and (change.deleted or change.binary)
+        and (rendered is None or not rendered_alike(root, change, rendered))
+    )
 
 
 @dataclass(frozen=True)
@@ -117,9 +161,16 @@ class Update:
     # The files with conflict markers, among those the update touched: others may
     # hold such lines on purpose.
     conflicts: tuple[str, ...]
+    # The files that the update deletes or replaces, which this repository had
+    # changed: no marker shows that the change is gone.
+    dropped: tuple[str, ...] = ()
 
     @classmethod
-    def read(cls, root: Path, source: str = SOURCE) -> Update:
+    def read(
+        cls, root: Path, source: str = SOURCE, rendered: Path | None = None
+    ) -> Update:
+        """What is staged in the checkout at root; rendered is a folder with what the
+        blueprint rendered for the version before, with the answers of the repository."""
         changes = staged_changes(root)
         return cls(
             source=source,
@@ -134,7 +185,14 @@ class Update:
                 for change in changes
                 if not change.deleted and MARKERS.search(blob(root, change.blob))
             ),
+            dropped=dropped_changes(root, changes, rendered),
         )
+
+    @property
+    def waits(self) -> bool:
+        """Whether the update waits for a person: for a conflict, or for a change of
+        this repository that it drops."""
+        return bool(self.conflicts or self.dropped)
 
     @property
     def title(self) -> str:
@@ -618,7 +676,7 @@ def files_section(changes: Sequence[Change]) -> list[str]:
 
 def merge_note(update: Update, merges: bool, automerge: bool) -> str:
     """What happens to the pull request once its checks pass."""
-    if update.conflicts:
+    if update.waits:
         return "It waits for you to merge it."
     if merges and not automerge:
         return (
@@ -685,6 +743,26 @@ def describe(
             "",
             *(f"- [ ] `{path}`" for path in update.conflicts),
         ]
+    if update.dropped:
+        deleted = {change.path for change in update.changes if change.deleted}
+        lines += [
+            "",
+            "### Changes of this repository that the update drops",
+            "",
+            "The release removes or replaces these files, which this repository had"
+            " changed. `copier update` merges such a change line by line only into a"
+            " text file that the release keeps: these files it takes from the release"
+            " as they are, without markers, so auto-merge is off. For each one, bring"
+            " what this repository needs of its own version, which `git show"
+            " main:<path>` shows, to the file that takes its place, or propose the"
+            " change to the blueprint; then commit and push to this branch and merge."
+            " Tick each file once its change is safe:",
+            "",
+            *(
+                f"- [ ] `{path}` ({'deleted' if path in deleted else 'replaced'})"
+                for path in update.dropped
+            ),
+        ]
     if modes:
         lines += [
             "",
@@ -748,7 +826,7 @@ def merges_itself(pull: Json | None, update: Update, automerge: bool) -> bool:
     """Whether the pull request merges itself once its checks pass: never with
     conflicts; with the auto-merge that it has, or that the bot turns on for a new pull
     request and for one that waited for conflicts. Whoever else turned it off decides."""
-    if update.conflicts:
+    if update.waits:
         return False
     merging = bool(pull and pull.get("auto_merge"))
     labels = {label["name"] for label in (pull or {}).get("labels", [])}
@@ -790,12 +868,14 @@ def hold(api: Api, repo: str, pull: Json) -> Json:
 def settle(
     api: Api, repo: str, number: int, pull: Json | None, update: Update, automerge: bool
 ) -> None:
-    """Conflicts turn auto-merge off, before they label the pull request: no check
-    reads every file, and markers in one of them would merge. Without conflicts, the
-    pull request merges itself as merges_itself says, which its description says too."""
+    """Conflicts, and changes of the repository that the update drops, turn auto-merge
+    off before they label the pull request: no check reads every file, and markers in
+    one of them would merge, as would a lost change that no marker shows. Without
+    them, the pull request merges itself as merges_itself says, which its description
+    says too."""
     merging = bool(pull and pull.get("auto_merge"))
     labels = {label["name"] for label in (pull or {}).get("labels", [])}
-    if update.conflicts:
+    if update.waits:
         if merging:
             hold(api, repo, pull)
         if LABEL not in labels:
@@ -818,10 +898,13 @@ def update_pull_request(
     automerge: bool,
     run_id: str,
     source: str = SOURCE,
+    rendered: Path | None = None,
 ) -> str:
     """Commit what `copier update` staged in the checkout at root and bring its pull
-    request to it; the answer says what happened."""
-    update = Update.read(root, source)
+    request to it; the answer says what happened. Rendered is the folder with what the
+    blueprint rendered for the version before, which tells the changes of the
+    repository that the update drops."""
+    update = Update.read(root, source, rendered)
     if not update.changes:
         return f"The blueprint's {update.after} changes nothing in this repository."
     pull = open_pull(api, repo)
@@ -850,10 +933,11 @@ def update_pull_request(
             )
         if head != pull["head"]["sha"] and strangers(api, repo, root, pull, app):
             return leave_alone(api, repo, pull, update)
-        # New changes wait with conflicts, and with BLUEPRINT_AUTOMERGE set to off,
-        # whoever switched auto-merge on for the update before. It goes before the
-        # branch moves, so that nothing merges should the bot stop after the move.
-        if pull.get("auto_merge") and (update.conflicts or not automerge):
+        # New changes wait with conflicts or dropped changes of the repository, and
+        # with BLUEPRINT_AUTOMERGE set to off, whoever switched auto-merge on for the
+        # update before. It goes before the branch moves, so that nothing merges
+        # should the bot stop after the move.
+        if pull.get("auto_merge") and (update.waits or not automerge):
             pull = hold(api, repo, pull)
         move_branch(api, repo, commit, exists=True)
         done = "Moved on"
@@ -861,5 +945,11 @@ def update_pull_request(
     settle(api, repo, number, pull, update, automerge)
     text = f"{done} #{number}: the blueprint's {update.before} to {update.after}"
     if update.conflicts:
-        text += f", with conflicts in {len(update.conflicts)} file(s), auto-merge off"
+        text += f", with conflicts in {len(update.conflicts)} file(s)"
+    if update.dropped:
+        text += (
+            f", dropping changes of this repository in {len(update.dropped)} file(s)"
+        )
+    if update.waits:
+        text += ", auto-merge off"
     return text + "."
