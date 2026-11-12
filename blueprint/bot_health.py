@@ -151,8 +151,10 @@ BOX = "<!-- rebase-check -->"
 UNTICKED = f"- [ ] {BOX}"
 TICKED = f"- [x] {BOX}"
 # Renovate runs every two hours, or with every push of its Mend app: a box that has
-# been ticked this long without a new branch needs a person.
-REBUILD_TIME = timedelta(days=1)
+# been ticked since the night before without a new branch needs a person. Less than a
+# day, so that the next nightly run counts even when GitHub starts its cron a few
+# minutes early.
+REBUILD_TIME = timedelta(hours=20)
 # The issue that asks for an upload of the social preview, which no API offers.
 PREVIEW = "social-preview"
 PREVIEW_TITLE = "Upload the new social preview"

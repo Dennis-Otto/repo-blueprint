@@ -3706,8 +3706,10 @@ def test_the_daily_look_waits_a_day_for_renovate_after_the_box_was_ticked(
     github.pulls = [
         renovate_pull(7, box="x"),
         renovate_pull(8, box="x", updated=NOW - timedelta(days=1, minutes=1)),
+        # The night before, by a run that started a few minutes later than this one.
+        renovate_pull(9, box="x", updated=NOW - timedelta(hours=23, minutes=55)),
     ]
-    for number in (7, 8):
+    for number in (7, 8, 9):
         github.pull_commits[number] = [
             commit_of("a"),
             commit_of("b", "Dennis-Otto", merge=True),
@@ -3720,6 +3722,9 @@ def test_the_daily_look_waits_a_day_for_renovate_after_the_box_was_ticked(
         "Renovate builds the branch anew in its next run.",
         "- #8 `renovate/lock-file-maintenance`: its box for a rebase has been ticked "
         "since 2026-10-12 11:59 UTC, and Renovate hasn't built the branch anew: look "
+        "at the log of Renovate's latest run.",
+        "- #9 `renovate/lock-file-maintenance`: its box for a rebase has been ticked "
+        "since 2026-10-12 12:05 UTC, and Renovate hasn't built the branch anew: look "
         "at the log of Renovate's latest run.",
         "",
         "Opened #1.",
