@@ -6,6 +6,14 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"],
+[%- elif project_type == 'chrome-extension' %]
+    "target": "es2024",
+    "lib": ["es2024", "dom"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // The types of every package in node_modules/@types: those of Node and of
+    // Chrome, and an extension without @types/chrome still compiles.
+    "types": ["*"],
 [%- else %]
     "target": "es2024",
     "lib": ["es2024"],
@@ -30,7 +38,11 @@
     "rewriteRelativeImportExtensions": true,
 [%- endif %]
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true
+    "noEmit": true[% if project_type == 'chrome-extension' %],
+    // A file that imports and exports nothing is a classic script, as the content
+    // script, src/content.ts, has to be: the compiler then writes it without an
+    // `export {}`, which a content script can't run. Every other file is a module.
+    "moduleDetection": "legacy"[% endif %]
   },
   "include": ["src", "test"]
 }
