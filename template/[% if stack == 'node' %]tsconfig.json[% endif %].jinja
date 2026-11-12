@@ -11,7 +11,9 @@
     "lib": ["es2024", "dom"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["node", "chrome"],
+    // The types of every package in node_modules/@types: those of Node and of
+    // Chrome, and an extension without @types/chrome still compiles.
+    "types": ["*"],
 [%- else %]
     "target": "es2024",
     "lib": ["es2024"],

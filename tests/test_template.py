@@ -16154,7 +16154,9 @@ def test_only_an_extension_type_checks_the_dom_and_the_api_of_chrome(
     ]
     if extension:
         assert options["lib"] == ["es2024", "dom"]
-        assert options["types"] == ["node", "chrome"]
+        # Every package of types, so that @types/chrome counts once it is installed,
+        # and an extension made before it was in package.json compiles without it.
+        assert options["types"] == ["*"]
         assert options["moduleDetection"] == "legacy"
         # Word for word as in player-switch-for-autodarts, whose update then takes
         # the file without a conflict.
