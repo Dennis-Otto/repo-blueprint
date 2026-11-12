@@ -417,6 +417,12 @@ def mutation_command(
         print(f"kind={kind}")
         print(f"parts={json.dumps(parts, ensure_ascii=False)}")
         for part in parts:
+            if kind == "php":
+                # Infection counts its mutants itself, as it makes them.
+                sample = part["patterns"].splitlines()
+                what = f"the sample: {', '.join(sample)}" if sample else "every file"
+                print(f"Infection changes {what}.", file=sys.stderr)
+                continue
             print(
                 f"Part {part['part']} of {part['parts']}: about {part['mutants']} "
                 "mutants",
@@ -2394,7 +2400,8 @@ def add_mutation_parsers(
     plan_parser.add_argument(
         "--sample",
         action="store_true",
-        help="one part with a sample of the functions, as a pull request tries them",
+        help="one part with a sample of the functions, or of the PHP files, as a pull "
+        "request tries them",
     )
     mutation_actions.add_parser(
         "configure",

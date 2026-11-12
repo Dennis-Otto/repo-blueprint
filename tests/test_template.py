@@ -26042,7 +26042,8 @@ def run_mutation_step(
     tmp_path: Path, name: str, kind: str, tools: dict[str, str], **variables: str
 ) -> tuple[int, str]:
     """Runs a step of the Mutation workflow in tmp_path/project as GitHub does, with
-    stand-ins for its tools; the exit code and what it wrote to the summary."""
+    stand-ins for its tools; the exit code and what it wrote to the summary. Its log
+    is in tmp_path/log."""
     step = tmp_path / "step.sh"
     step.write_text(mutation_step(name, kind), encoding="utf-8", newline="\n")
     bin_dir = tmp_path / "bin"
@@ -26062,6 +26063,7 @@ def run_mutation_step(
         "GITHUB_ENV": (tmp_path / "env").as_posix(),
         "GITHUB_STEP_SUMMARY": summary.as_posix(),
         "MUTMUT_LIMIT": "1m",
+        "INFECTION_LIMIT": "1m",
         # Not those of the part that runs the mutation tests of the blueprint.
         "PATTERNS": "",
         **variables,
@@ -26076,6 +26078,7 @@ def run_mutation_step(
         encoding="utf-8",
         check=False,
     )
+    (tmp_path / "log").write_text(result.stdout + result.stderr, encoding="utf-8")
     return result.returncode, summary.read_text(encoding="utf-8")
 
 
@@ -26666,6 +26669,61 @@ def test_infection_runs_with_the_bootstrap_of_the_tests(
     assert " --min-msi=0 --min-covered-msi=0 " in call
     # The plain text that the report and the dashboard read, without colors.
     assert " --no-ansi " in call
+    # The weekly run changes every file.
+    assert "--filter" not in call
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_infection_changes_only_the_files_of_a_sample(tmp_path: Path) -> None:
+    (tmp_path / "project").mkdir()
+    calls = tmp_path / "calls"
+
+    code, _ = run_mutation_step(
+        tmp_path,
+        "Run the mutants against the tests",
+        "php",
+        {"php": 'printf "%s\\n" "$@" > "$CALLS"\nprintf "%s" "$OUTPUT"\n'},
+        CALLS=calls.as_posix(),
+        OUTPUT=INFECTION,
+        PATTERNS="lib/Service/Sync.php\nlib/Db/Mapper.php",
+    )
+
+    assert code == 0
+    # One word, the files separated by commas, as Infection takes them.
+    assert calls.read_text(encoding="utf-8").splitlines()[-1] == (
+        "--filter=lib/Service/Sync.php,lib/Db/Mapper.php"
+    )
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_infection_out_of_time_fails_with_a_message(tmp_path: Path) -> None:
+    # Before the limit of the job, which would show the run as cancelled.
+    job = mutation_job("mutation")
+    limits = job["env"]["INFECTION_LIMIT"]
+    assert "'18m'" in limits
+    assert "&& 25 ||" in str(job["timeout-minutes"])
+    assert "'330m'" in limits
+    assert "|| 350 }}" in str(job["timeout-minutes"])
+    (tmp_path / "project").mkdir()
+
+    code, _ = run_mutation_step(
+        tmp_path,
+        "Run the mutants against the tests",
+        "php",
+        {"php": "echo 'Running the initial test suite...'\nexec sleep 30\n"},
+        INFECTION_LIMIT="1s",
+    )
+
+    assert code == 124
+    log = (tmp_path / "log").read_text(encoding="utf-8")
+    assert (
+        "::error title=Infection ran out of time::Infection didn't finish within 1s"
+        in log
+    )
+    output = (tmp_path / "project/build/infection-output.log").read_text(
+        encoding="utf-8"
+    )
+    assert "initial test suite" in output
 
 
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
@@ -26752,6 +26810,34 @@ def test_the_score_of_infection_or_why_it_has_none(
     assert summary.startswith("### Mutation tests (Infection)\n")
     assert expected in summary
     assert summary.endswith("```text\nTotal: 40\n```\n")
+    assert "sample" not in summary
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_report_of_infection_names_the_sample_of_a_pull_request(
+    tmp_path: Path,
+) -> None:
+    build = tmp_path / "project/build"
+    build.mkdir(parents=True)
+    (build / "infection-output.log").write_text(INFECTION, encoding="utf-8")
+
+    exit_code, summary = run_mutation_step(
+        tmp_path,
+        "Report the score",
+        "php",
+        {},
+        PATTERNS="lib/Service/Sync.php\nlib/Db/Mapper.php",
+    )
+
+    assert exit_code == 0
+    assert summary == (
+        "### Mutation tests (Infection)\n\n"
+        "The sample of a pull request: the mutants of 2 files, the same ones each"
+        " time. The weekly run changes every file.\n\n"
+        "- `lib/Service/Sync.php`\n- `lib/Db/Mapper.php`\n\n"
+        "- Mutation Score Indicator (MSI): 87%\n- Mutation Code Coverage: 100%\n"
+        "- Covered Code MSI: 87%\n"
+    )
 
 
 def test_infection_gets_a_php_that_it_runs_on() -> None:

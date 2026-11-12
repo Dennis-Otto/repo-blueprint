@@ -14,6 +14,10 @@ Before any part, one job runs the stats of mutmut: the whole suite once, with th
 trampolines that record which tests reach each function. It takes ten times as long
 as the tests, so the job hands its stats to every part, which loads them and runs
 only its mutants, and a test that fails without any mutant stops the run there.
+
+A pull request that changes how the mutants run tries a sample in one part: for
+mutmut a few of the functions, for Infection, which changes the PHP of a Nextcloud
+app in one part, a few of the files.
 """
 
 from __future__ import annotations
@@ -48,6 +52,19 @@ MOST_PARTS = 8
 # one part: enough to show a defect of the run within minutes, while the schedule runs
 # every part.
 SAMPLE_MUTANTS = 200
+# Infection, which mutates the PHP of a Nextcloud app, tries the files of a sample of
+# about so many lines in a pull request: all of the 17,000 lines of paperless-sync take
+# half an hour, a sample of these a minute or two, after the tests have run once.
+SAMPLE_LINES = 600
+# The files in which Infection looks for the code to change: the configuration that
+# Infection reads first, and lib/ without one, as the workflow writes it then.
+INFECTION_CONFIGURATIONS = (
+    "infection.json5",
+    "infection.json",
+    "infection.json5.dist",
+    "infection.json.dist",
+)
+PHP_SOURCE = "lib"
 # The score and the score of the logic count as dropped when they fall by more than
 # so many points: a run measures the same code a little differently at times, as when
 # a mutant hits its time limit.
@@ -397,22 +414,110 @@ def sampled(found: Sequence[Module], mutants: int) -> list[Unit]:
     return chosen or [min(units, key=lambda unit: (unit.mutants, unit.name))]
 
 
+# A comment of JSON5 on a line of its own; one after a value, such as the // of a URL,
+# stays, which the names of the directories don't need.
+COMMENT_LINE = re.compile(r"^\s*//.*$", re.MULTILINE)
+DIRECTORIES = re.compile(r"""["']?directories["']?\s*:\s*\[([^\]]*)\]""")
+EXCLUDES = re.compile(r"""["']?excludes["']?\s*:\s*\[([^\]]*)\]""")
+QUOTED = re.compile(r""""([^"\\]*)"|'([^'\\]*)'""")
+# A function with a body that does something: an interface, an abstract method or a
+# constructor that only promotes its parameters has no code that Infection changes.
+PHP_CODE = re.compile(r"\bfunction\b[^;{]*\{\s*[^\s}]")
+
+
+def infection_configuration(root: Path) -> str:
+    """The text of the configuration that Infection reads first, without the comments
+    of JSON5 on lines of their own, or nothing without one."""
+    for name in INFECTION_CONFIGURATIONS:
+        path = root / name
+        if path.is_file():
+            return COMMENT_LINE.sub("", path.read_text(encoding="utf-8"))
+    return ""
+
+
+def quoted_list(pattern: re.Pattern[str], text: str) -> list[str]:
+    """The strings of a list that the pattern finds, read leniently: JSON5 has quotes
+    of its own."""
+    found = pattern.search(text)
+    if not found:
+        return []
+    return [a or b for a, b in QUOTED.findall(found[1])]
+
+
+def php_sources(root: Path) -> list[str]:
+    """The directories of the code that Infection changes: source.directories of the
+    configuration that it reads, of JSON5 or JSON, or lib/, as the workflow writes it
+    without one."""
+    names = quoted_list(DIRECTORIES, infection_configuration(root))
+    return [name.strip("/") for name in names if name.strip("/")] or [PHP_SOURCE]
+
+
+def php_excluded(path: str, excludes: list[str]) -> bool:
+    """Whether source.excludes of Infection leaves out a file, by its path relative to
+    its source directory: an entry is a folder or a file there, or a regular
+    expression between slashes or hashes, as Infection takes it."""
+    for exclude in excludes:
+        if len(exclude) > 2 and exclude[0] == exclude[-1] and exclude[0] in "/#":
+            if re.search(exclude[1:-1], path):
+                return True
+        elif exclude.strip("/") and (path + "/").startswith(exclude.strip("/") + "/"):
+            return True
+    return False
+
+
+def php_files(root: Path) -> dict[str, int]:
+    """The PHP files of the source that have code to change, with their lines; a file
+    that source.excludes leaves out has none that Infection changes."""
+    excludes = quoted_list(EXCLUDES, infection_configuration(root))
+    found: dict[str, int] = {}
+    for directory in php_sources(root):
+        for path in sorted((root / directory).rglob("*.php")):
+            if not path.is_file() or php_excluded(
+                path.relative_to(root / directory).as_posix(), excludes
+            ):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if PHP_CODE.search(text):
+                found[path.relative_to(root).as_posix()] = len(text.splitlines())
+    return found
+
+
+def sampled_files(found: Mapping[str, int], lines: int) -> list[str]:
+    """The files of a sample of about so many lines for Infection, or none when the
+    code has no more, which the part then runs whole. As sampled() picks functions:
+    in the order of a hash of their paths, so that a pull request tries the same ones
+    each time; a file larger than the sample stays out, unless every one is."""
+    if sum(found.values()) <= lines:
+        return []
+    paths = sorted(found, key=lambda path: hashlib.sha256(path.encode()).hexdigest())
+    chosen: list[str] = []
+    count = 0
+    for path in paths:
+        if count + found[path] <= lines:
+            chosen.append(path)
+            count += found[path]
+    return sorted(chosen) or [min(paths, key=lambda path: (found[path], path))]
+
+
 def plan(
     root: Path, parts: int | None, sample: bool = False
 ) -> tuple[str, list[dict[str, Any]]]:
     """The tool and the parts of the run, as the matrix of the workflow takes them.
     One part runs every mutant; several each run those of their code, and the sample
-    of a pull request those of its functions."""
+    of a pull request those of its functions, or for Infection those of its files."""
     kind = kind_of(root)
     if not kind:
         return "", []
-    every = True
     if kind != "python":
-        buckets: list[list[Unit]] = [[]]
-    elif sample:
+        # Infection runs in one part; its sample is a few files, one on each line.
+        files = sampled_files(php_files(root), SAMPLE_LINES) if sample else []
+        return kind, [
+            {"part": 1, "parts": 1, "patterns": "\n".join(files), "mutants": 0}
+        ]
+    if sample:
         found = modules(root)
         chosen = sampled(found, SAMPLE_MUTANTS)
-        buckets = [chosen or [module.whole() for module in found]]
+        buckets: list[list[Unit]] = [chosen or [module.whole() for module in found]]
         every = not chosen
     else:
         buckets = split(modules(root), parts)
