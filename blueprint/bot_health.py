@@ -25,7 +25,7 @@ keeps one issue open while the social preview that GitHub shows is not the commi
 not bot-failure, since nothing fails there. It also ticks the box for a rebase of a
 pull request of Renovate that Renovate leaves alone after a merge of the default
 branch by a person, and keeps one issue with those whose branch carries a change of a
-person that the new branch would drop (decision 0143). In the blueprint, it also
+person that the new branch would drop (decision 0144). In the blueprint, it also
 keeps one issue with the warnings and errors in the log of Renovate.
 """
 
@@ -140,7 +140,7 @@ RENOVATE_TITLE = "Renovate logs problems"
 RENOVATE_LABEL = "dependencies"
 MOST_PROBLEMS = 50
 # The issue that lists the pull requests of Renovate that Renovate leaves alone and
-# that the daily look can't bring back by itself (decision 0143).
+# that the daily look can't bring back by itself (decision 0144).
 PARKED = "renovate-parked"
 PARKED_TITLE = "Renovate leaves pull requests alone"
 # Renovate's branches, its comment on a pull request whose branch it takes for edited,
@@ -1710,7 +1710,7 @@ def look_at_pull(
     says. The box for a rebase brings it back: Renovate builds the branch anew from
     the base, without those commits. The look ticks it where that drops nothing that
     a new branch doesn't make again, merges of the base and commits of bots, and
-    leaves the changes of a person to that person (decision 0143)."""
+    leaves the changes of a person to that person (decision 0144)."""
     number = int(pull["number"])
     renovate = str((pull.get("user") or {}).get("login") or "")
     commits = api.get(f"repos/{repo}/pulls/{number}/commits?per_page=100") or []

@@ -328,7 +328,7 @@ jobs:
       contents: read
       issues: write
       # Ticks the box for a rebase of a pull request of Renovate that Renovate leaves
-      # alone after a merge of main by a person (decision 0143).
+      # alone after a merge of main by a person (decision 0144).
       pull-requests: write
     steps:
       # GitHub's host of uploads too, which serves the uploaded social preview that the
