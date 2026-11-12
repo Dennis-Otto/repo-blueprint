@@ -1,5 +1,6 @@
-[#- The tools of the stack: those of a Worker, or those of every other package of Node. -#]
-[%- set registry -%][% if project_type == 'cloudflare-worker' %][% include "stacks/worker/package.json" %][% else %][% include "stacks/node/package.json" %][% endif %][%- endset -%]
+[#- The tools of the stack: those of a Worker, those of an extension, with the types of
+    Chrome, or those of every other package of Node. -#]
+[%- set registry -%][% if project_type == 'cloudflare-worker' %][% include "stacks/worker/package.json" %][% elif project_type == 'chrome-extension' %][% include "stacks/extension/package.json" %][% else %][% include "stacks/node/package.json" %][% endif %][%- endset -%]
 [%- set stack_manifest = registry | from_json -%]
 {
   "name": "{= project_slug =}",

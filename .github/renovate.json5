@@ -164,7 +164,9 @@
       enabled: false,
     },
     {
-      matchFileNames: ["stacks/node/**"],
+      // The tools of a Node package and the types of Chrome, which a new extension
+      // starts from; tests/test_template.py keeps the tools that both share equal.
+      matchFileNames: ["stacks/node/**", "stacks/extension/**"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "the tools of the Node packages",
     },
