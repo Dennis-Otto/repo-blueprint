@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from blueprint import advisories
+from blueprint import advisories, dependabot
 from blueprint.advisories import Accepted, check, configs, preset, read
 from blueprint.cli import main
 
@@ -22,6 +22,14 @@ GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(
     GIT is None, reason="the files of OSV-Scanner are those that git knows"
 )
+
+
+@pytest.fixture(autouse=True)
+def fixed_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A day long before the ends of the acceptances here, so that the command names
+    none of them as ending soon, as tests/test_ending.py tests."""
+    monkeypatch.setattr(dependabot, "today", lambda: datetime.date(2026, 10, 1))
+
 
 # Home Assistant pins Pillow and uv exactly, so their advisories wait for its next
 # release: OSV-Scanner reported 40 of them in stacks/home-assistant/, and Renovate

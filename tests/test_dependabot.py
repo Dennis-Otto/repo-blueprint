@@ -633,6 +633,6 @@ def test_a_dry_run_goes_with_dependabot_and_fix_without_it(
     capsys: pytest.CaptureFixture[str], options: list[str]
 ) -> None:
     assert main(["advisories", *options]) == 2
-    assert "--dry-run goes with --dependabot, and --fix without it" in (
+    assert "--fix, --dependabot and --ending go one at a time" in (
         capsys.readouterr().err
     )

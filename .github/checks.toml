@@ -645,6 +645,9 @@ acceptance is gone, and it couldn't: GitHub refused the app a token with the
 permission *Dependabot alerts* (read and write), or refused the alerts to its token.
 The summary of the run names the app: the settings app once the variable
 `SETTINGS_APP_CLIENT_ID` names it, the release app until then.
+When the step *Warn of the acceptances that end soon* failed, GitHub refused the
+token of the job the issue that names the acceptances ending within two weeks; its
+log has GitHub's answer, and the next run tries again.
 When the step *Make sure that Harden-Runner blocks* stopped the job, Harden-Runner
 had no agent that blocks, mostly because an outage of GitHub kept it from downloading
 it: that is no problem of the change, and the check passes when it runs again."""
