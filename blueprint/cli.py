@@ -1819,6 +1819,13 @@ def add_update_parsers(
         help="the blueprint on GitHub as OWNER/NAME, a fork perhaps, whose release the "
         "pull request links",
     )
+    update_parser.add_argument(
+        "--rendered",
+        type=Path,
+        help="a folder with what the blueprint rendered for the version before, which "
+        "tells the changes of the repository that the update drops; without it, every "
+        "file that the update deletes or replaces as binary waits for a person",
+    )
     next_branch_parser = commands.add_parser(
         "next-branch",
         help="bring the next pull request that waits for auto-merge up to date, one "
@@ -2787,6 +2794,7 @@ def main(
                     automerge=arguments.automerge != "off",
                     run_id=arguments.run_id,
                     source=arguments.source,
+                    rendered=arguments.rendered,
                 )
             )
             return 0

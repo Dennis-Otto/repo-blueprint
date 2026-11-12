@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -105,26 +106,31 @@ def write(root: Path, files: Mapping[str, str | bytes | None]) -> None:
             path.write_text(content, encoding="utf-8", newline="\n")
 
 
+def rendered(root: Path) -> Path:
+    """The folder with what the blueprint rendered for the version before, which the
+    workflow makes with copier recopy next to the checkout."""
+    return root.parent / "rendered"
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
-    """The checkout of main, at the blueprint's v1.0.0."""
+    """The checkout of main, at the blueprint's v1.0.0, as the blueprint rendered it."""
     root = tmp_path / "checkout"
     root.mkdir()
     git(root, "init", "--quiet", "--initial-branch=main")
     # The same modes and line endings on every system: the tests set the modes.
     git(root, "config", "core.autocrlf", "false")
     git(root, "config", "core.fileMode", "false")
-    write(
-        root,
-        {
-            ANSWERS: answers("v1.0.0"),
-            "README.md": "# Demo\n",
-            "scripts/check.sh": "#!/bin/sh\n",
-            # Lines like a conflict that the project has on purpose.
-            "docs/merging.md": "<<<<<<< ours\n",
-            "old.txt": "old\n",
-        },
-    )
+    files = {
+        ANSWERS: answers("v1.0.0"),
+        "README.md": "# Demo\n",
+        "scripts/check.sh": "#!/bin/sh\n",
+        # Lines like a conflict that the project has on purpose.
+        "docs/merging.md": "<<<<<<< ours\n",
+        "old.txt": "old\n",
+    }
+    write(root, files)
+    write(rendered(root), files)
     git(root, "add", "--all")
     git(root, "update-index", "--chmod=+x", "scripts/check.sh")
     git(root, "commit", "--quiet", "-m", "The start")
@@ -471,13 +477,23 @@ def github(root: Path) -> FakeGitHub:
     return FakeGitHub(root)
 
 
-def run(github: FakeGitHub, *, automerge: bool = True) -> str:
+def run(
+    github: FakeGitHub, *, automerge: bool = True, with_rendering: bool = True
+) -> str:
     return update_pull_request(
-        Api(github), REPO, github.root, app=APP, automerge=automerge, run_id="42"
+        Api(github),
+        REPO,
+        github.root,
+        app=APP,
+        automerge=automerge,
+        run_id="42",
+        rendered=rendered(github.root) if with_rendering else None,
     )
 
 
-def fresh_checkout(github: FakeGitHub, files: dict[str, str] | None = None) -> None:
+def fresh_checkout(
+    github: FakeGitHub, files: Mapping[str, str | bytes] | None = None
+) -> None:
     """A new run checks out main, which may have moved on."""
     git(github.root, "reset", "--quiet", "--hard", github.refs["main"])
     if files:
@@ -1012,6 +1028,216 @@ def test_conflicts_never_merge_when_the_bot_stops_after_the_move(
     assert github.pulls[1]["auto_merge"] is None
 
 
+# --------------------------------------------------------------------------- dropped changes
+
+LOGO = b"\x89PNG\r\n\x1a\n\x00\x01"
+DROPPED = "\n### Changes of this repository that the update drops\n"
+
+
+def test_an_update_that_drops_changes_of_the_repository_waits(
+    github: FakeGitHub,
+) -> None:
+    # The blueprint made these files, and this repository changed each of them since.
+    write(rendered(github.root), {"logo.png": LOGO, "gone.txt": "gone\n"})
+    fresh_checkout(
+        github,
+        {"logo.png": LOGO + b"ours", "gone.txt": "gone, ours\n", "old.txt": "ours\n"},
+    )
+    # The release replaces the logo, deletes gone.txt and renames old.txt, and copier
+    # update takes each from the release as it is, without a marker.
+    stage(
+        github.root,
+        "v1.1.0",
+        {
+            "logo.png": LOGO + b"theirs",
+            "gone.txt": None,
+            "old.txt": None,
+            "new.txt": "old\n",
+        },
+    )
+
+    assert run(github) == (
+        "Opened #1: the blueprint's v1.0.0 to v1.1.0, dropping changes of this"
+        " repository in 3 file(s), auto-merge off."
+    )
+
+    pull = github.pulls[1]
+    assert pull["auto_merge"] is None
+    assert pull["labels"] == [LABEL]
+    assert not gh_calls(github)
+    body = pull["body"]
+    assert "### Conflicts" not in body
+    assert (
+        f"{DROPPED}\nThe release removes or replaces these files, which this"
+        " repository had changed."
+    ) in body
+    assert (
+        "\n- [ ] `gone.txt` (deleted)\n- [ ] `logo.png` (replaced)\n"
+        "- [ ] `old.txt` (deleted)\n"
+    ) in body
+    # The new name of the renamed file is the blueprint's, not a dropped change.
+    assert "- [ ] `new.txt`" not in body
+    assert "\nIt waits for you to merge it. " in body
+
+
+def test_an_update_of_files_as_the_blueprint_made_them_merges_itself(
+    github: FakeGitHub,
+) -> None:
+    write(rendered(github.root), {"logo.png": LOGO, "gone.txt": "gone\n"})
+    fresh_checkout(github, {"logo.png": LOGO, "gone.txt": "gone\n"})
+    stage(
+        github.root,
+        "v1.1.0",
+        {
+            "logo.png": LOGO + b"theirs",
+            "gone.txt": None,
+            "old.txt": None,
+            "new.txt": "old\n",
+        },
+    )
+
+    assert run(github) == "Opened #1: the blueprint's v1.0.0 to v1.1.0."
+
+    pull = github.pulls[1]
+    assert pull["auto_merge"] == {"merge_method": "squash"}
+    assert pull["labels"] == []
+    assert DROPPED not in pull["body"]
+
+
+def test_without_the_rendering_every_deleted_or_binary_file_waits(
+    github: FakeGitHub,
+) -> None:
+    # A new binary file and a text file that copier merged line by line drop nothing.
+    stage(
+        github.root,
+        "v1.1.0",
+        {"old.txt": None, "README.md": "# Demo 2\n", "logo.png": LOGO},
+    )
+
+    assert run(github, with_rendering=False).endswith(
+        ", dropping changes of this repository in 1 file(s), auto-merge off."
+    )
+
+    assert "\n- [ ] `old.txt` (deleted)\n" in github.pulls[1]["body"]
+    assert "- [ ] `README.md`" not in github.pulls[1]["body"]
+
+
+def test_a_file_that_the_blueprint_did_not_render_before_waits(
+    github: FakeGitHub,
+) -> None:
+    (rendered(github.root) / "old.txt").unlink()
+    stage(github.root, "v1.1.0", {"old.txt": None})
+
+    run(github)
+
+    assert "\n- [ ] `old.txt` (deleted)\n" in github.pulls[1]["body"]
+
+
+def test_an_update_with_conflicts_and_dropped_changes_names_both(
+    github: FakeGitHub,
+) -> None:
+    fresh_checkout(github, {"old.txt": "ours\n"})
+    stage(github.root, "v1.1.0", {"README.md": CONFLICT, "old.txt": None})
+
+    assert run(github) == (
+        "Opened #1: the blueprint's v1.0.0 to v1.1.0, with conflicts in 1 file(s),"
+        " dropping changes of this repository in 1 file(s), auto-merge off."
+    )
+
+    body = github.pulls[1]["body"]
+    assert body.index("### Conflicts") < body.index(DROPPED)
+
+
+def test_dropped_changes_hold_the_open_pull_request(github: FakeGitHub) -> None:
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    run(github)
+    assert github.pulls[1]["auto_merge"] is not None
+    fresh_checkout(github, {"old.txt": "ours\n"})
+    stage(github.root, "v1.2.0", {"old.txt": None})
+
+    assert run(github).startswith("Moved on #1")
+
+    assert github.pulls[1]["auto_merge"] is None
+    assert github.pulls[1]["labels"] == [LABEL]
+    # Before the branch moves, so that the dropped change can't merge on its own.
+    assert github.calls.index(
+        ("gh", f"pr merge 1 --repo {REPO} --disable-auto")
+    ) < github.calls.index(("PATCH", f"repos/{REPO}/git/refs/heads/{BRANCH}"))
+
+
+def copier(cwd: Path, *arguments: str) -> None:
+    subprocess.run(
+        [sys.executable, "-m", "copier", *arguments, "--defaults", "--quiet"],
+        cwd=cwd,
+        capture_output=True,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("changed", [True, False])
+def test_copier_takes_these_files_from_the_release_and_the_bot_tells(
+    tmp_path: Path, changed: bool
+) -> None:
+    # A template whose v2.0.0 changes a line, a binary file, renames a file and
+    # deletes one, with the version of Copier that the workflow runs.
+    template = tmp_path / "template"
+    git(template.parent, "init", "--quiet", "--initial-branch=main", template.name)
+    write(
+        template,
+        {
+            "copier.yml": "_answers_file: .copier-answers.yml\n",
+            "{{ _copier_conf.answers_file }}.jinja": (
+                "{{ _copier_answers|to_nice_yaml }}"
+            ),
+            "both.txt": "a\nb\n",
+            "old_name.txt": "x\ny\n",
+            "deleted.txt": "d\ne\n",
+            "logo.png": LOGO,
+        },
+    )
+    git(template, "add", "--all")
+    git(template, "commit", "--quiet", "-m", "1")
+    git(template, "tag", "v1.0.0")
+    git(template, "mv", "old_name.txt", "new_name.txt")
+    write(template, {"both.txt": "a2\nb\n", "deleted.txt": None, "logo.png": LOGO * 2})
+    git(template, "add", "--all")
+    git(template, "commit", "--quiet", "-m", "2")
+    git(template, "tag", "v2.0.0")
+    project = tmp_path / "project"
+    copier(tmp_path, "copy", "--vcs-ref", "v1.0.0", template.as_posix(), project.name)
+    git(project, "init", "--quiet", "--initial-branch=main")
+    git(project, "add", "--all")
+    git(project, "commit", "--quiet", "-m", "The start")
+    if changed:
+        write(
+            project,
+            {
+                "both.txt": "a3\nb\n",
+                "old_name.txt": "x\ny\nz\n",
+                "deleted.txt": "d\ne\nf\n",
+                "logo.png": LOGO + b"ours",
+            },
+        )
+        git(project, "commit", "--quiet", "--all", "-m", "Changes of the project")
+    # The steps of the workflow.
+    before = tmp_path / "rendered"
+    before.mkdir()
+    (before / ANSWERS).write_bytes((project / ANSWERS).read_bytes())
+    copier(before, "recopy", "--overwrite", "--vcs-ref", "v1.0.0", ".")
+    copier(project, "update", "--conflict", "inline", "--vcs-ref", "v2.0.0", ".")
+    git(project, "add", "--all")
+
+    update = Update.read(project, rendered=before)
+
+    if changed:
+        assert update.conflicts == ("both.txt",)
+        assert update.dropped == ("deleted.txt", "logo.png", "old_name.txt")
+    else:
+        assert update.conflicts == ()
+        assert update.dropped == ()
+    assert update.waits is changed
+
+
 # --------------------------------------------------------------------------- modes
 
 
@@ -1450,6 +1676,7 @@ def test_the_command_line(
     arguments = ["--repo", REPO, "update-commit", "--app", APP, "--automerge", "off"]
     # A repository made from a fork of the blueprint links the fork's release.
     arguments += ["--source", "Someone/blueprint"]
+    arguments += ["--rendered", str(rendered(github.root))]
 
     assert cli.main(arguments, api=Api(github), root=github.root) == 0
 
