@@ -34,7 +34,7 @@ Die [Website des Blueprints](https://dennis-otto.github.io/repo-blueprint/de/) z
 
 <!-- --8<-- [start:quick-start] -->
 
-Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator des Kontos oder der Organisation, der das Repository gehören soll (`gh auth login`):
+Git [mit Signatur](https://dennis-otto.github.io/repo-blueprint/de/troubleshooting.html#ein-commit-hat-keine-verifizierte-signatur), Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator des Kontos oder der Organisation, der das Repository gehören soll (`gh auth login`):
 
 ```sh
 uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt

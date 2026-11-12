@@ -47,7 +47,7 @@ from blueprint.app import (
     run_command,
     wait_for_code,
 )
-from blueprint.bootstrap import PUSH_AS_GH, CreateError
+from blueprint.bootstrap import PUSH_AS_GH, SIGNING, CreateError
 from blueprint.checklist import PINNED, RELEASE_APP_PERMISSIONS, release_app
 from blueprint.github import Api, GitHubError
 from blueprint.settings import Settings
@@ -132,6 +132,7 @@ class Shell:
             "gh pr create --fill": done(PULL + "\n"),
             "git branch --show-current": done("main\n"),
             f"git rev-parse --verify --quiet refs/heads/{BRANCH}": done(code=1),
+            "git config --type=bool --get commit.gpgsign": done("true\n"),
         }
 
     def __call__(
@@ -729,7 +730,7 @@ def test_the_preflight_shows_what_it_checked(
     register(copy, run=shell, browser=Browser(), timeout=5)
 
     out = capsys.readouterr().out.splitlines()
-    assert out[:8] == [
+    assert out[:9] == [
         f"The preflight of {REPO}:",
         "  ✔ gh is signed in to github.com as octocat",
         "  ✔ octo-org is an organization that octocat owns",
@@ -738,7 +739,26 @@ def test_the_preflight_shows_what_it_checked(
         "  ✔ This folder is on main, where the pull request starts",
         f"  ✔ No branch {BRANCH} is left of an earlier attempt",
         "  ✔ Copier runs with uvx",
+        "  ✔ Git signs every commit, as the rules of main ask",
     ]
+
+
+def test_git_that_signs_no_commit_is_named_before_the_browser(
+    copy: Path, shell: Shell, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The pull request that names the app merges only with a signed commit, but a
+    # commit can be signed with --gpg-sign too: a warning, which stops nothing.
+    shell.answers["git config --type=bool --get commit.gpgsign"] = done(code=1)
+    shell.answers["git config --get user.signingkey"] = done(code=1)
+
+    register(copy, run=shell, browser=Browser(), timeout=5)
+
+    out = capsys.readouterr().out
+    assert (
+        "  · Git signs no commit, and main takes signed commits only\n"
+        f"      set up a key that GitHub verifies: {SIGNING}\n"
+    ) in out
+    assert EXCHANGE in shell.calls
 
 
 def test_gh_has_to_be_installed(

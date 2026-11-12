@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from blueprint import workflows
-from blueprint.bootstrap import PUSH_AS_GH
+from blueprint.bootstrap import PUSH_AS_GH, SIGNING
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
     BRANCH,
@@ -228,7 +228,8 @@ def release_app(api: Api, repo: str, settings: Settings) -> tuple[Step, Step]:
     how = [
         "Register it with one command: you confirm one page on GitHub, and it sets the"
         " private key and opens the pull request that names the app. Turn"
-        " commit.gpgsign on first: main takes signed commits only, also this one:",
+        " commit.gpgsign on first, with a key that GitHub verifies, as"
+        f" {SIGNING} sets it up: main takes signed commits only, also this one:",
         "python3 .github/blueprint.py app register",
         f"The app gets read and write access to {listed('write')}, read access to"
         f" {listed('read')}, and no webhook. For an app that exists, such as for a"
@@ -310,7 +311,8 @@ def change_answer(data: str) -> list[str]:
     a signature fails nothing until the merge, which the rules of main then block."""
     return [
         "main takes only pull requests of signed commits, so run this on a branch, with"
-        " commit.gpgsign on or --gpg-sign added to the commit:",
+        " commit.gpgsign on or --gpg-sign added to the commit, with a key as"
+        f" {SIGNING} sets it up:",
         *answer_commands(data),
         f"With pipx in place of uv, the Copier line starts pipx run --spec {PINNED};"
         " a Copier of your own, copier update.",

@@ -1,7 +1,7 @@
 """What git and gh answer to the preflight of blueprint.py create when nothing in it
-stops create: a Git with an identity, a GitHub CLI after 2.48, signed in as octocat
-with the scopes of gh auth login and workflow, an organization that octocat owns,
-and a name that GitHub doesn't have yet. The tests of create and of the command line
+stops create: a Git with an identity that signs every commit, a GitHub CLI after
+2.48, signed in as octocat with the scopes of gh auth login and workflow, an
+organization that octocat owns, and a name that GitHub doesn't have yet. The tests of create and of the command line
 start from these and change the one answer that they are about."""
 
 from __future__ import annotations
@@ -27,6 +27,8 @@ def answers(repo: str) -> dict[str, tuple[int, str]]:
         "git --version": (0, "git version 2.47.1\n"),
         "git var GIT_AUTHOR_IDENT": (0, IDENTITY),
         "git var GIT_COMMITTER_IDENT": (0, IDENTITY),
+        "git config --type=bool --get commit.gpgsign": (0, "true\n"),
+        "git config --get user.signingkey": (0, "~/.ssh/id_ed25519.pub\n"),
         "gh --version": (
             0,
             "gh version 2.62.0 (2024-11-14)\n"
