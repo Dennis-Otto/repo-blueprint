@@ -139,6 +139,9 @@ RENOVATE = "renovate"
 RENOVATE_TITLE = "Renovate logs problems"
 RENOVATE_LABEL = "dependencies"
 MOST_PROBLEMS = 50
+# Renovate's line for two updates of one dependency in one branch, of which it drops
+# one; the rules of the blueprint raise it from info to a warning.
+COLLISION = "Ignoring upgrade collision"
 # The issue that lists the pull requests of Renovate that Renovate leaves alone and
 # that the daily look can't bring back by itself (decision 0144).
 PARKED = "renovate-parked"
@@ -1532,6 +1535,12 @@ def problem_of(entry: Mapping[str, Any]) -> Problem:
     detail = ""
     if isinstance(error, dict):
         detail = str(error.get("message") or "")
+    if entry.get("msg") == COLLISION:
+        detail = (
+            f"{entry.get('depName')} {entry.get('currentValue')}: "
+            f"kept {entry.get('previousNewValue')}, "
+            f"dropped {entry.get('thisNewValue')}"
+        )
     place = next(
         (
             str(entry[key])
@@ -1607,6 +1616,15 @@ def problems_text(problems: Mapping[Problem, int], hidden: int, run: str) -> str
         lines += [
             "",
             f"And {len(problems) - MOST_PROBLEMS} more in the log of the run.",
+        ]
+    if any(problem.message == COLLISION for problem in problems):
+        lines += [
+            "",
+            "An upgrade collision: two updates of one dependency met in one branch, "
+            "and Renovate committed only the one that it kept, or neither when that "
+            "one waits, as for its release age. A rule that gives one of them a branch "
+            "of its own keeps them apart, as the blueprint does with the digests of "
+            "the images.",
         ]
     if hidden:
         lines += [

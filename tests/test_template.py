@@ -68,6 +68,7 @@ from blueprint import bootstrap, ownership, screenshots
 from blueprint.app import App, answered_app
 from blueprint.binaries import UNREVIEWABLE, Binary, binaries
 from blueprint.bot_health import (
+    COLLISION,
     CRON,
     EVENT_BOTS,
     FAILED,
@@ -10186,6 +10187,53 @@ def test_renovate_follows_an_action_pinned_to_a_branch_at_once(
     # After the groups of the actions, so that its own group and schedule apply.
     for group in ("the actions", "the actions to a new major version"):
         assert rules.index(f'groupName: "{group}"') < rule.start(), group
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_renovate_brings_every_image_without_a_collision(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # No registry gives Renovate the date of a release of an image that it can wait a
+    # week from, and Renovate holds an update without a date for good: the images of
+    # the compose files got no new version for weeks (#859, decision 0148).
+    root = ROOT if kind == "blueprint" else projects[kind]
+    text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    shared = renovate_rules(text)
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    docker = [rule for rule in rules if rule.get("matchDatasources") == ["docker"]]
+    assert docker == [
+        {"matchDatasources": ["docker"], "minimumReleaseAge": None},
+        {
+            "matchDatasources": ["docker"],
+            "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+            "groupName": "the images",
+        },
+        {
+            "matchDatasources": ["docker"],
+            "matchUpdateTypes": ["digest", "pinDigest"],
+            "group": {
+                "branchTopic": "{{{groupSlug}}}-digests",
+                "commitMessageTopic": "the digests of {{{groupName}}}",
+            },
+        },
+    ]
+    assert "decision 0148" in text
+    # No later rule gives an image a release age again; the refresh of the lock files
+    # has one, and it is no image.
+    after = rules[rules.index(docker[0]) + 1 :]
+    for rule in after:
+        if rule.get("minimumReleaseAge"):
+            assert rule["matchUpdateTypes"] == ["lockFileMaintenance"], rule
+    # The new digest of a tag goes into a branch of its own also in a group of the
+    # project, which sets no group of its own: in one branch with the new version of
+    # the same image, Renovate keeps only one of them.
+    assert [rule for rule in rules if "group" in rule] == docker[2:]
+    # Renovate logs a collision at the level info, which the issue of its problems,
+    # from the warnings alone, would miss.
+    assert shared["logLevelRemap"] == [
+        {"matchMessage": COLLISION, "newLogLevel": "warn"}
+    ]
 
 
 # It asks Git for the files of the repository, which the copy of the mutation tests
