@@ -16127,6 +16127,25 @@ def test_only_an_extension_type_checks_the_dom_and_the_api_of_chrome(
         if name != "@types/chrome"
     }
     assert shared == node["devDependencies"]
+    # And the same locked versions: the lock of the extension has those of Node,
+    # and besides them only the types of Chrome with what they depend on.
+    locked = {
+        name: json.loads(
+            (ROOT / "stacks" / name / "package-lock.json").read_text(encoding="utf-8")
+        )["packages"]
+        for name in ("node", "extension")
+    }
+    chrome = {"node_modules/@types/chrome"}
+    chrome |= {
+        f"node_modules/{name}"
+        for name in locked["extension"]["node_modules/@types/chrome"]["dependencies"]
+    }
+    assert set(locked["extension"]) - set(locked["node"]) == chrome
+    assert {key: entry["version"] for key, entry in locked["node"].items() if key} == {
+        key: entry["version"]
+        for key, entry in locked["extension"].items()
+        if key and key not in chrome
+    }
     # A popup and a content script know the DOM, and the calls of chrome.* their
     # types; a content script, which imports and exports nothing, stays a script.
     text = (project / "tsconfig.json").read_text(encoding="utf-8")
