@@ -8,7 +8,7 @@ Die Dokumentation aus `docs/` als Website mit Suche und hellem und dunklem Desig
 
 Weitere Sprachen funktionieren genauso, etwa `/de/`, `/nl/` und `/fr/`, sobald `mkdocs.yml` sie nennt: Eine Seite, die eine davon nicht übersetzt hat, bleibt eine Kopie der englischen Seite, die keine Versionen nennt, egal welche andere Sprache sie übersetzt hat; der Bericht eines Pull Requests verlinkt eine geänderte Seite unter ihrer Adresse, `nl/faq.html` für `docs/faq.nl.md`; und die Hinweise zu Rechtschreibung und Stil lassen eine Seite in einer Sprache aus, die sie nicht lesen können.
 
-**Womit:** MkDocs mit dem Material-Theme, `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
+**Womit:** MkDocs 1.6 mit dem Material-Theme, das Renovate unter MkDocs 2 hält, bis jede Website zu Zensical wechselt, bevor die Wartung von Material am 5. Mai 2027 endet, wie [Entscheidung 0144](../decisions/0144-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) es plant, `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
 
 ## Diagramme, die sich selbst reparieren
 
