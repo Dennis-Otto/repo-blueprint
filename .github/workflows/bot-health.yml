@@ -28,7 +28,9 @@ name: Bot health
 # those of a pull request or of a fork, and the workflows that keep an issue of their
 # own, such as Newest Node, get neither a second try nor an issue here, unless
 # Harden-Runner stopped a job of their first attempt: then their failed jobs run once
-# more, as nothing else would run them again (decision 0141).
+# more, as nothing else would run them again (decision 0141). Nothing follows the end
+# of Bot health itself, so the nightly look runs the failed jobs of its own runs of
+# the last two days once more that Harden-Runner stopped at their first attempt.
 # It checks out the default branch only, for blueprint.py, never the code of a pull
 # request; blueprint.py bot-health holds the logic.
 # https://github.com/Dennis-Otto/repo-blueprint

@@ -31,6 +31,7 @@ from blueprint.bot_health import (
     MOST_STARTS,
     ONE_TRY,
     OWN_ISSUE,
+    OWN_WORKFLOW,
     PREVIEW_TITLE,
     QUIET_RUNS,
     RENOVATE,
@@ -39,6 +40,7 @@ from blueprint.bot_health import (
     STEP_COLOR,
     STEP_DESCRIPTION,
     STOPPED,
+    STOPPED_SINCE,
     WEEKDAYS,
     Cron,
     Problem,
@@ -94,9 +96,11 @@ def run_of(
     attempt: int = 1,
     created: datetime = NOW - timedelta(hours=3),
     sha: str = HEAD,
+    workflow: int = 1,
 ) -> dict[str, Any]:
     return {
         "id": number,
+        "workflow_id": workflow,
         "head_sha": sha,
         "name": name,
         "path": path,
@@ -237,6 +241,12 @@ class FakeGitHub:
                 r"&exclude_pull_requests=true&per_page=1",
                 self.runs_of_event,
             ),
+            (
+                r"/actions/workflows/(\d+)/runs\?branch=main&event=workflow_run"
+                r"&status=failure&created=%3E%3D([\dT:-]+Z)"
+                r"&exclude_pull_requests=true&per_page=100",
+                self.failed_runs,
+            ),
             (r"/git/ref/heads/main", self.head_of_main),
             (
                 r"/commits\?sha=main&path=\.github/social-preview\.png&per_page=1",
@@ -359,6 +369,23 @@ class FakeGitHub:
         runs = self.workflow_runs.get(int(number), [])
         return 200, {
             "workflow_runs": [run for run in runs if run["event"] == event][:1]
+        }
+
+    def failed_runs(
+        self, method: str, body: Any, number: str, since: str
+    ) -> tuple[int, Any]:
+        # The runs that another workflow's end started and that failed in their latest
+        # attempt, since the time that the request names.
+        start = datetime.fromisoformat(since)
+        runs = self.workflow_runs.get(int(number), [])
+        return 200, {
+            "workflow_runs": [
+                run
+                for run in runs
+                if run["event"] == "workflow_run"
+                and run["conclusion"] == "failure"
+                and datetime.fromisoformat(run["created_at"]) >= start
+            ][:100]
         }
 
     def enable(self, method: str, body: Any, number: str) -> tuple[int, Any]:
@@ -1200,6 +1227,202 @@ def test_a_stopped_run_that_github_does_not_know(github: FakeGitHub) -> None:
         "GitHub doesn't know the run 7.",
         True,
     )
+
+
+def own_run(
+    number: int,
+    *,
+    conclusion: str = "failure",
+    attempt: int = 1,
+    created: datetime = NOW - timedelta(hours=3),
+) -> dict[str, Any]:
+    """A run of Bot health that the end of another workflow started."""
+    return run_of(
+        number,
+        name="Bot health",
+        path=OWN_WORKFLOW,
+        event="workflow_run",
+        conclusion=conclusion,
+        attempt=attempt,
+        created=created,
+    )
+
+
+def stopped_own_run(
+    github: FakeGitHub, number: int, *, attempt: int = 1, created: datetime = NOW
+) -> dict[str, Any]:
+    """A run of Bot health whose job Harden-Runner stopped."""
+    github.jobs[(number, attempt)] = [stopped_job(number * 10, "run")]
+    github.annotations[number * 10] = [STOPPED_JOB]
+    return own_run(number, attempt=attempt, created=created - timedelta(hours=3))
+
+
+def test_the_daily_look_runs_a_run_of_bot_health_again_that_harden_runner_stopped(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Bot health can't follow its own end, so nothing else runs these again.
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.jobs[(31, 1)] = [
+        job_of_a_run(310, "run", "failure", [("Run the failed jobs", "failure")])
+    ]
+    github.annotations[310] = [failure("failure", "GitHub answered 403: Forbidden")]
+    github.workflow_runs[1] = [
+        # The latest run passed, so the look at the workflow opens no issue.
+        own_run(40, conclusion="success"),
+        # Stopped at its first attempt, and still failed.
+        stopped_own_run(github, 35),
+        # A run that ran again is left to that attempt, ...
+        stopped_own_run(github, 34, attempt=2),
+        # ... one that failed for another reason stays failed, ...
+        own_run(31),
+        # ... and one before the days that the look goes back is no longer looked at.
+        stopped_own_run(github, 30, created=NOW - STOPPED_SINCE - timedelta(hours=1)),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reruns == [35]
+    assert github.issues == {}
+    assert summary.splitlines()[6:] == [
+        "| `Bot health` | passes |",
+        "",
+        "#### Runs of `Bot health` that Harden-Runner stopped",
+        "",
+        "- Harden-Runner stopped a job of [the run of 2026-10-13 09:00 UTC]"
+        f"(https://github.com/{REPO}/actions/runs/35), so its failed jobs run once "
+        "more.",
+    ]
+
+
+@pytest.mark.parametrize("state", ["active", "disabled_manually"])
+def test_the_daily_look_says_nothing_of_bot_health_when_harden_runner_stopped_none(
+    github: FakeGitHub, tmp_path: Path, state: str
+) -> None:
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW, state=state)]
+    github.workflow_runs[1] = [own_run(40, conclusion="success")]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reruns == []
+    assert "Harden-Runner stopped" not in summary
+
+
+def test_the_daily_look_fails_when_github_refuses_to_run_bot_health_again(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.workflow_runs[1] = [own_run(40, conclusion="success")]
+    github.workflow_runs[1].append(stopped_own_run(github, 35))
+    github.rerun_by_another = own_run(35)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert not healthy
+    assert summary.splitlines()[-1].endswith(
+        "/actions/runs/35), and GitHub refused to run it again."
+    )
+
+
+@pytest.mark.parametrize(("status", "healthy"), [(503, True), (422, False)])
+def test_the_daily_look_at_the_stopped_runs_of_bot_health_waits_out_an_outage(
+    github: FakeGitHub, tmp_path: Path, status: int, healthy: bool
+) -> None:
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.workflow_runs[1] = [own_run(40, conclusion="success")]
+    since = stamp(NOW - STOPPED_SINCE)
+    github.fail[
+        (
+            "GET",
+            f"repos/{REPO}/actions/workflows/1/runs?branch=main&event=workflow_run"
+            f"&status=failure&created=%3E%3D{since}&exclude_pull_requests=true"
+            "&per_page=100",
+        )
+    ] = status
+    notices: list[str] = []
+
+    summary, looked = sweep(api_of(github), REPO, tmp_path, NOW, notices=notices)
+
+    # An outage is no failure of the bot: the next day's look catches up.
+    assert looked is healthy
+    assert summary.splitlines()[-1] == (
+        f"Couldn't look: `GitHub answered {status}: simulated failure`"
+    )
+    assert len(notices) == int(healthy)
+
+
+def test_the_daily_look_opens_no_issue_for_a_stopped_run_of_bot_health_it_runs_again(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The latest finished run of Bot health is the stopped one: its second try comes
+    # after the look, so the look goes by the run before it and opens no issue.
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.workflow_runs[1] = [
+        stopped_own_run(github, 35),
+        own_run(31, conclusion="success"),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reruns == [35]
+    assert github.issues == {}
+    assert "| `Bot health` | passes |" in summary
+
+
+@pytest.mark.parametrize(("status", "outage"), [(503, True), (403, False)])
+def test_the_daily_look_waits_out_an_outage_while_it_runs_bot_health_again(
+    github: FakeGitHub, tmp_path: Path, status: int, outage: bool
+) -> None:
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.workflow_runs[1] = [
+        own_run(40, conclusion="success"),
+        stopped_own_run(github, 35),
+    ]
+    github.fail[("POST", f"repos/{REPO}/actions/runs/35/rerun-failed-jobs")] = 422
+    github.fail[("GET", f"repos/{REPO}/actions/runs/35")] = status
+    notices: list[str] = []
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW, notices=notices)
+
+    # An outage is no failure of the bot, any other error is.
+    assert healthy is outage
+    assert summary.splitlines()[-1] == (
+        f"Couldn't look: `GitHub answered {status}: simulated failure`"
+    )
+    assert len(notices) == int(outage)
+
+
+@pytest.mark.parametrize(("conclusion", "counts"), [("success", True), (None, False)])
+def test_a_late_second_try_of_bot_health_leaves_a_run_that_a_newer_one_follows(
+    github: FakeGitHub, conclusion: str | None, counts: bool
+) -> None:
+    # A stopped run of Bot health that the nightly look runs again a day late looks
+    # at an end that a newer run of the bot may have followed: then that one counts.
+    github.runs[1] = run_of(1, created=NOW - timedelta(days=1))
+    github.workflow_runs[1] = [
+        run_of(
+            2,
+            conclusion=conclusion,
+            status="completed" if conclusion else "in_progress",
+        ),
+        run_of(1, created=NOW - timedelta(days=1)),
+    ]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    if counts:
+        assert result == (
+            "Release: a newer run ended after [the run of 2026-10-12 12:00 UTC]"
+            f"(https://github.com/{REPO}/actions/runs/1), so that one counts, nothing "
+            "to do."
+        )
+        assert github.reruns == []
+    else:
+        assert result == "Release: failed: runs the failed jobs once more."
+        assert github.reruns == [1]
+    assert github.issues == {}
 
 
 # The runs that GitHub ended before their jobs in its outage of 9 November 2026, from
