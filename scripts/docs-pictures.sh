@@ -47,9 +47,13 @@ fi
 # pictures of the last screen and of the social preview WebPs of a fifth of the size
 # of their PNGs or less. Then gifsicle makes the GIF for GitHub less than half as
 # large, in 64 colors, which a terminal of 16 colors needs for the edges of its
-# letters.
+# letters. Last, .github/docs-pictures/recording.py marks the GIF with the
+# fingerprint of the pictures that the tape took of its screens, and puts the
+# committed GIF and video back in place of the new ones when the committed GIF
+# carries the same: VHS records in real time, so a GIF of the same screens has other
+# frames and colors on each run.
 if docker run --rm --volume "$root:/work:ro" --entrypoint sh "$terminal" -c '
-  mkdir -p /tmp/out/docs/images && cd /tmp/out &&
+  mkdir -p /tmp/out/docs/images /tmp/out/screens && cd /tmp/out &&
     vhs /work/.github/docs-pictures/copier-copy.tape >&2 && cd docs/images &&
     ffmpeg -loglevel error -i copier-copy.gif -c:v libx264 -preset veryslow -crf 28 \
       -pix_fmt yuv420p -movflags +faststart -an copier-copy.mp4 >&2 &&
@@ -57,11 +61,14 @@ if docker run --rm --volume "$root:/work:ro" --entrypoint sh "$terminal" -c '
     ffmpeg -loglevel error -i /work/.github/social-preview.png -c:v libwebp -quality 85 \
       social-preview.webp >&2 &&
     gifsicle --batch --optimize=3 --lossy=100 --colors=64 copier-copy.gif >&2 &&
+    python3 /work/.github/docs-pictures/recording.py keep copier-copy.gif copier-copy.mp4 \
+      /work/docs/images /tmp/out/screens/*.png copier-copy.png >&2 &&
     tar -cf - copier-copy.gif copier-copy.mp4 copier-copy.webp social-preview.webp' >"$recording" 2>"$log" &&
   [[ -s "$recording" ]]; then
   mkdir -p docs/images
   tar -xf "$recording" -C docs/images
   echo "Rendered docs/images/copier-copy.gif, .mp4 and .webp, and docs/images/social-preview.webp."
+  grep '^copier-copy.gif shows ' "$log" || true
 else
   cat "$log" >&2
   echo "Recording .github/docs-pictures/copier-copy.tape failed." >&2
