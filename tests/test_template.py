@@ -7048,7 +7048,9 @@ PHP = shutil.which("php")
 
 
 @pytest.mark.skipif(PHP is None, reason="the comparison of the canary runs in PHP")
-@pytest.mark.parametrize("change", ["none", "missed", "unexpected", "no report"])
+@pytest.mark.parametrize(
+    "change", ["none", "missed", "unexpected", "type", "no report"]
+)
 def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
     projects: dict[str, Path], tmp_path: Path, change: str
 ) -> None:
@@ -7077,6 +7079,11 @@ def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
                 "line_from": escaped,
             }
         )
+    elif change == "type":
+        # Psalm 7 checks the types in the same run: an issue of a type is no path.
+        issues.append(
+            {"type": "UnusedClass", "file_path": canary.as_posix(), "line_from": 30}
+        )
     if change != "no report":
         (tmp_path / "psalm-canary.json").write_text(
             json.dumps(issues), encoding="utf-8"
@@ -7090,7 +7097,7 @@ def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
         check=False,
     )
 
-    if change == "none":
+    if change in ("none", "type"):
         assert result.returncode == 0, result.stdout + result.stderr
         assert result.stdout == (
             f"The taint analysis finds each of the {len(expected)} paths of the canary,"
@@ -7109,6 +7116,298 @@ def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
         " output above says why.\n",
     }[change]
     assert message in result.stdout + result.stderr
+
+
+# Just enough of the API of Psalm, as each major version has it, for the plugin to run
+# without Composer: the kinds of taint, the storages that the plugin changes and the
+# call that adds a source, by the names and the order of its parameters. Psalm 7 adds
+# the location of a source to its id, so a path leads from it into the parameter.
+PSALM_API = {
+    "6": r"""
+namespace Psalm\Type {
+	final class TaintKind {
+		public const INPUT_SQL = 'sql';
+		public const INPUT_SSRF = 'ssrf';
+		public const INPUT_FILE = 'file';
+		public const INPUT_HEADER = 'header';
+	}
+	final class TaintKindGroup {
+		public const ALL_INPUT = ['html', 'sql', 'ssrf', 'file', 'header'];
+	}
+}
+namespace Psalm\Storage {
+	class FunctionLikeParameter {
+		public ?array $sinks = null;
+		public function __construct(public string $name) {}
+	}
+	class MethodStorage {
+		public array $params = [];
+		public ?string $cased_name = null;
+		public array $taint_source_types = [];
+	}
+}
+namespace Psalm {
+	trait AddsTaintSources {
+		public function addTaintSource(
+			Type\Union $expr_type,
+			string $taint_id,
+			array $taints = Type\TaintKindGroup::ALL_INPUT,
+			?CodeLocation $code_location = null,
+		): Type\Union {
+			$this->sources[] = [$taint_id, $taints, $code_location !== null];
+			return $expr_type;
+		}
+	}
+}
+""",
+    "7": r"""
+namespace Psalm\Type {
+	final class TaintKind {
+		public const INPUT_SQL = (1 << 5);
+		public const INPUT_SSRF = (1 << 9);
+		public const INPUT_FILE = (1 << 10);
+		public const INPUT_HEADER = (1 << 12);
+		public const ALL_INPUT = (1 << 20) - 1;
+	}
+}
+namespace Psalm\Storage {
+	class FunctionLikeParameter {
+		public int $sinks = 0;
+		public function __construct(public string $name) {}
+	}
+	class MethodStorage {
+		public array $params = [];
+		public ?string $cased_name = null;
+		public int $taint_source_types = 0;
+	}
+}
+namespace Psalm {
+	trait AddsTaintSources {
+		public function addTaintSource(
+			Type\Union $expr_type,
+			string $taint_id,
+			CodeLocation $code_location,
+			?int $taints = null,
+		): Type\Union {
+			$this->sources[] = [$taint_id, $taints, true];
+			$source = (object)['id' => "$taint_id specialized"];
+			$expr_type->parent_nodes = [$source->id => $source];
+			return $expr_type;
+		}
+		public function getTaintArgumentNode(
+			object $source,
+			string $function,
+			int $offset,
+			?CodeLocation $call_location = null,
+		): ?object {
+			return (object)['id' => strtolower($function) . '#' . ($offset + 1)];
+		}
+		public function addTaintPath(object $source, object $from, object $to): void {
+			$this->paths[] = [$from->id, $to->id];
+		}
+	}
+}
+""",
+}
+
+# What both versions have alike, and what the plugin does with it: every method of
+# nextcloud/ocp that it names, one parameter with a sink of SQL already, and a public
+# method with two parameters of a controller and of a service.
+PSALM_RUN = r"""<?php
+declare(strict_types=1);
+/* API */
+namespace PhpParser\Node\Stmt {
+	class ClassMethod {
+		public function __construct(public array $params) {}
+		public function isPublic(): bool { return true; }
+		public function isMagic(): bool { return false; }
+	}
+}
+namespace Psalm\Type {
+	class Union {
+		public array $parent_nodes = [];
+	}
+}
+namespace Psalm {
+	class Type {
+		public static function getString(): Type\Union { return new Type\Union(); }
+	}
+	class CodeLocation {
+		public function __construct(public object $file_source, public object $stmt) {}
+	}
+	class Codebase {
+		use AddsTaintSources;
+		public array $sources = [];
+		public array $paths = [];
+		public object $taint_flow_graph;
+		public function __construct(public object $classlike_storage_provider) {
+			$this->taint_flow_graph = new \stdClass();
+		}
+		public function classExtendsOrImplements(string $class, string $parent): bool {
+			return $class === 'OCA\App\Controller\PageController' && $parent === 'OCP\AppFramework\Controller';
+		}
+	}
+}
+namespace Psalm\Plugin\EventHandler\Event {
+	use Psalm\Codebase;
+	use Psalm\Storage\MethodStorage;
+	class AfterCodebasePopulatedEvent {
+		public function __construct(private Codebase $codebase) {}
+		public function getCodebase(): Codebase { return $this->codebase; }
+	}
+	class AfterFunctionLikeAnalysisEvent {
+		public function __construct(
+			private Codebase $codebase,
+			private object $source,
+			private object $stmt,
+			private MethodStorage $storage,
+		) {}
+		public function getCodebase(): Codebase { return $this->codebase; }
+		public function getStatementsSource(): object { return $this->source; }
+		public function getStmt(): object { return $this->stmt; }
+		public function getFunctionlikeStorage(): MethodStorage { return $this->storage; }
+	}
+}
+namespace Psalm\Plugin\EventHandler {
+	interface AfterCodebasePopulatedInterface {
+		public static function afterCodebasePopulated(Event\AfterCodebasePopulatedEvent $event);
+	}
+	interface AfterFunctionLikeAnalysisInterface {
+		public static function afterStatementAnalysis(Event\AfterFunctionLikeAnalysisEvent $event): ?bool;
+	}
+}
+namespace {
+	use PhpParser\Node\Stmt\ClassMethod;
+	use Psalm\Codebase;
+	use Psalm\Plugin\EventHandler\Event\AfterCodebasePopulatedEvent;
+	use Psalm\Plugin\EventHandler\Event\AfterFunctionLikeAnalysisEvent;
+	use Psalm\Storage\FunctionLikeParameter;
+	use Psalm\Storage\MethodStorage;
+	use Psalm\Type\TaintKind;
+
+	require $argv[1];
+
+	$classes = [];
+	foreach (NextcloudTaintPlugin::SOURCES as $class => $methods) {
+		foreach ($methods as $method) {
+			$classes[$class][strtolower($method)] = new MethodStorage();
+		}
+	}
+	foreach (NextcloudTaintPlugin::SINKS as $class => $methods) {
+		foreach ($methods as $method => $parameters) {
+			$storage = $classes[$class][strtolower($method)] ??= new MethodStorage();
+			foreach (array_keys($parameters) as $name) {
+				$storage->params[] = new FunctionLikeParameter($name);
+			}
+		}
+	}
+	$classes['OCP\Files\Folder']['get']->params[0]->sinks = is_int(TaintKind::INPUT_SQL)
+		? TaintKind::INPUT_SQL
+		: [TaintKind::INPUT_SQL];
+	$provider = new class($classes) {
+		public function __construct(private array $classes) {}
+		public function has(string $class): bool { return isset($this->classes[$class]); }
+		public function get(string $class): object { return (object)['methods' => $this->classes[$class]]; }
+	};
+	$codebase = new Codebase($provider);
+	NextcloudTaintPlugin::afterCodebasePopulated(new AfterCodebasePopulatedEvent($codebase));
+	foreach (['OCA\App\Controller\PageController', 'OCA\App\Service\PageService'] as $class) {
+		$storage = new MethodStorage();
+		$storage->cased_name = 'show';
+		NextcloudTaintPlugin::afterStatementAnalysis(new AfterFunctionLikeAnalysisEvent(
+			$codebase,
+			new class($class) {
+				public function __construct(private string $class) {}
+				public function getFQCLN(): string { return $this->class; }
+			},
+			new ClassMethod([new \stdClass(), new \stdClass()]),
+			$storage,
+		));
+	}
+
+	$found = [
+		'sources' => [],
+		'sinks' => [],
+		'controller' => $codebase->sources,
+		'paths' => $codebase->paths,
+	];
+	foreach ($classes as $class => $methods) {
+		foreach ($methods as $method => $storage) {
+			if ($storage->params === []) {
+				$found['sources']["$class::$method"] = $storage->taint_source_types;
+			}
+			foreach ($storage->params as $parameter) {
+				$found['sinks']["$class::$method \$$parameter->name"] = $parameter->sinks;
+			}
+		}
+	}
+	echo json_encode($found, JSON_THROW_ON_ERROR);
+}
+"""
+
+
+@pytest.mark.skipif(PHP is None, reason="the plugin runs in PHP")
+@pytest.mark.parametrize("psalm", ["6", "7"])
+def test_the_taint_plugin_works_with_psalm_6_and_7(
+    projects: dict[str, Path], tmp_path: Path, psalm: str
+) -> None:
+    assert PHP
+    # Psalm 6 holds the kinds of taint as a list of their names, with every kind of
+    # input in TaintKindGroup; Psalm 7 as the bits of an integer, with every kind of
+    # input in TaintKind, and has no TaintKindGroup any more. The composer.json of an
+    # app is its own, so the plugin of the blueprint meets both.
+    plugin = projects["nextcloud-app"] / ".github/psalm/NextcloudTaintPlugin.php"
+    script = tmp_path / "run.php"
+    script.write_text(
+        PSALM_RUN.replace("/* API */", PSALM_API[psalm]),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    result = subprocess.run(
+        [PHP, str(script), str(plugin)],
+        capture_output=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    found = json.loads(result.stdout)
+    kinds: dict[str, Any]
+    if psalm == "6":
+        kinds = {"file": ["file"], "ssrf": ["ssrf"], "header": ["header"]}
+        kinds["sql and file"] = ["sql", "file"]
+        everything: Any = ["html", "sql", "ssrf", "file", "header"]
+    else:
+        kinds = {"file": 1 << 10, "ssrf": 1 << 9, "header": 1 << 12}
+        kinds["sql and file"] = 1 << 5 | 1 << 10
+        everything = (1 << 20) - 1
+    # The term of a search and the answers of other servers are every kind of input.
+    assert found["sources"] == {
+        "OCP\\Search\\ISearchQuery::getterm": everything,
+        "OCP\\Search\\IFilter::get": everything,
+        "OCP\\Http\\Client\\IResponse::getbody": everything,
+        "OCP\\Http\\Client\\IResponse::getheader": everything,
+        "OCP\\Http\\Client\\IResponse::getheaders": everything,
+    }
+    # A sink takes its kinds besides those that it has already.
+    sinks = found["sinks"]
+    assert sinks.pop("OCP\\Files\\Folder::get $path") == kinds["sql and file"]
+    redirect = "OCP\\AppFramework\\Http\\RedirectResponse::__construct $redirectURL"
+    assert sinks.pop(redirect) == kinds["header"]
+    assert len(sinks) > 20
+    for name, sink in sinks.items():
+        kind = "ssrf" if name.startswith("OCP\\Http\\Client\\IClient::") else "file"
+        assert sink == kinds[kind], name
+    # Each parameter of a public method of a controller is every kind of input, at
+    # its place in the code, and a parameter of a class that is no controller is none.
+    parameters = [f"oca\\app\\controller\\pagecontroller::show#{n}" for n in (1, 2)]
+    assert found["controller"] == [[node, everything, True] for node in parameters]
+    # Psalm 6 knows the source by the id of the node of the parameter, Psalm 7 by a
+    # path from the source into that node.
+    assert found["paths"] == (
+        [] if psalm == "6" else [[f"{node} specialized", node] for node in parameters]
+    )
 
 
 @pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")
