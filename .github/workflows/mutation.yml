@@ -395,7 +395,8 @@ jobs:
               echo
               echo "The sample of a pull request: the mutants of $(grep -c . <<< "$PATTERNS") files, the same ones each time. The weekly run changes every file."
               echo
-              sed 's/.*/- `&`/' <<< "$PATTERNS"
+              mapfile -t sample < <(grep . <<< "$PATTERNS")
+              printf -- "- \`%s\`\n" "${sample[@]}"
               echo
             fi
             if [[ "$scored" == true ]]; then
