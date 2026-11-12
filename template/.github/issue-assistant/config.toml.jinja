@@ -15,7 +15,7 @@ release_replies = 2
 
 [links]
 # Hosts that links in the assistant's comments may lead to, besides this repository.
-hosts = [[% if stack == 'home-assistant' %]"www.home-assistant.io", "developers.home-assistant.io", "hacs.xyz"[% elif stack == 'php' %]"docs.nextcloud.com", "apps.nextcloud.com"[% elif project_type == 'github-action' %]"docs.github.com"[% elif project_type == 'python-package' %]"docs.python.org", "pypi.org"[% elif stack == 'node' %]"nodejs.org", "www.npmjs.com"[% elif stack == 'container' %]"docs.docker.com"[% endif %]]
+hosts = [[% if stack == 'home-assistant' %]"www.home-assistant.io", "developers.home-assistant.io", "hacs.xyz"[% elif stack == 'php' %]"docs.nextcloud.com", "apps.nextcloud.com"[% elif project_type == 'github-action' %]"docs.github.com"[% elif project_type == 'python-package' %]"docs.python.org", "pypi.org"[% elif project_type == 'chrome-extension' %]"developer.chrome.com", "chromewebstore.google.com"[% elif project_type == 'cloudflare-worker' %]"developers.cloudflare.com"[% elif stack == 'node' %]"nodejs.org", "www.npmjs.com"[% elif stack == 'container' %]"docs.docker.com"[% endif %]]
 
 [forms]
 # The dropdown of the issue forms whose answer chooses an area label, and the
