@@ -51,6 +51,12 @@ NO_BOT_FIXES_LABEL = (
     'suggestion"\n'
     'group = "decision"'
 )
+# The label no-bot-fixes as a label of the file, or named in a comment, which declines
+# it; a label such as no-bot-fixes-docs, or a description that names it, doesn't count.
+HAS_NO_BOT_FIXES = re.compile(
+    rf"""^(?:name\s*=\s*["']{NO_BOT_FIXES}["']|#.*(?<![\w-]){NO_BOT_FIXES}(?![\w-]))""",
+    re.MULTILINE,
+)
 # A label of the group decision, with a comment behind the group or without one.
 IN_DECISION = re.compile(r'^group = "decision"(?:[ \t#].*)?$', re.MULTILINE)
 
@@ -109,9 +115,9 @@ def no_bot_fixes_label(text: str) -> str:
     """The label no-bot-fixes, which the documents of the blueprint name as the way to
     keep the fix bot away from a pull request, after the last label of the group
     decision, or at the end of the file without one. A file that names the label
-    anywhere, as a label of its own or in a comment such as `# no-bot-fixes: not here`,
-    has it or declines it, and stays as it is."""
-    if NO_BOT_FIXES in text:
+    as a label of its own or in a comment such as `# no-bot-fixes: not here`, has it or
+    declines it, and stays as it is."""
+    if HAS_NO_BOT_FIXES.search(text):
         return text
     decisions = [
         block for block in BLOCK.finditer(text) if IN_DECISION.search(block[0])

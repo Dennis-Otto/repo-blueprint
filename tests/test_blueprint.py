@@ -4302,6 +4302,31 @@ def test_the_checklist_asks_for_the_licenses_of_the_blueprint_bots_tools(
     assert bot_tools_allowed(tmp_path) == Step(step.text, True, "")
 
 
+def test_the_dependency_review_may_quote_or_list_the_tools_in_a_flow(
+    tmp_path: Path,
+) -> None:
+    # The project owns the file, so any spelling of YAML counts.
+    review = tmp_path / ".github/dependency-review.yml"
+    review.parent.mkdir()
+    review.write_text(
+        "allow-dependencies-licenses:\n"
+        '  - "pkg:pypi/jinja2-ansible-filters"\n'
+        "  - 'pkg:pypi/typing-extensions'\n"
+        "  - pkg:pypi/wcwidth-extra # another tool\n",
+        encoding="utf-8",
+    )
+    step = bot_tools_allowed(tmp_path)
+    assert step.done is False
+    assert step.how.startswith("Add pkg:pypi/wcwidth under")
+
+    review.write_text(
+        "allow-dependencies-licenses: [pkg:pypi/jinja2-ansible-filters,"
+        ' "pkg:pypi/typing-extensions", pkg:pypi/wcwidth]\n',
+        encoding="utf-8",
+    )
+    assert bot_tools_allowed(tmp_path).done is True
+
+
 def test_without_its_dependency_review_a_repository_lacks_every_tool(
     tmp_path: Path,
 ) -> None:

@@ -257,6 +257,19 @@ def test_a_file_that_names_no_bot_fixes_declines_or_has_the_label() -> None:
     assert no_bot_fixes_label(NEW) == NEW
 
 
+def test_a_label_that_only_mentions_no_bot_fixes_still_gets_it() -> None:
+    # Another label whose name begins with it, or a description that names it, is
+    # neither the label nor a decline.
+    other = (
+        '[[label]]\nname = "no-bot-fixes-docs"\ncolor = "c5def5"\n'
+        'description = "Like no-bot-fixes, for the documents"\ngroup = "decision"\n'
+    )
+    assert no_bot_fixes_label(other) == f"{other}\n{NO_BOT_FIXES_LABEL}\n"
+    # A comment that names only that other label declines nothing either.
+    commented = f"# no-bot-fixes-docs: for the documents\n{other}"
+    assert no_bot_fixes_label(commented) == f"{commented}\n{NO_BOT_FIXES_LABEL}\n"
+
+
 def test_an_update_after_1_1_0_adds_the_label(tmp_path: Path) -> None:
     root = project(tmp_path, WITHOUT_NO_BOT_FIXES)
     found = migrate(root, fix=False)

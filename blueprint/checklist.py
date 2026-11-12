@@ -454,11 +454,12 @@ def bot_tools_allowed(root: Path) -> Step:
     with each update, passes their licenses, as it does in a new repository."""
     path = root / DEPENDENCY_REVIEW
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    missing = [
-        tool
-        for tool in BOT_TOOLS
-        if not re.search(rf"^\s*-\s*{re.escape(tool)}\s*(?:#.*)?$", text, re.MULTILINE)
-    ]
+    # The items of the file as YAML writes them, in a block or a flow list, quoted or
+    # not, without its comments.
+    items = set(
+        re.findall(r"""["']?([^\s"',\[\]]+)["']?""", re.sub(r"(?:^|\s)#.*", "", text))
+    )
+    missing = [tool for tool in BOT_TOOLS if tool not in items]
     return Step(
         "The dependency review allows the licenses of the blueprint bot's tools",
         not missing,
