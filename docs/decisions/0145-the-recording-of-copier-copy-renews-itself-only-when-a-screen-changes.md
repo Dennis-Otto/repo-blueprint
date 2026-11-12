@@ -31,4 +31,4 @@ Option 4. Before each key on which the tape waits for Copier, and after the copy
 - A release that changes nothing on the screens of the recording no longer renews the GIF and the video, about 2.5 MB of history each time. The first run after this change renews them once, to add the fingerprint.
 - A change that only shows between two screens, such as a line of Copier that scrolls by while it writes the files, renews the recording only with the next change of a screen.
 - A new version of VHS, of its fonts or of ffmpeg may draw the screens another way, which renews the recording once, as it should.
-- The history that exists stays as it is. `dashboard.png`, which shows the date and the versions of the live dashboard, still changes with each run.
+- The history that exists stays as it is. `dashboard.png`, which shows the date and the versions of the live dashboard, still changes with each run; rendering it from fixed data is the part of #827 that stays open.

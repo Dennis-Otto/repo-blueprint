@@ -82,6 +82,12 @@ def test_a_marked_gif_shows_the_same_frames_and_carries_its_fingerprint(
     with Image.open(io.BytesIO(marked)) as image:
         assert image.info["comment"] == mark.encode()
         assert image.info["loop"] == 0
+    # The extension NETSCAPE2.0, which makes the GIF loop, stays right after the
+    # global color table, and the comment follows it.
+    start = recording.blocks_start(data)
+    assert data[start : start + 3] == b"\x21\xff\x0b"
+    assert marked[start : start + 19] == data[start : start + 19]
+    assert marked[start + 19 : start + 21] == b"\x21\xfe"
     # A new mark takes the place of the old one, and marking twice changes nothing.
     other = recording.fingerprint([b"another screen"])
     again = recording.marked(marked, other)

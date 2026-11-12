@@ -33,7 +33,7 @@ MARK = "The screens of the recording: "
 HEADERS = (b"GIF87a", b"GIF89a")
 # The blocks of a GIF after its header: an extension, the picture of a frame, the end.
 EXTENSION, IMAGE, TRAILER = 0x21, 0x2C, 0x3B
-COMMENT = 0xFE
+COMMENT, APPLICATION = 0xFE, 0xFF
 # The most bytes of a sub-block of a GIF.
 LONGEST = 255
 
@@ -108,22 +108,30 @@ def mark_of(data: bytes) -> str | None:
 
 
 def marked(data: bytes, mark: str) -> bytes:
-    """The GIF with mark as its comment before every other block, in place of a
-    fingerprint that it carried; a comment needs the version 89a of GIF."""
+    """The GIF with mark as its comment, in place of a fingerprint that it carried; a
+    comment needs the version 89a of GIF. The comment follows the application
+    extensions at the start, such as NETSCAPE2.0 that makes the GIF loop, which some
+    viewers look for right after the global color table."""
     start = blocks_start(data)
     kept = bytearray(data[:start])
     kept[:6] = HEADERS[1]
     text = mark.encode()
-    kept += bytes((EXTENSION, COMMENT))
+    comment = bytearray((EXTENSION, COMMENT))
     for at in range(0, len(text), LONGEST):
         part = text[at : at + LONGEST]
-        kept += bytes((len(part),)) + part
-    kept += b"\x00"
+        comment += bytes((len(part),)) + part
+    comment += b"\x00"
+    placed = False
     at = start
     for label, begin, end in leading_extensions(data):
+        if not placed and label != APPLICATION:
+            kept += comment
+            placed = True
         if label != COMMENT or not text_of(data, begin, end).startswith(MARK):
             kept += data[begin:end]
         at = end
+    if not placed:
+        kept += comment
     return bytes(kept + data[at:])
 
 
