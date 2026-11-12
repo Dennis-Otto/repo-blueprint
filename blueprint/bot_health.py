@@ -17,7 +17,9 @@ in case GitHub lost an event, and starts a workflow whose schedule GitHub missed
 switched off. A failure of Lint, which main runs only each week, counts only at the
 head of main: a pull request reaches main only when it passes Lint. A run that GitHub
 couldn't start, as in its outage of 9 November 2026, is no failure of the bot: its end
-starts nothing, and the daily look runs it again once (decision 0136). The same look
+starts nothing, and the daily look runs it again once (decision 0136). Nothing
+follows the end of this bot itself, so the daily look also runs the failed jobs of
+its own runs once more that Harden-Runner stopped (decision 0141). The same look
 keeps one issue open while the social preview that GitHub shows is not the committed
 .github/social-preview.png, which only a person can upload; its label is manual-step,
 not bot-failure, since nothing fails there. In the blueprint, it also
@@ -95,6 +97,12 @@ OWN_ISSUE = frozenset({"Diagrams", "Newest Node", "Newest Python", "Next runner"
 # Harden-Runner stopped them, which no later event of theirs makes up for (decision
 # 0141).
 EVENT_BOTS = frozenset({"Area labels", "Commands", "Dependabot maintenance", "Welcome"})
+# The workflow of this bot, which can't follow its own end: the daily look gives the
+# runs of it that Harden-Runner stopped their second try, those of the days back to
+# STOPPED_SINCE, so that a look that GitHub starts late or misses leaves none behind.
+# A run that ran again has a later attempt, so each gets one second try.
+OWN_WORKFLOW = ".github/workflows/bot-health.yml"
+STOPPED_SINCE = timedelta(days=2)
 OWN_ISSUE_LINE = re.compile(r"^[ \t]*#[ \t]*bot-health:[ \t]*own-issue\b", re.MULTILINE)
 # The runs that do what a schedule does. A push may start the same workflow, but its
 # run may leave out what only the schedule does, such as the tests of the coming
@@ -760,15 +768,22 @@ def watch_stop(api: Api, repo: str, run_id: int) -> tuple[str, bool]:
             "failed.",
             True,
         )
+    text, done = again_after_a_stop(api, repo, run)
+    return f"{run.name}: {text}.", done
+
+
+def again_after_a_stop(api: Api, repo: str, run: Run) -> tuple[str, bool]:
+    """Runs the failed jobs of a run that Harden-Runner stopped once more: what
+    happened, and False when GitHub refused that try."""
     tried = run_again(api, repo, run)
     if tried is None:
         return (
-            f"{run.name}: Harden-Runner stopped a job of {run.link()}, and GitHub "
-            "refused to run it again.",
+            f"Harden-Runner stopped a job of {run.link()}, and GitHub refused to run "
+            "it again",
             False,
         )
     again = "its failed jobs run once more" if tried else "another bot runs it again"
-    return f"{run.name}: Harden-Runner stopped a job of {run.link()}, so {again}.", True
+    return f"Harden-Runner stopped a job of {run.link()}, so {again}", True
 
 
 # ---------------------------------------------------------------- the daily look
@@ -1193,6 +1208,35 @@ def look_after(
     return "; ".join(notes), started
 
 
+def own_stops(
+    api: Api, repo: str, branch: str, workflow: Json, now: datetime
+) -> tuple[list[str], bool]:
+    """The second try of the runs of this bot that Harden-Runner stopped at their first
+    attempt, after the end of another workflow, since STOPPED_SINCE: their failed jobs
+    run once more, as the job run does for every other bot, so that the end that they
+    looked at is looked at again and their run passes (decision 0141). A stopped daily
+    look needs none, as the next one makes it up. Lines for the summary, and False
+    when GitHub refused a try."""
+    since = (now - STOPPED_SINCE).strftime("%Y-%m-%dT%H:%M:%SZ")
+    listed = api.get(
+        f"repos/{repo}/actions/workflows/{workflow['id']}/runs"
+        f"?branch={urllib.parse.quote(branch)}&event=workflow_run&status=failure"
+        f"&created=%3E%3D{since}&exclude_pull_requests=true&per_page=100"
+    )
+    lines = []
+    done = True
+    # GitHub lists the runs that ended as a failure in their latest attempt; one that
+    # ran again already is left to that attempt.
+    for item in (listed or {}).get("workflow_runs", []):
+        run = Run.of(item)
+        if run.attempt > 1 or not stopped_by_harden_runner(api, repo, run, every=True):
+            continue
+        text, tried = again_after_a_stop(api, repo, run)
+        lines.append(f"- {text}.")
+        done = done and tried
+    return lines, done
+
+
 def sweep(
     api: Api,
     repo: str,
@@ -1263,6 +1307,22 @@ def sweep(
                 notices.append(unreachable(error))
         starts += started
         lines.append(f"| {code(name)} | {state} |")
+    # After the look at every workflow, so that a look that runs again doesn't meet
+    # the daily look at the same workflow.
+    own = next((item for item in workflows if item["path"] == OWN_WORKFLOW), None)
+    if own is not None and own["state"] == "active":
+        try:
+            stops, tried = own_stops(api, repo, branch, own, now)
+        except GitHubError as error:
+            stops, tried = [f"Couldn't look: {code(str(error))}"], error.unavailable
+            if error.unavailable and notices is not None and not notices:
+                notices.append(unreachable(error))
+        healthy = healthy and tried
+        if stops:
+            heading = (
+                f"#### Runs of {code(str(own['name']))} that Harden-Runner stopped"
+            )
+            lines += ["", heading, "", *stops]
     try:
         uploaded = preview_report(api, repo, root, branch, issues.get(PREVIEW), opener)
     except (GitHubError, Unreadable) as error:
