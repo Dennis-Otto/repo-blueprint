@@ -37,6 +37,8 @@ from blueprint.fixes import (
     MADE_BY,
     MAIN_EVENTS,
     OPT_OUT,
+    RIGHTS_FOLDERS,
+    RIGHTS_SCRIPTS,
     SUGGESTED,
     Command,
     Fixes,
@@ -60,6 +62,7 @@ from blueprint.fixes import (
     fix_own,
     fix_text,
     fixers,
+    for_unread,
     fragment_path,
     heal_main,
     is_command,
@@ -75,14 +78,18 @@ from blueprint.fixes import (
     run,
     run_until_done,
     runs_of,
+    runs_with_rights,
     shown,
     shown_lines,
     suggest,
     suggestions_of,
     text_fixed,
     watched,
+    why_unread,
 )
 from blueprint.github import Api, GitHubError
+from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE
+from blueprint.update import BRANCH as UPDATE_BRANCH
 
 ROOT = Path(__file__).parents[1]
 REPO = "o/r"
@@ -1868,6 +1875,78 @@ def test_a_bot_branch_gets_its_commit_too() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("pull", "why"),
+    [
+        # Renovate's and Dependabot's merge once green, by themselves.
+        ({"user": {"type": "Bot"}}, "bot"),
+        ({"user": {"type": "Bot"}, "auto_merge": None}, "bot"),
+        # A person's merges after another look, unless its auto-merge is on.
+        (
+            {"user": {"type": "User"}, "auto_merge": {"merge_method": "squash"}},
+            "auto-merge",
+        ),
+        ({"user": {"type": "User"}, "auto_merge": None}, ""),
+        ({}, ""),
+    ],
+)
+def test_the_bot_knows_whether_anyone_reads_its_commit_before_the_merge(
+    pull: dict[str, Any], why: str
+) -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.pulls[0].update(pull)
+
+    decided = plan(api_of(github), REPO, SHA, "pull_request", "feature", 42, FIXES)
+
+    assert why_unread(pull) == why
+    assert (decided.action, decided.unread) == ("commit", why)
+
+
+@pytest.mark.parametrize(
+    ("path", "with_rights"),
+    [
+        # The paths of the issue #837, and blueprint.py with its code.
+        (".github/blueprint.py", True),
+        ("blueprint/cli.py", True),
+        ("Blueprint/CLI.py", True),
+        ("blueprint.py", True),
+        ("weekly.py", True),
+        ("scripts/check.sh", True),
+        ("pyproject.toml", True),
+        (".github/actions/a/action.yml", True),
+        (".github/renovate.json5", True),
+        (".github/repository.toml", True),
+        (".github/workflows/ci.yml", True),
+        ("requirements-dev.txt", True),
+        # The template reaches every repository made from the blueprint.
+        ("template/README.md.jinja", True),
+        # What runs only in a check, or nowhere.
+        ("tests/conftest.py", False),
+        ("app.py", False),
+        ("src/blueprint.py", False),
+        ("docs/blueprint/index.md", False),
+        ("README.md", False),
+    ],
+)
+def test_what_decides_what_a_workflow_runs_or_runs_with_its_rights(
+    path: str, with_rights: bool
+) -> None:
+    assert runs_with_rights(path) is with_rights
+
+
+def test_the_scripts_with_rights_are_those_that_the_workflows_run() -> None:
+    named = {
+        found[1]
+        for workflow in (ROOT / ".github/workflows").glob("*.yml")
+        for found in re.finditer(
+            r"python3 \"?([a-z_]+\.py)\b", workflow.read_text(encoding="utf-8")
+        )
+    }
+
+    assert named == RIGHTS_SCRIPTS
+
+
 @pytest.mark.parametrize("event", MAIN_EVENTS)
 def test_main_gets_a_pull_request_with_its_fixes(event: str) -> None:
     github = FakeGitHub()
@@ -2003,6 +2082,129 @@ def test_a_commit_that_fails_otherwise_fails_the_bot() -> None:
 
     with pytest.raises(GitHubError, match="Expected branch"):
         commit_onto_branch(api_of(github), REPO, "feature", SHA, FIXES, "app", "u")
+
+
+# What a check of a pull request of Renovate or of main could write, by a dependency of
+# the branch that runs in it: the code that the jobs with the key of the release app run.
+WITH_RIGHTS = {"blueprint/cli.py": b"evil = 1\n", ".github/blueprint.py": b"evil = 2\n"}
+
+
+def with_rights(github: FakeGitHub) -> Fixes:
+    """The fixes of app.py and of two files that run with rights, which the commit has."""
+    github.files |= {path: b"good = 1\n" for path in WITH_RIGHTS}
+    return Fixes(FIXES.files | WITH_RIGHTS)
+
+
+@pytest.mark.parametrize(
+    ("unread", "reason"),
+    [
+        ("bot", "a bot opened the pull request"),
+        ("auto-merge", "the pull request merges by itself"),
+        # A step that doesn't say counts as unread.
+        (None, "nobody may read the commit"),
+        ("unknown", "nobody may read the commit"),
+    ],
+)
+def test_an_unread_commit_leaves_what_runs_with_rights_to_a_person(
+    unread: str | None, reason: str
+) -> None:
+    github = FakeGitHub()
+    fixes = with_rights(github)
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, fixes, "app", "u", unread
+    )
+
+    (request,) = github.graphql
+    assert [
+        addition["path"]
+        for addition in request["variables"]["input"]["fileChanges"]["additions"]
+    ] == ["app.py"]
+    assert said.startswith("The fix bot committed c0ffee0 onto `feature`:")
+    for path in WITH_RIGHTS:
+        assert f"- `{path}`: decides what a workflow runs, and {reason}" in said
+    assert said.endswith("so a person commits its fix\n")
+
+
+def test_an_unread_commit_of_nothing_but_what_runs_with_rights_is_none() -> None:
+    github = FakeGitHub()
+    with_rights(github)
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, Fixes(WITH_RIGHTS), "app", "u", "bot"
+    )
+
+    assert said.startswith("The bot leaves every fix to a person.\n\n\nLeft to you:")
+    assert "`blueprint/cli.py`" in said
+    assert github.graphql == []
+
+
+def test_the_author_reads_every_fix_of_a_branch_of_a_person() -> None:
+    # Decision 0023: a person who merges by hand sees the commit in the pull request.
+    github = FakeGitHub()
+    fixes = with_rights(github)
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, fixes, "app", "u", ""
+    )
+
+    assert "Left to you" not in said
+    (request,) = github.graphql
+    assert len(request["variables"]["input"]["fileChanges"]["additions"]) == 3
+
+
+def test_what_nobody_reads_keeps_every_other_reason() -> None:
+    fixes = Fixes(WITH_RIGHTS, {"a.bin": "no text file"})
+
+    left = for_unread(fixes, "main")
+
+    assert left.files == {}
+    assert list(left.left) == [".github/blueprint.py", "a.bin", "blueprint/cli.py"]
+    assert left.left["a.bin"] == "no text file"
+
+
+def test_the_update_of_the_blueprint_is_unread_by_its_branch() -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.pulls[0]["user"] = {"type": "Bot"}
+    github.pulls[0]["head"]["ref"] = UPDATE_BRANCH
+
+    decided = plan(api_of(github), REPO, SHA, "pull_request", UPDATE_BRANCH, 42, FIXES)
+
+    assert (decided.action, decided.unread) == ("commit", "update")
+    # A person's branch of that name is still read by its author.
+    assert why_unread({"user": {"type": "User"}, "head": {"ref": UPDATE_BRANCH}}) == ""
+
+
+def test_the_update_of_the_blueprint_gets_the_move_of_a_migration() -> None:
+    # Decision 0111: the update merges by itself once the bot committed the move.
+    github = FakeGitHub()
+    fixes = with_rights(github)
+    github.files[LABELS] = b'group = "decision"\n'
+    fixes = Fixes(fixes.files | {LABELS: b'group = "contribution"\n'})
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, fixes, "app", "u", "update"
+    )
+
+    (request,) = github.graphql
+    assert [
+        addition["path"]
+        for addition in request["variables"]["input"]["fileChanges"]["additions"]
+    ] == ["app.py", LABELS]
+    for path in WITH_RIGHTS:
+        assert f"- `{path}`: decides what a workflow runs, and the update" in said
+    # On any other pull request that nobody reads, the file stays with a person.
+    assert LABELS in for_unread(Fixes({LABELS: b""}), "bot").left
+
+
+def test_a_migration_moves_only_data_that_the_bot_may_commit() -> None:
+    # The bot of main decides, so a new path comes to MOVABLE before its migration.
+    assert {migration.path for migration in MIGRATIONS} <= MOVABLE
+    for path in MOVABLE:
+        assert not path.startswith((".github/workflows/", ".github/actions/"))
+        assert path.endswith(".toml")
+        assert path.split("/")[0] not in RIGHTS_FOLDERS
 
 
 def test_too_many_files_for_one_answer_stop_the_bot() -> None:
@@ -2332,6 +2534,64 @@ def test_main_without_fixes_and_without_a_pull_request_is_fine() -> None:
     assert github.writes() == []
 
 
+def test_the_pull_request_of_main_holds_nothing_that_runs_with_rights() -> None:
+    # It merges itself, so what a check of main wrote must not reach main through it.
+    github = FakeGitHub()
+    fixes = with_rights(github)
+
+    said = heal_main(api_of(github), REPO, SHA, "main", fixes, "app", "https://run")
+
+    assert said.startswith(f"#77 from {BRANCH} has the fixes of main in c0ffee0")
+    (request,) = github.graphql
+    assert [
+        addition["path"]
+        for addition in request["variables"]["input"]["fileChanges"]["additions"]
+    ] == ["app.py"]
+    (created,) = github.created
+    assert "Left to you:" in created["body"]
+    assert (
+        "- `blueprint/cli.py`: decides what a workflow runs, and the pull request of "
+        "main merges itself, without a person reading the commit, so a person commits "
+        "its fix"
+    ) in created["body"]
+    assert "- `.github/blueprint.py`: decides what a workflow runs" in created["body"]
+
+
+def test_main_with_nothing_but_fixes_with_rights_opens_no_pull_request() -> None:
+    github = FakeGitHub()
+    with_rights(github)
+
+    said = heal_main(api_of(github), REPO, SHA, "main", Fixes(WITH_RIGHTS), "app", "u")
+
+    assert said.startswith("main has no fix that the bot commits.\n\nLeft to you:\n")
+    assert "- `blueprint/cli.py`: decides what a workflow runs" in said
+    assert github.writes() == []
+
+
+def test_main_with_nothing_but_fixes_with_rights_closes_its_pull_request() -> None:
+    # Its old commit may hold such a fix, which must not merge itself either.
+    github = FakeGitHub()
+    with_rights(github)
+    healed_pull(github, SHA, github.files | WITH_RIGHTS)
+
+    said = heal_main(
+        api_of(github), REPO, SHA, "main", Fixes(WITH_RIGHTS), "app", "https://run"
+    )
+
+    assert said.startswith(
+        "main has no fix that the bot commits; closed #9.\n\nLeft to you:\n"
+    )
+    assert github.comments == [
+        {
+            "body": "`main` has no fix left that the bot commits; a person commits "
+            "the rest: https://run",
+            "number": 9,
+        }
+    ]
+    assert github.pulls[0]["state"] == "closed"
+    assert BRANCH not in github.refs
+
+
 # ---------------------------------------------------------------- the command line
 
 
@@ -2442,6 +2702,13 @@ def test_fix_collect_from_the_command_line(
     assert output.read_text(encoding="utf-8") == "action=commit\npull=42\n"
     assert capsys.readouterr().out == "#42 comes from a branch of this repository.\n"
     assert load([folder / "1-fixes-check"]).files == {"app.py": b"x = 2\n"}
+
+    # The pull request of Renovate: the step of the commit learns that nobody reads it.
+    github.pulls[0]["user"] = {"type": "Bot"}
+    output.unlink()
+
+    assert fix_collect(homedarts(tmp_path), github, output) == 0
+    assert output.read_text(encoding="utf-8") == "action=commit\npull=42\nunread=bot\n"
 
 
 @pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
@@ -3945,6 +4212,7 @@ def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None
             APP_SLUG="app",
             URL="https://run",
             BASE="main",
+            UNREAD="",
         )
         assert done.returncode == 0, done.stderr
         assert done.stubbed[0].startswith(
@@ -3952,6 +4220,20 @@ def test_the_steps_of_the_fix_bot_pass_what_the_run_says(tmp_path: Path) -> None
         )
         assert done.stubbed[0].endswith(f"--folder {runner}/fixes")
         assert done.calls == []
+    # The commit learns from the collect why nobody reads it, and an empty answer
+    # stays an answer: the author reads it.
+    for unread in ("bot", ""):
+        done = run_fix_bot_step(
+            tmp_path,
+            "Commit the fixes onto the branch of the pull request",
+            SHA=SHA,
+            BRANCH="feature",
+            APP_SLUG="app",
+            URL="https://run",
+            UNREAD=unread,
+        )
+        assert done.returncode == 0, done.stderr
+        assert f" --branch feature --unread {unread} --app app " in done.stubbed[0]
 
 
 def title_bot_starts(
