@@ -867,14 +867,26 @@ def test_a_dependabot_update_merges_only_the_commit_that_was_checked(
 
 MERGE_STEP = "Merge a release of dependency updates once its checks pass"
 RELEASE_PR = json.dumps({"number": 21, "headBranchName": "release-please--x"})
-SINCE_V120 = [
-    exact("release view --repo o/r --json tagName --jq .tagName", "v1.2.0\n"),
-]
+
+
+def decides(verdict: str) -> str:
+    """A stub of python3 that writes its call down and decides as blueprint.py does:
+    merge=true or merge=false into the file after --output, and its reason."""
+    return recording(
+        "python3",
+        'while [[ "$1" != --output ]]; do shift; done\n'
+        f'printf "merge=%s\\n" {verdict} > "$2"\necho "The reason."',
+    )
 
 
 def run_the_merge_of_dependency_updates(
-    tmp_path: Path, *answers: Answer, event: str = "schedule", pr: str = RELEASE_PR
-) -> tuple[list[str], str]:
+    tmp_path: Path,
+    *answers: Answer,
+    verdict: str = "true",
+    event: str = "schedule",
+    pr: str = RELEASE_PR,
+    script: str = ".github/blueprint.py",
+) -> StepResult:
     done = run_step(
         tmp_path,
         "release.yml",
@@ -882,16 +894,11 @@ def run_the_merge_of_dependency_updates(
         MERGE_STEP,
         answers=[*answers, Answer(r"pr merge --repo o/r --auto --squash 21")],
         env={"GH_TOKEN": "app-token", "PR": pr, "GITHUB_EVENT_NAME": event},
+        stubs={"python3": decides(verdict)},
+        files={script: ""},
     )
     assert done.returncode == 0, done.stderr
-    return done.called("pr merge"), done.stdout
-
-
-def subjects_since_v120(subjects: str) -> list[Answer]:
-    return [
-        *SINCE_V120,
-        Answer(rf"api repos/o/r/compare/v1\.2\.0\.\.\.{SHA} --jq .*", subjects),
-    ]
+    return done
 
 
 def test_the_merge_runs_in_every_run_without_a_new_release() -> None:
@@ -905,94 +912,58 @@ def test_the_merge_runs_in_every_run_without_a_new_release() -> None:
 
 
 @WITH_JQ
-def test_the_first_release_waits_for_the_maintainer(tmp_path: Path) -> None:
-    merged, said = run_the_merge_of_dependency_updates(
-        tmp_path,
-        Answer(r"release view .*", err="release not found", code=1),
-    )
-
-    assert merged == []
-    assert said == "The first release waits for the maintainer.\n"
-
-
-@WITH_JQ
-@pytest.mark.parametrize(
-    ("subjects", "merges"),
-    [
-        (
-            "fix(deps): update ruff\nchore(deps-dev): update mypy\nbuild(deps): pin",
-            True,
-        ),
-        ("fix(deps): update ruff\nfeat: a dark mode", False),
-        ("fix(depsy): no update\n", False),
-        ("chore: release 1.2.0\n", False),
-    ],
-)
-def test_a_release_merges_itself_only_with_dependency_updates_alone(
-    tmp_path: Path, subjects: str, merges: bool
+@pytest.mark.parametrize("script", [".github/blueprint.py", "blueprint.py"])
+@pytest.mark.parametrize("event", ["schedule", "push"])
+@pytest.mark.parametrize("verdict", ["true", "false"])
+def test_blueprint_py_decides_whether_the_release_merges_itself(
+    tmp_path: Path, script: str, event: str, verdict: str
 ) -> None:
-    merged, said = run_the_merge_of_dependency_updates(
-        tmp_path, *subjects_since_v120(subjects)
+    # tests/test_dependency_release.py tests the decision, by the commits since the
+    # last release and the event of the run.
+    done = run_the_merge_of_dependency_updates(
+        tmp_path, verdict=verdict, event=event, script=script
     )
 
-    assert merged == (["pr merge --repo o/r --auto --squash 21"] if merges else [])
-    assert ("the maintainer merges it" in said) == (not merges)
-
-
-@WITH_JQ
-@pytest.mark.parametrize(
-    ("event", "subjects", "merges"),
-    [
-        ("push", "fix(deps): update ruff (#7)\nchore(deps): update uv (#8)", False),
-        (
-            "push",
-            "fix(deps): update ruff (#7)\nfix(deps): update uv [SECURITY] (#8)",
-            True,
-        ),
-        ("push", "fix(deps): update pillow to v13 [security] (#9)", True),
-        ("schedule", "fix(deps): update ruff (#7)", True),
-        ("workflow_dispatch", "fix(deps): update ruff (#7)", True),
-    ],
-)
-def test_dependency_updates_release_once_a_day_and_a_fix_of_security_at_once(
-    tmp_path: Path, event: str, subjects: str, merges: bool
-) -> None:
-    merged, said = run_the_merge_of_dependency_updates(
-        tmp_path, *subjects_since_v120(subjects), event=event
+    assert done.stubbed == [
+        f"python3 {script} --repo o/r release dependency-only --event {event} "
+        f"--output {(tmp_path / 'runner' / 'dependency-only').as_posix()}"
+    ]
+    assert done.called("pr merge") == (
+        ["pr merge --repo o/r --auto --squash 21"] if verdict == "true" else []
     )
-
-    assert merged == (["pr merge --repo o/r --auto --squash 21"] if merges else [])
-    assert ("merges in the daily run of the release bot" in said) == (not merges)
+    # The reason stays in the log and in the summary of the run.
+    assert done.stdout.startswith("The reason.\n")
+    assert done.summary == "The reason.\n"
 
 
 @WITH_JQ
 def test_the_daily_run_finds_the_release_pull_request_that_stayed_the_same(
     tmp_path: Path,
 ) -> None:
-    merged, _ = run_the_merge_of_dependency_updates(
+    done = run_the_merge_of_dependency_updates(
         tmp_path,
         Answer(
             r"pr list --repo o/r --state open --label autorelease: pending "
             r"--json number --jq .*",
             json=[{"number": 21}],
         ),
-        *subjects_since_v120("fix(deps): update ruff (#7)"),
         pr="",
     )
 
-    assert merged == ["pr merge --repo o/r --auto --squash 21"]
+    assert done.called("pr merge") == ["pr merge --repo o/r --auto --squash 21"]
 
 
 @WITH_JQ
 def test_without_a_release_pull_request_nothing_merges(tmp_path: Path) -> None:
-    merged, said = run_the_merge_of_dependency_updates(
+    done = run_the_merge_of_dependency_updates(
         tmp_path,
         Answer(r"pr list --repo o/r --state open .*", json=[]),
         pr="",
     )
 
-    assert merged == []
-    assert said == "No release pull request is open.\n"
+    assert done.called("pr merge") == []
+    assert done.stubbed == []
+    assert done.stdout == "No release pull request is open.\n"
 
 
 @WITH_JQ
@@ -1006,7 +977,6 @@ def test_a_release_whose_checks_passed_already_merges_at_once(
         "release-please",
         MERGE_STEP,
         answers=[
-            *subjects_since_v120("fix(deps): update ruff (#7)"),
             exact(
                 "pr merge --repo o/r --auto --squash 21",
                 err="Pull request Pull request is in clean status",
@@ -1023,6 +993,8 @@ def test_a_release_whose_checks_passed_already_merges_at_once(
             "PR": RELEASE_PR,
             "GITHUB_EVENT_NAME": "schedule",
         },
+        stubs={"python3": decides("true")},
+        files={".github/blueprint.py": ""},
     )
 
     # Without --auto, the rules of main still decide, and a refusal fails the run.
