@@ -3728,6 +3728,52 @@ def test_a_list_that_fails_on_a_gateway_is_read_once_more(waits: list[float]) ->
     assert waits == [10]
 
 
+def test_a_list_that_a_gateway_keeps_failing_is_an_outage(waits: list[float]) -> None:
+    # gh names the status without parentheses when the body of the error is no JSON
+    # of GitHub, such as the page of a gateway.
+    runner, calls = answers(
+        *["<html>Bad Gateway</html>\x00gh: HTTP 502"] * 4, codes=[1] * 4
+    )
+
+    with pytest.raises(GitHubError) as error:
+        Api(runner).get_all("repos/x/rulesets")
+    assert len(calls) == 4
+    assert waits == [10, 20, 40]
+    assert error.value.status == 502
+    assert error.value.unavailable
+    assert str(error.value) == "GitHub answered 502: Bad Gateway"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "status", "message"),
+    [
+        ("gh: HTTP 404", 404, "Not Found"),
+        ("gh: Not Found (HTTP 404)", 404, "Not Found"),
+        ("gh: HTTP 403", 403, "Forbidden"),
+        # A status without a name of its own keeps its number.
+        ("gh: HTTP 499", 499, "HTTP 499"),
+    ],
+    ids=["bare", "in parentheses", "refused", "no name"],
+)
+def test_a_list_names_the_status_of_github_in_either_form(
+    stderr: str, status: int, message: str
+) -> None:
+    runner, calls = answers(f"\x00{stderr}", codes=[1])
+
+    with pytest.raises(GitHubError) as error:
+        Api(runner).get_all("repos/x/rulesets", missing_ok=False)
+    assert len(calls) == 1
+    assert error.value.status == status
+    assert error.value.message == message
+    assert not error.value.unavailable
+
+
+def test_a_bare_404_of_a_list_is_an_empty_list() -> None:
+    runner, _ = answers("\x00gh: HTTP 404", codes=[1])
+
+    assert Api(runner).get_all("repos/x/environments/pypi/secrets") == []
+
+
 def test_a_list_without_an_answer_is_read_again(waits: list[float]) -> None:
     runner, calls = answers(
         "\x00gh: context deadline exceeded", json.dumps([[{"id": 1}]]), codes=[1, 0]
