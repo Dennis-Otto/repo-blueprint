@@ -1764,13 +1764,17 @@ jobs:
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           URL: ${{ github.event.workflow_run.html_url }}
+          UNREAD: ${{ steps.collect.outputs.unread }}
         run: |
           tool=.github/blueprint.py
           [[ -f "$tool" ]] || tool=blueprint.py
           # The commit goes through GitHub's API as the release app: GitHub signs it,
-          # and the push starts the checks again.
+          # and the push starts the checks again. Where nobody reads it before the
+          # merge, as on a pull request of Renovate, it holds no file that decides what
+          # a workflow runs.
           python3 "$tool" --repo "$GH_REPO" fix commit --sha "$SHA" --branch "$BRANCH" \
-            --app "$APP_SLUG" --url "$URL" --folder "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"
+            --unread "$UNREAD" --app "$APP_SLUG" --url "$URL" \
+            --folder "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"
       - name: Create a token of the release app for main
         id: main-app
         if: >-
