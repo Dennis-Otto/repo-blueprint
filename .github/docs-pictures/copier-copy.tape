@@ -2,6 +2,13 @@
 # the command and the answers, records the terminal into a GIF and takes a picture of
 # its last screen. scripts/docs-pictures.sh plays it in the image of the Dockerfile
 # next to it, and makes the video of the website and a smaller GIF from it.
+# It also takes a picture of each screen on which it waits, into screens/, numbered in
+# their order: VHS records in real time, so the frames of the GIF differ from run to
+# run, but those pictures are the same while the screens are. recording.py keeps the
+# committed GIF and video while they stay the same. A picture shows the frame after
+# its command, so the screen stays a moment longer before the next key: 300 ms after
+# the wait, the picture, and at least 200 ms before the key, as long as the tape
+# waited before.
 # The commands of a tape: https://github.com/charmbracelet/vhs
 
 Output docs/images/copier-copy.gif
@@ -46,12 +53,16 @@ Enter
 # the cursor instead, which holds the default of a question, the help of a choice
 # or (Y/n), or for a moment where that line stays empty.
 Wait+Screen@60s /The name of the project/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/01.png
+Sleep 200ms
 Type "Paperless Sync"
 Sleep 300ms
 Enter
 Wait+Screen /The name of the repository/
-Sleep 800ms
+Sleep 300ms
+Screenshot screens/02.png
+Sleep 500ms
 Enter
 Wait+Screen /One sentence/
 Sleep 300ms
@@ -60,59 +71,89 @@ Sleep 300ms
 Enter
 Wait+Screen /The kind of project/
 Wait+Screen /Use arrow keys/
-Sleep 800ms
+Sleep 300ms
+Screenshot screens/03.png
+Sleep 500ms
 Down@400ms 3
-Sleep 600ms
+Sleep 300ms
+Screenshot screens/04.png
+Sleep 300ms
 Enter
 Wait+Screen /GitHub account or organization/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/05.png
+Sleep 200ms
 Type "Dennis-Otto"
 Sleep 300ms
 Enter
 Wait+Screen /The maintainer/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/06.png
+Sleep 200ms
 Enter
 Wait+Screen /The copyright of the license/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/07.png
+Sleep 200ms
 Enter
 # The license, a choice whose default, MIT, is selected.
 Wait /Use arrow keys\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/08.png
+Sleep 200ms
 Enter
 Wait /paperless_sync$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/09.png
+Sleep 200ms
 Enter
 # It publishes on the registry of its kind, yes.
 Wait /\(Y.n\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/10.png
+Sleep 200ms
 Enter
 # The languages of the code, of which Python is selected, and GitHub Discussions, yes.
 Wait /to invert\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/11.png
+Sleep 200ms
 Enter
 Wait /\(Y.n\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/12.png
+Sleep 200ms
 Enter
 Wait /\(y.N\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/13.png
+Sleep 200ms
 Enter
 Sleep 700ms
 Enter
 Sleep 700ms
 Enter
 Wait /Dennis-Otto$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/14.png
+Sleep 200ms
 Enter
 # The release app of the owner, its Client ID and its App ID, which the owner of the
 # blueprint gets as defaults.
 Wait /dennis-otto-release-automation$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/15.png
+Sleep 200ms
 Enter
 Wait /Iv23liP9PIEHOV74AiIA$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/16.png
+Sleep 200ms
 Enter
 Wait /4739928$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/17.png
+Sleep 200ms
 Enter
 # Who runs Renovate, a choice whose default, the Renovate workflow of the blueprint
 # for its owner, is selected, and the AI of the issue assistant, yes. The choice
@@ -120,12 +161,16 @@ Enter
 Sleep 1s
 Enter
 Wait /\(Y.n\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/18.png
+Sleep 200ms
 Enter
 # Whether to start with sample code, yes, once the answer of the AI shows.
 Sleep 700ms
 Wait /\(Y.n\)$/
-Sleep 500ms
+Sleep 300ms
+Screenshot screens/19.png
+Sleep 200ms
 Enter
 # No other workflows of tests and no marker in the logs of tests, whose questions show
 # no default.
@@ -136,12 +181,17 @@ Enter
 
 # Copier writes the files and says what comes next, and the prompt comes back.
 Wait@60s /^\$$/
-Sleep 4s
+Sleep 300ms
+Screenshot screens/20.png
+Sleep 3700ms
 
 Type "ls -A paperless-sync"
 Sleep 300ms
 Enter
-Sleep 3s
+Wait /^\$$/
+Sleep 300ms
+Screenshot screens/21.png
+Sleep 2700ms
 # The command after the copy, which every copy brings: a dry run shows its preflight
 # and what it runs. The recording has no sign-in, so the GitHub CLI of its image, gh.sh,
 # answers what the preflight asks.
@@ -150,7 +200,8 @@ Sleep 300ms
 Enter
 Wait /^\$$/
 Sleep 1s
-# The last screen, which the website shows before its video plays. VHS writes it
-# with the next frame, so the recording goes on after it.
+# The last screen, which the website shows before its video plays and which ends the
+# screens of the fingerprint. VHS writes it with the next frame, so the recording
+# goes on after it.
 Screenshot docs/images/copier-copy.png
 Sleep 3s
