@@ -37,9 +37,9 @@
 [%- endif %]
     "forceConsistentCasingInFileNames": true,
     "noEmit": true[% if project_type == 'chrome-extension' %],
-    // A file that imports and exports nothing is a classic script, as a content
-    // script has to be: the compiler then writes it without an `export {}`, which a
-    // content script can't run. Every other file is a module.
+    // A file that imports and exports nothing is a classic script, as the content
+    // script, src/content.ts, has to be: the compiler then writes it without an
+    // `export {}`, which a content script can't run. Every other file is a module.
     "moduleDetection": "legacy"[% endif %]
   },
   "include": ["src", "test"]

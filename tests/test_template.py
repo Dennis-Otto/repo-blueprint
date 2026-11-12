@@ -16156,7 +16156,12 @@ def test_only_an_extension_type_checks_the_dom_and_the_api_of_chrome(
         assert options["lib"] == ["es2024", "dom"]
         assert options["types"] == ["node", "chrome"]
         assert options["moduleDetection"] == "legacy"
-        assert "is a classic script, as a content\n    // script has to be" in text
+        # Word for word as in player-switch-for-autodarts, whose update then takes
+        # the file without a conflict.
+        assert (
+            "is a classic script, as the content\n    // script, src/content.ts, has to be"
+            in text
+        )
     else:
         assert options["lib"] == ["es2024"]
         assert options["types"] == ["node"]
