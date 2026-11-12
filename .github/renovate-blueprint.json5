@@ -59,6 +59,16 @@
     automerge: true,
   },
   osvVulnerabilityAlerts: true,
+  // Renovate logs at the level info alone that two updates of one dependency met in
+  // one branch and that it dropped one of them. When the one that it kept waits, as
+  // for its release age, neither comes; as a warning, it reaches the issue "Renovate
+  // logs problems".
+  // An image without a date of its release comes without the week of waiting, by the
+  // rule of the images, and Renovate warns of it in every run; that is no problem.
+  logLevelRemap: [
+    { matchMessage: "Ignoring upgrade collision", newLogLevel: "warn" },
+    { matchMessage: "/did not have a releaseTimestamp/", newLogLevel: "info" },
+  ],
   // Python, Node and PHP follow the blueprint and what the project supports.
   pyenv: { enabled: false },
   nvm: { enabled: false },
@@ -223,9 +233,31 @@
       enabled: false,
     },
     {
+      // An image whose registry gives Renovate no date of its release comes without
+      // the week of waiting, and one with a date still waits a week: ghcr.io,
+      // mcr.microsoft.com and quay.io give no date, and Docker Hub none to a request
+      // without a login for an image of more than 1,000 tags, such as nextcloud,
+      // postgres, python or redis. Renovate would hold an update without a date for
+      // good (decision 0148 of the blueprint). The digest keeps the image the one that
+      // the checks of the pull request tested.
+      matchDatasources: ["docker"],
+      minimumReleaseAgeBehaviour: "timestamp-optional",
+    },
+    {
       matchDatasources: ["docker"],
       matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest"],
       groupName: "the images",
+    },
+    {
+      // The new digest of a tag that stays goes into a branch of its own, beside that
+      // of its group, also of a group of the project: in one branch with the new
+      // version of the same image, Renovate would drop one of the two.
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["digest", "pinDigest"],
+      group: {
+        branchTopic: "{{{groupSlug}}}-digests",
+        commitMessageTopic: "the digests of {{{groupName}}}",
+      },
     },
     {
       // The dev container keeps the Python, PHP or Node of the project, as the CI

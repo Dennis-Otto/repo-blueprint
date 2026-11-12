@@ -3271,6 +3271,44 @@ def test_the_issue_of_renovate_lists_a_few_problems(
     assert summary.count("| WARN |") == MOST_PROBLEMS
     assert "\nAnd 5 more in the log of the run.\n" in summary
     assert "private" not in summary
+    assert "collision" not in summary
+
+
+def test_the_issue_of_renovate_counts_the_updates_that_collided(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # Two updates of one image met in one branch, and Renovate kept the new version,
+    # which then waited for its release age, so neither came (#859). The rules of the
+    # blueprint raise the line to a warning; the issue says which update it dropped,
+    # how often, and what keeps them apart.
+    collision = log_line(
+        40,
+        "Ignoring upgrade collision",
+        repository="Dennis-Otto/app",
+        branch="renovate/the-images",
+        packageFile="demo/compose.yaml",
+        depName="nextcloud",
+        currentValue="33.0.9-apache",
+        previousNewValue="33.0.10-apache",
+        thisNewValue="33.0.9-apache",
+    )
+    log = tmp_path / "problems.json"
+    log.write_text(f"{collision}\n{collision}\n", encoding="utf-8")
+    github.others = {"Dennis-Otto/app": {"private": False}}
+
+    summary = renovate_report(api_of(github), REPO, [log], RUN)
+
+    assert (
+        "| WARN | `Ignoring upgrade collision` | `demo/compose.yaml` "
+        "| `nextcloud 33.0.9-apache: kept 33.0.10-apache, dropped 33.0.9-apache` "
+        "| 2 |\n"
+    ) in summary
+    assert (
+        "\nAn upgrade collision: two updates of one dependency met in one branch, "
+        "and Renovate committed only the one that it kept, or neither when that one "
+        "waits, as for its release age. A rule that gives one of them a branch of its "
+        "own keeps them apart, as the blueprint does with the digests of the images.\n"
+    ) in summary
 
 
 # ---------------------------------------------------------------- the command line
