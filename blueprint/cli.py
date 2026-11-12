@@ -23,6 +23,7 @@ from blueprint import (
     annotate,
     decisions,
     dependabot,
+    ending,
     lock_age,
     locks,
     mutation,
@@ -1096,6 +1097,10 @@ def advisories_command(arguments: argparse.Namespace, root: Path) -> int:
             "No osv-scanner.toml accepts a version with every advisory, and "
             f"{advisories.PRESET} has no rule."
         )
+    # Only a note: the weekly run of OSV-Scanner warns and opens the issue.
+    day = dependabot.today()
+    for soon in ending.ending(dependabot.acceptances(root)[0], day):
+        print(f"Ends soon: {ending.line(soon, day)}")
     return 0
 
 
@@ -1125,6 +1130,24 @@ def dependabot_command(
         )
         return 1
     for line in outcome.report(repo, arguments.dry_run):
+        print(line)
+    return 0
+
+
+def ending_command(
+    api: Api, repo: str, arguments: argparse.Namespace, root: Path
+) -> int:
+    """Warns of each acceptance of an osv-scanner.toml that ends within two weeks,
+    and keeps the one issue that names them; with --dry-run, only says so."""
+    outcome = ending.keep_issue(api, repo, root, dry_run=arguments.dry_run)
+    for warning in outcome.warnings:
+        print(warning, file=sys.stderr)
+    print(
+        f"The acceptances of the osv-scanner.toml files of {repo} that end within "
+        f"{ending.WINDOW.days} days"
+        + (" (a dry run: nothing changed):" if arguments.dry_run else ":")
+    )
+    for line in outcome.summary:
         print(line)
     return 0
 
@@ -2452,9 +2475,15 @@ def add_advisories_parsers(
         "reason, and open again those that it closed once the acceptance ends",
     )
     advisories_parser.add_argument(
+        "--ending",
+        action="store_true",
+        help=f"warn of each acceptance that ends within {ending.WINDOW.days} days, and "
+        "keep one issue that names them, which closes once none ends that soon",
+    )
+    advisories_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="with --dependabot: only say which alerts it would close or open again",
+        help="with --dependabot or --ending: only say what it would change",
     )
 
 
@@ -2717,16 +2746,20 @@ def standalone_command(
             print(f"blueprint.py: {error}", file=sys.stderr)
             return 2
     if arguments.command == "advisories" and (
-        (arguments.dependabot and arguments.fix)
-        or (arguments.dry_run and not arguments.dependabot)
+        sum((arguments.fix, arguments.dependabot, arguments.ending)) > 1
+        or (arguments.dry_run and not (arguments.dependabot or arguments.ending))
     ):
         print(
-            "blueprint.py: --dry-run goes with --dependabot, and --fix without it: "
-            "the one writes the rules of Renovate, the other closes Dependabot alerts",
+            "blueprint.py: --fix, --dependabot and --ending go one at a time, and "
+            "--dry-run with --dependabot or --ending: --fix writes the rules of "
+            "Renovate, --dependabot closes Dependabot alerts, --ending keeps the issue "
+            "of the acceptances that end soon",
             file=sys.stderr,
         )
         return 2
-    if arguments.command == "advisories" and not arguments.dependabot:
+    if arguments.command == "advisories" and not (
+        arguments.dependabot or arguments.ending
+    ):
         try:
             return advisories_command(arguments, root)
         except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
@@ -2856,6 +2889,8 @@ def main(
             return 0
         if arguments.command == "fix":
             return fix_bot_command(api, repo, arguments, root)
+        if arguments.command == "advisories" and arguments.ending:
+            return ending_command(api, repo, arguments, root)
         if arguments.command == "advisories":
             return dependabot_command(api, repo, arguments, root)
         if arguments.command == "commit-overrides":
