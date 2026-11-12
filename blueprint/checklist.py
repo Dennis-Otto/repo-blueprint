@@ -435,6 +435,39 @@ DEPENDABOT_ALERTS = Step(
     "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/own-account.md"
     "#8-the-settings-app-optional",
 )
+DEPENDENCY_REVIEW = ".github/dependency-review.yml"
+# The tools of the blueprint bot (.github/copier-requirements.txt) whose license the
+# dependency review reads wrongly or doesn't know, as a new repository allows them in
+# template/.github/dependency-review.yml.jinja. The project owns its file, so an entry
+# that a release adds there reaches an existing repository only through this step: the
+# file decides which licenses and advisories pass, and no bot changes it where nobody
+# reads the change (decision 0143).
+BOT_TOOLS = (
+    "pkg:pypi/jinja2-ansible-filters",
+    "pkg:pypi/typing-extensions",
+    "pkg:pypi/wcwidth",
+)
+
+
+def bot_tools_allowed(root: Path) -> Step:
+    """The dependency review of a pull request of the blueprint bot, whose tools come
+    with each update, passes their licenses, as it does in a new repository."""
+    path = root / DEPENDENCY_REVIEW
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    missing = [
+        tool
+        for tool in BOT_TOOLS
+        if not re.search(rf"^\s*-\s*{re.escape(tool)}\s*(?:#.*)?$", text, re.MULTILINE)
+    ]
+    return Step(
+        "The dependency review allows the licenses of the blueprint bot's tools",
+        not missing,
+        f"Add {', '.join(missing)} under allow-dependencies-licenses in"
+        f" {DEPENDENCY_REVIEW}, as a new repository has them: the review otherwise"
+        " stops the update of the blueprint that brings a new version of one."
+        if missing
+        else "",
+    )
 
 
 def workflows_step(api: Api, repo: str, root: Path) -> list[Step]:
@@ -518,6 +551,7 @@ def checklist(
         renovate(
             api, repo, root, str(settings.variables.get("RELEASE_APP", "")).strip()
         ),
+        bot_tools_allowed(root),
         Step(
             "Settings → General → Issues: 'Auto-close issues with merged linked pull requests' off "
             "(the issue assistant closes them with the release)",

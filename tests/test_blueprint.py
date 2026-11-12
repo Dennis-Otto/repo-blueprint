@@ -27,9 +27,11 @@ import blueprint.github
 from blueprint import cli
 from blueprint.checklist import (
     APP_NAME_LIMIT,
+    BOT_TOOLS,
     RELEASE_APP_PERMISSIONS,
     Step,
     best_practices,
+    bot_tools_allowed,
     change_answer,
     checklist,
     release_app_name,
@@ -4229,6 +4231,7 @@ def test_the_checklist_of_a_new_repository(
     assert out.count("https://www.bestpractices.dev/en/projects/new") == 2
     assert "press 'Save (and continue) 🤖'" in out
     assert "Trusted publisher on PyPI" in out
+    assert "✘ The dependency review allows the licenses of the blueprint bot's" in out
 
 
 def test_the_checklist_of_a_finished_repository(
@@ -4246,6 +4249,11 @@ def test_the_checklist_of_a_finished_repository(
         "[![Baseline](https://www.bestpractices.dev/projects/1/baseline)]\n",
         encoding="utf-8",
     )
+    (root / ".github/dependency-review.yml").write_text(
+        "allow-dependencies-licenses:\n"
+        + "".join(f"  - {tool}\n" for tool in BOT_TOOLS),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(blueprint.checklist, "reuse_compliant", lambda repo: True)
     capsys.readouterr()
 
@@ -4261,6 +4269,48 @@ def test_the_checklist_of_a_finished_repository(
     assert "✔ Registered with the REUSE API" in out
     assert "✔ OpenSSF Best Practices badge in the README" in out
     assert "✔ OpenSSF Baseline badge in the README" in out
+
+
+def test_the_checklist_asks_for_the_licenses_of_the_blueprint_bots_tools(
+    tmp_path: Path,
+) -> None:
+    # As the repositories that took release 1.3.0 by an update have the file: the
+    # project owns it, so the update didn't add wcwidth.
+    review = tmp_path / ".github/dependency-review.yml"
+    review.parent.mkdir()
+    review.write_text(
+        "allow-dependencies-licenses:\n"
+        "  - pkg:pypi/jinja2-ansible-filters\n"
+        "  - pkg:pypi/typing-extensions # read wrongly\n"
+        "  # - pkg:pypi/wcwidth\n",
+        encoding="utf-8",
+    )
+
+    step = bot_tools_allowed(tmp_path)
+
+    assert step.text == (
+        "The dependency review allows the licenses of the blueprint bot's tools"
+    )
+    assert step.done is False
+    assert step.how.startswith(
+        "Add pkg:pypi/wcwidth under allow-dependencies-licenses in"
+        " .github/dependency-review.yml, as a new repository has them"
+    )
+
+    with review.open("a", encoding="utf-8") as file:
+        file.write("  - pkg:pypi/wcwidth\n")
+    assert bot_tools_allowed(tmp_path) == Step(step.text, True, "")
+
+
+def test_without_its_dependency_review_a_repository_lacks_every_tool(
+    tmp_path: Path,
+) -> None:
+    step = bot_tools_allowed(tmp_path)
+    assert step.done is False
+    assert step.how.startswith(
+        "Add pkg:pypi/jinja2-ansible-filters, pkg:pypi/typing-extensions,"
+        " pkg:pypi/wcwidth under"
+    )
 
 
 def test_the_checklist_asks_for_a_social_preview_of_the_project(root: Path) -> None:
@@ -4573,7 +4623,7 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 13
+        assert len(texts) == 14
     else:
         assert any(text in step for step in texts)
 

@@ -9,11 +9,15 @@ from pathlib import Path
 import pytest
 
 from blueprint.cli import main
+from blueprint.fixes import OPT_OUT
 from blueprint.migrate import (
     LABELS,
+    NO_BOT_FIXES_LABEL,
     Migration,
     contribution_labels,
+    label_name,
     migrate,
+    no_bot_fixes_label,
 )
 
 # As every repository of the blueprint has it up to the release that moves the labels.
@@ -113,6 +117,19 @@ group = "release"
 """
 
 
+# As the repositories that took release 1.1.0 by an update have it: without the label
+# no-bot-fixes, which that release gave only to a new repository.
+WITHOUT_NO_BOT_FIXES = NEW.replace(
+    '[[label]]\nname = "no-bot-fixes"\ncolor = "c5def5"\n'
+    'description = "The fix bot leaves this pull request alone"\n'
+    'group = "decision"\n\n',
+    "",
+)
+WITH_NO_BOT_FIXES = WITHOUT_NO_BOT_FIXES.replace(
+    "# Contribution: ", f"{NO_BOT_FIXES_LABEL}\n\n# Contribution: "
+)
+
+
 def groups(text: str) -> dict[str, str]:
     return {label["name"]: label["group"] for label in tomllib.loads(text)["label"]}
 
@@ -196,6 +213,62 @@ def test_the_comment_at_the_top_names_the_group_once() -> None:
         '[[label]]\nname = "help wanted"\ngroup = "decision"\n'
     )
     assert contribution_labels(named).count("#   contribution") == 1
+
+
+def test_the_label_no_bot_fixes_is_the_one_the_fix_bot_reads() -> None:
+    (label,) = tomllib.loads(NO_BOT_FIXES_LABEL)["label"]
+    assert label_name(NO_BOT_FIXES_LABEL) == label["name"] == OPT_OUT
+    assert label["group"] == "decision"
+
+
+def test_the_label_no_bot_fixes_comes_after_the_last_decision() -> None:
+    assert "no-bot-fixes" not in WITHOUT_NO_BOT_FIXES
+    assert no_bot_fixes_label(WITHOUT_NO_BOT_FIXES) == WITH_NO_BOT_FIXES
+    assert no_bot_fixes_label(WITH_NO_BOT_FIXES) == WITH_NO_BOT_FIXES
+
+
+def test_a_decision_with_a_comment_behind_its_group_is_one_too() -> None:
+    text = (
+        '[[label]]\nname = "wontfix"\ngroup = "decision" # ours\n\n'
+        '[[label]]\nname = "release"\ngroup = "release"\n'
+    )
+    assert no_bot_fixes_label(text) == (
+        '[[label]]\nname = "wontfix"\ngroup = "decision" # ours\n\n'
+        f"{NO_BOT_FIXES_LABEL}\n\n"
+        '[[label]]\nname = "release"\ngroup = "release"\n'
+    )
+
+
+def test_a_group_whose_name_only_starts_with_decision_is_another() -> None:
+    text = '[[label]]\nname = "a"\ngroup = "decisions"\n\n# Last\n'
+    assert no_bot_fixes_label(text) == f"{text}\n{NO_BOT_FIXES_LABEL}\n"
+
+
+def test_without_a_decision_the_label_no_bot_fixes_comes_at_the_end() -> None:
+    text = '[[label]]\nname = "bug"\ngroup = "type"'
+    assert no_bot_fixes_label(text) == f"{text}\n\n{NO_BOT_FIXES_LABEL}\n"
+    assert no_bot_fixes_label("") == f"{NO_BOT_FIXES_LABEL}\n"
+
+
+def test_a_file_that_names_no_bot_fixes_declines_or_has_the_label() -> None:
+    declined = f"# no-bot-fixes: this project wants every fix\n{WITHOUT_NO_BOT_FIXES}"
+    assert no_bot_fixes_label(declined) == declined
+    # A label of that name stays as the project wrote it.
+    assert no_bot_fixes_label(NEW) == NEW
+
+
+def test_an_update_after_1_1_0_adds_the_label(tmp_path: Path) -> None:
+    root = project(tmp_path, WITHOUT_NO_BOT_FIXES)
+    found = migrate(root, fix=False)
+    assert [migration.moved for migration in found] == [no_bot_fixes_label]
+    assert migrate(root, fix=True) == found
+    assert (root / LABELS).read_text(encoding="utf-8") == WITH_NO_BOT_FIXES
+    assert not migrate(root, fix=False)
+    labels = tomllib.loads(WITH_NO_BOT_FIXES)["label"]
+    assert [label["name"] for label in labels if label["group"] == "decision"] == [
+        "wontfix",
+        "no-bot-fixes",
+    ]
 
 
 def test_the_check_names_what_is_left_and_writes_nothing(tmp_path: Path) -> None:
