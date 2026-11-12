@@ -13366,6 +13366,37 @@ def test_the_issue_assistant_names_its_ai_by_default(
     assert badges[-1].startswith("[![Sponsor]")
 
 
+# The hosts that the comments of the issue assistant may link to besides the
+# repository, by kind: the documentation that a helpful answer points to. A Chrome
+# extension and a Cloudflare Worker have the stack node, but their reporters need
+# the pages of Chrome and of Cloudflare, not those of a package of npm (#848).
+LINK_HOSTS = {
+    "home-assistant": [
+        "www.home-assistant.io",
+        "developers.home-assistant.io",
+        "hacs.xyz",
+    ],
+    "nextcloud-app": ["docs.nextcloud.com", "apps.nextcloud.com"],
+    "github-action": ["docs.github.com"],
+    "python-package": ["docs.python.org", "pypi.org"],
+    "node-package": ["nodejs.org", "www.npmjs.com"],
+    "chrome-extension": ["developer.chrome.com", "chromewebstore.google.com"],
+    "cloudflare-worker": ["developers.cloudflare.com"],
+    "container": ["docs.docker.com"],
+    "generic": [],
+}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_issue_assistant_may_link_to_the_documentation_of_its_kind(
+    projects: Mapping[str, Path], kind: str
+) -> None:
+    config = tomllib.loads(
+        (projects[kind] / ".github/issue-assistant/config.toml").read_text("utf-8")
+    )
+    assert config["links"]["hosts"] == LINK_HOSTS[kind]
+
+
 # The badge that the README of the issue assistant offers to a repository that uses
 # it, which the blueprint's own README shows as well.
 ISSUE_ASSISTANT_BADGE = (
