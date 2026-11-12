@@ -830,7 +830,8 @@ def fix_bot_command(
             return 1
         job_output(
             arguments.output,
-            f"action={decided.action}\npull={decided.number or ''}\n",
+            f"action={decided.action}\npull={decided.number or ''}\n"
+            + (f"unread={decided.unread}\n" if decided.unread else ""),
         )
         sys.stdout.write(decided.text)
         return 0
@@ -858,6 +859,7 @@ def fix_bot_command(
             fixes,
             arguments.app,
             arguments.url,
+            arguments.unread,
         )
     elif arguments.action == "suggest":
         said = suggest(api, repo, int(arguments.pull), arguments.sha, fixes)
@@ -2268,6 +2270,12 @@ def add_fix_parsers(
         "--output", help="the file of the outputs of the step, $GITHUB_OUTPUT"
     )
     commit_fixes_parser.add_argument("--branch", required=True)
+    commit_fixes_parser.add_argument(
+        "--unread",
+        help="why nobody reads the commit before the merge, as fix collect said: "
+        "bot, auto-merge, or empty when its author does; without it, the bot commits "
+        "no file that decides what a workflow runs",
+    )
     suggest_parser.add_argument("--pull", required=True)
     main_parser.add_argument("--base", required=True, help="the default branch")
     for bot_parser in (commit_fixes_parser, main_parser):
