@@ -7048,7 +7048,9 @@ PHP = shutil.which("php")
 
 
 @pytest.mark.skipif(PHP is None, reason="the comparison of the canary runs in PHP")
-@pytest.mark.parametrize("change", ["none", "missed", "unexpected", "no report"])
+@pytest.mark.parametrize(
+    "change", ["none", "missed", "unexpected", "type", "no report"]
+)
 def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
     projects: dict[str, Path], tmp_path: Path, change: str
 ) -> None:
@@ -7077,6 +7079,11 @@ def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
                 "line_from": escaped,
             }
         )
+    elif change == "type":
+        # Psalm 7 checks the types in the same run: an issue of a type is no path.
+        issues.append(
+            {"type": "UnusedClass", "file_path": canary.as_posix(), "line_from": 30}
+        )
     if change != "no report":
         (tmp_path / "psalm-canary.json").write_text(
             json.dumps(issues), encoding="utf-8"
@@ -7090,7 +7097,7 @@ def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
         check=False,
     )
 
-    if change == "none":
+    if change in ("none", "type"):
         assert result.returncode == 0, result.stdout + result.stderr
         assert result.stdout == (
             f"The taint analysis finds each of the {len(expected)} paths of the canary,"
@@ -7113,7 +7120,8 @@ def test_the_canary_fails_unless_the_analysis_finds_its_paths_and_no_other(
 
 # Just enough of the API of Psalm, as each major version has it, for the plugin to run
 # without Composer: the kinds of taint, the storages that the plugin changes and the
-# call that adds a source, by the names and the order of its parameters.
+# call that adds a source, by the names and the order of its parameters. Psalm 7 adds
+# the location of a source to its id, so a path leads from it into the parameter.
 PSALM_API = {
     "6": r"""
 namespace Psalm\Type {
@@ -7182,7 +7190,20 @@ namespace Psalm {
 			?int $taints = null,
 		): Type\Union {
 			$this->sources[] = [$taint_id, $taints, true];
+			$source = (object)['id' => "$taint_id specialized"];
+			$expr_type->parent_nodes = [$source->id => $source];
 			return $expr_type;
+		}
+		public function getTaintArgumentNode(
+			object $source,
+			string $function,
+			int $offset,
+			?CodeLocation $call_location = null,
+		): ?object {
+			return (object)['id' => strtolower($function) . '#' . ($offset + 1)];
+		}
+		public function addTaintPath(object $source, object $from, object $to): void {
+			$this->paths[] = [$from->id, $to->id];
 		}
 	}
 }
@@ -7203,7 +7224,9 @@ namespace PhpParser\Node\Stmt {
 	}
 }
 namespace Psalm\Type {
-	class Union {}
+	class Union {
+		public array $parent_nodes = [];
+	}
 }
 namespace Psalm {
 	class Type {
@@ -7215,6 +7238,7 @@ namespace Psalm {
 	class Codebase {
 		use AddsTaintSources;
 		public array $sources = [];
+		public array $paths = [];
 		public object $taint_flow_graph;
 		public function __construct(public object $classlike_storage_provider) {
 			$this->taint_flow_graph = new \stdClass();
@@ -7301,7 +7325,12 @@ namespace {
 		));
 	}
 
-	$found = ['sources' => [], 'sinks' => [], 'controller' => $codebase->sources];
+	$found = [
+		'sources' => [],
+		'sinks' => [],
+		'controller' => $codebase->sources,
+		'paths' => $codebase->paths,
+	];
 	foreach ($classes as $class => $methods) {
 		foreach ($methods as $method => $storage) {
 			if ($storage->params === []) {
@@ -7372,10 +7401,13 @@ def test_the_taint_plugin_works_with_psalm_6_and_7(
         assert sink == kinds[kind], name
     # Each parameter of a public method of a controller is every kind of input, at
     # its place in the code, and a parameter of a class that is no controller is none.
-    assert found["controller"] == [
-        ["oca\\app\\controller\\pagecontroller::show#1", everything, True],
-        ["oca\\app\\controller\\pagecontroller::show#2", everything, True],
-    ]
+    parameters = [f"oca\\app\\controller\\pagecontroller::show#{n}" for n in (1, 2)]
+    assert found["controller"] == [[node, everything, True] for node in parameters]
+    # Psalm 6 knows the source by the id of the node of the parameter, Psalm 7 by a
+    # path from the source into that node.
+    assert found["paths"] == (
+        [] if psalm == "6" else [[f"{node} specialized", node] for node in parameters]
+    )
 
 
 @pytest.mark.skipif(BASH is None, reason="the check runs in bash, Git Bash on Windows")

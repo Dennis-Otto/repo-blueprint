@@ -26,8 +26,10 @@ declare(strict_types=1);
  * It works with Psalm 6 and Psalm 7, which hold the kinds of taint differently: Psalm 6
  * as a list of their names, with every kind of input in TaintKindGroup, and Psalm 7 as
  * the bits of an integer, with every kind of input in TaintKind, which has no
- * TaintKindGroup any more. The composer.json of an app is its own, so an app that takes
- * a release of the blueprint keeps the Psalm that it has until it updates Psalm itself.
+ * TaintKindGroup any more; and Psalm 7 tells a source apart by its location, so the
+ * input of a parameter takes a path into it. The composer.json of an app is its own,
+ * so an app that takes a release of the blueprint keeps the Psalm that it has until it
+ * updates Psalm itself.
  *
  * The blueprint keeps this file current: https://github.com/Dennis-Otto/repo-blueprint
  */
@@ -163,15 +165,28 @@ final class NextcloudTaintPlugin implements AfterCodebasePopulatedInterface, Aft
 		) {
 			return null;
 		}
-		$id = strtolower($class . '::' . $event->getFunctionlikeStorage()->cased_name);
+		$function = $class . '::' . (string)$event->getFunctionlikeStorage()->cased_name;
 		foreach ($method->params as $offset => $parameter) {
 			// By name: Psalm 7 takes the location before the kinds of taint, Psalm 6 after them.
-			$codebase->addTaintSource(
+			$input = $codebase->addTaintSource(
 				expr_type: Type::getString(),
-				taint_id: $id . '#' . ($offset + 1),
+				taint_id: strtolower($function) . '#' . ($offset + 1),
 				taints: self::input(),
 				code_location: new CodeLocation($source, $parameter),
 			);
+			if (!self::bits()) {
+				// Psalm 6 gives the source the id of the node of the parameter, so the
+				// parameter carries the input on.
+				continue;
+			}
+			// Psalm 7 adds the location of a source to its id: the input flows into the
+			// node of the parameter by a path of its own.
+			$node = $codebase->getTaintArgumentNode($source, $function, $offset);
+			if ($node !== null) {
+				foreach ($input->parent_nodes as $from) {
+					$codebase->addTaintPath($source, $from, $node);
+				}
+			}
 		}
 		return null;
 	}
