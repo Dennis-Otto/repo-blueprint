@@ -64,6 +64,7 @@ from blueprint.coach import (
 from blueprint.coach import annotation as coach_annotation
 from blueprint.coach import report as coach_report
 from blueprint.coverage_comment import Coverage, coverage_comment
+from blueprint.dependency_release import dependency_release
 from blueprint.diagrams import (
     SOURCES,
     commit_request,
@@ -1733,6 +1734,25 @@ def add_changelog_parsers(
         "into its description, for release-please, which might not parse its squash "
         "commit (the release bot)",
     )
+    release_parser = commands.add_parser(
+        "release", help="the release pull request, for the release bot"
+    )
+    release_actions = release_parser.add_subparsers(dest="action", required=True)
+    dependency_parser = release_actions.add_parser(
+        "dependency-only",
+        help="whether the release pull request merges itself as a release of "
+        "dependency updates, by the commits since the last release (decision 0087)",
+    )
+    dependency_parser.add_argument(
+        "--event",
+        required=True,
+        help="the event of the run of the release bot, such as schedule or push",
+    )
+    dependency_parser.add_argument(
+        "--output",
+        required=True,
+        help="the file to write merge=true or merge=false into",
+    )
     beta_parser = commands.add_parser(
         "beta", help="the notes of a beta of the next release, for the release bot"
     )
@@ -2840,6 +2860,13 @@ def main(
             return dependabot_command(api, repo, arguments, root)
         if arguments.command == "commit-overrides":
             print(write_overrides(api, repo), end="")
+            return 0
+        if arguments.command == "release":
+            verdict = dependency_release(api, repo, arguments.event)
+            Path(arguments.output).write_text(
+                f"merge={'true' if verdict.merge else 'false'}\n", encoding="utf-8"
+            )
+            print(verdict.text)
             return 0
         if arguments.command == "workflows":
             print(register_workflows(api, repo))
