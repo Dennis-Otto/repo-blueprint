@@ -418,36 +418,63 @@ def sampled(found: Sequence[Module], mutants: int) -> list[Unit]:
 # stays, which the names of the directories don't need.
 COMMENT_LINE = re.compile(r"^\s*//.*$", re.MULTILINE)
 DIRECTORIES = re.compile(r"""["']?directories["']?\s*:\s*\[([^\]]*)\]""")
+EXCLUDES = re.compile(r"""["']?excludes["']?\s*:\s*\[([^\]]*)\]""")
 QUOTED = re.compile(r""""([^"\\]*)"|'([^'\\]*)'""")
 # A function with a body that does something: an interface, an abstract method or a
 # constructor that only promotes its parameters has no code that Infection changes.
 PHP_CODE = re.compile(r"\bfunction\b[^;{]*\{\s*[^\s}]")
 
 
-def php_sources(root: Path) -> list[str]:
-    """The directories of the code that Infection changes: source.directories of the
-    configuration that it reads, of JSON5 or JSON, or lib/, as the workflow writes it
-    without one. Read leniently: JSON5 has comments and quotes of its own."""
+def infection_configuration(root: Path) -> str:
+    """The text of the configuration that Infection reads first, without the comments
+    of JSON5 on lines of their own, or nothing without one."""
     for name in INFECTION_CONFIGURATIONS:
         path = root / name
         if path.is_file():
-            text = COMMENT_LINE.sub("", path.read_text(encoding="utf-8"))
-            found = DIRECTORIES.search(text)
-            if found:
-                names = [a or b for a, b in QUOTED.findall(found[1])]
-                return [name.strip("/") for name in names if name.strip("/")] or [
-                    PHP_SOURCE
-                ]
-            break
-    return [PHP_SOURCE]
+            return COMMENT_LINE.sub("", path.read_text(encoding="utf-8"))
+    return ""
+
+
+def quoted_list(pattern: re.Pattern[str], text: str) -> list[str]:
+    """The strings of a list that the pattern finds, read leniently: JSON5 has quotes
+    of its own."""
+    found = pattern.search(text)
+    if not found:
+        return []
+    return [a or b for a, b in QUOTED.findall(found[1])]
+
+
+def php_sources(root: Path) -> list[str]:
+    """The directories of the code that Infection changes: source.directories of the
+    configuration that it reads, of JSON5 or JSON, or lib/, as the workflow writes it
+    without one."""
+    names = quoted_list(DIRECTORIES, infection_configuration(root))
+    return [name.strip("/") for name in names if name.strip("/")] or [PHP_SOURCE]
+
+
+def php_excluded(path: str, excludes: list[str]) -> bool:
+    """Whether source.excludes of Infection leaves out a file, by its path relative to
+    its source directory: an entry is a folder or a file there, or a regular
+    expression between slashes or hashes, as Infection takes it."""
+    for exclude in excludes:
+        if len(exclude) > 2 and exclude[0] == exclude[-1] and exclude[0] in "/#":
+            if re.search(exclude[1:-1], path):
+                return True
+        elif exclude.strip("/") and (path + "/").startswith(exclude.strip("/") + "/"):
+            return True
+    return False
 
 
 def php_files(root: Path) -> dict[str, int]:
-    """The PHP files of the source that have code to change, with their lines."""
+    """The PHP files of the source that have code to change, with their lines; a file
+    that source.excludes leaves out has none that Infection changes."""
+    excludes = quoted_list(EXCLUDES, infection_configuration(root))
     found: dict[str, int] = {}
     for directory in php_sources(root):
         for path in sorted((root / directory).rglob("*.php")):
-            if not path.is_file():
+            if not path.is_file() or php_excluded(
+                path.relative_to(root / directory).as_posix(), excludes
+            ):
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
             if PHP_CODE.search(text):

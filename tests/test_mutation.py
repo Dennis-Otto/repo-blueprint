@@ -947,6 +947,28 @@ def test_the_php_files_with_code_to_change(tmp_path: Path) -> None:
 
     assert php_files(tmp_path) == {"lib/Db/Mapper.php": 7, "lib/Service/Sync.php": 10}
 
+    # source.excludes leaves out folders and files of a source directory, and those
+    # that a regular expression finds; a folder only matches whole names.
+    files(
+        tmp_path,
+        {
+            "lib/Migration/Version1.php": php_class("Version1", 5),
+            "lib/MigrationHelper.php": php_class("MigrationHelper", 8),
+            "lib/Cache/Store.php": php_class("Store", 6),
+            "lib/Generated/Proxy.php": php_class("Proxy", 3),
+        },
+    )
+    (tmp_path / "infection.json5").write_text(
+        "{source: {directories: ['lib'], excludes: "
+        "['Migration/', 'Cache/Store.php', '#^Gener#', '/']}}\n",
+        encoding="utf-8",
+    )
+    assert php_files(tmp_path) == {
+        "lib/Db/Mapper.php": 7,
+        "lib/MigrationHelper.php": 8,
+        "lib/Service/Sync.php": 10,
+    }
+
 
 def test_a_sample_of_php_files_takes_files_up_to_its_lines() -> None:
     found = {f"lib/File{number}.php": 10 + number for number in range(10)}
