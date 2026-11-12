@@ -48,11 +48,14 @@ from blueprint.mutation import (
     modules,
     no_mutant_ran,
     no_mutant_ran_error,
+    php_files,
+    php_sources,
     plan,
     read_parts,
     read_previous,
     read_stats,
     sampled,
+    sampled_files,
     split,
     stats_summary,
     stopped,
@@ -859,9 +862,6 @@ def test_a_pull_request_tries_a_sample_in_one_part(
     assert len(parts) == 1
     assert parts[0]["mutants"] == 2
     assert parts[0]["patterns"] in ("a.x_f*", "b.x_g*")
-    # Infection has no sample.
-    php = files(tmp_path / "php", {"appinfo/info.xml": "<info/>"})
-    assert plan(php, None, sample=True)[1][0]["patterns"] == ""
 
 
 def test_the_sample_from_the_command_line(
@@ -881,6 +881,119 @@ def test_the_sample_from_the_command_line(
 
     lines = capsys.readouterr().out.splitlines()
     assert len(json.loads(lines[1].removeprefix("parts="))) == 1
+
+
+# A class with code that Infection changes, of so many lines.
+def php_class(name: str, lines: int) -> str:
+    padding = "\n" * max(lines - 5, 0)
+    return (
+        f"<?php\nclass {name} {{\n    public function run(int $a): int {{\n"
+        f"        return $a + 1;\n    }}\n}}{padding}"
+    )
+
+
+def test_the_sources_of_infection(tmp_path: Path) -> None:
+    # Without a configuration, the workflow writes one with lib/.
+    assert php_sources(tmp_path) == ["lib"]
+    # JSON5 with comments, single quotes and a key without quotes; the // of a URL
+    # after a value stays.
+    (tmp_path / "infection.json5").write_text(
+        "{\n"
+        '  "$schema": "https://example.com/schema.json",\n'
+        '  // The directories: ["comment"]\n'
+        '  source: {directories: [\'lib/\', "src"], excludes: ["Migration"]},\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    assert php_sources(tmp_path) == ["lib", "src"]
+    # Infection reads infection.json5 before infection.json.
+    (tmp_path / "infection.json").write_text(
+        '{"source": {"directories": ["other"]}}', encoding="utf-8"
+    )
+    assert php_sources(tmp_path) == ["lib", "src"]
+    (tmp_path / "infection.json5").unlink()
+    assert php_sources(tmp_path) == ["other"]
+    # A configuration that names no directory, or only the root, leaves lib/.
+    (tmp_path / "infection.json").write_text('{"timeout": 30}', encoding="utf-8")
+    assert php_sources(tmp_path) == ["lib"]
+    (tmp_path / "infection.json").write_text(
+        '{"source": {"directories": ["/"]}}', encoding="utf-8"
+    )
+    assert php_sources(tmp_path) == ["lib"]
+    (tmp_path / "infection.json").unlink()
+    (tmp_path / "infection.json.dist").write_text(
+        '{"source": {"directories": ["dist"]}}', encoding="utf-8"
+    )
+    assert php_sources(tmp_path) == ["dist"]
+
+
+def test_the_php_files_with_code_to_change(tmp_path: Path) -> None:
+    files(
+        tmp_path,
+        {
+            "lib/Service/Sync.php": php_class("Sync", 10),
+            "lib/Db/Mapper.php": php_class("Mapper", 7),
+            # No code that Infection changes.
+            "lib/Contract.php": "<?php\ninterface Contract {\n"
+            "    public function run(int $a): int;\n}\n",
+            "lib/Value.php": "<?php\nfinal class Value {\n"
+            "    public function __construct(public int $a) {}\n}\n",
+            "lib/notes.txt": "function a() { return 1; }\n",
+            # Not in the source.
+            "tests/SyncTest.php": php_class("SyncTest", 10),
+        },
+    )
+    (tmp_path / "lib/Folder.php").mkdir()
+
+    assert php_files(tmp_path) == {"lib/Db/Mapper.php": 7, "lib/Service/Sync.php": 10}
+
+
+def test_a_sample_of_php_files_takes_files_up_to_its_lines() -> None:
+    found = {f"lib/File{number}.php": 10 + number for number in range(10)}
+
+    chosen = sampled_files(found, 40)
+
+    assert chosen
+    assert sum(found[path] for path in chosen) <= 40
+    # The same files each time, whatever their order, and in the order of their paths.
+    assert sampled_files(dict(reversed(found.items())), 40) == chosen
+    assert chosen == sorted(chosen)
+    # All of the code is no sample: the part changes every file.
+    assert sampled_files(found, 145) == []
+    # A sample smaller than every file takes the smallest.
+    assert sampled_files(found, 5) == ["lib/File0.php"]
+
+
+def test_a_pull_request_of_a_nextcloud_app_tries_a_sample_of_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    php = files(
+        tmp_path,
+        {
+            "appinfo/info.xml": "<info/>",
+            "lib/A.php": php_class("A", 10),
+            "lib/B.php": php_class("B", 10),
+        },
+    )
+    every = ("php", [{"part": 1, "parts": 1, "patterns": "", "mutants": 0}])
+    # The weekly run, and a pull request of code no larger than the sample, change
+    # every file.
+    assert plan(php, None) == every
+    assert plan(php, 2, sample=True) == every
+    monkeypatch.setattr(mutation, "SAMPLE_LINES", 10)
+
+    kind, parts = plan(php, 3, sample=True)
+
+    assert kind == "php"
+    assert len(parts) == 1
+    assert parts[0]["patterns"] in ("lib/A.php", "lib/B.php")
+    assert cli.main(["mutation", "plan", "--sample"], root=php) == 0
+    captured = capsys.readouterr()
+    assert f"Infection changes the sample: {parts[0]['patterns']}." in captured.err
+    assert cli.main(["mutation", "plan"], root=php) == 0
+    captured = capsys.readouterr()
+    assert "Infection changes every file." in captured.err
+    assert "about" not in captured.err
 
 
 # ---------------------------------------------------------------- the configuration
