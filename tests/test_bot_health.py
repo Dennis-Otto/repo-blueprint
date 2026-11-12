@@ -96,9 +96,11 @@ def run_of(
     attempt: int = 1,
     created: datetime = NOW - timedelta(hours=3),
     sha: str = HEAD,
+    workflow: int = 1,
 ) -> dict[str, Any]:
     return {
         "id": number,
+        "workflow_id": workflow,
         "head_sha": sha,
         "name": name,
         "path": path,
@@ -1348,6 +1350,79 @@ def test_the_daily_look_at_the_stopped_runs_of_bot_health_waits_out_an_outage(
         f"Couldn't look: `GitHub answered {status}: simulated failure`"
     )
     assert len(notices) == int(healthy)
+
+
+def test_the_daily_look_opens_no_issue_for_a_stopped_run_of_bot_health_it_runs_again(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The latest finished run of Bot health is the stopped one: its second try comes
+    # after the look, so the look goes by the run before it and opens no issue.
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.workflow_runs[1] = [
+        stopped_own_run(github, 35),
+        own_run(31, conclusion="success"),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert github.reruns == [35]
+    assert github.issues == {}
+    assert "| `Bot health` | passes |" in summary
+
+
+@pytest.mark.parametrize(("status", "outage"), [(503, True), (403, False)])
+def test_the_daily_look_waits_out_an_outage_while_it_runs_bot_health_again(
+    github: FakeGitHub, tmp_path: Path, status: int, outage: bool
+) -> None:
+    github.workflows = [workflow(1, "Bot health", path=OWN_WORKFLOW)]
+    github.workflow_runs[1] = [
+        own_run(40, conclusion="success"),
+        stopped_own_run(github, 35),
+    ]
+    github.fail[("POST", f"repos/{REPO}/actions/runs/35/rerun-failed-jobs")] = 422
+    github.fail[("GET", f"repos/{REPO}/actions/runs/35")] = status
+    notices: list[str] = []
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW, notices=notices)
+
+    # An outage is no failure of the bot, any other error is.
+    assert healthy is outage
+    assert summary.splitlines()[-1] == (
+        f"Couldn't look: `GitHub answered {status}: simulated failure`"
+    )
+    assert len(notices) == int(outage)
+
+
+@pytest.mark.parametrize(("conclusion", "counts"), [("success", True), (None, False)])
+def test_a_late_second_try_of_bot_health_leaves_a_run_that_a_newer_one_follows(
+    github: FakeGitHub, conclusion: str | None, counts: bool
+) -> None:
+    # A stopped run of Bot health that the nightly look runs again a day late looks
+    # at an end that a newer run of the bot may have followed: then that one counts.
+    github.runs[1] = run_of(1, created=NOW - timedelta(days=1))
+    github.workflow_runs[1] = [
+        run_of(
+            2,
+            conclusion=conclusion,
+            status="completed" if conclusion else "in_progress",
+        ),
+        run_of(1, created=NOW - timedelta(days=1)),
+    ]
+
+    result = watch_run(api_of(github), REPO, 1, NOW)
+
+    if counts:
+        assert result == (
+            "Release: a newer run ended after [the run of 2026-10-12 12:00 UTC]"
+            f"(https://github.com/{REPO}/actions/runs/1), so that one counts, nothing "
+            "to do."
+        )
+        assert github.reruns == []
+    else:
+        assert result == "Release: failed: runs the failed jobs once more."
+        assert github.reruns == [1]
+    assert github.issues == {}
 
 
 # The runs that GitHub ended before their jobs in its outage of 9 November 2026, from
