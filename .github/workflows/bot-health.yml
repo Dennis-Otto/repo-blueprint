@@ -327,6 +327,9 @@ jobs:
       checks: read
       contents: read
       issues: write
+      # Ticks the box for a rebase of a pull request of Renovate that Renovate leaves
+      # alone after a merge of main by a person (decision 0143).
+      pull-requests: write
     steps:
       # GitHub's host of uploads too, which serves the uploaded social preview that the
       # look compares with .github/social-preview.png.
@@ -414,7 +417,7 @@ jobs:
           sparse-checkout: |
             .github
             blueprint
-      - name: Look at the latest run of every workflow, start the missed ones, and compare the social preview
+      - name: Look at the latest run of every workflow, start the missed ones, compare the social preview, and bring back the pull requests of Renovate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

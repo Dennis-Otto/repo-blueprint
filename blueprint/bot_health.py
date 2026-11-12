@@ -22,7 +22,10 @@ follows the end of this bot itself, so the daily look also runs the failed jobs 
 its own runs once more that Harden-Runner stopped (decision 0141). The same look
 keeps one issue open while the social preview that GitHub shows is not the committed
 .github/social-preview.png, which only a person can upload; its label is manual-step,
-not bot-failure, since nothing fails there. In the blueprint, it also
+not bot-failure, since nothing fails there. It also ticks the box for a rebase of a
+pull request of Renovate that Renovate leaves alone after a merge of the default
+branch by a person, and keeps one issue with those whose branch carries a change of a
+person that the new branch would drop (decision 0143). In the blueprint, it also
 keeps one issue with the warnings and errors in the log of Renovate.
 """
 
@@ -136,6 +139,20 @@ RENOVATE = "renovate"
 RENOVATE_TITLE = "Renovate logs problems"
 RENOVATE_LABEL = "dependencies"
 MOST_PROBLEMS = 50
+# The issue that lists the pull requests of Renovate that Renovate leaves alone and
+# that the daily look can't bring back by itself (decision 0143).
+PARKED = "renovate-parked"
+PARKED_TITLE = "Renovate leaves pull requests alone"
+# Renovate's branches, its comment on a pull request whose branch it takes for edited,
+# and the box in the description that asks it to build the branch anew.
+RENOVATE_BRANCH = "renovate/"
+EDITED = "Edited/Blocked Notification"
+BOX = "<!-- rebase-check -->"
+UNTICKED = f"- [ ] {BOX}"
+TICKED = f"- [x] {BOX}"
+# Renovate runs every two hours, or with every push of its Mend app: a box that has
+# been ticked this long without a new branch needs a person.
+REBUILD_TIME = timedelta(days=1)
 # The issue that asks for an upload of the social preview, which no API offers.
 PREVIEW = "social-preview"
 PREVIEW_TITLE = "Upload the new social preview"
@@ -1382,6 +1399,16 @@ def sweep(
             healthy = False
     if uploaded:
         lines += ["", "#### Social preview", "", uploaded]
+    try:
+        parked = parked_report(api, repo, issues.get(PARKED), now)
+    except GitHubError as error:
+        parked = f"Couldn't look: {code(str(error))}"
+        if not error.unavailable:
+            healthy = False
+        elif notices is not None and not notices:
+            notices.append(unreachable(error))
+    if parked:
+        lines += ["", "#### Pull requests of Renovate", "", parked]
     return "\n".join(lines) + "\n", healthy
 
 
@@ -1642,3 +1669,162 @@ def renovate_report(
         return f"{text}\nOpened #{number}.\n"
     api.patch(f"repos/{repo}/issues/{issue.number}", {"body": body})
     return f"{text}\nUpdated #{issue.number}.\n"
+
+
+# ---------------------------------------------------------------- Renovate's pull requests
+
+
+def account_of(commit: Mapping[str, Any]) -> str:
+    """The GitHub account that authored a commit, or nothing for an address that GitHub
+    links to none."""
+    return str((commit.get("author") or {}).get("login") or "")
+
+
+def blocked_after(
+    api: Api, repo: str, number: int, renovate: str, since: datetime
+) -> bool:
+    """Whether Renovate said on the pull request, after since, that it takes the branch
+    for edited: its own comment, not someone's quote of it."""
+    comments = api.get(f"repos/{repo}/issues/{number}/comments?per_page=100") or []
+    return any(
+        str((comment.get("user") or {}).get("login") or "") == renovate
+        and EDITED in str(comment.get("body") or "")
+        and datetime.fromisoformat(str(comment["updated_at"])) > since
+        for comment in comments
+    )
+
+
+def look_at_pull(
+    api: Api, repo: str, pull: Mapping[str, Any], now: datetime
+) -> tuple[str, bool] | None:
+    """The line of the summary for a pull request of Renovate that left its automatic
+    path, and whether a person has to act; None for one on that path.
+
+    Renovate rebuilds, rebases and merges its branch only while it takes every commit
+    on it for its own or for that of an author it ignores, such as the release app of
+    the bots (decision 0104). It leaves the branch alone after a commit of a person,
+    also a merge of the base that *Update branch* makes in their name, and after one
+    of a bot that it doesn't ignore, which its comment Edited/Blocked Notification
+    says. The box for a rebase brings it back: Renovate builds the branch anew from
+    the base, without those commits. The look ticks it where that drops nothing that
+    a new branch doesn't make again, merges of the base and commits of bots, and
+    leaves the changes of a person to that person (decision 0143)."""
+    number = int(pull["number"])
+    renovate = str((pull.get("user") or {}).get("login") or "")
+    commits = api.get(f"repos/{repo}/pulls/{number}/commits?per_page=100") or []
+    others = [commit for commit in commits if account_of(commit) != renovate]
+    people = [commit for commit in others if not account_of(commit).endswith("[bot]")]
+    if not people and not (
+        others
+        and blocked_after(
+            api,
+            repo,
+            number,
+            renovate,
+            datetime.fromisoformat(str(commits[-1]["commit"]["committer"]["date"])),
+        )
+    ):
+        return None
+    link = f"#{number} {code(str(pull['head']['ref']))}"
+    kept = [
+        str(commit["sha"])[:7]
+        for commit in people
+        if len(commit.get("parents") or []) < 2
+    ]
+    if kept:
+        shown = ", ".join(f"`{sha}`" for sha in kept)
+        return (
+            f"{link}: Renovate takes its branch for edited, and it carries changes of "
+            f"a person that aren't merges of the base ({shown}), which a new branch "
+            "would drop. Move what they change to a pull request of its own, then "
+            "tick the box for a rebase in its description, or close it.",
+            True,
+        )
+    body = str(pull.get("body") or "")
+    if UNTICKED in body:
+        api.patch(
+            f"repos/{repo}/pulls/{number}",
+            {"body": body.replace(UNTICKED, TICKED, 1)},
+        )
+        return (
+            f"{link}: Renovate took its branch for edited after merges of the base or "
+            "commits of bots, which a new branch makes again: ticked the box for a "
+            "rebase, and Renovate builds the branch anew in its next run.",
+            False,
+        )
+    if TICKED not in body:
+        return (
+            f"{link}: Renovate takes its branch for edited, and its description has no "
+            "box for a rebase: add the label `rebase`, which asks Renovate the same.",
+            True,
+        )
+    updated = datetime.fromisoformat(str(pull["updated_at"]))
+    if now - updated < REBUILD_TIME:
+        return (
+            f"{link}: its box for a rebase is ticked, and Renovate builds the branch "
+            "anew in its next run.",
+            False,
+        )
+    return (
+        f"{link}: its box for a rebase has been ticked since {moment(updated)}, and "
+        "Renovate hasn't built the branch anew: look at the log of Renovate's latest "
+        "run.",
+        True,
+    )
+
+
+def parked_body(reported: Sequence[str]) -> str:
+    """What the issue says: the pull requests, and when it closes."""
+    listed = "\n".join(f"- {line}" for line in reported)
+    return (
+        "Renovate leaves these pull requests alone: it no longer rebuilds, rebases or "
+        "merges their branches, and the daily look of the bot-health bot can't bring "
+        "them back by itself.\n\n"
+        f"{listed}\n\n"
+        "Bring a branch of Renovate up to date by leaving it to Renovate and the "
+        "branch bot, not with *Update branch*, which merges in your name. Where the "
+        "only commits that aren't Renovate's are such merges or commits of bots, the "
+        "daily look ticks the box for a rebase by itself. This issue closes once "
+        "Renovate takes each of these pull requests up again, or they are closed.\n"
+    )
+
+
+def parked_report(api: Api, repo: str, issue: Issue | None, now: datetime) -> str:
+    """Brings back the open pull requests of Renovate that it leaves alone where that
+    drops nothing of a person, and keeps the one issue with the others current. The
+    lines of the summary; empty when there is nothing to say."""
+    pulls = [
+        pull
+        for pull in api.get(f"repos/{repo}/pulls?state=open&per_page=100") or []
+        if str(pull["head"]["ref"]).startswith(RENOVATE_BRANCH)
+        # The name of a fork's branch says nothing about who made it.
+        and ((pull["head"].get("repo") or {}).get("full_name")) == repo
+    ]
+    found = [
+        look
+        for pull in sorted(pulls, key=lambda item: int(item["number"]))
+        for look in [look_at_pull(api, repo, pull, now)]
+        if look is not None
+    ]
+    lines = [f"- {line}" for line, _ in found]
+    reported = [line for line, person in found if person]
+    if reported:
+        body = f"{marker({'key': PARKED})}\n{parked_body(reported)}"
+        if issue is None:
+            number = open_issue(api, repo, PARKED_TITLE, body, [TYPE, RENOVATE_LABEL])
+            lines += ["", f"Opened #{number}."]
+        elif issue.body != body:
+            api.patch(f"repos/{repo}/issues/{issue.number}", {"body": body})
+            lines += ["", f"Updated #{issue.number}."]
+        else:
+            lines += ["", f"Listed in #{issue.number}."]
+    elif issue is not None:
+        close_issue(
+            api,
+            repo,
+            issue.number,
+            "Renovate takes every one of its open pull requests up again.",
+        )
+        lines += ["", f"Closed #{issue.number}."]
+    # Without a line of a pull request, a line of the issue alone.
+    return "\n".join(lines).strip("\n")
