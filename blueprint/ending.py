@@ -29,6 +29,10 @@ TITLE = "An acceptance of advisories in osv-scanner.toml ends soon"
 # The issue of the command, which it finds again by this mark in its text.
 MARKER = "<!-- blueprint: accepted advisories end -->"
 LABELS = ["dependencies", "security"]
+# The reason that the warning gives an entry of [[IgnoredVulns]] without one: it closes
+# no Dependabot alert, but OSV-Scanner reports its advisory again on its date all the
+# same.
+UNEXPLAINED = "(no reason given)"
 
 
 class Client(Protocol):
@@ -49,6 +53,12 @@ def ending(found: list[Acceptance], day: datetime.date) -> list[Acceptance]:
         soon,
         key=lambda item: (item.until, item.config, item.name, item.advisory),
     )
+
+
+def dated(root: Path) -> list[Acceptance]:
+    """Every acceptance of the repository that ends on a date, with a reason or
+    without."""
+    return acceptances(root, UNEXPLAINED)[0]
 
 
 def accepted(acceptance: Acceptance) -> str:
@@ -114,8 +124,10 @@ def body(soon: list[Acceptance]) -> str:
 
 
 def own_issue(client: Client, repo: str) -> Json:
-    """The open issue of the command, or None."""
-    for item in client.get_all(f"repos/{repo}/issues?state=open&labels={LABELS[0]}"):
+    """The open issue of the command, or None. It is found by its mark alone, so that
+    a label that someone takes away, or that the repository lacks, opens no second
+    one."""
+    for item in client.get_all(f"repos/{repo}/issues?state=open"):
         if "pull_request" not in item and MARKER in str(item.get("body") or ""):
             return item
     return None
@@ -136,8 +148,7 @@ def keep_issue(
     """Opens the one issue while an acceptance ends within WINDOW, keeps its text
     current, and closes it once none does; with dry_run, only says so."""
     day = dependabot.today()
-    found, _ = acceptances(root)
-    soon = ending(found, day)
+    soon = ending(dated(root), day)
     warnings = [
         f"::warning title=An accepted advisory ends soon::{line(item, day)}"
         for item in soon

@@ -1099,7 +1099,7 @@ def advisories_command(arguments: argparse.Namespace, root: Path) -> int:
         )
     # Only a note: the weekly run of OSV-Scanner warns and opens the issue.
     day = dependabot.today()
-    for soon in ending.ending(dependabot.acceptances(root)[0], day):
+    for soon in ending.ending(ending.dated(root), day):
         print(f"Ends soon: {ending.line(soon, day)}")
     return 0
 

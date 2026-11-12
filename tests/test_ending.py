@@ -170,7 +170,7 @@ def test_an_acceptance_that_ends_soon_opens_the_issue(tmp_path: Path) -> None:
 
     outcome = keep_issue(client, REPO, root)
 
-    assert client.asked == [f"repos/{REPO}/issues?state=open&labels=dependencies"]
+    assert client.asked == [f"repos/{REPO}/issues?state=open"]
     [(method, path, sent)] = client.changes
     assert (method, path) == ("POST", f"repos/{REPO}/issues")
     assert sent["title"] == TITLE
@@ -206,6 +206,32 @@ def test_the_issue_follows_the_acceptances(tmp_path: Path) -> None:
     assert changed.changes == [("PATCH", f"repos/{REPO}/issues/7", {"body": current})]
     assert same.changes == []
     assert outcome.summary[-1] == "#7 names them already."
+
+
+UNEXPLAINED = """\
+[[IgnoredVulns]]
+id = "GHSA-dddd-eeee-ffff"
+ignoreUntil = 2026-11-20
+"""
+
+
+@needs_git
+def test_an_ignored_advisory_without_a_reason_is_named_too(tmp_path: Path) -> None:
+    root = repository(tmp_path, {"osv-scanner.toml": UNEXPLAINED})
+    # It closes no Dependabot alert, but it ends on its date all the same.
+    assert dependabot.acceptances(root)[0] == []
+    # The issue whose label someone took away is still found by its mark.
+    client = FakeClient([issue(7, f"{MARKER}\nOlder text.", labels=[])])
+
+    outcome = keep_issue(client, REPO, root)
+
+    [(method, path, sent)] = client.changes
+    assert (method, path) == ("PATCH", f"repos/{REPO}/issues/7")
+    assert (
+        "the advisory GHSA-dddd-eeee-ffff until **2026-11-20**: (no reason given)"
+        in sent["body"]
+    )
+    assert len(outcome.warnings) == 1
 
 
 @needs_git
