@@ -1,6 +1,6 @@
 # A release moves a file of the project through a check that fixes itself
 
-- Status: accepted
+- Status: accepted, amended by [0143](0143-a-step-that-the-changelog-asks-of-an-existing-repository-is-a-migration-a-line-of-the-checklist-or-a-note.md)
 - Date: 2026-11-02
 
 ## Context

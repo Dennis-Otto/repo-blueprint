@@ -85,17 +85,24 @@ from blueprint.bot_health import (
 )
 from blueprint.changelog import Fragment, release_changelog
 from blueprint.checklist import (
+    BOT_TOOLS,
     CHROME_WEB_STORE_ITEM,
     CHROME_WEB_STORE_SIGN_IN,
     RELEASE_APP_PERMISSIONS,
     answer_steps,
+    bot_tools_allowed,
     social_preview,
 )
 from blueprint.coach import Catalog, missing, undeclared
 from blueprint.fixes import fixers, signed_off, watched
 from blueprint.github import Api
 from blueprint.locks import why_renovate_skips
-from blueprint.migrate import contribution_labels, migrate
+from blueprint.migrate import (
+    NO_BOT_FIXES_LABEL,
+    contribution_labels,
+    migrate,
+    no_bot_fixes_label,
+)
 from blueprint.mutation import NOTHING_MATCHES, default_paths
 from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
@@ -9129,6 +9136,34 @@ def test_the_move_of_the_labels_gives_what_a_new_repository_has(
     )
     assert 'group = "contribution"' not in old
     assert contribution_labels(old) == new
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_label_no_bot_fixes_comes_where_a_new_repository_has_it(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # As a repository has the file that took release 1.1.0 by an update.
+    new = (projects[kind] / ".github/labels.toml").read_text(encoding="utf-8")
+    old = new.replace(f"{NO_BOT_FIXES_LABEL}\n\n", "")
+    assert old != new
+    assert no_bot_fixes_label(old) == new
+
+
+def test_the_checklist_asks_for_each_tool_that_a_new_repository_allows(
+    projects: dict[str, Path],
+) -> None:
+    # The step of the checklist knows the tools of the blueprint bot that the template
+    # allows, since an update leaves the file of the project as it is.
+    for project in (ROOT, *projects.values()):
+        review = (project / ".github/dependency-review.yml").read_text(encoding="utf-8")
+        block = re.search(
+            r"  # The tools of the blueprint bot\b.*?\n((?:  - [^\n]*\n)+)",
+            review,
+            re.DOTALL,
+        )
+        assert block is not None, project
+        assert tuple(re.findall(r"  - (\S+)", block[1])) == BOT_TOOLS, project
+        assert bot_tools_allowed(project).done, project
 
 
 def test_the_update_of_every_kind_finishes_as_the_fix_bot_does() -> None:
