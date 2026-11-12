@@ -87,7 +87,9 @@ from blueprint.coach import (
 )
 from blueprint.diagrams import COMMIT, PART, git
 from blueprint.github import Api, GitHubError, Json
+from blueprint.migrate import MOVABLE
 from blueprint.pages import command as tool_command
+from blueprint.update import BRANCH as UPDATE_BRANCH
 from blueprint.update import gh, graphql, post
 
 HEADLINE = FIX_HEADLINE
@@ -349,6 +351,8 @@ UNREAD = {
     "commit",
     "main": "the pull request of main merges itself, without a person reading the "
     "commit",
+    "update": "the update of the blueprint merges by itself, without a person reading "
+    "the commit",
 }
 UNREAD_UNKNOWN = "nobody may read the commit before the pull request merges"
 
@@ -368,9 +372,12 @@ def runs_with_rights(path: str) -> bool:
 def why_unread(pull: Json) -> str:
     """Why nobody reads a commit of the bot on a pull request before it merges, as a
     key of UNREAD, or nothing when its author does: a bot's merges once green, and one
-    whose auto-merge is on merges without another look at a later commit."""
+    whose auto-merge is on merges without another look at a later commit. The update
+    of the blueprint is the bot's own pull request from the branch of the blueprint
+    bot, which only the release app pushes; plan has left those of a fork out."""
     if str((pull.get("user") or {}).get("type")) == "Bot":
-        return "bot"
+        head = str((pull.get("head") or {}).get("ref"))
+        return "update" if head == UPDATE_BRANCH else "bot"
     if pull.get("auto_merge") is not None:
         return "auto-merge"
     return ""
@@ -381,14 +388,16 @@ def for_unread(fixes: Fixes, why: str | None) -> Fixes:
     none of a file that decides what a workflow runs, or that runs with its rights. What
     runs in a check, such as a dependency of the branch, writes the files that it kept,
     and a job without rights must not reach one with them that way. Where the author
-    reads the commit, why is empty and every fix stays; None means it isn't known."""
+    reads the commit, why is empty and every fix stays; None means it isn't known. On
+    the update of the blueprint, a file that a migration moves stays too, as decision
+    0111 has the bot commit the move (blueprint/migrate.py)."""
     if why == "":
         return fixes
     reason = UNREAD.get(why or "", UNREAD_UNKNOWN)
     kept: dict[str, bytes] = {}
     left = dict(fixes.left)
     for path, data in fixes.files.items():
-        if runs_with_rights(path):
+        if runs_with_rights(path) and not (why == "update" and path in MOVABLE):
             left[path] = (
                 f"decides what a workflow runs, and {reason}, so a person commits "
                 "its fix"

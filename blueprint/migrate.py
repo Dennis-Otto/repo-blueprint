@@ -19,6 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 LABELS = ".github/labels.toml"
+# The files that a migration may move: the fix bot commits a fix of them onto the pull
+# request of an update, which merges by itself (decision 0142), and of no other file
+# that decides what a workflow runs. They are data that no job runs as code. The bot
+# that decides is the copy of main, from the release before, so a new path comes here
+# one release before the first migration of it; a test keeps each migration's path in.
+MOVABLE = frozenset({LABELS})
 # The first label of the group contribution is the one that the digest of the issue
 # assistant tells the maintainer to add, so this is their order.
 CONTRIBUTION = ("good first issue", "help wanted")

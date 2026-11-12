@@ -37,6 +37,7 @@ from blueprint.fixes import (
     MADE_BY,
     MAIN_EVENTS,
     OPT_OUT,
+    RIGHTS_FOLDERS,
     RIGHTS_SCRIPTS,
     SUGGESTED,
     Command,
@@ -87,6 +88,8 @@ from blueprint.fixes import (
     why_unread,
 )
 from blueprint.github import Api, GitHubError
+from blueprint.migrate import LABELS, MIGRATIONS, MOVABLE
+from blueprint.update import BRANCH as UPDATE_BRANCH
 
 ROOT = Path(__file__).parents[1]
 REPO = "o/r"
@@ -2158,6 +2161,50 @@ def test_what_nobody_reads_keeps_every_other_reason() -> None:
     assert left.files == {}
     assert list(left.left) == [".github/blueprint.py", "a.bin", "blueprint/cli.py"]
     assert left.left["a.bin"] == "no text file"
+
+
+def test_the_update_of_the_blueprint_is_unread_by_its_branch() -> None:
+    github = FakeGitHub()
+    github.pull()
+    github.pulls[0]["user"] = {"type": "Bot"}
+    github.pulls[0]["head"]["ref"] = UPDATE_BRANCH
+
+    decided = plan(api_of(github), REPO, SHA, "pull_request", UPDATE_BRANCH, 42, FIXES)
+
+    assert (decided.action, decided.unread) == ("commit", "update")
+    # A person's branch of that name is still read by its author.
+    assert why_unread({"user": {"type": "User"}, "head": {"ref": UPDATE_BRANCH}}) == ""
+
+
+def test_the_update_of_the_blueprint_gets_the_move_of_a_migration() -> None:
+    # Decision 0111: the update merges by itself once the bot committed the move.
+    github = FakeGitHub()
+    fixes = with_rights(github)
+    github.files[LABELS] = b'group = "decision"\n'
+    fixes = Fixes(fixes.files | {LABELS: b'group = "contribution"\n'})
+
+    said = commit_onto_branch(
+        api_of(github), REPO, "feature", SHA, fixes, "app", "u", "update"
+    )
+
+    (request,) = github.graphql
+    assert [
+        addition["path"]
+        for addition in request["variables"]["input"]["fileChanges"]["additions"]
+    ] == ["app.py", LABELS]
+    for path in WITH_RIGHTS:
+        assert f"- `{path}`: decides what a workflow runs, and the update" in said
+    # On any other pull request that nobody reads, the file stays with a person.
+    assert LABELS in for_unread(Fixes({LABELS: b""}), "bot").left
+
+
+def test_a_migration_moves_only_data_that_the_bot_may_commit() -> None:
+    # The bot of main decides, so a new path comes to MOVABLE before its migration.
+    assert {migration.path for migration in MIGRATIONS} <= MOVABLE
+    for path in MOVABLE:
+        assert not path.startswith((".github/workflows/", ".github/actions/"))
+        assert path.endswith(".toml")
+        assert path.split("/")[0] not in RIGHTS_FOLDERS
 
 
 def test_too_many_files_for_one_answer_stop_the_bot() -> None:

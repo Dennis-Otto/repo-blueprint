@@ -2273,7 +2273,7 @@ def add_fix_parsers(
     commit_fixes_parser.add_argument(
         "--unread",
         help="why nobody reads the commit before the merge, as fix collect said: "
-        "bot, auto-merge, or empty when its author does; without it, the bot commits "
+        "bot, auto-merge, update, or empty when its author does; without it, the bot commits "
         "no file that decides what a workflow runs",
     )
     suggest_parser.add_argument("--pull", required=True)

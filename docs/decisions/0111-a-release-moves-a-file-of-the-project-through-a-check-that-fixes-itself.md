@@ -37,3 +37,4 @@ The first migration moves `good first issue` and `help wanted` to `contribution`
 - The job `update (kind)` of *Variants* runs the same command after `copier update`, as the fix bot would, and so tests each migration on the files of the latest release.
 - A project that moves a label back without the comment gets it moved again.
 - The way back from a migration is to delete it from `MIGRATIONS`; the files it moved stay as they are.
+- The bot commits the move only of a file in `MOVABLE` of `blueprint/migrate.py`, as nobody reads the update before it merges ([decision 0142](0142-the-fix-bot-commits-nothing-that-runs-with-rights-where-nobody-reads-its-commit.md)). The bot of `main` decides from the release before, so a migration of a new file comes a release after that file joins `MOVABLE`.
