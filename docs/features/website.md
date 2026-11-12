@@ -8,7 +8,7 @@ The documentation in `docs/` as a website with search and a light and a dark the
 
 More languages work the same way, such as `/de/`, `/nl/` and `/fr/` once `mkdocs.yml` names them: a page that one of them hasn't translated stays a copy of the English page that names no versions, whichever other language translated it; the report of a pull request links a changed page at its address, `nl/faq.html` for `docs/faq.nl.md`; and the hints at the spelling and the style leave out a page in a language that they can't read.
 
-**How:** MkDocs 1.6 with the Material theme, which Renovate holds below MkDocs 2 until every website moves to Zensical before the maintenance of Material ends on 5 May 2027, as [decision 0144](../decisions/0144-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) plans it, `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
+**How:** MkDocs 1.6 with the Material theme, which Renovate holds below MkDocs 2 until every website moves to Zensical before the maintenance of Material ends on 5 May 2027, as [decision 0145](../decisions/0145-every-website-moves-to-zensical-before-the-maintenance-of-material-for-mkdocs-ends.md) plans it, `mkdocs.yml`, `docs.yml`, `.github/mkdocs_blueprint.py`, `.github/a11y/`.
 
 ## Diagrams that fix themselves
 

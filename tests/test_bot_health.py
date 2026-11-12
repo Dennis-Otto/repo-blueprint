@@ -176,6 +176,10 @@ class FakeGitHub:
         self.graphql_refused = False
         self.graphql_error = "refused"
         self.picture_commits: list[dict[str, str]] = [{"sha": HEAD}]
+        # The open pull requests, and the commits and comments of each.
+        self.pulls: list[dict[str, Any]] = []
+        self.pull_commits: dict[int, list[dict[str, Any]]] = {}
+        self.pull_comments: dict[int, list[dict[str, Any]]] = {}
         self.calls: list[tuple[str, str]] = []
 
     def __call__(
@@ -230,6 +234,10 @@ class FakeGitHub:
             (r"/issues", self.new_issue),
             (r"/issues/(\d+)", self.issue),
             (r"/issues/(\d+)/comments", self.comment),
+            (r"/issues/(\d+)/comments\?per_page=100", self.comments_of_pull),
+            (r"/pulls\?state=open&per_page=100", self.open_pulls),
+            (r"/pulls/(\d+)", self.pull),
+            (r"/pulls/(\d+)/commits\?per_page=100", self.commits_of_pull),
             (r"/labels(?:/([\w-]+))?", self.label),
             (r"/actions/workflows\?per_page=100", self.workflow_list),
             (
@@ -347,6 +355,21 @@ class FakeGitHub:
     def comment(self, method: str, body: Any, number: str) -> tuple[int, Any]:
         self.comments.setdefault(int(number), []).append(body["body"])
         return 201, {}
+
+    def comments_of_pull(self, method: str, body: Any, number: str) -> tuple[int, Any]:
+        return 200, self.pull_comments.get(int(number), [])
+
+    def open_pulls(self, method: str, body: Any) -> tuple[int, Any]:
+        return 200, self.pulls
+
+    def pull(self, method: str, body: Any, number: str) -> tuple[int, Any]:
+        assert method == "PATCH"
+        found = next(pull for pull in self.pulls if pull["number"] == int(number))
+        found.update(body)
+        return 200, found
+
+    def commits_of_pull(self, method: str, body: Any, number: str) -> tuple[int, Any]:
+        return 200, self.pull_commits.get(int(number), [])
 
     def label(self, method: str, body: Any, name: str | None) -> tuple[int, Any]:
         if method == "GET":
@@ -3454,3 +3477,276 @@ def test_the_command_line_of_the_bot(
     github.known = False
     assert cli.main([*arguments, "run", "1"], Api(github), tmp_path) == 2
     assert "doesn't know the repository" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- Renovate's pull requests
+
+# The account that Renovate runs as: the release app, in a Renovate workflow.
+RENOVATE_BOT = "octo-release[bot]"
+PULLS = f"repos/{REPO}/pulls?state=open&per_page=100"
+
+
+def renovate_pull(
+    number: int,
+    *,
+    branch: str = "renovate/lock-file-maintenance",
+    box: str | None = " ",
+    updated: datetime = NOW - timedelta(hours=3),
+    head: str | None = REPO,
+) -> dict[str, Any]:
+    """An open pull request of Renovate, with its box for a rebase unticked (" "),
+    ticked ("x") or missing (None)."""
+    ticks = (
+        ""
+        if box is None
+        else f"\n - [{box}] <!-- rebase-check -->If you want to rebase/retry this PR, "
+        "check this box\n"
+    )
+    return {
+        "number": number,
+        "user": {"login": RENOVATE_BOT},
+        "head": {
+            "ref": branch,
+            "repo": {"full_name": head} if head else None,
+        },
+        "body": f"This PR refreshes the lock files.\n\n---\n{ticks}\n---\n",
+        "updated_at": stamp(updated),
+    }
+
+
+def commit_of(
+    sha: str,
+    login: str | None = RENOVATE_BOT,
+    *,
+    merge: bool = False,
+    when: datetime = NOW - timedelta(hours=5),
+) -> dict[str, Any]:
+    """A commit of the pull request: of an account, or of an address that GitHub links
+    to none (None); a merge has two parents."""
+    return {
+        "sha": sha * 40,
+        "author": {"login": login} if login else None,
+        "parents": [{"sha": "0" * 40}] * (2 if merge else 1),
+        "commit": {"committer": {"date": stamp(when)}},
+    }
+
+
+def edited_comment(
+    login: str = RENOVATE_BOT, when: datetime = NOW - timedelta(hours=1)
+) -> dict[str, Any]:
+    return {
+        "user": {"login": login},
+        "body": "### Edited/Blocked Notification\n\nRenovate will not automatically "
+        "rebase this PR, because it does not recognize the last commit author and "
+        "assumes somebody else may have edited the PR.",
+        "updated_at": stamp(when),
+    }
+
+
+def renovate_lines(summary: str) -> list[str]:
+    lines = summary.splitlines()
+    return lines[lines.index("#### Pull requests of Renovate") + 2 :]
+
+
+def test_the_daily_look_ticks_the_box_of_renovate_after_a_merge_of_main_by_a_person(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # #746 of 9 November 2026: two merges of main with Update branch, in the name of
+    # a person, and Renovate left the branch alone for good.
+    github.pulls = [renovate_pull(746, branch="renovate/pip-compile-refresh")]
+    github.pull_commits[746] = [
+        commit_of("a"),
+        commit_of("b", "Dennis-Otto", merge=True),
+        commit_of("c", "Dennis-Otto", merge=True),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert "- [x] <!-- rebase-check -->" in github.pulls[0]["body"]
+    assert "- [ ] <!-- rebase-check -->" not in github.pulls[0]["body"]
+    assert renovate_lines(summary) == [
+        "- #746 `renovate/pip-compile-refresh`: Renovate took its branch for edited "
+        "after merges of the base or commits of bots, which a new branch makes again: "
+        "ticked the box for a rebase, and Renovate builds the branch anew in its next "
+        "run."
+    ]
+    assert github.issues == {}
+    # Renovate's word was not needed: the commits of a person say it.
+    assert ("GET", f"repos/{REPO}/issues/746/comments?per_page=100") not in (
+        github.calls
+    )
+
+
+def test_the_daily_look_leaves_renovate_alone_on_its_automatic_path(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    github.pulls = [
+        # Renovate's own commits, and one of the bots that Renovate ignores.
+        renovate_pull(1),
+        # No commit to look at.
+        renovate_pull(2, branch="renovate/actions"),
+        # A bot that Renovate didn't complain about, or long before its commit.
+        renovate_pull(3, branch="renovate/python"),
+        # Not Renovate's: another branch, and a fork's branch of the same name.
+        renovate_pull(4, branch="feat/dark-mode"),
+        renovate_pull(5, head="someone/demo"),
+        renovate_pull(6, head=None),
+    ]
+    github.pull_commits[1] = [commit_of("a"), commit_of("b", "release[bot]")]
+    github.pull_commits[3] = [commit_of("a"), commit_of("b", "github-actions[bot]")]
+    github.pull_comments[3] = [
+        edited_comment(when=NOW - timedelta(hours=6)),
+        # Someone who quotes Renovate.
+        edited_comment("Dennis-Otto"),
+    ]
+    for number in (4, 5, 6):
+        github.pull_commits[number] = [commit_of("a", "Dennis-Otto")]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert "Renovate" not in summary
+    assert writes(github) == []
+
+
+def test_the_daily_look_ticks_the_box_after_renovate_named_a_bot_it_doesnt_ignore(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    # The Mend Renovate app ignores the release app alone: a commit of another bot
+    # parks the branch, which Renovate says in its comment.
+    github.pulls = [renovate_pull(9)]
+    github.pull_commits[9] = [commit_of("a"), commit_of("b", "github-actions[bot]")]
+    github.pull_comments[9] = [edited_comment()]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert "- [x] <!-- rebase-check -->" in github.pulls[0]["body"]
+    assert renovate_lines(summary)[0].startswith(
+        "- #9 `renovate/lock-file-maintenance`: Renovate took its branch for edited"
+    )
+
+
+@pytest.mark.parametrize("login", ["Dennis-Otto", None])
+def test_the_daily_look_reports_a_change_of_a_person_on_a_branch_of_renovate(
+    github: FakeGitHub, tmp_path: Path, login: str | None
+) -> None:
+    # A new branch would drop it, so the look ticks nothing and asks a person.
+    github.pulls = [renovate_pull(790, branch="renovate/vimeo-psalm-7.x")]
+    github.pull_commits[790] = [
+        commit_of("a"),
+        commit_of("b", login),
+        commit_of("c", "Dennis-Otto", merge=True),
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert "- [ ] <!-- rebase-check -->" in github.pulls[0]["body"]
+    line = (
+        "#790 `renovate/vimeo-psalm-7.x`: Renovate takes its branch for edited, and "
+        "it carries changes of a person that aren't merges of the base (`bbbbbbb`), "
+        "which a new branch would drop. Move what they change to a pull request of "
+        "its own, then tick the box for a rebase in its description, or close it."
+    )
+    assert renovate_lines(summary) == [f"- {line}", "", "Opened #1."]
+    issue = github.issues[1]
+    assert issue["title"] == "Renovate leaves pull requests alone"
+    assert issue["labels"] == [LABEL, "maintenance", "dependencies"]
+    assert MARKER.search(issue["body"])
+    assert f"\n- {line}\n" in issue["body"]
+
+    # The next look finds the same: the issue stays as it is.
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert renovate_lines(summary)[-1] == "Listed in #1."
+    assert ("PATCH", f"repos/{REPO}/issues/1") not in github.calls
+
+    # Another pull request joins it.
+    github.pulls.append(renovate_pull(791, box=None))
+    github.pull_commits[791] = [commit_of("a"), commit_of("d", "Dennis-Otto")]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert renovate_lines(summary)[-1] == "Updated #1."
+    assert "#791" in github.issues[1]["body"]
+
+    # The person moved the change and ticked the box; Renovate built both anew.
+    github.pull_commits[790] = github.pull_commits[791] = [commit_of("e")]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert renovate_lines(summary) == ["Closed #1."]
+    assert github.issues[1]["state"] == "closed"
+    assert github.comments[1] == [
+        "Renovate takes every one of its open pull requests up again."
+    ]
+
+
+def test_the_daily_look_reports_a_branch_of_renovate_without_a_box(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    github.pulls = [renovate_pull(5, box=None)]
+    github.pull_commits[5] = [commit_of("a"), commit_of("b", "Dennis-Otto", merge=True)]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert renovate_lines(summary) == [
+        "- #5 `renovate/lock-file-maintenance`: Renovate takes its branch for edited, "
+        "and its description has no box for a rebase: add the label `rebase`, which "
+        "asks Renovate the same.",
+        "",
+        "Opened #1.",
+    ]
+
+
+def test_the_daily_look_waits_a_day_for_renovate_after_the_box_was_ticked(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    github.pulls = [
+        renovate_pull(7, box="x"),
+        renovate_pull(8, box="x", updated=NOW - timedelta(days=1, minutes=1)),
+        # The night before, by a run that started a few minutes later than this one.
+        renovate_pull(9, box="x", updated=NOW - timedelta(hours=23, minutes=55)),
+    ]
+    for number in (7, 8, 9):
+        github.pull_commits[number] = [
+            commit_of("a"),
+            commit_of("b", "Dennis-Otto", merge=True),
+        ]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert renovate_lines(summary) == [
+        "- #7 `renovate/lock-file-maintenance`: its box for a rebase is ticked, and "
+        "Renovate builds the branch anew in its next run.",
+        "- #8 `renovate/lock-file-maintenance`: its box for a rebase has been ticked "
+        "since 2026-10-12 11:59 UTC, and Renovate hasn't built the branch anew: look "
+        "at the log of Renovate's latest run.",
+        "- #9 `renovate/lock-file-maintenance`: its box for a rebase has been ticked "
+        "since 2026-10-12 12:05 UTC, and Renovate hasn't built the branch anew: look "
+        "at the log of Renovate's latest run.",
+        "",
+        "Opened #1.",
+    ]
+    assert "#7" not in github.issues[1]["body"]
+    assert ("PATCH", f"repos/{REPO}/pulls/7") not in github.calls
+
+
+@pytest.mark.parametrize(("status", "healthy"), [(503, True), (403, False)])
+def test_the_daily_look_at_renovate_waits_out_an_outage(
+    github: FakeGitHub, tmp_path: Path, status: int, healthy: bool
+) -> None:
+    github.fail[("GET", PULLS)] = status
+    notices: list[str] = []
+
+    summary, looked = sweep(api_of(github), REPO, tmp_path, NOW, notices=notices)
+
+    assert looked is healthy
+    assert renovate_lines(summary) == [
+        f"Couldn't look: `GitHub answered {status}: simulated failure`"
+    ]
+    assert len(notices) == int(healthy)
+    # Without a list of notices, the summary alone says it.
+    _, looked = sweep(api_of(github), REPO, tmp_path, NOW)
+    assert looked is healthy

@@ -10136,7 +10136,7 @@ def test_renovate_holds_mkdocs_below_2_until_every_website_moves(
     projects: dict[str, Path], kind: str
 ) -> None:
     # MkDocs 2.0 leaves out the plugins and the theme of every website, so a stable
-    # 2.0 must not come as a routine pull request before the move that decision 0144
+    # 2.0 must not come as a routine pull request before the move that decision 0145
     # plans; the rule names its reason.
     rules = (projects[kind] / ".github/renovate-blueprint.json5").read_text(
         encoding="utf-8"
@@ -10149,16 +10149,16 @@ def test_renovate_holds_mkdocs_below_2_until_every_website_moves(
         rules,
     )
     assert rule
-    assert "decision 0144" in rule[1]
+    assert "decision 0145" in rule[1]
     assert "5 May 2027" in rule[1]
 
 
 def test_the_lock_of_the_websites_stays_on_mkdocs_1_until_the_move() -> None:
     # The lock of the website's tools, which every repository gets, is on MkDocs 1,
-    # and decision 0144 plans the move away from it.
+    # and decision 0145 plans the move away from it.
     lock = (ROOT / "stacks/docs/requirements-docs.txt").read_text(encoding="utf-8")
     assert re.search(r"^mkdocs==1\.\d+\.\d+ \\$", lock, re.M)
-    assert list((ROOT / "docs/decisions").glob("0144-*zensical*.md"))
+    assert list((ROOT / "docs/decisions").glob("0145-*zensical*.md"))
 
 
 @pytest.mark.parametrize("kind", KINDS)
