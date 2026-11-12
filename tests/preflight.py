@@ -1,8 +1,9 @@
 """What git and gh answer to the preflight of blueprint.py create when nothing in it
 stops create: a Git with an identity that signs every commit, a GitHub CLI after
 2.48, signed in as octocat with the scopes of gh auth login and workflow, an
-organization that octocat owns, and a name that GitHub doesn't have yet. The tests of create and of the command line
-start from these and change the one answer that they are about."""
+organization that octocat owns, and a name that GitHub doesn't have yet. The tests of
+create and of the command line start from these and change the one answer that they
+are about."""
 
 from __future__ import annotations
 
