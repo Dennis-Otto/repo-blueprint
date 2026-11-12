@@ -26887,6 +26887,39 @@ def test_the_dependabot_alert_bot_asks_for_the_alerts_alone(
     assert run["env"]["DRY_RUN"] == "${{ inputs.dry_run || false }}"
 
 
+@pytest.mark.parametrize("project", ["blueprint", *KINDS])
+def test_the_weekly_osv_scanner_run_warns_before_an_acceptance_ends(
+    projects: Mapping[str, Path], project: str
+) -> None:
+    # The acceptance of the Pillow of Home Assistant would have ended quietly, and
+    # every check with a lock file turned red the next day (repo-blueprint#851): the
+    # job of the alerts warns two weeks before, with the token of the job, which may
+    # write the issue that names the acceptances and nothing else.
+    root = ROOT if project == "blueprint" else projects[project]
+    job = workflow_steps.job("osv-scanner.yml", "dependabot", root)
+    warn = workflow_steps.step_in(job, "Warn of the acceptances that end soon")
+
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
+    assert "advisories --ending" in warn["run"]
+    assert '"$GITHUB_STEP_SUMMARY"' in warn["run"]
+    assert warn["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "DRY_RUN": "${{ inputs.dry_run || false }}",
+    }
+    # Also after the app couldn't close the alerts, which needs no app, but never
+    # without the block of Harden-Runner.
+    assert warn["if"] == (
+        "always() && steps.blocks.outcome != 'failure' && "
+        "steps.checkout.outcome == 'success'"
+    )
+    names = [step.get("name") for step in job["steps"]]
+    assert names.index(warn["name"]) > names.index(
+        "Close the alerts that osv-scanner.toml accepts"
+    )
+    script = root / ".github" / "blueprint" / "ending.py"
+    assert project == "blueprint" or script.is_file()
+
+
 @pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
 @pytest.mark.parametrize(
     ("strict", "code", "level"), [("true", 1, "error"), ("false", 0, "notice")]
