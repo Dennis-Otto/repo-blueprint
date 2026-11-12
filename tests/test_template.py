@@ -10193,9 +10193,10 @@ def test_renovate_follows_an_action_pinned_to_a_branch_at_once(
 def test_renovate_brings_every_image_without_a_collision(
     projects: dict[str, Path], kind: str
 ) -> None:
-    # No registry gives Renovate the date of a release of an image that it can wait a
-    # week from, and Renovate holds an update without a date for good: the images of
-    # the compose files got no new version for weeks (#859, decision 0148).
+    # ghcr.io and Docker Hub, for an image of more than 1,000 tags, give Renovate no
+    # date of a release, and Renovate held an update without a date for good: the
+    # images of the compose files got no new version for weeks (#859, decision 0148).
+    # An image with a date still waits the week.
     root = ROOT if kind == "blueprint" else projects[kind]
     text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     shared = renovate_rules(text)
@@ -10203,7 +10204,10 @@ def test_renovate_brings_every_image_without_a_collision(
     rules = [*shared["packageRules"], *own.get("packageRules", [])]
     docker = [rule for rule in rules if rule.get("matchDatasources") == ["docker"]]
     assert docker == [
-        {"matchDatasources": ["docker"], "minimumReleaseAge": None},
+        {
+            "matchDatasources": ["docker"],
+            "minimumReleaseAgeBehaviour": "timestamp-optional",
+        },
         {
             "matchDatasources": ["docker"],
             "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
@@ -10219,20 +10223,23 @@ def test_renovate_brings_every_image_without_a_collision(
         },
     ]
     assert "decision 0148" in text
-    # No later rule gives an image a release age again; the refresh of the lock files
-    # has one, and it is no image.
-    after = rules[rules.index(docker[0]) + 1 :]
-    for rule in after:
-        if rule.get("minimumReleaseAge"):
-            assert rule["matchUpdateTypes"] == ["lockFileMaintenance"], rule
+    # The week of waiting stays for an image with a date, and no rule asks for a date
+    # again.
+    assert shared["minimumReleaseAge"] == "7 days"
+    behaviours = [rule for rule in rules if "minimumReleaseAgeBehaviour" in rule]
+    assert behaviours == docker[:1]
+    assert "minimumReleaseAgeBehaviour" not in shared
     # The new digest of a tag goes into a branch of its own also in a group of the
     # project, which sets no group of its own: in one branch with the new version of
     # the same image, Renovate keeps only one of them.
     assert [rule for rule in rules if "group" in rule] == docker[2:]
     # Renovate logs a collision at the level info, which the issue of its problems,
     # from the warnings alone, would miss.
+    # Its warning of every update without a date, which the rule of the images lets
+    # pass, is no problem.
     assert shared["logLevelRemap"] == [
-        {"matchMessage": COLLISION, "newLogLevel": "warn"}
+        {"matchMessage": COLLISION, "newLogLevel": "warn"},
+        {"matchMessage": "/did not have a releaseTimestamp/", "newLogLevel": "info"},
     ]
 
 
