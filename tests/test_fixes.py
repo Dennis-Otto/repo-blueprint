@@ -3520,6 +3520,10 @@ def test_the_draft_of_an_entry_says_what_the_title_says(
         "fix: | cell",
         "fix: , and more",
         "fix:: double",
+        "fix: --- rule",
+        "fix: . end",
+        "fix: / root",
+        "fix: $HOME expands",
     ],
 )
 def test_a_title_that_could_be_more_than_words_gets_no_draft(title: str) -> None:
@@ -3538,7 +3542,9 @@ def test_every_draft_is_a_fragment_that_the_release_takes_in(
     assert not re.search(r"[<@]|\]\(|://|\bwww\.", text, re.I)
     # One item of a list, whose words begin as words, never a second mark of a block.
     entry = text.splitlines()[2]
-    assert re.match(r"- (\*\*\S|[^\W_]|[`\"'\u201c\u2018\u201e(])", entry), entry
+    assert re.match(
+        r"- (\*\*\S|[^\W_]|[`\"'\u201c\u2018\u201e(]|(?:[./]|--?)[^\W_])", entry
+    ), entry
     assert not re.match(r"- \d+[.)](\s|$)", entry), entry
 
 
