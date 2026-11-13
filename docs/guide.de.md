@@ -55,7 +55,7 @@ Was eine Person einmal erledigt: die Release-App des Kontos und seine Vorgaben, 
 
 Der Blueprint funktioniert für jedes Konto und jede Organisation auf GitHub, und ein Repository daraus nennt nichts vom Eigentümer des Blueprints außer den Links auf den Blueprint. Jeder Eigentümer bringt zwei eigene Dinge mit:
 
-- **Eine Release-App,** einmal für alle seine Repositories. Die Bots handeln als GitHub App des Eigentümers: Ihr Token startet die Prüfungen der Release- und Update-Pull-Requests, darf Workflows ändern und legt die Release-Tags an, was das Token eines Jobs nicht kann. Nur der Eigentümer einer App hat ihren privaten Schlüssel, deshalb kann der Blueprint seine eigene nicht verleihen. Kopiere den Blueprint und lass die Frage nach der Release-App leer, dann registriert sie nach `create` ein Befehl auf deinem Konto oder deiner Organisation, mit Name und Berechtigungen vorausgefüllt und ohne Webhook:
+- **Eine Release-App,** einmal für alle seine Repositorys. Die Bots handeln als GitHub App des Eigentümers: Ihr Token startet die Prüfungen der Release- und Update-Pull-Requests, darf Workflows ändern und legt die Release-Tags an, was das Token eines Jobs nicht kann. Nur der Eigentümer einer App hat ihren privaten Schlüssel, deshalb kann der Blueprint seine eigene nicht verleihen. Kopiere den Blueprint und lass die Frage nach der Release-App leer, dann registriert sie nach `create` ein Befehl auf deinem Konto oder deiner Organisation, mit Name und Berechtigungen vorausgefüllt und ohne Webhook:
 
   ```sh
   python3 .github/blueprint.py app register

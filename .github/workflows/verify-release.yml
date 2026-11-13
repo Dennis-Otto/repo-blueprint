@@ -223,12 +223,18 @@ jobs:
           git init --quiet "$RUNNER_TEMP/tag"
           git -C "$RUNNER_TEMP/tag" fetch --quiet --depth=1 "https://github.com/$GH_REPO.git" "refs/tags/$TAG:refs/tags/$TAG" ||
             stop "The tag $TAG can't be fetched from the repository."
+          # The signature covers the name inside the tag, not the name of the ref: a new
+          # ref at the signed tag of an older release would pass the signature, as
+          # .github/sign-tag.sh and SECURITY.md say.
+          name="$(git -C "$RUNNER_TEMP/tag" cat-file tag "$TAG" 2>/dev/null | sed -n '/^$/q; s/^tag //p')"
           if [[ "$(git -C "$RUNNER_TEMP/tag" cat-file -t "$TAG")" != tag ]]; then
             if [[ "$WEEKLY" == true ]]; then
               echo "::notice::The tag $TAG is older than the signed tags."
             else
               fail "The tag $TAG is not a signed tag."
             fi
+          elif [[ "$name" != "$TAG" ]]; then
+            fail "The tag $TAG is the signed tag $name of another version."
           elif (cd "$RUNNER_TEMP/tag" && "$gitsign" verify-tag "$TAG" \
             --certificate-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@refs/heads/main" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1); then

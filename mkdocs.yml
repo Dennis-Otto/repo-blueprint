@@ -28,6 +28,13 @@ copyright: "© 2026 Dennis Otto"
 # CHANGELOG.md.
 edit_uri: ""
 
+# The logo of the social preview, .github/social-preview.html, in the header and as
+# the icon of the tab, in place of Material's book. The theme of the blueprint merges
+# in from .github/mkdocs-blueprint.yml.
+theme:
+  logo: images/logo.svg
+  favicon: images/logo.svg
+
 plugins:
   search:
     lang: [en, de]

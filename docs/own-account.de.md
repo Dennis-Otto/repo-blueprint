@@ -12,7 +12,7 @@ Der Blueprint funktioniert für jedes Konto und jede Organisation auf GitHub. Ei
 - **Renovate,** das die Abhängigkeiten aktuell hält: in einem Workflow jedes Repositorys, als deine Release-App, oder als Mend-Renovate-App, die du installierst. Der Renovate-Workflow des Blueprints läuft nur für die Repositorys des Eigentümers des Blueprints.
 - **Die KI des Issue-Assistenten** ist optional. Ohne sie labelt der Issue-Assistent neue Issues weiter, erinnert und schließt und führt die Befehle des Maintainers aus, und es braucht kein Secret.
 - **Die Settings-App** ist optional: eine zweite App mit nur den Berechtigungen der Einstellungen, die sie dann anstelle der Release-App anwendet, damit die Release-App kein *Administration* braucht. [Schritt 8](#8-die-settings-app-optional) richtet sie ein.
-- **Der Rollout** ist optional: Der Blueprint-Bot jedes Repositorys läuft jede Woche und bringt das neueste Release des Blueprints von selbst. Der Rollout des Blueprints startet nur die Bots der Repositorys seines Eigentümers gleich nach einem Release.
+- **Der Rollout** ist optional: Der Blueprint-Bot jedes Repositorys läuft jede Woche und bringt das neueste Release des Blueprints von selbst, als Pull Request, der [sich selbst merged, sobald alle Prüfungen grün sind](features/updates.md). Die Repository-Variable `BLUEPRINT_AUTOMERGE` mit dem Wert `off` lässt stattdessen jedes Update auf dich warten, wie [die Fragen und Antworten](faq.md#wie-verhindere-ich-dass-sich-die-updates-des-blueprints-selbst-mergen) sagen. Der Rollout des Blueprints startet nur die Bots der Repositorys seines Eigentümers gleich nach einem Release.
 
 ## 1. Den Blueprint kopieren
 

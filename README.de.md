@@ -15,9 +15,9 @@
 
 <!-- --8<-- [start:pitch] -->
 
-**GitHub-Repositories, die sich selbst testen, veröffentlichen, absichern und aktualisieren — mit einem `copier copy`.**
+**GitHub-Repositorys, die sich selbst testen, veröffentlichen, absichern und aktualisieren — mit einem `copier copy`.**
 
-Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für neun Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Chrome-Erweiterungen, Cloudflare Worker, Container-Images und Repositories ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
+Repo Blueprint ist eine [Copier](https://copier.readthedocs.io/)-Vorlage für neun Arten von Projekten: Home-Assistant-Integrationen, Nextcloud-Apps, GitHub Actions, Python- und Node-Pakete, Chrome-Erweiterungen, Cloudflare Worker, Container-Images und Repositorys ohne Build. Ein neues Repository startet mit mehr als 30 Workflows, und ein Bot bringt es auf jede neue Version des Blueprints.
 
 - **Getestet bei jeder Änderung.** `scripts/check.sh` führt dieselben Prüfungen auf deinem Rechner und in der CI aus, mit voller Abdeckung des Codes. Der PR-Coach erklärt jede Prüfung, die scheitert, und der Fix-Bot committet, was ein Befehl beheben kann.
 - **Veröffentlicht und signiert von einem Bot.** Der Merge des Release-Pull-Requests veröffentlicht das Release mit seiner SBOM und der signierten Provenance nach SLSA Build Level 3, auch für Container-Images, und prüft es danach so, wie seine Nutzer es können.
@@ -61,14 +61,14 @@ Copier fragt nach Name, einer Beschreibung in einem Satz, der Art des Projekts, 
 
 <!-- --8<-- [start:made-with] -->
 
-Sieben öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code und den Prüfungen und Bots des Blueprints; jede Version des Blueprints erreicht sie als Pull Request:
+Sieben öffentliche Repositorys folgen dem Blueprint, jedes mit eigenem Code und den Prüfungen und Bots des Blueprints; jede Version des Blueprints erreicht sie als Pull Request:
 
 - **[HomeDarts for Autodarts](https://github.com/Dennis-Otto/homedarts-for-autodarts)**, eine Home-Assistant-Integration: lokale Steuerung des Boards in Echtzeit, Spiele, Turniere und Statistiken, ohne Cloud-Konto. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/homedarts-for-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/homedarts-for-autodarts)
 - **[Player Switch for Autodarts](https://github.com/Dennis-Otto/player-switch-for-autodarts)**, eine Chrome-Erweiterung in TypeScript: ein gemeinsames Autodarts-Display, an dem jeder unter seinem eigenen Konto spielt und ein Tipp auf eine Kachel den Spieler wechselt, ohne neue Anmeldung. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/player-switch-for-autodarts/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/player-switch-for-autodarts)
 - **[Issue-Assistent](https://github.com/Dennis-Otto/issue-assistant)**, eine GitHub Action: eine erste Analyse jedes neuen Issues durch eine KI, die nur liest, geprüft von einem Job ohne KI, bevor sie erscheint. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/issue-assistant/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/issue-assistant)
 - **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**, eine Nextcloud-App: die Dokumente von Paperless-ngx in Nextcloud Files, nach Korrespondent, Typ und Jahr. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-sync/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-sync)
 - **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**, eine Nextcloud-App: die Volltextsuche von Paperless-ngx in der Suche von Nextcloud. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/paperless-unified-search/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/paperless-unified-search)
-- **[Repo Pager](https://github.com/Dennis-Otto/repo-pager)**, ein Cloudflare Worker in TypeScript: ein privater Telegram-Pager, den jeder Maintainer für seine eigenen Repositories betreibt und der nur meldet, was ihn braucht, und es per Button erledigt. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/repo-pager/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/repo-pager)
+- **[Repo Pager](https://github.com/Dennis-Otto/repo-pager)**, ein Cloudflare Worker in TypeScript: ein privater Telegram-Pager, den jeder Maintainer für seine eigenen Repositorys betreibt und der nur meldet, was ihn braucht, und es per Button erledigt. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/repo-pager/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/repo-pager)
 - **[dennis-otto.github.io](https://github.com/Dennis-Otto/dennis-otto.github.io)**, ein Repository ohne Build: die Website mit jedem Projekt seines Eigentümers. [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Dennis-Otto/dennis-otto.github.io/badge)](https://scorecard.dev/viewer/?uri=github.com/Dennis-Otto/dennis-otto.github.io)
 
 [Das Dashboard](https://dennis-otto.github.io/repo-blueprint/dashboard/) zeigt jedes davon auf einen Blick: die Version des Blueprints, auf der es ist, seine Prüfungen, seine Releases und seine Scorecard.
@@ -81,7 +81,7 @@ Sieben öffentliche Repositories folgen dem Blueprint, jedes mit eigenem Code un
 
 - **Statt eines Template-Repositorys von GitHub:** *Use this template* kopiert die Dateien einmal, ohne die Einstellungen, und später folgt nichts. Der Blueprint setzt die Rulesets, die Sicherheit und die Environments als Code und bringt jede Verbesserung als Pull Request.
 - **Statt Cookiecutter und cruft:** Die Hooks einer Cookiecutter-Vorlage führen Code auf deinem Rechner aus, und `cruft update` wartet, bis jemand es startet. Copier führt keinen Code des Blueprints aus, also braucht es kein `--trust`; `blueprint.py create`, das du danach startest, ist eine Datei der Kopie, die du vorher lesen kannst. Und der Bot des Blueprints aktualisiert jedes Repository von selbst.
-- **Statt einer anderen Copier-Vorlage,** etwa copier-uv oder scientific-python/cookie, die Python-Projekten gut dienen: Der Blueprint bringt einen Standard auch zu Home Assistant, Nextcloud, GitHub Actions, Node und Containern, mit signierten Releases nach SLSA Build Level 3, SBOMs und VEX, und testet jede Version an jeder Art und an den echten Repositories, bevor sie ausrollt.
+- **Statt einer anderen Copier-Vorlage,** etwa copier-uv oder scientific-python/cookie, die Python-Projekten gut dienen: Der Blueprint bringt einen Standard auch zu Home Assistant, Nextcloud, GitHub Actions, Node und Containern, mit signierten Releases nach SLSA Build Level 3, SBOMs und VEX, und testet jede Version an jeder Art und an den echten Repositorys, bevor sie ausrollt.
 - **Statt projen:** projen schreibt die Dateien eines Projekts aus Code, der bei jeder Synthese läuft, vor allem für TypeScript, AWS CDK und jsii. Der Blueprint braucht keinen eigenen Code im Projekt: Er hält seine eigenen Dateien aktuell und lässt dir die des Projekts.
 
 [Der Vergleich](https://dennis-otto.github.io/repo-blueprint/de/compare.html) stellt sie nebeneinander, auch dort, wo ein anderes Werkzeug besser passt.
@@ -108,7 +108,7 @@ Jede Art startet mit einem funktionierenden Beispiel samt Tests und hat eine eig
 
 <!-- --8<-- [end:kinds] -->
 
-![Repo Blueprint für GitHub-Repositories: neun Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](docs/images/social-preview.webp)
+![Repo Blueprint für GitHub-Repositorys: neun Arten von Projekten mit einem Standard und ein Terminal, in dem copier copy nach der Art des Projekts fragt, die Prüfungen und Bots ankommen, blueprint.py settings apply die Rulesets, Environments und Labels setzt und copier update jeder neuen Version folgt](docs/images/social-preview.webp)
 
 ## Wie sich ein Repository selbst pflegt
 
@@ -209,4 +209,4 @@ Beiträge sind willkommen: siehe [CONTRIBUTING.md](https://github.com/Dennis-Ott
 
 ## Lizenz
 
-[MIT No Attribution](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE): Repositories aus dem Blueprint schulden ihm nichts, nicht einmal einen Hinweis. Jede Datei nennt ihre Lizenz in der maschinenlesbaren Form von [REUSE](https://reuse.software).
+[MIT No Attribution](https://github.com/Dennis-Otto/repo-blueprint/blob/main/LICENSE): Repositorys aus dem Blueprint schulden ihm nichts, nicht einmal einen Hinweis. Jede Datei nennt ihre Lizenz in der maschinenlesbaren Form von [REUSE](https://reuse.software).

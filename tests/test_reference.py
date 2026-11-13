@@ -927,7 +927,7 @@ def test_the_showcase_of_the_readme() -> None:
         " its releases and its Scorecard.\n"
     )
     german = reference.showcase(registry, "de")
-    assert german.startswith("Zwei öffentliche Repositories folgen dem Blueprint,")
+    assert german.startswith("Zwei öffentliche Repositorys folgen dem Blueprint,")
     assert "\n- **[Beta](https://github.com/Octo-Org/beta.io)**, ein Paket: der" in (
         german
     )
@@ -986,7 +986,7 @@ def test_the_real_repositories_of_a_kind() -> None:
     )
     german = reference.real_repositories(registry, "node-package", "de")
     assert german.startswith(
-        "Diese öffentlichen Repositories dieser Art sind aus dem Blueprint"
+        "Diese öffentlichen Repositorys dieser Art sind aus dem Blueprint"
         " entstanden:\n\n- **[Alpha](https://github.com/Octo-Org/beta)**: die Seiten"
     )
     assert german.endswith(

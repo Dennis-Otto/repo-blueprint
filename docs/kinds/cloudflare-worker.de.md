@@ -61,7 +61,7 @@ Sie geschehen bei Cloudflare, also nennt die Checkliste die ersten beiden als ei
 
 <!-- --8<-- [start:real-repository] -->
 
-[Repo Pager](https://github.com/Dennis-Otto/repo-pager) ist aus dem Blueprint entstanden: ein privater Telegram-Pager, den jeder Maintainer für seine eigenen Repositories betreibt und der nur meldet, was ihn braucht, und es per Button erledigt.
+[Repo Pager](https://github.com/Dennis-Otto/repo-pager) ist aus dem Blueprint entstanden: ein privater Telegram-Pager, den jeder Maintainer für seine eigenen Repositorys betreibt und der nur meldet, was ihn braucht, und es per Button erledigt.
 
 Der Workflow Variants probiert jeden Pull Request des Blueprints, der ändert, was die Antworten von Repo Pager rendern, mit ihnen aus, bevor er merged.
 

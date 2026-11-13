@@ -1185,7 +1185,11 @@ def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[st
 
 
 def rulesets(api: Api, repo: str) -> dict[str, Json]:
-    return {item["name"]: item["id"] for item in api.get_all(f"repos/{repo}/rulesets")}
+    """The rulesets of the repository itself, by name, with their ids: not those of
+    an organization above it, which GitHub lists too unless asked without them, and
+    which the repository can't change, even when one has the name of a managed one."""
+    path = f"repos/{repo}/rulesets?includes_parents=false"
+    return {item["name"]: item["id"] for item in api.get_all(path)}
 
 
 def check_rulesets(

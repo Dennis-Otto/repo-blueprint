@@ -396,6 +396,9 @@ class FakeGitHub:
         self.file_queries: list[dict[str, str]] = []
         self.fork_approval = "first_time_contributors"
         self.rulesets: dict[int, dict[str, Any]] = {}
+        # The rulesets of the organization above, by their ids, which the list names
+        # unless it asks without its parents, and which the repository can't change.
+        self.parent_rulesets: dict[int, dict[str, Any]] = {}
         # The Actions policies of the repository, and one of its organization, which
         # the list names only with has_parents.
         self.policies: dict[int, dict[str, Any]] = {}
@@ -651,10 +654,16 @@ class FakeGitHub:
 
     def ruleset(self, method: str, body: Any, number: str | None) -> tuple[int, Any]:
         if method == "GET" and number is None:
+            # GitHub lists the rulesets of the parents too, unless asked without them.
+            parents = "includes_parents=false" not in self.calls[-1][1]
+            listed = {**self.rulesets, **(self.parent_rulesets if parents else {})}
             return 200, [
-                {"id": key, "name": value["name"]}
-                for key, value in self.rulesets.items()
+                {"id": key, "name": value["name"]} for key, value in listed.items()
             ]
+        if int(number or 0) in self.parent_rulesets:
+            if method == "GET":
+                return 200, self.parent_rulesets[int(number or 0)]
+            return 403, {"message": "The ruleset belongs to the organization."}
         if method == "GET":
             return 200, self.rulesets[int(number or 0)]
         if method == "DELETE":
@@ -1168,6 +1177,30 @@ def test_rulesets_beyond_the_first_page_are_found(
     assert all(method == "GET" for method, _ in github.calls)
 
 
+@pytest.mark.parametrize("name", ["Protect main", "Release tags"])
+def test_a_ruleset_of_the_organization_of_the_same_name_is_none_of_these_settings(
+    github: FakeGitHub, root: Path, name: str
+) -> None:
+    """GitHub lists the rulesets of the organization above with those of the
+    repository, unless asked without them, and refuses to change them through the
+    repository: one named like a managed ruleset is neither compared, written nor
+    deleted as the repository's own."""
+    parent = {"name": name, "source_type": "Organization", "rules": []}
+    github.parent_rulesets = {99: parent}
+
+    run(github, root, "settings", "apply")
+    set_secrets(github)
+
+    assert run(github, root, "settings", "apply") == 0
+    assert run(github, root, "settings", "check") == 0
+    assert name in [ruleset["name"] for ruleset in github.rulesets.values()]
+    assert github.parent_rulesets == {99: parent}
+    assert not [path for _, path in github.calls if path.endswith("/rulesets/99")]
+    assert ("GET", f"repos/{REPO}/rulesets?includes_parents=false&per_page=100") in (
+        github.calls
+    )
+
+
 def test_the_order_of_the_rules_and_the_checks_is_no_difference() -> None:
     want = main_ruleset(["b", "a"])
     have = json.loads(json.dumps(main_ruleset(["a", "b"])))
@@ -1588,7 +1621,7 @@ def test_rulesets_that_a_private_repository_cannot_read_are_a_notice(
     github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     github.repo["private"] = True
-    listing = f"repos/{REPO}/rulesets?per_page=100"
+    listing = f"repos/{REPO}/rulesets?includes_parents=false&per_page=100"
     github.fail[("GET", listing)] = (403, RULESETS_REFUSAL)
     run(github, root, "settings", "apply")
     set_secrets(github)
@@ -1607,7 +1640,9 @@ def test_a_refusal_of_the_rulesets_that_is_not_the_plan_still_fails(
     github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     github.repo["private"] = True
-    github.fail[("GET", f"repos/{REPO}/rulesets?per_page=100")] = 403
+    github.fail[
+        ("GET", f"repos/{REPO}/rulesets?includes_parents=false&per_page=100")
+    ] = 403
 
     assert run(github, root, "settings", "check") == 2
 
@@ -1620,7 +1655,9 @@ def test_a_public_repository_fails_on_a_refusal_that_names_advanced_security(
     # Such as a policy of an organization: a public repository has every part.
     refusal = "Advanced Security is disabled by a policy of the enterprise."
     github.fail[("POST", f"repos/{REPO}/rulesets")] = (422, refusal)
-    github.fail[("GET", f"repos/{REPO}/rulesets?per_page=100")] = (403, refusal)
+    github.fail[
+        ("GET", f"repos/{REPO}/rulesets?includes_parents=false&per_page=100")
+    ] = (403, refusal)
 
     assert run(github, root, "settings", "check") == 2
     assert run(github, root, "settings", "apply") == 2

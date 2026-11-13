@@ -981,7 +981,7 @@ WORDS: dict[str, dict[str, str]] = {
             " als Pull Request:"
         ),
         "many": (
-            "{count} öffentliche Repositories folgen dem Blueprint, jedes mit eigenem"
+            "{count} öffentliche Repositorys folgen dem Blueprint, jedes mit eigenem"
             " Code und den Prüfungen und Bots des Blueprints; jede Version des"
             " Blueprints erreicht sie als Pull Request:"
         ),
@@ -1002,7 +1002,7 @@ WORDS: dict[str, dict[str, str]] = {
         ),
         "kind one": "[{title}]({url}) ist aus dem Blueprint entstanden: {pitch}",
         "kind many": (
-            "Diese öffentlichen Repositories dieser Art sind aus dem Blueprint"
+            "Diese öffentlichen Repositorys dieser Art sind aus dem Blueprint"
             " entstanden:"
         ),
         "kind item": "- **[{title}]({url})**: {pitch}",
