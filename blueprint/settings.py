@@ -1142,6 +1142,12 @@ def own_release_app(blueprint: dict[str, str], own: dict[str, str]) -> None:
         )
 
 
+def required_check(check: dict[str, Json]) -> str:
+    """A required status check as its name and the app that must report it, which is
+    null when any source may."""
+    return json.dumps([check["context"], check.get("integration_id")])
+
+
 def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[str]:
     """What differs between two rulesets, in the parts this tool manages. A token that
     may only read the administration, such as the release app's, gets the rulesets
@@ -1163,8 +1169,10 @@ def ruleset_differences(want: dict[str, Json], have: dict[str, Json]) -> list[st
         for key, value in rule.get("parameters", {}).items():
             current = parameters.get(key)
             if key == "required_status_checks":
-                value = sorted(check["context"] for check in value)
-                current = sorted(check["context"] for check in current or [])
+                # The source counts as well: a check without integration_id accepts
+                # any app and any commit status of its name, not GitHub Actions alone.
+                value = sorted(required_check(check) for check in value)
+                current = sorted(required_check(check) for check in current or [])
             elif key == "code_scanning_tools":
                 value = sorted(json.dumps(tool, sort_keys=True) for tool in value)
                 current = sorted(

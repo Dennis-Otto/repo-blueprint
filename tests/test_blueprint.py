@@ -1176,6 +1176,27 @@ def test_the_order_of_the_rules_and_the_checks_is_no_difference() -> None:
     assert ruleset_differences(want, have) == []
 
 
+@pytest.mark.parametrize("source", [{}, {"integration_id": 99999}])
+def test_a_required_check_of_another_source_is_a_difference(
+    source: dict[str, int],
+) -> None:
+    """Each required check of main is pinned to the app of GitHub Actions, so that no
+    commit status of its name satisfies it: a check that accepts any source, or the
+    checks of another app, differs, and the settings bot writes the pin back."""
+    want = main_ruleset(["lint", "codeql"])
+    have = json.loads(json.dumps(main_ruleset(["codeql", "lint"])))
+    (checks,) = (
+        rule["parameters"]["required_status_checks"]
+        for rule in have["rules"]
+        if rule["type"] == "required_status_checks"
+    )
+    checks[1] = {"context": checks[1]["context"], **source}
+
+    assert ruleset_differences(want, have) == [
+        "required_status_checks.required_status_checks"
+    ]
+
+
 RULESETS = Path(__file__).parent / "data/rulesets"
 
 
