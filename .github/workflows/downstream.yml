@@ -9,7 +9,10 @@ name: Downstream
 # runs, such as a workflow or a script, fails the check, one in a page warns, and so do
 # answers in tests/answers/ that differ from those of the repository. In the pull
 # requests that change what the repositories get from the blueprint, and every week
-# for the update to main, since the repositories change on their own.
+# for the update to main, since the repositories change on their own. The weekly run
+# fails on such answers as well, since a warning in a green run reaches nobody, and
+# keeps those of each repository for the fix bot, which brings them to main in its
+# pull request of the fixes of main.
 #
 # No required check: a conflict can be the right change, with a line in the changelog
 # that says how a repository resolves it. The Variants workflow makes a repository with
@@ -97,8 +100,33 @@ jobs:
           arguments=(--head "$(git rev-parse HEAD)")
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
             arguments+=(--base "$(git rev-parse HEAD^1)")
+          else
+            # A pull request only warns of answers that differ, which aren't its fault.
+            arguments+=(--drift-fails)
           fi
           python3 downstream.py "${arguments[@]}"
+      # The answers of each repository, for the fix bot after the checks, when the run
+      # of main failed: the files of tests/answers/ that they change, and nothing when
+      # only a conflict failed it.
+      - name: Take the answers of the repositories anew
+        id: fix
+        if: >-
+          ${{ failure() && github.event_name != 'pull_request' &&
+          github.ref_name == github.event.repository.default_branch }}
+        run: |
+          python3 downstream.py --answers
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          python3 "$script" fix keep "$RUNNER_TEMP/fixes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the fixes for the fix bot
+        if: ${{ !cancelled() && steps.fix.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fixes-downstream
+          path: ${{ runner.temp }}/fixes/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml.
       - name: Explain the failure

@@ -60,14 +60,14 @@ A run of a check only tells about its commit. Once a newer push replaced that co
   <img src="../images/diagrams/the-runs-of-a-replaced-commit.svg" alt="The runs of a replaced commit: A new commit on a pull request starts the job signed commits, and a merge or an update of a branch starts the branch bot, both of which run anyway. Each takes the runs that wait or run, then the heads of the open pull requests. The head of an open pull request, a run of main, a release, a workflow that is no check, a second attempt and a run younger than 20 seconds stay. A second list of GitHub looks at the commit of each other run, and when it agrees, the bot cancels the run, which gives its runner back. After the checks, no job starts for it, as the event names the heads of the open pull requests.">
 </picture>
 
-- **What stays:** the head of any open pull request, also of a fork with a branch of the same name; a run of `main`, a schedule and a release; a workflow that isn't one of the checks in `update-branches.yml`, such as one that does something when a pull request closes; a run that someone started again, since they want its answer; and a run younger than 20 seconds, whose head a list of GitHub may not know yet.
+- **What stays:** the head of any open pull request, also of a fork with a branch of the same name; a run of `main`, a schedule and a release; a workflow that isn't one of the checks in `after-checks.yml`, such as one that does something when a pull request closes; a run that someone started again, since they want its answer; and a run younger than 20 seconds, whose head a list of GitHub may not know yet.
 - **When in doubt, nothing goes:** a list that GitHub refuses cancels nothing, and a second list, for the commit, has to agree right before the cancel. A run that stays only costs a runner, and the next look takes it.
 - **No runner of its own:** the bot is a step of *signed commits*, which runs on every push anyway, and a part of the branch bot, which runs on every merge. It adds a few seconds to them, where a job of its own would have added 467 jobs on a busy day. It fails neither of them: what GitHub refuses is an annotation.
 - **Nothing starts for a cancelled run:** every run that ends starts *After the checks*, whose flaky-test bot, bot for cancelled checks and PR coach would each take a runner to find that the commit is no longer the head. The event names the heads of the open pull requests, so they skip without a runner, also after a run that ended by itself. A run from a fork names none, and its jobs ask GitHub.
 - **What it saves:** on 1 November 2026, 547 runs across seven repositories ran on after their commit went; the bot would have cancelled 520 of them, about 740 jobs and 900 minutes of runners, as [the decision](../decisions/0108-the-runs-of-a-replaced-commit-give-their-runner-back.md) lays out.
 - **See it yourself:** `python3 .github/blueprint.py stale-runs --dry-run` says what the bot would cancel right now, and the summary of each run of the job says what it did.
 
-**How:** `pull-request-title.yml`, `update-branches.yml`, `blueprint.py stale-runs`.
+**How:** `pull-request-title.yml`, `after-checks.yml`, `blueprint.py stale-runs`.
 
 ## Clean-up
 
