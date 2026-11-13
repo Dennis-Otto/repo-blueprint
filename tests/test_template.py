@@ -105,7 +105,7 @@ from blueprint.migrate import (
     no_bot_fixes_label,
 )
 from blueprint.mutation import NOTHING_MATCHES, default_paths
-from blueprint.pages import CELL_WORDS, layouts, long_cells, shown
+from blueprint.pages import CELL_WORDS, layouts, long_blocks, long_cells, shown
 from blueprint.pr_report import WEBSITE_ARTIFACT, WEBSITE_DAYS
 from blueprint.settings import (
     PERMISSIONS,
@@ -2773,12 +2773,60 @@ def test_the_blueprint_checks_itself_on_the_newest_python_and_its_oldest() -> No
     assert oldest == "3.12"
 
 
+# How the description of the blueprint names each kind of project, in English and in
+# German; a repository without a build is no kind that anyone looks for.
+DESCRIBED_KINDS = {
+    "home-assistant": ("Home Assistant/HACS", "Home Assistant/HACS"),
+    "nextcloud-app": ("Nextcloud apps", "Nextcloud-Apps"),
+    "github-action": ("GitHub Actions", "GitHub Actions"),
+    "python-package": ("Python", "Python"),
+    "node-package": ("Node/TypeScript", "Node/TypeScript"),
+    "chrome-extension": ("Chrome extensions", "Chrome-Erweiterungen"),
+    "cloudflare-worker": ("Cloudflare Workers", "Cloudflare Workers"),
+    "container": ("containers", "Container"),
+    "generic": None,
+}
+
+
+def test_the_description_of_the_blueprint_names_every_kind_of_project() -> None:
+    """The About box of GitHub, the website, its preview cards and AGENTS.md name the
+    kinds of projects as the README does: a new kind of copier.yml fails here until
+    the description names it."""
+    copier = load_yaml((ROOT / "copier.yml").read_text(encoding="utf-8"))
+    kinds = list(copier["project_type"]["choices"].values())
+    settings = tomllib.loads(
+        (ROOT / ".github/repository.toml").read_text(encoding="utf-8")
+    )["repository"]
+    description = settings["description"]
+    site = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    english, german = (
+        json.loads(line.partition(":")[2])
+        for line in site.splitlines()
+        if line.strip().startswith("site_description:")
+    )
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8").splitlines()[2]
+
+    assert sorted(DESCRIBED_KINDS) == sorted(kinds)
+    assert english == description
+    assert agents == f"Repo Blueprint: {description}"
+    assert len(description) <= 350, "GitHub's limit of a description"
+    for words, text in ((0, description), (1, german)):
+        listed = re.search(r"\(([^)]*)\)", text)
+        assert listed is not None
+        assert listed[1].split(", ") == [
+            names[words] for names in DESCRIBED_KINDS.values() if names
+        ]
+    topics = settings["topics"]
+    assert {"chrome-extension", "cloudflare-workers"} <= set(topics)
+    assert len(topics) <= 20, "GitHub's limit of topics"
+
+
 def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
     project = render(
         tmp_path,
         project_name="Repo Blueprint",
         project_slug="repo-blueprint",
-        description="Copier template for self-maintaining GitHub repos (Python, Home Assistant/HACS, Nextcloud apps, GitHub Actions, Node/TypeScript, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update.",
+        description="Copier template for self-maintaining GitHub repos (Home Assistant/HACS, Nextcloud apps, GitHub Actions, Python, Node/TypeScript, Chrome extensions, Cloudflare Workers, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update.",
         project_type="github-action",
         python_package="blueprint",
         license="MIT-0",
@@ -4635,8 +4683,8 @@ def test_every_repository_checks_that_its_pages_have_one_column(
     assert pages_step(check) == pages_step(generic) == pages_step(own)
     assert '"$python" "$tool" pages\n' in pages_step(check)
     assert "docker" not in pages_step(check)
-    # The pages that a new repository starts with have one column, and no cell of
-    # their tables holds a paragraph.
+    # The pages that a new repository starts with have one column, no cell of their
+    # tables holds a paragraph, and no paragraph or item of a list is a wall of text.
     checked = [
         page
         for page in project.rglob("*.md")
@@ -4647,6 +4695,7 @@ def test_every_repository_checks_that_its_pages_have_one_column(
     for page in checked:
         assert layouts(page.read_text(encoding="utf-8")) == [], page
         assert long_cells(page.read_text(encoding="utf-8")) == [], page
+        assert long_blocks(page.read_text(encoding="utf-8")) == [], page
     contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
     assert "## Pages in one column" in contributing
     assert "`python3 .github/blueprint.py pages --fix`" in contributing
