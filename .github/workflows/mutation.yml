@@ -10,7 +10,8 @@ name: Mutation
 # the tests: one job collects them, every part loads them and runs only its mutants,
 # and a test that fails without any mutant stops the run there, in one job. The
 # report puts the parts together into one score, lists first the survivors that
-# change the logic, with their changes, and keeps the details as an artifact. A low
+# change the logic, with their changes, and keeps the details as an artifact; for
+# Infection it reads the Covered Code MSI and the escaped mutants of its logs. A low
 # score fails nothing, a run that measures nothing fails, with the tests that failed
 # without any mutant; a score of the default branch that drops below the best of the
 # runs before opens one issue, which closes once a run is back. A pull request that
@@ -421,20 +422,23 @@ jobs:
           if [[ "$scored" != true ]]; then
             exit 1
           fi
-      - name: Keep the results
+      # The report compares the score with the run before and keeps the logs in the
+      # artifact mutation, which the dashboard and the next run read.
+      - name: Hand the logs of Infection to the report
         if: always() && needs.plan.outputs.kind == 'php'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutation
+          name: mutation-part-${{ matrix.part }}
           path: build/infection*.log
-          retention-days: 30
+          retention-days: 7
           if-no-files-found: ignore
 
   report:
     name: mutation report
     needs: [plan, stats, mutation]
-    # Stats that failed have said why; no part ran.
-    if: ${{ !cancelled() && needs.plan.outputs.kind == 'python' && needs.stats.result == 'success' }}
+    # Stats that failed have said why; no part ran. Infection has no stats, and its
+    # report runs once its job ran, to say that a run without a score measured nothing.
+    if: ${{ !cancelled() && ((needs.plan.outputs.kind == 'python' && needs.stats.result == 'success') || (needs.plan.outputs.kind == 'php' && needs.mutation.result != 'skipped')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -473,6 +477,7 @@ jobs:
             gh run download "$previous" --name mutation --dir "$RUNNER_TEMP/previous" || true
           fi
       - name: Report the score and the surviving mutants
+        if: needs.plan.outputs.kind == 'python'
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -485,6 +490,29 @@ jobs:
           cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
           # A run that measures nothing, not a low score, fails: an error of the tool,
           # of its configuration or of a test.
+          exit "$status"
+      # The Covered Code MSI of the output of Infection, as mutation.json in the form of
+      # mutmut, so that a drop opens the issue as for Python, with the files whose
+      # mutants escaped from infection.log; the logs go on into the artifact.
+      - name: Report the score of Infection
+        if: needs.plan.outputs.kind == 'php'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          script=.github/blueprint.py
+          [[ -f "$script" ]] || script=blueprint.py
+          # The sample of a pull request is compared with no other run.
+          sample=()
+          if [[ "$EVENT" == pull_request ]]; then
+            sample=(--sample)
+          fi
+          status=0
+          python3 "$script" mutation infection "$RUNNER_TEMP/parts" --root "$GITHUB_WORKSPACE" \
+            --out "$RUNNER_TEMP/mutation" --previous "$RUNNER_TEMP/previous/mutation.json" \
+            --run "$RUN_URL" "${sample[@]}" > "$RUNNER_TEMP/summary.md" || status=$?
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          # A run without a score measured nothing; the job of the mutants says why.
           exit "$status"
       # The score, the results that the dashboard reads, and every survivor with its
       # change; the next weekly run compares with mutation.json.

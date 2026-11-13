@@ -386,6 +386,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Accepted advisories",
         "Lock files",
         "Lock files match their sources",
+        "Translations",
         "Version",
         "Ruff",
         "Composer",
