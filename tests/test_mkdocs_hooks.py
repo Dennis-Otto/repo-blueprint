@@ -170,6 +170,135 @@ def test_a_website_in_one_language_keeps_its_404_page(tmp_path: Path) -> None:
     assert hooks().on_post_template(page, "404.html", config(tmp_path)) == page
 
 
+def material_404(lang: str = "en") -> str:
+    """The 404 page as Material writes it: a heading and nothing else."""
+    return (
+        f'<html lang="{lang}"><head><title>Demo</title></head><body>'
+        '<article class="md-content__inner md-typeset">\n  \n'
+        "  <h1>404 - Not found</h1>\n\n</article></body></html>"
+    )
+
+
+def not_found_part(words: dict[str, str], home: str, heading: str, lang: str) -> str:
+    named = f' lang="{lang}"' if lang else ""
+    return (
+        f"<section{named}><{heading}>{words['title']}</{heading}>"
+        f"<p>{words['text']}</p>"
+        f'<p><a class="md-button md-button--primary" href="{home}">'
+        f"{words['home']}</a></p><p>{words['search']}</p></section>"
+    )
+
+
+def test_the_404_page_leads_on_in_the_language_of_the_website(tmp_path: Path) -> None:
+    module = hooks()
+    words = module.NOT_FOUND
+    one = config(tmp_path)
+    one.theme = {"language": "de"}
+    one.site_url = "https://owner.github.io/demo"
+
+    page = module.on_post_template(material_404("de"), "404.html", one)
+
+    assert page == (
+        '<html lang="de"><head><title>Seite nicht gefunden - Demo</title></head>'
+        '<body><article class="md-content__inner md-typeset">'
+        '<div id="not-found">'
+        + not_found_part(words["de"], "/demo/", "h1", "")
+        + "</div>"
+        + module.NOT_FOUND_SCRIPT
+        + "</article></body></html>"
+    )
+
+
+def test_the_404_page_leads_on_in_every_language_of_the_website(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    words = module.NOT_FOUND
+    # French has no words: the website in French takes the English ones, and a
+    # further language without them gets no part.
+    two = config(tmp_path, ("en", True, True), ("de", False, True), ("fr", False, True))
+    french = config(tmp_path, ("fr", True, True), ("de", False, True))
+    two.site_url = french.site_url = "https://example.org/docs/"
+
+    english = module.on_post_template(material_404(), "404.html", two)
+    other = module.on_post_template(material_404("fr"), "404.html", french)
+
+    assert (
+        '<div id="not-found">'
+        + not_found_part(words["en"], "/docs/", "h1", "")
+        + not_found_part(words["de"], "/docs/de/", "h2", "de")
+        + "</div>"
+    ) in english
+    assert "<title>Page not found - Demo</title>" in english
+    assert (
+        '<div id="not-found">'
+        + not_found_part(words["en"], "/docs/", "h1", "en")
+        + not_found_part(words["de"], "/docs/de/", "h2", "de")
+        + "</div>"
+    ) in other
+    assert "<title>Page not found - Demo</title>" in other
+
+
+def test_a_website_without_an_address_leads_to_the_root(tmp_path: Path) -> None:
+    module = hooks()
+    one = config(tmp_path)
+    one.theme = {"language": None}
+
+    page = module.on_post_template(material_404(), "404.html", one)
+
+    assert 'href="/">Go to the home page</a>' in page
+
+
+def test_a_404_page_of_the_project_stays_as_it_is(tmp_path: Path) -> None:
+    own = material_404().replace("404 - Not found", "Lost?")
+
+    assert hooks().on_post_template(own, "404.html", config(tmp_path)) == own
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the script runs in Node")
+@pytest.mark.parametrize(
+    ("path", "found", "tried", "shown", "went"),
+    [
+        # An address in the style of folders leads on to its page.
+        ("/demo/faq/", True, "/demo/faq.html", False, "/demo/faq.html?q=1#a"),
+        ("/demo/faq", True, "/demo/faq.html", False, "/demo/faq.html?q=1#a"),
+        # The content shows when that is no page either, or the request fails.
+        ("/demo/faq/", False, "/demo/faq.html", True, ""),
+        ("/demo/faq/", None, "/demo/faq.html", True, ""),
+        # A page of .html, a file and the root are no address to try.
+        ("/demo/gone.html", True, "", True, ""),
+        ("/demo/logo.png", True, "", True, ""),
+        ("/", True, "", True, ""),
+    ],
+)
+def test_the_404_page_tries_the_address_as_a_page(
+    path: str, found: bool | None, tried: str, shown: bool, went: str
+) -> None:
+    script = hooks().NOT_FOUND_SCRIPT.removeprefix("<script>").removesuffix("</script>")
+    program = (
+        "const tried=[],went=[],d={hidden:false};"
+        f"globalThis.location={{pathname:{json.dumps(path)},search:'?q=1',hash:'#a',"
+        "replace:(u)=>went.push(u)};"
+        "globalThis.document={getElementById:()=>d};"
+        "globalThis.fetch=(u,o)=>{tried.push(u+' '+o.method);"
+        f"const found={json.dumps(found)};"
+        "return found===null?Promise.reject(new Error('offline'))"
+        ":Promise.resolve({ok:found})};"
+        f"{script};"
+        "setTimeout(()=>console.log(JSON.stringify({tried,went,shown:!d.hidden})));"
+    )
+
+    result = subprocess.run(
+        ["node", "-e", program], capture_output=True, text=True, check=True
+    )
+
+    assert json.loads(result.stdout) == {
+        "tried": [f"{tried} HEAD"] if tried else [],
+        "went": [went] if went else [],
+        "shown": shown,
+    }
+
+
 class Network:
     """The requests of a plugin, with its errors, and an answer or an error for every
     download in turn: a status code or an exception. Each download must come with

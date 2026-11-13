@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import gzip
 import html
 import http.client
 import io
@@ -1090,7 +1091,11 @@ table { border-collapse: collapse; width: 100%; min-width: 900px; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left;
   white-space: nowrap; }
 th { background: var(--head); font-weight: 600; font-size: 13px; }
+th:first-child, td:first-child { position: sticky; left: 0; z-index: 1;
+  background: var(--bg); box-shadow: inset -1px 0 0 var(--line); }
+th:first-child { background: var(--head); }
 tr:last-child td { border-bottom: 0; }
+nav { max-width: 1400px; margin: 0 auto 16px; font-size: 14px; }
 td.state { text-align: center; }
 a { color: inherit; }
 .ok { color: var(--ok); } .bad { color: var(--bad); font-weight: 600; }
@@ -1266,6 +1271,83 @@ def made_with_section(others: MadeWith, latest: str) -> str:
     )
 
 
+# The website beside which the Dashboard workflow publishes the dashboard, in the
+# folder above it: its name, the page that explains the dashboard, the picture of
+# the dashboard that the website publishes, from docs/images/dashboard.png, and its
+# icon, the default one of Material.
+WEBSITE_NAME = "Repo Blueprint"
+EXPLAINED = "features/bots.html#dashboard"
+PICTURE = "images/dashboard.png"
+ICON = "assets/images/favicon.png"
+
+
+def website(url: str) -> str:
+    """The address of the website of the dashboard published at url."""
+    base = url if url.endswith("/") else f"{url}/"
+    return urllib.parse.urljoin(base, "..")
+
+
+def head(owner: str, url: str) -> str:
+    """The tags of the head that describe the page published at url to search
+    engines and to the preview of a shared link, and give it the icon of the
+    website."""
+    home = website(url)
+    description = html.escape(
+        f"The public repositories of {owner} at a glance: the release of the "
+        "blueprint each is on, its releases and pull requests, the last runs of its "
+        "workflows, its OpenSSF Scorecard and its health.",
+        quote=True,
+    )
+    picture = html.escape(urllib.parse.urljoin(home, PICTURE), quote=True)
+    return (
+        f'<meta name="description" content="{description}">\n'
+        f'<link rel="canonical" href="{html.escape(url, quote=True)}">\n'
+        f'<link rel="icon" href="{html.escape(urllib.parse.urljoin(home, ICON))}">\n'
+        '<meta property="og:type" content="website">\n'
+        f'<meta property="og:site_name" content="{WEBSITE_NAME}">\n'
+        '<meta property="og:title" content="Repository dashboard">\n'
+        f'<meta property="og:description" content="{description}">\n'
+        f'<meta property="og:url" content="{html.escape(url, quote=True)}">\n'
+        f'<meta property="og:image" content="{picture}">\n'
+        '<meta name="twitter:card" content="summary_large_image">\n'
+    )
+
+
+def way_back(url: str) -> str:
+    """The first line of the page, which leads to the website beside it and to its
+    page that explains the dashboard."""
+    home = website(url)
+    explained = urllib.parse.urljoin(home, EXPLAINED)
+    return (
+        '<nav aria-label="Website">'
+        f'<a href="{html.escape(home)}">{WEBSITE_NAME}</a> · '
+        f'<a href="{html.escape(explained)}">What the dashboard shows</a></nav>\n'
+    )
+
+
+def add_to_sitemap(sitemap: Path, url: str, now: datetime) -> None:
+    """Add the page published at url to the sitemap of the website beside it, and to
+    its copy compressed with gzip, as MkDocs writes them, when it isn't there yet.
+
+    MkDocs builds the website before the dashboard, so its sitemap lists every page
+    but this one, and search engines learnt of the page only through links.
+    """
+    text = sitemap.read_text(encoding="utf-8")
+    loc = f"<loc>{html.escape(url, quote=False)}</loc>"
+    if loc in text:
+        return
+    entry = (
+        f"    <url>\n         {loc}\n"
+        f"         <lastmod>{now.date().isoformat()}</lastmod>\n    </url>\n"
+    )
+    end = text.rindex("</urlset>")
+    text = text[:end] + entry + text[end:]
+    sitemap.write_text(text, encoding="utf-8", newline="\n")
+    packed = sitemap.with_name(sitemap.name + ".gz")
+    if packed.is_file():
+        packed.write_bytes(gzip.compress(text.encode("utf-8"), mtime=0))
+
+
 def render(
     rows: list[Row],
     owner: str,
@@ -1273,6 +1355,7 @@ def render(
     now: datetime,
     previous: dict[str, Any] | None = None,
     others: MadeWith | None = None,
+    url: str = PUBLISHED,
 ) -> str:
     heads = [
         "Repository",
@@ -1323,12 +1406,14 @@ def render(
         '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         "<title>Repository dashboard</title>\n"
-        '<link rel="alternate" type="application/atom+xml" '
+        + head(owner, url)
+        + '<link rel="alternate" type="application/atom+xml" '
         'title="The releases of every repository" href="releases.atom">\n'
         '<link rel="alternate" type="application/json" '
         'title="The data of the dashboard" href="repos.json">\n'
-        f"<style>{STYLE}</style>\n</head>\n<body>\n<main>\n"
-        "<h1>Repository dashboard</h1>\n"
+        f"<style>{STYLE}</style>\n</head>\n<body>\n"
+        + way_back(url)
+        + "<main>\n<h1>Repository dashboard</h1>\n"
         f"<p>The public repositories of {html.escape(owner)} and the bots of the "
         f'<a href="https://github.com/{BLUEPRINT}">repo blueprint</a>, '
         f"as of {moment}. The blueprint's latest release is {html.escape(latest or DASH)}. "
@@ -1373,6 +1458,11 @@ def main(
         default=PUBLISHED,
         help="the address where the dashboard is published, which its feed links to",
     )
+    parser.add_argument(
+        "--sitemap",
+        type=Path,
+        help="the sitemap.xml of the website beside the dashboard, to add it to",
+    )
     arguments = parser.parse_args(argv)
     api = api or Api()
     now = now or datetime.now(UTC)
@@ -1407,7 +1497,8 @@ def main(
     previous = week_before(history, now)
     arguments.out.parent.mkdir(parents=True, exist_ok=True)
     arguments.out.write_text(
-        render(rows, arguments.owner, latest, now, previous, others), encoding="utf-8"
+        render(rows, arguments.owner, latest, now, previous, others, arguments.url),
+        encoding="utf-8",
     )
     arguments.out.with_name("history.json").write_text(
         json.dumps(add_to_history(history, rows, now), indent=1) + "\n",
@@ -1423,6 +1514,8 @@ def main(
     arguments.out.with_name("made-with.json").write_text(
         json.dumps(made_with_data(others, now), indent=1) + "\n", encoding="utf-8"
     )
+    if arguments.sitemap:
+        add_to_sitemap(arguments.sitemap, arguments.url, now)
     print(
         f"Wrote the dashboard of {len(rows)} repositories to {arguments.out}, "
         f"with {len(others.repos)} of other owners."
