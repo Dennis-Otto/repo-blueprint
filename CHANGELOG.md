@@ -7,6 +7,13 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.18.2](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.1...v1.18.2) (2026-11-13)
+
+
+### Bug fixes
+
+* **flaky:** count no job that ran out of time after each of its steps had passed ([#904](https://github.com/Dennis-Otto/repo-blueprint/issues/904)) ([13feb4b](https://github.com/Dennis-Otto/repo-blueprint/commit/13feb4b8deafb99822d39cc936fe88417c1a5aa2))
+
 ## [1.18.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.0...v1.18.1) (2026-11-13)
 
 ### Bug fixes
