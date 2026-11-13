@@ -71,7 +71,7 @@ A run of a check only tells about its commit. Once a newer push replaced that co
 
 ## Clean-up
 
-Every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month.
+Every week, the branches that `main` holds and the caches of closed pull requests go; a branch with work of its own stays and is listed after a month. A branch without a commit of its own goes only once `main` has moved past it a day ago or earlier, so one that somebody has just made from `main`, such as with *Create a branch* on an issue, stays, however old the last commit of `main` is. Any name that Git allows works, one with a `#` or a `%` too, and a branch that GitHub refuses is a warning: the bot goes on with the next one and looks at it again the next week.
 
 **How:** `cleanup.yml`.
 

@@ -31,6 +31,7 @@ from blueprint.update import (
     FILES,
     LABEL,
     NOTICE,
+    PENDING,
     REGULAR,
     SOURCE,
     Change,
@@ -178,7 +179,8 @@ class FakeGitHub:
         self.signed = True
         self.tree_differs = False
         self.graphql_fails = False
-        self.merge_fails = False
+        # How many calls of gh pr merge GitHub refuses before it takes one.
+        self.merge_fails = 0
         self.fail: dict[tuple[str, str], int] = {}
         # Runs when the Git Data API made a commit, as a push of someone else would.
         self.on_commit: Callable[[], None] | None = None
@@ -192,6 +194,7 @@ class FakeGitHub:
         if arguments[0] == "pr":
             self.calls.append(("gh", " ".join(arguments)))
             if self.merge_fails:
+                self.merge_fails -= 1
                 return subprocess.CompletedProcess(arguments, 1, "", "no auto-merge")
             pull = self.pulls[int(arguments[2])]
             enable = "--auto" in arguments
@@ -287,6 +290,7 @@ class FakeGitHub:
             "head": {"ref": pull["head"], "sha": self.refs.get(pull["head"])},
             "labels": [{"name": name} for name in pull["labels"]],
             "auto_merge": pull["auto_merge"],
+            "body": pull["body"],
         }
 
     def list_pulls(self, method: str, body: Any, head: str) -> tuple[int, Any]:
@@ -1661,12 +1665,73 @@ def test_a_refused_request_stops_the_bot(github: FakeGitHub) -> None:
         run(github)
 
 
-def test_auto_merge_that_github_refuses_stops_the_bot(github: FakeGitHub) -> None:
-    github.merge_fails = True
+def test_auto_merge_that_github_refuses_stops_the_bot(
+    github: FakeGitHub, waits: list[float]
+) -> None:
+    github.merge_fails = 3
     stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
 
     with pytest.raises(GitHubError, match="no auto-merge"):
         run(github)
+
+    # The bot asked three times, with a wait before each try again, and the mark of
+    # the auto-merge that it didn't get to stays for its next run.
+    assert gh_calls(github) == [f"pr merge 1 --repo {REPO} --auto --squash"] * 3
+    assert waits == [5, 15]
+    assert github.pulls[1]["body"].startswith(f"{PENDING}\n")
+
+
+def test_auto_merge_that_github_refuses_for_a_moment_turns_on(
+    github: FakeGitHub, waits: list[float]
+) -> None:
+    github.merge_fails = 2
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+
+    assert run(github) == "Opened #1: the blueprint's v1.0.0 to v1.1.0."
+
+    assert github.pulls[1]["auto_merge"] == {"merge_method": "squash"}
+    assert waits == [5, 15]
+    # Once auto-merge is on, the mark goes, and the description says that it merges.
+    body = github.pulls[1]["body"]
+    assert PENDING not in body
+    assert body.startswith("Brings the repository")
+    assert "It merges itself once every check passes." in body
+
+
+def test_a_later_run_turns_on_the_auto_merge_that_the_bot_never_got_to(
+    github: FakeGitHub,
+) -> None:
+    github.merge_fails = 3
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    with pytest.raises(GitHubError, match="no auto-merge"):
+        run(github)
+    fresh_checkout(github)
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+
+    # The run again finds the pull request without auto-merge and without a label,
+    # but with the mark of its own unfinished run: nobody decided to turn it off.
+    assert run(github) == "Kept #1: the blueprint's v1.0.0 to v1.1.0."
+
+    assert github.pulls[1]["auto_merge"] == {"merge_method": "squash"}
+    assert gh_calls(github)[-1] == f"pr merge 1 --repo {REPO} --auto --squash"
+    assert PENDING not in github.pulls[1]["body"]
+    assert "It merges itself once every check passes." in github.pulls[1]["body"]
+
+
+def test_a_new_release_turns_on_the_auto_merge_that_the_bot_never_got_to(
+    github: FakeGitHub,
+) -> None:
+    github.merge_fails = 3
+    stage(github.root, "v1.1.0", {"README.md": "# Demo, updated\n"})
+    with pytest.raises(GitHubError, match="no auto-merge"):
+        run(github)
+    fresh_checkout(github)
+    stage(github.root, "v1.2.0", {"README.md": "# Demo, updated again\n"})
+
+    assert run(github) == "Moved on #1: the blueprint's v1.0.0 to v1.2.0."
+
+    assert github.pulls[1]["auto_merge"] == {"merge_method": "squash"}
+    assert PENDING not in github.pulls[1]["body"]
 
 
 def test_the_command_line(
