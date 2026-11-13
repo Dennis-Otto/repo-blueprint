@@ -106,7 +106,7 @@ from blueprint.fixes import keep as keep_fixes
 from blueprint.github import Api, GitHubError, Json, current_repo
 from blueprint.migrate import migrate
 from blueprint.notices import third_party_notices
-from blueprint.outage import couldnt_start, failed_unstarted, unreachable
+from blueprint.outage import couldnt_start, failed_unstarted, sit_out, unreachable
 from blueprint.overrides import write_overrides
 from blueprint.ownership import check as ownership_check
 from blueprint.pages import (
@@ -3026,9 +3026,13 @@ def standalone_command(
 def waits_out_an_outage(arguments: argparse.Namespace) -> bool:
     """Whether the command is a bot that ends with a notice, not a failure, when GitHub
     keeps failing: its next event or run does what it couldn't (decision 0136). A
-    check, such as that of the signatures, still fails, as it must not pass unseen."""
-    return arguments.command in ("bot-health", "next-branch") or (
-        arguments.command == "coach" and arguments.action == "report"
+    check, such as that of the signatures, still fails, as it must not pass unseen.
+    So does the fix bot after the checks, but not its command on a comment, whose
+    failure tells the person who asked (decision 0155)."""
+    return (
+        arguments.command in ("bot-health", "next-branch")
+        or (arguments.command == "coach" and arguments.action == "report")
+        or (arguments.command == "fix" and arguments.action != "command")
     )
 
 
@@ -3157,6 +3161,7 @@ def main(
             and waits_out_an_outage(arguments)
         ):
             print(unreachable(error), file=sys.stderr)
+            sit_out()
             return 0
         print(f"blueprint.py: {error}", file=sys.stderr)
         return 2
