@@ -976,13 +976,15 @@ of its own."""
 [step."Pages in one column"]
 problem = """A README, a CONTRIBUTING file or a page of `docs/` sets columns side by
 side: a `<table>` that puts a picture beside text, or a cell with a width; the log names
-each file and line. A cell of a Markdown table with more than 30 words, a paragraph, is
-a warning in the same log, which fails nothing yet."""
+each file and line. A cell of a Markdown table with more than 30 words, a paragraph, and
+a paragraph or an item of a list with more than 150 words are warnings in the same log,
+which fail nothing."""
 why = """The GitHub app and phones keep such columns side by side and squeeze them until
 the text is a few words wide and the pictures are tiny."""
 fix = """Put the cells one below the other, the text before its picture, and leave out
 the widths; a table holds tabular data only. Make the rows of a table with paragraphs a
-list, or move the detail to a page of its own and link it. The command that the log names does this
+list, or move the detail to a page of its own and link it; give a long paragraph a short
+lead sentence and a list or headings below it. The command that the log names does this
 for you, then commit what changed (in the blueprint itself, the tool is `blueprint.py`
 without `.github/`):"""
 commands = ["python3 .github/blueprint.py pages --fix"]

@@ -1325,6 +1325,50 @@ def test_a_website_without_an_address_needs_no_map(tmp_path: Path) -> None:
     assert messages(site) == []
 
 
+def previewed(address: str) -> str:
+    """The head of a page whose preview card shows the picture at address."""
+    return (
+        f'{GENERATOR}<meta property="og:image" content="{address}" />'
+        f'<meta property="twitter:image" content="{address}" />'
+    )
+
+
+def test_the_picture_of_a_preview_card_is_a_file_of_the_website(
+    tmp_path: Path,
+) -> None:
+    preview = "assets/images/social-preview.png"
+    card = "assets/images/social/guide%20one.png"
+    files = one_language()
+    files["index.html"] = page(
+        "en", canonical=BASE + "index.html", head=previewed(BASE + preview)
+    )
+    files["guide.html"] = page(
+        "en", canonical=BASE + "guide.html", head=previewed(f"{BASE}{card}?v=1")
+    )
+    files["other.html"] = page(
+        "en",
+        canonical=BASE + "other.html",
+        head=previewed("https://elsewhere.example/card.png"),
+    )
+    site = built(tmp_path, files)
+
+    # Each page names its picture twice, and the check names it once.
+    assert messages(site) == [
+        f"guide.html: names {BASE}{card}?v=1 as the picture of its preview card, "
+        "which the website doesn't have: a link to the page would show no picture",
+        f"index.html: names {BASE}{preview} as the picture of its preview card, "
+        "which the website doesn't have: a link to the page would show no picture",
+    ]
+
+    (site / preview).parent.mkdir(parents=True)
+    (site / preview).write_bytes(b"\x89PNG")
+    (site / "assets/images/social").mkdir()
+    (site / "assets/images/social/guide one.png").write_bytes(b"\x89PNG")
+
+    # A picture of another server is not the website's to check.
+    assert messages(site) == []
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
