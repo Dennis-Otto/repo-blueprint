@@ -175,7 +175,9 @@ jobs:
     # Not in the blueprint itself; generated repositories don't have this line.
     if: github.repository != 'Dennis-Otto/repo-blueprint'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The sum of the timeouts of its steps (HACS, hassfest, the oldest Home Assistant)
+    # and room for the PR coach, so that a slow pull still gets its explanation.
+    timeout-minutes: 25
     steps:
       - name: Record the network traffic of the job
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
