@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import dataclasses
+import gzip
 import io
 import json
 import subprocess
@@ -2016,3 +2017,118 @@ def test_the_job_that_publishes_asks_for_the_data_of_the_dashboard(
             f"- {PUBLISHED_DASHBOARD}/{name} answers with its data.\n"
             for name in DASHBOARD_FILES
         )
+
+
+def test_the_page_leads_back_to_the_website_and_describes_itself() -> None:
+    page = dashboard.render([], "Dennis-Otto <x>", "v1.0.0", NOW)
+    site = "https://dennis-otto.github.io/repo-blueprint/"
+
+    # A visitor from a shared link reaches the website and the page that explains it.
+    assert (
+        '<body>\n<nav aria-label="Website">'
+        f'<a href="{site}">Repo Blueprint</a> · '
+        f'<a href="{site}features/bots.html#dashboard">What the dashboard shows</a>'
+        "</nav>\n<main>\n"
+    ) in page
+    description = (
+        "The public repositories of Dennis-Otto &lt;x&gt; at a glance: the release "
+        "of the blueprint each is on, its releases and pull requests, the last runs "
+        "of its workflows, its OpenSSF Scorecard and its health."
+    )
+    # Search engines and the preview of a shared link describe it, the tab shows the
+    # icon of the website.
+    for tag in (
+        f'<meta name="description" content="{description}">',
+        f'<link rel="canonical" href="{site}dashboard/">',
+        f'<link rel="icon" href="{site}assets/images/favicon.png">',
+        '<meta property="og:type" content="website">',
+        '<meta property="og:site_name" content="Repo Blueprint">',
+        '<meta property="og:title" content="Repository dashboard">',
+        f'<meta property="og:description" content="{description}">',
+        f'<meta property="og:url" content="{site}dashboard/">',
+        f'<meta property="og:image" content="{site}images/dashboard.png">',
+        '<meta name="twitter:card" content="summary_large_image">',
+    ):
+        assert tag in page.split("</head>", 1)[0]
+    # The name of each repository stays in view while a table scrolls sideways.
+    assert (
+        "th:first-child, td:first-child { position: sticky; left: 0; z-index: 1;\n"
+        "  background: var(--bg); box-shadow: inset -1px 0 0 var(--line); }\n"
+        "th:first-child { background: var(--head); }"
+    ) in page
+
+
+def test_the_page_follows_the_address_where_it_is_published() -> None:
+    page = dashboard.render(
+        [], "Owner", "v1.0.0", NOW, url="https://example.org/blueprint/board/"
+    )
+
+    assert '<a href="https://example.org/blueprint/">Repo Blueprint</a>' in page
+    assert '<link rel="canonical" href="https://example.org/blueprint/board/">' in page
+    assert 'content="https://example.org/blueprint/images/dashboard.png">' in page
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.org/blueprint/board/", "https://example.org/blueprint/board"],
+)
+def test_the_website_is_one_level_above_the_dashboard(url: str) -> None:
+    assert dashboard.website(url) == "https://example.org/blueprint/"
+
+
+SITEMAP = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    "    <url>\n"
+    "         <loc>https://dennis-otto.github.io/repo-blueprint/index.html</loc>\n"
+    "         <lastmod>2026-10-01</lastmod>\n"
+    "    </url>\n"
+    "</urlset>"
+)
+
+
+def test_the_dashboard_joins_the_sitemap_of_the_website(tmp_path: Path) -> None:
+    sitemap = tmp_path / "site" / "sitemap.xml"
+    sitemap.parent.mkdir()
+    sitemap.write_text(SITEMAP, encoding="utf-8")
+    packed = sitemap.with_name("sitemap.xml.gz")
+    packed.write_bytes(gzip.compress(SITEMAP.encode("utf-8")))
+    arguments = [
+        "--owner",
+        "Dennis-Otto",
+        "--out",
+        str(tmp_path / "site/dashboard/index.html"),
+    ]
+
+    for _ in range(2):
+        code = dashboard.main(
+            [*arguments, "--sitemap", str(sitemap)],
+            api=simulated(ROUTES),
+            opener=opener,
+            now=NOW,
+        )
+        assert code == 0
+
+    # Once, however often the dashboard is written beside the same website.
+    expected = SITEMAP.replace(
+        "</urlset>",
+        "    <url>\n"
+        "         <loc>https://dennis-otto.github.io/repo-blueprint/dashboard/</loc>\n"
+        "         <lastmod>2026-10-08</lastmod>\n"
+        "    </url>\n"
+        "</urlset>",
+    )
+    assert sitemap.read_text(encoding="utf-8") == expected
+    assert gzip.decompress(packed.read_bytes()).decode("utf-8") == expected
+
+
+def test_a_sitemap_without_its_compressed_copy(tmp_path: Path) -> None:
+    sitemap = tmp_path / "sitemap.xml"
+    sitemap.write_text(SITEMAP, encoding="utf-8")
+
+    dashboard.add_to_sitemap(sitemap, "https://example.org/board/", NOW)
+
+    assert "<loc>https://example.org/board/</loc>" in sitemap.read_text(
+        encoding="utf-8"
+    )
+    assert not sitemap.with_name("sitemap.xml.gz").exists()
