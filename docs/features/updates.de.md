@@ -23,7 +23,7 @@ Renovate, mehrmals am Tag als Release-App des Eigentümers, für jedes Repositor
 
 ## Updates
 
-Innerhalb eines Tages nach jedem Release des Blueprints (in den Repositories des Rollouts innerhalb von Minuten), und jede Woche, führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request.
+Innerhalb eines Tages nach jedem Release des Blueprints (in den Repositorys des Rollouts innerhalb von Minuten), und jede Woche, führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request.
 
 **Womit:** `blueprint-update.yml`.
 
@@ -105,7 +105,7 @@ Für eine Nextcloud-App, jede Woche: hat Nextcloud eine neue Hauptversion, hebt 
   <img src="../images/diagrams/what-belongs-to-the-blueprint-and-what-to-the-project.de.svg" alt="Was dem Blueprint gehört und was dem Projekt: copier update bringt die Änderungen der Dateien des Blueprints, Zeile für Zeile mit den Änderungen des Repositorys zusammengeführt, und überschreibt nie die Dateien des Projekts. Ein Projekt ergänzt eigene Prüfungen, Einstellungen, Notizen für Coding-Agents und Workflows neben denen des Blueprints.">
 </picture>
 
-Der Blueprint hält die gemeinsamen Teile aller Repositories gleich; ein Projekt ergänzt seine eigenen, ohne sie abzuspalten:
+Der Blueprint hält die gemeinsamen Teile aller Repositorys gleich; ein Projekt ergänzt seine eigenen, ohne sie abzuspalten:
 
 - **Änderungen an den Dateien des Blueprints überstehen Updates, oder sie warten auf dich:** `copier update` führt die Änderungen des Blueprints und die des Repositorys Zeile für Zeile zusammen und markiert einen Konflikt, wo beide dieselben Zeilen geändert haben. Eine Datei, die das Release löscht, umbenennt oder als Binärdatei ersetzt, kann es nicht zusammenführen und nimmt die Fassung des Releases: Hatte das Repository eine solche Datei geändert, nennt der Blueprint-Bot sie in seinem Pull Request, schaltet Auto-Merge ab und setzt das Label `merge-conflict`. Bring die Änderung in die Datei, die an ihre Stelle tritt, oder schlage sie dem Blueprint vor.
 - **Ein Pull Request erfährt es, wenn er eine davon ändert:** Der Check *lint* annotiert jede Datei, die `.github/blueprint/owned.txt` auflistet, und der Bericht des PR-Coachs sagt, wohin die Änderung stattdessen gehört, verlinkt ein neues Issue im Blueprint, das mit den Dateien ausgefüllt ist, und setzt das Label `blueprint-file`. Ein Hinweis, oder ein Fehlschlag mit der Repository-Variable [`BLUEPRINT_OWNERSHIP`](../reference/variables.md#blueprint_ownership) (englisch) auf `fail`; die Bots bekommen keinen.
