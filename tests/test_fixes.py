@@ -2723,13 +2723,22 @@ class Unavailable(FakeGitHub):
         return 503, {"message": "Service unavailable"}
 
 
+@pytest.mark.parametrize("runner", [True, False])
 def test_the_fix_bot_ends_with_a_notice_when_github_keeps_failing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], waits: list[float]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    waits: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+    runner: bool,
 ) -> None:
     # Its next run after the checks does what this one couldn't, and the run of the
     # bot mails no one (decision 0155).
     github = Unavailable()
     output = tmp_path / "output"
+    folder = tmp_path / "runner"
+    folder.mkdir()
+    if runner:
+        monkeypatch.setenv("RUNNER_TEMP", str(folder))
 
     assert fix_collect(homedarts(tmp_path), github, output) == 0
     out, err = capsys.readouterr()
@@ -2739,8 +2748,10 @@ def test_the_fix_bot_ends_with_a_notice_when_github_keeps_failing(
     )
     assert "Nothing to do for a person." in err
     assert waits == [10, 20, 40]
-    # The steps after it, which commit or suggest, learn of nothing to do.
+    # The steps after it, which commit or suggest, learn of nothing to do, and the
+    # step of the issue of main learns that the job sat out an outage, on a runner.
     assert not output.exists()
+    assert (folder / "github-sat-out").exists() is runner
 
 
 def test_the_command_fix_fails_when_github_keeps_failing(
@@ -4621,6 +4632,29 @@ def test_a_step_of_the_fix_bot_ends_with_a_notice_when_github_keeps_failing(
     assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
     assert done.stdout.startswith(NOTICE)
     assert not done.called(WRITES.args)
+    # The steps after it learn that the job sat out an outage.
+    assert (done.runner_temp / "github-sat-out").exists()
+
+
+@needs_bash
+def test_the_issue_of_the_fix_bot_of_main_stays_open_after_an_outage(
+    tmp_path: Path,
+) -> None:
+    # A step before, such as fix main or the token of the release app, sat out an
+    # outage of GitHub, so the job passed without doing anything: that is no run
+    # that passes again, and the issue stays as it is.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "fixes",
+        KEEPS,
+        answers=(Answer(r"issue list --state open .*", "7\n"), WRITES),
+        env={"FAILED": "false", "URL": "https://run/9"},
+        files={"$RUNNER_TEMP/github-sat-out": ""},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == []
 
 
 @needs_bash

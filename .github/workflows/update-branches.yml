@@ -85,14 +85,16 @@ env:
   # stays in $RUNNER_TEMP/gh-errors, and given_up says whether it was GitHub's. When
   # GitHub keeps failing, the trap ends the step with a notice instead of a failure:
   # the next event or the bot-health bot catches up, and a person has nothing to do
-  # (decision 0136). A step says in INSTEAD what it does instead, if it does more
-  # than nothing.
+  # (decision 0136), and leaves $RUNNER_TEMP/github-sat-out for the steps after it,
+  # as a job that sat out an outage passed nothing. A step says in INSTEAD what it
+  # does instead, if it does more than nothing.
   OUTAGE: |
     outage="$RUNNER_TEMP/github-unavailable"
     unavailable() {
       local status=$?
       if ((status)) && [[ -e "$outage" ]]; then
         echo "::notice title=GitHub is unavailable::GitHub kept failing ($(head -n 1 "$RUNNER_TEMP/gh-errors")), as in an outage of GitHub (https://www.githubstatus.com), so ${INSTEAD:-the bot did nothing this time}; its next run catches up. Nothing to do for a person."
+        touch "$RUNNER_TEMP/github-sat-out"
         exit 0
       fi
     }
@@ -297,7 +299,7 @@ jobs:
         run: |
           eval "$OUTAGE"
           tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO" --jq .full_name > /dev/null
-          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app."
+          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app. A short outage of GitHub that ended a moment ago looks the same: if none of these holds, the next run tells them apart."
           exit 1
       # The default branch, also for pull_request_target, without the token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

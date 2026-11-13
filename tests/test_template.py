@@ -19568,6 +19568,44 @@ def test_the_flaky_test_bot_warns_of_a_log_that_it_cannot_read(
 
 
 @WITH_JQ
+def test_the_flaky_test_bot_waits_for_one_log_that_github_keeps_failing(
+    tmp_path: Path,
+) -> None:
+    # Each log that GitHub kept failing cost a minute of waits, longer than the job
+    # may run with three of them: after the first, the report asks for no more, and
+    # its rows name no tests.
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(11, "test (3.12)", "failure", ("Run", "failure")),
+                    job_of_a_run(12, "test (3.13)", "failure", ("Run", "failure")),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(EXITED),
+            "repos/o/r/actions/jobs/11/logs.error": "HTTP 502: Bad Gateway\n",
+            "repos/o/r/actions/jobs/12/logs.error": "HTTP 502: Bad Gateway\n",
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        stubs={"sleep": workflow_steps.recording("sleep")},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert len(done.called(r".*/jobs/11/logs")) == 4
+    assert not done.called(r".*/jobs/12/logs")
+    for job in (11, 12):
+        assert f"/runs/5/job/{job}) | `Run` | {NOTHING} | `{EXITED}` |" in done.summary
+
+
+@WITH_JQ
 @pytest.mark.parametrize("kind", ["python-package", "home-assistant"])
 def test_the_flaky_test_bot_of_a_project_reads_a_log_with_colors(
     projects: Mapping[str, Path], tmp_path: Path, kind: str

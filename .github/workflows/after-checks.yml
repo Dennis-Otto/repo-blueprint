@@ -155,14 +155,16 @@ env:
   # stays in $RUNNER_TEMP/gh-errors, and given_up says whether it was GitHub's. When
   # GitHub keeps failing, the trap ends the step with a notice instead of a failure:
   # the next event or the bot-health bot catches up, and a person has nothing to do
-  # (decision 0136). A step says in INSTEAD what it does instead, if it does more
-  # than nothing.
+  # (decision 0136), and leaves $RUNNER_TEMP/github-sat-out for the steps after it,
+  # as a job that sat out an outage passed nothing. A step says in INSTEAD what it
+  # does instead, if it does more than nothing.
   OUTAGE: |
     outage="$RUNNER_TEMP/github-unavailable"
     unavailable() {
       local status=$?
       if ((status)) && [[ -e "$outage" ]]; then
         echo "::notice title=GitHub is unavailable::GitHub kept failing ($(head -n 1 "$RUNNER_TEMP/gh-errors")), as in an outage of GitHub (https://www.githubstatus.com), so ${INSTEAD:-the bot did nothing this time}; its next run catches up. Nothing to do for a person."
+        touch "$RUNNER_TEMP/github-sat-out"
         exit 0
       fi
     }
@@ -589,6 +591,7 @@ jobs:
           rows=""
           # Each job with each of its tests, one to a line, for the count in the issue.
           counted=""
+          no_logs=""
           while IFS=$'\t' read -r -u 3 id conclusion url name steps; do
             if [[ -z "$id" ]] || [[ "$conclusion" == failure && "$first" == cancelled ]]; then
               continue
@@ -616,9 +619,16 @@ jobs:
             # A log that GitHub doesn't give, such as that of a job that never started,
             # leaves the row without its tests, and a warning of the run says why; so
             # does one that GitHub kept failing, as the report is worth more than a log.
-            if ! log="$(tried gh api --header "$API_VERSION_HEADER" "${allow[@]}" "repos/$GH_REPO/actions/jobs/$id/logs")"; then
+            # After a log that GitHub kept failing, the report asks for no more: it
+            # would wait for each of them, longer than the job may run.
+            if [[ -n "$no_logs" ]]; then
+              log=""
+            elif ! log="$(tried gh api --header "$API_VERSION_HEADER" "${allow[@]}" "repos/$GH_REPO/actions/jobs/$id/logs")"; then
               echo "::warning::The log of the job $(plain "$name") couldn't be read, so the report names none of its tests: $(plain "$(head -n 1 "$RUNNER_TEMP/gh-errors")")"
               log=""
+              if given_up; then
+                no_logs=true
+              fi
             fi
             log="$(sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9-]+T[0-9:.]+Z //' <<<"$log")"
             # The tests that pytest names in the log. Other tests, such as those of a
@@ -1863,7 +1873,7 @@ jobs:
         run: |
           eval "$OUTAGE"
           tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO" --jq .full_name > /dev/null
-          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app."
+          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app. A short outage of GitHub that ended a moment ago looks the same: if none of these holds, the next run tells them apart."
           exit 1
       - name: Keep the pull request with the fixes of main
         if: steps.main-app.outputs.token != ''
@@ -1917,6 +1927,11 @@ jobs:
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           eval "$OUTAGE"
+          # A job that sat out an outage of GitHub did nothing, so it passed nothing
+          # either: the issue stays as it is (decision 0155).
+          if [[ "$FAILED" != true && -e "$RUNNER_TEMP/github-sat-out" ]]; then
+            exit 0
+          fi
           title="The fix bot fails on main"
           number="$(tried gh issue list --state open --search "\"$title\" in:title" --json number,title \
             --jq "map(select(.title == \"$title\"))[0].number // empty")"
@@ -2128,7 +2143,7 @@ jobs:
         run: |
           eval "$OUTAGE"
           tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO" --jq .full_name > /dev/null
-          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app."
+          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app. A short outage of GitHub that ended a moment ago looks the same: if none of these holds, the next run tells them apart."
           exit 1
       - name: Set the title and commit the draft of the entry
         if: steps.app.outputs.token != ''
@@ -2362,7 +2377,7 @@ jobs:
         run: |
           eval "$OUTAGE"
           tried gh api --header "$API_VERSION_HEADER" "repos/$GH_REPO" --jq .full_name > /dev/null
-          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app."
+          echo "::error title=The release app gave no token::GitHub answers, but refused the token of the release app; the log of the step that asked for it has its answer. Most often the app isn't installed on this repository or lacks a permission that the bot asks for, or the secret RELEASE_AUTOMATION_PRIVATE_KEY of the environment release holds the key of another app. A short outage of GitHub that ended a moment ago looks the same: if none of these holds, the next run tells them apart."
           exit 1
       - name: Commit the diagrams onto the branch of the pull request
         if: steps.app.outputs.token != ''
