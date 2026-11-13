@@ -3434,10 +3434,10 @@ def test_an_integration_that_needs_a_newer_home_assistant_fails_on_its_oldest(
         (None, 0, "There is no hacs.json to name the oldest Home Assistant"),
         ('{"name": "Example"}', 0, "hacs.json names no oldest Home Assistant"),
         (
-            '{"name": "Example", "homeassistant": "2026.8"}',
+            '{"name": "Example", "homeassistant": "2026.8.x"}',
             1,
             "::error file=hacs.json,title=No release of Home Assistant::hacs.json"
-            " names 2026.8 as the oldest Home Assistant",
+            " names 2026.8.x as the oldest Home Assistant",
         ),
     ],
 )
@@ -3458,6 +3458,25 @@ def test_the_oldest_home_assistant_is_the_one_that_hacs_json_names(
     assert said in result.stdout
     # Without a release to run, no image.
     assert result.stubbed == []
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_a_minimum_without_a_patch_number_is_the_first_release_of_its_month(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # HACS reads 2026.8 as 2026.8.0, so the step runs that image.
+    files = {
+        **INTEGRATION,
+        "hacs.json": '{"name": "Example", "homeassistant": "2026.8"}\n',
+    }
+
+    result, _ = run_on_the_oldest(tmp_path, projects["home-assistant"], files)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    [docker] = result.stubbed
+    assert docker.endswith(" ghcr.io/home-assistant/home-assistant:2026.8.0 -")
 
 
 def test_the_example_promises_a_home_assistant_no_newer_than_it_tests(

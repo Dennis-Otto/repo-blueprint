@@ -240,6 +240,11 @@ jobs:
             echo "hacs.json names no oldest Home Assistant, so HACS offers each release to every one; nothing to load."
             exit 0
           fi
+          # HACS compares with AwesomeVersion, for which 2026.8 is 2026.8.0, the
+          # first release of that month, and so is the tag of its image.
+          if [[ "$minimum" =~ ^[0-9]{4}\.[0-9]{1,2}$ ]]; then
+            minimum="$minimum.0"
+          fi
           if [[ ! "$minimum" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$ ]]; then
             echo "::error file=hacs.json,title=No release of Home Assistant::hacs.json names $minimum as the oldest Home Assistant, which is no release such as 2026.8.0."
             exit 1

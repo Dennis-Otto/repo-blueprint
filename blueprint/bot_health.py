@@ -1353,6 +1353,21 @@ def blueprint_report(
     if released_tag(answered_release(base64.b64decode(content).decode())) == tag:
         return f"The pull request of the blueprint bot brings {code(tag)}.", False
     out = f"{code(tag)} is out, and this repository has {code(have or 'none')}"
+    # A run of the bot that the Rollout or its schedule started brings it already,
+    # and one that failed since the release fails again: its weekly run and its issue
+    # of failures take that on, so that the owner gets no mail of a failure each day.
+    runs = runs_of(api, repo, branch, bot, most=50)
+    if any(run.status != "completed" for run in runs):
+        return f"{out}: the blueprint bot is running already.", False
+    published = str(latest.get("published_at") or "")
+    if published and any(
+        run.conclusion == "failure" and run.created >= datetime.fromisoformat(published)
+        for run in runs[:1]
+    ):
+        return (
+            f"{out}: the blueprint bot failed on it, so it waits for its weekly run.",
+            False,
+        )
     if not start:
         return f"{out}: the blueprint bot starts in a later look.", False
     api.post(f"repos/{repo}/actions/workflows/{bot['id']}/dispatches", {"ref": branch})

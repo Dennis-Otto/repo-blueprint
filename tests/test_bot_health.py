@@ -4028,3 +4028,73 @@ def test_the_daily_look_at_the_releases_of_the_blueprint_waits_out_an_outage(
     assert github.dispatched == []
     _, looked = sweep(api_of(github), REPO, tmp_path, NOW)
     assert looked is healthy
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
+def test_the_daily_look_leaves_the_blueprint_bot_alone_while_it_runs(
+    github: FakeGitHub, tmp_path: Path, status: str
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    # Started by the Rollout or its schedule, before it pushed its branch.
+    github.workflow_runs[9] = [
+        run_of(
+            1,
+            name="Blueprint update",
+            path=BLUEPRINT_BOT,
+            event="workflow_dispatch",
+            status=status,
+            conclusion=None,
+            workflow=9,
+        )
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert blueprint_lines(summary) == [
+        "`v1.20.0` is out, and this repository has `v1.17.0`: the blueprint bot is"
+        " running already."
+    ]
+    assert github.dispatched == []
+
+
+@pytest.mark.parametrize(
+    ("ran", "started"),
+    [
+        # A failure since the release fails again: the weekly run takes it on.
+        (NOW - timedelta(hours=3), False),
+        # A failure before the release says nothing about the release.
+        (NOW - timedelta(days=3), True),
+    ],
+)
+def test_the_daily_look_starts_the_blueprint_bot_once_for_a_release_it_failed_on(
+    github: FakeGitHub, tmp_path: Path, ran: datetime, started: bool
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    github.others[BLUEPRINT_RELEASE] = {
+        "tag_name": "v1.20.0",
+        "published_at": stamp(NOW - timedelta(days=1)),
+    }
+    github.workflow_runs[9] = [
+        run_of(
+            1,
+            name="Blueprint update",
+            path=BLUEPRINT_BOT,
+            event="workflow_dispatch",
+            created=ran,
+            workflow=9,
+        )
+    ]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    out = "`v1.20.0` is out, and this repository has `v1.17.0`: "
+    assert blueprint_lines(summary) == [
+        out
+        + (
+            "started the blueprint bot."
+            if started
+            else "the blueprint bot failed on it, so it waits for its weekly run."
+        )
+    ]
+    assert ((9, {"ref": "main"}) in github.dispatched) is started
