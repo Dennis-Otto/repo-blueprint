@@ -2734,7 +2734,9 @@ CARD = (
     '<meta property="og:image:type" content="image/png" />\n'
     '<meta property="og:image:width" content="1200" />\n'
     '<meta property="og:image:height" content="630" />\n'
+    '<meta property="og:image:alt" content="Demo for everyone" />\n'
     '<meta property="twitter:card" content="summary_large_image" />\n'
+    '<meta property="twitter:image:alt" content="Demo for everyone" />\n'
     f'<meta property="twitter:image" content="{SITE}assets/images/social/index.png" />'
 )
 
@@ -2785,6 +2787,12 @@ def test_a_home_page_previews_with_the_preview_of_the_repository(
         assert '<meta property="og:image:height" content="640" />' in output
         assert output.count('property="twitter:card"') == 1
         assert output.count("og:image:type") == 1
+        # The text of the picture stays, which a project's check of the website reads.
+        assert '<meta property="og:image:alt" content="Demo for everyone" />' in output
+        assert (
+            '<meta property="twitter:image:alt" content="Demo for everyone" />'
+            in output
+        )
         assert output.endswith("</head><body>og:image</body>")
 
     # An inner page keeps the card that the social plugin drew for it.
