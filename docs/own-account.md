@@ -16,7 +16,7 @@ The blueprint works for every account and organization on GitHub. A repository m
 
 ## 1. Copy the blueprint
 
-You need Git, Python 3.12 or later, [uv](https://docs.astral.sh/uv/) and GitHub CLI 2.48 or later, signed in as an administrator of your account or organization (`gh auth login`), and no checkout of the blueprint.
+You need Git, Python 3.12 or later, [uv](https://docs.astral.sh/uv/) and GitHub CLI 2.48 or later, signed in as an administrator of your account or organization (`gh auth login`), a key with which Git signs every commit, and no checkout of the blueprint. `main` takes signed commits only, from the first after `create`: when Git signs none yet, set up a key as [the troubleshooting](troubleshooting.md#a-commit-has-no-verified-signature) says, with SSH in a few lines, and the preflight of `create` warns until it does.
 
 ```sh
 uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint my-project
@@ -58,7 +58,7 @@ python3 .github/blueprint.py create
 
 ## 3. Register the release app
 
-One command registers the app on your account or organization, with its name and all of its permissions filled in and without a webhook, sets its private key and opens the pull request that names it. Turn `commit.gpgsign` on first: the rules of `main` ask for a signature on every commit, also on the one that names the app.
+One command registers the app on your account or organization, with its name and all of its permissions filled in and without a webhook, sets its private key and opens the pull request that names it. Have Git sign every commit first, with `commit.gpgsign` and a key on your account, as [the troubleshooting](troubleshooting.md#a-commit-has-no-verified-signature) sets it up: the rules of `main` ask for a signature on every commit, also on the one that names the app, and the preflight of `app register` warns when Git signs none.
 
 ```sh
 python3 .github/blueprint.py app register
@@ -77,7 +77,7 @@ Like `create`, it first checks what it needs, and a finding marked with ✘ stop
 Two things are left for you, and the command prints the link of the first:
 
 1. **Install the app** on the repository, at `https://github.com/apps/NAME/installations/new`.
-2. **Merge the pull request** once its checks are green, on its page or with `gh pr merge --squash`. The check *signed commits* names a commit without a signature and how to sign it again.
+2. **Merge the pull request** once its checks are green, on its page or with `gh pr merge --squash`. The check *signed commits* names a commit without a signature and how to sign it again, as [the troubleshooting](troubleshooting.md#a-commit-has-no-verified-signature) does.
 
 The checklist sees the installation by the check suite that GitHub opens for an installed app at each push, so it ticks the app off after the merge when you install first, and after the next push otherwise.
 

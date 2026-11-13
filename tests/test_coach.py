@@ -9,6 +9,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import subprocess
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -1681,7 +1682,7 @@ def test_an_unsigned_commit_of_a_fork_is_no_all_clear() -> None:
         "git fetch origin\n"
         f"git fetch https://github.com/{REPO}.git main\n"
         "git switch your-branch\n"
-        "git rebase -S FETCH_HEAD\n"
+        "git rebase --force-rebase -S FETCH_HEAD\n"
         "git push --force-with-lease\n"
     ) in part
     assert "git config gpg.format ssh\n" in part
@@ -2513,3 +2514,42 @@ def test_report_with_a_broken_catalog(
 
     assert result == 2
     assert "needs the text title" in capsys.readouterr().err
+
+
+def test_the_fix_of_signed_commits_signs_a_branch_that_is_on_its_base_already(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Most branches that lack a signature start from the newest commit of their
+    # base, and a rebase onto it rewrites nothing unless it is forced to.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.com")
+    # A signer that always fails shows that git tried to sign.
+    (tmp_path / "gitconfig").write_text("[gpg]\n\tprogram = false\n", encoding="utf-8")
+    repository = tmp_path / "repository"
+
+    def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *arguments], cwd=repository, capture_output=True, text=True
+        )
+
+    repository.mkdir()
+    for arguments in (
+        ["init", "--initial-branch=main"],
+        ["commit", "--allow-empty", "--message", "base"],
+        ["switch", "--create", "your-branch"],
+        ["commit", "--allow-empty", "--message", "unsigned"],
+    ):
+        assert git(*arguments).returncode == 0
+    (rebase,) = [
+        command
+        for command in catalog().checks["signed commits"].commands
+        if command.startswith("git rebase")
+    ]
+
+    result = git(*shlex.split(rebase.replace("FETCH_HEAD", "main"))[1:])
+
+    assert result.returncode != 0
+    assert "gpg failed to sign" in result.stderr

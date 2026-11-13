@@ -264,7 +264,8 @@ block. A signature shows who made a commit, so that nobody can push one in the n
 somebody else."""
 fix = """Sign the commits of your branch and push them again: rebase them with a
 signature onto the branch of this repository that the pull request goes into, also from
-a fork, and push with `--force-with-lease`. `-S` signs a commit, while `-s` adds only
+a fork, forced, so that git signs them again also when the branch starts from there
+already, and push with `--force-with-lease`. `-S` signs a commit, while `-s` adds only
 the sign-off of the Developer Certificate of Origin, so a commit needs both. If git
 can't sign yet, set it up first, here with an SSH key: the same key must be on your
 account on GitHub as a *signing key*, which is a type of its own beside an
@@ -278,7 +279,7 @@ commands = [
   "git fetch origin",
   "git fetch https://github.com/{repo}.git {base}",
   "git switch your-branch",
-  "git rebase -S FETCH_HEAD",
+  "git rebase --force-rebase -S FETCH_HEAD",
   "git push --force-with-lease",
 ]
 docs = "https://docs.github.com/en/authentication/managing-commit-signature-verification"

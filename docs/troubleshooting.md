@@ -1,5 +1,5 @@
 ---
-description: "What to do when something in a repository of Repo Blueprint doesn't work: a create that stops at its preflight or midway, a script that is not executable, an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
+description: "What to do when something in a repository of Repo Blueprint doesn't work: a create that stops at its preflight or midway, a commit without a verified signature, a script that is not executable, an update that conflicts, a required check that never reports, settings apply without administrator rights, a settings bot whose token the release app refuses, a switch of the security that GitHub keeps off, a release pull request without checks, Renovate that opens no updates, and OSV-Scanner that reports a version that another package pins."
 ---
 
 # Troubleshooting
@@ -10,7 +10,7 @@ Most problems explain themselves where they happen: a check that fails says in i
 
 **What you see:** `python3 .github/blueprint.py create` shows *The preflight of OWNER/NAME* with a line marked ✘ and the command that fixes it below, and ends with *the preflight found 1 problem that would stop create, which made nothing*.
 
-**Why:** before its first step, `create` checks what its steps need, so that a missing tool or right can't leave a repository that is half made. The preflight only asks git and gh, and `create` makes nothing while a finding is marked with ✘. A finding marked with · is one that GitHub didn't answer or that the preflight can't tell, and it stops nothing. `python3 .github/blueprint.py doctor` runs the preflight alone, and `create --dry-run` shows it with the commands.
+**Why:** before its first step, `create` checks what its steps need, so that a missing tool or right can't leave a repository that is half made. The preflight only asks git and gh, and `create` makes nothing while a finding is marked with ✘. A finding marked with · is one that GitHub didn't answer, that the preflight can't tell or that only warns, such as a Git that signs no commit, and it stops nothing. `python3 .github/blueprint.py doctor` runs the preflight alone, and `create --dry-run` shows it with the commands.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.dark.svg">
@@ -22,6 +22,7 @@ Most problems explain themselves where they happen: a check that fails says in i
 - **Python before 3.12:** the tools of the new repository, such as its lock files, need Python 3.12 or later. Install it from [python.org](https://www.python.org/downloads/); on Windows, `py -3` runs it.
 - **Git is not installed:** install it from [git-scm.com](https://git-scm.com/downloads).
 - **Git has no name or no email address to commit with:** `git config --global user.name "Your Name"` and `git config --global user.email "you@example.com"`. The sign-off of the first commit names them.
+- **Git signs no commit, or names no key to sign with (·):** `create` goes on, since its first commit lands before the rules of `main`, but every commit after it needs a signature: set up a key as [A commit has no verified signature](#a-commit-has-no-verified-signature) says. *Git signs a commit only with --gpg-sign* means that Git has a key: `git config --global commit.gpgsign true` signs every commit with it.
 - **GitHub CLI before 2.48, or none:** install or update it as [its installation](https://github.com/cli/cli#installation) says.
 - **gh is not signed in to github.com:** `gh auth login --hostname github.com --scopes workflow`. With a token in the variable `GH_TOKEN`, gh uses that one: give it the scopes, or remove the variable.
 - **Without the scopes that create needs:** `gh auth refresh --hostname github.com --scopes workflow,read:org`, with the scopes that the finding names. `repo` creates the repository and pushes, `workflow` pushes the files in `.github/workflows/` over HTTPS, which GitHub refuses without it (with `ssh` as gh's git protocol the key pushes them, and the preflight doesn't ask for `workflow`), and `read:org` shows whether you own the organization. A fine-grained token names no scopes, so the preflight can't tell (·): it has to create repositories of the owner, with *Administration*, *Contents* and *Workflows* (read and write).
@@ -39,6 +40,35 @@ Most problems explain themselves where they happen: a check that fails says in i
 **Why:** `gh repo create` makes the repository on GitHub and adds `origin` before it pushes, so a push or settings that failed leave a repository that is there.
 
 **What to do:** run `python3 .github/blueprint.py create` again. When `origin` pushes to the repository of the answers, and GitHub has it, `create` goes on from the first step that is left: the push of `main` when GitHub has no branch `main` yet, signed in by gh as `gh repo create --push` is, then `settings apply` and the checklist, which change only what differs. A folder that pushes to another repository is no new copy, and `create` refuses it.
+
+## A commit has no verified signature
+
+**What you see:** GitHub blocks the merge of a pull request with *Commits must have verified signatures*, and the check *signed commits* names a commit with the reason of GitHub, such as `unsigned`, `unknown_key` or `bad_email`. Or a commit stops with *gpg failed to sign the data* or *user.signingkey needs to be set*, or the preflight of `create`, `doctor` or `app register` shows *Git signs no commit, and main takes signed commits only*.
+
+**Why:** `settings apply` gives `main` the rule that every commit carries a signature that GitHub verifies, so that nobody can push a commit in the name of somebody else, and nobody merges past it. The first commit of `create` lands before the rule, and every commit after it needs a signature: the one of `app register`, your own and those of an update of the blueprint by hand. `git commit -s` adds only the sign-off of the Developer Certificate of Origin, and `-S` signs, so a commit needs both. GitHub verifies a signature when the key is on your account as a *signing key*, a type of its own beside the key that signs you in, and when the email of the commit is verified on your account.
+
+**What to do:** set up a key once, before the first commit after `create`. With SSH, which Git 2.34 and later sign with, these lines make a key where you have none yet, have Git sign every commit with it and add it to your account as a signing key, after gh gets the scope for that:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "you@example.com"
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+gh auth refresh --hostname github.com --scopes admin:ssh_signing_key
+gh ssh-key add ~/.ssh/id_ed25519.pub --type signing --title "Signing key"
+```
+
+Skip the first line when `~/.ssh/id_ed25519` is there already, and add the key in place of the last two in the settings of your account on GitHub, under *SSH and GPG keys → New SSH key* with the type *Signing Key*. With a key of GPG, follow [GitHub's guide](https://docs.github.com/en/authentication/managing-commit-signature-verification) in place of these lines. `python3 .github/blueprint.py doctor` then shows *Git signs every commit*, and [the contributing guide](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CONTRIBUTING.md#requirements-for-changes) of every repository says the same.
+
+A branch whose commits have no signature, or one that GitHub doesn't verify, gets them signed again and pushed: the rebase onto the newest `main` of GitHub writes every commit of the branch anew with a signature, also when the branch starts from there already, which `--force-rebase` sees to.
+
+```sh
+git fetch origin main
+git rebase --force-rebase --gpg-sign FETCH_HEAD
+git push --force-with-lease
+```
+
+`--force-with-lease` replaces the branch on GitHub only while it is the one that you rebased, and the checks of the pull request run again. For `unknown_key`, add the key to your account as above; for `bad_email`, verify the email of the commit on your account or commit with one that is, `git config --global user.email`, and sign the commits again.
 
 ## A script or the hook is not executable
 
@@ -58,7 +88,7 @@ git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --
 gh pr create --fill
 ```
 
-`chmod +x` makes the files executable on the disk, on Linux, on macOS and in the dev container, and `git update-index --chmod=+x` in the commit, on Windows too. The rules of `main` ask for a signature on every commit: turn `commit.gpgsign` on or add `--gpg-sign` to the commit, and the check *signed commits* names a commit without one and how to sign it again. A container also has `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` shows the mode of each file, `100755` for one that is executable. In Git Bash on Windows, the line with `.github/*.sh scripts/*.sh` names each script.
+`chmod +x` makes the files executable on the disk, on Linux, on macOS and in the dev container, and `git update-index --chmod=+x` in the commit, on Windows too. The rules of `main` ask for a signature on every commit: turn `commit.gpgsign` on or add `--gpg-sign` to the commit, with a key as [A commit has no verified signature](#a-commit-has-no-verified-signature) sets it up, and the check *signed commits* names a commit without one and how to sign it again. A container also has `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` shows the mode of each file, `100755` for one that is executable. In Git Bash on Windows, the line with `.github/*.sh scripts/*.sh` names each script.
 
 ## An update of the blueprint conflicts
 
