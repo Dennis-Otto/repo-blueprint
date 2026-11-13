@@ -152,10 +152,16 @@ The license.
 
 The name of the Python package or module.
 
+A name of Python starts with a letter: py\_ before a slug that starts with a digit, such as py\_2fa\_helper for 2FA Helper.
+
 - **Type:** text
 - **Asked:** only when `project_type in ['python-package', 'github-action', 'home-assistant']`
 - **When Copier refuses an answer, it says:** Use lowercase letters, digits and underscores.
-- **Default:** `{= project_slug | replace('-', '_') =}`, a template of Copier
+- **Default:** a template of Copier, from the answers before it:
+
+```text
+{= ('py_' if project_slug | regex_search('^[0-9]') else '') ~ project_slug | replace('-', '_') =}
+```
 
 ### `ha_domain`
 
@@ -170,16 +176,22 @@ The domain of the integration in Home Assistant.
 
 The id of the Nextcloud app, 32 characters at most.
 
-The App Store takes an id of 32 characters at most, from a lowercase letter to a letter or a digit, as the schema of appinfo/info.xml says.
+The App Store takes an id of 32 characters at most, from a lowercase letter to a letter or a digit, as the schema of appinfo/info.xml says: app\_ before a slug that starts with a digit or has one character only, such as app\_2fa\_helper.
 
 - **Type:** text
 - **Asked:** only when `project_type == 'nextcloud-app'`
 - **When Copier refuses an answer, it says:** Use 2 to 32 lowercase letters, digits and underscores, from a letter to a letter or a digit, as the App Store takes them.
-- **Default:** `{= (project_slug | replace('-', '_'))[:32] | trim('_') =}`, a template of Copier
+- **Default:** a template of Copier, from the answers before it:
+
+```text
+{= (('' if project_slug | regex_search('^[a-z][a-z0-9-]*[a-z0-9]$') else 'app_') ~ project_slug | replace('-', '_'))[:32] | trim('_') =}
+```
 
 ### `nextcloud_namespace`
 
 The PHP namespace of the app, under OCA.
+
+Each word with a capital first letter, and its other letters as they are: PaperlessSync stays PaperlessSync and iCal Sync becomes ICalSync, where the filter title would lower the inner capitals; App before a name that starts with a digit.
 
 - **Type:** text
 - **Asked:** only when `project_type == 'nextcloud-app'`
@@ -187,7 +199,10 @@ The PHP namespace of the app, under OCA.
 - **Default:** a template of Copier, from the answers before it:
 
 ```text
-{= project_name | regex_replace('[^A-Za-z0-9]+', ' ') | title | replace(' ', '') =}
+[% for word in (project_name | regex_replace('[^A-Za-z0-9]+', ' ')).split() %]
+[% if loop.first and word | regex_search('^[0-9]') %]App
+[% endif %]{= word[:1] | upper ~ word[1:] =}
+[% endfor %]
 ```
 
 ### `publish_package`

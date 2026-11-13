@@ -2647,6 +2647,27 @@ def test_someone_sets_every_label(projects: dict[str, Path]) -> None:
         assert "dependabot" not in setters, project
 
 
+@pytest.mark.parametrize("page", ["docs/guide.md", "docs/guide.de.md"])
+def test_the_guide_names_the_labels_that_the_bots_set(
+    projects: dict[str, Path], page: str
+) -> None:
+    # An existing repository gives its labels.toml the labels of the bots by hand, as
+    # the guide lists them: the group release, maintenance and no-bot-fixes, and no
+    # label that the template no longer has, such as docker.
+    text = (projects["generic"] / ".github/labels.toml").read_text(encoding="utf-8")
+    labels = tomllib.loads(text)["label"]
+    bots = {label["name"] for label in labels if label["group"] == "release"}
+    step = next(
+        line
+        for line in (ROOT / page).read_text(encoding="utf-8").splitlines()
+        if line.startswith("3. ") and "labels.toml.jinja" in line
+    )
+    named = set(re.findall(r"`([^`]+)`", step.partition("labels.toml.jinja)")[2]))
+
+    assert named == {*bots, "maintenance", "no-bot-fixes"}
+    assert named <= {label["name"] for label in labels}
+
+
 def test_the_composer_lock_belongs_to_the_composer_json(
     projects: dict[str, Path],
 ) -> None:
@@ -3000,7 +3021,9 @@ def test_the_settings_tool_runs_in_every_repository(
     assert "The settings of a repository as code" in result.stdout
     # Every copy brings create and its preflight alone, for the folder that copier
     # copy wrote, and what registers its release app after them.
-    assert ",app,create,doctor," in result.stdout
+    persons = result.stdout.partition("\nsteps of the bots")[0]
+    for name in ("app", "create", "doctor"):
+        assert f"\n  {name} " in persons
     for action in ("register", "connect"):
         command = subprocess.run(
             [sys.executable, ".github/blueprint.py", "app", action, "--help"],
@@ -14095,6 +14118,75 @@ def test_answers_that_would_break_a_file_are_refused(
             )
 
 
+@pytest.mark.parametrize(
+    ("name", "kind", "expected"),
+    [
+        # The filter title lowered the inner capitals: Paperlesssync and IcalSync.
+        (
+            "PaperlessSync",
+            "nextcloud-app",
+            {
+                "nextcloud_namespace": "PaperlessSync",
+                "nextcloud_app_id": "paperlesssync",
+            },
+        ),
+        (
+            "iCal Sync",
+            "nextcloud-app",
+            {"nextcloud_namespace": "ICalSync", "nextcloud_app_id": "ical_sync"},
+        ),
+        # A digit at the start, which no name of Python, the App Store or PHP takes.
+        (
+            "2FA Helper",
+            "nextcloud-app",
+            {
+                "project_slug": "2fa-helper",
+                "nextcloud_app_id": "app_2fa_helper",
+                "nextcloud_namespace": "App2FAHelper",
+            },
+        ),
+        (
+            "2FA Helper",
+            "home-assistant",
+            {"python_package": "py_2fa_helper", "ha_domain": "py_2fa_helper"},
+        ),
+        ("2FA Helper", "python-package", {"python_package": "py_2fa_helper"}),
+        # One character, which the App Store doesn't take as an id.
+        ("X", "generic", {"project_slug": "x"}),
+        ("X", "python-package", {"project_slug": "x", "python_package": "x"}),
+        (
+            "X",
+            "nextcloud-app",
+            {"nextcloud_app_id": "app_x", "nextcloud_namespace": "X"},
+        ),
+    ],
+)
+def test_the_defaults_of_a_name_pass_their_own_questions(
+    tmp_path: Path, name: str, kind: str, expected: dict[str, str]
+) -> None:
+    # copier copy --defaults asks nothing, so a default that its validator refuses
+    # stopped the copy on a question that nobody answered.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        worker = run_copy(
+            str(Template.folder),
+            tmp_path / "project",
+            data={
+                "owner": "octo-org",
+                "project_name": name,
+                "description": "A demo.",
+                "project_type": kind,
+            },
+            defaults=True,
+            vcs_ref="HEAD",
+            pretend=True,
+            quiet=True,
+        )
+
+    answers = worker.answers.combined
+    assert {question: answers[question] for question in expected} == expected
+
+
 def test_a_namespace_may_hold_underscores_as_those_of_nextcloud_do(
     tmp_path: Path,
 ) -> None:
@@ -14206,9 +14298,10 @@ def test_names_with_quotes_and_markup_render_files_that_parse(
         assert (info.findtext("description") or "").strip() == HOSTILE_DESCRIPTION
         # The id of a long name, cut to the 32 characters that the App Store takes.
         assert info.findtext("id") == "demo_quoted_tagged_user_project"
+        # Each word keeps its capitals, such as USER of $USER.
         assert (
             info.findtext("namespace")
-            == "DemoQuotedTaggedUserProjectOfPaperlessDocuments"
+            == "DemoQuotedTaggedUSERProjectOfPaperlessDocuments"
         )
         composer = json.loads((project / "composer.json").read_text(encoding="utf-8"))
         assert composer["description"] == HOSTILE_DESCRIPTION

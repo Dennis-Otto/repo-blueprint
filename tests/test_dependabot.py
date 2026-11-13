@@ -152,7 +152,12 @@ def test_every_ecosystem_of_the_acceptances_has_its_name_of_dependabot() -> None
 
 def test_today_is_the_date_in_utc(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.undo()
-    assert dependabot.today() == datetime.datetime.now(datetime.UTC).date()
+    # The day may turn between two readings of the clock: today() is one of them.
+    before = datetime.datetime.now(datetime.UTC).date()
+    day = dependabot.today()
+    after = datetime.datetime.now(datetime.UTC).date()
+
+    assert day in {before, after}
 
 
 def test_an_acceptance_ends_on_its_date() -> None:

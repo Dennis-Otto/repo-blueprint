@@ -1,5 +1,6 @@
-"""The settings of a repository as code, the checklist of what only a person can do,
-and the changelog of its releases.
+"""The settings of a repository as code, the checklist of what only a person can do, a
+new repository on GitHub with create, and doctor, whether create can run here; the
+release app with app, and the steps of the bots, such as the changelog of a release.
 
     python3 blueprint.py settings check     compare .github/repository.toml with GitHub
     python3 blueprint.py settings apply     make GitHub match .github/repository.toml
