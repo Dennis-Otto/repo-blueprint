@@ -59,6 +59,20 @@ curl --fail --location --silent --show-error --retry 5 --retry-all-errors \
 build="$(node -e "$read_build" "$channel" "$platform" <"$list")"
 version="${build%% *}"
 url="${build#* }"
+# The zip has no sha256 in .github/pins.toml, as every other download of the workflows
+# has: the version moves with the channel, every few days, so no checksum could stay
+# pinned. The list is trusted only with what a list of Chrome for Testing can hold: a
+# version of four numbers, which names a folder that a new download replaces, and an
+# address on Google's storage of Chrome for Testing, which is downloaded and run.
+if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+  echo "Chrome for Testing lists '$version' as the version of $channel, which is not a version of Chrome; $versions may be broken." >&2
+  exit 1
+fi
+storage=https://storage.googleapis.com/chrome-for-testing-public/
+if [[ "$url" != "$storage"* || ! "$url" =~ ^[A-Za-z0-9:/._-]+$ ]]; then
+  echo "Chrome for Testing lists '$url' for $channel $version, which is not on $storage; $versions may be broken." >&2
+  exit 1
+fi
 
 target="$folder/$version"
 if [[ ! -x "$target/$executable" ]]; then
