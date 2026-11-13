@@ -75,6 +75,21 @@ A decision that shapes the project gets a record in [`docs/decisions/`](docs/dec
 - **Checked:** `bash scripts/check.sh` fails when two records share a number, when the numbers skip one, when a file of the folder is no record, or when the index lists a record twice, misses one, names a file that the folder doesn't have or lists the records out of order.
 - **Two at once:** Two pull requests that each take the next free number merge without a conflict of Git, since their files have different names, so the second one fails once `main` is merged into it: give its record the next free number that the log names, in the name of its file, in its row and in each link to it; which record moves is yours to choose, so no command renames one.
 - **Fixed:** `python3 .github/blueprint.py decisions --fix` fixes what only the index gets wrong, as the fix bot does on the branch of a pull request and suggests on one from a fork: the number of a row, the row of a renamed record, a row twice, a missing row from the title and the status of its record, and the order of the rows.
+[%- if project_type in ['home-assistant', 'nextcloud-app', 'chrome-extension'] %]
+
+### Translations
+[% if project_type == 'home-assistant' %]
+The texts of the integration are in `strings.json`, or in `translations/en.json` without one, and each other language is a file of `translations/`, such as `de.json`, with the same keys. `en.json` is the copy of `strings.json`.
+[%- elif project_type == 'nextcloud-app' %]
+The texts of the app are in English in its code, and each language has two catalogs in `l10n/`: `<language>.json`, which PHP loads, and `<language>.js`, which the browser loads, with the same texts and the rule of its plurals, `pluralForm`.
+[%- else %]
+The texts of the extension are in `_locales/<language>/messages.json`, and each language translates the messages of the `default_locale` of the manifest.
+[%- endif %]
+
+- **Checked:** the step *Translations* of `bash scripts/check.sh` fails when a language lacks a text of its source or keeps one that the source no longer has, when a text has no words or other placeholders than the source, such as `{name}`, `%s` or `$NAME$`[% if project_type == 'nextcloud-app' %], when a plural has another number of forms than its `pluralForm` names, or when `l10n/<language>.js` says something else than its `.json`[% elif project_type == 'chrome-extension' %], or when a message defines a placeholder with another content than the `default_locale`[% else %], or when `en.json` is no copy of `strings.json`[% endif %].
+- **Fixed:** `python3 .github/blueprint.py translations --fix` fixes what needs no words, as the fix bot does on the branch of a pull request and suggests on one from a fork: the order of the texts, the stale ones[% if project_type == 'nextcloud-app' %] and each `l10n/<language>.js` from its `.json`[% elif project_type == 'home-assistant' %] and `en.json` as the copy of `strings.json`[% endif %].
+- **Words of a person:** a text that a language lacks needs words in that language. Write them, or ask in the pull request for a maintainer or a native speaker to add them before the merge.
+[%- endif %]
 
 ## Checks
 
