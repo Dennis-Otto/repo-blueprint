@@ -16267,6 +16267,131 @@ def test_only_a_chrome_extension_delivers_to_the_chrome_web_store(
     assert "\n  - Releases and the Chrome Web Store: releases.md\n" in mkdocs
 
 
+CHROME_STORAGE = "https://storage.googleapis.com/chrome-for-testing-public"
+
+
+@pytest.mark.skipif(BASH is None, reason="the script runs in bash, Git Bash on Windows")
+@WITH_NODE
+@pytest.mark.parametrize(
+    ("version", "url", "said"),
+    [
+        (
+            "157.0.8103.50",
+            f"{CHROME_STORAGE}/157.0.8103.50/linux64/chrome-linux64.zip",
+            None,
+        ),
+        # The version names the folder that a new download replaces: one that leads
+        # out of the folder of the downloads would have rm -rf delete another.
+        (
+            "../..",
+            f"{CHROME_STORAGE}/157.0.8103.50/linux64/chrome-linux64.zip",
+            "'../..' as the version of Stable",
+        ),
+        (
+            "157.0.8103",
+            f"{CHROME_STORAGE}/157.0.8103/linux64/chrome-linux64.zip",
+            "'157.0.8103' as the version",
+        ),
+        (
+            "157.0.8103.50\nrm",
+            f"{CHROME_STORAGE}/157.0.8103.50/linux64/chrome-linux64.zip",
+            "which is not a version of Chrome",
+        ),
+        # The address is downloaded, unpacked and run as the browser: only Google's
+        # storage of Chrome for Testing.
+        (
+            "157.0.8103.50",
+            "https://example.com/chrome-linux64.zip",
+            "'https://example.com/chrome-linux64.zip' for Stable 157.0.8103.50",
+        ),
+        (
+            "157.0.8103.50",
+            "https://storage.googleapis.com.example.com/chrome-for-testing-public/chrome-linux64.zip",
+            "which is not on https://storage.googleapis.com/chrome-for-testing-public/",
+        ),
+        (
+            "157.0.8103.50",
+            "http://storage.googleapis.com/chrome-for-testing-public/chrome-linux64.zip",
+            "which is not on",
+        ),
+        (
+            "157.0.8103.50",
+            f"{CHROME_STORAGE}/157.0.8103.50/linux64/chrome-linux64.zip --output /tmp/x",
+            "which is not on",
+        ),
+    ],
+)
+def test_chrome_for_testing_takes_only_a_version_and_an_address_of_its_list(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    version: str,
+    url: str,
+    said: str | None,
+) -> None:
+    """scripts/chrome-for-testing.sh takes from Google's list only a version of four
+    numbers and an address on the storage of Chrome for Testing (#839): anything else
+    fails with a clear message before a folder is deleted or a zip downloaded."""
+    listing = tmp_path / "list.json"
+    listing.write_text(
+        json.dumps(
+            {
+                "channels": {
+                    "Stable": {
+                        "version": version,
+                        "downloads": {"chrome": [{"platform": "linux64", "url": url}]},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    # A folder next to the downloads, which a version of ../.. would lead to.
+    home = tmp_path / "home"
+    (home / "keep").mkdir(parents=True)
+    folder = home / "cache/chrome-for-testing"
+    curl = textwrap.dedent(
+        """\
+        while (($# > 0)); do
+          if [[ "$1" == --output ]]; then output="$2"; fi
+          address="$1"
+          shift
+        done
+        case "$address" in
+        *last-known-good-versions-with-downloads.json) cp "$LIST" "$output" ;;
+        *) echo zip > "$output" ;;
+        esac
+        """
+    )
+    result, calls = run_workflow_step(
+        tmp_path,
+        f'bash scripts/chrome-for-testing.sh Stable "{folder.as_posix()}"\n',
+        projects["chrome-extension"],
+        {
+            "curl": curl,
+            "unzip": "",
+            "uname": 'if [[ "$1" == -s ]]; then echo Linux; else echo x86_64; fi\n',
+        },
+        LIST=listing.as_posix(),
+    )
+
+    downloads = [call for call in calls if call.startswith("curl ")]
+    assert (home / "keep").is_dir()
+    if said is None:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == f"{folder.as_posix()}/{version}/chrome-linux64/chrome\n"
+        assert len(downloads) == 2, calls
+        assert downloads[1].endswith(f" {url}")
+        assert "unzip " in "\n".join(calls)
+        return
+    assert result.returncode == 1, result.stdout
+    assert said in result.stderr
+    assert "may be broken" in result.stderr
+    # Only the list: nothing downloaded, unpacked or deleted.
+    assert len(downloads) == 1, calls
+    assert not any(call.startswith("unzip ") for call in calls)
+    assert not folder.exists()
+
+
 @pytest.mark.parametrize("kind", ["node-package", "chrome-extension"])
 def test_only_an_extension_type_checks_the_dom_and_the_api_of_chrome(
     projects: dict[str, Path], kind: str
