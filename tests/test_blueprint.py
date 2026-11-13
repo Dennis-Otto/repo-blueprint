@@ -4767,6 +4767,8 @@ def test_the_checklist_names_the_command_that_registers_a_release_app(
     assert registered.done is False
     lines = registered.how.splitlines()
     assert "commit.gpgsign" in lines[0]
+    # With where a new owner learns to set up a key, which main asks for.
+    assert blueprint.bootstrap.SIGNING in lines[0]
     assert lines[1] == "python3 .github/blueprint.py app register"
     assert lines[2] == (
         "The app gets read and write access to Actions, Administration, Checks, Commit"

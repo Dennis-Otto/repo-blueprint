@@ -88,7 +88,7 @@ gh pr create --fill
 
 Mit pipx statt uv beginnt die Copier-Zeile mit `pipx run --spec copier==9.19.1 copier update`, und mit einem eigenen Copier mit `copier update`. Die ersten beiden Zeilen starten den Branch beim aktuellen `main` von GitHub, auch wenn eine frühere Änderung ihren Branch zurückgelassen hat.
 
-`--vcs-ref=:current:` behält das Release des Blueprints, auf dem das Repository steht, und `--defaults` nimmt jede andere Antwort aus `.copier-answers.yml`. Der Push läuft über GitHub CLI, deren Anmeldung Workflows ändern darf. Die Regeln von `main` verlangen außerdem eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Was die Antwort in `.github/repository.toml` ändert, etwa eine Variable oder die Topics, wendet der Einstellungs-Bot nach dem Merge an.
+`--vcs-ref=:current:` behält das Release des Blueprints, auf dem das Repository steht, und `--defaults` nimmt jede andere Antwort aus `.copier-answers.yml`. Der Push läuft über GitHub CLI, deren Anmeldung Workflows ändern darf. Die Regeln von `main` verlangen außerdem eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, mit einem Schlüssel, wie ihn [die Fehlerbehebung](troubleshooting.md#ein-commit-hat-keine-verifizierte-signatur) einrichtet, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Was die Antwort in `.github/repository.toml` ändert, etwa eine Variable oder die Topics, wendet der Einstellungs-Bot nach dem Merge an.
 
 ## Mein Code hat das Beispiel ersetzt: Wie behandeln die Updates ihn nicht länger als Beispiel?
 
