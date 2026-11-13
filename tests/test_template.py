@@ -3310,6 +3310,218 @@ def test_hassfest_shows_its_errors_as_annotations(
     assert not re.match(pattern["regexp"], "Integrations: 1")
 
 
+OLDEST = "Load the integration on the oldest Home Assistant"
+
+
+def a_home_assistant(folder: Path, refused: str) -> Path:
+    """A package homeassistant of 2026.8.0, as the image of that release has it, whose
+    install_package writes each requirement down and refuses the one refused."""
+    package = folder / "homeassistant"
+    (package / "util").mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "util/__init__.py").write_text("", encoding="utf-8")
+    (package / "util/package.py").write_text(
+        "import os\n\n\n"
+        "def install_package(package, upgrade=True, target=None, constraints=None):\n"
+        '    with open(os.environ["INSTALLED"], "a", encoding="utf-8") as log:\n'
+        "        print(package, upgrade, os.path.basename(constraints), file=log)\n"
+        f"    return package != {refused!r}\n",
+        encoding="utf-8",
+    )
+    metadata = folder / "homeassistant-2026.8.0.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: homeassistant\nVersion: 2026.8.0\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def run_on_the_oldest(
+    tmp_path: Path, project: Path, files: Mapping[str, str], refused: str = ""
+) -> tuple[workflow_steps.StepResult, list[str]]:
+    """The step of the oldest Home Assistant of the project, with a docker that runs
+    the Python it gets on this machine, in the checkout, with a fake Home Assistant;
+    with the requirements that it installed."""
+    packages = a_home_assistant(tmp_path / "packages", refused)
+    installed = tmp_path / "installed.txt"
+    installed.touch()
+    result = workflow_steps.run_step(
+        tmp_path,
+        "ci.yml",
+        "home-assistant",
+        OLDEST,
+        root=project,
+        files=files,
+        stubs={
+            "docker": workflow_steps.recording("docker", 'exec "$PYTHON" -X utf8 -')
+        },
+        env={
+            "PYTHON": Path(sys.executable).as_posix(),
+            "PYTHONPATH": str(packages),
+            "INSTALLED": str(installed),
+        },
+    )
+    return result, installed.read_text(encoding="utf-8").splitlines()
+
+
+INTEGRATION = {
+    "hacs.json": '{"name": "Example", "homeassistant": "2026.8.0"}\n',
+    "custom_components/__init__.py": "",
+    "custom_components/example/manifest.json": '{"domain": "example"}\n',
+    "custom_components/example/__init__.py": "DOMAIN = 'example'\n",
+    "custom_components/example/sensor.py": "from . import DOMAIN\n",
+    "custom_components/example/helpers/__init__.py": "",
+    "custom_components/example/helpers/time.py": "import datetime\n",
+}
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_an_integration_loads_on_the_oldest_home_assistant_of_its_hacs_json(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    result, installed = run_on_the_oldest(
+        tmp_path, projects["home-assistant"], INTEGRATION
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The image of the release that hacs.json names, with the checkout read-only.
+    [docker] = result.stubbed
+    assert docker.startswith("docker run --rm --interactive --volume ")
+    assert docker.endswith(
+        ":/github/workspace:ro --workdir /github/workspace --entrypoint python3"
+        " ghcr.io/home-assistant/home-assistant:2026.8.0 -"
+    )
+    assert "Home Assistant 2026.8.0 on Python " in result.stdout
+    # Every module, a package by its own name; a manifest without requirements
+    # installs nothing.
+    assert re.findall(r"^(\S+) imports\.$", result.stdout, re.M) == [
+        "custom_components.example",
+        "custom_components.example.helpers",
+        "custom_components.example.helpers.time",
+        "custom_components.example.sensor",
+    ]
+    assert installed == []
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_an_integration_that_needs_a_newer_home_assistant_fails_on_its_oldest(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    files = {
+        **INTEGRATION,
+        "custom_components/example/manifest.json": (
+            '{"domain": "example", "requirements": ["good==1.0", "bad==2.0"]}\n'
+        ),
+        # Something that came with a newer Home Assistant than the minimum.
+        "custom_components/example/sensor.py": (
+            "from homeassistant.helpers.newer import Thing\n"
+        ),
+    }
+
+    result, installed = run_on_the_oldest(
+        tmp_path, projects["home-assistant"], files, refused="bad==2.0"
+    )
+
+    assert result.returncode == 1
+    # The requirements of the manifest install as Home Assistant installs them, with
+    # its constraints, and each one that doesn't is an error of the manifest.
+    assert installed == [
+        "good==1.0 False package_constraints.txt",
+        "bad==2.0 False package_constraints.txt",
+    ]
+    assert (
+        "::error file=custom_components/example/manifest.json,title=A requirement"
+        " that doesn't install::bad==2.0 doesn't install on the oldest Home Assistant."
+    ) in result.stdout
+    # The module that needs more, at its file and with its error; the others load.
+    assert (
+        "::error file=custom_components/example/sensor.py,title=Not on the oldest"
+        " Home Assistant::custom_components.example.sensor doesn't import:"
+        " ModuleNotFoundError: No module named 'homeassistant.helpers'"
+    ) in result.stdout
+    assert "Traceback" in result.stderr
+    assert "custom_components.example.helpers.time imports." in result.stdout
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+@pytest.mark.parametrize(
+    ("hacs", "code", "said"),
+    [
+        (None, 0, "There is no hacs.json to name the oldest Home Assistant"),
+        ('{"name": "Example"}', 0, "hacs.json names no oldest Home Assistant"),
+        (
+            '{"name": "Example", "homeassistant": "2026.8.x"}',
+            1,
+            "::error file=hacs.json,title=No release of Home Assistant::hacs.json"
+            " names 2026.8.x as the oldest Home Assistant",
+        ),
+    ],
+)
+def test_the_oldest_home_assistant_is_the_one_that_hacs_json_names(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    hacs: str | None,
+    code: int,
+    said: str,
+) -> None:
+    files = {key: value for key, value in INTEGRATION.items() if key != "hacs.json"}
+    if hacs is not None:
+        files["hacs.json"] = hacs + "\n"
+
+    result, _ = run_on_the_oldest(tmp_path, projects["home-assistant"], files)
+
+    assert result.returncode == code
+    assert said in result.stdout
+    # Without a release to run, no image.
+    assert result.stubbed == []
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_a_minimum_without_a_patch_number_is_the_first_release_of_its_month(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # HACS reads 2026.8 as 2026.8.0, so the step runs that image.
+    files = {
+        **INTEGRATION,
+        "hacs.json": '{"name": "Example", "homeassistant": "2026.8"}\n',
+    }
+
+    result, _ = run_on_the_oldest(tmp_path, projects["home-assistant"], files)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    [docker] = result.stubbed
+    assert docker.endswith(" ghcr.io/home-assistant/home-assistant:2026.8.0 -")
+
+
+def test_the_example_promises_a_home_assistant_no_newer_than_it_tests(
+    projects: dict[str, Path],
+) -> None:
+    # The step runs the example on a release, and the lock file of its tests is no
+    # older than that minimum.
+    project = projects["home-assistant"]
+    hacs = json.loads((project / "hacs.json").read_text(encoding="utf-8"))
+    minimum = hacs["homeassistant"]
+    assert re.fullmatch(r"\d{4}\.\d{1,2}\.\d+", minimum)
+    lock = (project / "requirements-test.txt").read_text(encoding="utf-8")
+    locked = re.search(r"^homeassistant==(\d+)\.(\d+)\.(\d+)", lock, re.M)
+    assert locked
+    assert tuple(map(int, minimum.split("."))) <= tuple(map(int, locked.groups()))
+    ci = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    step = step_in(job_in(ci, "home-assistant"), OLDEST)
+    assert condition_of(step) == (
+        "${{ !cancelled() && steps.checkout.outcome == 'success' }}"
+    )
+
+
 HADOLINT = re.compile(r"ghcr\.io/hadolint/hadolint:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}")
 
 
@@ -4687,6 +4899,11 @@ def compile_step(check: str) -> str:
 
 def explanations_step(check: str) -> str:
     start = check.index('step "Explanations of the checks"')
+    return check[start : check.index("\nstep ", start + 1) + 1]
+
+
+def translations_step(check: str) -> str:
+    start = check.index('step "Translations"')
     return check[start : check.index('step "Version"', start)]
 
 
@@ -4854,6 +5071,105 @@ def test_every_repository_checks_the_numbers_of_its_records_of_decisions(
     assert "The step *Records of decisions* of `scripts/check.sh` fails" in agents
     index = (project / "docs/decisions/README.md").read_text(encoding="utf-8")
     assert "The step *Records of decisions* of `scripts/check.sh` fails" in index
+
+
+# The kinds of projects that ship catalogs of translations.
+TRANSLATED = ["home-assistant", "nextcloud-app", "chrome-extension"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_project_with_translations_checks_them(
+    projects: dict[str, Path], kind: str
+) -> None:
+    project = projects[kind]
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    contributing = (project / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    explained = tomllib.loads(
+        (project / ".github/checks.toml").read_text(encoding="utf-8")
+    )
+    # The explanation is there for every kind, as .github/checks.toml is one file.
+    step = explained["step"]["Translations"]
+    assert step["autofix"] == ["{blueprint} translations --fix"]
+    assert step["commands"] == ["python3 .github/blueprint.py translations --fix"]
+    assert step["docs"] == (
+        "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/checks.md#checks"
+    )
+    if kind not in TRANSLATED:
+        assert 'step "Translations"' not in check
+        assert "\n### Translations\n" not in contributing
+        return
+    # After the explanations, with the Python and blueprint.py of the pages, which the
+    # CI never skips.
+    assert (
+        check.index('\nstep "Explanations of the checks"\n')
+        < check.index('\nstep "Translations"\n')
+        < check.index('\nstep "Version"\n')
+    )
+    assert '  "$python" "$tool" translations\n' in translations_step(check)
+    assert "which this runner lacks" in translations_step(check)
+    assert "\n### Translations\n\nThe texts of the " in contributing
+    assert "`python3 .github/blueprint.py translations --fix` fixes" in contributing
+    layout = {
+        "home-assistant": "`en.json` as the copy of `strings.json`.",
+        "nextcloud-app": "each `l10n/<language>.js` from its `.json`.",
+        "chrome-extension": "the order of the texts, the stale ones.",
+    }
+    assert layout[kind] in contributing
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("kind", TRANSLATED)
+def test_the_translations_of_a_new_repository_pass_their_check(
+    projects: dict[str, Path], tmp_path: Path, kind: str
+) -> None:
+    project = shutil.copytree(projects[kind], tmp_path / kind)
+    subprocess.run(["git", "init", "--quiet", str(project)], check=True)
+    check = (project / "scripts/check.sh").read_text(encoding="utf-8")
+    # Its set-up, the step of the pages, which finds the Python, and the step.
+    script = (
+        check[: check.index('step "Text files"')]
+        + pages_step(check)
+        + translations_step(check)
+    )
+
+    result = run_the_steps(project, script, ci=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    found = {
+        "home-assistant": "Each of the 1 catalog(s) of translations has the texts",
+        "nextcloud-app": "No catalogs of translations, so nothing to check.",
+        "chrome-extension": "Each of the 1 catalog(s) of translations has the texts",
+    }
+    assert found[kind] in result.stdout
+    # A language that lacks a text fails the step, with an annotation at its file.
+    broken = {
+        "home-assistant": (
+            "custom_components/demo/translations/de.json",
+            '{"config": {"abort": {}}}\n',
+        ),
+        "nextcloud-app": (
+            "l10n/de.json",
+            '{"translations": {"Files": ""}, "pluralForm": "nplurals=2; '
+            'plural=(n != 1);"}\n',
+        ),
+        "chrome-extension": ("extension/_locales/de/messages.json", "{}\n"),
+    }
+    name, text = broken[kind]
+    # The folder of the integration is named after its domain.
+    found_files = list(project.glob(name.replace("/demo/", "/*/")))
+    target = found_files[0] if found_files else project / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+
+    result = run_the_steps(project, script, ci=True)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    relative = target.relative_to(project).as_posix()
+    assert f"::error file={relative}" in result.stdout
+    assert "title=Translations::" in result.stdout
 
 
 # In the copy of the mutation tests, the tool is the code with the mutants, which the
@@ -15160,7 +15476,7 @@ PARTS = {
         "ownership",
     ],
     "conventional title": ["conventional title", "changelog"],
-    "home-assistant": ["hacs", "hassfest"],
+    "home-assistant": ["hacs", "hassfest", "oldest-home-assistant"],
     "dependency-review": ["dependency-review", "age of the refresh"],
 }
 
@@ -15728,6 +16044,8 @@ def test_every_project_fixes_what_a_command_can_fix(
         "Accepted advisories",
         "Lock files",
         "Lock files match their sources",
+        # The order, the stale texts and the copies of the catalogs.
+        *(["Translations"] if kind in TRANSLATED else []),
         "Version",
         *FIXED_STEPS.get(stack, []),
     ]
@@ -26966,13 +27284,24 @@ def test_the_parts_and_the_report_hand_on_their_results() -> None:
     )
     # Each part hands its results to the report, which puts them together also when a
     # part failed, and keeps the artifact that the dashboard and the next run read.
-    assert "mutation-part-${{ matrix.part }}" in [
-        found.get("name") for found in inputs(mutation)
-    ]
+    # Infection too, in one part, so that the report of a Nextcloud app compares its
+    # score with the run before and the issue of a drop opens as for Python.
+    assert [found.get("name") for found in inputs(mutation)].count(
+        "mutation-part-${{ matrix.part }}"
+    ) == 2
+    assert "mutation" not in [found.get("name") for found in inputs(mutation)]
     assert report["needs"] == ["plan", "stats", "mutation"]
     assert condition_of(report) == (
-        "${{ !cancelled() && needs.plan.outputs.kind == 'python' && "
-        "needs.stats.result == 'success' }}"
+        "${{ !cancelled() && ((needs.plan.outputs.kind == 'python' && "
+        "needs.stats.result == 'success') || (needs.plan.outputs.kind == 'php' && "
+        "needs.mutation.result != 'skipped')) }}"
+    )
+    steps = named_steps(report)
+    assert condition_of(steps["Report the score and the surviving mutants"]) == (
+        "needs.plan.outputs.kind == 'python'"
+    )
+    assert condition_of(steps["Report the score of Infection"]) == (
+        "needs.plan.outputs.kind == 'php'"
     )
     assert any(
         found.get("pattern") == "mutation-part-*"
@@ -27234,6 +27563,72 @@ def test_the_report_of_infection_names_the_sample_of_a_pull_request(
         "- Mutation Score Indicator (MSI): 87%\n- Mutation Code Coverage: 100%\n"
         "- Covered Code MSI: 87%\n"
     )
+
+
+# In the copy of the mutation tests, the tool is the code with the mutants, which the
+# variables of mutmut switch in the process that this test starts.
+@pytest.mark.mutation_unsafe
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+@pytest.mark.parametrize("event", ["schedule", "pull_request"])
+def test_the_report_of_a_nextcloud_app_keeps_the_issue_of_a_drop(
+    tmp_path: Path, event: str
+) -> None:
+    project = tmp_path / "project"
+    with_the_tool(project)
+    workspace = "/home/runner/work/app/app"
+    parts = tmp_path / "temp/parts"
+    parts.mkdir(parents=True)
+    (parts / "infection-output.log").write_text(INFECTION, encoding="utf-8")
+    (parts / "infection.log").write_text(
+        f"Escaped mutants:\n================\n\n"
+        f"1) {workspace}/lib/Service/Sync.php:42    [M] GreaterThan [ID] 1a2b\n",
+        encoding="utf-8",
+    )
+    before = tmp_path / "temp/previous"
+    before.mkdir()
+    (before / "mutation.json").write_text(
+        json.dumps(
+            {
+                "tool": "infection",
+                "complete": True,
+                "score": 92.0,
+                "logic_score": 92.0,
+                "run": "https://github.com/Someone/demo/actions/runs/1",
+                "date": "2026-10-17T01:15:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code, summary = run_mutation_step(
+        tmp_path,
+        "Report the score of Infection",
+        "php",
+        {"python3": PYTHON},
+        RUN_URL="https://github.com/Someone/demo/actions/runs/2",
+        GITHUB_WORKSPACE=workspace,
+        EVENT=event,
+        # Git Bash on Windows would hand the path of the runner on as one of Windows.
+        MSYS_NO_PATHCONV="1",
+    )
+
+    assert code == 0, (tmp_path / "log").read_text(encoding="utf-8")
+    assert summary.startswith("### The score of Infection\n\n**87.0 %** of the mutants")
+    out = tmp_path / "temp/mutation"
+    data = json.loads((out / "mutation.json").read_text(encoding="utf-8"))
+    assert data["tool"] == "infection"
+    assert data["score"] == 87.0
+    assert data["logic_by_function"] == {"lib/Service/Sync.php": 1}
+    # The dashboard reads the score from the output of Infection, in the artifact.
+    assert (out / "infection-output.log").read_text(encoding="utf-8") == INFECTION
+    if event == "schedule":
+        # The job of the issue compares with the run before, as for Python.
+        assert data["complete"] is True
+        assert "the score 92.0 % → 87.0 %." in summary
+        assert (out / "previous.json").is_file()
+    else:
+        assert data["complete"] is False
+        assert "A pull request tries a sample of the files" in summary
 
 
 def test_infection_gets_a_php_that_it_runs_on() -> None:

@@ -33,6 +33,10 @@ Die anderen Bots, die ihre eigenen Pull Requests mergen, haben eigene Schalter:
 - **Der Upstream-Bot einer Nextcloud-App** wartet, wenn [`UPSTREAM_AUTOMERGE`](reference/variables.md#upstream_automerge) auf `off` steht.
 - **Renovate** merged, was die Regeln von `.github/renovate.json5` erlauben; eine Regel mit `"automerge": false` stoppt das für die Pakete, die sie nennt. Die wöchentliche Auffrischung der Lock-Dateien merged sich nur aus Versionen selbst, die mindestens eine Woche alt sind, und die von Composer wartet auf dich.
 
+## Wie schnell kommt ein Release des Blueprints an?
+
+In einem Repository der Release-App des Eigentümers des Blueprints binnen Minuten: Der Rollout startet seinen Blueprint-Bot gleich nach dem Release. In jedem anderen, etwa einem eines anderen Eigentümers, innerhalb eines Tages: Der nächtliche Blick des Bot-Health-Bots startet den Blueprint-Bot, sobald der Blueprint ein neueres Release hat, als `.copier-answers.yml` nennt, und der Pull Request des Bots es noch nicht bringt. Der Bot läuft außerdem jede Woche. Für ein Release, das nicht warten kann, starte ihn von Hand, mit `gh workflow run blueprint-update.yml` oder unter *Actions → Blueprint update*.
+
 ## Kann ein Repository privat sein, und was kostet es?
 
 Ja: `python3 .github/blueprint.py create --private` legt ein privates Repository an. Öffentliche Repositorys nutzen GitHub Actions kostenlos. Ein privates hat bei GitHub Free 2.000 Minuten im Monat, und GitHub rundet jeden Job auf eine ganze Minute auf. Die Zeitpläne eines Projekts und die Läufe, die sie starten, kommen auf etwa 20 Läufe am Tag, etwa 600 im Monat; die Prüfungen der Pull Requests kosten mehr, weshalb der Blueprint eine Prüfung nur dort ausführt, wo sie ein Ergebnis ändern kann, und die Jobs wenige hält (Entscheidungen [0009](decisions/0009-run-a-check-only-where-it-can-change-a-result.md) und [0027](decisions/0027-few-jobs-that-each-run-several-checks.md), englisch).

@@ -31,8 +31,12 @@ Mit [uv](https://docs.astral.sh/uv/) und der GitHub CLI, wie [der Schnellstart](
 Das Ruleset *Protect main* aus `.github/repository.toml` lässt einen Pull Request mergen, sobald diese Prüfungen grün sind:
 
 - `check (home-assistant)`: `scripts/check.sh` mit den Werkzeugen von Home Assistant.
-- `home-assistant`: die HACS-Action und hassfest, die Validierung von Home Assistant.
+- `home-assistant`: die HACS-Action und hassfest, die Validierung von Home Assistant, und das älteste Home Assistant, das die Integration verspricht.
 - `lint`, `diagrams`, `docs`, `conventional title`, `codeql`, `dependency-review` und `gitleaks`, die jede Art braucht: jeder Linter in einem Job, die Bilder der Diagramme, der strenge Build der Website, der Titel des Pull Requests mit seinem Eintrag im Changelog, CodeQL, die Prüfung neuer Abhängigkeiten und der Secret-Scan.
+
+### Das älteste Home Assistant
+
+`hacs.json` nennt in `homeassistant` das älteste Home Assistant, das die Integration unterstützt, und HACS bietet jedes Release jedem Home Assistant ab diesem an. Die Tests laufen auf dem neueren Home Assistant der Lock-Datei, das Renovate jeden Monat weiterbewegt. Darum startet die Prüfung `home-assistant` das Image dieses ältesten Releases, `ghcr.io/home-assistant/home-assistant:<minimum>`, installiert dort die Requirements jeder `manifest.json` so, wie Home Assistant es tut, und importiert jedes Modul aus `custom_components/` mit dessen Python und dessen Paketen. Ein Modul, das etwas Neueres braucht, etwa einen Helfer, der erst mit einem späteren Release kam, lässt die Prüfung an seiner Datei fehlschlagen, und der PR-Coach zeigt die zwei Auswege: den Code auf dem Minimum lauffähig halten, oder `homeassistant` in `hacs.json` anheben und das im Changelog sagen. Das Minimum steht weiter nur einmal da, in `hacs.json`, einer Datei des Projekts.
 
 ## Auslieferung
 
