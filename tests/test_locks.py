@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import zipfile
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -1043,6 +1044,60 @@ def test_a_new_release_upstream_changes_neither_the_check_nor_the_hashes(
     assert main(["locks", "--compile"], root=root) == 0
     assert capsys.readouterr().out == PASSED.format(1)
     assert fixed(root, capsys) == locked
+
+
+@needs_git
+@pytest.mark.usefixtures("uv_here")
+@pytest.mark.parametrize("noted", [0, 1])
+def test_the_first_compile_fills_the_cache_of_uv_before_the_others_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    noted: int,
+) -> None:
+    # Compiles that start together race to write uv's answer about the Python into its
+    # cache, and one of them fails (#894): no other compile starts before the first one
+    # that ran uv ends. A file with a note, here the first `noted` ones, may not run uv.
+    names = ["a/requirements.txt", "b/requirements.txt", "c/requirements.txt"]
+    root = repository(
+        tmp_path,
+        {name: lock(REQUIREMENTS_HEADER, "pytest==9.0.3") for name in names},
+    )
+    alone = names[noted]
+    events: list[tuple[str, str]] = []
+    record = threading.Lock()
+    another_started = threading.Event()
+
+    def compare(_root: Path, name: str, _uv: str) -> locks.Compared:
+        with record:
+            events.append(("start", name))
+        if name in names[:noted]:
+            with record:
+                events.append(("end", name))
+            return locks.Compared(name, note="a link")
+        if name == alone:
+            # Time for a compile that starts beside it to show in the events.
+            another_started.wait(timeout=0.5)
+        else:
+            another_started.set()
+        with record:
+            events.append(("end", name))
+        return locks.Compared(name)
+
+    monkeypatch.setattr(locks, "compare", compare)
+
+    assert main(["locks", "--compile"], root=root) == 0
+
+    serial = names[: noted + 1]
+    assert events[: 2 * len(serial)] == [
+        (event, name) for name in serial for event in ("start", "end")
+    ]
+    assert sorted(events[2 * len(serial) :]) == sorted(
+        (event, name) for name in names[noted + 1 :] for event in ("start", "end")
+    )
+    assert capsys.readouterr().out == "".join(
+        f"{name}: not compared, for a link.\n" for name in names[:noted]
+    ) + PASSED.format(len(names) - noted)
 
 
 @needs_git
