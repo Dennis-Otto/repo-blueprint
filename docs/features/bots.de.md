@@ -71,7 +71,7 @@ Ein Lauf einer Prüfung sagt nur etwas über seinen Commit. Sobald ein neuerer P
 
 ## Aufräumen
 
-Jede Woche verschwinden die Branches, die `main` enthält, und die Caches geschlossener Pull Requests; ein Branch mit eigener Arbeit bleibt und wird nach einem Monat aufgelistet. Ein Branch ohne eigenen Commit verschwindet erst, wenn sein letzter Commit einen Tag alt ist, also bleibt einer, den jemand gerade von `main` angelegt hat, etwa mit *Create a branch* an einem Issue. Jeder Name, den Git erlaubt, funktioniert, auch einer mit `#` oder `%`, und ein Branch, den GitHub ablehnt, ist eine Warnung: Der Bot macht mit dem nächsten weiter und sieht ihn sich in der nächsten Woche wieder an.
+Jede Woche verschwinden die Branches, die `main` enthält, und die Caches geschlossener Pull Requests; ein Branch mit eigener Arbeit bleibt und wird nach einem Monat aufgelistet. Ein Branch ohne eigenen Commit verschwindet erst, wenn `main` vor mindestens einem Tag über ihn hinausgegangen ist, also bleibt einer, den jemand gerade von `main` angelegt hat, etwa mit *Create a branch* an einem Issue, wie alt der letzte Commit von `main` auch ist. Jeder Name, den Git erlaubt, funktioniert, auch einer mit `#` oder `%`, und ein Branch, den GitHub ablehnt, ist eine Warnung: Der Bot macht mit dem nächsten weiter und sieht ihn sich in der nächsten Woche wieder an.
 
 **Womit:** `cleanup.yml`.
 

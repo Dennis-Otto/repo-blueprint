@@ -696,6 +696,22 @@ def run_the_branch_clean_up(
     return done
 
 
+COUNTED = "[.ahead_by, .behind_by] | @tsv"
+FIRST_OF_MAIN = ".commits[0].commit.committer.date"
+
+
+def counted(branch: str, ahead: int, behind: int) -> Answer:
+    """How many commits a branch has that main doesn't, and main that it doesn't."""
+    return exact(
+        f"api repos/o/r/compare/main...{branch} --jq {COUNTED}", f"{ahead}\t{behind}\n"
+    )
+
+
+def moved_past(branch: str, date: str) -> Answer:
+    """The date of the first commit that main has and the branch doesn't."""
+    return exact(f"api repos/o/r/compare/{branch}...main --jq {FIRST_OF_MAIN}", date)
+
+
 def last_commit(branch: str, date: str) -> Answer:
     """The date of the last commit of a branch, named as in the path of a request."""
     return exact(f"api repos/o/r/commits/{branch} --jq .commit.committer.date", date)
@@ -716,36 +732,45 @@ def test_the_clean_up_bot_deletes_only_the_branches_that_main_holds(
             "fix/merged",
             "fix/issue#12",
             "feat/fresh",
+            "feat/at-main",
             "feat/old",
             "feat/new",
         ),
         branches("feat/in-review", "other"),
-        exact("api repos/o/r/compare/main...fix/merged --jq .ahead_by", "0\n"),
-        exact("api repos/o/r/compare/main...fix/issue%2312 --jq .ahead_by", "0\n"),
-        exact("api repos/o/r/compare/main...feat/fresh --jq .ahead_by", "0\n"),
-        exact("api repos/o/r/compare/main...feat/old --jq .ahead_by", "2\n"),
-        exact("api repos/o/r/compare/main...feat/new --jq .ahead_by", "1\n"),
-        last_commit("fix/merged", days_ago(2) + "\n"),
-        last_commit("fix/issue%2312", days_ago(2) + "\n"),
-        last_commit("feat/fresh", days_ago(0) + "\n"),
+        counted("fix/merged", 0, 3),
+        counted("fix/issue%2312", 0, 1),
+        counted("feat/fresh", 0, 1),
+        counted("feat/at-main", 0, 0),
+        counted("feat/old", 2, 5),
+        counted("feat/new", 1, 0),
+        moved_past("fix/merged", days_ago(2) + "\n"),
+        moved_past("fix/issue%2312", days_ago(2) + "\n"),
+        moved_past("feat/fresh", days_ago(0) + "\n"),
         last_commit("feat/old", "2026-01-02T03:04:05Z\n"),
         last_commit("feat/new", days_ago(2) + "\n"),
     )
 
-    # Only a branch that main holds completely, and whose last commit is a day old,
-    # goes: one made from main a moment ago stays. The bot doesn't even look at main,
-    # the website, the branches of the bots and those of open pull requests, and it
-    # names a branch with a # encoded, so that the # is no fragment of the path.
+    # Only a branch that main holds completely, and that main moved past a day ago,
+    # goes: one made from main stays while it sits on main's last commit, however
+    # old that is, and for a day after main moved on. The bot doesn't even look at
+    # main, the website, the branches of the bots and those of open pull requests,
+    # and it names a branch with a # encoded, so that the # is no fragment of the path.
     assert done.called("api --method DELETE") == [
         "api --method DELETE repos/o/r/git/refs/heads/fix/merged --silent",
         "api --method DELETE repos/o/r/git/refs/heads/fix/issue%2312 --silent",
     ]
-    assert done.called("api repos/o/r/compare/") == [
-        "api repos/o/r/compare/main...fix/merged --jq .ahead_by",
-        "api repos/o/r/compare/main...fix/issue%2312 --jq .ahead_by",
-        "api repos/o/r/compare/main...feat/fresh --jq .ahead_by",
-        "api repos/o/r/compare/main...feat/old --jq .ahead_by",
-        "api repos/o/r/compare/main...feat/new --jq .ahead_by",
+    assert done.called("api repos/o/r/(compare|commits)/") == [
+        f"api repos/o/r/compare/main...fix/merged --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/merged...main --jq {FIRST_OF_MAIN}",
+        f"api repos/o/r/compare/main...fix/issue%2312 --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/issue%2312...main --jq {FIRST_OF_MAIN}",
+        f"api repos/o/r/compare/main...feat/fresh --jq {COUNTED}",
+        f"api repos/o/r/compare/feat/fresh...main --jq {FIRST_OF_MAIN}",
+        f"api repos/o/r/compare/main...feat/at-main --jq {COUNTED}",
+        f"api repos/o/r/compare/main...feat/old --jq {COUNTED}",
+        "api repos/o/r/commits/feat/old --jq .commit.committer.date",
+        f"api repos/o/r/compare/main...feat/new --jq {COUNTED}",
+        "api repos/o/r/commits/feat/new --jq .commit.committer.date",
     ]
     # A branch with commits of its own stays; once it is a month old, the bot lists it
     # for its owner, by its name as it is.
@@ -777,18 +802,24 @@ def test_a_branch_that_github_refuses_is_a_warning_and_the_bot_goes_on(
 ) -> None:
     done = run_the_branch_clean_up(
         tmp_path,
-        listing("fix/compare", "fix/date", "fix/delete", "fix/merged"),
+        listing("fix/compare", "fix/moved", "fix/date", "fix/delete", "fix/merged"),
         "",
         Answer(
             r"api repos/o/r/compare/main\.\.\.fix/compare .*",
             err="gh: Bad Gateway (HTTP 502)",
             code=1,
         ),
-        Answer(r"api repos/o/r/compare/.*", "0\n"),
+        counted("fix/date", 1, 0),
+        Answer(r"api repos/o/r/compare/main\.\.\..*", "0\t1\n"),
+        Answer(
+            r"api repos/o/r/compare/fix/moved\.\.\.main .*",
+            err="gh: Not Found (HTTP 404)",
+            code=1,
+        ),
+        Answer(r"api repos/o/r/compare/.*\.\.\.main .*", days_ago(2) + "\n"),
         Answer(
             r"api repos/o/r/commits/fix/date .*", err="gh: Not Found (HTTP 404)", code=1
         ),
-        Answer(r"api repos/o/r/commits/.*", days_ago(2) + "\n"),
         Answer(
             r"api --method DELETE repos/o/r/git/refs/heads/fix/delete --silent",
             err="gh: Reference does not exist (HTTP 422)",
@@ -805,12 +836,13 @@ def test_a_branch_that_github_refuses_is_a_warning_and_the_bot_goes_on(
     assert done.stdout.splitlines() == [
         f"::warning::GitHub refused a request for the branch {name};"
         " the clean-up looks at it again next week."
-        for name in ("fix/compare", "fix/date", "fix/delete")
+        for name in ("fix/compare", "fix/moved", "fix/date", "fix/delete")
     ]
     assert done.summary == (
         "### Branches\n"
         "- deleted `fix/merged`, which main holds\n"
         "- left `fix/compare` for next week: GitHub refused a request for it\n"
+        "- left `fix/moved` for next week: GitHub refused a request for it\n"
         "- left `fix/date` for next week: GitHub refused a request for it\n"
         "- left `fix/delete` for next week: GitHub refused a request for it\n"
     )
@@ -852,15 +884,17 @@ def test_the_clean_up_bot_never_looks_at_a_protected_branch_and_encodes_a_name(
                 {"name": "fix/issue#12 100%", "protected": False},
             ],
         ),
-        Answer(r"api repos/o/r/compare/.* --jq \.ahead_by", "0\n"),
-        Answer(r"api repos/o/r/commits/.*", days_ago(2) + "\n"),
+        Answer(r"api repos/o/r/compare/main\.\.\..*", "0\t1\n"),
+        Answer(r"api repos/o/r/compare/.*\.\.\.main .*", days_ago(2) + "\n"),
     )
 
     # jq of gh encodes the name for the paths, and the summary keeps it as it is.
     assert done.called("api repos/o/r/compare/|api --method DELETE") == [
-        "api repos/o/r/compare/main...fix/merged --jq .ahead_by",
+        f"api repos/o/r/compare/main...fix/merged --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/merged...main --jq {FIRST_OF_MAIN}",
         "api --method DELETE repos/o/r/git/refs/heads/fix/merged --silent",
-        "api repos/o/r/compare/main...fix/issue%2312%20100%25 --jq .ahead_by",
+        f"api repos/o/r/compare/main...fix/issue%2312%20100%25 --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/issue%2312%20100%25...main --jq {FIRST_OF_MAIN}",
         "api --method DELETE repos/o/r/git/refs/heads/fix/issue%2312%20100%25 --silent",
     ]
     assert "- deleted `fix/issue#12 100%`, which main holds\n" in done.summary
