@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -19,6 +20,7 @@ from hypothesis import strategies as st
 
 from blueprint import branches, cli
 from blueprint.bot_health import (
+    BLUEPRINT_BOT,
     EVENT_BOTS,
     LABEL,
     LABEL_COLOR,
@@ -54,6 +56,7 @@ from blueprint.bot_health import (
     field_values,
     marker,
     missed_time,
+    newer_release,
     open_issue,
     open_issues,
     own_issue,
@@ -181,6 +184,8 @@ class FakeGitHub:
         self.pull_commits: dict[int, list[dict[str, Any]]] = {}
         self.pull_comments: dict[int, list[dict[str, Any]]] = {}
         self.calls: list[tuple[str, str]] = []
+        # The .copier-answers.yml of each branch that has one.
+        self.answers: dict[str, str] = {}
 
     def __call__(
         self, arguments: Sequence[str], body: str | None
@@ -262,6 +267,7 @@ class FakeGitHub:
             ),
             (r"/actions/workflows/(\d+)/enable", self.enable),
             (r"/actions/workflows/(\d+)/dispatches", self.dispatch),
+            (r"/contents/\.copier-answers\.yml\?ref=([\w/.-]+)", self.answers_of),
         ):
             match = re.fullmatch(pattern, path.removeprefix(own))
             if match:
@@ -419,6 +425,13 @@ class FakeGitHub:
     def dispatch(self, method: str, body: Any, number: str) -> tuple[int, Any]:
         self.dispatched.append((int(number), body))
         return 204, None
+
+    def answers_of(self, method: str, body: Any, ref: str) -> tuple[int, Any]:
+        if ref not in self.answers:
+            return 404, {"message": "Not Found"}
+        # The contents API in base64, in lines, as GitHub sends them.
+        encoded = base64.encodebytes(self.answers[ref].encode()).decode()
+        return 200, {"encoding": "base64", "content": encoded}
 
     # ------------------------------------------------------------------ helpers
 
@@ -3788,3 +3801,300 @@ def test_the_daily_look_at_renovate_waits_out_an_outage(
     # Without a list of notices, the summary alone says it.
     _, looked = sweep(api_of(github), REPO, tmp_path, NOW)
     assert looked is healthy
+
+
+# ---------------------------------------------------------------- releases of the blueprint
+
+BLUEPRINT_RELEASE = "Dennis-Otto/repo-blueprint/releases/latest"
+
+
+def answers(version: str, source: str = "gh:Dennis-Otto/repo-blueprint") -> str:
+    return f"_commit: {version}\n_src_path: {source}\nproject_type: generic\n"
+
+
+def a_repository_of_the_blueprint(
+    github: FakeGitHub, root: Path, version: str, latest: str | None = "v1.20.0"
+) -> None:
+    """A repository with the blueprint bot and the answers of version, whose blueprint
+    has latest as its latest release."""
+    (root / ".copier-answers.yml").write_text(answers(version), encoding="utf-8")
+    github.workflows = [workflow(9, "Blueprint update", path=BLUEPRINT_BOT)]
+    if latest is not None:
+        github.others[BLUEPRINT_RELEASE] = {"tag_name": latest}
+
+
+def blueprint_lines(summary: str) -> list[str]:
+    heading = "#### Releases of the blueprint\n\n"
+    return summary.split(heading, 1)[1].split("\n\n", 1)[0].splitlines()
+
+
+def test_the_daily_look_starts_the_blueprint_bot_for_a_newer_release(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0-2-gabc1234")
+    # The branch of an update before, which brings an older release.
+    github.answers["blueprint/update"] = answers("v1.18.0")
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert blueprint_lines(summary) == [
+        "`v1.20.0` is out, and this repository has `v1.17.0-2-gabc1234`: started the"
+        " blueprint bot."
+    ]
+    assert github.dispatched == [(9, {"ref": "main"})]
+
+
+@pytest.mark.parametrize(
+    ("version", "latest"),
+    [
+        ("v1.20.0", "v1.20.0"),
+        # Past the latest release, or an older release that GitHub calls the latest.
+        ("v1.20.0-3-gabc1234", "v1.20.0"),
+        ("v1.21.0", "v1.20.0"),
+    ],
+)
+def test_the_daily_look_leaves_the_blueprint_bot_alone_without_a_newer_release(
+    github: FakeGitHub, tmp_path: Path, version: str, latest: str
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, version, latest)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert blueprint_lines(summary) == [
+        f"This repository has `{version}`, and `{latest}` is the latest."
+    ]
+    assert github.dispatched == []
+    # Without a question about the branch of the bot.
+    assert not [path for _, path in github.calls if "/contents/" in path]
+
+
+def test_the_daily_look_leaves_the_blueprint_bot_alone_while_its_pull_request_has_it(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    github.answers["blueprint/update"] = answers("v1.20.0")
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert blueprint_lines(summary) == [
+        "The pull request of the blueprint bot brings `v1.20.0`."
+    ]
+    assert github.dispatched == []
+
+
+def test_the_daily_look_says_when_the_blueprint_has_no_release(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0", latest=None)
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert blueprint_lines(summary) == [
+        "`Dennis-Otto/repo-blueprint` has no published release."
+    ]
+    assert github.dispatched == []
+
+
+def test_the_daily_look_starts_the_blueprint_bot_once_when_its_schedule_was_missed(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    bot = tmp_path / BLUEPRINT_BOT
+    bot.parent.mkdir(parents=True)
+    bot.write_text(SCHEDULED, encoding="utf-8")
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    # The run of its missed schedule brings the release anyway.
+    assert github.dispatched == [(9, {"ref": "main", "inputs": {}})]
+    assert "#### Releases of the blueprint" not in summary
+
+
+def test_the_daily_look_starts_the_blueprint_bot_in_a_later_look_after_a_few_starts(
+    github: FakeGitHub, tmp_path: Path
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    for number in range(MOST_STARTS):
+        write(tmp_path, number, SCHEDULED)
+    github.workflows += [
+        workflow(number, f"W{number}") for number in range(MOST_STARTS)
+    ]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert len(github.dispatched) == MOST_STARTS
+    assert 9 not in [number for number, _ in github.dispatched]
+    assert blueprint_lines(summary) == [
+        "`v1.20.0` is out, and this repository has `v1.17.0`: the blueprint bot starts"
+        " in a later look."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("state", "has_answers", "source"),
+    [
+        # The bot switched off, the blueprint itself without answers, a blueprint
+        # elsewhere than on GitHub.
+        ("disabled_manually", True, "gh:Dennis-Otto/repo-blueprint"),
+        ("active", False, "gh:Dennis-Otto/repo-blueprint"),
+        ("active", True, "https://gitlab.com/someone/blueprint.git"),
+        ("active", True, "/a/folder/of/the/blueprint"),
+    ],
+)
+def test_the_daily_look_says_nothing_of_the_blueprint_without_its_bot_or_answers(
+    github: FakeGitHub, tmp_path: Path, state: str, has_answers: bool, source: str
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    github.workflows[0]["state"] = state
+    if has_answers:
+        (tmp_path / ".copier-answers.yml").write_text(
+            answers("v1.17.0", source), encoding="utf-8"
+        )
+    else:
+        (tmp_path / ".copier-answers.yml").unlink()
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert "#### Releases of the blueprint" not in summary
+    assert github.dispatched == []
+    assert not [path for _, path in github.calls if "releases" in path]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "gh:someone/fork",
+        "https://github.com/someone/fork.git",
+        "git@github.com:someone/fork.git",
+    ],
+)
+def test_the_daily_look_asks_the_blueprint_that_the_answers_name(
+    github: FakeGitHub, tmp_path: Path, source: str
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    (tmp_path / ".copier-answers.yml").write_text(
+        answers("v1.17.0", source), encoding="utf-8"
+    )
+    github.others["someone/fork/releases/latest"] = {"tag_name": "v2.0.0"}
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert blueprint_lines(summary) == [
+        "`v2.0.0` is out, and this repository has `v1.17.0`: started the blueprint bot."
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tag", "have", "newer"),
+    [
+        ("v1.20.0", "v1.19.3", True),
+        ("v1.20.0", "v1.20.0-1-gabc1234", False),
+        ("v1.20.0-beta.1", "v1.19.0", True),
+        ("v1.20.0", "v1.20.0-beta.1", True),
+        ("v1.19.0", "v1.20.0", False),
+        # A version without a number: the blueprint bot decides.
+        ("v1.20.0", "abc1234", True),
+        ("v1.20.0", "", True),
+        ("latest", "latest", False),
+    ],
+)
+def test_a_newer_release_is_one_of_a_higher_version(
+    tag: str, have: str, newer: bool
+) -> None:
+    assert newer_release(tag, have) is newer
+
+
+@pytest.mark.parametrize(("status", "healthy"), [(503, True), (403, False)])
+def test_the_daily_look_at_the_releases_of_the_blueprint_waits_out_an_outage(
+    github: FakeGitHub, tmp_path: Path, status: int, healthy: bool
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    github.fail[("GET", f"repos/{BLUEPRINT_RELEASE}")] = status
+    notices: list[str] = []
+
+    summary, looked = sweep(api_of(github), REPO, tmp_path, NOW, notices=notices)
+
+    assert looked is healthy
+    assert blueprint_lines(summary) == [
+        f"Couldn't look: `GitHub answered {status}: simulated failure`"
+    ]
+    assert len(notices) == int(healthy)
+    assert github.dispatched == []
+    _, looked = sweep(api_of(github), REPO, tmp_path, NOW)
+    assert looked is healthy
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
+def test_the_daily_look_leaves_the_blueprint_bot_alone_while_it_runs(
+    github: FakeGitHub, tmp_path: Path, status: str
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    # Started by the Rollout or its schedule, before it pushed its branch.
+    github.workflow_runs[9] = [
+        run_of(
+            1,
+            name="Blueprint update",
+            path=BLUEPRINT_BOT,
+            event="workflow_dispatch",
+            status=status,
+            conclusion=None,
+            workflow=9,
+        )
+    ]
+
+    summary, healthy = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    assert healthy
+    assert blueprint_lines(summary) == [
+        "`v1.20.0` is out, and this repository has `v1.17.0`: the blueprint bot is"
+        " running already."
+    ]
+    assert github.dispatched == []
+
+
+@pytest.mark.parametrize(
+    ("ran", "started"),
+    [
+        # A failure since the release fails again: the weekly run takes it on.
+        (NOW - timedelta(hours=3), False),
+        # A failure before the release says nothing about the release.
+        (NOW - timedelta(days=3), True),
+    ],
+)
+def test_the_daily_look_starts_the_blueprint_bot_once_for_a_release_it_failed_on(
+    github: FakeGitHub, tmp_path: Path, ran: datetime, started: bool
+) -> None:
+    a_repository_of_the_blueprint(github, tmp_path, "v1.17.0")
+    github.others[BLUEPRINT_RELEASE] = {
+        "tag_name": "v1.20.0",
+        "published_at": stamp(NOW - timedelta(days=1)),
+    }
+    github.workflow_runs[9] = [
+        run_of(
+            1,
+            name="Blueprint update",
+            path=BLUEPRINT_BOT,
+            event="workflow_dispatch",
+            created=ran,
+            workflow=9,
+        )
+    ]
+
+    summary, _ = sweep(api_of(github), REPO, tmp_path, NOW)
+
+    out = "`v1.20.0` is out, and this repository has `v1.17.0`: "
+    assert blueprint_lines(summary) == [
+        out
+        + (
+            "started the blueprint bot."
+            if started
+            else "the blueprint bot failed on it, so it waits for its weekly run."
+        )
+    ]
+    assert ((9, {"ref": "main"}) in github.dispatched) is started

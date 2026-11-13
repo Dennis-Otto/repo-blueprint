@@ -158,7 +158,7 @@ Each group has a page of its own, with what runs, the files that run it and the 
 ### [Dependencies and updates](docs/features/updates.md)
 
 - **Dependencies:** Renovate updates the dependencies a few times a day, as the release app of the owner.
-- **Updates:** Right after every release of the blueprint, and every week, the blueprint bot opens a pull request with `copier update`.
+- **Updates:** Within a day of every release of the blueprint, and weekly, the blueprint bot opens a `copier update` pull request.
 - **Upstream:** A Nextcloud app gets a pull request that raises `max-version` once a new major version of Nextcloud passes every check.
 
 ### [Bots, their cost and the dashboard](docs/features/bots.md)

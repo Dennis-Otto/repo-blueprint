@@ -2305,3 +2305,248 @@ def test_a_report_without_results_fails(
         cli.main(["mutation", "report", str(tmp_path / "broken"), "--out", str(out)])
         == 2
     )
+
+
+# ---------------------------------------------------------------- Infection
+
+# The end of the output of Infection 0.35, and its text log, of a project in ROOT_PHP.
+ROOT_PHP = "/home/runner/work/app/app"
+INFECTION_OUTPUT = """\
+40 mutations were generated:
+      30 mutants were killed by Test Framework
+       1 mutants were caught by Static Analysis
+       0 mutants were configured to be ignored
+       2 mutants were not covered by tests
+       5 covered mutants were not detected
+       1 errors were encountered
+       0 syntax errors were encountered
+       1 time outs were encountered
+       0 mutants required more time than configured
+
+Metrics:
+         Mutation Score Indicator (MSI): 82%
+         Mutation Code Coverage: 95%
+         Covered Code MSI: 86.84%
+"""
+INFECTION_LOG = f"""\
+Escaped mutants:
+================
+
+1) {ROOT_PHP}/lib/Service/Sync.php:42    [M] GreaterThan [ID] 1a2b
+
+--- Original
++++ New
+@@ @@
+-        if ($a > $b) {{
++        if ($a >= $b) {{
+
+2) {ROOT_PHP}/lib/Db/Mapper.php:7    [M] Plus [ID] 3c4d
+
+--- Original
++++ New
+@@ @@
+-        return $a + 1;
++        return $a - 1;
+
+3) {ROOT_PHP}/lib/Service/Sync.php:50    [M] TrueValue [ID] 5e6f
+
+4) other/Outside.php:3    [M] Minus [ID] 7a8b
+
+Timed Out mutants:
+==================
+
+1) {ROOT_PHP}/lib/Service/Slow.php:9    [M] For_ [ID] 9c0d
+
+Not Covered mutants:
+====================
+
+1) {ROOT_PHP}/lib/Service/Unused.php:3    [M] Plus [ID] 1e2f
+"""
+
+
+def test_the_counts_and_the_score_of_infection() -> None:
+    counts = mutation.infection_counts(INFECTION_OUTPUT)
+    assert counts["mutations were generated"] == 40
+    assert counts["covered mutants were not detected"] == 5
+    assert mutation.infection_score(INFECTION_OUTPUT) == 86.84
+    # No score after an error, nor when Infection generated no mutant.
+    assert mutation.infection_score('Class "OCP\\App" not found\n') is None
+    assert (
+        mutation.infection_score(
+            INFECTION_OUTPUT.replace("40 mutations", "0 mutations")
+        )
+        is None
+    )
+
+
+def test_the_escaped_mutants_of_infection() -> None:
+    found = mutation.escaped_mutants(INFECTION_LOG, ROOT_PHP + "/")
+    # Only those of the section of the escaped, by their path from the root.
+    assert found == [
+        {"name": "lib/Service/Sync.php:42 GreaterThan", "file": "lib/Service/Sync.php"},
+        {"name": "lib/Db/Mapper.php:7 Plus", "file": "lib/Db/Mapper.php"},
+        {"name": "lib/Service/Sync.php:50 TrueValue", "file": "lib/Service/Sync.php"},
+        {"name": "other/Outside.php:3 Minus", "file": "other/Outside.php"},
+    ]
+    # Without a root, the paths stay as Infection wrote them.
+    assert mutation.escaped_mutants(INFECTION_LOG, "")[0]["file"] == (
+        f"{ROOT_PHP}/lib/Service/Sync.php"
+    )
+    assert mutation.escaped_mutants("", ROOT_PHP) == []
+
+
+def test_a_run_of_infection_as_mutation_json() -> None:
+    data = mutation.infection_data(
+        INFECTION_OUTPUT, INFECTION_LOG, root=ROOT_PHP, run=RUN, now=NOW, sample=False
+    )
+    assert data == {
+        "tool": "infection",
+        "run": RUN,
+        "date": "2026-10-24T03:00:00+00:00",
+        "complete": True,
+        "parts": 1,
+        # Killed by the tests and the static analysis, errors and time outs.
+        "killed": 33,
+        "survived": 5,
+        "other": 2,
+        "score": 86.84,
+        "logic_score": 86.84,
+        "kinds": {LOGIC: 5, VALUE: 0, TEXT: 0},
+        # The files with escaped mutants, the most first.
+        "logic_by_function": {
+            "lib/Service/Sync.php": 2,
+            "lib/Db/Mapper.php": 1,
+            "other/Outside.php": 1,
+        },
+    }
+    # The sample of a pull request, and a run without a score, are incomplete.
+    sample = mutation.infection_data(
+        INFECTION_OUTPUT, "", root="", run=RUN, now=NOW, sample=True
+    )
+    assert sample["complete"] is False
+    assert sample["logic_by_function"] == {}
+    broken = mutation.infection_data("", "", root="", run=RUN, now=NOW, sample=False)
+    assert broken["complete"] is False
+    assert broken["score"] == 0.0
+    assert broken["other"] == 0
+
+
+def test_the_summary_of_infection() -> None:
+    now = mutation.infection_data(
+        INFECTION_OUTPUT, "", root="", run=RUN, now=NOW, sample=False
+    )
+    before = {**now, "score": 90.0, "logic_score": 90.0, "run": BEFORE}
+    text = mutation.infection_summary(now, before, measured=True, sample=False)
+    assert text == (
+        "### The score of Infection\n\n"
+        "**86.8 %** of the mutants of the code that the tests run were caught: 33 "
+        "caught, 5 escaped, 2 other.\n\n"
+        f"Since [the run of 2026-10-24]({BEFORE}): the score 90.0 % → 86.8 %.\n"
+    )
+    assert mutation.infection_summary(now, None, measured=True, sample=True).endswith(
+        "A pull request tries a sample of the files, which is compared with no other "
+        "run.\n"
+    )
+    assert "Infection reported no score" in mutation.infection_summary(
+        now, None, measured=False, sample=False
+    )
+
+
+def test_a_drop_of_infection_opens_one_issue() -> None:
+    github = FakeGitHub()
+    now = mutation.infection_data(
+        INFECTION_OUTPUT, INFECTION_LOG, root=ROOT_PHP, run=RUN, now=NOW, sample=False
+    )
+    before = {
+        **now,
+        "score": 92.0,
+        "logic_score": 92.0,
+        "kinds": {LOGIC: 3, VALUE: 0, TEXT: 0},
+        "logic_by_function": {"lib/Service/Sync.php": 1, "lib/Db/Mapper.php": 1},
+        "run": BEFORE,
+        "date": "2026-10-17T03:00:00+00:00",
+    }
+
+    assert keep_issue(Api(github), REPO, now, before) == (
+        "The score dropped: opened #1."
+    )
+
+    body = github.issues[1]["body"]
+    assert "more mutants of the code escape" in body
+    assert "| Score | 92.0 % | 86.8 % |" in body
+    assert "| Escaped mutants | 3 | 5 |" in body
+    # Infection has no score of the logic of its own.
+    assert "Score of the logic" not in body
+    assert "The files with more escaped mutants than before:" in body
+    assert "| `lib/Service/Sync.php` | 1 |\n| `other/Outside.php` | 1 |\n" in body
+    assert "`ignore` of its mutator in `infection.json5`" in body
+    assert "pragma" not in body
+    # Back at the score: the issue closes.
+    back = {**now, "score": 92.0, "logic_score": 92.0}
+    assert keep_issue(Api(github), REPO, back, now) == "The score is back: closed #1."
+
+
+def test_the_report_of_infection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    logs = files(
+        tmp_path / "parts",
+        {
+            "infection-output.log": INFECTION_OUTPUT,
+            "infection.log": INFECTION_LOG,
+            "infection-summary.log": "Total: 40\n",
+        },
+    )
+    before = {
+        **comparable(92.0, 92.0),
+        "tool": "infection",
+        "logic_by_function": {"lib/Service/Sync.php": 1},
+    }
+    previous = files(tmp_path, {"previous/mutation.json": json.dumps(before)})
+    out = tmp_path / "mutation"
+    arguments = ["mutation", "infection", str(logs), "--out", str(out), "--run", RUN]
+
+    code = cli.main(
+        [
+            *arguments,
+            "--root",
+            ROOT_PHP,
+            "--previous",
+            str(previous / "previous/mutation.json"),
+        ]
+    )
+
+    assert code == 0
+    printed = capsys.readouterr().out
+    assert printed.startswith("### The score of Infection\n")
+    assert "the score 92.0 % → 86.8 %." in printed
+    now = json.loads((out / "mutation.json").read_text(encoding="utf-8"))
+    assert now["score"] == 86.84
+    assert now["best"]["score"]["score"] == 92.0
+    assert json.loads((out / "previous.json").read_text(encoding="utf-8")) == before
+    # The logs stay in the artifact, for the dashboard and the escaped mutants.
+    assert sorted(path.name for path in out.glob("*.log")) == [
+        "infection-output.log",
+        "infection-summary.log",
+        "infection.log",
+    ]
+    # The issue of the drop, from the folder of the report.
+    github = FakeGitHub()
+    assert cli.main(["--repo", REPO, "mutation", "issue", str(out)], Api(github)) == 0
+    assert capsys.readouterr().out == "The score dropped: opened #1.\n"
+
+
+def test_a_report_of_infection_without_a_score_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "mutation"
+
+    code = cli.main(
+        ["mutation", "infection", str(tmp_path / "none"), "--out", str(out), "--sample"]
+    )
+
+    assert code == 1
+    assert "Infection reported no score" in capsys.readouterr().out
+    data = json.loads((out / "mutation.json").read_text(encoding="utf-8"))
+    assert data["complete"] is False
+    assert not (out / "previous.json").exists()

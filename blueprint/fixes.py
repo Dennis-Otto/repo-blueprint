@@ -77,6 +77,7 @@ from blueprint.coach import (
     OWN_CHECKS,
     TYPES,
     Catalog,
+    begins_as_words,
     check_steps,
     clean,
     code,
@@ -989,13 +990,14 @@ def needs_entry(title: str, pull: Json, files: Iterable[Json]) -> bool:
 
 def draft_of(title: str) -> str:
     """The text of a fragment from a title of a change for users: its words below the
-    heading of its kind, or nothing when they say nothing, or could be more than words.
-    A test proves that the release takes in each such text."""
+    heading of its kind, or nothing when they say nothing, or could be more than words,
+    such as a mark of a block of Markdown at their start, which would make the entry a
+    heading, a list or a quote. A test proves that the release takes in each such text."""
     match = FOR_USERS.match(title)
     if match is None:
         return ""
     words = clean(match[4], LONGEST_TITLE).rstrip(". ")
-    if not words or NOT_WORDS.search(words):
+    if not words or NOT_WORDS.search(words) or not begins_as_words(words):
         return ""
     kind = DRAFT_BREAKING if match[3] else DRAFT_KINDS[match[1]]
     entry = f"**{match[2]}:** {words}" if match[2] else words[0].upper() + words[1:]

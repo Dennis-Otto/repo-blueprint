@@ -434,8 +434,12 @@ def current_repo(api: Api) -> str:
         ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], None
     )
     if result.returncode != 0:
+        # gh's own words tell a missing sign-in or a network error apart from a
+        # folder that is no repository of GitHub.
+        said = result.stderr.strip() or f"gh repo view ended with {result.returncode}"
         raise GitHubError(
             0,
-            "this folder is no GitHub repository the CLI knows; pass --repo OWNER/NAME",
+            f"{said}\nIf this folder is no GitHub repository the CLI knows, "
+            "pass --repo OWNER/NAME.",
         )
     return result.stdout.strip()

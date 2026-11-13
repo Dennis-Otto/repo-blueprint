@@ -85,6 +85,28 @@ LABELS = ["maintenance"]
 # Greedy: the state holds objects of its own, on the one line of the marker.
 MARKER = re.compile(r"<!-- mutation-score (\{.*\}) -->")
 
+# The tool of the PHP of a Nextcloud app, as mutation.json names it, and what its output
+# and its text log say: a count with its words, such as "35 mutants were killed by Test
+# Framework", the score, a heading of the log, such as "Escaped mutants:", and a mutant
+# below it, "1) /home/runner/work/app/app/lib/Sync.php:42    [M] GreaterThan [ID] 1a2b".
+INFECTION = "infection"
+INFECTION_COUNT = re.compile(r"^ *(\d+) (\S.*?):? *$", re.MULTILINE)
+INFECTION_GENERATED = "mutations were generated"
+INFECTION_ESCAPED = "covered mutants were not detected"
+# What a test or the static analysis caught, as the Covered Code MSI counts it.
+INFECTION_CAUGHT = (
+    "mutants were killed",
+    "mutants were caught",
+    "errors were encountered",
+    "syntax errors were encountered",
+    "time outs were encountered",
+)
+INFECTION_SCORE = re.compile(r"Covered Code MSI: (\d+(?:\.\d+)?)%")
+INFECTION_SECTION = re.compile(r"(\w[\w ]*) mutants:")
+INFECTION_MUTANT = re.compile(
+    r"\d+\) (?P<path>.+?):(?P<line>\d+) +\[M\] (?P<mutator>\S+)"
+)
+
 # The kinds of survivors, in the order in which the summary lists them.
 LOGIC = "logic"
 VALUE = "value"
@@ -1312,12 +1334,121 @@ def comparison(now: Mapping[str, Any], previous: Mapping[str, Any] | None) -> st
     if not comparable(previous):
         return "No complete run before this one to compare with."
     assert previous is not None
+    if now.get("tool") == INFECTION:
+        # Infection sorts no mutants by kind: its score of the logic is its score.
+        return (
+            f"Since {run_link(previous, 'the run')}: the score "
+            f"{percent(float(previous['score']))} → {percent(float(now['score']))}."
+        )
     return (
         f"Since {run_link(previous, 'the run')}: the score "
         f"{percent(float(previous['score']))} → {percent(float(now['score']))}, the "
         f"score of the logic {percent(float(previous['logic_score']))} → "
         f"{percent(float(now['logic_score']))}."
     )
+
+
+# ---------------------------------------------------------------- Infection
+
+
+def infection_counts(output: str) -> dict[str, int]:
+    """The counts of the output of Infection by their words, such as
+    "covered mutants were not detected" for "5 covered mutants were not detected"."""
+    return {words: int(number) for number, words in INFECTION_COUNT.findall(output)}
+
+
+def infection_score(output: str) -> float | None:
+    """The Covered Code MSI of the output of Infection, the share of the mutants of the
+    code that the tests run which they caught; None when it has none, such as after an
+    error, or when Infection generated no mutant."""
+    found = INFECTION_SCORE.search(output)
+    if found is None or not infection_counts(output).get(INFECTION_GENERATED):
+        return None
+    return float(found[1])
+
+
+def escaped_mutants(log: str, root: str) -> list[dict[str, str]]:
+    """The escaped mutants of the text log of Infection, each with its file from the
+    root of the repository, its line and its mutator."""
+    prefix = root.replace("\\", "/").rstrip("/") + "/" if root else ""
+    found: list[dict[str, str]] = []
+    section = ""
+    for line in log.splitlines():
+        heading = INFECTION_SECTION.fullmatch(line)
+        if heading:
+            section = heading[1]
+            continue
+        mutant = INFECTION_MUTANT.match(line)
+        if mutant is None or section != "Escaped":
+            continue
+        path = mutant["path"].replace("\\", "/")
+        if prefix and path.startswith(prefix):
+            path = path[len(prefix) :]
+        found.append(
+            {"name": f"{path}:{mutant['line']} {mutant['mutator']}", "file": path}
+        )
+    return found
+
+
+def infection_data(
+    output: str, log: str, *, root: str, run: str, now: datetime, sample: bool
+) -> dict[str, Any]:
+    """What the next run compares with, of a run of Infection: mutation.json in the form
+    of mutmut, with the Covered Code MSI as the score and as the score of the logic,
+    since Infection sorts no mutants by kind, and the files with escaped mutants in
+    place of the functions. The sample of a pull request is incomplete."""
+    counts = infection_counts(output)
+    found = infection_score(output)
+    caught = sum(
+        number for words, number in counts.items() if words.startswith(INFECTION_CAUGHT)
+    )
+    escaped = counts.get(INFECTION_ESCAPED, 0)
+    by_file = Counter(mutant["file"] for mutant in escaped_mutants(log, root))
+    return {
+        "tool": INFECTION,
+        "run": run,
+        "date": now.isoformat(timespec="seconds"),
+        "complete": found is not None and not sample,
+        "parts": 1,
+        "killed": caught,
+        "survived": escaped,
+        "other": max(0, counts.get(INFECTION_GENERATED, 0) - caught - escaped),
+        "score": found or 0.0,
+        "logic_score": found or 0.0,
+        "kinds": {LOGIC: escaped, VALUE: 0, TEXT: 0},
+        "logic_by_function": dict(
+            sorted(by_file.items(), key=lambda item: (-item[1], item[0]))
+        ),
+    }
+
+
+def infection_summary(
+    now: Mapping[str, Any],
+    previous: Mapping[str, Any] | None,
+    *,
+    measured: bool,
+    sample: bool,
+) -> str:
+    """The summary of the report of Infection: its score and the comparison with the
+    run before, which the job of the mutants doesn't have."""
+    lines = ["### The score of Infection", ""]
+    if not measured:
+        lines.append(
+            "Infection reported no score, so the run is compared with no other; the "
+            "summary of the job of the mutants says why."
+        )
+        return "\n".join(lines) + "\n"
+    lines += [
+        f"**{percent(float(now['score']))}** of the mutants of the code that the tests "
+        f"run were caught: {now['killed']} caught, {now['survived']} escaped, "
+        f"{now['other']} other.",
+        "",
+        "A pull request tries a sample of the files, which is compared with no other "
+        "run."
+        if sample
+        else comparison(now, previous),
+    ]
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- the issue
@@ -1464,36 +1595,57 @@ def issue_body(
         if int(count) > int(before.get(function, 0))
     }
     rows = sorted(grown.items(), key=lambda item: (-item[1], item[0]))[:MOST_ROWS]
+    infection = now.get("tool") == INFECTION
     lines = [
         f"<!-- mutation-score {state} -->",
         f"The mutation score of the default branch dropped in {run_link(now, 'the run')}"
         f", below that of {run_link(baseline, 'the run')}: more mutants of the code "
-        "survive, changes that the tests run but don't check.",
+        + ("escape" if infection else "survive")
+        + ", changes that the tests run but don't check.",
         "",
         "| | Before | Now |",
         "| --- | --- | --- |",
         f"| Score | {percent(float(baseline['score']))} | {percent(float(now['score']))} |",
-        f"| Score of the logic | {percent(float(baseline['logic_score']))} | "
-        f"{percent(float(now['logic_score']))} |",
-        f"| Survivors that change the logic | {logic_count(baseline)} | "
-        f"{logic_count(now)} |",
     ]
+    if infection:
+        # Infection sorts no mutants by kind: its score of the logic is its score.
+        lines.append(
+            f"| Escaped mutants | {logic_count(baseline)} | {logic_count(now)} |"
+        )
+    else:
+        lines += [
+            f"| Score of the logic | {percent(float(baseline['logic_score']))} | "
+            f"{percent(float(now['logic_score']))} |",
+            f"| Survivors that change the logic | {logic_count(baseline)} | "
+            f"{logic_count(now)} |",
+        ]
     if rows:
         lines += [
             "",
-            "The functions with more survivors of the logic than before:",
+            "The files with more escaped mutants than before:"
+            if infection
+            else "The functions with more survivors of the logic than before:",
             "",
-            "| Function | More survivors |",
+            "| File | More escaped mutants |"
+            if infection
+            else "| Function | More survivors |",
             "| --- | --- |",
             *(f"| {code(function)} | {count} |" for function, count in rows),
         ]
+    kill = (
+        "`infection.log` in the artifact *mutation* of the run lists each escaped "
+        "mutant with its change. Kill them with a test; a mutant that no test needs to "
+        "catch goes into the `ignore` of its mutator in `infection.json5`."
+        if infection
+        else "The summary of the run lists each survivor with its change. Kill those "
+        "of the logic with a test; a text that no test needs to check gets "
+        "`# pragma: no mutate`."
+    )
     lines += [
         "",
-        "The summary of the run lists each survivor with its change. Kill those of the "
-        "logic with a test; a text that no test needs to check gets "
-        "`# pragma: no mutate`. This issue closes by itself once a weekly run is back "
-        "at the score before. To accept the lower score, close it as not planned: "
-        "later runs compare with the score of its latest run.",
+        f"{kill} This issue closes by itself once a weekly run is back at the score "
+        "before. To accept the lower score, close it as not planned: later runs "
+        "compare with the score of its latest run.",
     ]
     return "\n".join(lines) + "\n"
 

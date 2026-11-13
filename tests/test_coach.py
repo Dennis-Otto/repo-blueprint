@@ -386,6 +386,7 @@ def test_every_explanation_says_how_it_fixes_itself_or_why_it_cannot() -> None:
         "Accepted advisories",
         "Lock files",
         "Lock files match their sources",
+        "Translations",
         "Version",
         "Ruff",
         "Composer",
@@ -969,6 +970,12 @@ def test_every_suggested_title_passes(title: str, branch: str) -> None:
         ("Feat!:drop Python 3.12", "feat!: drop Python 3.12"),
         ("feat(): add a dark mode", "feat: add a dark mode"),
         ("  Feat:   add a dark mode  ", "feat: add a dark mode"),
+        # A title is no Markdown: words that begin with punctuation or a number stay.
+        ("Fix: /fix on forks", "fix: /fix on forks"),
+        ("Fix: .gitattributes keeps LF", "fix: .gitattributes keeps LF"),
+        ("Fix: --repo works again", "fix: --repo works again"),
+        ("Feat: # of the heading", "feat: # of the heading"),
+        ("Fix: 2", "fix: 2"),
     ],
 )
 def test_the_form_of_a_title_that_names_its_type_is_for_the_fix_bot(
@@ -1018,6 +1025,11 @@ def test_the_form_of_a_title_that_names_its_type_is_for_the_fix_bot(
         "feat: ...",
         "[feat]",
         "feat(settings)!:",
+        # Words that begin with a second colon: the bot made "fix: : double" of
+        # "fix:: double".
+        "fix:: double",
+        "Fix:: double",
+        "Fix: : double",
         # The breaking mark in a place that no rule of the form moves it from.
         "feat!(settings): drop the old settings",
         # Longer than the coach shows, so the suggestion cuts its words.

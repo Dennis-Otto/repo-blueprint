@@ -29,3 +29,11 @@ The weekly run of the bot stays, as the safety net of [0033](0033-schedules-are-
 - A release reaches the repositories as soon as it exists, so the blueprint bot takes only a release that the release workflow of the blueprint made and signed ([0020](0020-update-only-to-a-verified-release.md)), and a tag that someone else pushed reaches no repository.
 - The repository variable `BLUEPRINT_AUTOMERGE` set to `off` keeps the pace for a maintainer who wants to look first: the update pull request still comes right after the release, and waits for a person to merge it. An update with conflicts waits as well.
 - 0002 keeps its choice of Copier and of a bot in every repository; this record amends only how often the bot runs.
+
+## Amendment of 2026-11-13: within a day outside the release app
+
+The weekly run left every repository outside the release app of the blueprint, such as one of another owner, up to seven days behind each release, and nothing told its owner to start the bot by hand: the wait that this record rejected for the fleet. 1.14.0 to 1.17.0 came out between 8 and 10 November 2026, with fixes for every repository among them ([#834](https://github.com/Dennis-Otto/repo-blueprint/issues/834)).
+
+A daily schedule of the blueprint bot with a cheap first job was the obvious way, but it adds seven runs a week to every repository, and a private one pays at least a minute for each; the schedules of a repository keep to a dozen runs a day, which a test holds. So the nightly look of the bot-health bot, which runs anyway and may start workflows, looks instead: when `_commit` of `.copier-answers.yml` names an older version than the latest release of the blueprint that `_src_path` names, and the branch `blueprint/update` doesn't bring that release yet, it starts the blueprint bot by `workflow_dispatch`, within its limit of starts a day. The bot then verifies the release and updates as ever. A bot that the look started for its missed schedule brings the release anyway; a repository that has the release, or one past it, starts nothing; a latest release that GitHub names but that is older than the version of the repository starts nothing either.
+
+So a release reaches every repository within a day, and the repositories of the Rollout within minutes, as before; their nightly look finds nothing new. The weekly run stays as the safety net.

@@ -9,12 +9,14 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import tomllib
 import webbrowser
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 import blueprint
@@ -28,6 +30,7 @@ from blueprint import (
     locks,
     mutation,
     screenshots,
+    translations,
     versions,
 )
 from blueprint.app import TIMEOUT, connect, register
@@ -408,6 +411,67 @@ def parts_count(text: str) -> int | None:
     return int(text)
 
 
+def keep_run(
+    now: dict[str, Any], last: dict[str, Any] | None, out: Path
+) -> dict[str, Any] | None:
+    """Writes mutation.json of a run into out, with the high-water mark and the
+    baseline that the next run compares with, and previous.json, what the run compared
+    with, for the job that keeps the issue of a drop; that run, if there is one."""
+    previous = mutation.baseline_of(last)
+    # The high-water mark, which the next run compares with, so that a fall of less
+    # than the tolerance each week still adds up to a drop.
+    best = mutation.raised(mutation.best_of(last), now)
+    # An incomplete run keeps the last complete one, so that the next run compares
+    # with that, and a drop past an incomplete run still shows.
+    if not now["complete"] and previous is not None:
+        now["baseline"] = previous
+    if best is not None:
+        now["best"] = best
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "mutation.json").write_text(
+        json.dumps(now, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
+    if previous is not None:
+        (out / "previous.json").write_text(
+            json.dumps(previous, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        )
+    return previous
+
+
+def infection_report(arguments: argparse.Namespace) -> int:
+    """The report of a run of Infection from the logs that its job handed on: its
+    score, compared with the run before, mutation.json for the issue of a drop and the
+    next run, and the logs, which the dashboard reads; it fails without a score."""
+    logs = Path(arguments.logs_folder)
+    out = Path(arguments.out)
+
+    def read(name: str) -> str:
+        path = logs / name
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    output = read("infection-output.log")
+    now = mutation.infection_data(
+        output,
+        read("infection.log"),
+        root=arguments.root,
+        run=arguments.run,
+        now=datetime.now(UTC),
+        sample=arguments.sample,
+    )
+    previous = keep_run(now, mutation.read_previous(arguments.previous), out)
+    for path in sorted(logs.glob("infection*.log")):
+        shutil.copyfile(path, out / path.name)
+    measured = mutation.infection_score(output) is not None
+    sys.stdout.write(
+        mutation.infection_summary(
+            now, previous, measured=measured, sample=arguments.sample
+        )
+    )
+    return 0 if measured else 1
+
+
 def mutation_command(
     arguments: argparse.Namespace,
     root: Path,
@@ -487,29 +551,12 @@ def mutation_command(
         repo = arguments.repo or current_repo(api)
         print(mutation.keep_issue(api, repo, now, previous))
         return 0
+    if arguments.action == "infection":
+        return infection_report(arguments)
     report = mutation.Report.of(mutation.read_parts(Path(arguments.parts_folder)))
-    last = mutation.read_previous(arguments.previous)
-    previous = mutation.baseline_of(last)
     now = report.data(arguments.run, datetime.now(UTC))
-    # The high-water mark, which the next run compares with, so that a fall of less
-    # than the tolerance each week still adds up to a drop.
-    best = mutation.raised(mutation.best_of(last), now)
-    # An incomplete run keeps the last complete one, so that the next run compares
-    # with that, and a drop past an incomplete run still shows.
-    if not now["complete"] and previous is not None:
-        now["baseline"] = previous
-    if best is not None:
-        now["best"] = best
     out = Path(arguments.out)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "mutation.json").write_text(
-        json.dumps(now, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
-    )
-    # What the run compared with, for the job that keeps the issue of a drop.
-    if previous is not None:
-        (out / "previous.json").write_text(
-            json.dumps(previous, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
-        )
+    previous = keep_run(now, mutation.read_previous(arguments.previous), out)
     (out / "results.txt").write_text(report.results_text(), encoding="utf-8")
     (out / "survivors.md").write_text(mutation.survivors_text(report), encoding="utf-8")
     sys.stdout.write(mutation.summary(report, now, previous))
@@ -983,6 +1030,46 @@ def decisions_command(arguments: argparse.Namespace, root: Path) -> int:
             f"{command(root)} decisions --fix fixes what only the index gets wrong: "
             "the number of a row, the row of a renamed record, a row twice, a missing "
             "row and the order of the rows."
+        )
+    return 1
+
+
+def translations_command(arguments: argparse.Namespace, root: Path) -> int:
+    """What is wrong with the catalogs of the translations, one on each line, and in
+    the CI also as annotations at their lines; with --fix, what a command can fix
+    first."""
+    result = translations.check(root, arguments.fix)
+    for path in result.fixed:
+        print(f"{path}: in step with its source now")
+    found = result.findings
+    if not result.catalogs:
+        print("No catalogs of translations, so nothing to check.")
+        return 0
+    if not found:
+        print(
+            f"Each of the {result.catalogs} catalog(s) of translations has the texts "
+            "of its source, with their placeholders, and no other."
+        )
+        return 0
+    for finding in found:
+        print(finding.text())
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for finding in found:
+            print(
+                annotate.Annotation(
+                    "Translations", finding.message, finding.path, finding.line
+                ).command()
+            )
+    if any(finding.fixable for finding in found):
+        print(
+            f"{command(root)} translations --fix brings the order of the texts, the "
+            "stale ones and the copies in step with their source."
+        )
+    if not all(finding.fixable for finding in found):
+        print(
+            "A text without words or with other placeholders needs words in its "
+            "language, which only a person can write: write them, or ask in the pull "
+            "request for a maintainer or a native speaker to add them."
         )
     return 1
 
@@ -2475,6 +2562,33 @@ def add_mutation_parsers(
         "--previous", type=Path, help="mutation.json of the run before"
     )
     mutation_report_parser.add_argument("--run", default="", help="the link of the run")
+    infection_parser = mutation_actions.add_parser(
+        "infection",
+        help="the score of a run of Infection, compared with the run before, and "
+        "mutation.json for the issue when the score drops",
+    )
+    infection_parser.add_argument(
+        "logs_folder",
+        metavar="LOGS",
+        help="the folder with infection-output.log and infection.log of the run",
+    )
+    infection_parser.add_argument(
+        "--out", required=True, help="the folder for the artifact of the run"
+    )
+    infection_parser.add_argument(
+        "--previous", type=Path, help="mutation.json of the run before"
+    )
+    infection_parser.add_argument("--run", default="", help="the link of the run")
+    infection_parser.add_argument(
+        "--root",
+        default="",
+        help="the folder in which Infection ran, which the paths of its log start with",
+    )
+    infection_parser.add_argument(
+        "--sample",
+        action="store_true",
+        help="the run tried the sample of a pull request, which no run compares with",
+    )
     mutation_issue_parser = mutation_actions.add_parser(
         "issue",
         help="open, keep or close the one issue of a dropped score, from the report",
@@ -2597,6 +2711,18 @@ def add_pages_parsers(
         action="store_true",
         help="move it in those files",
     )
+    translations_parser = commands.add_parser(
+        "translations",
+        help="the catalogs of the translations of a Home Assistant integration, a "
+        "Nextcloud app or a Chrome extension: every language with the texts of its "
+        "source and no other, each with its words and the placeholders of the source",
+    )
+    translations_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="first bring the order of the texts, the stale ones and the copies, such "
+        "as en.json of strings.json and l10n/*.js of l10n/*.json, in step",
+    )
     site_check_parser = commands.add_parser(
         "site-check",
         help="what the website that MkDocs built promises: a sitemap in every folder "
@@ -2626,10 +2752,15 @@ def parser() -> argparse.ArgumentParser:
     one function with every command made 1,800 copies of its 640 lines, 51 MB of
     code that the Mutation workflow and its tests compiled for minutes."""
     parser = argparse.ArgumentParser(
-        prog="blueprint.py", description=blueprint.__doc__.split("\n\n")[0]
+        prog="blueprint.py",
+        description=blueprint.__doc__.split("\n\n")[0],
+        # The epilog lists the commands in groups of its own, line by line.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--repo", help="OWNER/NAME; by default the repository of this folder"
+        "--repo",
+        metavar="OWNER/NAME",
+        help="the repository; by default the repository of this folder",
     )
     parser.add_argument(
         "--config",
@@ -2637,7 +2768,12 @@ def parser() -> argparse.ArgumentParser:
         default=CONFIG,
         help="the settings, by default %(default)s",
     )
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar="COMMAND",
+        help="one of the commands below; COMMAND --help shows its own help",
+    )
     for add in (
         add_settings_parsers,
         add_changelog_parsers,
@@ -2654,7 +2790,59 @@ def parser() -> argparse.ArgumentParser:
         add_locks_parsers,
     ):
         add(commands)
+    parser.epilog = command_groups(commands)
     return parser
+
+
+# The commands that a person runs; every other one is a step of a bot or a workflow,
+# which a person seldom needs.
+PERSON_COMMANDS = (
+    "create",
+    "doctor",
+    "checklist",
+    "settings",
+    "app",
+    "workflows",
+    "fragments",
+    "fix",
+    "locks",
+    "advisories",
+    "pages",
+    "binaries",
+    "decisions",
+    "migrate",
+)
+HELP_COLUMN = 24
+HELP_WIDTH = 79
+
+
+def command_groups(
+    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> str:
+    """The commands of a person and the steps of the bots, as two groups of the help.
+    argparse lists the commands of one subparser in one flat block, so the help shows
+    them here instead, and the block keeps only the line of COMMAND."""
+    helps = {str(action.dest): str(action.help) for action in commands._choices_actions}
+    commands._choices_actions.clear()
+    bots = [name for name in helps if name not in PERSON_COMMANDS]
+    groups = [
+        ("commands for a person", PERSON_COMMANDS),
+        ("steps of the bots and the workflows", bots),
+    ]
+    return "\n\n".join(
+        f"{title}:\n" + "\n".join(command_line(name, helps[name]) for name in names)
+        for title, names in groups
+    )
+
+
+def command_line(name: str, help_text: str) -> str:
+    """One command of the help, its words beside it in the column where argparse sets
+    them; a test keeps every name short enough for it."""
+    first, *rest = textwrap.wrap(help_text, HELP_WIDTH - HELP_COLUMN)
+    indent = " " * HELP_COLUMN
+    return "\n".join(
+        [f"  {name:<{HELP_COLUMN - 2}}{first}", *(indent + line for line in rest)]
+    )
 
 
 def files_command(arguments: argparse.Namespace, root: Path) -> int | None:
@@ -2666,6 +2854,7 @@ def files_command(arguments: argparse.Namespace, root: Path) -> int | None:
         "decisions": lambda: decisions_command(arguments, root),
         "migrate": lambda: migrate_command(arguments, root),
         "pages": lambda: pages_command(arguments, root),
+        "translations": lambda: translations_command(arguments, root),
     }
     run = commands.get(arguments.command)
     if run is None:

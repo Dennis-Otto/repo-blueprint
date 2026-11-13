@@ -86,6 +86,17 @@ def answered_release(text: str) -> str:
     return match.group(1) if match else ""
 
 
+def answered_source(text: str) -> str:
+    """The repository on GitHub of the blueprint that a .copier-answers.yml updates
+    from, as owner/name, such as a fork, or "" for a blueprint elsewhere."""
+    match = re.search(r"^_src_path: *(\S+)", text, re.MULTILINE)
+    path = match.group(1) if match else ""
+    for prefix in ("gh:", "https://github.com/", "git@github.com:"):
+        path = path.removeprefix(prefix)
+    path = path.removesuffix(".git")
+    return path if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", path) else ""
+
+
 @dataclass(frozen=True)
 class Change:
     """A file that the update staged, with its mode in HEAD and in the index: a new
