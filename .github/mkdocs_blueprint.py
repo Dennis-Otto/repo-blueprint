@@ -134,6 +134,19 @@ EMPTY = re.compile(rf"<p\b{TAG}>\s*</p>\n?")
 LINK = re.compile(r"<a\b[^>]*>.*?</a>", re.S)
 PARAGRAPH = re.compile(r"<p>(?P<inside>(?:(?!</p>).)*?)</p>", re.S)
 DESCRIPTION = 160
+# The designed preview of the repository, which GitHub shows for a link to it, where
+# the website serves it, and the tags of the head that name the picture of a preview
+# card, which the home page of each language takes from it instead of the card that
+# the social plugin draws: that one shows the name of the website twice and cuts its
+# description. The inner pages keep their cards, whose titles are their own.
+PREVIEW = ".github/social-preview.png"
+SERVED_PREVIEW = "assets/images/social-preview.png"
+PREVIEW_TAG = re.compile(
+    rf'<meta\b(?={TAG}\bproperty="(?:og:image(?::\w+)?|twitter:image)")'
+    rf"{TAG}>\n?",
+    re.I,
+)
+TWITTER_CARD = 'property="twitter:card"'
 
 # The pages that a website in several languages, and any other, keeps out of the
 # search and out of search engines: the template of a decision record, which is
@@ -587,8 +600,8 @@ def source_facts(output: str) -> str:
 
 
 def on_files(files: Any, config: Any) -> Any:
-    """Serve the stylesheet and the script of the blueprint, pin Mermaid, and add the
-    page of the automation.
+    """Serve the stylesheet and the script of the blueprint and the preview of the
+    repository, pin Mermaid, and add the page of the automation.
 
     Both are files beside this one, which the i18n plugin leaves in place as files
     of the theme. The script of Material that loads Mermaid comes from a copy in
@@ -611,6 +624,20 @@ def on_files(files: Any, config: Any) -> Any:
                 config.site_dir,
                 config.use_directory_urls,
                 dest_uri=destination,
+            )
+        )
+    root = Path(config.config_file_path).parent
+    preview = root / PREVIEW
+    BUILT.preview = size(str(preview)) if preview.is_file() else None
+    if BUILT.preview is not None:
+        # From its folder: MkDocs leaves out a file whose path starts with a dot.
+        files.append(
+            kind(
+                preview.name,
+                str(preview.parent),
+                config.site_dir,
+                config.use_directory_urls,
+                dest_uri=SERVED_PREVIEW,
             )
         )
     folder = automated(config)
@@ -690,7 +717,8 @@ class Built:
     on_page_content left, by its path on the website, each by the name of its file;
     the links in the footer that the hooks gave the build before, None until they
     did; the version of the latest release, which the header shows; and the menu of
-    each language, for the map of the website.
+    each language, for the map of the website; and the width and the height of the
+    preview of the repository that the website serves, None without one.
 
     The i18n plugin builds every further language within the build of the default
     one, and MkDocs loads the hooks anew for each build of mkdocs serve.
@@ -706,6 +734,7 @@ class Built:
         self.social: list[dict[str, str]] | None = None
         self.version = ""
         self.menus: dict[str, Menu] = {}
+        self.preview: tuple[int, int] | None = None
 
 
 BUILT = Built()
@@ -1405,8 +1434,40 @@ def on_post_page(output: str, page: Any, config: Any) -> str:
             output = search_in_language(output, page, found)
     if unlisted(page, config):
         output = output.replace("</head>", f"{NOINDEX}</head>", 1)
+    if page.file.dest_uri in homes(config):
+        output = previewed(output, config)
     kept(output, page)
     return source_facts(output)
+
+
+def previewed(output: str, config: Any) -> str:
+    """A home page whose link shows the preview of the repository, when the website
+    serves one and has an address, in place of the picture of the card that the
+    social plugin drew, which runs before this hook.
+
+    A link preview needs the full address of the picture. Without the plugin, as
+    in a preview on a computer without Cairo or on a website that turned it off,
+    the page gets the tags of the picture alone, and the card of Twitter that
+    shows it large.
+    """
+    if BUILT.preview is None or not config.site_url:
+        return output
+    address = urljoin(config.site_url, SERVED_PREVIEW)
+    width, height = BUILT.preview
+    tags = {
+        "og:image": address,
+        "og:image:type": "image/png",
+        "og:image:width": str(width),
+        "og:image:height": str(height),
+        "twitter:image": address,
+    }
+    if TWITTER_CARD not in output:
+        tags["twitter:card"] = "summary_large_image"
+    head = "".join(
+        f'<meta property="{name}" content="{html.escape(value)}" />\n'
+        for name, value in tags.items()
+    )
+    return PREVIEW_TAG.sub("", output).replace("</head>", f"{head}</head>", 1)
 
 
 def kept(output: str, page: Any) -> None:

@@ -2728,6 +2728,110 @@ def test_an_untranslated_page_keeps_the_canonical_page_of_its_project() -> None:
     assert "noindex" in output
 
 
+CARD = (
+    '<meta property="og:title" content="Demo" />\n'
+    f'<meta property="og:image" content="{SITE}assets/images/social/index.png" />\n'
+    '<meta property="og:image:type" content="image/png" />\n'
+    '<meta property="og:image:width" content="1200" />\n'
+    '<meta property="og:image:height" content="630" />\n'
+    '<meta property="twitter:card" content="summary_large_image" />\n'
+    f'<meta property="twitter:image" content="{SITE}assets/images/social/index.png" />'
+)
+
+
+def previewing(tmp_path: Path, preview: bytes | None) -> ModuleType:
+    """The hooks after on_files of a website whose repository has preview as its
+    .github/social-preview.png, or none, and whether they serve it."""
+    module = hooks()
+    if preview is not None:
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".github/social-preview.png").write_bytes(preview)
+    config = SimpleNamespace(
+        config_file_path=str(tmp_path / "mkdocs.yml"),
+        docs_dir=str(tmp_path / "docs"),
+        site_dir=str(tmp_path / "site"),
+        use_directory_urls=False,
+    )
+    page = File("index.md", str(tmp_path / "docs"), str(tmp_path / "site"), False)
+    served = {file.dest_uri: file for file in module.on_files([page], config)}
+    # A file that is no picture has no size for the tags, and isn't served.
+    if module.BUILT.preview is not None:
+        file = served["assets/images/social-preview.png"]
+        assert file.abs_src_path == str(tmp_path / ".github/social-preview.png")
+        # MkDocs leaves out a file whose path in its folder starts with a dot.
+        assert not any(part.startswith(".") for part in Path(file.src_uri).parts)
+    else:
+        assert "assets/images/social-preview.png" not in served
+    return module
+
+
+def test_a_home_page_previews_with_the_preview_of_the_repository(
+    tmp_path: Path,
+) -> None:
+    module = previewing(tmp_path, png(1280, 640))
+    picture = f"{SITE}assets/images/social-preview.png"
+    head = f"<head>{CARD}\n</head><body>og:image</body>"
+
+    plain = bilingual(search=False)
+    for url, current in (("index.html", "en"), ("de/index.html", "de")):
+        page = page_of(url, locale=current)
+        output = module.on_post_page(head, page, bilingual(current, search=False))
+
+        assert 'property="og:title" content="Demo"' in output
+        assert "social/index.png" not in output
+        assert f'<meta property="og:image" content="{picture}" />' in output
+        assert f'<meta property="twitter:image" content="{picture}" />' in output
+        assert '<meta property="og:image:width" content="1280" />' in output
+        assert '<meta property="og:image:height" content="640" />' in output
+        assert output.count('property="twitter:card"') == 1
+        assert output.count("og:image:type") == 1
+        assert output.endswith("</head><body>og:image</body>")
+
+    # An inner page keeps the card that the social plugin drew for it.
+    guide = module.on_post_page(head, page_of("guide.html"), plain)
+    assert guide == head
+
+
+def test_a_home_page_without_the_social_plugin_still_previews(
+    tmp_path: Path,
+) -> None:
+    module = previewing(tmp_path, png(1280, 640))
+
+    output = module.on_post_page(
+        "<head></head>", page_of("index.html"), bilingual(search=False)
+    )
+
+    assert output == (
+        f'<head><meta property="og:image" content="{SITE}assets/images/'
+        'social-preview.png" />\n'
+        '<meta property="og:image:type" content="image/png" />\n'
+        '<meta property="og:image:width" content="1280" />\n'
+        '<meta property="og:image:height" content="640" />\n'
+        f'<meta property="twitter:image" content="{SITE}assets/images/'
+        'social-preview.png" />\n'
+        '<meta property="twitter:card" content="summary_large_image" />\n'
+        "</head>"
+    )
+
+
+def test_a_home_page_keeps_its_card_without_a_preview_to_show(
+    tmp_path: Path,
+) -> None:
+    head = f"<head>{CARD}</head>"
+    page = page_of("index.html")
+
+    # A repository without .github/social-preview.png, or with a file that is no
+    # picture, and a website without an address, which a link preview can't use.
+    plain = bilingual(search=False)
+    assert previewing(tmp_path, None).on_post_page(head, page, plain) == head
+    unknown = previewing(tmp_path, b"not a picture")
+    assert unknown.on_post_page(head, page, plain) == head
+    (tmp_path / "again").mkdir()
+    module = previewing(tmp_path / "again", png())
+    homeless = SimpleNamespace(site_url=None, plugins={})
+    assert module.on_post_page(head, page, homeless) == head
+
+
 def test_the_preview_card_of_a_home_page_names_the_website() -> None:
     module = hooks()
     social = SimpleNamespace(plugins={"material/social": object()}, site_name="Demo")

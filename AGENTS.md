@@ -1,6 +1,6 @@
 # Instructions for coding agents
 
-Repo Blueprint: Copier template for self-maintaining GitHub repos (Python, Home Assistant/HACS, Nextcloud apps, GitHub Actions, Node/TypeScript, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update.
+Repo Blueprint: Copier template for self-maintaining GitHub repos (Home Assistant/HACS, Nextcloud apps, GitHub Actions, Python, Node/TypeScript, Chrome extensions, Cloudflare Workers, containers): CI, signed SLSA L3 releases, Renovate, OpenSSF Scorecard, settings as code, and a bot that rolls out every template update.
 
 These are the rules for coding agents, such as Claude Code, Codex, GitHub Copilot and Cursor, that change the blueprint; people find the same rules in [CONTRIBUTING.md](CONTRIBUTING.md). Every repository made from the blueprint gets an `AGENTS.md` of its own from [`template/AGENTS.md.jinja`](template/AGENTS.md.jinja). The notes on how the blueprint works are in [.github/agents.project.md](.github/agents.project.md): read them as well.
 
