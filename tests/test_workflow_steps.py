@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 from shell import BASH
@@ -666,9 +667,15 @@ def test_the_clean_up_bot_runs_every_week_with_the_rights_it_needs() -> None:
     }
 
 
+def listing(*names: str) -> str:
+    """The branches as the clean-up bot lists them: each name as it is, a tab and the
+    name for the path of a request, encoded as jq's @uri does, but with its slashes."""
+    return "".join(f"{name}\t{quote(name, safe='/')}\n" for name in names)
+
+
 def run_the_branch_clean_up(
     tmp_path: Path, listed: str, used: str, *more: Answer
-) -> tuple[list[str], str]:
+) -> StepResult:
     done = run_step(
         tmp_path,
         "cleanup.yml",
@@ -686,15 +693,36 @@ def run_the_branch_clean_up(
         env={"DEFAULT": "main"},
     )
     assert done.returncode == 0, done.stderr
-    return done.commands, done.summary
+    return done
+
+
+COUNTED = "[.ahead_by, .behind_by] | @tsv"
+FIRST_OF_MAIN = ".commits[0].commit.committer.date"
+
+
+def counted(branch: str, ahead: int, behind: int) -> Answer:
+    """How many commits a branch has that main doesn't, and main that it doesn't."""
+    return exact(
+        f"api repos/o/r/compare/main...{branch} --jq {COUNTED}", f"{ahead}\t{behind}\n"
+    )
+
+
+def moved_past(branch: str, date: str) -> Answer:
+    """The date of the first commit that main has and the branch doesn't."""
+    return exact(f"api repos/o/r/compare/{branch}...main --jq {FIRST_OF_MAIN}", date)
+
+
+def last_commit(branch: str, date: str) -> Answer:
+    """The date of the last commit of a branch, named as in the path of a request."""
+    return exact(f"api repos/o/r/commits/{branch} --jq .commit.committer.date", date)
 
 
 def test_the_clean_up_bot_deletes_only_the_branches_that_main_holds(
     tmp_path: Path,
 ) -> None:
-    calls, summary = run_the_branch_clean_up(
+    done = run_the_branch_clean_up(
         tmp_path,
-        branches(
+        listing(
             "main",
             "gh-pages",
             "release-please--branches--main",
@@ -702,81 +730,148 @@ def test_the_clean_up_bot_deletes_only_the_branches_that_main_holds(
             "dependabot/pip/ruff-1",
             "feat/in-review",
             "fix/merged",
+            "fix/issue#12",
+            "feat/fresh",
+            "feat/at-main",
             "feat/old",
             "feat/new",
         ),
         branches("feat/in-review", "other"),
-        exact("api repos/o/r/compare/main...fix/merged --jq .ahead_by", "0\n"),
-        exact("api repos/o/r/compare/main...feat/old --jq .ahead_by", "2\n"),
-        exact("api repos/o/r/compare/main...feat/new --jq .ahead_by", "1\n"),
-        exact(
-            "api repos/o/r/commits/feat/old --jq .commit.committer.date",
-            "2026-01-02T03:04:05Z\n",
-        ),
-        exact(
-            "api repos/o/r/commits/feat/new --jq .commit.committer.date",
-            days_ago(2) + "\n",
-        ),
+        counted("fix/merged", 0, 3),
+        counted("fix/issue%2312", 0, 1),
+        counted("feat/fresh", 0, 1),
+        counted("feat/at-main", 0, 0),
+        counted("feat/old", 2, 5),
+        counted("feat/new", 1, 0),
+        moved_past("fix/merged", days_ago(2) + "\n"),
+        moved_past("fix/issue%2312", days_ago(2) + "\n"),
+        moved_past("feat/fresh", days_ago(0) + "\n"),
+        last_commit("feat/old", "2026-01-02T03:04:05Z\n"),
+        last_commit("feat/new", days_ago(2) + "\n"),
     )
 
-    # Only a branch that main holds completely goes, and the bot doesn't even look at
-    # main, the website, the branches of the bots and those of open pull requests.
-    assert [call for call in calls if "--method DELETE" in call] == [
-        "api --method DELETE repos/o/r/git/refs/heads/fix/merged --silent"
+    # Only a branch that main holds completely, and that main moved past a day ago,
+    # goes: one made from main stays while it sits on main's last commit, however
+    # old that is, and for a day after main moved on. The bot doesn't even look at
+    # main, the website, the branches of the bots and those of open pull requests,
+    # and it names a branch with a # encoded, so that the # is no fragment of the path.
+    assert done.called("api --method DELETE") == [
+        "api --method DELETE repos/o/r/git/refs/heads/fix/merged --silent",
+        "api --method DELETE repos/o/r/git/refs/heads/fix/issue%2312 --silent",
     ]
-    assert [call for call in calls if call.startswith("api repos/o/r/compare/")] == [
-        "api repos/o/r/compare/main...fix/merged --jq .ahead_by",
-        "api repos/o/r/compare/main...feat/old --jq .ahead_by",
-        "api repos/o/r/compare/main...feat/new --jq .ahead_by",
+    assert done.called("api repos/o/r/(compare|commits)/") == [
+        f"api repos/o/r/compare/main...fix/merged --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/merged...main --jq {FIRST_OF_MAIN}",
+        f"api repos/o/r/compare/main...fix/issue%2312 --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/issue%2312...main --jq {FIRST_OF_MAIN}",
+        f"api repos/o/r/compare/main...feat/fresh --jq {COUNTED}",
+        f"api repos/o/r/compare/feat/fresh...main --jq {FIRST_OF_MAIN}",
+        f"api repos/o/r/compare/main...feat/at-main --jq {COUNTED}",
+        f"api repos/o/r/compare/main...feat/old --jq {COUNTED}",
+        "api repos/o/r/commits/feat/old --jq .commit.committer.date",
+        f"api repos/o/r/compare/main...feat/new --jq {COUNTED}",
+        "api repos/o/r/commits/feat/new --jq .commit.committer.date",
     ]
     # A branch with commits of its own stays; once it is a month old, the bot lists it
-    # for its owner.
-    assert summary == (
+    # for its owner, by its name as it is.
+    assert done.summary == (
         "### Branches\n"
         "- deleted `fix/merged`, which main holds\n"
+        "- deleted `fix/issue#12`, which main holds\n"
         "- kept `feat/old, 2 commit(s) that main doesn't have, last on 2026-01-02`:"
         " without a pull request for a month\n"
     )
+    assert "::warning::" not in done.stdout
 
 
 def test_the_clean_up_bot_says_when_there_is_nothing_to_clean_up(
     tmp_path: Path,
 ) -> None:
-    calls, summary = run_the_branch_clean_up(
-        tmp_path, branches("main", "renovate/x"), ""
-    )
+    done = run_the_branch_clean_up(tmp_path, listing("main", "renovate/x"), "")
 
-    assert calls == [
+    assert done.commands == [
         "pr list --state open --limit 500 --json headRefName --jq .[].headRefName",
-        "api repos/o/r/branches --paginate --jq .[] | select(.protected | not) | .name",
+        "api repos/o/r/branches --paginate --jq .[] | select(.protected | not)"
+        ' | [.name, (.name | @uri | gsub("%2F"; "/"))] | @tsv',
     ]
-    assert summary == "### Branches\nNothing to clean up.\n"
+    assert done.summary == "### Branches\nNothing to clean up.\n"
 
 
-def test_an_error_of_the_api_deletes_no_branch(tmp_path: Path) -> None:
-    done = run_step(
+def test_a_branch_that_github_refuses_is_a_warning_and_the_bot_goes_on(
+    tmp_path: Path,
+) -> None:
+    done = run_the_branch_clean_up(
         tmp_path,
-        "cleanup.yml",
-        "cleanup",
-        "Delete the branches that main holds",
-        answers=[
-            Answer(r"pr list .*"),
-            Answer(r"api repos/o/r/branches .*", branches("fix/merged")),
-            Answer(
-                r"api repos/o/r/compare/.*", err="gh: Bad Gateway (HTTP 502)", code=1
-            ),
-            Answer(r"api --method DELETE .*"),
-        ],
-        env={"DEFAULT": "main"},
+        listing("fix/compare", "fix/moved", "fix/date", "fix/delete", "fix/merged"),
+        "",
+        Answer(
+            r"api repos/o/r/compare/main\.\.\.fix/compare .*",
+            err="gh: Bad Gateway (HTTP 502)",
+            code=1,
+        ),
+        counted("fix/date", 1, 0),
+        Answer(r"api repos/o/r/compare/main\.\.\..*", "0\t1\n"),
+        Answer(
+            r"api repos/o/r/compare/fix/moved\.\.\.main .*",
+            err="gh: Not Found (HTTP 404)",
+            code=1,
+        ),
+        Answer(r"api repos/o/r/compare/.*\.\.\.main .*", days_ago(2) + "\n"),
+        Answer(
+            r"api repos/o/r/commits/fix/date .*", err="gh: Not Found (HTTP 404)", code=1
+        ),
+        Answer(
+            r"api --method DELETE repos/o/r/git/refs/heads/fix/delete --silent",
+            err="gh: Reference does not exist (HTTP 422)",
+            code=1,
+        ),
     )
 
-    assert done.returncode == 1
-    assert not done.called("api --method DELETE")
+    # No branch whose state the bot doesn't know goes, the one after them does, and
+    # the run stays green with a warning for each that it looks at again next week.
+    assert done.called("api --method DELETE") == [
+        "api --method DELETE repos/o/r/git/refs/heads/fix/delete --silent",
+        "api --method DELETE repos/o/r/git/refs/heads/fix/merged --silent",
+    ]
+    assert done.stdout.splitlines() == [
+        f"::warning::GitHub refused a request for the branch {name};"
+        " the clean-up looks at it again next week."
+        for name in ("fix/compare", "fix/moved", "fix/date", "fix/delete")
+    ]
+    assert done.summary == (
+        "### Branches\n"
+        "- deleted `fix/merged`, which main holds\n"
+        "- left `fix/compare` for next week: GitHub refused a request for it\n"
+        "- left `fix/moved` for next week: GitHub refused a request for it\n"
+        "- left `fix/date` for next week: GitHub refused a request for it\n"
+        "- left `fix/delete` for next week: GitHub refused a request for it\n"
+    )
+
+
+def test_a_warning_keeps_the_percent_of_a_branch(tmp_path: Path) -> None:
+    done = run_the_branch_clean_up(
+        tmp_path,
+        listing("fix/100%0Adone"),
+        "",
+        Answer(r"api repos/o/r/compare/.*", code=1),
+    )
+
+    # The runner reads %0A of a workflow command as a new line; %25 is the percent.
+    assert done.stdout == (
+        "::warning::GitHub refused a request for the branch fix/100%250Adone;"
+        " the clean-up looks at it again next week.\n"
+    )
+    assert done.summary == (
+        "### Branches\n"
+        "- left `fix/100%0Adone` for next week: GitHub refused a request for it\n"
+    )
 
 
 @WITH_JQ
-def test_the_clean_up_bot_never_looks_at_a_protected_branch(tmp_path: Path) -> None:
-    calls, _ = run_the_branch_clean_up(
+def test_the_clean_up_bot_never_looks_at_a_protected_branch_and_encodes_a_name(
+    tmp_path: Path,
+) -> None:
+    done = run_the_branch_clean_up(
         tmp_path,
         "",
         "",
@@ -786,15 +881,23 @@ def test_the_clean_up_bot_never_looks_at_a_protected_branch(tmp_path: Path) -> N
                 {"name": "main", "protected": True},
                 {"name": "stable", "protected": True},
                 {"name": "fix/merged", "protected": False},
+                {"name": "fix/issue#12 100%", "protected": False},
             ],
         ),
-        Answer(r"api repos/o/r/compare/main\.\.\.fix/merged --jq \.ahead_by", "0\n"),
+        Answer(r"api repos/o/r/compare/main\.\.\..*", "0\t1\n"),
+        Answer(r"api repos/o/r/compare/.*\.\.\.main .*", days_ago(2) + "\n"),
     )
 
-    assert [call for call in calls if "compare" in call or "DELETE" in call] == [
-        "api repos/o/r/compare/main...fix/merged --jq .ahead_by",
+    # jq of gh encodes the name for the paths, and the summary keeps it as it is.
+    assert done.called("api repos/o/r/compare/|api --method DELETE") == [
+        f"api repos/o/r/compare/main...fix/merged --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/merged...main --jq {FIRST_OF_MAIN}",
         "api --method DELETE repos/o/r/git/refs/heads/fix/merged --silent",
+        f"api repos/o/r/compare/main...fix/issue%2312%20100%25 --jq {COUNTED}",
+        f"api repos/o/r/compare/fix/issue%2312%20100%25...main --jq {FIRST_OF_MAIN}",
+        "api --method DELETE repos/o/r/git/refs/heads/fix/issue%2312%20100%25 --silent",
     ]
+    assert "- deleted `fix/issue#12 100%`, which main holds\n" in done.summary
 
 
 def test_the_clean_up_bot_deletes_the_caches_of_closed_pull_requests_only(

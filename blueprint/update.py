@@ -21,6 +21,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from blueprint import github
 from blueprint.changelog import PULL_REQUESTS
 from blueprint.github import Api, GitHubError, Json
 
@@ -33,6 +34,13 @@ ANSWERS = ".copier-answers.yml"
 LABEL = "merge-conflict"
 # The first line of the one comment on a pull request that the bot leaves alone.
 NOTICE = "<!-- blueprint-bot: newer release -->"
+# The first line of the description of a pull request whose auto-merge the bot means
+# to turn on and hasn't yet: a later run tells it from one whose auto-merge somebody
+# turned off, and tries again.
+PENDING = "<!-- blueprint-bot: auto-merge to turn on -->"
+# The seconds that the bot waits before it asks for auto-merge again: GitHub refuses
+# it for a moment after a pull request opens or its branch moves.
+MERGE_WAITS = (5, 15)
 # The lines that start and end a conflict of `copier update --conflict inline`.
 MARKERS = re.compile(rb"^(?:<{7}|>{7}) ", re.MULTILINE)
 # The modes of git: no file, a file, an executable file.
@@ -705,13 +713,16 @@ def describe(
     *,
     merges: bool = True,
     automerge: bool = True,
+    pending: bool = False,
 ) -> str:
     """The description of the pull request: what it brings, with the notes of every
     release since the version before, what to do with conflicts and lost modes, the
-    files that it changes and whether it merges itself."""
+    files that it changes and whether it merges itself; pending, it starts with the
+    mark of the auto-merge that the bot is to turn on."""
     lines = [
+        *([PENDING] if pending else []),
         f"Brings the repository from the blueprint's {update.before} to"
-        f" [{update.after}]({update.release}) with `copier update`."
+        f" [{update.after}]({update.release}) with `copier update`.",
     ]
     if update.before and update.before != update.after:
         compare = (
@@ -825,12 +836,15 @@ def leave_alone(api: Api, repo: str, pull: Json, update: Update) -> str:
 def merges_itself(pull: Json | None, update: Update, automerge: bool) -> bool:
     """Whether the pull request merges itself once its checks pass: never with
     conflicts; with the auto-merge that it has, or that the bot turns on for a new pull
-    request and for one that waited for conflicts. Whoever else turned it off decides."""
+    request, for one that waited for conflicts and for one whose description still
+    has the mark of a run that didn't get to turn it on. Whoever else turned it off
+    decides."""
     if update.waits:
         return False
     merging = bool(pull and pull.get("auto_merge"))
     labels = {label["name"] for label in (pull or {}).get("labels", [])}
-    return merging or (automerge and (pull is None or LABEL in labels))
+    pending = str((pull or {}).get("body") or "").startswith(PENDING)
+    return merging or (automerge and (pull is None or LABEL in labels or pending))
 
 
 def write_pull(
@@ -840,22 +854,27 @@ def write_pull(
     update: Update,
     modes: Sequence[Change],
     automerge: bool,
-) -> int:
+) -> tuple[int, str]:
+    """Write the title and the description of the pull request, or open it; the
+    answer is its number and its description, which has the mark of the auto-merge
+    that the bot is to turn on until settle has."""
+    merges = merges_itself(pull, update, automerge)
     body = describe(
         update,
         modes,
         listed_releases(api, update),
-        merges=merges_itself(pull, update, automerge),
+        merges=merges,
         automerge=automerge,
+        pending=merges and not (pull and pull.get("auto_merge")),
     )
     fields = {"title": update.title, "body": body}
     if pull is not None:
         api.patch(f"repos/{repo}/pulls/{pull['number']}", fields)
-        return int(pull["number"])
+        return int(pull["number"]), body
     created = post(
         api, f"repos/{repo}/pulls", {**fields, "head": BRANCH, "base": "main"}
     )
-    return int(created["number"])
+    return int(created["number"]), body
 
 
 def hold(api: Api, repo: str, pull: Json) -> Json:
@@ -865,14 +884,34 @@ def hold(api: Api, repo: str, pull: Json) -> Json:
     return {**pull, "auto_merge": None}
 
 
+def turn_on_auto_merge(api: Api, repo: str, number: int) -> None:
+    """Turn auto-merge on, asking again after a wait while GitHub refuses it; the
+    last refusal is the error."""
+    arguments = ("pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+    for wait in MERGE_WAITS:
+        try:
+            gh(api, *arguments)
+            return
+        except GitHubError:
+            github.sleep(wait)
+    gh(api, *arguments)
+
+
 def settle(
-    api: Api, repo: str, number: int, pull: Json | None, update: Update, automerge: bool
+    api: Api,
+    repo: str,
+    number: int,
+    body: str,
+    pull: Json | None,
+    update: Update,
+    automerge: bool,
 ) -> None:
     """Conflicts, and changes of the repository that the update drops, turn auto-merge
     off before they label the pull request: no check reads every file, and markers in
     one of them would merge, as would a lost change that no marker shows. Without
     them, the pull request merges itself as merges_itself says, which its description
-    says too."""
+    says too; once auto-merge is on, the description loses the mark that the bot was
+    to turn it on, so that a later run leaves it off when somebody turns it off."""
     merging = bool(pull and pull.get("auto_merge"))
     labels = {label["name"] for label in (pull or {}).get("labels", [])}
     if update.waits:
@@ -886,7 +925,10 @@ def settle(
         # Someone may have taken it off a moment ago.
         api.delete(f"repos/{repo}/issues/{number}/labels/{label}", missing_ok=True)
     if not merging and merges_itself(pull, update, automerge):
-        gh(api, "pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+        turn_on_auto_merge(api, repo, number)
+        api.patch(
+            f"repos/{repo}/pulls/{number}", {"body": body.removeprefix(f"{PENDING}\n")}
+        )
 
 
 def update_pull_request(
@@ -941,8 +983,8 @@ def update_pull_request(
             pull = hold(api, repo, pull)
         move_branch(api, repo, commit, exists=True)
         done = "Moved on"
-    number = write_pull(api, repo, pull, update, modes, automerge)
-    settle(api, repo, number, pull, update, automerge)
+    number, body = write_pull(api, repo, pull, update, modes, automerge)
+    settle(api, repo, number, body, pull, update, automerge)
     text = f"{done} #{number}: the blueprint's {update.before} to {update.after}"
     if update.conflicts:
         text += f", with conflicts in {len(update.conflicts)} file(s)"
