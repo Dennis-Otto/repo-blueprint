@@ -100,6 +100,11 @@ jobs:
           gh api --header "$API_VERSION_HEADER" repos/o/r/log || echo "gh failed with $?"
           gh api --header "$API_VERSION_HEADER" --allow-escape-sequences repos/o/r/log || echo "gh failed with $?"
           gh api --header "$API_VERSION_HEADER" repos/o/r/log --jq . || echo "gh failed with $?"
+      - name: Output
+        run: |
+          [[ ! -p /dev/stdout && ! -p /dev/stderr ]] || exit 1
+          echo out
+          echo err >&2
       - name: Default shell
         run: |
           false | true
@@ -253,6 +258,16 @@ def test_the_fake_gh_guards_against_escape_sequences_as_its_version_does(
         assert done.stdout == f"0\n{red}gh failed with 1\n{red}"
         assert "unknown flag: --allow-escape-sequences\n" in done.stderr
     assert done.commands[0] == "help api"
+
+
+def test_a_step_writes_its_output_into_files_where_no_pipe_can_break(
+    tmp_path: Path, demo: Path
+) -> None:
+    # A write of bash into a pipe of the test once ended a step on Windows by SIGPIPE,
+    # with code 141 and without a word of what came after (#868).
+    done = run_step(tmp_path, "demo.yml", "demo", "Output", root=demo)
+
+    assert (done.returncode, done.stdout, done.stderr) == (0, "out\n", "err\n")
 
 
 def test_a_step_runs_with_the_options_of_its_shell(tmp_path: Path, demo: Path) -> None:

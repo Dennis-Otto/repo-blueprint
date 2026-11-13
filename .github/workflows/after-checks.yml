@@ -16,12 +16,16 @@ name: After the checks
 # its steps had passed failed in no test: its runner never reported that the job
 # ended, and the summary names it as the runner's fault, outside the issue. A job that
 # fails again is a real failure and stays red, and so does one that failed the same
-# way for the commit before: running it again would only keep a runner busy. A run
-# whose failed jobs ran no step, which GitHub couldn't start, as in its outage of 9
-# November 2026, it leaves alone with a notice: another try while GitHub fails would
-# only fail and mail again, and a bot that GitHub keeps failing ends with a notice as
-# well (decision 0136). A pull request names its jobs and steps and writes its logs,
-# so the issue shows them only as code, and the branch of a fork not at all.
+# way for the commit before: running it again would only keep a runner busy. The
+# Downstream workflow of the blueprint updates the repositories that take it as they
+# are at that moment, so one of its jobs that passes when it runs again found a
+# repository that changed in between, such as one that merged what the pull request
+# needs: the bot runs it once more, but counts no flaky test for it. A run whose failed
+# jobs ran no step, which GitHub couldn't start, as in its outage of 9 November 2026,
+# it leaves alone with a notice: another try while GitHub fails would only fail and
+# mail again, and a bot that GitHub keeps failing ends with a notice as well (decision
+# 0136). A pull request names its jobs and steps and writes its logs, so the issue
+# shows them only as code, and the branch of a fork not at all.
 #
 # The start of the branch bot: a required check of a pull request that failed for good,
 # also of one from a fork, moves the line of the branch bot in update-branches.yml on to
@@ -432,7 +436,7 @@ jobs:
     name: report the flaky tests
     if: >-
       !github.event.repository.fork &&
-      !contains(fromJSON('["CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate", "Release"]'), github.event.workflow_run.name) &&
+      !contains(fromJSON('["Downstream", "CodeQL", "Dependency review", "Docs", "Lint", "Pull request title", "Secret scan", "Fuzzing", "Links", "OSV-Scanner", "Workflow security", "Renovate", "Release"]'), github.event.workflow_run.name) &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.run_attempt > 1
     concurrency:
