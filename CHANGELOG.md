@@ -7,6 +7,15 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.18.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.0...v1.18.1) (2026-11-13)
+
+
+### Bug fixes
+
+* **docs:** the home page keeps the text of its preview picture ([#903](https://github.com/Dennis-Otto/repo-blueprint/issues/903)) ([641a5b4](https://github.com/Dennis-Otto/repo-blueprint/commit/641a5b4cc857310e1f8f5be88b5091870531d9c7))
+* **locks:** compile the first lock file alone before the others run side by side ([#896](https://github.com/Dennis-Otto/repo-blueprint/issues/896)) ([bbb371a](https://github.com/Dennis-Otto/repo-blueprint/commit/bbb371adb6488b27257d34206eb8e153bd5bf52a))
+* the bots after the checks and the branch bot sit out an outage of GitHub ([#899](https://github.com/Dennis-Otto/repo-blueprint/issues/899)) ([388cb41](https://github.com/Dennis-Otto/repo-blueprint/commit/388cb414e86444bd386245c8322a0923328d99d2))
+
 ## [1.18.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.17.0...v1.18.0) (2026-11-13)
 
 ### Features
