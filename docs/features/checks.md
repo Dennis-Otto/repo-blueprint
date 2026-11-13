@@ -8,6 +8,8 @@ What runs in every pull request and on `main`, how long it takes, and how a chec
 
 Two pull requests that each take the next free number for a record of a decision merge without a conflict of Git, since their files have different names. So the step *Records of decisions* of `scripts/check.sh` fails when two records of `docs/decisions/` share a number, the numbers skip one, or the index `docs/decisions/README.md` lists a record twice, misses one, names a file that doesn't exist or lists the records out of order, and names the next free number: once the branch bot merges `main` into the second pull request, it fails there, before the clash reaches `main`. `blueprint.py decisions --fix` fixes what only the index gets wrong, such as a missing row or the order of the rows, and the fix bot commits it; which record takes a new number stays for its author (decision 0135 of the [decisions](https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/decisions/README.md)).
 
+A Home Assistant integration, a Nextcloud app and a Chrome extension check their translations in the step *Translations*: every language has the texts of its source and no other, `translations/*.json` those of `strings.json`, each catalog of `l10n/` those of the others, `_locales/*/messages.json` those of the `default_locale`, and each text has words and the placeholders of the source, such as `{name}`, `%s` or `$NAME$`, a plural as many forms as its `pluralForm` names, and `l10n/<language>.js` the texts of its `.json`. `blueprint.py translations --fix` fixes the order, the stale texts and the copies, and the fix bot commits it; a text that a language lacks waits for a person who writes it (decision 0153).
+
 **How:** The tools of each kind of project, hash-pinned.
 
 ## Lint

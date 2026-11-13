@@ -1155,6 +1155,27 @@ commands = ["python3 .github/blueprint.py coach verify"]
 docs = "CONTRIBUTING.md#when-a-check-fails"
 autofix = """What a check found, and how to fix it, is for a person to explain."""
 
+[step.Translations]
+problem = """A catalog of translations doesn't follow its source: a language lacks a text
+of the source or keeps one that the source no longer has, a text has no words or other
+placeholders than the source, such as `{name}`, `%s` or `$NAME$`, a plural has another
+number of forms than its `pluralForm` names, `translations/en.json` of an integration
+is no copy of `strings.json`, or `l10n/<language>.js` of a Nextcloud app says something
+else than its `l10n/<language>.json`; the log names each file, line and text."""
+why = """A text that a language lacks shows in English or as its key, a stale one is
+dead weight that nobody translates again, and a lost placeholder shows a sentence
+without the value that it stands for, such as the name of a file. Nobody notices it
+until a user of that language reports it."""
+fix = """Write each text that the log names in its language, with the placeholders of the
+source, or ask in the pull request for a maintainer or a native speaker to add it before
+the merge. The command fixes what needs no words: the order of the texts, the stale
+ones, `en.json` as the copy of `strings.json` and `l10n/*.js` from `l10n/*.json`; then
+commit what changed (in the blueprint itself, the tool is `blueprint.py` without
+`.github/`):"""
+commands = ["python3 .github/blueprint.py translations --fix"]
+docs = "https://github.com/Dennis-Otto/repo-blueprint/blob/main/docs/features/checks.md#checks"
+autofix = ["{blueprint} translations --fix"]
+
 [step.Version]
 problem = """A file has another version than `.release-please-manifest.json`, whose
 version the release bot writes into every file that has one."""

@@ -324,6 +324,33 @@ elif [[ -n "${CI:-}" ]]; then
 else
   echo "Python 3.12 or newer is not installed here; the CI checks the explanations."
 fi
+[%- if project_type in ['home-assistant', 'nextcloud-app', 'chrome-extension'] %]
+
+step "Translations"
+# Every language has the texts of its source and no other, each with its words and
+# the placeholders of the source, such as {name}, %s or $NAME$:
+[%- if project_type == 'home-assistant' %]
+# translations/*.json of the integration against strings.json, or en.json without
+# one, of which en.json is the copy.
+[%- elif project_type == 'nextcloud-app' %]
+# the catalogs of l10n/ against each other, with as many forms of a plural as their
+# pluralForm names, and each l10n/<language>.js with the texts of its .json.
+[%- else %]
+# _locales/*/messages.json against the default_locale of the manifest, with the
+# definitions of the placeholders.
+[%- endif %]
+# translations --fix brings the order, the stale texts and the copies in step; a text
+# that a language lacks needs a person. The Python and blueprint.py of the step Pages
+# in one column.
+if [[ -n "$python" ]]; then
+  "$python" "$tool" translations
+elif [[ -n "${CI:-}" ]]; then
+  echo "Checking the translations needs Python 3.12 or newer, which this runner lacks."
+  exit 1
+else
+  echo "Python 3.12 or newer is not installed here; the CI checks the translations."
+fi
+[%- endif %]
 
 step "Version"
 # The release bot writes the version of each release into these files.
