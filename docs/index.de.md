@@ -50,7 +50,7 @@ hide:
 
     ---
 
-    Renovate, das der Blueprint mehrmals am Tag ausführt: Actions und Abhängigkeiten eine Woche nach ihrem Release und ein Image, für das seine Registry kein Datum seines Releases nennt, bei seinem nächsten Lauf, montags, sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt. Routine-Updates und die wöchentliche Auffrischung der Lock-Dateien aus Versionen, die eine Woche alt sind, mergen sich selbst, sobald alle Prüfungen grün sind. Renovate hält kein Issue offen.
+    Renovate, das der Blueprint mehrmals am Tag ausführt: Actions und Abhängigkeiten eine Woche nach ihrem Release und ein Image, für das seine Registry kein Datum seines Releases nennt, bei seinem nächsten Lauf, montags, sofort ein Update, das eine Schwachstelle behebt, oder den neuen Commit eines Branches, dem eine Action folgt. Jedes Update, auch ein Major-Update, und die wöchentliche Auffrischung der Lock-Dateien aus Versionen, die eine Woche alt sind, mergen sich selbst, sobald alle Prüfungen grün sind. Renovate hält kein Issue offen.
 
 - :material-robot-outline:{ .lg .middle } **Issues**
 

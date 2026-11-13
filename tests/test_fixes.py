@@ -1138,9 +1138,14 @@ def test_the_bot_goes_by_the_list_and_the_files_of_main(tmp_path: Path) -> None:
 def test_this_repository_lists_what_keeps_fixes() -> None:
     found = watched(ROOT)
 
-    assert {"Lint", "Docs", "CI (python)"} <= found.keeping
+    assert {"Lint", "Docs", "CI (python)", "Downstream"} <= found.keeping
     assert found.keeping <= found.listed
     assert {"CodeQL", "Release", "Variants"} <= found.listed - found.keeping
+    # The weekly run of Downstream keeps the answers of the repositories on main, and
+    # a run of a pull request keeps nothing: the bot doesn't wait for its quarter of an
+    # hour there (#843).
+    assert "Downstream" in found.awaited("schedule")
+    assert "Downstream" not in found.awaited("pull_request")
 
 
 @pytest.mark.parametrize(

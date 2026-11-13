@@ -23,8 +23,8 @@ HEAD = f"{0xB2:040x}"
 OTHER = f"{0xC3:040x}"
 WORKFLOW = """on:
   workflow_run:
-    # The workflows of the checks.
-    workflows: [CI (python), Lint, Pull request title, Docker E2E]
+    # The workflows of the checks, and the release.
+    workflows: [CI (python), Lint, Pull request title, Docker E2E, Release]
     types: [completed]
 """
 
@@ -113,7 +113,7 @@ class FakeGitHub:
 
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
-    path = tmp_path / ".github/workflows/update-branches.yml"
+    path = tmp_path / ".github/workflows/after-checks.yml"
     path.parent.mkdir(parents=True)
     path.write_text(WORKFLOW, encoding="utf-8")
     return tmp_path
@@ -124,7 +124,10 @@ def fixed_time(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("blueprint.stale_runs.time.time", lambda: NOW)
 
 
-def test_the_checks_are_the_workflows_that_the_branch_bot_follows(root: Path) -> None:
+def test_the_checks_are_the_workflows_that_the_bots_after_the_checks_follow(
+    root: Path,
+) -> None:
+    # Without the release, whose runs the bot leaves alone.
     assert checks_of(root) == {
         "CI (python)",
         "Lint",
@@ -138,7 +141,7 @@ def test_without_a_list_of_the_checks_the_bot_leaves_every_run_alone(
 ) -> None:
     # No file, and a file that names no workflows: it doesn't even ask GitHub.
     assert checks_of(tmp_path / "elsewhere") == frozenset()
-    (root / ".github/workflows/update-branches.yml").write_text("on: push\n", "utf-8")
+    (root / ".github/workflows/after-checks.yml").write_text("on: push\n", "utf-8")
     assert checks_of(root) == frozenset()
     github = FakeGitHub(a_run(1))
     outcome = cancel_stale_runs(Api(github), REPO, root)

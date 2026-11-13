@@ -5,26 +5,26 @@ config:
 ---
 flowchart TB
     accTitle: Which updates of Renovate merge on their own
-    accDescr: A routine update waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer, as a major update does.
+    accDescr: Every update, a major one too, waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files of npm and pip-compile keeps to versions a week old and merges on its own as well. The refresh of a package manager that can't keep to that age, such as Composer, brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer.
 
-    routine(["Routine update"])
+    update(["Update,<br>a major one too"])
     fix(["Fix of a vulnerability"])
-    refresh(["Weekly refresh<br>of the lock files"])
-    major(["Major update"])
+    refresh(["Weekly refresh of the lock files<br>of npm and pip-compile"])
+    composer(["Weekly refresh of the lock files<br>of Composer and the others"])
     week["A week after<br>its release"]
     checks{"Every check<br>passes"}
     merge["Merges on its own"]
     maintainer["Waits for<br>the maintainer"]
 
-    routine --> week --> checks
+    update --> week --> checks
     fix -- "at once" --> checks
+    refresh -- "versions a week old" --> checks
     checks --> merge
-    refresh -- "newest versions,<br>no week of waiting" --> maintainer
-    major --> maintainer
+    composer -- "newest versions,<br>no week of waiting" --> maintainer
 
     classDef bot fill:#526cfe2e,stroke:#526cfe,stroke-width:2px
     classDef person fill:#f59e0b2e,stroke:#f59e0b,stroke-width:2px
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
-    class routine,fix,refresh,major,week,checks bot
+    class update,fix,refresh,composer,week,checks bot
     class maintainer person
     class merge done

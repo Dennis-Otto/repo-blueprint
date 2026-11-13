@@ -3,10 +3,10 @@
 // workflows current; the Renovate workflow of the blueprint runs it for every
 // repository with a .github/renovate.json5, as the release app. An update waits a
 // week after its release; one that fixes a vulnerability comes at once, and so does
-// the new commit of a branch that an action follows. Routine updates, and the weekly
-// refresh of the lock files from versions a week old, merge on their own once every
-// check passes; a major update waits for the maintainer, and so does the refresh of
-// a package manager that can't keep to that age. Updates of what the users run are
+// the new commit of a branch that an action follows. Every update, a major one too,
+// and the weekly refresh of the lock files from versions a week old, merge on their
+// own once every check passes; the refresh of a package manager that can't keep to
+// that age waits for the maintainer. Updates of what the users run are
 // committed as fix(deps) and lead to a patch release, updates of the tools as
 // chore(deps).
 // Renovate keeps no issue open: what waits for the maintainer is a pull request,
@@ -24,7 +24,7 @@
     "local>Dennis-Otto/repo-blueprint//.github/renovate-accepted.json5",
   ],
   timezone: "Europe/Berlin",
-  // No dependency dashboard, so that a repository can have no open issue: routine
+  // No dependency dashboard, so that a repository can have no open issue: the
   // updates merge on their own, and what waits for the maintainer is a pull
   // request. Renovate closes the issue of the dashboard by its title, which stays
   // the one that it had.
@@ -41,7 +41,7 @@
   // package manager can keep to that.
   lockFileMaintenance: { enabled: true, schedule: ["* * * * 1"] },
   internalChecksFilter: "strict",
-  // GitHub merges a routine update once every required check passes.
+  // GitHub merges an update once every required check passes.
   platformAutomerge: true,
   automergeType: "pr",
   automergeStrategy: "squash",
@@ -117,8 +117,10 @@
   ],
   packageRules: [
     {
-      // Routine updates merge on their own, a week after their release.
-      matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest"],
+      // Every update merges on its own, a week after its release, a major one too:
+      // the checks are the gate, and one whose checks fail stays open and shows the
+      // failure (decision 0150 of the blueprint).
+      matchUpdateTypes: ["major", "minor", "patch", "digest", "pin", "pinDigest"],
       automerge: true,
     },
     {

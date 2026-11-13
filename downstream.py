@@ -6,7 +6,7 @@ minutes, where the blueprint bot runs `copier update`: a conflict, or a workflow
 the update breaks, showed there only after the release. tests/answers/ holds the
 answers of each of these repositories, and
 
-    python3 downstream.py [--head REF] [--base REF]
+    python3 downstream.py [--head REF] [--base REF] [--drift-fails]
         clones each repository, read-only, and updates it as its blueprint bot does,
         without --trust, from the version that it has to REF of this checkout: HEAD
         by default, with the changes that aren't committed yet. It lists the files
@@ -14,14 +14,16 @@ answers of each of these repositories, and
         --base the files whose update REF changes against BASE, such as the commit of
         main that a pull request merges into. An update that fails fails it, and so
         does a conflict that REF brings into a file that isn't a page of text, such
-        as a workflow, a script or the configuration of a bot. It warns of answers in tests/answers/ that differ from those of the
-        repository.
+        as a workflow, a script or the configuration of a bot. It warns of answers in
+        tests/answers/ that differ from those of the repository, and with
+        --drift-fails, as in the weekly run, they fail it.
     python3 downstream.py --answers
         writes tests/answers/ anew from the answers of each repository on GitHub, and
         the file of a new canary of .github/fleet.toml.
 
 The Downstream workflow runs it in each pull request that changes what the
-repositories get from the blueprint, and every week.
+repositories get from the blueprint, and every week, when answers that differ fail
+the run and the run keeps those of --answers for the fix bot.
 https://github.com/Dennis-Otto/repo-blueprint
 """
 
@@ -383,14 +385,17 @@ def code(path: str) -> str:
     return f"`{path}`"
 
 
-def findings(update: Update) -> list[str]:
-    """The warnings and errors of an update, as GitHub shows them."""
+def findings(update: Update, drift_fails: bool = False) -> list[str]:
+    """The warnings and errors of an update, as GitHub shows them; answers that
+    differ from those of the repository are an error with drift_fails."""
     name = update.repository
     lines = []
     if update.drift:
+        level = "error" if drift_fails else "warning"
+        differ = "differs" if len(update.drift) == 1 else "differ"
         lines.append(
-            f"::warning file={update.answers.as_posix()},title=The answers of {name}::"
-            f"{', '.join(update.drift)} differ from the answers of {name}; "
+            f"::{level} file={update.answers.as_posix()},title=The answers of {name}::"
+            f"{', '.join(update.drift)} {differ} from the answers of {name}; "
             "python3 downstream.py --answers writes them anew."
         )
     if update.error:
@@ -595,6 +600,12 @@ def main(
         help="the file to add the summary to (default: $GITHUB_STEP_SUMMARY, or print it)",
     )
     parser.add_argument(
+        "--drift-fails",
+        action="store_true",
+        help=f"fail when answers of {ANSWERS.as_posix()}/ differ from those of the "
+        "repository, as the weekly run does, instead of a warning",
+    )
+    parser.add_argument(
         "--answers",
         action="store_true",
         help=f"write {ANSWERS.as_posix()}/ anew from the answers on GitHub, also of a new canary",
@@ -627,9 +638,10 @@ def main(
         print(text)
     failed = False
     for update in updates:
-        for line in findings(update):
+        for line in findings(update, arguments.drift_fails):
             print(line)
-        failed = failed or bool(update.error or update.breaking)
+        drifted = arguments.drift_fails and bool(update.drift)
+        failed = failed or bool(update.error or update.breaking) or drifted
     return 1 if failed else 0
 
 

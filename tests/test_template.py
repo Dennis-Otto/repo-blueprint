@@ -631,18 +631,17 @@ def test_the_workflows_are_the_blueprints_own(
             )
             assert source.count(marker) == 1
             source = source.replace(marker, f"          languages: {CODEQL[kind]}\n")
-        if name in ("after-checks.yml", "update-branches.yml"):
-            # The workflows they watch; the bots after the checks and the branch bot
-            # test them.
+        if name == "after-checks.yml":
+            # The workflows it watches; the bots after the checks test them.
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
-        if name in ("after-checks.yml", "update-branches.yml") and (
+        if name == "after-checks.yml" and (
             "renovate.yml" not in workflows(projects[kind])
         ):
-            # The flaky-test bot and the branch bot know the check of the rules of
-            # Renovate, which only a repository with a Renovate workflow of its own
-            # runs.
+            # The flaky-test bot and the start of the branch bot know the check of the
+            # rules of Renovate, which only a repository with a Renovate workflow of
+            # its own runs.
             source = source.replace(
                 '"Workflow security", "Renovate"', '"Workflow security"'
             )
@@ -10106,7 +10105,7 @@ def test_dependabot_merges_as_the_release_app(
         for key, value in app["with"].items()
         if key.startswith("permission-")
     } == {"permission-contents": "write", "permission-pull-requests": "write"}
-    merge = step_in(job, "Enable automatic squash merge for patch and minor updates")
+    merge = step_in(job, "Enable automatic squash merge")
     # Without the app, the job's own token still turns auto-merge on.
     assert merge["env"]["GH_TOKEN"] == (
         "${{ steps.app.outputs.token || secrets.GITHUB_TOKEN }}"
@@ -10581,6 +10580,30 @@ def test_the_mend_app_keeps_npm_alone_to_versions_a_week_old(tmp_path: Path) -> 
     assert refresh_of(shared, own, "npm") == MERGES_BY_ITSELF
     assert refresh_of(shared, own, "pip-compile") == WAITS
     assert "postUpgradeTasks" not in str(shared)
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
+def test_every_update_of_renovate_merges_by_itself_a_major_one_too(
+    projects: dict[str, Path], kind: str
+) -> None:
+    # The checks are the gate, not the kind of the update: a major update merges once
+    # every check passes, and one whose checks fail stays open and shows the failure
+    # (decision 0150). It still waits its week, as every other update does.
+    root = ROOT if kind == "blueprint" else projects[kind]
+    text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
+    shared = renovate_rules(text)
+    own = renovate_rules((root / ".github/renovate.json5").read_text(encoding="utf-8"))
+    rules = [*shared["packageRules"], *own.get("packageRules", [])]
+    assert rules[0] == {
+        "matchUpdateTypes": ["major", "minor", "patch", "digest", "pin", "pinDigest"],
+        "automerge": True,
+    }
+    assert shared["minimumReleaseAge"] == "7 days"
+    # No later rule holds a major update back for a person again.
+    for rule in rules:
+        if "major" in rule.get("matchUpdateTypes", ["major"]):
+            assert rule.get("automerge") is not False or "matchManagers" in rule, rule
+    assert "a major update waits" not in text
 
 
 @pytest.mark.parametrize("kind", [*KINDS, "blueprint"])
@@ -13284,11 +13307,7 @@ def test_a_foreign_owner_runs_renovate_in_their_own_repository(
             OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
         ), job
     # Its failure moves the line of the branch bot on at once, as a scanner's does.
-    update = (project / ".github/workflows/update-branches.yml").read_text("utf-8")
-    assert watched_after_the_checks(update) == watched_after_the_checks(after) - {
-        "Release"
-    }
-    assert '"Workflow security", "Renovate"]' in condition_of(job_in(update, "update"))
+    assert '"Workflow security", "Renovate"]' in condition_of(job_in(after, "branches"))
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -14429,34 +14448,33 @@ def test_the_branch_bot_brings_renovate_up_to_date_as_renovate_itself() -> None:
 def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
     events = triggers(text)
+    # No workflow_run: GitHub created a run after the end of every check, and all but a
+    # few skipped, each with a run of Bot health behind it (#819, decision 0151). The
+    # bots after the checks start the bot when a check failed for good.
     assert set(events) == {
         "push",
         "pull_request_target",
-        "workflow_run",
         "schedule",
         "workflow_dispatch",
     }
-    # Turning auto-merge on or off, and a check that fails, move the line on; a merge
-    # into main does too, and the schedule is the safety net.
+    # Turning auto-merge on or off moves the line on; a merge into main does too, and
+    # the schedule is the safety net.
     assert events["pull_request_target"] == [
         "    types: [auto_merge_enabled, auto_merge_disabled]"
     ]
-    assert "    types: [completed]" in events["workflow_run"]
     assert "often hours late" in text
+    inputs = parse(text)["on"]["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"after", "attempt"}
+    assert all(field["type"] == "string" for field in inputs.values())
+    assert all(field["default"] == "" for field in inputs.values())
     job = job_in(text, "update")
     condition = condition_of(job)
-    # A pull request from a fork takes its place in the line, and its failed checks move
-    # the line on as well: the bot only reads them from the API. Only those that a person
-    # approved: GitHub holds no check of a fork on pull_request_target, so an edit of a
-    # title every few seconds could keep cancelling the bot.
-    assert "head.repo.full_name" not in condition
-    assert (
-        "(github.event.workflow_run.head_repository.full_name == github.repository || "
-        "github.event.workflow_run.event == 'pull_request')" in condition
-    )
-    assert (
-        "github.event.pull_request.base.ref == github.event.repository.default_branch"
-        in condition
+    # A pull request from a fork takes its place in the line: the bot only reads it
+    # from the API.
+    assert condition == (
+        "!github.event.repository.fork && "
+        "(github.event_name != 'pull_request_target' || "
+        "github.event.pull_request.base.ref == github.event.repository.default_branch)"
     )
     # The token of the job handles the runs of forks, with the one right that takes, so
     # that the release app needs none: the merges of the account that it names are the
@@ -14475,27 +14493,11 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         "BOT_ACCOUNT": "${{ steps.app.outputs.app-slug }}[bot]",
         # The run of a check whose end started it: when GitHub couldn't start that
         # run, the line stays as it is (decision 0136).
-        "AFTER": "${{ github.event.workflow_run.id }}",
-        "ATTEMPT": "${{ github.event.workflow_run.run_attempt }}",
+        "AFTER": "${{ inputs.after }}",
+        "ATTEMPT": "${{ inputs.attempt }}",
     }
     assert '"${after[@]}"' in bot["run"]
     assert "actions" not in app_permissions(job)
-    assert "workflow_dispatch" in events
-    # The title's check runs on pull_request_target.
-    assert (
-        """contains(fromJSON('["pull_request", "pull_request_target"]'), """
-        "github.event.workflow_run.event)" in condition
-    )
-    # A failed test moves the line on only when it stays failed, at the second
-    # attempt, since the bots after the checks run it once more; the other checks move
-    # it on at once: the same list as theirs, without the release.
-    assert "github.event.workflow_run.run_attempt > 1" in condition
-    listed = re.search(
-        r"contains\(fromJSON\('(\[[^\]]+\])'\), github\.event\.workflow_run\.name\)",
-        condition,
-    )
-    assert listed
-    assert set(json.loads(listed[1])) == OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate"}
     # The token reads the checks and the statuses of the line.
     permissions = app_permissions(job)
     for permission, access in (
@@ -14504,12 +14506,8 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         ("contents", "write"),
     ):
         assert permissions[permission] == access, permission
-    assert (
-        """contains(fromJSON('["failure", "timed_out", "startup_failure"]'), """
-        "github.event.workflow_run.conclusion)" in condition
-    )
-    # A group on the job: a run whose job skips, as after checks that passed, would
-    # otherwise cancel the run that updates.
+    # A group on the job: a run whose job skips, as for a pull request into another
+    # branch, would otherwise cancel the run that updates.
     assert "concurrency" not in parse(text)
     assert job["concurrency"] == {
         "group": "update-branches",
@@ -14531,7 +14529,8 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
         'next-branch "${only[@]}" "${after[@]}" | tee -a "$GITHUB_STEP_SUMMARY"' in run
     )
     # After the end of a check, the bot first asks whether GitHub started it.
-    assert 'after=(--after "$AFTER" --attempt "$ATTEMPT")' in run
+    assert '[[ -n "$AFTER" ]]' in run
+    assert 'after=(--after "$AFTER" --attempt "${ATTEMPT:-1}")' in run
     # A run for auto-merge shows as a check of that pull request, and the bot-health
     # bot ignores it: it passes with the warnings.
     assert '[[ "$GITHUB_EVENT_NAME" == pull_request_target ]]' in run
@@ -14541,20 +14540,77 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     assert "update-branches.yml" in dangerous
 
 
+def test_a_check_that_failed_for_good_starts_the_branch_bot() -> None:
+    job = after_the_checks_job("branches")
+    condition = condition_of(job)
+    # A pull request from a fork takes its place in the line, and its failed checks move
+    # the line on as well: the bot only reads them from the API. Only those that a person
+    # approved: GitHub holds no check of a fork on pull_request_target, so an edit of a
+    # title every few seconds could keep cancelling the bot.
+    assert condition.startswith("!github.event.repository.fork && ")
+    assert (
+        "(github.event.workflow_run.head_repository.full_name == github.repository || "
+        "github.event.workflow_run.event == 'pull_request')" in condition
+    )
+    # The title's check runs on pull_request_target.
+    assert (
+        """contains(fromJSON('["pull_request", "pull_request_target"]'), """
+        "github.event.workflow_run.event)" in condition
+    )
+    assert (
+        """contains(fromJSON('["failure", "timed_out", "startup_failure"]'), """
+        "github.event.workflow_run.conclusion)" in condition
+    )
+    # A failed test moves the line on only when it stays failed, at the second
+    # attempt, since the job rerun runs it once more; the other checks move it on at
+    # once: the same list as that of the flaky-test bot, without the release.
+    assert "github.event.workflow_run.run_attempt > 1" in condition
+    listed = re.search(
+        r"contains\(fromJSON\('(\[[^\]]+\])'\), github\.event\.workflow_run\.name\)",
+        condition,
+    )
+    assert listed
+    quick = set(json.loads(listed[1]))
+    assert quick == OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate"}
+    rerun = after_the_checks_job("rerun")
+    assert quick == left_alone_by_the_flaky_test_bot(rerun) - {"Release"}
+    # The token of the job starts the workflow of the bot, which GitHub runs for a
+    # dispatch of a job's token, and nothing else.
+    assert job["permissions"] == {"actions": "write"}
+    start = job["steps"][-2]
+    assert start["name"] == "Start the branch bot"
+    assert start["env"] == {
+        "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+        "GH_REPO": "${{ github.repository }}",
+        "RUN": "${{ github.event.workflow_run.id }}",
+        "ATTEMPT": "${{ github.event.workflow_run.run_attempt }}",
+        "NAME": "${{ github.event.workflow_run.name }}",
+    }
+    assert "${{" not in start["run"]
+    assert (
+        'gh workflow run update-branches.yml --field after="$RUN" '
+        '--field attempt="$ATTEMPT"'
+    ) in start["run"]
+    assert job["steps"][-1]["name"] == WAIT_FOR_DOCKER
+
+
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
 def test_a_failed_check_moves_the_line_of_the_branch_bot_on(
     projects: dict[str, Path], project: str
 ) -> None:
-    # The branch bot follows the workflows of the checks that the bots after the
-    # checks follow, of every kind of project, but not the release.
+    # The bots after the checks start the branch bot after the workflows of the checks
+    # of every kind of project; GitHub starts no run of the branch bot after the end of
+    # a check by itself.
     root = ROOT if project == "blueprint" else projects[project]
     flows = root / ".github/workflows"
     after = (flows / "after-checks.yml").read_text(encoding="utf-8")
     update = (flows / "update-branches.yml").read_text(encoding="utf-8")
-    assert watched_after_the_checks(update) == watched_after_the_checks(after) - {
-        "Release"
-    }
-    assert ("the blueprint sets them" in update) == (project == "blueprint")
+    assert "workflow_run" not in triggers(update)
+    branches = job_in(after, "branches")
+    assert "update-branches.yml" in branches["steps"][-2]["run"]
+    renovate = "Renovate" in watched_after_the_checks(after)
+    listed = '"Workflow security", "Renovate"]' in condition_of(branches)
+    assert listed == renovate
 
 
 @pytest.mark.parametrize("project", ["blueprint", *KINDS])
@@ -15970,11 +16026,12 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     named = names_of_workflows(root)
     after_checks = after_pull_requests(named.items())
     assert {"After the checks", "Findings"} <= after_checks
-    # The branch bot is the one that acts on such an end: a failed check of a pull
-    # request moves its line on, which is a run of the bot on the default branch like
-    # any other, and one that fails is a failure of the bot.
-    assert "Update branches" in after_checks
-    for name in watched_by_bot_health(root) & after_checks - {"Update branches"}:
+    # The branch bot no longer starts on such an end: the bots after the checks start
+    # it when a check of a pull request failed for good, which is a run of the bot on
+    # the default branch like any other, and one that fails is a failure of the bot
+    # (decision 0151).
+    assert "Update branches" not in after_checks
+    for name in watched_by_bot_health(root) & after_checks:
         text = named[name]
         for job, body in parse(text)["jobs"].items():
             # A job that calls a reusable workflow of the issue assistant, as that of
@@ -23251,6 +23308,23 @@ def test_the_downstream_workflow_updates_each_repository_read_only() -> None:
     assert 'arguments=(--head "$(git rev-parse HEAD)")\n' in run
     assert 'arguments+=(--base "$(git rev-parse HEAD^1)")\n' in run
     assert 'python3 downstream.py "${arguments[@]}"\n' in run
+    # Answers of tests/answers/ that differ fail the weekly run, as a warning in a
+    # green run reaches nobody, and only warn in a pull request, which isn't at fault
+    # (#843). The run of main takes them anew from each repository and keeps them for
+    # the fix bot, which brings them in its pull request of the fixes of main.
+    assert "else\n  # A pull request only warns" in run
+    assert "  arguments+=(--drift-fails)\n" in run
+    take = step_in(job, "Take the answers of the repositories anew")
+    assert condition_of(take) == (
+        "${{ failure() && github.event_name != 'pull_request' && "
+        "github.ref_name == github.event.repository.default_branch }}"
+    )
+    assert take["run"].startswith("python3 downstream.py --answers\n")
+    assert 'fix keep "$RUNNER_TEMP/fixes"' in take["run"]
+    [keep] = steps_using(job, "actions/upload-artifact")
+    assert condition_of(keep) == "${{ !cancelled() && steps.fix.outcome == 'success' }}"
+    assert keep["with"]["name"] == "fixes-downstream"
+    assert keep["with"]["if-no-files-found"] == "ignore"
     assert job["steps"][-1] == explain_step("downstream")
     explained_under_their_comments(workflow)
     # No required check: a conflict can be the right change.
