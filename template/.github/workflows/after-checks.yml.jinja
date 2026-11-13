@@ -9,4 +9,6 @@
 [#- The marker of the tests of the project, which the validator of test_marker keeps
     free of quotes and backslashes. -#]
 [%- set marker = [['          MARKER: ""', '          MARKER: "' ~ test_marker ~ '"']] -%]
-{= replaced(".github/workflows/after-checks.yml", [[workflows, project]] + renovate + marker) -=}
+[#- The flaky-test bot counts no rerun of Downstream, which only the blueprint has. -#]
+[%- set downstream = [['["Downstream", "CodeQL"', '["CodeQL"']] -%]
+{= replaced(".github/workflows/after-checks.yml", [[workflows, project]] + renovate + marker + downstream) -=}
