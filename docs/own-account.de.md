@@ -16,7 +16,7 @@ Der Blueprint funktioniert für jedes Konto und jede Organisation auf GitHub. Ei
 
 ## 1. Den Blueprint kopieren
 
-Du brauchst Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator deines Kontos oder deiner Organisation (`gh auth login`), und keinen Checkout des Blueprints.
+Du brauchst Git, Python ab 3.12, [uv](https://docs.astral.sh/uv/) und die GitHub CLI ab 2.48, angemeldet als Administrator deines Kontos oder deiner Organisation (`gh auth login`), einen Schlüssel, mit dem Git jeden Commit signiert, und keinen Checkout des Blueprints. `main` nimmt nur signierte Commits, vom ersten nach `create` an: Signiert Git noch keinen, richte einen Schlüssel ein, wie [die Fehlerbehebung](troubleshooting.md#ein-commit-hat-keine-verifizierte-signatur) sagt, mit SSH in wenigen Zeilen, und die Vorabprüfung von `create` warnt, bis es das tut.
 
 ```sh
 uvx --from copier==9.19.1 copier copy gh:Dennis-Otto/repo-blueprint mein-projekt
@@ -58,7 +58,7 @@ python3 .github/blueprint.py create
 
 ## 3. Die Release-App registrieren
 
-Ein Befehl registriert die App auf deinem Konto oder deiner Organisation, mit Name und allen Berechtigungen vorausgefüllt und ohne Webhook, setzt ihren privaten Schlüssel und öffnet den Pull Request, der sie nennt. Schalte vorher `commit.gpgsign` ein: Die Regeln von `main` verlangen eine Signatur auf jedem Commit, auch auf dem, der die App nennt.
+Ein Befehl registriert die App auf deinem Konto oder deiner Organisation, mit Name und allen Berechtigungen vorausgefüllt und ohne Webhook, setzt ihren privaten Schlüssel und öffnet den Pull Request, der sie nennt. Lass Git vorher jeden Commit signieren, mit `commit.gpgsign` und einem Schlüssel auf deinem Konto, wie [die Fehlerbehebung](troubleshooting.md#ein-commit-hat-keine-verifizierte-signatur) es einrichtet: Die Regeln von `main` verlangen eine Signatur auf jedem Commit, auch auf dem, der die App nennt, und die Vorabprüfung von `app register` warnt, wenn Git keinen signiert.
 
 ```sh
 python3 .github/blueprint.py app register
@@ -77,7 +77,7 @@ Wie `create` prüft er zuerst, was er braucht, und ein mit ✘ markierter Befund
 Zwei Dinge bleiben dir, und den Link des ersten gibt der Befehl aus:
 
 1. **Installiere die App** auf dem Repository, unter `https://github.com/apps/NAME/installations/new`.
-2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`. Der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst.
+2. **Merge den Pull Request,** sobald seine Prüfungen grün sind, auf seiner Seite oder mit `gh pr merge --squash`. Der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst, wie es [die Fehlerbehebung](troubleshooting.md#ein-commit-hat-keine-verifizierte-signatur) tut.
 
 Die Checkliste erkennt die Installation an der Check Suite, die GitHub für eine installierte App bei jedem Push öffnet. Sie hakt die App also nach dem Merge ab, wenn du zuerst installierst, und sonst nach dem nächsten Push.
 

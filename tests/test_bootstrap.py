@@ -40,6 +40,8 @@ ASKED = [
     "git --version",
     "git var GIT_AUTHOR_IDENT",
     "git var GIT_COMMITTER_IDENT",
+    "git config --type=bool --get commit.gpgsign",
+    "git config --get user.signingkey",
     "gh --version",
     "gh api --include user",
     "gh config get git_protocol --host github.com",
@@ -52,6 +54,7 @@ SHOWN = [
     "  ✔ Python 3.13",
     "  ✔ Git 2.47.1",
     "  ✔ Git commits as Test <test@example.com>",
+    "  ✔ Git signs every commit, as the rules of main ask",
     "  ✔ GitHub CLI 2.62.0",
     "  ✔ gh is signed in to github.com as octocat, with the scopes gist, read:org, "
     "repo, workflow",
@@ -506,6 +509,88 @@ def test_what_the_preflight_cannot_tell_stops_nothing(
 
     assert f"{shown}\n" in capsys.readouterr().out
     assert shell.steps == [INIT, ADD, COMMIT, GH]
+
+
+GPGSIGN = "git config --type=bool --get commit.gpgsign"
+SIGNINGKEY = "git config --get user.signingkey"
+FORMAT = "git config --get gpg.format"
+KEY_COMMAND = "git config --get gpg.ssh.defaultKeyCommand"
+UNSET = (1, "")
+
+
+@pytest.mark.parametrize(
+    ("changed", "shown"),
+    [
+        pytest.param(
+            {GPGSIGN: UNSET, SIGNINGKEY: UNSET},
+            [
+                "  · Git signs no commit, and main takes signed commits only",
+                f"      set up a key that GitHub verifies: {bootstrap.SIGNING}",
+            ],
+            id="no signing at all",
+        ),
+        pytest.param(
+            {GPGSIGN: (0, "false\n")},
+            [
+                "  · Git signs a commit only with --gpg-sign, and main takes signed "
+                "commits only",
+                "      git config --global commit.gpgsign true",
+            ],
+            id="a key without commit.gpgsign",
+        ),
+        pytest.param(
+            {SIGNINGKEY: UNSET, FORMAT: (0, "ssh\n"), KEY_COMMAND: UNSET},
+            [
+                "  · Git signs every commit with SSH, but names no key to sign with",
+                "      git config --global user.signingkey ~/.ssh/id_ed25519.pub",
+            ],
+            id="SSH without a key",
+        ),
+        pytest.param(
+            {SIGNINGKEY: UNSET, FORMAT: (0, "ssh\n"), KEY_COMMAND: (0, "ssh-add -L")},
+            ["  ✔ Git signs every commit, as the rules of main ask"],
+            id="SSH with the key of the agent",
+        ),
+        pytest.param(
+            {SIGNINGKEY: UNSET, FORMAT: UNSET},
+            ["  ✔ Git signs every commit, as the rules of main ask"],
+            id="gpg with the key of the email address",
+        ),
+    ],
+)
+def test_git_that_may_not_sign_is_a_warning_that_stops_nothing(
+    root: Path,
+    capsys: pytest.CaptureFixture[str],
+    changed: dict[str, tuple[int, str]],
+    shown: list[str],
+) -> None:
+    # The first commit lands before the rules of main, which ask for a signature on
+    # every commit after it, such as on the one of app register.
+    shell = Shell(changed)
+
+    assert doctor(root, run=shell, python=PYTHON)
+
+    out = capsys.readouterr().out
+    assert "\n".join(shown) + "\n" in out
+    assert out.endswith("Nothing stops python3 .github/blueprint.py create.\n")
+    assert create(root, "A demo", run=shell, python=PYTHON) == "octo-org/demo"
+    asked = [step for step in shell.steps if step in changed]
+    assert [step for step in shell.steps if step not in asked] == [
+        INIT,
+        ADD,
+        COMMIT,
+        GH,
+    ]
+
+
+def test_the_preflight_links_to_a_section_of_the_troubleshooting() -> None:
+    page = (ROOT / "docs/troubleshooting.md").read_text(encoding="utf-8")
+    anchors = {
+        re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        for heading in re.findall(r"^## (.+)$", page, re.MULTILINE)
+    }
+
+    assert bootstrap.SIGNING.partition("#")[2] in anchors
 
 
 def test_a_wider_scope_counts_for_read_org(
@@ -1044,3 +1129,33 @@ def test_the_real_git_names_an_identity_that_is_missing(
 
     assert finding.ok is False
     assert finding.fix == 'git config --global user.email "you@example.com"'
+
+
+@pytest.mark.usefixtures("plain_git")
+@pytest.mark.parametrize(
+    ("config", "ok", "fix"),
+    [
+        ("", None, f"set up a key that GitHub verifies: {bootstrap.SIGNING}"),
+        (
+            "[commit]\n\tgpgsign = yes\n[gpg]\n\tformat = ssh\n",
+            None,
+            "git config --global user.signingkey ~/.ssh/id_ed25519.pub",
+        ),
+        (
+            "[commit]\n\tgpgsign = on\n[gpg]\n\tformat = ssh\n"
+            "[user]\n\tsigningkey = ~/.ssh/id_ed25519.pub\n",
+            True,
+            "",
+        ),
+    ],
+)
+def test_the_real_git_says_whether_it_signs_every_commit(
+    tmp_path: Path, config: str, ok: bool | None, fix: str
+) -> None:
+    # Git reads a boolean in any of its spellings, and answers 1 for a setting that
+    # it doesn't have.
+    (tmp_path / "gitconfig").write_text(config, encoding="utf-8")
+
+    finding = bootstrap.signing_finding(bootstrap.run_command, tmp_path)
+
+    assert (finding.ok, finding.fix) == (ok, fix)

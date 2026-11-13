@@ -1,5 +1,5 @@
 ---
-description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein create, das bei seiner Vorabprüfung oder mittendrin anhält, ein Skript, das nicht ausführbar ist, ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
+description: "Was zu tun ist, wenn in einem Repository von Repo Blueprint etwas nicht funktioniert: ein create, das bei seiner Vorabprüfung oder mittendrin anhält, ein Commit ohne verifizierte Signatur, ein Skript, das nicht ausführbar ist, ein Update mit Konflikten, eine Pflichtprüfung, die nie berichtet, settings apply ohne Administratorrechte, ein Settings-Bot, dessen Token die Release-App verweigert, ein Schalter der Sicherheit, den GitHub aus lässt, ein Release-Pull-Request ohne Prüfungen, Renovate, das keine Updates öffnet, und OSV-Scanner, der eine Version meldet, die ein anderes Paket festlegt."
 ---
 
 # Fehlerbehebung
@@ -10,7 +10,7 @@ Die meisten Probleme erklären sich dort, wo sie auftreten: Eine Prüfung, die s
 
 **Was du siehst:** `python3 .github/blueprint.py create` zeigt *The preflight of OWNER/NAME* mit einer Zeile mit ✘ und darunter dem Befehl, der sie behebt, und endet mit *the preflight found 1 problem that would stop create, which made nothing*.
 
-**Warum:** Vor seinem ersten Schritt prüft `create`, was seine Schritte brauchen, damit ein fehlendes Werkzeug oder Recht kein halb fertiges Repository hinterlässt. Die Vorabprüfung fragt git und gh nur, und `create` macht nichts, solange ein Befund ein ✘ trägt. Ein Befund mit · ist einer, auf den GitHub nicht geantwortet hat oder den die Vorabprüfung nicht erkennen kann, und er hält nichts an. `python3 .github/blueprint.py doctor` führt die Vorabprüfung allein aus, und `create --dry-run` zeigt sie mit den Befehlen.
+**Warum:** Vor seinem ersten Schritt prüft `create`, was seine Schritte brauchen, damit ein fehlendes Werkzeug oder Recht kein halb fertiges Repository hinterlässt. Die Vorabprüfung fragt git und gh nur, und `create` macht nichts, solange ein Befund ein ✘ trägt. Ein Befund mit · ist einer, auf den GitHub nicht geantwortet hat, den die Vorabprüfung nicht erkennen kann oder der nur warnt, etwa ein Git, das keinen Commit signiert, und er hält nichts an. `python3 .github/blueprint.py doctor` führt die Vorabprüfung allein aus, und `create --dry-run` zeigt sie mit den Befehlen.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/how-create-checks-first-and-goes-on-where-it-stopped.de.dark.svg">
@@ -22,6 +22,7 @@ Die meisten Probleme erklären sich dort, wo sie auftreten: Eine Prüfung, die s
 - **Python vor 3.12:** Die Werkzeuge des neuen Repositorys, etwa seine Lock-Dateien, brauchen Python ab 3.12. Installiere es von [python.org](https://www.python.org/downloads/); unter Windows startet `py -3` es.
 - **Git ist nicht installiert:** Installiere es von [git-scm.com](https://git-scm.com/downloads).
 - **Git hat keinen Namen oder keine E-Mail-Adresse für den Commit:** `git config --global user.name "Dein Name"` und `git config --global user.email "du@example.com"`. Der Sign-off des ersten Commits nennt sie.
+- **Git signiert keinen Commit oder nennt keinen Schlüssel dafür (·):** `create` macht weiter, denn sein erster Commit kommt vor den Regeln von `main` an, aber jeder Commit danach braucht eine Signatur: Richte einen Schlüssel ein, wie [Ein Commit hat keine verifizierte Signatur](#ein-commit-hat-keine-verifizierte-signatur) sagt. *Git signs a commit only with --gpg-sign* heißt, dass Git einen Schlüssel hat: `git config --global commit.gpgsign true` signiert jeden Commit damit.
 - **Die GitHub CLI vor 2.48, oder keine:** Installiere oder aktualisiere sie, wie [ihre Installation](https://github.com/cli/cli#installation) es beschreibt.
 - **gh ist nicht bei github.com angemeldet:** `gh auth login --hostname github.com --scopes workflow`. Mit einem Token in der Variable `GH_TOKEN` nutzt gh dieses: Gib ihm die Scopes, oder entferne die Variable.
 - **Ohne die Scopes, die create braucht:** `gh auth refresh --hostname github.com --scopes workflow,read:org`, mit den Scopes, die der Befund nennt. `repo` legt das Repository an und pusht, `workflow` pusht die Dateien in `.github/workflows/` über HTTPS, die GitHub ohne ihn ablehnt (mit `ssh` als Git-Protokoll von gh pusht sie der Schlüssel, und die Vorabprüfung fragt nicht nach `workflow`), und `read:org` zeigt, ob dir die Organisation gehört. Ein Fine-grained Token nennt keine Scopes, deshalb kann die Vorabprüfung es nicht erkennen (·): Es muss Repositorys des Eigentümers anlegen dürfen, mit *Administration*, *Contents* und *Workflows* (Lesen und Schreiben).
@@ -39,6 +40,35 @@ Die meisten Probleme erklären sich dort, wo sie auftreten: Eine Prüfung, die s
 **Warum:** `gh repo create` legt das Repository auf GitHub an und fügt `origin` hinzu, bevor es pusht, deshalb hinterlassen ein Push oder Einstellungen, die scheiterten, ein Repository, das da ist.
 
 **Was zu tun ist:** Starte `python3 .github/blueprint.py create` noch einmal. Pusht `origin` zum Repository der Antworten, und GitHub hat es, macht `create` beim ersten Schritt weiter, der noch fehlt: dem Push von `main`, wenn GitHub noch keinen Branch `main` hat, angemeldet durch gh wie bei `gh repo create --push`, dann `settings apply` und die Checkliste, die nur ändern, was abweicht. Ein Ordner, der zu einem anderen Repository pusht, ist keine neue Kopie, und `create` lehnt ihn ab.
+
+## Ein Commit hat keine verifizierte Signatur
+
+**Was du siehst:** GitHub blockiert den Merge eines Pull Requests mit *Commits must have verified signatures*, und der Check *signed commits* nennt einen Commit mit dem Grund von GitHub, etwa `unsigned`, `unknown_key` oder `bad_email`. Oder ein Commit bricht mit *gpg failed to sign the data* oder *user.signingkey needs to be set* ab, oder die Vorabprüfung von `create`, `doctor` oder `app register` zeigt *Git signs no commit, and main takes signed commits only*.
+
+**Warum:** `settings apply` gibt `main` die Regel, dass jeder Commit eine Signatur trägt, die GitHub verifiziert, damit niemand einen Commit im Namen eines anderen pushen kann, und niemand merged an ihr vorbei. Der erste Commit von `create` kommt vor der Regel an, und jeder Commit danach braucht eine Signatur: der von `app register`, deine eigenen und die eines Updates des Blueprints von Hand. `git commit -s` ergänzt nur das Sign-off des Developer Certificate of Origin, und `-S` signiert, also braucht ein Commit beides. GitHub verifiziert eine Signatur, wenn der Schlüssel auf deinem Konto als *Signing Key* liegt, eine eigene Art neben dem Schlüssel, der dich anmeldet, und wenn die E-Mail-Adresse des Commits auf deinem Konto verifiziert ist.
+
+**Was zu tun ist:** Richte einmal einen Schlüssel ein, vor dem ersten Commit nach `create`. Mit SSH, mit dem Git ab 2.34 signiert, erzeugen diese Zeilen einen Schlüssel, wo du noch keinen hast, lassen Git jeden Commit damit signieren und legen ihn als Signing Key auf dein Konto, nachdem gh den Scope dafür bekommen hat:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "du@example.com"
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+gh auth refresh --hostname github.com --scopes admin:ssh_signing_key
+gh ssh-key add ~/.ssh/id_ed25519.pub --type signing --title "Signing key"
+```
+
+Lass die erste Zeile weg, wenn es `~/.ssh/id_ed25519` schon gibt, und lege den Schlüssel statt mit den letzten beiden in den Einstellungen deines Kontos auf GitHub an, unter *SSH and GPG keys → New SSH key* mit der Art *Signing Key*. Mit einem Schlüssel von GPG folge statt dieser Zeilen [der Anleitung von GitHub](https://docs.github.com/de/authentication/managing-commit-signature-verification). `python3 .github/blueprint.py doctor` zeigt dann *Git signs every commit*, und [der Leitfaden für Beiträge](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CONTRIBUTING.md#requirements-for-changes) jedes Repositorys sagt dasselbe.
+
+Ein Branch, dessen Commits keine Signatur haben, oder eine, die GitHub nicht verifiziert, bekommt sie neu signiert und gepusht: Der Rebase auf das neueste `main` von GitHub schreibt jeden Commit des Branches neu mit Signatur, auch wenn der Branch schon dort beginnt, wofür `--force-rebase` sorgt.
+
+```sh
+git fetch origin main
+git rebase --force-rebase --gpg-sign FETCH_HEAD
+git push --force-with-lease
+```
+
+`--force-with-lease` ersetzt den Branch auf GitHub nur, solange er der ist, den du neu aufgesetzt hast, und die Prüfungen des Pull Requests laufen noch einmal. Bei `unknown_key` lege den Schlüssel wie oben auf dein Konto; bei `bad_email` verifiziere die E-Mail-Adresse des Commits auf deinem Konto oder committe mit einer, die es ist, `git config --global user.email`, und signiere die Commits neu.
 
 ## Ein Skript oder der Hook ist nicht ausführbar
 
@@ -58,7 +88,7 @@ git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --
 gh pr create --fill
 ```
 
-`chmod +x` macht die Dateien auf der Platte ausführbar, unter Linux, macOS und im Dev-Container, und `git update-index --chmod=+x` sie im Commit, auch unter Windows. Die Regeln von `main` verlangen eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Ein Container hat außerdem `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` zeigt den Modus jeder Datei, `100755` für eine ausführbare. In Git Bash unter Windows nennt die Zeile mit `.github/*.sh scripts/*.sh` jedes Skript.
+`chmod +x` macht die Dateien auf der Platte ausführbar, unter Linux, macOS und im Dev-Container, und `git update-index --chmod=+x` sie im Commit, auch unter Windows. Die Regeln von `main` verlangen eine Signatur auf jedem Commit: Schalte `commit.gpgsign` ein oder ergänze `--gpg-sign` beim Commit, mit einem Schlüssel, wie ihn [Ein Commit hat keine verifizierte Signatur](#ein-commit-hat-keine-verifizierte-signatur) einrichtet, und der Check *signed commits* nennt einen Commit ohne Signatur und wie du ihn neu signierst. Ein Container hat außerdem `app/entrypoint.sh`. `git ls-files --stage .githooks scripts` zeigt den Modus jeder Datei, `100755` für eine ausführbare. In Git Bash unter Windows nennt die Zeile mit `.github/*.sh scripts/*.sh` jedes Skript.
 
 ## Ein Update des Blueprints hat Konflikte
 
