@@ -10,7 +10,9 @@ description: 'The projects of Dennis Otto in one place: Home Assistant, Nextclou
 discussions: false
 homepage: https://dennis-otto.github.io/
 issue_assistant_ai: true
-languages: []
+languages:
+- python
+- javascript-typescript
 license: MIT
 owner: Dennis-Otto
 project_name: Dennis Otto

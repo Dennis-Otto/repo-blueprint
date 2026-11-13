@@ -1,6 +1,6 @@
 # Refresh every lock file once a week, and let the refresh wait for the maintainer
 
-- Status: superseded in part by [0137](0137-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md), with which the refresh of npm and pip-compile keeps to versions a week old and merges by itself
+- Status: superseded in part by [0137](0137-the-refresh-of-the-lock-files-merges-by-itself-from-versions-a-week-old.md), with which the refresh of npm and pip-compile keeps to versions a week old and merges by itself, and by [0149](0149-a-major-update-merges-by-itself-once-every-check-passes.md), with which a major update does too; the picture shows the rules of today
 - Date: 2026-10-13
 
 ## Context
@@ -22,7 +22,7 @@ Option 3 now, and option 4 once the check exists. Every package manager refreshe
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/diagrams/which-updates-of-renovate-merge-on-their-own.dark.svg">
-  <img src="../images/diagrams/which-updates-of-renovate-merge-on-their-own.svg" alt="Which updates of Renovate merge on their own: A routine update waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer, as a major update does.">
+  <img src="../images/diagrams/which-updates-of-renovate-merge-on-their-own.svg" alt="Which updates of Renovate merge on their own: Every update, a major one too, waits a week after its release and then merges on its own once every check passes. An update that fixes a vulnerability comes at once and merges on its own. The weekly refresh of the lock files of npm and pip-compile keeps to versions a week old and merges on its own as well. The refresh of a package manager that can't keep to that age, such as Composer, brings the newest version of every indirect dependency, without a week of waiting, so it waits for the maintainer.">
 </picture>
 
 ## Consequences

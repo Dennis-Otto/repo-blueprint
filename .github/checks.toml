@@ -812,8 +812,10 @@ machine:"""
 commands = ["python3 downstream.py --base origin/main"]
 docs = "CONTRIBUTING.md#tests"
 autofix = """How a template takes up a change that a repository made is the decision
-of a person. Answers of `tests/answers/` that differ from those of a repository only
-warn, and `python3 downstream.py --answers` writes them anew."""
+of a person. Answers of `tests/answers/` that differ from those of a repository warn
+in a pull request, which isn't at fault, and fail the weekly run of `main`: it takes
+them anew with `python3 downstream.py --answers` and keeps them for the fix bot,
+which brings them in its pull request of the fixes of `main`."""
 
 [check."mutation plan"]
 title = "The plan of the mutation tests"

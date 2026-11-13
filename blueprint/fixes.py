@@ -110,6 +110,10 @@ KEEPS_FIXES = re.compile(rf"""^[ \t]+name:[ \t]*["']?{ARTIFACT}""", re.M)
 # The workflow that keeps a fix only on main, and also when it passes: Docs, whose first
 # run of every page accepts the violations that the website has, and turns no check red.
 MAIN_WORKFLOW = "Docs"
+# The workflows that keep a fix only on main, which the bot doesn't wait for on a pull
+# request: Docs, and Downstream, whose weekly run takes the answers of tests/answers/
+# anew from the repositories when they differ.
+MAIN_ONLY = frozenset({MAIN_WORKFLOW, "Downstream"})
 # In a command of autofix, blueprint.py of this repository, with the Python that runs.
 TOOL = "{blueprint}"
 # In a command of autofix, the Python that runs the bot, for a script of the repository.
@@ -522,10 +526,11 @@ class Watched:
     keeping: frozenset[str]
 
     def awaited(self, event: str) -> frozenset[str]:
-        """Those that the bot waits for: Docs keeps nothing on a pull request."""
+        """Those that the bot waits for: Docs and Downstream keep nothing on a pull
+        request."""
         if event in MAIN_EVENTS:
             return self.keeping
-        return self.keeping - {MAIN_WORKFLOW}
+        return self.keeping - MAIN_ONLY
 
 
 def watched(root: Path) -> Watched:

@@ -291,6 +291,38 @@ def test_answers_that_differ_from_those_of_the_repository_warn(
     assert "- `tests/answers/demo.yml`: extra, project_name\n" in run.summary
 
 
+def test_answers_that_differ_fail_the_weekly_run(
+    blueprint: Path, run: Run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A warning in a green run reached nobody: the answers of a canary drifted for
+    # days, and the Variants tried another project than the repository (#843). The
+    # weekly run fails instead, which the pager reports, and keeps the answers of
+    # --answers for the fix bot.
+    write(
+        blueprint,
+        {
+            "tests/answers/demo.yml": downstream.text_of(
+                "Dennis-Otto/demo", {**ANSWERS, "project_name": "Other"}
+            )
+        },
+    )
+
+    assert run("--drift-fails") == 1
+    assert (
+        "::error file=tests/answers/demo.yml,title=The answers of Dennis-Otto/demo::"
+        "project_name differs from the answers of Dennis-Otto/demo; python3"
+        " downstream.py --answers writes them anew.\n"
+    ) in capsys.readouterr().out
+    assert "- `tests/answers/demo.yml`: project_name\n" in run.summary
+
+
+def test_answers_that_are_those_of_the_repository_pass_the_weekly_run(
+    run: Run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("--drift-fails") == 0
+    assert "::" not in capsys.readouterr().out
+
+
 def test_a_repository_that_cannot_be_cloned_fails(
     run: Run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
