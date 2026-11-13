@@ -2068,6 +2068,14 @@ def test_the_page_follows_the_address_where_it_is_published() -> None:
     assert 'content="https://example.org/blueprint/images/dashboard.png">' in page
 
 
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.org/blueprint/board/", "https://example.org/blueprint/board"],
+)
+def test_the_website_is_one_level_above_the_dashboard(url: str) -> None:
+    assert dashboard.website(url) == "https://example.org/blueprint/"
+
+
 SITEMAP = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'

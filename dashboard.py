@@ -1283,7 +1283,8 @@ ICON = "assets/images/favicon.png"
 
 def website(url: str) -> str:
     """The address of the website of the dashboard published at url."""
-    return urllib.parse.urljoin(url, "..")
+    base = url if url.endswith("/") else f"{url}/"
+    return urllib.parse.urljoin(base, "..")
 
 
 def head(owner: str, url: str) -> str:
