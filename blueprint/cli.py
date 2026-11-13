@@ -107,12 +107,15 @@ from blueprint.outage import couldnt_start, failed_unstarted, unreachable
 from blueprint.overrides import write_overrides
 from blueprint.ownership import check as ownership_check
 from blueprint.pages import (
+    BLOCK_WORDS,
     CELL_WORDS,
+    RECORDS,
     Layout,
     annotation,
     command,
     fixed,
     layouts,
+    long_blocks,
     long_cells,
     pages,
 )
@@ -1010,11 +1013,13 @@ def migrate_command(arguments: argparse.Namespace, root: Path) -> int:
 def pages_command(arguments: argparse.Namespace, root: Path) -> int:
     """The layouts of the pages that GitHub shows, one on each line, and in the CI also
     as annotations at their lines; with --fix, the pages in one column first, where
-    there is a safe way to. The cells of Markdown tables that hold a paragraph come
-    first, as warnings, which fail nothing yet."""
+    there is a safe way to. The cells of Markdown tables that hold a paragraph, and
+    the paragraphs and the items of lists that hold a wall of text, come first, as
+    warnings, which fail nothing."""
     shown = pages(root)
     left: list[tuple[Path, Layout]] = []
     long: list[tuple[Path, Layout]] = []
+    walls: list[tuple[Path, Layout]] = []
     fixable = 0
     for page in shown:
         path = root / page
@@ -1029,19 +1034,32 @@ def pages_command(arguments: argparse.Namespace, root: Path) -> int:
             print(f"{page.as_posix()}: {editable} layout(s) in one column now")
         left += [(page, layout) for layout in found]
         long += [(page, cell) for cell in long_cells(text)]
+        if RECORDS not in page.parts[:-1]:
+            walls += [(page, block) for block in long_blocks(text)]
     ci = os.environ.get("GITHUB_ACTIONS") == "true"
-    for page, cell in long:
-        print(f"{page.as_posix()}:{cell.line}: {cell.message}")
-    if long:
-        if ci:
-            for page, cell in long:
-                print(annotation(page, cell))
-        print(
-            f"{len(long)} cell(s) of Markdown tables hold more than {CELL_WORDS} words, "
-            "a paragraph that the GitHub app and phones squeeze: make the rows a list, "
-            "or move the detail to a page of its own, as CONTRIBUTING.md describes. "
-            "They are warnings for now."
-        )
+    for warnings, said in (
+        (
+            long,
+            f"{len(long)} cell(s) of Markdown tables hold more than {CELL_WORDS} "
+            "words, a paragraph that the GitHub app and phones squeeze: make the rows "
+            "a list, or move the detail to a page of its own, as CONTRIBUTING.md "
+            "describes. They are warnings for now.",
+        ),
+        (
+            walls,
+            f"{len(walls)} paragraph(s) or item(s) of lists hold more than "
+            f"{BLOCK_WORDS} words, a wall of text on a phone: give each a short lead "
+            "sentence and a list or headings below it, as CONTRIBUTING.md describes. "
+            "They are warnings, which fail nothing.",
+        ),
+    ):
+        for page, warning in warnings:
+            print(f"{page.as_posix()}:{warning.line}: {warning.message}")
+        if warnings:
+            if ci:
+                for page, warning in warnings:
+                    print(annotation(page, warning))
+            print(said)
     if not left:
         print(f"The {len(shown)} page(s) that GitHub shows have one column.")
         return 0

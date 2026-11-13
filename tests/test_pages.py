@@ -12,8 +12,10 @@ import pytest
 
 from blueprint.cli import main
 from blueprint.pages import (
+    BLOCK_WORDS,
     CELL_WIDTH,
     CELL_WORDS,
+    LONG_BLOCK,
     LONG_CELL,
     PICTURE_BESIDE_TEXT,
     Layout,
@@ -22,6 +24,7 @@ from blueprint.pages import (
     command,
     fixed,
     layouts,
+    long_blocks,
     long_cells,
     masked,
     pages,
@@ -646,6 +649,89 @@ def test_the_check_warns_of_the_cells_with_a_paragraph(
     ]
 
 
+def wall(kind: str, count: int, line: int) -> Layout:
+    message = LONG_BLOCK.format(kind=kind, words=count, limit=BLOCK_WORDS)
+    return Layout(line, message, level="warning")
+
+
+def test_a_paragraph_or_an_item_of_a_list_with_a_wall_of_text_is_a_warning() -> None:
+    page = f"""# Guide
+
+{words(BLOCK_WORDS)}
+
+{words(100)}
+{words(BLOCK_WORDS - 99)}
+
+- {words(BLOCK_WORDS + 1)}
+  - {words(10)}
+  {words(BLOCK_WORDS - 9)}
+1. {words(BLOCK_WORDS)}
+"""
+
+    assert long_blocks(page) == [
+        # A paragraph over two lines, an item of a list without the item in it, and
+        # the item in it with the line that continues it.
+        wall("a paragraph", BLOCK_WORDS + 1, 5),
+        wall("an item of a list", BLOCK_WORDS + 1, 8),
+        wall("an item of a list", BLOCK_WORDS + 1, 9),
+    ]
+    assert BLOCK_WORDS == 150
+    assert "{kind} of {words} words, more than {limit}" in LONG_BLOCK
+
+
+def test_what_a_reader_doesn_t_read_as_text_ends_a_block_and_counts_nothing() -> None:
+    half = words(BLOCK_WORDS // 2 + 1)
+    address = "https://example.org/a/(very)/long/address"
+    page = f"""{half}
+## A heading
+{half}
+| A | B |
+| --- | --- |
+| {half} | B |
+{half}
+<p>{half}</p>
+{half}
+```text
+{half}
+```
+{half}
+[link]: {address} "{half}"
+{half} [link]({address} "a title") [picture](a.png)
+
+{words(BLOCK_WORDS)} `code`
+"""
+
+    # The headings, the tables, HTML, code, the definitions of links and the
+    # addresses of links end a block or count nothing, but code in a line does.
+    assert long_blocks(page) == [wall("a paragraph", BLOCK_WORDS + 1, 17)]
+
+
+@pytest.mark.skipif(GIT is None, reason="the pages are the files that git knows")
+def test_the_check_warns_of_a_wall_of_text_outside_the_records_of_decisions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    text = f"# Guide\n\n{words(200)}\n"
+    root = repository(
+        tmp_path,
+        {"docs/guide.md": text, "docs/decisions/0001-a-record.md": text},
+    )
+    message = LONG_BLOCK.format(kind="a paragraph", words=200, limit=BLOCK_WORDS)
+
+    # A warning fails nothing, and a record keeps the words that were decided.
+    assert main(["pages"], root=root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"docs/guide.md:3: {message}",
+        f"::warning file=docs/guide.md,line=3,title=Pages in one column::{message}",
+        "1 paragraph(s) or item(s) of lists hold more than 150 words, a wall of text "
+        "on a phone: give each a short lead sentence and a list or headings below it, "
+        "as CONTRIBUTING.md describes. They are warnings, which fail nothing.",
+        "The 2 page(s) that GitHub shows have one column.",
+    ]
+
+
 @pytest.mark.skipif(GIT is None, reason="the pages are the files that git knows")
 def test_the_fix_puts_the_pages_in_one_column(
     tmp_path: Path,
@@ -741,3 +827,4 @@ def test_the_readmes_of_the_blueprint_read_on_a_phone(name: str) -> None:
         "docs/features/ and link it"
     )
     assert long_cells(text) == []
+    assert long_blocks(text) == []
