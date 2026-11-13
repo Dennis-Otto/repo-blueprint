@@ -170,6 +170,135 @@ def test_a_website_in_one_language_keeps_its_404_page(tmp_path: Path) -> None:
     assert hooks().on_post_template(page, "404.html", config(tmp_path)) == page
 
 
+def material_404(lang: str = "en") -> str:
+    """The 404 page as Material writes it: a heading and nothing else."""
+    return (
+        f'<html lang="{lang}"><head><title>Demo</title></head><body>'
+        '<article class="md-content__inner md-typeset">\n  \n'
+        "  <h1>404 - Not found</h1>\n\n</article></body></html>"
+    )
+
+
+def not_found_part(words: dict[str, str], home: str, heading: str, lang: str) -> str:
+    named = f' lang="{lang}"' if lang else ""
+    return (
+        f"<section{named}><{heading}>{words['title']}</{heading}>"
+        f"<p>{words['text']}</p>"
+        f'<p><a class="md-button md-button--primary" href="{home}">'
+        f"{words['home']}</a></p><p>{words['search']}</p></section>"
+    )
+
+
+def test_the_404_page_leads_on_in_the_language_of_the_website(tmp_path: Path) -> None:
+    module = hooks()
+    words = module.NOT_FOUND
+    one = config(tmp_path)
+    one.theme = {"language": "de"}
+    one.site_url = "https://owner.github.io/demo"
+
+    page = module.on_post_template(material_404("de"), "404.html", one)
+
+    assert page == (
+        '<html lang="de"><head><title>Seite nicht gefunden - Demo</title></head>'
+        '<body><article class="md-content__inner md-typeset">'
+        '<div id="not-found">'
+        + not_found_part(words["de"], "/demo/", "h1", "")
+        + "</div>"
+        + module.NOT_FOUND_SCRIPT
+        + "</article></body></html>"
+    )
+
+
+def test_the_404_page_leads_on_in_every_language_of_the_website(
+    tmp_path: Path,
+) -> None:
+    module = hooks()
+    words = module.NOT_FOUND
+    # French has no words: the website in French takes the English ones, and a
+    # further language without them gets no part.
+    two = config(tmp_path, ("en", True, True), ("de", False, True), ("fr", False, True))
+    french = config(tmp_path, ("fr", True, True), ("de", False, True))
+    two.site_url = french.site_url = "https://example.org/docs/"
+
+    english = module.on_post_template(material_404(), "404.html", two)
+    other = module.on_post_template(material_404("fr"), "404.html", french)
+
+    assert (
+        '<div id="not-found">'
+        + not_found_part(words["en"], "/docs/", "h1", "")
+        + not_found_part(words["de"], "/docs/de/", "h2", "de")
+        + "</div>"
+    ) in english
+    assert "<title>Page not found - Demo</title>" in english
+    assert (
+        '<div id="not-found">'
+        + not_found_part(words["en"], "/docs/", "h1", "en")
+        + not_found_part(words["de"], "/docs/de/", "h2", "de")
+        + "</div>"
+    ) in other
+    assert "<title>Page not found - Demo</title>" in other
+
+
+def test_a_website_without_an_address_leads_to_the_root(tmp_path: Path) -> None:
+    module = hooks()
+    one = config(tmp_path)
+    one.theme = {"language": None}
+
+    page = module.on_post_template(material_404(), "404.html", one)
+
+    assert 'href="/">Go to the home page</a>' in page
+
+
+def test_a_404_page_of_the_project_stays_as_it_is(tmp_path: Path) -> None:
+    own = material_404().replace("404 - Not found", "Lost?")
+
+    assert hooks().on_post_template(own, "404.html", config(tmp_path)) == own
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the script runs in Node")
+@pytest.mark.parametrize(
+    ("path", "found", "tried", "shown", "went"),
+    [
+        # An address in the style of folders leads on to its page.
+        ("/demo/faq/", True, "/demo/faq.html", False, "/demo/faq.html?q=1#a"),
+        ("/demo/faq", True, "/demo/faq.html", False, "/demo/faq.html?q=1#a"),
+        # The content shows when that is no page either, or the request fails.
+        ("/demo/faq/", False, "/demo/faq.html", True, ""),
+        ("/demo/faq/", None, "/demo/faq.html", True, ""),
+        # A page of .html, a file and the root are no address to try.
+        ("/demo/gone.html", True, "", True, ""),
+        ("/demo/logo.png", True, "", True, ""),
+        ("/", True, "", True, ""),
+    ],
+)
+def test_the_404_page_tries_the_address_as_a_page(
+    path: str, found: bool | None, tried: str, shown: bool, went: str
+) -> None:
+    script = hooks().NOT_FOUND_SCRIPT.removeprefix("<script>").removesuffix("</script>")
+    program = (
+        "const tried=[],went=[],d={hidden:false};"
+        f"globalThis.location={{pathname:{json.dumps(path)},search:'?q=1',hash:'#a',"
+        "replace:(u)=>went.push(u)};"
+        "globalThis.document={getElementById:()=>d};"
+        "globalThis.fetch=(u,o)=>{tried.push(u+' '+o.method);"
+        f"const found={json.dumps(found)};"
+        "return found===null?Promise.reject(new Error('offline'))"
+        ":Promise.resolve({ok:found})};"
+        f"{script};"
+        "setTimeout(()=>console.log(JSON.stringify({tried,went,shown:!d.hidden})));"
+    )
+
+    result = subprocess.run(
+        ["node", "-e", program], capture_output=True, text=True, check=True
+    )
+
+    assert json.loads(result.stdout) == {
+        "tried": [f"{tried} HEAD"] if tried else [],
+        "went": [went] if went else [],
+        "shown": shown,
+    }
+
+
 class Network:
     """The requests of a plugin, with its errors, and an answer or an error for every
     download in turn: a status code or an exception. Each download must come with
@@ -2597,6 +2726,110 @@ def test_an_untranslated_page_keeps_the_canonical_page_of_its_project() -> None:
 
     assert f'<link rel="canonical" href="{SITE}setup.html">' in output
     assert "noindex" in output
+
+
+CARD = (
+    '<meta property="og:title" content="Demo" />\n'
+    f'<meta property="og:image" content="{SITE}assets/images/social/index.png" />\n'
+    '<meta property="og:image:type" content="image/png" />\n'
+    '<meta property="og:image:width" content="1200" />\n'
+    '<meta property="og:image:height" content="630" />\n'
+    '<meta property="twitter:card" content="summary_large_image" />\n'
+    f'<meta property="twitter:image" content="{SITE}assets/images/social/index.png" />'
+)
+
+
+def previewing(tmp_path: Path, preview: bytes | None) -> ModuleType:
+    """The hooks after on_files of a website whose repository has preview as its
+    .github/social-preview.png, or none, and whether they serve it."""
+    module = hooks()
+    if preview is not None:
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".github/social-preview.png").write_bytes(preview)
+    config = SimpleNamespace(
+        config_file_path=str(tmp_path / "mkdocs.yml"),
+        docs_dir=str(tmp_path / "docs"),
+        site_dir=str(tmp_path / "site"),
+        use_directory_urls=False,
+    )
+    page = File("index.md", str(tmp_path / "docs"), str(tmp_path / "site"), False)
+    served = {file.dest_uri: file for file in module.on_files([page], config)}
+    # A file that is no picture has no size for the tags, and isn't served.
+    if module.BUILT.preview is not None:
+        file = served["assets/images/social-preview.png"]
+        assert file.abs_src_path == str(tmp_path / ".github/social-preview.png")
+        # MkDocs leaves out a file whose path in its folder starts with a dot.
+        assert not any(part.startswith(".") for part in Path(file.src_uri).parts)
+    else:
+        assert "assets/images/social-preview.png" not in served
+    return module
+
+
+def test_a_home_page_previews_with_the_preview_of_the_repository(
+    tmp_path: Path,
+) -> None:
+    module = previewing(tmp_path, png(1280, 640))
+    picture = f"{SITE}assets/images/social-preview.png"
+    head = f"<head>{CARD}\n</head><body>og:image</body>"
+
+    plain = bilingual(search=False)
+    for url, current in (("index.html", "en"), ("de/index.html", "de")):
+        page = page_of(url, locale=current)
+        output = module.on_post_page(head, page, bilingual(current, search=False))
+
+        assert 'property="og:title" content="Demo"' in output
+        assert "social/index.png" not in output
+        assert f'<meta property="og:image" content="{picture}" />' in output
+        assert f'<meta property="twitter:image" content="{picture}" />' in output
+        assert '<meta property="og:image:width" content="1280" />' in output
+        assert '<meta property="og:image:height" content="640" />' in output
+        assert output.count('property="twitter:card"') == 1
+        assert output.count("og:image:type") == 1
+        assert output.endswith("</head><body>og:image</body>")
+
+    # An inner page keeps the card that the social plugin drew for it.
+    guide = module.on_post_page(head, page_of("guide.html"), plain)
+    assert guide == head
+
+
+def test_a_home_page_without_the_social_plugin_still_previews(
+    tmp_path: Path,
+) -> None:
+    module = previewing(tmp_path, png(1280, 640))
+
+    output = module.on_post_page(
+        "<head></head>", page_of("index.html"), bilingual(search=False)
+    )
+
+    assert output == (
+        f'<head><meta property="og:image" content="{SITE}assets/images/'
+        'social-preview.png" />\n'
+        '<meta property="og:image:type" content="image/png" />\n'
+        '<meta property="og:image:width" content="1280" />\n'
+        '<meta property="og:image:height" content="640" />\n'
+        f'<meta property="twitter:image" content="{SITE}assets/images/'
+        'social-preview.png" />\n'
+        '<meta property="twitter:card" content="summary_large_image" />\n'
+        "</head>"
+    )
+
+
+def test_a_home_page_keeps_its_card_without_a_preview_to_show(
+    tmp_path: Path,
+) -> None:
+    head = f"<head>{CARD}</head>"
+    page = page_of("index.html")
+
+    # A repository without .github/social-preview.png, or with a file that is no
+    # picture, and a website without an address, which a link preview can't use.
+    plain = bilingual(search=False)
+    assert previewing(tmp_path, None).on_post_page(head, page, plain) == head
+    unknown = previewing(tmp_path, b"not a picture")
+    assert unknown.on_post_page(head, page, plain) == head
+    (tmp_path / "again").mkdir()
+    module = previewing(tmp_path / "again", png())
+    homeless = SimpleNamespace(site_url=None, plugins={})
+    assert module.on_post_page(head, page, homeless) == head
 
 
 def test_the_preview_card_of_a_home_page_names_the_website() -> None:
