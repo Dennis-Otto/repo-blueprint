@@ -367,8 +367,12 @@ def test_what_a_catalog_of_an_app_gets_wrong(tmp_path: Path) -> None:
 
 
 def test_translations_fix_writes_the_catalogs_of_the_browser(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Outside the CI, as on a machine of a contributor: no annotations.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     files(
         tmp_path,
         {
@@ -407,6 +411,7 @@ def test_translations_fix_writes_the_catalogs_of_the_browser(
     assert "nplurals" not in PLURAL_FORM.replace("nplurals=2", "")
     files(tmp_path, {"l10n/nl.json": {"translations": {}, "pluralForm": "plural=0;"}})
     assert cli.main(["translations", "--fix"], root=tmp_path) == 1
+    assert "::error" not in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------- Chrome
