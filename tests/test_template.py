@@ -18861,13 +18861,19 @@ def variants_of_a_run(
 ) -> dict[str, object]:
     """The jobs of a run of Variants that was cancelled, such as run 38396054999, whose
     legs a newer run cancelled: a leg that ended as given, one that was cancelled with
-    the messages, and the job that waits for the legs, which failed because they did
-    not pass."""
+    the messages in its step, and the job that waits for the legs, which failed because
+    they did not pass."""
     answers: dict[str, object] = {
         jobs: {
             "jobs": [
                 job_of_a_run(first, "variant (generic)", leg),
-                job_of_a_run(first + 1, "update (generic)", "cancelled"),
+                job_of_a_run(
+                    first + 1,
+                    "update (generic)",
+                    "cancelled",
+                    ("Set up job", "success"),
+                    ("Update the project", "cancelled"),
+                ),
                 job_of_a_run(first + 2, "variants", "failure", ("Check", "failure")),
             ]
         },
@@ -19740,12 +19746,121 @@ def test_the_flaky_test_bot_reports_the_job_of_a_cancelled_run_that_ran_out_of_t
         line for line in written["issue-comment"].splitlines() if line.startswith("| [")
     ] == [
         "| [`update (generic)`](https://github.com/o/r/actions/runs/5/job/12)"
-        f" | {NOTHING} | {NOTHING} | `{TIMED_OUT}` |"
+        f" | `Update the project` | {NOTHING} | `{TIMED_OUT}` |"
     ]
     assert (
         f"| `Variants / update (generic)` | {NOTHING} | 1 | {LAST_RUN} |"
         in written["issue-create"].splitlines()
     )
+
+
+# The steps of a job that ran out of time after each of them had passed, as the job
+# 131918438997 of Dennis-Otto/issue-assistant on the preview runner
+# ubuntu-24.04-firewall: its runner never reported that the job ended.
+EVERY_STEP_PASSED = (
+    ("Set up job", "success"),
+    ("Make sure that the network block holds", "success"),
+    ("Run actions/checkout", "skipped"),
+    ("Complete job", "success"),
+)
+RUNNER_FAULT = "### The runner's fault"
+
+
+@WITH_JQ
+def test_the_flaky_test_bot_reports_no_job_that_ran_out_of_time_after_its_steps(
+    tmp_path: Path,
+) -> None:
+    # #895: such a job kept the issue of flaky tests open, although no test of the
+    # repository failed and nothing in it could fix the runner.
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job_of_a_run(
+                        11, "the network block (100 %)", "cancelled", *EVERY_STEP_PASSED
+                    ),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(OUT_OF_TIME),
+            "issue list": [],
+        },
+        NAME="Action test",
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "nothing to report" in done.summary
+    assert not written_by(done)
+    assert not any(call.startswith("issue ") for call in done.commands)
+    # No log to read for a test that didn't fail.
+    assert not any("/logs" in call for call in done.commands)
+    assert (
+        "::notice::The job the network block (100 %25) ran out of time although each of"
+        " its steps had passed"
+    ) in done.stdout
+    lines = done.summary.splitlines()
+    at = lines.index(RUNNER_FAULT)
+    assert lines[at + 4 : at + 7] == [
+        "| Job |",
+        "| --- |",
+        "| [`the network block (100 %)`](https://github.com/o/r/actions/runs/5/job/11) |",
+    ]
+
+
+@WITH_JQ
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # The step that ran when the time was up.
+        (("Set up job", "success"), ("Run the tests", "cancelled")),
+        # One that GitHub left without an end.
+        (("Set up job", "success"), ("Run the tests", None)),
+        # None at all: nothing tells that the work was done.
+        (),
+    ],
+    ids=["cancelled", "unfinished", "none"],
+)
+def test_the_flaky_test_bot_reports_a_job_that_ran_out_of_time_in_a_step(
+    tmp_path: Path, steps: tuple[tuple[str, str | None], ...]
+) -> None:
+    job = job_of_a_run(12, "test (3.12)", "cancelled")
+    job["steps"] = [{"name": step, "conclusion": result} for step, result in steps]
+    _, summary, written = run_a_bot_after_the_checks(
+        tmp_path,
+        "report",
+        "Add the jobs that failed at first to the issue of flaky tests",
+        {
+            "repos/o/r/actions/runs/5/attempts/1": {"conclusion": "failure"},
+            "repos/o/r/actions/runs/5/attempts/1/jobs": {
+                "jobs": [
+                    job,
+                    job_of_a_run(11, "lint", "cancelled", *EVERY_STEP_PASSED),
+                ]
+            },
+            "repos/o/r/check-runs/11/annotations": annotations_of_a_job(OUT_OF_TIME),
+            "repos/o/r/check-runs/12/annotations": annotations_of_a_job(OUT_OF_TIME),
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    # The job of the tests is flaky, the other one the runner's fault.
+    step = "`Run the tests`" if steps and steps[-1][1] == "cancelled" else NOTHING
+    assert [
+        line for line in written["issue-comment"].splitlines() if line.startswith("| [")
+    ] == [
+        "| [`test (3.12)`](https://github.com/o/r/actions/runs/5/job/12)"
+        f" | {step} | {NOTHING} | `{OUT_OF_TIME}` |"
+    ]
+    assert "lint" not in written["issue-create"]
+    assert RUNNER_FAULT in summary
+    assert "| [`lint`](https://github.com/o/r/actions/runs/5/job/11) |" in summary
+    assert summary.index(RUNNER_FAULT) < summary.index("### Flaky")
 
 
 @WITH_JQ
