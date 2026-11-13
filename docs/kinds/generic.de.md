@@ -2,7 +2,7 @@
 description: "Eine Vorlage für ein GitHub-Repository ohne Build, etwa mit Dokumentation, Konfiguration oder Skripten: die Prüfungen der Textdateien und Shell-Skripte, eine Website, signierte Releases, die Einstellungen als Code und die Bots jedes Repositorys."
 ---
 
-# Vorlage für GitHub-Repositories mit Dokumentation, Konfiguration und Skripten, mit Releases und Einstellungen als Code
+# Vorlage für GitHub-Repositorys mit Dokumentation, Konfiguration und Skripten, mit Releases und Einstellungen als Code
 
 Ein Repository mit Dokumentation, Konfiguration oder Skripten, das keinen Build braucht und dieselbe Pflege bekommt wie jede andere Art.
 

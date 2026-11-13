@@ -2846,6 +2846,21 @@ def test_the_description_of_the_blueprint_names_every_kind_of_project() -> None:
     assert len(topics) <= 20, "GitHub's limit of topics"
 
 
+def test_the_website_of_the_blueprint_shows_the_logo_of_its_social_preview() -> None:
+    """The header and the tab of the website show the logo of the social preview, not
+    Material's book: one logo, which the test keeps equal in both files."""
+    theme = load_yaml((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))["theme"]
+    preview = (ROOT / ".github/social-preview.html").read_text(encoding="utf-8")
+    drawn = re.search(r'<div class="logo">(<svg .*?</svg>)', preview, re.DOTALL)
+    logo = ROOT / "docs" / theme["logo"]
+
+    assert theme == {"logo": "images/logo.svg", "favicon": "images/logo.svg"}
+    assert drawn is not None
+    assert " ".join(logo.read_text(encoding="utf-8").split()) == " ".join(
+        drawn[1].split()
+    )
+
+
 def test_the_blueprint_follows_its_own_template(tmp_path: Path) -> None:
     project = render(
         tmp_path,
@@ -25649,11 +25664,13 @@ def verify_a_hacs_release(
             "GITSIGN_SHA256": hashlib.sha256(GITSIGN).hexdigest(),
         },
         stubs={
-            # The signed tag of the release, in the repository that git init made.
+            # The signed tag of the release, with its name inside, in the repository
+            # that git init made.
             "git": workflow_steps.recording(
                 "git",
                 '[[ "$1" != init ]] || mkdir -p "${@: -1}"\n'
-                '[[ "$*" != *" cat-file -t "* ]] || echo tag',
+                '[[ "$*" != *" cat-file -t "* ]] || echo tag\n'
+                f'[[ "$*" != *" cat-file tag "* ]] || printf "tag %s\\n\\n" {tag}',
             ),
             "python3": PYTHON3,
         },
