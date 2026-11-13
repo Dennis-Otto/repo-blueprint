@@ -16168,8 +16168,8 @@ def test_the_bot_for_cancelled_checks_only_starts_the_runs_of_the_head_again() -
     # Every job of a run that lost a race starts again, so that each of its checks
     # reports; of a run that ran out of time, only the jobs that it cancelled.
     script = workflow_steps.step("after-checks.yml", "cancelled", CANCELLED_STEP)["run"]
-    assert script.count('gh run rerun "$RUN"\n') == 1
-    assert script.count('gh run rerun "$RUN" --failed 2>&1') == 1
+    assert script.count('tried gh run rerun "$RUN" &&') == 1
+    assert script.count('tried gh run rerun "$RUN" --failed)') == 1
     # The values of the event reach the scripts as variables only.
     assert not any("${{" in found.get("run", "") for found in steps)
 
@@ -16376,24 +16376,14 @@ def test_the_bot_for_cancelled_checks_knows_the_workflows_of_the_flaky_test_bot(
     )
 
 
-@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
-def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
-    tmp_path: Path,
-) -> None:
-    # A head that GitHub didn't tell is no head that a newer push replaced: the step
-    # fails with the error of gh instead of saying that the run stays cancelled.
-    done = workflow_steps.run_step(
+def cancelled_on_main(tmp_path: Path, *answers: Answer) -> workflow_steps.StepResult:
+    """The bot for cancelled checks after a run of CodeQL for main was cancelled."""
+    return workflow_steps.run_step(
         tmp_path,
         "after-checks.yml",
         "cancelled",
         CANCELLED_STEP,
-        answers=[
-            Answer(
-                r"api repos/o/r/git/ref/heads/main --jq \.object\.sha",
-                err="HTTP 502: Bad Gateway",
-                code=1,
-            ),
-        ],
+        answers=answers,
         env={
             "RUN": "5",
             "ATTEMPT": "1",
@@ -16404,9 +16394,45 @@ def test_the_bot_for_cancelled_checks_fails_when_it_cant_read_the_head_of_main(
             "EVENT": "push",
             "BRANCH": "main",
         },
+        stubs={"sleep": workflow_steps.recording("sleep")},
+    )
+
+
+HEAD_OF_MAIN = r"api repos/o/r/git/ref/heads/main --jq \.object\.sha"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_fails_when_github_refuses_the_head_of_main(
+    tmp_path: Path,
+) -> None:
+    # A head that GitHub didn't tell is no head that a newer push replaced: the step
+    # fails with the error of gh instead of saying that the run stays cancelled.
+    done = cancelled_on_main(
+        tmp_path, Answer(HEAD_OF_MAIN, err="HTTP 403: Resource not accessible", code=1)
     )
 
     assert done.returncode != 0
+    assert "stays cancelled" not in done.summary
+    assert not any(call.startswith("run rerun") for call in done.commands)
+    assert done.stubbed == []
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_bot_for_cancelled_checks_ends_with_a_notice_when_github_keeps_failing(
+    tmp_path: Path,
+) -> None:
+    # As in GitHub's outage of 9 November 2026: the bot runs nothing again while GitHub
+    # fails, and its run mails no one (#786).
+    done = cancelled_on_main(
+        tmp_path, Answer(HEAD_OF_MAIN, err="HTTP 502: Bad Gateway", code=1)
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(HEAD_OF_MAIN)) == 4
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert done.stdout.startswith(
+        "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 502: Bad Gateway)"
+    )
     assert "stays cancelled" not in done.summary
     assert not any(call.startswith("run rerun") for call in done.commands)
 
@@ -19070,6 +19096,88 @@ def test_a_refusal_after_github_failed_for_a_moment_still_fails_the_bot(
 
     assert done.returncode == 1
     assert "::notice" not in done.stdout
+
+
+FLAKY_REPORT_STEP = "Add the jobs that failed at first to the issue of flaky tests"
+
+
+@pytest.mark.skipif(BASH is None, reason="the step runs in bash, Git Bash on Windows")
+def test_the_report_of_flaky_tests_ends_with_a_notice_when_github_keeps_failing(
+    tmp_path: Path,
+) -> None:
+    # As in GitHub's outage of 9 November 2026: the next flaky test reports again, and
+    # the run of the bot mails no one (#786).
+    first = r"api repos/o/r/actions/runs/5/attempts/1 .*"
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        FLAKY_REPORT_STEP,
+        {"repos/o/r/actions/runs/5/attempts/1.error": GATEWAY_TIMEOUT},
+        {"sleep": workflow_steps.recording("sleep")},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(first)) == 4
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert done.stdout.startswith(
+        "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 504: Gateway "
+        "Timeout"
+    )
+    assert not done.called("issue")
+    assert done.summary == ""
+
+
+@WITH_JQ
+def test_the_report_of_flaky_tests_comments_only_once_when_github_fails(
+    tmp_path: Path,
+) -> None:
+    # GitHub may have added the comment before it failed: a second one would repeat
+    # it, so the step ends with a notice and the counts wait for the next report.
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        FLAKY_REPORT_STEP,
+        {
+            **FIRST_ATTEMPT,
+            "issue list": [{"number": 7, "title": "Flaky tests"}],
+            "issue comment.error": "HTTP 502: Bad Gateway\n",
+        },
+        {"sleep": workflow_steps.recording("sleep")},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called("issue comment")) == 1
+    assert done.stubbed == []
+    assert "::notice title=GitHub is unavailable::" in done.stdout
+    assert not done.called("issue edit")
+
+
+@WITH_JQ
+def test_the_report_of_flaky_tests_waits_when_github_keeps_failing_the_annotations(
+    tmp_path: Path,
+) -> None:
+    # GitHub kept failing the annotations of the first job: the report waits for the
+    # next flaky test rather than name no error.
+    done = run_after_the_checks(
+        tmp_path,
+        "report",
+        FLAKY_REPORT_STEP,
+        {
+            "repos/o/r/check-runs/11/annotations.error": GATEWAY_TIMEOUT,
+            **FIRST_ATTEMPT,
+            "issue list": [],
+            "issue create": "https://github.com/o/r/issues/9\n",
+        },
+        {"sleep": workflow_steps.recording("sleep")},
+        URL="https://github.com/o/r/actions/runs/5",
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(r"api repos/o/r/check-runs/11/annotations")) == 4
+    assert "::notice title=GitHub is unavailable::" in done.stdout
+    assert not done.called("issue create")
 
 
 # The jobs of the runs that GitHub ended before they began in its outage of 9 November
