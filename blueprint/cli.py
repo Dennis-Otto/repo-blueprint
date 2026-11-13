@@ -1396,9 +1396,13 @@ def locks_compile_command(arguments: argparse.Namespace, root: Path) -> int:
     # Each compile asks uv about the Python that it names, and uv keeps the answer in
     # its cache. Compiles that start together on a fresh runner race to write it there,
     # and one of them fails (repo-blueprint#894): the first file compiles alone, so
-    # that the others, side by side, find the answer in the cache.
-    first, *others = names
-    results = [locks.compare(root, first, uv)]
+    # that the others, side by side, find the answer in the cache. A file with a note
+    # may not have run uv at all, so the files compile one after the other until one
+    # without a note has.
+    results: list[locks.Compared] = []
+    others = list(names)
+    while others and all(found.note for found in results):
+        results.append(locks.compare(root, others.pop(0), uv))
     with ThreadPoolExecutor() as pool:
         results += pool.map(lambda name: locks.compare(root, name, uv), others)
     for found in results:
