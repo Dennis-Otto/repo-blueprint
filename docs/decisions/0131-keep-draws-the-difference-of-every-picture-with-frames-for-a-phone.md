@@ -1,6 +1,6 @@
 # Keep draws the difference of every picture, with frames for a phone
 
-- Status: accepted
+- Status: accepted, amended by [0149](0149-a-comparison-shows-the-place-of-a-change-before-and-after-of-one-frame.md), with which the difference shows the picture in its own colors behind a light veil, beside a comparison of the place of the change before and after
 - Date: 2026-11-08
 
 ## Context

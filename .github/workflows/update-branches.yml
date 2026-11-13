@@ -10,7 +10,7 @@ name: Update branches
 # pass. While its checks run, the others wait; its merge starts the next run, and so
 # does a required check of it that fails for good, through the bots after the checks,
 # which start this workflow then and only then: GitHub would create a run here after
-# the end of every check, which skipped in all but a few (decision 0150). Turning
+# the end of every check, which skipped in all but a few (decision 0151). Turning
 # auto-merge on starts one at once. A pull request whose required check failed waits
 # for a fix and leaves its place to the next one. One that conflicts with main gets
 # the label merge-conflict and one comment. The label goes once it no longer

@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from shared import load_yaml
 
 from blueprint.cli import main
 from blueprint.screenshots import (
+    ARROW,
     COMPARED_FILES,
     JOB_MINUTES,
     LARGEST,
@@ -26,6 +28,7 @@ from blueprint.screenshots import (
     RED,
     REPORT,
     SHOWN,
+    STRIP,
     Correction,
     Kept,
     Page,
@@ -34,6 +37,8 @@ from blueprint.screenshots import (
     changed_share,
     collect,
     commit_request,
+    comparison,
+    comparison_path,
     corrected_pages,
     corrections,
     diff_path,
@@ -41,6 +46,7 @@ from blueprint.screenshots import (
     drawn_differences,
     due,
     fit_page,
+    fits_beside,
     fitted_size,
     frames,
     is_picture,
@@ -63,6 +69,7 @@ from blueprint.screenshots import (
     settings,
     shown_picture,
     shown_share,
+    span,
     summary,
     written,
 )
@@ -72,6 +79,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUN = "https://github.com/o/r/actions/runs/1"
 SHA = "a" * 40
 EN_DIFFERENCE = "diff/docs/images/en/a.png"
+EN_COMPARISON = "comparison/docs/images/en/a.png"
 
 
 def png(
@@ -387,9 +395,9 @@ def test_the_share_as_the_pull_request_shows_it(
 # The pictures of the differences
 
 BLUE = (82, 108, 254, 255)
-# The blue of the pictures above in the pale gray of a difference: a quarter of its
-# darkness on white.
-PALE_BLUE = (221, 221, 221)
+# The blue of the pictures above in a difference: in its own color, behind a veil of
+# its own average color, which is this blue again.
+VEILED_BLUE = BLUE[:3]
 
 
 def picture(
@@ -429,6 +437,27 @@ def animation(changed: list[int]) -> bytes:
         disposal=1,
     )
     return out.getvalue()
+
+
+def compared_picture(
+    path: str,
+    share: float,
+    before: tuple[int, int] | None = None,
+    frame: int = 1,
+    frames: int = 1,
+) -> Picture:
+    """A changed picture as keep names it with the picture of its difference and its
+    comparison, of the frame numbered frame of frames."""
+    return Picture(
+        path,
+        "changed",
+        share,
+        before,
+        diff=diff_path(path),
+        comparison=comparison_path(path),
+        frame=frame,
+        frames=frames,
+    )
 
 
 def looked_at(data: bytes | None) -> Image.Image:
@@ -484,8 +513,8 @@ def test_a_difference_shows_each_changed_pixel_in_red_in_a_frame(kind: str) -> N
     # A picture 200 pixels long gets a frame one pixel wide, two pixels away from
     # its changes.
     assert red_of(drawn) == {(100, 50), (101, 50)} | outline(97, 47, 104, 53)
-    assert drawn.getpixel((0, 0)) == PALE_BLUE
-    assert drawn.getpixel((99, 50)) == PALE_BLUE
+    assert drawn.getpixel((0, 0)) == VEILED_BLUE
+    assert drawn.getpixel((99, 50)) == VEILED_BLUE
 
 
 def test_a_transparent_pixel_is_white_in_a_difference() -> None:
@@ -511,7 +540,7 @@ def test_the_difference_of_an_animation_is_that_of_its_frame_with_the_most_chang
     assert red_of(drawn) == {(0, 0), (1, 0), (2, 0)} | {
         spot for spot in outline(-2, -2, 4, 2) if spot[0] >= 0 and spot[1] >= 0
     }
-    assert drawn.getpixel((10, 5)) == (211, 211, 211)
+    assert drawn.getpixel((10, 5)) == (80, 80, 80)
 
 
 def test_a_difference_needs_the_same_size_and_frames_and_a_change() -> None:
@@ -540,7 +569,7 @@ def test_a_change_of_a_single_pixel_shows_on_a_phone(size: tuple[int, int]) -> N
     for way in ways:
         assert reddest(drawn.resize(small, way)) > 150
     # The one red pixel alone fades into the gray.
-    alone = Image.new("RGB", size, PALE_BLUE)
+    alone = Image.new("RGB", size, VEILED_BLUE)
     alone.putpixel(middle, RED)
     assert reddest(alone.resize(small, Image.Resampling.LANCZOS)) < 60
 
@@ -556,6 +585,192 @@ def test_changes_near_each_other_share_a_frame() -> None:
         (90, 90, 91, 91),
     ]
     assert regions(Image.new("L", (100, 100)), 10) == []
+
+
+@pytest.mark.parametrize(
+    ("page", "writing", "veiled"),
+    [
+        # A dark page stays dark, and its light text stays light.
+        ((28, 28, 28), (230, 230, 230), ((28, 28, 28), (190, 190, 190))),
+        # A light page stays light, and its dark text stays dark.
+        ((250, 250, 250), (20, 20, 20), ((249, 249, 249), (65, 65, 65))),
+    ],
+)
+def test_a_difference_keeps_the_picture_recognizable(
+    page: tuple[int, int, int],
+    writing: tuple[int, int, int],
+    veiled: tuple[tuple[int, int, int], tuple[int, int, int]],
+) -> None:
+    # homedarts-for-autodarts#716: a dark page in a pale gray left nothing to
+    # recognize, and a veil of white still made it a medium gray. The veil of the
+    # picture's own average color keeps its background and the contrast of its text.
+    before = Image.new("RGBA", (200, 100), (*page, 255))
+    for x in range(20, 60):
+        for y in range(15, 25):
+            before.putpixel((x, y), (*writing, 255))
+    after = before.copy()
+    after.putpixel((100, 50), (*writing, 255))
+    drawn = looked_at(difference(saved(before), saved(after)))
+
+    background, text = drawn.getpixel((150, 90)), drawn.getpixel((30, 20))
+    assert (background, text) == veiled
+    assert max(abs(a - b) for a, b in zip(veiled[0], page, strict=True)) <= 6
+    assert drawn.getpixel((100, 50)) == RED
+
+
+# The comparisons
+
+STEPS = [(37, 99, 235), (22, 163, 74), (245, 158, 11), (147, 51, 234), (15, 23, 42)]
+
+
+def saved(image: Image.Image) -> bytes:
+    """A picture as a PNG."""
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def steps(changed: dict[int, tuple[int, int, int, int]]) -> bytes:
+    """A lossless animated WebP of 300 x 400 pixels with a step of its own color in
+    each frame, as the animations of a quick start show them, and a white box where
+    changed names one for the number of a frame, from 1."""
+    shown = []
+    for number, color in enumerate(STEPS, 1):
+        image = Image.new("RGB", (300, 400), color)
+        if number in changed:
+            left, top, right, bottom = changed[number]
+            image.paste((255, 255, 255), (left, top, right, bottom))
+        shown.append(image)
+    out = io.BytesIO()
+    shown[0].save(
+        out,
+        "WEBP",
+        save_all=True,
+        append_images=shown[1:],
+        duration=500,
+        lossless=True,
+    )
+    return out.getvalue()
+
+
+def test_the_comparison_of_an_animation_is_of_its_frame_with_the_most_changes() -> None:
+    # homedarts-for-autodarts#716: the difference showed step 4, the pictures before
+    # and after beside it step 1. The comparison shows step 4 on both sides, a small
+    # change in a later frame, and says which frame it is.
+    before = steps({})
+    after = steps({2: (10, 10, 11, 11), 4: (150, 300, 156, 304)})
+    compared_of = comparison(before, after)
+    assert compared_of is not None
+    assert (compared_of.frame, compared_of.frames) == (4, 5)
+    drawn = looked_at(compared_of.picture)
+
+    # Cut to the change, with room around it and at least 144 pixels of each side, a
+    # square, which a phone shows larger one above the other: before above, a strip
+    # with an arrow, after below.
+    assert drawn.size == (144, 297)
+    top, bottom = drawn.crop((0, 0, 144, 144)), drawn.crop((0, 153, 144, 297))
+    # The real pictures, in their own colors, of the same frame on both sides.
+    assert top.getpixel((0, 0)) == STEPS[3]
+    assert bottom.getpixel((0, 0)) == STEPS[3]
+    assert top.getpixel((69, 71)) == STEPS[3]
+    assert bottom.getpixel((69, 71)) == (255, 255, 255)
+    # The same red frame around the change on both sides, and only there.
+    assert red_of(top) == red_of(bottom)
+    assert (65, 72) in red_of(top)
+    assert not red_of(top) & {(x, y) for x in range(69, 75) for y in range(70, 74)}
+    assert drawn.getpixel((10, 148)) == STRIP
+    assert drawn.getpixel((72, 148)) == ARROW
+    # The difference shows the same frame.
+    assert looked_at(difference(before, after)).getpixel((0, 0)) == STEPS[3]
+
+
+def gradient(size: tuple[int, int], changed: tuple[tuple[int, int], ...] = ()) -> bytes:
+    """A PNG whose pixels tell where they are, and whose changed pixels are white."""
+    width, height = size
+    image = Image.frombytes(
+        "RGB",
+        size,
+        bytes(
+            value
+            for y in range(height)
+            for x in range(width)
+            for value in (x % 256, y % 256, 128)
+        ),
+    )
+    for spot in changed:
+        image.putpixel(spot, (255, 255, 255))
+    return saved(image)
+
+
+def test_the_comparison_of_a_few_pixels_in_a_large_picture_is_cut_to_them() -> None:
+    size = (1500, 1000)
+    spots = ((1450, 50), (1451, 50), (1452, 51))
+    compared_of = comparison(gradient(size), gradient(size, spots))
+    assert compared_of is not None
+    assert (compared_of.frame, compared_of.frames) == (1, 1)
+    drawn = looked_at(compared_of.picture)
+
+    # In pixels of the picture: 90 of room, and at least 540 of each side, moved
+    # inside the picture at its corner, at their size, so that a text stays readable.
+    assert drawn.size == (540, 540 + 540 + 31)
+    top, bottom = drawn.crop((0, 0, 540, 540)), drawn.crop((0, 571, 540, 1111))
+    assert top.getpixel((0, 0)) == (960 % 256, 0, 128)
+    assert bottom.getpixel((539, 539)) == (1499 % 256, 539 % 256, 128)
+    assert bottom.getpixel((1450 - 960, 50)) == (255, 255, 255)
+    assert top.getpixel((1450 - 960, 50)) == (1450 % 256, 50, 128)
+    assert red_of(top) == red_of(bottom) != set()
+
+
+@pytest.mark.parametrize(
+    ("box", "size"),
+    [
+        # A wide place, such as a line of text: one above the other.
+        ((100, 500, 900, 510), (920, 360 + 360 + 26)),
+        # A tall place, such as a column: side by side.
+        ((500, 100, 510, 900), (360 + 360 + 26, 920)),
+    ],
+)
+def test_a_wide_place_stands_above_the_other_and_a_tall_one_beside(
+    box: tuple[int, int, int, int], size: tuple[int, int]
+) -> None:
+    before = Image.new("RGB", (1000, 1000), (240, 240, 240))
+    after = before.copy()
+    after.paste((0, 0, 0), box)
+    compared_of = comparison(saved(before), saved(after))
+    assert compared_of is not None
+    assert looked_at(compared_of.picture).size == size
+
+
+def test_a_phone_shows_a_tall_place_larger_beside_and_a_square_one_above() -> None:
+    assert fits_beside(100, 400)
+    assert not fits_beside(100, 100)
+    assert not fits_beside(400, 100)
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "length", "cut"),
+    [
+        # Room around the changes, at least the least part.
+        (50, 60, 200, (5, 105)),
+        (40, 180, 200, (30, 190)),
+        # Moved inside the picture at its ends.
+        (0, 2, 200, (0, 100)),
+        (198, 200, 200, (100, 200)),
+        # Never longer than the picture.
+        (10, 20, 50, (0, 50)),
+    ],
+)
+def test_a_comparison_shows_a_part_of_each_side_around_the_changes(
+    low: int, high: int, length: int, cut: tuple[int, int]
+) -> None:
+    assert span(low, high, length, 10, 100) == cut
+
+
+def test_a_comparison_needs_the_same_size_and_frames_and_a_change() -> None:
+    blue, white = (82, 108, 254), (255, 255, 255)
+    assert comparison(png(), png(level=0)) is None
+    assert comparison(png(), png(size=(2, 2))) is None
+    assert comparison(gif([blue, white], [100, 100]), gif([blue], [100])) is None
 
 
 # What the bot keeps
@@ -600,12 +815,7 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
         (
             Picture("docs/images/gone.png", "deleted"),
             Picture("docs/images/new.png", "new"),
-            Picture(
-                "docs/images/other.png",
-                "changed",
-                0.25,
-                diff="diff/docs/images/other.png",
-            ),
+            compared_picture("docs/images/other.png", 0.25),
         ),
         ("README.md",),
     )
@@ -620,6 +830,7 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
         if path.is_file()
     )
     assert files == [
+        "comparison/docs/images/other.png",
         "deleted.txt",
         "diff/docs/images/other.png",
         "files/docs/images/new.png",
@@ -630,6 +841,11 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
     assert (folder / "diff/docs/images/other.png").read_bytes() == difference(
         png(), png(changed=1)
     )
+    compared_of = comparison(png(), png(changed=1))
+    assert compared_of is not None
+    assert (
+        folder / "comparison/docs/images/other.png"
+    ).read_bytes() == compared_of.picture
     assert (folder / "deleted.txt").read_text(
         encoding="utf-8"
     ) == "docs/images/gone.png\n"
@@ -641,6 +857,9 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
                 "share": None,
                 "before": None,
                 "diff": None,
+                "comparison": None,
+                "frame": None,
+                "frames": None,
             },
             {
                 "path": "docs/images/new.png",
@@ -648,6 +867,9 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
                 "share": None,
                 "before": None,
                 "diff": None,
+                "comparison": None,
+                "frame": None,
+                "frames": None,
             },
             {
                 "path": "docs/images/other.png",
@@ -655,6 +877,9 @@ def test_keep_takes_only_the_pictures_that_look_different(tmp_path: Path) -> Non
                 "share": 0.25,
                 "before": None,
                 "diff": "diff/docs/images/other.png",
+                "comparison": "comparison/docs/images/other.png",
+                "frame": 1,
+                "frames": 1,
             },
         ],
         "ignored": ["README.md"],
@@ -803,6 +1028,15 @@ def folder_with(
                         "share": p.share,
                         "before": p.before,
                         **({"diff": p.diff} if p.diff else {}),
+                        **(
+                            {
+                                "comparison": p.comparison,
+                                "frame": p.frame,
+                                "frames": p.frames,
+                            }
+                            if p.comparison
+                            else {}
+                        ),
                     }
                     for p in pictures
                 ],
@@ -909,8 +1143,19 @@ def test_keep_draws_the_difference_of_every_kind_of_picture(tmp_path: Path) -> N
     assert (1, 0) in red_of(
         looked_at((folder / "diff/docs/images/c.gif.png").read_bytes())
     )
+    # The comparison of each, of the frame with the most changes: the second of the
+    # animation, which changed in two pixels.
+    assert [(p.comparison, p.frame, p.frames) for p in found.pictures] == [
+        ("comparison/docs/images/a.png", 1, 1),
+        ("comparison/docs/images/b.webp.png", 1, 1),
+        ("comparison/docs/images/c.gif.png", 2, 3),
+    ]
+    for one in found.pictures:
+        assert one.comparison is not None
+        assert looked_at((folder / one.comparison).read_bytes())
     assert kept(folder) == found
-    # The pull request takes the pictures from files/, and nothing of diff/.
+    # The pull request takes the pictures from files/, and nothing of diff/ and
+    # comparison/.
     assert written(folder) == [p.path for p in found.pictures]
     request = commit_request(folder, "o/r", "bot/screenshots", SHA, "docs: x", "Body")
     changes_of = request["variables"]["input"]["fileChanges"]
@@ -974,6 +1219,72 @@ def test_the_bot_takes_only_the_differences_that_keep_draws(
 ) -> None:
     folder = folder_with(tmp_path / "run", {"docs/a.png": png()}, [change], drawn=drawn)
     with pytest.raises(ValueError, match=r"which is no PNG that keep drew for it"):
+        kept(folder)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        # Another place than keep gives it.
+        (
+            replace(
+                compared_picture("docs/a.png", 0.25),
+                comparison="comparison/docs/b.png",
+            ),
+            r"names comparison/docs/b\.png as the comparison of docs/a\.png, which is "
+            r"no PNG that keep drew for it",
+        ),
+        # A comparison without its frame, a frame without a comparison, and a frame
+        # that the picture doesn't have.
+        (
+            replace(compared_picture("docs/a.png", 0.25), frame=None),
+            r"names frame None of 1 for the comparison comparison/docs/a\.png of "
+            r"docs/a\.png, which keep doesn't name so",
+        ),
+        (
+            replace(compared_picture("docs/a.png", 0.25), frames=None),
+            r"names frame 1 of None",
+        ),
+        (
+            replace(compared_picture("docs/a.png", 0.25), comparison=None),
+            r"names frame 1 of 1 for the comparison None",
+        ),
+        (compared_picture("docs/a.png", 0.25, frame=0, frames=3), r"frame 0 of 3"),
+        (compared_picture("docs/a.png", 0.25, frame=4, frames=3), r"frame 4 of 3"),
+    ],
+)
+def test_the_bot_takes_only_the_comparisons_that_keep_draws(
+    tmp_path: Path, change: Picture, message: str
+) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"docs/a.png": png()},
+        [change],
+        drawn={"diff/docs/a.png": png(), "comparison/docs/a.png": png()},
+    )
+    if change.comparison is None:
+        data = json.loads((folder / REPORT).read_text(encoding="utf-8"))
+        data["pictures"][0] |= {"frame": change.frame, "frames": change.frames}
+        (folder / REPORT).write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        kept(folder)
+
+
+@pytest.mark.parametrize("frame", ["2", 1.5, True])
+def test_the_frame_of_a_comparison_is_a_whole_number(
+    tmp_path: Path, frame: object
+) -> None:
+    folder = folder_with(
+        tmp_path,
+        {"docs/a.png": png()},
+        [compared_picture("docs/a.png", 0.25, frame=1, frames=3)],
+        drawn={"diff/docs/a.png": png(), "comparison/docs/a.png": png()},
+    )
+    assert kept(folder).pictures[0].frame == 1
+    data = json.loads((folder / REPORT).read_text(encoding="utf-8"))
+    data["pictures"][0]["frame"] = frame
+    (folder / REPORT).write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"no readable report\.json: .* is no whole"):
         kept(folder)
 
 
@@ -1457,7 +1768,7 @@ def test_keep_names_the_size_of_a_picture_that_came_out_at_another(
     found = keep(root, folder)
     assert found.pictures == (
         Picture("s/a.png", "changed", None, (660, 788)),
-        Picture("s/same.png", "changed", 1 / (660 * 788), diff="diff/s/same.png"),
+        compared_picture("s/same.png", 1 / (660 * 788)),
     )
     assert kept(folder) == found
     assert resized(found, root) == {"s/a.png": ((660, 788), (660, 878))}
@@ -1815,6 +2126,17 @@ def test_the_listing_shows_each_picture_with_its_change() -> None:
         "| `docs/b.png` | new |  |\n"
         "| `docs/c.png` | deleted |  |\n"
     )
+    # An animation names the frame that its comparison shows, a still picture none.
+    compared_ones = Kept(
+        (
+            compared_picture("docs/a.webp", 0.0066, frame=12, frames=25),
+            compared_picture("docs/b.png", 0.5),
+        )
+    )
+    assert listing(compared_ones).endswith(
+        "| `docs/a.webp` | changed, most in frame 12 of 25 | 0.66 % |\n"
+        "| `docs/b.png` | changed | 50.00 % |\n"
+    )
 
 
 def test_the_summary_says_what_keep_found() -> None:
@@ -1827,7 +2149,8 @@ def test_the_summary_says_what_keep_found() -> None:
     drawn = Kept((Picture("docs/a.png", "changed", 0.5, diff="diff/docs/a.png"),))
     assert drawn_differences(drawn) in summary(drawn)
     assert drawn_differences(drawn).startswith(
-        "The artifact of the run also holds, in `diff/`, a picture of what changed"
+        "The artifact of the run also holds, for each of them that kept its size and "
+        "frames, in `comparison/` the place of the change before and after"
     )
     assert drawn_differences(Kept(())) == ""
     assert text.endswith(
@@ -2092,9 +2415,7 @@ def test_keep_takes_the_files_that_the_settings_name(tmp_path: Path) -> None:
             Picture("docs/demo/gone.json", "deleted", kind="file"),
             Picture("docs/demo/new.json", "new", kind="file"),
             Picture(TIMELINE, "changed", kind="file"),
-            Picture(
-                "docs/images/a.png", "changed", 0.25, diff="diff/docs/images/a.png"
-            ),
+            compared_picture("docs/images/a.png", 0.25),
         ),
         ("docs/demo/other.json",),
     )
@@ -2222,14 +2543,15 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
         tmp_path / "shards",
         {"docs/images/en/a.png": png(changed=1)},
         [
-            Picture(
-                "docs/images/en/a.png", "changed", 0.25, (4, 2), diff=EN_DIFFERENCE
-            ),
+            compared_picture("docs/images/en/a.png", 0.25, (4, 2), 3, 7),
             Picture("docs/images/en/old.png", "deleted"),
         ],
         name="screenshots-en",
         ignored=("README.md",),
-        drawn={EN_DIFFERENCE: png(color=(*RED, 255))},
+        drawn={
+            EN_DIFFERENCE: png(color=(*RED, 255)),
+            EN_COMPARISON: png(color=(*RED, 128)),
+        },
     )
     german = folder_with(
         tmp_path / "shards",
@@ -2245,9 +2567,7 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
         (
             Picture(TIMELINE, "changed", kind="file"),
             Picture("docs/images/de/a.png", "new"),
-            Picture(
-                "docs/images/en/a.png", "changed", 0.25, (4, 2), diff=EN_DIFFERENCE
-            ),
+            compared_picture("docs/images/en/a.png", 0.25, (4, 2), 3, 7),
             Picture("docs/images/en/old.png", "deleted"),
         ),
         ("README.md", "notes.txt"),
@@ -2256,6 +2576,7 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
     assert kept(folder, (TIMELINE,)) == found
     assert (folder / "files/docs/images/en/a.png").read_bytes() == png(changed=1)
     assert (folder / EN_DIFFERENCE).read_bytes() == png(color=(*RED, 255))
+    assert (folder / EN_COMPARISON).read_bytes() == png(color=(*RED, 128))
     assert (folder / "files" / TIMELINE).read_bytes() == b"{}\n"
     assert (folder / "deleted.txt").read_text(encoding="utf-8") == (
         "docs/images/en/old.png\n"
@@ -2268,8 +2589,12 @@ def test_collect_puts_the_shards_together(tmp_path: Path) -> None:
         "share": 0.25,
         "before": [4, 2],
         "diff": EN_DIFFERENCE,
+        "comparison": EN_COMPARISON,
+        "frame": 3,
+        "frames": 7,
     }
     assert report_of["pictures"][1]["diff"] is None
+    assert report_of["pictures"][1]["comparison"] is None
 
 
 def test_each_picture_belongs_to_one_shard(tmp_path: Path) -> None:

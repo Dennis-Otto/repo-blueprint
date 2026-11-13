@@ -10588,7 +10588,7 @@ def test_every_update_of_renovate_merges_by_itself_a_major_one_too(
 ) -> None:
     # The checks are the gate, not the kind of the update: a major update merges once
     # every check passes, and one whose checks fail stays open and shows the failure
-    # (decision 0149). It still waits its week, as every other update does.
+    # (decision 0150). It still waits its week, as every other update does.
     root = ROOT if kind == "blueprint" else projects[kind]
     text = (root / ".github/renovate-blueprint.json5").read_text(encoding="utf-8")
     shared = renovate_rules(text)
@@ -14449,7 +14449,7 @@ def test_the_branch_bot_moves_its_line_on_at_once() -> None:
     text = (ROOT / ".github/workflows/update-branches.yml").read_text(encoding="utf-8")
     events = triggers(text)
     # No workflow_run: GitHub created a run after the end of every check, and all but a
-    # few skipped, each with a run of Bot health behind it (#819, decision 0150). The
+    # few skipped, each with a run of Bot health behind it (#819, decision 0151). The
     # bots after the checks start the bot when a check failed for good.
     assert set(events) == {
         "push",
@@ -16029,7 +16029,7 @@ def test_the_bot_health_bot_counts_no_run_after_the_checks_of_a_pull_request(
     # The branch bot no longer starts on such an end: the bots after the checks start
     # it when a check of a pull request failed for good, which is a run of the bot on
     # the default branch like any other, and one that fails is a failure of the bot
-    # (decision 0150).
+    # (decision 0151).
     assert "Update branches" not in after_checks
     for name in watched_by_bot_health(root) & after_checks:
         text = named[name]

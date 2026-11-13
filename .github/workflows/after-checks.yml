@@ -26,7 +26,7 @@ name: After the checks
 # the next pull request, so a job of its own starts that workflow then, with the run
 # that failed. Before, the end of every check started a run of Update branches by
 # itself, and nearly all of them skipped, each with a run of Bot health behind it
-# (decision 0150).
+# (decision 0151).
 #
 # The bot for cancelled checks: a newer run of a workflow cancels the one still running
 # for the same pull request, and that of a check or a scanner for the push to main
@@ -980,7 +980,7 @@ jobs:
     # A required check of a pull request that failed for good moves the line of the
     # branch bot on to the next pull request: this job starts the bot then, and only
     # then, so that GitHub creates no run of Update branches after every check that
-    # passed (decision 0150). A failed test moves the line on only when it stays
+    # passed (decision 0151). A failed test moves the line on only when it stays
     # failed, at the second attempt, since the job rerun runs it once more; the other
     # checks fail the same way again and move it on at once. The first run of a fork's
     # head that was approved is its second attempt. Also a pull request from a fork,

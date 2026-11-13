@@ -4,7 +4,7 @@ name: Dependabot maintenance
 # merges its own updates, those of actions pinned to a commit of a branch included.
 # Every update merges on its own once every required check passes, a major one too:
 # the checks are the gate, and one whose checks fail stays open and shows the failure
-# (decision 0149). Updates of runtime dependencies are committed as fix(deps) and so
+# (decision 0150). Updates of runtime dependencies are committed as fix(deps) and so
 # lead to a patch release (see release.yml). Auto-merge is turned on
 # as the release app, as Renovate's is: a merge that auto-merge does with the token
 # of a workflow starts no workflow, so the release bot and the branch bot would wait

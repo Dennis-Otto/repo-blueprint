@@ -903,7 +903,7 @@ def test_every_dependabot_update_merges_itself_a_major_one_too() -> None:
     ):
         assert part in settings["if"]
     # The checks are the gate, not the kind of the update: a major one, and one whose
-    # metadata names no kind, merges once every required check passes (decision 0149).
+    # metadata names no kind, merges once every required check passes (decision 0150).
     for name in (
         "Check that the release app is set up",
         "Enable automatic squash merge",
