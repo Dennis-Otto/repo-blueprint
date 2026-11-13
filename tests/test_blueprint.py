@@ -55,6 +55,7 @@ from blueprint.settings import (
     apply_pages,
     apply_policies,
     check_actions,
+    check_classic_protection,
     check_community,
     check_environments,
     check_labels,
@@ -418,6 +419,8 @@ class FakeGitHub:
         }
         # Off, as in a new repository.
         self.pages: dict[str, Any] | None = None
+        # A classic branch protection of main; none, as in a new repository.
+        self.protection: dict[str, Any] | None = None
         # The open issues and pull requests, and the numbers of the bot users of apps.
         self.issues: list[dict[str, Any]] = []
         # The pull requests of every state, newest first, as GitHub answers them,
@@ -534,6 +537,7 @@ class FakeGitHub:
             ),
             (r"/environments/([\w-]+)/secrets", self.secrets),
             (r"/community/profile", self.community_profile),
+            (r"/branches/main/protection", self.branch_protection),
             (r"/pages", self.pages_site),
             (r"/issues", self.issue_list),
             (r"/pulls", self.pull_list),
@@ -557,6 +561,11 @@ class FakeGitHub:
 
     def community_profile(self, method: str, body: Any) -> tuple[int, Any]:
         return 200, self.community
+
+    def branch_protection(self, method: str, body: Any) -> tuple[int, Any]:
+        if self.protection is None:
+            return 404, {"message": "Branch not protected"}
+        return 200, self.protection
 
     def repository(self, method: str, body: Any) -> tuple[int, Any]:
         if method == "PATCH":
@@ -4669,7 +4678,7 @@ def test_the_checklist_names_the_delivery(
 
     texts = [step.text for step in steps]
     if text is None:
-        assert len(texts) == 14
+        assert len(texts) == 15
     else:
         assert any(text in step for step in texts)
 
@@ -5123,3 +5132,127 @@ def test_a_profile_without_its_files_names_what_it_counts(github: FakeGitHub) ->
     assert drift.manual == (
         "add what the profile counts: https://github.com/Dennis-Otto/demo/community"
     )
+
+
+# A classic branch protection as GitHub answers it, as an existing repository may
+# still have it from before the blueprint: the old names of checks and an approval.
+CLASSIC = {
+    "required_status_checks": {"strict": True, "contexts": ["test", "build"]},
+    "required_pull_request_reviews": {
+        "required_approving_review_count": 1,
+        "require_code_owner_reviews": True,
+        "require_last_push_approval": True,
+    },
+    "restrictions": {"users": [], "teams": [], "apps": []},
+    "required_signatures": {"enabled": True},
+    "required_linear_history": {"enabled": False},
+    "required_conversation_resolution": {"enabled": True},
+    "lock_branch": {"enabled": True},
+    "enforce_admins": {"enabled": True},
+    "allow_force_pushes": {"enabled": False},
+}
+
+
+def test_a_classic_branch_protection_is_reported_and_left_to_a_person(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    github.protection = CLASSIC
+
+    assert run(github, root, "settings", "apply") == 1
+
+    out = capsys.readouterr().out
+    assert (
+        "branch protection main: GitHub has"
+        ' "the checks build, test; a branch that is up to date; 1 approving review;'
+        " a review of the code owners; an approval of the last push; pushes only of"
+        " the people, teams and apps that it names; signed commits; resolved"
+        " conversations; a locked branch, which takes no change at all; all of it of"
+        ' the administrators as well", the configuration wants "none"'
+    ) in out
+    assert (
+        "remove it with gh api --method DELETE"
+        " repos/Dennis-Otto/demo/branches/main/protection, or under"
+        " https://github.com/Dennis-Otto/demo/settings/branches"
+    ) in out
+    # A person may have set it on purpose: the settings never remove it.
+    assert not any(
+        method == "DELETE" and path.endswith("/protection")
+        for method, path in github.calls
+    )
+
+
+@pytest.mark.parametrize(
+    ("protection", "requires"),
+    [
+        ({}, "present"),
+        (
+            {"required_pull_request_reviews": {"required_approving_review_count": 0}},
+            "a pull request",
+        ),
+        (
+            {
+                "required_status_checks": {"strict": False, "contexts": []},
+                "required_pull_request_reviews": {"required_approving_review_count": 2},
+                "restrictions": None,
+                "enforce_admins": {"enabled": False},
+            },
+            "2 approving reviews",
+        ),
+    ],
+)
+def test_a_classic_branch_protection_says_what_it_requires(
+    github: FakeGitHub, protection: dict[str, Any], requires: str
+) -> None:
+    github.protection = protection
+
+    (drift,) = check_classic_protection(Api(github), REPO)
+
+    assert (drift.setting, drift.want, drift.have) == (
+        "branch protection main",
+        "none",
+        requires,
+    )
+
+
+def test_a_branch_without_a_classic_protection_has_nothing_to_report(
+    github: FakeGitHub,
+) -> None:
+    assert check_classic_protection(Api(github), REPO) == []
+
+
+def test_a_private_repository_on_its_plan_has_no_classic_protection_to_read(
+    github: FakeGitHub,
+) -> None:
+    path = f"repos/{REPO}/branches/main/protection"
+    github.fail[("GET", path)] = (403, RULESETS_REFUSAL)
+
+    assert check_classic_protection(Api(github), REPO, private=True) == []
+    # A public repository has every part: such an answer there still fails.
+    with pytest.raises(GitHubError, match="403"):
+        check_classic_protection(Api(github), REPO)
+
+
+def test_the_checklist_names_a_classic_branch_protection(
+    github: FakeGitHub, root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(github, root, "settings", "apply")
+    capsys.readouterr()
+    run(github, root, "checklist")
+    assert "  ✔ No classic branch protection of main, only the rulesets" in (
+        capsys.readouterr().out.splitlines()
+    )
+    github.protection = {
+        "required_pull_request_reviews": {"required_approving_review_count": 1}
+    }
+
+    assert run(github, root, "checklist") == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    step = lines.index("  ✘ No classic branch protection of main, only the rulesets")
+    assert (
+        lines[step + 1]
+        .strip()
+        .startswith("it requires 1 approving review: the rulesets protect main")
+    )
+    # Not a part of the settings that settings apply could set.
+    assert "  ✔ Settings as code applied" in lines

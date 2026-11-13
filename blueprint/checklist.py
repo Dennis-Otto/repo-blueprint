@@ -18,6 +18,7 @@ from blueprint.bootstrap import PUSH_AS_GH, SIGNING
 from blueprint.github import Api, GitHubError
 from blueprint.settings import (
     BRANCH,
+    CLASSIC_PROTECTION,
     Drift,
     Plan,
     Settings,
@@ -527,10 +528,12 @@ def checklist(
     plan = read_plan(api, repo)
     settings = fitted(api, repo, settings, plan)
     drift = check(api, repo, settings, plan.private)
-    # What a person sets, which the API can't: the secrets and the files that the
-    # community profile counts, each a step of its own.
+    # What a person sets, which the API can't: the secrets, the files that the
+    # community profile counts and the removal of a classic branch protection, which
+    # an existing repository may still have, each a step of its own.
     secrets_missing = [item for item in drift if item.setting.startswith("secret ")]
     community = [item for item in drift if item.setting == "community profile"]
+    classic = [item for item in drift if item.setting == CLASSIC_PROTECTION]
     target = settings.variables.get("PUBLISH_TO", "none")
     # The app first: the settings and the secrets that follow name it.
     registered, installed = release_app(api, repo, settings)
@@ -548,6 +551,11 @@ def checklist(
             "Community profile complete (100 %)",
             not community,
             "\n".join(item.manual for item in community),
+        ),
+        Step(
+            f"No classic branch protection of {BRANCH}, only the rulesets",
+            not classic,
+            "\n".join(f"it requires {item.have}: {item.manual}" for item in classic),
         ),
         installed,
         DEPENDABOT_ALERTS,
