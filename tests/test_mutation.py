@@ -1786,6 +1786,13 @@ class FakeGitHub:
                 for issue in self.issues.values()
                 if issue["state"] == "open"
             ]
+        elif path == "/issues?labels=maintenance&state=closed&per_page=100":
+            # The newest first, as GitHub lists them.
+            data = [
+                dict(issue)
+                for _, issue in sorted(self.issues.items(), reverse=True)
+                if issue["state"] == "closed"
+            ]
         elif path == "/issues":
             number = len(self.issues) + 1
             self.issues[number] = {**payload, "number": number, "state": "open"}
@@ -1923,6 +1930,128 @@ def test_the_issue_keeps_the_first_functions_of_the_run_before() -> None:
     assert state["baseline"]["note"] == "a--b"
     assert "| Survivors that change the logic | 3 | 0 |" in body
     assert "The functions with more survivors" not in body
+    # The latest run, which later runs compare with once a maintainer accepts it.
+    assert state["latest"]["score"] == 80.0
+    assert "To accept the lower score, close it as not planned" in body
+
+
+def weekly_runs(
+    api: Api, scores: Sequence[tuple[float, float]]
+) -> tuple[list[str], dict[str, Any]]:
+    """keep_issue after each of a series of complete weekly runs, with the mark that
+    the report gives each; the lines and the last run."""
+    lines = []
+    previous: dict[str, Any] | None = None
+    for week, (score, logic) in enumerate(scores):
+        now = comparable(
+            score, logic, run=f"{BEFORE}{week}", date=f"2026-09-{week + 10}"
+        )
+        now["best"] = mutation.raised(mutation.best_of(previous), now)
+        lines.append(keep_issue(api, REPO, now, previous))
+        previous = now
+    assert previous is not None
+    return lines, previous
+
+
+def test_a_slow_fall_adds_up_to_a_drop() -> None:
+    # Each week 0.4 points below the week before, within the tolerance of a run, but
+    # the third week is 0.8 points below the best: twenty such weeks lost eight points
+    # without an issue when each run was compared only with the run before.
+    github = FakeGitHub()
+
+    lines, _ = weekly_runs(Api(github), [(90.0, 95.0), (89.6, 95.0), (89.2, 95.0)])
+
+    assert lines == [
+        "The score didn't drop.",
+        "The score didn't drop.",
+        "The score dropped: opened #1.",
+    ]
+    body = github.issues[1]["body"]
+    assert f"below that of [the run of 2026-09-10]({BEFORE}0)" in body
+    assert "| Score | 90.0 % | 89.2 % |" in body
+
+
+def test_the_mark_follows_each_score_on_its_own() -> None:
+    # The best score and the best score of the logic come from different runs: the
+    # logic falls from the run of its own best.
+    github = FakeGitHub()
+
+    lines, last = weekly_runs(
+        Api(github), [(90.0, 90.0), (91.0, 89.8), (91.0, 89.6), (90.8, 89.4)]
+    )
+
+    assert lines[-1] == "The score dropped: opened #1."
+    # A run that reaches the best score again takes its place.
+    assert last["best"]["score"]["run"] == f"{BEFORE}2"
+    assert last["best"]["logic_score"]["run"] == f"{BEFORE}0"
+    assert "| Score of the logic | 90.0 % | 89.4 % |" in github.issues[1]["body"]
+    # A run keeps no mark or baseline of the runs before in its mark.
+    assert "best" not in last["best"]["score"]
+
+
+def test_a_maintainer_accepts_a_lower_score_by_closing_the_issue_as_not_planned() -> (
+    None
+):
+    github = FakeGitHub()
+    api = Api(github)
+    lines, last = weekly_runs(api, [(90.0, 95.0), (85.0, 95.0)])
+    assert lines[-1] == "The score dropped: opened #1."
+    github.issues[1].update(state="closed", state_reason="not_planned")
+
+    # The mark stays at 90, but the accepted 85 is what later runs compare with.
+    now = comparable(84.8, 95.0, run=RUN, date="2026-09-24")
+    now["best"] = mutation.raised(mutation.best_of(last), now)
+    assert now["best"]["score"]["score"] == 90.0
+    assert keep_issue(api, REPO, now, last) == "The score didn't drop."
+
+    # A fall below the accepted score is a drop again, from the accepted score.
+    lower = comparable(84.4, 95.0, run=RUN, date="2026-10-01")
+    lower["best"] = mutation.raised(mutation.best_of(now), lower)
+    assert keep_issue(api, REPO, lower, now) == "The score dropped: opened #2."
+    assert "| Score | 85.0 % | 84.4 % |" in github.issues[2]["body"]
+
+
+def test_only_an_issue_of_a_drop_closed_as_not_planned_accepts_a_score() -> None:
+    github = FakeGitHub()
+    latest = comparable(85.0, 95.0, run=RUN)
+    good = issue_body(latest, comparable(90.0, 95.0))
+    closed = {"state": "closed", "state_reason": "not_planned"}
+    github.add(good, pull_request={}, **closed)
+    github.add(good, state="closed", state_reason="completed")
+    github.add("Another issue.", **closed)
+    github.add("<!-- mutation-score {broken} -->", **closed)
+    github.add("<!-- mutation-score [1] -->", **closed)
+    github.add('<!-- mutation-score {"baseline": {"complete": false}} -->', **closed)
+    github.add(
+        issue_body({**latest, "complete": False}, comparable(90.0, 95.0)), **closed
+    )
+
+    assert mutation.accepted_levels(Api(github), REPO) == {}
+    github.add(issue_body(comparable(86.0, 95.0), comparable(90.0, 95.0)), **closed)
+    github.add(good, **closed)
+    # The newest issue of a run counts.
+    levels = mutation.accepted_levels(Api(github), REPO)
+    assert [level["score"] for level in levels.values()] == [85.0]
+
+
+def test_the_high_water_mark_of_the_runs() -> None:
+    run = comparable(80.0, 90.0)
+    own = {"score": run, "logic_score": run}
+    assert mutation.best_of(None) is None
+    assert mutation.best_of({"complete": False}) is None
+    # A run from before the mark is its own mark, also through an incomplete run.
+    assert mutation.best_of(run) == own
+    assert mutation.best_of({"complete": False, "baseline": run}) == own
+    assert mutation.mark_in({"best": {"score": run}}) is None
+    assert mutation.mark_in({"best": "x"}) is None
+    assert mutation.best_of({**run, "best": own}) == own
+    # An incomplete run keeps the mark, and the first complete run starts it.
+    assert mutation.raised(own, {"complete": False}) == own
+    assert mutation.raised(None, {"complete": False}) is None
+    assert mutation.raised(None, {**run, "best": own}) == own
+    # A run that reaches a score of the mark takes its place for that score.
+    even = comparable(80.0, 89.0, run=RUN)
+    assert mutation.raised(own, even) == {"score": even, "logic_score": run}
 
 
 # ---------------------------------------------------------------- the command line
@@ -2084,6 +2213,37 @@ def test_a_drop_past_an_incomplete_run_still_shows(
     folder = str(tmp_path / "third/mutation")
     assert cli.main(["--repo", REPO, "mutation", "issue", folder], Api(github)) == 0
     assert capsys.readouterr().out == "The score dropped: opened #1.\n"
+
+
+def test_the_report_carries_the_high_water_mark_forward(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, plain = report_of(tmp_path / "plain", two_parts(), None)
+    score, logic = plain["score"], plain["logic_score"]
+    # The run before was as good as this one, but a run before it was a point better.
+    higher = comparable(score + 1.0, logic)
+    before = {
+        **comparable(score + 0.3, logic),
+        "best": {"score": higher, "logic_score": comparable(score, logic - 1.0)},
+    }
+    first = files(tmp_path, {"first.json": json.dumps(before)})
+
+    code, now = report_of(tmp_path / "now", two_parts(), first / "first.json")
+
+    assert code == 0
+    assert now["best"]["score"] == higher
+    assert now["best"]["logic_score"]["score"] == score
+    assert now["best"]["logic_score"]["run"] == RUN
+    capsys.readouterr()
+    github = FakeGitHub()
+    folder = str(tmp_path / "now/mutation")
+    assert cli.main(["--repo", REPO, "mutation", "issue", folder], Api(github)) == 0
+    assert capsys.readouterr().out == "The score dropped: opened #1.\n"
+    # The run of the mark is the run before the drop.
+    marker = mutation.MARKER.search(github.issues[1]["body"])
+    assert marker
+    state = json.loads(marker[1])
+    assert state["baseline"]["score"] == score + 1.0
 
 
 def test_the_baseline_of_a_run() -> None:
