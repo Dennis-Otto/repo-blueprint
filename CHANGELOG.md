@@ -7,6 +7,47 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.18.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.17.0...v1.18.0) (2026-11-13)
+
+
+### Features
+
+* a dropped mutation score of a Nextcloud app opens the issue, and translations are checked ([#889](https://github.com/Dennis-Otto/repo-blueprint/issues/889)) ([8ccdc0c](https://github.com/Dennis-Otto/repo-blueprint/commit/8ccdc0c7887f07be1cb5285aa40684b6032ce59b))
+* a major update of Renovate or Dependabot merges by itself once every check passes ([#885](https://github.com/Dennis-Otto/repo-blueprint/issues/885)) ([c6d5b94](https://github.com/Dennis-Otto/repo-blueprint/commit/c6d5b942436befcbe0237bfda38673a06d12e9c5))
+* a release reaches every repository within a day, and an integration loads on its oldest Home Assistant ([#890](https://github.com/Dennis-Otto/repo-blueprint/issues/890)) ([1a81f0f](https://github.com/Dennis-Otto/repo-blueprint/commit/1a81f0f96f5ad5d059f362da5a7dea4c74c6c323))
+* **advisories:** warn two weeks before an accepted advisory ends ([#876](https://github.com/Dennis-Otto/repo-blueprint/issues/876)) ([1cdbedf](https://github.com/Dennis-Otto/repo-blueprint/commit/1cdbedf9902f0a55e4e4f2fca1b3330aaa52bd15))
+* **create:** the path of a new owner says how to set up commit signing ([#879](https://github.com/Dennis-Otto/repo-blueprint/issues/879)) ([e091c51](https://github.com/Dennis-Otto/repo-blueprint/commit/e091c519dbb5a12bd2aa0dae14fa750426fd0a37))
+* **issue-assistant:** a Chrome extension and a Cloudflare Worker may link to the documentation of their kind ([#875](https://github.com/Dennis-Otto/repo-blueprint/issues/875)) ([590c7b0](https://github.com/Dennis-Otto/repo-blueprint/commit/590c7b0658119f49f17819218f073a206b383b81))
+* **settings:** settings check names a classic branch protection of main ([#892](https://github.com/Dennis-Otto/repo-blueprint/issues/892)) ([bdaea53](https://github.com/Dennis-Otto/repo-blueprint/commit/bdaea53026ceab8f932a2079f467627b8d218576))
+
+
+### Bug fixes
+
+* a link to a website previews with the designed picture of its repository ([#887](https://github.com/Dennis-Otto/repo-blueprint/issues/887)) ([15bdc44](https://github.com/Dennis-Otto/repo-blueprint/commit/15bdc4482c05354e24f77a2c227627f568330c76))
+* a list that a gateway fails to read is read again as an outage ([#861](https://github.com/Dennis-Otto/repo-blueprint/issues/861)) ([94791cd](https://github.com/Dennis-Otto/repo-blueprint/commit/94791cd67b2f814eda086442cd809e656ce9bf21))
+* **bot-health:** bring back a pull request of Renovate that a merge by hand parked ([#871](https://github.com/Dennis-Otto/repo-blueprint/issues/871)) ([75ec966](https://github.com/Dennis-Otto/repo-blueprint/commit/75ec966c1b87e169c393014e281387ac6244d638))
+* **bot-health:** the nightly look runs a stopped run of Bot health again ([#865](https://github.com/Dennis-Otto/repo-blueprint/issues/865)) ([f6455d9](https://github.com/Dennis-Otto/repo-blueprint/commit/f6455d9816b0fed731e2414f7cf6a792efa3a5a8))
+* Chrome for Testing comes only from Google's storage ([#881](https://github.com/Dennis-Otto/repo-blueprint/issues/881)) ([2b05345](https://github.com/Dennis-Otto/repo-blueprint/commit/2b05345172d7042e34efcba4a774f36957fb7951))
+* **deps:** lock file maintenance ([#744](https://github.com/Dennis-Otto/repo-blueprint/issues/744)) ([c678e12](https://github.com/Dennis-Otto/repo-blueprint/commit/c678e127a5cb8107a71487420910c36d70d219a2))
+* **deps:** lock file maintenance ([#745](https://github.com/Dennis-Otto/repo-blueprint/issues/745)) ([1436820](https://github.com/Dennis-Otto/repo-blueprint/commit/1436820a7b571fcefa249b7ca04c381855ab46c5))
+* **deps:** refresh pip-compile outputs ([#746](https://github.com/Dennis-Otto/repo-blueprint/issues/746)) ([fb226a7](https://github.com/Dennis-Otto/repo-blueprint/commit/fb226a7ed136367d37981549c4978ce8b8e7953c))
+* **deps:** update the issue assistant to v1.10.6 ([#814](https://github.com/Dennis-Otto/repo-blueprint/issues/814)) ([6944ee2](https://github.com/Dennis-Otto/repo-blueprint/commit/6944ee2c4f75581e0f95e91b9b7fa1d4cf382328))
+* **migrate:** an existing repository gets the label no-bot-fixes, and its checklist names the licenses its dependency review lacks ([#870](https://github.com/Dennis-Otto/repo-blueprint/issues/870)) ([38c771e](https://github.com/Dennis-Otto/repo-blueprint/commit/38c771eaf52ca9ced6f9b5591d7c43be62ea9df9))
+* **mutation:** a pull request of a Nextcloud app tries a sample of Infection ([#877](https://github.com/Dennis-Otto/repo-blueprint/issues/877)) ([99ac5e8](https://github.com/Dennis-Otto/repo-blueprint/commit/99ac5e8f7e5c5a049e19f0bda0b437a671093ef9))
+* **mutation:** a slow fall of the mutation score opens its issue ([#886](https://github.com/Dennis-Otto/repo-blueprint/issues/886)) ([374495d](https://github.com/Dennis-Otto/repo-blueprint/commit/374495d1b2c29af00281efe8a78a1ed3d7059957))
+* **nextcloud-app:** the taint plugin works with Psalm 6 and Psalm 7 ([#862](https://github.com/Dennis-Otto/repo-blueprint/issues/862)) ([4c9e356](https://github.com/Dennis-Otto/repo-blueprint/commit/4c9e356a3e6e7612b3c0ebf403772a97fd6255a1))
+* **release:** a release of dependency updates merges itself beside a bot's commit that makes no release ([#867](https://github.com/Dennis-Otto/repo-blueprint/issues/867)) ([cce6703](https://github.com/Dennis-Otto/repo-blueprint/commit/cce67039f70b565a749b8a4dbf7e648966531997))
+* **renovate:** bring every image its new version and digest again ([#878](https://github.com/Dennis-Otto/repo-blueprint/issues/878)) ([df025a7](https://github.com/Dennis-Otto/repo-blueprint/commit/df025a7926c92d25bed303c4fabe08c697b85fed))
+* **screenshots:** a changed picture comes with one comparison of the same frame ([#884](https://github.com/Dennis-Otto/repo-blueprint/issues/884)) ([aaf62ab](https://github.com/Dennis-Otto/repo-blueprint/commit/aaf62abdb308fa00aa9797f073be214693c6df02))
+* **settings:** a required check of main from another source is a drift ([#880](https://github.com/Dennis-Otto/repo-blueprint/issues/880)) ([586e937](https://github.com/Dennis-Otto/repo-blueprint/commit/586e937460e522600bbf677187a13048b63fa757))
+* **settings:** leave the rulesets of an organization alone, and check the name inside a release tag ([#891](https://github.com/Dennis-Otto/repo-blueprint/issues/891)) ([debf4b6](https://github.com/Dennis-Otto/repo-blueprint/commit/debf4b614e484c18f764a0279a8954297aeed93f))
+* **template:** a Chrome extension type-checks the DOM and the calls of chrome.* ([#866](https://github.com/Dennis-Otto/repo-blueprint/issues/866)) ([c38181c](https://github.com/Dennis-Otto/repo-blueprint/commit/c38181cea9195c433c038bd44e81d4990a17f858))
+* the clean-up keeps fresh branches, and the update bot turns on the auto-merge it missed ([#883](https://github.com/Dennis-Otto/repo-blueprint/issues/883)) ([f240ea8](https://github.com/Dennis-Otto/repo-blueprint/commit/f240ea8e751ccf454faf32c938df11210873b2df))
+* the defaults of a project name pass their own questions, and small fixes of code and docs ([#893](https://github.com/Dennis-Otto/repo-blueprint/issues/893)) ([57ae9cf](https://github.com/Dennis-Otto/repo-blueprint/commit/57ae9cfd7b231c6ce685b2d00bebef6435478b49))
+* the fix bot commits nothing that runs with rights where nobody reads its commit ([#863](https://github.com/Dennis-Otto/repo-blueprint/issues/863)) ([10df5d4](https://github.com/Dennis-Otto/repo-blueprint/commit/10df5d4ac09713b0c9f3f767233bea681bd8d8c4))
+* **update:** an update that drops a change of the repository waits ([#869](https://github.com/Dennis-Otto/repo-blueprint/issues/869)) ([bb7711e](https://github.com/Dennis-Otto/repo-blueprint/commit/bb7711ee5d170f3d8f9bedc59a2ad0a67272c06d))
+* **website:** the 404 page and the dashboard lead on to the website ([#888](https://github.com/Dennis-Otto/repo-blueprint/issues/888)) ([36b8682](https://github.com/Dennis-Otto/repo-blueprint/commit/36b8682dccd110251895eec58432e7a4f86168e9))
+
 ## [1.17.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.16.0...v1.17.0) (2026-11-10)
 
 ### Features
