@@ -248,6 +248,69 @@ def test_an_app_whose_catalogs_agree(
     assert registered(script.replace("\n)\n", ");\n")) == registered(script)
     assert registered("OC.L10N.register(x, {}, '')") is None
     assert registered('OC.L10N.register("a", {,}, "")') is None
+    assert registered('OC.L10N.register("a", [], "")') is None
+    assert registered('OC.L10N.register("a", {})') is None
+    assert registered("window.OC = {}") is None
+
+
+def js_quote(text: Any) -> str:
+    """A string in single quotes, as scripts/check-l10n.mjs of a project writes it."""
+    if not isinstance(text, str):
+        return f"[{', '.join(js_quote(each) for each in text)}]"
+    escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+    return f"'{escaped}'"
+
+
+def test_a_browser_catalog_in_single_quotes_reads_as_its_meaning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # As paperless-unified-search writes it with its own tool: single quotes, escapes
+    # and a comma after the last text.
+    files(tmp_path, nextcloud_files(NEXTCLOUD))
+    texts = "".join(
+        f"\t\t{js_quote(key)}: {js_quote(value)},\n" for key, value in NEXTCLOUD.items()
+    )
+    script = (
+        f"OC.L10N.register(\n\t'demo_app',\n\t{{\n{texts}\t}},\n\t"
+        f"{js_quote(PLURAL_FORM)})\n"
+    )
+    (tmp_path / "l10n/de.js").write_text(script, encoding="utf-8")
+    assert registered(script) == ("demo_app", NEXTCLOUD, PLURAL_FORM)
+    assert cli.main(["translations"], root=tmp_path) == 0
+    assert "Each of the 1 catalog(s)" in capsys.readouterr().out
+    # Left as it is: it says what the .json says.
+    assert (tmp_path / "l10n/de.js").read_text(encoding="utf-8") == script
+
+
+@pytest.mark.parametrize(
+    ("literal", "meaning"),
+    [
+        (r"'can\'t'", "can't"),
+        (r'"say \"hi\""', 'say "hi"'),
+        (r"'a\\b'", "a\\b"),
+        (r"'\n\r\t\b\f\v\0'", "\n\r\t\b\f\v\0"),
+        (r"'ä\u{1F600}\x41'", "ä\U0001f600A"),
+        ("'one \\\ntwo'", "one two"),
+        (r"'\q'", "q"),
+        ("'Ä {name}, %s'", "Ä {name}, %s"),
+        ("'a,}'", "a,}"),
+    ],
+)
+def test_a_string_of_javascript_means_what_javascript_reads(
+    literal: str, meaning: str
+) -> None:
+    assert registered(f"OC.L10N.register({literal}, {{}}, '')") == (meaning, {}, "")
+
+
+def test_a_trailing_comma_only_ends_a_list() -> None:
+    assert registered("OC.L10N.register('a', {'x': ['y', 'z',],}, '',)") == (
+        "a",
+        {"x": ["y", "z"]},
+        "",
+    )
+    assert registered("OC.L10N.register('a', {'x': 'y',,}, '')") is None
+    assert registered("OC.L10N.register('a', ['x' 'y'], '')") is None
+    assert registered("OC.L10N.register('a', {'x': 'y}, '')") is None
 
 
 def test_what_a_catalog_of_an_app_gets_wrong(tmp_path: Path) -> None:

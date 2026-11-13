@@ -45,11 +45,28 @@ CHROME_PLACEHOLDER = re.compile(r"\$([A-Za-z0-9_@]+)\$")
 PLURAL = re.compile(r"_(.*)_::_(.*)_", re.DOTALL)
 NPLURALS = re.compile(r"nplurals\s*=\s*(\d+)")
 # l10n/<language>.js: OC.L10N.register("app", {texts}, "pluralForm");
-REGISTER = re.compile(
-    r"\s*OC\.L10N\.register\(\s*(?P<app>\"(?:[^\"\\]|\\.)*\")\s*,\s*(?P<texts>\{.*\})"
-    r"\s*,\s*(?P<plural>\"(?:[^\"\\]|\\.)*\")\s*\)\s*;?\s*",
+REGISTER = re.compile(r"\s*OC\.L10N\.register\((?P<arguments>.*)\)\s*;?\s*", re.DOTALL)
+# A string literal of JavaScript, in single or double quotes, or a comma before the
+# end of an object or an array, which JavaScript allows and JSON doesn't.
+JS_LITERAL = re.compile(
+    r"(?P<string>'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\")"
+    r"|(?<=[^\s{\[,])(?P<space>\s*),(?P<end>\s*[}\]])",
     re.DOTALL,
 )
+JS_ESCAPE = re.compile(
+    r"\\(?:u\{(?P<code>[0-9a-fA-F]+)\}|u(?P<unicode>[0-9a-fA-F]{4})"
+    r"|x(?P<hex>[0-9a-fA-F]{2})|(?P<other>.))",
+    re.DOTALL,
+)
+JS_ESCAPES = {
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "b": "\b",
+    "f": "\f",
+    "v": "\v",
+    "0": "\0",
+}
 APP_ID = re.compile(r"<id>\s*([^<\s]+)\s*</id>")
 # The folders that hold no catalogs of the project.
 PACKAGES = frozenset({"node_modules", "vendor", ".git", ".venv"})
@@ -294,19 +311,44 @@ def browser_catalog(app: str, texts: Mapping[str, Any], plural: str) -> str:
     )
 
 
+def js_unescape(found: re.Match[str]) -> str:
+    """The character that an escape of a JavaScript string stands for."""
+    code = found["code"] or found["unicode"] or found["hex"]
+    if code is not None:
+        return chr(int(code, 16))
+    other = found["other"]
+    return "" if other in "\r\n\u2028\u2029" else JS_ESCAPES.get(other, other)
+
+
+def js_to_json(text: str) -> str:
+    """A literal of JavaScript as JSON: its strings in double quotes, no trailing commas.
+
+    Nextcloud writes l10n/<language>.js in double quotes, a project's own tool may
+    write it in single quotes and with a comma after the last text: both mean the same.
+    """
+
+    def literal(found: re.Match[str]) -> str:
+        if found["string"] is None:
+            return f"{found['space']}{found['end']}"
+        value = JS_ESCAPE.sub(js_unescape, found["string"][1:-1])
+        return json.dumps(value, ensure_ascii=False)
+
+    return JS_LITERAL.sub(literal, text)
+
+
 def registered(text: str) -> tuple[str, Any, str] | None:
     """The app, the texts and the rule of the plurals of l10n/<language>.js."""
     found = REGISTER.fullmatch(text)
     if found is None:
         return None
     try:
-        return (
-            json.loads(found["app"]),
-            json.loads(found["texts"]),
-            json.loads(found["plural"]),
-        )
+        arguments = json.loads(js_to_json(f"[{found['arguments']}]"))
     except ValueError:
         return None
+    match arguments:
+        case [str(app), dict(texts), str(plural)]:
+            return app, texts, plural
+    return None
 
 
 def app_id(root: Path) -> str:
