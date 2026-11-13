@@ -3149,3 +3149,144 @@ def test_the_start_names_the_newest_commit_and_the_shards(
     assert done.outputs == outputs
     assert done.stubbed[0] == "python3 blueprint.py screenshots due"
     assert ("python3 blueprint.py screenshots plan" in done.stubbed) == bool(outputs)
+
+
+# The bots after the checks and the branch bot in an outage of GitHub, as on 9
+# November 2026: each step that calls GitHub tries again, ends with a notice when
+# GitHub keeps failing, and sends a write that GitHub failed only once (#786,
+# decisions 0136 and 0155).
+OUTAGE_JOBS = {
+    "after-checks.yml": (
+        "rerun",
+        "report",
+        "release",
+        "cancelled",
+        "stopped",
+        "fixes",
+        "own-branch",
+        "diagrams",
+    ),
+    "update-branches.yml": ("update",),
+}
+PROBE = "Tell an outage of GitHub from a refused token"
+GH_CALL = re.compile(r"(?<![\w-])gh (?!help\b)\w+")
+
+
+def test_the_bots_share_one_copy_of_the_helpers_for_an_outage() -> None:
+    copies = {name: workflow(name)["env"]["OUTAGE"] for name in OUTAGE_JOBS}
+    assert len(set(copies.values())) == 1
+    [helpers] = set(copies.values())
+    for function in ("unavailable", "calls", "tried", "once", "given_up"):
+        assert f"{function}()" in helpers
+    assert "trap unavailable EXIT" in helpers
+
+
+@pytest.mark.parametrize(
+    ("name", "job_id"),
+    [(name, job_id) for name, jobs in OUTAGE_JOBS.items() for job_id in jobs],
+)
+def test_every_call_of_github_by_a_bot_sits_out_an_outage(
+    name: str, job_id: str
+) -> None:
+    # A call of gh without tried or once failed the run and mailed the maintainer at
+    # the first error of GitHub.
+    for each in job(name, job_id)["steps"]:
+        script = each.get("run") or ""
+        lines = [
+            line.strip()
+            for line in script.splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+        calls = [line for line in lines if GH_CALL.search(line)]
+        if not calls:
+            continue
+        assert lines[0] == 'eval "$OUTAGE"', each["name"]
+        for line in calls:
+            for found in GH_CALL.finditer(line):
+                assert re.search(r"\b(?:tried|once) $", line[: found.start()]), (
+                    each["name"],
+                    line,
+                )
+
+
+@pytest.mark.parametrize(
+    ("name", "job_id"),
+    [(name, job_id) for name, jobs in OUTAGE_JOBS.items() for job_id in jobs],
+)
+def test_every_token_of_a_bot_sits_out_an_outage(name: str, job_id: str) -> None:
+    # GitHub fails the token of the release app in an outage too: the step goes on,
+    # and the step after it tells an outage, which ends with a notice, from a token
+    # that GitHub refused, which fails the job.
+    steps = job(name, job_id)["steps"]
+    tokens = [
+        index
+        for index, each in enumerate(steps)
+        if "create-github-app-token" in each.get("uses", "")
+    ]
+    probes = [index for index, each in enumerate(steps) if each.get("name") == PROBE]
+    assert len(probes) == (1 if tokens else 0)
+    for index in tokens:
+        token = steps[index]
+        assert token["continue-on-error"] is True
+        [probe] = probes
+        assert probe > index
+        assert f"steps.{token['id']}.outcome == 'failure'" in condition_of(steps[probe])
+        # Before every step that says that the bot failed.
+        said = [
+            later
+            for later, each in enumerate(steps)
+            if "failure()" in str(each.get("if", ""))
+        ]
+        assert all(probe < later for later in said), token["id"]
+
+
+PROBES = [
+    ("after-checks.yml", "fixes"),
+    ("after-checks.yml", "own-branch"),
+    ("after-checks.yml", "diagrams"),
+    ("update-branches.yml", "update"),
+]
+THE_REPOSITORY = r"api repos/o/r --jq \.full_name"
+
+
+@pytest.mark.parametrize(("name", "job_id"), PROBES)
+def test_a_token_that_github_fails_in_an_outage_ends_with_a_notice(
+    tmp_path: Path, name: str, job_id: str
+) -> None:
+    done = run_step(
+        tmp_path,
+        name,
+        job_id,
+        PROBE,
+        answers=[Answer(THE_REPOSITORY, err="HTTP 503: Service Unavailable\n", code=1)],
+        stubs={"sleep": recording("sleep")},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(THE_REPOSITORY)) == 4
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert done.stdout.startswith(
+        "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 503"
+    )
+
+
+@pytest.mark.parametrize(("name", "job_id"), PROBES)
+def test_a_token_that_github_refuses_as_it_answers_fails_the_job(
+    tmp_path: Path, name: str, job_id: str
+) -> None:
+    done = run_step(
+        tmp_path,
+        name,
+        job_id,
+        PROBE,
+        answers=[exact("api repos/o/r --jq .full_name", "o/r\n")],
+        stubs={"sleep": recording("sleep")},
+    )
+
+    assert done.returncode == 1
+    assert done.stubbed == []
+    assert (
+        "::error title=The release app gave no token::GitHub answers, but refused the"
+        " token of the release app"
+    ) in done.stdout
+    assert "::notice" not in done.stdout

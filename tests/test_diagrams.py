@@ -1850,6 +1850,119 @@ def test_a_diagram_bot_that_fails_says_so_on_the_pull_request(
     ]
 
 
+# The diagram bot in an outage of GitHub, as on 9 November 2026: it ends with a
+# notice, its run mails no one, and the next run of the check draws the diagrams
+# again (#786).
+SLEEP = {"sleep": workflow_steps.recording("sleep")}
+UNAVAILABLE = "HTTP 503: Service Unavailable\n"
+NOTICE = "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 50"
+
+
+@needs_bash
+def test_the_diagram_bot_sits_out_an_outage_in_its_fetch(tmp_path: Path) -> None:
+    download = r"run download 5 --name diagrams --dir .*"
+
+    result = run_step(
+        FETCH,
+        tmp_path,
+        tmp_path,
+        SLEEP,
+        [Answer(download, err=UNAVAILABLE, code=1)],
+        RUN="5",
+        SHA="abc1234def",
+        HEADLINE=HEADLINE,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(result.called(download)) == 4
+    assert result.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert result.stdout.startswith(NOTICE)
+    assert result.outputs == {}
+    assert result.summary == ""
+
+
+@needs_bash
+def test_the_diagram_bot_sits_out_an_outage_before_its_commit(tmp_path: Path) -> None:
+    head = r"api repos/o/r/git/ref/heads/feature .*"
+    folder = kept(tmp_path / "kept", {"docs/images/diagrams/steps.svg": "<svg >\n"})
+    shutil.copytree(folder, tmp_path / "runner/diagrams")
+
+    result = run_step(
+        COMMIT,
+        tmp_path,
+        tmp_path,
+        SLEEP,
+        [Answer(head, err=UNAVAILABLE, code=1)],
+        APP_SLUG="app",
+        BRANCH="feature",
+        NUMBER="7",
+        SHA="abc1234def",
+        URL="https://github.com/o/r/actions/runs/5",
+        HEADLINE=HEADLINE,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(result.called(head)) == 4
+    assert result.stdout.startswith(NOTICE)
+    assert not result.called("api graphql")
+    assert result.summary == ""
+
+
+@runs_a_copy_of_the_tool
+@needs_bash
+def test_the_diagram_bot_sends_a_commit_that_github_fails_only_once(
+    tmp_path: Path,
+) -> None:
+    # GitHub may have made the commit before it failed; the next run of the check
+    # sees whether it did.
+    folder = kept(tmp_path / "kept", {"docs/images/diagrams/steps.svg": "<svg >\n"})
+    shutil.copytree(folder, tmp_path / "runner/diagrams")
+
+    result = run_step(
+        COMMIT,
+        with_tools(tmp_path / "main"),
+        tmp_path,
+        SLEEP,
+        [
+            Answer(r"api graphql --input .*", err="HTTP 502: Bad Gateway\n", code=1),
+            *bot_answers(),
+        ],
+        APP_SLUG="app",
+        BRANCH="feature",
+        NUMBER="7",
+        SHA="abc1234def",
+        URL="https://github.com/o/r/actions/runs/5",
+        HEADLINE=HEADLINE,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(result.called("api graphql")) == 1
+    assert result.stubbed == []
+    assert result.stdout.startswith(NOTICE)
+    assert not result.called("pr comment")
+
+
+@needs_bash
+def test_the_diagram_bot_says_it_failed_only_once_while_github_fails(
+    tmp_path: Path,
+) -> None:
+    result = run_step(
+        FAILED,
+        tmp_path,
+        tmp_path,
+        SLEEP,
+        [Answer(r"pr comment .*", err="HTTP 502: Bad Gateway\n", code=1)],
+        BRANCH="feature",
+        NUMBER="7",
+        URL="https://github.com/o/r/actions/runs/8",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(result.called("pr comment")) == 1
+    assert result.stubbed == []
+    assert result.stdout.startswith(NOTICE)
+
+
 def applied(root: Path, request: dict[str, Any]) -> None:
     """What GitHub does with the request of the bot: the commit on the branch."""
     changed = request["variables"]["input"]["fileChanges"]

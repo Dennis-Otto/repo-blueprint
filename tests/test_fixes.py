@@ -2716,6 +2716,54 @@ def test_fix_collect_from_the_command_line(
     assert output.read_text(encoding="utf-8") == "action=commit\npull=42\nunread=bot\n"
 
 
+class Unavailable(FakeGitHub):
+    """GitHub in an outage, as on 9 November 2026: every call of its API fails."""
+
+    def route(self, method: str, path: str, body: Any) -> tuple[int, Any]:
+        return 503, {"message": "Service unavailable"}
+
+
+@pytest.mark.parametrize("runner", [True, False])
+def test_the_fix_bot_ends_with_a_notice_when_github_keeps_failing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    waits: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+    runner: bool,
+) -> None:
+    # Its next run after the checks does what this one couldn't, and the run of the
+    # bot mails no one (decision 0155).
+    github = Unavailable()
+    output = tmp_path / "output"
+    folder = tmp_path / "runner"
+    folder.mkdir()
+    if runner:
+        monkeypatch.setenv("RUNNER_TEMP", str(folder))
+
+    assert fix_collect(homedarts(tmp_path), github, output) == 0
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith(
+        "::notice title=GitHub is unavailable::GitHub kept failing (GitHub answered 503"
+    )
+    assert "Nothing to do for a person." in err
+    assert waits == [10, 20, 40]
+    # The steps after it, which commit or suggest, learn of nothing to do, and the
+    # step of the issue of main learns that the job sat out an outage, on a runner.
+    assert not output.exists()
+    assert (folder / "github-sat-out").exists() is runner
+
+
+def test_the_command_fix_fails_when_github_keeps_failing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The person who asked for the fixes learns that they didn't come.
+    github = commented(Unavailable())
+
+    assert fix_command(homedarts(tmp_path), github, tmp_path / "output") == 2
+    assert capsys.readouterr().err.startswith("blueprint.py: GitHub answered 503")
+
+
 @pytest.mark.parametrize("event", ["schedule", "workflow_dispatch"])
 def test_fix_collect_takes_the_weekly_run_of_main(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], event: str
@@ -4545,6 +4593,152 @@ def test_the_fix_bot_of_main_keeps_one_issue_of_its_failures(
         assert made[-1].startswith(last)
     else:
         assert made == made[:1]
+
+
+# The steps of the fix bot in bash in an outage of GitHub, as on 9 November 2026:
+# they end with a notice, their run mails no one, and a write that GitHub failed,
+# which it may have done, goes out only once (#786).
+SLEEP = {"sleep": workflow_steps.recording("sleep")}
+UNAVAILABLE = "HTTP 503: Service Unavailable\n"
+NOTICE = "::notice title=GitHub is unavailable::GitHub kept failing (HTTP 50"
+SAYS = "Say on the pull request that the fix bot failed"
+KEEPS = "Keep the issue of the fix bot of main current"
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("step", "failing", "variables"),
+    [
+        (SAYS, r"pr view 42 .*", {"PULL": "42", "SHA": SHA, "URL": "https://run/9"}),
+        (KEEPS, r"issue list .*", {"FAILED": "true", "URL": "https://run/9"}),
+        (KEEPS, r"issue list .*", {"FAILED": "false", "URL": "https://run/9"}),
+    ],
+)
+def test_a_step_of_the_fix_bot_ends_with_a_notice_when_github_keeps_failing(
+    tmp_path: Path, step: str, failing: str, variables: dict[str, str]
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "fixes",
+        step,
+        answers=(Answer(failing, err=UNAVAILABLE, code=1), WRITES),
+        env=variables,
+        stubs=SLEEP,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(failing)) == 4
+    assert done.stubbed == ["sleep 10", "sleep 20", "sleep 40"]
+    assert done.stdout.startswith(NOTICE)
+    assert not done.called(WRITES.args)
+    # The steps after it learn that the job sat out an outage.
+    assert (done.runner_temp / "github-sat-out").exists()
+
+
+@needs_bash
+def test_the_issue_of_the_fix_bot_of_main_stays_open_after_an_outage(
+    tmp_path: Path,
+) -> None:
+    # A step before, such as fix main or the token of the release app, sat out an
+    # outage of GitHub, so the job passed without doing anything: that is no run
+    # that passes again, and the issue stays as it is.
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "fixes",
+        KEEPS,
+        answers=(Answer(r"issue list --state open .*", "7\n"), WRITES),
+        env={"FAILED": "false", "URL": "https://run/9"},
+        files={"$RUNNER_TEMP/github-sat-out": ""},
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.commands == []
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("job", "step", "answers", "write", "variables"),
+    [
+        (
+            "fixes",
+            SAYS,
+            (PR_COMMENTS,),
+            r"pr comment 42 .*",
+            {"PULL": "42", "SHA": SHA, "URL": "https://run/9"},
+        ),
+        (
+            "fixes",
+            KEEPS,
+            (Answer(r"issue list --state open .*", "7\n"),),
+            r"issue close 7 .*",
+            {"FAILED": "false", "URL": "https://run/9"},
+        ),
+        (
+            "fixes",
+            KEEPS,
+            (Answer(r"issue list --state open .*", ""),),
+            r"issue create .*",
+            {"FAILED": "true", "URL": "https://run/9"},
+        ),
+        (
+            "own-branch",
+            SAYS,
+            (),
+            r"pr comment 42 .*",
+            {"PULL": "42", "URL": "https://run/9"},
+        ),
+    ],
+)
+def test_a_write_of_the_fix_bot_that_github_fails_goes_out_once(
+    tmp_path: Path,
+    job: str,
+    step: str,
+    answers: tuple[Answer, ...],
+    write: str,
+    variables: dict[str, str],
+) -> None:
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        job,
+        step,
+        answers=(*answers, Answer(write, err="HTTP 502: Bad Gateway\n", code=1)),
+        env=variables,
+        stubs=SLEEP,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(write)) == 1
+    assert done.stubbed == []
+    assert done.stdout.startswith(NOTICE)
+
+
+@needs_bash
+def test_an_issue_of_the_fix_bot_that_github_fails_to_edit_is_edited_again(
+    tmp_path: Path,
+) -> None:
+    # An edit does the same the second time.
+    edit = r"issue edit 7 .*"
+    done = workflow_steps.run_step(
+        tmp_path,
+        "after-checks.yml",
+        "fixes",
+        KEEPS,
+        answers=(
+            Answer(r"issue list --state open .*", "7\n"),
+            Answer(edit, err="HTTP 502: Bad Gateway\n", code=1, once=True),
+            WRITES,
+        ),
+        env={"FAILED": "true", "URL": "https://run/9"},
+        stubs=SLEEP,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert len(done.called(edit)) == 2
+    assert done.stubbed == ["sleep 10"]
+    assert NOTICE not in done.stdout
 
 
 # ---------------------------------------------------------------- the command /fix
