@@ -1327,6 +1327,8 @@ def comparison(now: Mapping[str, Any], previous: Mapping[str, Any] | None) -> st
 class Issue:
     number: int
     baseline: dict[str, Any]
+    # The runs of the marks that the run fell below, which closing it accepts.
+    marks: tuple[dict[str, str], ...] = ()
 
 
 def open_issue_of(api: Api, repo: str) -> Issue | None:
@@ -1337,12 +1339,23 @@ def open_issue_of(api: Api, repo: str) -> Issue | None:
         if "pull_request" in item or not match:
             continue
         try:
-            baseline = json.loads(match[1]).get("baseline")
+            state = json.loads(match[1])
+            baseline = state.get("baseline")
         except (ValueError, AttributeError):
             continue
         if comparable(baseline):
-            return Issue(int(item["number"]), dict(baseline))
+            return Issue(int(item["number"]), dict(baseline), marks_in(state))
     return None
+
+
+def marks_in(state: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
+    """The runs of the marks in the marker of an issue, which closing it accepts."""
+    marks = state.get("marks")
+    return tuple(
+        {"run": str(mark.get("run") or ""), "date": str(mark.get("date") or "")}
+        for mark in (marks if isinstance(marks, list) else [])
+        if isinstance(mark, dict)
+    )
 
 
 def run_of(data: Mapping[str, Any]) -> tuple[str, str]:
@@ -1350,9 +1363,10 @@ def run_of(data: Mapping[str, Any]) -> tuple[str, str]:
 
 
 def accepted_levels(api: Api, repo: str) -> dict[tuple[str, str], dict[str, Any]]:
-    """The scores that a maintainer accepted, by the run before each drop: an issue of a
-    drop closed as not planned keeps the latest run that it showed, which later runs
-    compare with in place of that run. The newest issue counts for a run."""
+    """The scores that a maintainer accepted, by the run before each drop and the run of
+    each mark that it fell below: an issue of a drop closed as not planned keeps the
+    latest run that it showed, which later runs compare with in place of those runs.
+    The newest issue counts for a run."""
     listed = api.get(
         f"repos/{repo}/issues?labels={LABELS[0]}&state=closed&per_page=100"
     )
@@ -1371,7 +1385,8 @@ def accepted_levels(api: Api, repo: str) -> dict[tuple[str, str], dict[str, Any]
         except (ValueError, AttributeError):
             continue
         if comparable(baseline) and comparable(latest):
-            levels.setdefault(run_of(baseline), dict(latest))
+            for run in (baseline, *marks_in(state)):
+                levels.setdefault(run_of(run), dict(latest))
     return levels
 
 
@@ -1389,7 +1404,7 @@ def fallen_from(
     ):
         return None
     levels = accepted_levels(api, repo)
-    falls = []
+    falls: list[tuple[float, dict[str, Any]]] = []
     for key in SCORES:
         before = levels.get(run_of(best[key]), best[key])
         fall = float(before[key]) - float(now[key])
@@ -1403,7 +1418,25 @@ def logic_count(data: Mapping[str, Any]) -> int:
     return int(kinds.get(LOGIC, 0)) if isinstance(kinds, dict) else 0
 
 
-def issue_body(now: Mapping[str, Any], baseline: Mapping[str, Any]) -> str:
+def fallen_marks(
+    now: Mapping[str, Any], best: Mapping[str, Mapping[str, Any]] | None
+) -> tuple[dict[str, str], ...]:
+    """The runs of the marks that a run fell below, for the score or the score of the
+    logic: the issue keeps them, so that closing it accepts the fall of both."""
+    if best is None:
+        return ()
+    return tuple(
+        dict(zip(("run", "date"), run_of(best[key]), strict=True))
+        for key in SCORES
+        if float(now[key]) < float(best[key][key]) - TOLERANCE
+    )
+
+
+def issue_body(
+    now: Mapping[str, Any],
+    baseline: Mapping[str, Any],
+    marks: Iterable[Mapping[str, str]] = (),
+) -> str:
     """The text of the issue: the scores before and now, and the functions with more
     survivors of the logic than before."""
 
@@ -1417,7 +1450,12 @@ def issue_body(now: Mapping[str, Any], baseline: Mapping[str, Any]) -> str:
 
     # The latest run, which later runs compare with once a maintainer accepts it.
     state = json.dumps(
-        {"baseline": kept(baseline), "latest": kept(now)}, sort_keys=True
+        {
+            "baseline": kept(baseline),
+            "latest": kept(now),
+            "marks": [dict(mark) for mark in marks],
+        },
+        sort_keys=True,
     ).replace("--", "-\\u002d")
     before = kept(baseline)["logic_by_function"]
     grown = {
@@ -1474,7 +1512,7 @@ def keep_issue(
         if dropped(now, issue.baseline):
             api.patch(
                 f"repos/{repo}/issues/{issue.number}",
-                {"body": issue_body(now, issue.baseline)},
+                {"body": issue_body(now, issue.baseline, issue.marks)},
             )
             return f"The score is still below that before the drop: updated #{issue.number}."
         api.post(
@@ -1490,13 +1528,15 @@ def keep_issue(
             {"state": "closed", "state_reason": "completed"},
         )
         return f"The score is back: closed #{issue.number}."
-    baseline = fallen_from(api, repo, now, mark_in(now) or best_of(previous))
+    best = mark_in(now) or best_of(previous)
+    baseline = fallen_from(api, repo, now, best)
     if baseline is None:
         return "The score didn't drop."
+    body = issue_body(now, baseline, fallen_marks(now, best))
     response = api.request(
         "POST",
         f"repos/{repo}/issues",
-        {"title": TITLE, "body": issue_body(now, baseline), "labels": LABELS},
+        {"title": TITLE, "body": body, "labels": LABELS},
     )
     return f"The score dropped: opened #{response.data['number']}."
 

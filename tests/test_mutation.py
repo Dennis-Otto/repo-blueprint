@@ -2011,6 +2011,37 @@ def test_a_maintainer_accepts_a_lower_score_by_closing_the_issue_as_not_planned(
     assert "| Score | 85.0 % | 84.4 % |" in github.issues[2]["body"]
 
 
+def test_one_closure_accepts_the_fall_of_both_scores_from_marks_of_different_runs() -> (
+    None
+):
+    # The best score comes from the second run, the best of the logic from the first;
+    # the third run falls below both.
+    github = FakeGitHub()
+    api = Api(github)
+    lines, last = weekly_runs(api, [(90.0, 95.0), (91.0, 94.8), (85.0, 90.0)])
+    assert lines[-1] == "The score dropped: opened #1."
+    # The issue keeps the runs of both marks; an update keeps them as well.
+    again = comparable(85.0, 90.0, run=RUN, date="2026-09-20")
+    again["best"] = mutation.raised(mutation.best_of(last), again)
+    assert keep_issue(api, REPO, again, last).startswith("The score is still below")
+    issue = mutation.open_issue_of(api, REPO)
+    assert issue is not None
+    assert [mark["run"] for mark in issue.marks] == [f"{BEFORE}1", f"{BEFORE}0"]
+    github.issues[1].update(state="closed", state_reason="not_planned")
+
+    now = comparable(85.0, 90.0, run=RUN, date="2026-09-24")
+    now["best"] = mutation.raised(mutation.best_of(again), now)
+    assert keep_issue(api, REPO, now, again) == "The score didn't drop."
+
+
+def test_the_marks_of_an_issue_take_only_runs() -> None:
+    assert mutation.marks_in({"marks": "run"}) == ()
+    assert mutation.marks_in({"marks": [1, {"run": "x"}]}) == (
+        {"run": "x", "date": ""},
+    )
+    assert mutation.fallen_marks(comparable(80.0, 90.0), None) == ()
+
+
 def test_only_an_issue_of_a_drop_closed_as_not_planned_accepts_a_score() -> None:
     github = FakeGitHub()
     latest = comparable(85.0, 95.0, run=RUN)

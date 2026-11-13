@@ -1,6 +1,6 @@
 # The mutation tests run in parts, list the logic first and open an issue when the score drops
 
-- Status: accepted, amended by [0150](0150-a-drop-of-the-mutation-score-counts-from-the-best-run.md): a run is compared with the best of the runs before
+- Status: accepted, amended by [0152](0152-a-drop-of-the-mutation-score-counts-from-the-best-run.md): a run is compared with the best of the runs before
 - Date: 2026-10-18
 
 ## Context
