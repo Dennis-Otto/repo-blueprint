@@ -36,7 +36,7 @@ The [changelog](https://github.com/Dennis-Otto/repo-blueprint/blob/main/CHANGELO
 ## Always
 
 - New versions of the dependencies and the actions, and every new major version of Nextcloud, reach the repositories through the update bots.
-- Every new release of the blueprint reaches every repository made from it as a pull request of the blueprint bot: within minutes for the repositories of the release app, which the Rollout takes one after the other, and with the weekly run of the bot for every other one.
+- Every new release of the blueprint reaches every repository made from it as a pull request of the blueprint bot: within minutes for the repositories of the release app, which the Rollout takes one after the other, and within a day for every other one, whose bot the nightly look of the bot-health bot starts for a newer release.
 - What GitHub adds for the security of repositories and releases is taken up when it fits, as immutable releases and their attestations were.
 
 ## Not planned

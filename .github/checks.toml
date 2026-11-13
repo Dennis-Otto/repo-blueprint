@@ -519,10 +519,10 @@ autofix = """A test of the action that fails needs a person, who knows what the 
 
 [check.home-assistant]
 title = "The validations of Home Assistant"
-problem = """A step of the check failed before HACS and hassfest ran. When one of them
-fails, the PR coach explains that one instead."""
-why = """HACS and hassfest run in one job, which takes one runner instead of two; they
-report only once the job got that far."""
+problem = """A step of the check failed before HACS, hassfest and the oldest Home
+Assistant ran. When one of them fails, the PR coach explains that one instead."""
+why = """HACS, hassfest and the oldest Home Assistant run in one job, which takes one
+runner instead of three; they report only once the job got that far."""
 fix = """Run the check again; if it fails at the same step, the log of the check says
 why."""
 docs = "https://developers.home-assistant.io/docs/creating_integration_manifest"
@@ -554,6 +554,27 @@ commands = [
 ]
 docs = "https://developers.home-assistant.io/docs/creating_integration_manifest"
 autofix = """A rule of Home Assistant that the integration breaks needs a person, who knows what the integration should do."""
+
+[check.oldest-home-assistant]
+title = "The oldest Home Assistant of hacs.json"
+problem = """A module of the integration doesn't import on the oldest Home Assistant that
+`hacs.json` names in `homeassistant`, or a requirement of its manifest doesn't install
+there; the annotations name each module with its error. Mostly the code uses something
+that came with a newer Home Assistant than that minimum."""
+why = """HACS offers each release to every Home Assistant from that minimum on, but the
+tests run on the newer one of the lock file. An integration that needs more than its
+minimum breaks for the users of the older versions while every other check passes."""
+fix = """Either keep the code working on the minimum, such as with a fallback for the
+older Home Assistant, or raise `homeassistant` in `hacs.json` to the oldest release
+that has what the code needs, and say so in the changelog. With Docker, this starts the
+Python of that Home Assistant in your checkout, where `import custom_components.<domain>.<module>`
+shows the error of the annotation:"""
+commands = [
+  'docker run --rm -it -v "$PWD:/github/workspace:ro" -w /github/workspace --entrypoint python3 ghcr.io/home-assistant/home-assistant:"$(jq -r .homeassistant hacs.json)"',
+]
+docs = "https://hacs.xyz/docs/publish/start/#hacsjson"
+autofix = """Whether the code keeps the older Home Assistant or the minimum rises is a choice
+for a person, who knows its users."""
 
 [check.zizmor]
 title = "The security of the workflows (zizmor)"

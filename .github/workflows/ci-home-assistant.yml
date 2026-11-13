@@ -1,7 +1,8 @@
 name: CI (home-assistant)
 
 # Home Assistant integration: the hash-pinned test tools of requirements-test.txt and
-# the checks of scripts/check.sh, plus the validation of HACS and of hassfest.
+# the checks of scripts/check.sh, plus the validation of HACS and of hassfest and the
+# integration on the oldest Home Assistant that its hacs.json names.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
@@ -166,9 +167,9 @@ jobs:
           [[ -f "$script" ]] || script=blueprint.py
           python3 "$script" coach explain "$CHECK"
 
-  # HACS and hassfest in one job, which takes one runner instead of two; each step
-  # runs also when the other failed, so that the check reports both, and the PR coach
-  # explains each one that failed.
+  # HACS, hassfest and the oldest Home Assistant in one job, which takes one runner
+  # instead of three; each step runs also when one before failed, so that the check
+  # reports all of them, and the PR coach explains each one that failed.
   home-assistant:
     name: home-assistant
     # Not in the blueprint itself; generated repositories don't have this line.
@@ -216,6 +217,70 @@ jobs:
           EOF
           echo "::add-matcher::$RUNNER_TEMP/hassfest.json"
           docker run --rm --volume "$PWD:/github/workspace:ro" ghcr.io/home-assistant/hassfest:latest
+      # HACS offers a release to every Home Assistant from the minimum of hacs.json on,
+      # but the tests run on the Home Assistant of the lock file, which Renovate moves on
+      # every month. This step imports every module of each integration in the image of
+      # that oldest Home Assistant, with its Python and its packages, after it installed
+      # the requirements of the manifest as Home Assistant does, so that code which needs
+      # a newer Home Assistant fails here and not for its users. hacs.json alone names
+      # the minimum, and the image of that release is what its users run.
+      - name: Load the integration on the oldest Home Assistant
+        id: oldest
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 10
+        run: |
+          if [[ ! -f hacs.json ]]; then
+            echo "There is no hacs.json to name the oldest Home Assistant; nothing to load."
+            exit 0
+          fi
+          minimum="$(jq -r '.homeassistant // ""' hacs.json)"
+          if [[ -z "$minimum" ]]; then
+            echo "hacs.json names no oldest Home Assistant, so HACS offers each release to every one; nothing to load."
+            exit 0
+          fi
+          if [[ ! "$minimum" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$ ]]; then
+            echo "::error file=hacs.json,title=No release of Home Assistant::hacs.json names $minimum as the oldest Home Assistant, which is no release such as 2026.8.0."
+            exit 1
+          fi
+          echo "Loading the integration on Home Assistant $minimum, the oldest that hacs.json promises."
+          docker run --rm --interactive --volume "$PWD:/github/workspace:ro" --workdir /github/workspace \
+            --entrypoint python3 "ghcr.io/home-assistant/home-assistant:$minimum" - <<'EOF'
+          """Imports every module of each integration in custom_components/."""
+          import importlib
+          import json
+          import sys
+          import traceback
+          from importlib.metadata import version
+          from pathlib import Path
+
+          print(f"Home Assistant {version('homeassistant')} on Python {sys.version.split()[0]}")
+          sys.path.insert(0, str(Path.cwd()))
+          failed = 0
+          for manifest in sorted(Path("custom_components").glob("*/manifest.json")):
+              requirements = json.loads(manifest.read_text(encoding="utf-8")).get("requirements") or []
+              if requirements:
+                  import homeassistant
+                  from homeassistant.util.package import install_package
+
+                  constraints = Path(homeassistant.__file__).parent / "package_constraints.txt"
+                  for requirement in requirements:
+                      if not install_package(requirement, upgrade=False, constraints=str(constraints)):
+                          failed += 1
+                          print(f"::error file={manifest.as_posix()},title=A requirement that doesn't install::{requirement} doesn't install on the oldest Home Assistant.")
+              for path in sorted(manifest.parent.rglob("*.py")):
+                  parts = path.with_suffix("").parts
+                  module = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+                  try:
+                      importlib.import_module(module)
+                  except BaseException as error:
+                      failed += 1
+                      traceback.print_exc()
+                      reason = " ".join(traceback.format_exception_only(error)[-1].split())
+                      print(f"::error file={path.as_posix()},title=Not on the oldest Home Assistant::{module} doesn't import: {reason}")
+                  else:
+                      print(f"{module} imports.")
+          sys.exit(1 if failed else 0)
+          EOF
       # The PR coach: what failed, why it matters and how to fix it, in the summary
       # of the check and as its annotation, from .github/checks.toml: each check
       # of the job that failed, or the job itself when none of them did.
@@ -226,6 +291,7 @@ jobs:
           FAILED: |
             ${{ steps.hacs.outcome == 'failure' && 'hacs' || '' }}
             ${{ steps.hassfest.outcome == 'failure' && 'hassfest' || '' }}
+            ${{ steps.oldest.outcome == 'failure' && 'oldest-home-assistant' || '' }}
         run: |
           script=.github/blueprint.py
           [[ -f "$script" ]] || script=blueprint.py
