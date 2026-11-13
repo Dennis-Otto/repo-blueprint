@@ -12,7 +12,7 @@ The blueprint works for every account and organization on GitHub. A repository m
 - **Renovate,** which keeps the dependencies current: in a workflow of each repository, as your release app, or as the Mend Renovate app, which you install. The Renovate workflow of the blueprint runs only for the repositories of the blueprint's owner.
 - **The AI of the issue assistant** is optional. Without it, the issue assistant still labels new issues, reminds and closes, and carries out the commands of the maintainer, and no secret is needed.
 - **The settings app** is optional: a second app with only the permissions of the settings, which then applies them in place of the release app, so that the release app needs no *Administration*. [Step 8](#8-the-settings-app-optional) sets it up.
-- **The Rollout** is optional: the blueprint bot of each repository runs every week and brings the latest release of the blueprint on its own. The Rollout of the blueprint only starts the bots of its owner's repositories right after a release.
+- **The Rollout** is optional: the nightly look of the bot-health bot starts the blueprint bot of each repository once the blueprint has a newer release, so a release arrives within a day, and the bot still runs every week as the safety net. The Rollout of the blueprint only starts the bots of its owner's repositories right after a release, within minutes.
 
 ## 1. Copy the blueprint
 

@@ -23,7 +23,7 @@ Renovate, mehrmals am Tag als Release-App des Eigentümers, für jedes Repositor
 
 ## Updates
 
-Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request.
+Innerhalb eines Tages nach jedem Release des Blueprints (in den Repositories des Rollouts innerhalb von Minuten), und jede Woche, führt der Blueprint-Bot `copier update` aus und öffnet einen Pull Request.
 
 **Womit:** `blueprint-update.yml`.
 
@@ -32,7 +32,7 @@ Gleich nach jedem Release des Blueprints, und jede Woche, führt der Blueprint-B
   <img src="../images/diagrams/how-an-update-of-the-blueprint-arrives.de.svg" alt="Wie ein Update des Blueprints ankommt: Gleich nach jedem Release des Blueprints, und jede Woche, prüft der Blueprint-Bot zuerst das neueste veröffentlichte Release. Ein Release, das nicht unveränderlich ist, dessen Tag nicht auf dem main-Branch des Blueprints liegt oder das der Release-Workflow des Blueprints nicht signiert hat, lässt den Lauf fehlschlagen, und nichts wird aktualisiert. Sonst führt der Bot copier update auf dieses Release aus. Ist sein Pull Request noch offen und hast du auf seinen Branch committet, überlässt der Bot dir den Branch und sagt einmal, dass ein neueres Release erschienen ist. Sonst öffnet er den Pull Request oder bringt den offenen auf das neue Release. Mit Konflikten, die Auto-Merge abschalten, oder mit BLUEPRINT_AUTOMERGE auf off, wartet er auf den Maintainer; sonst merged er sich selbst, sobald alle Prüfungen grün sind.">
 </picture>
 
-Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet.
+Der Blueprint-Bot (`blueprint-update.yml`) führt jede Woche `copier update` aus, und gleich nach jedem Release des Blueprints, dessen Rollout-Workflow ihn in jedem Repository der Release-App startet. Jedes andere Repository, etwa eines eines anderen Eigentümers, bekommt ein Release innerhalb eines Tages: Der nächtliche Blick des Bot-Health-Bots vergleicht die Version aus `.copier-answers.yml` mit dem neuesten Release des Blueprints, den sie nennt, und startet den Blueprint-Bot, wenn dieses neuer ist und der Pull Request des Bots es noch nicht bringt, außer der Bot läuft schon oder ist an diesem Release gescheitert, was sein wöchentlicher Lauf und sein Issue der Fehlschläge übernehmen. Dieser Blick fügt keinen eigenen Lauf hinzu, kostet ein privates Repository also keine Minute.
 
 - **Das Release:** Er nimmt das neueste veröffentlichte Release des Blueprints, den `.copier-answers.yml` nennt, vielleicht eines Forks davon, nie einen Tag, dessen Release noch ein Entwurf ist.
 - **Erst geprüft:** Vor dem Update prüft er das Release: Es muss unveränderlich sein, sein Tag muss auf einen Commit von `main` des Blueprints zeigen, der nicht älter ist als die Version des Repositorys, und der Release-Workflow des Blueprints muss den Tag signiert haben (gitsign, wie [SECURITY.md](https://github.com/Dennis-Otto/repo-blueprint/blob/main/SECURITY.md#verify-a-release) zeigt). Jedes andere Release lässt den Lauf fehlschlagen, bevor Copier etwas rendert, mit dem Grund und dem, was zu tun ist, in der Zusammenfassung des Laufs, sodass ein Tag, den jemand anderes gepusht hat, kein Repository erreicht; antworten GitHub oder Sigstore nicht, fragt der Bot dreimal und wartet dann auf seinen nächsten Lauf. Einen Blueprint, der nicht auf GitHub liegt, kann er nicht prüfen, also aktualisiert er nicht von ihm.

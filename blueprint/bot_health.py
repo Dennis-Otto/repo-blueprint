@@ -25,12 +25,17 @@ keeps one issue open while the social preview that GitHub shows is not the commi
 not bot-failure, since nothing fails there. It also ticks the box for a rebase of a
 pull request of Renovate that Renovate leaves alone after a merge of the default
 branch by a person, and keeps one issue with those whose branch carries a change of a
-person that the new branch would drop (decision 0144). In the blueprint, it also
-keeps one issue with the warnings and errors in the log of Renovate.
+person that the new branch would drop (decision 0144). When the blueprint has a
+newer release than the repository and the pull request of the blueprint bot doesn't
+bring it yet, the look starts the blueprint bot, so that a repository that the Rollout
+doesn't start, such as one of another owner, gets it within a day (decision 0052). In
+the blueprint, it also keeps one issue with the warnings and errors in the log of
+Renovate.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -52,6 +57,14 @@ from blueprint.social_preview import (
     settings_page,
     shows_the_project,
 )
+from blueprint.update import (
+    ANSWERS,
+    answered_release,
+    answered_source,
+    released_tag,
+    version_key,
+)
+from blueprint.update import BRANCH as UPDATE_BRANCH
 
 LABEL = "bot-failure"
 LABEL_COLOR = "d93f0b"
@@ -105,6 +118,8 @@ EVENT_BOTS = frozenset({"Area labels", "Commands", "Dependabot maintenance", "We
 # STOPPED_SINCE, so that a look that GitHub starts late or misses leaves none behind.
 # A run that ran again has a later attempt, so each gets one second try.
 OWN_WORKFLOW = ".github/workflows/bot-health.yml"
+# The blueprint bot, which the daily look starts for a newer release of the blueprint.
+BLUEPRINT_BOT = ".github/workflows/blueprint-update.yml"
 STOPPED_SINCE = timedelta(days=2)
 OWN_ISSUE_LINE = re.compile(r"^[ \t]*#[ \t]*bot-health:[ \t]*own-issue\b", re.MULTILINE)
 # The runs that do what a schedule does. A push may start the same workflow, but its
@@ -1295,6 +1310,70 @@ def again_after_stops(
     return lines, done
 
 
+def newer_release(tag: str, have: str) -> bool:
+    """Whether the latest release of the blueprint comes after the version that this
+    repository has, as Copier names it. GitHub calls a release latest by its date or by
+    hand, so an older one is never newer; a version without a number leaves it to the
+    blueprint bot, which verifies the release and refuses an older one."""
+    have = released_tag(have)
+    ours, theirs = version_key(have), version_key(tag)
+    if ours is None or theirs is None:
+        return tag != have
+    return theirs > ours
+
+
+def blueprint_report(
+    api: Api, repo: str, root: Path, branch: str, bot: Json | None, *, start: bool
+) -> tuple[str, bool]:
+    """The daily look for a newer release of the blueprint, and whether it started the
+    blueprint bot for it. The Rollout starts the bots of the release app of the
+    blueprint right after a release; every other repository, such as one of another
+    owner, would wait for the weekly run of its bot, so this look starts it within a
+    day, without a schedule of its own (decision 0052). Nothing to say without the bot
+    or its answers, as in the blueprint itself."""
+    answers = root / ANSWERS
+    if bot is None or bot["state"] != "active" or not answers.is_file():
+        return "", False
+    text = answers.read_text(encoding="utf-8")
+    source = answered_source(text)
+    if not source:
+        return "", False
+    have = answered_release(text)
+    latest = api.get(f"repos/{source}/releases/latest") or {}
+    tag = str(latest.get("tag_name") or "")
+    if not tag:
+        return f"{code(source)} has no published release.", False
+    if not newer_release(tag, have):
+        return (
+            f"This repository has {code(have)}, and {code(tag)} is the latest.",
+            False,
+        )
+    brought = api.get(f"repos/{repo}/contents/{ANSWERS}?ref={UPDATE_BRANCH}")
+    content = str((brought or {}).get("content") or "")
+    if released_tag(answered_release(base64.b64decode(content).decode())) == tag:
+        return f"The pull request of the blueprint bot brings {code(tag)}.", False
+    out = f"{code(tag)} is out, and this repository has {code(have or 'none')}"
+    # A run of the bot that the Rollout or its schedule started brings it already,
+    # and one that failed since the release fails again: its weekly run and its issue
+    # of failures take that on, so that the owner gets no mail of a failure each day.
+    runs = runs_of(api, repo, branch, bot, most=50)
+    if any(run.status != "completed" for run in runs):
+        return f"{out}: the blueprint bot is running already.", False
+    published = str(latest.get("published_at") or "")
+    if published and any(
+        run.conclusion == "failure" and run.created >= datetime.fromisoformat(published)
+        for run in runs[:1]
+    ):
+        return (
+            f"{out}: the blueprint bot failed on it, so it waits for its weekly run.",
+            False,
+        )
+    if not start:
+        return f"{out}: the blueprint bot starts in a later look.", False
+    api.post(f"repos/{repo}/actions/workflows/{bot['id']}/dispatches", {"ref": branch})
+    return f"{out}: started the blueprint bot.", True
+
+
 def sweep(
     api: Api,
     repo: str,
@@ -1335,6 +1414,7 @@ def sweep(
         (str(workflow["name"]), texts[str(workflow["path"])]) for workflow in workflows
     )
     starts = 0
+    begun: set[int] = set()
     healthy = True
     own = next((item for item in workflows if item["path"] == OWN_WORKFLOW), None)
     stopped: list[Run] = []
@@ -1378,6 +1458,8 @@ def sweep(
             elif notices is not None and not notices:
                 notices.append(unreachable(error))
         starts += started
+        if started:
+            begun.add(int(workflow["id"]))
         lines.append(f"| {code(name)} | {state} |")
     # After the look at every workflow, so that a look that runs again doesn't meet
     # the daily look at the same workflow.
@@ -1392,6 +1474,22 @@ def sweep(
     if own is not None and stops:
         heading = f"#### Runs of {code(str(own['name']))} that Harden-Runner stopped"
         lines += ["", heading, "", *stops]
+    # A bot that the look started for its missed schedule brings the release anyway.
+    bot = next((item for item in workflows if item["path"] == BLUEPRINT_BOT), None)
+    if bot is not None and int(bot["id"]) not in begun:
+        try:
+            news, started = blueprint_report(
+                api, repo, root, branch, bot, start=starts < MOST_STARTS
+            )
+        except GitHubError as error:
+            news, started = f"Couldn't look: {code(str(error))}", False
+            if not error.unavailable:
+                healthy = False
+            elif notices is not None and not notices:
+                notices.append(unreachable(error))
+        starts += started
+        if news:
+            lines += ["", "#### Releases of the blueprint", "", news]
     try:
         uploaded = preview_report(api, repo, root, branch, issues.get(PREVIEW), opener)
     except (GitHubError, Unreadable) as error:
