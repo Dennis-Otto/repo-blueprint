@@ -7,6 +7,14 @@ requests when there is none.
 
 ## Unreleased
 
+## [1.18.1](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.18.0...v1.18.1) (2026-11-13)
+
+### Bug fixes
+
+- **The bots after the checks and the branch bot sit out an outage of GitHub:** the report of flaky tests, the bot for cancelled checks, the fix bot, the bot of the title and the entry and the diagram bot failed their run, and mailed you, at the first error of GitHub, and so did a token of the release app that GitHub failed, for those bots and for the branch bot. Each call now tries again, 10, 20 and 40 seconds apart, and when GitHub keeps failing, the run passes with the notice *GitHub is unavailable*, as its next run catches up. A comment, an issue or a commit that GitHub failed goes out only once, and a token that GitHub refuses while it answers still fails the run, with what to check ([#786](https://github.com/Dennis-Otto/repo-blueprint/issues/786)).
+- **The check of the lock files no longer fails now and then on a fresh runner:** `blueprint.py locks --compile` compiled every lock file of pip-compile side by side, and each run of uv wrote what it found about the Python into uv's cache at the same moment, so one of them sometimes failed with `failed to rename file … interpreter-v4` and passed on a rerun. It now compiles the first lock file alone, which fills the cache, and only then the others side by side ([#894](https://github.com/Dennis-Otto/repo-blueprint/issues/894)).
+- **The home page of a website keeps the text of its preview picture:** since the home page shows the designed preview of the repository, it also dropped `og:image:alt`, the text that describes the picture to people who can't see it, so a project's check of its website failed. The home page now keeps `og:image:alt` and `twitter:image:alt`.
+
 ## [1.18.0](https://github.com/Dennis-Otto/repo-blueprint/compare/v1.17.0...v1.18.0) (2026-11-13)
 
 ### Features
