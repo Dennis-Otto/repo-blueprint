@@ -488,12 +488,18 @@ def mutation_command(
         print(mutation.keep_issue(api, repo, now, previous))
         return 0
     report = mutation.Report.of(mutation.read_parts(Path(arguments.parts_folder)))
-    previous = mutation.baseline_of(mutation.read_previous(arguments.previous))
+    last = mutation.read_previous(arguments.previous)
+    previous = mutation.baseline_of(last)
     now = report.data(arguments.run, datetime.now(UTC))
+    # The high-water mark, which the next run compares with, so that a fall of less
+    # than the tolerance each week still adds up to a drop.
+    best = mutation.raised(mutation.best_of(last), now)
     # An incomplete run keeps the last complete one, so that the next run compares
     # with that, and a drop past an incomplete run still shows.
     if not now["complete"] and previous is not None:
         now["baseline"] = previous
+    if best is not None:
+        now["best"] = best
     out = Path(arguments.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "mutation.json").write_text(

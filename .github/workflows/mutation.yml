@@ -12,12 +12,12 @@ name: Mutation
 # report puts the parts together into one score, lists first the survivors that
 # change the logic, with their changes, and keeps the details as an artifact. A low
 # score fails nothing, a run that measures nothing fails, with the tests that failed
-# without any mutant; a score of the default branch that drops below that of the run
-# before opens one issue, which closes once a run is back. A pull request that changes
-# how the mutants run collects the stats and tries a sample of the mutants in one part,
-# Infection the mutants of a few files, and shows a defect as a red check. That check
-# isn't required: a pull request that merges itself, such as an update of mutmut,
-# doesn't wait for it.
+# without any mutant; a score of the default branch that drops below the best of the
+# runs before opens one issue, which closes once a run is back. A pull request that
+# changes how the mutants run collects the stats and tries a sample of the mutants in
+# one part, Infection the mutants of a few files, and shows a defect as a red check.
+# That check isn't required: a pull request that merges itself, such as an update of
+# mutmut, doesn't wait for it.
 # https://github.com/Dennis-Otto/repo-blueprint
 
 on:
