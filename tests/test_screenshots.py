@@ -29,7 +29,6 @@ from blueprint.screenshots import (
     REPORT,
     SHOWN,
     STRIP,
-    VEIL,
     Correction,
     Kept,
     Page,
@@ -397,8 +396,8 @@ def test_the_share_as_the_pull_request_shows_it(
 
 BLUE = (82, 108, 254, 255)
 # The blue of the pictures above in a difference: in its own color, behind a veil of
-# a fifth of white.
-VEILED_BLUE = (116, 137, 254)
+# its own average color, which is this blue again.
+VEILED_BLUE = BLUE[:3]
 
 
 def picture(
@@ -541,7 +540,7 @@ def test_the_difference_of_an_animation_is_that_of_its_frame_with_the_most_chang
     assert red_of(drawn) == {(0, 0), (1, 0), (2, 0)} | {
         spot for spot in outline(-2, -2, 4, 2) if spot[0] >= 0 and spot[1] >= 0
     }
-    assert drawn.getpixel((10, 5)) == (115, 115, 115)
+    assert drawn.getpixel((10, 5)) == (80, 80, 80)
 
 
 def test_a_difference_needs_the_same_size_and_frames_and_a_change() -> None:
@@ -588,20 +587,34 @@ def test_changes_near_each_other_share_a_frame() -> None:
     assert regions(Image.new("L", (100, 100)), 10) == []
 
 
-def test_a_difference_keeps_the_picture_recognizable() -> None:
+@pytest.mark.parametrize(
+    ("page", "writing", "veiled"),
+    [
+        # A dark page stays dark, and its light text stays light.
+        ((28, 28, 28), (230, 230, 230), ((28, 28, 28), (190, 190, 190))),
+        # A light page stays light, and its dark text stays dark.
+        ((250, 250, 250), (20, 20, 20), ((249, 249, 249), (65, 65, 65))),
+    ],
+)
+def test_a_difference_keeps_the_picture_recognizable(
+    page: tuple[int, int, int],
+    writing: tuple[int, int, int],
+    veiled: tuple[tuple[int, int, int], tuple[int, int, int]],
+) -> None:
     # homedarts-for-autodarts#716: a dark page in a pale gray left nothing to
-    # recognize. Its dark background and light text keep their contrast now.
-    dark, light = (28, 28, 28, 255), (230, 230, 230, 255)
-    before = Image.new("RGBA", (200, 100), dark)
+    # recognize, and a veil of white still made it a medium gray. The veil of the
+    # picture's own average color keeps its background and the contrast of its text.
+    before = Image.new("RGBA", (200, 100), (*page, 255))
     for x in range(20, 60):
-        before.putpixel((x, 20), light)
+        for y in range(15, 25):
+            before.putpixel((x, y), (*writing, 255))
     after = before.copy()
-    after.putpixel((100, 50), light)
+    after.putpixel((100, 50), (*writing, 255))
     drawn = looked_at(difference(saved(before), saved(after)))
 
     background, text = drawn.getpixel((150, 90)), drawn.getpixel((30, 20))
-    assert background == (73, 73, 73)
-    assert text == (235, 235, 235)
+    assert (background, text) == veiled
+    assert max(abs(a - b) for a, b in zip(veiled[0], page, strict=True)) <= 6
     assert drawn.getpixel((100, 50)) == RED
 
 
@@ -668,12 +681,7 @@ def test_the_comparison_of_an_animation_is_of_its_frame_with_the_most_changes() 
     assert drawn.getpixel((10, 148)) == STRIP
     assert drawn.getpixel((72, 148)) == ARROW
     # The difference shows the same frame.
-    veiled = Image.blend(
-        Image.new("RGB", (1, 1), STEPS[3]), Image.new("RGB", (1, 1), "white"), VEIL
-    )
-    assert looked_at(difference(before, after)).getpixel((0, 0)) == veiled.getpixel(
-        (0, 0)
-    )
+    assert looked_at(difference(before, after)).getpixel((0, 0)) == STEPS[3]
 
 
 def gradient(size: tuple[int, int], changed: tuple[tuple[int, int], ...] = ()) -> bytes:

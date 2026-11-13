@@ -19,7 +19,7 @@ Option 2, and the difference stays beside it for the exact pixels. For each chan
 
 The comparison cuts both frames to the box around every change, with 60 pixels of room around it and at least 360 of each side, in pixels of the picture shown 1000 pixels wide at its longer side, moved inside the picture at its edges. It keeps the pixels at their size, so that a text in it stays as readable as in the picture. The two places stand side by side or one above the other, whichever a phone held upright (9 to 16) shows larger, so a wide place, such as a line of text, stands above the other; the one before comes first, and a gray strip with a white arrow lies between them. Each group of changes gets the same red frame on both sides, as wide and as far from its changes as in the difference, measured in the comparison.
 
-The difference shows the new picture in its own colors behind a veil of a fifth of white instead of a gray copy, so that a dark page stays dark, its text readable, and the red of the changes still stands out. Its PNG is in RGB now, no longer a palette of the grays.
+The difference shows the new picture in its own colors behind a veil of a fifth of its own average color instead of a gray copy, so that a dark page stays dark and a light one light, its text readable, and the red of the changes still stands out. Its PNG is in RGB now, no longer a palette of the grays.
 
 `kept()` takes a comparison only as `keep` names it, a PNG at `comparison/<path>` of a changed picture and no link, together with a whole `frame` from 1 up to `frames`, and neither without the other; a report of a `keep` before this change names none. The table of the pull request of the screenshot bot names the frame of an animation, and the bot commits nothing of `comparison/`.
 

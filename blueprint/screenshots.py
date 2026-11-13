@@ -102,9 +102,10 @@ Size = tuple[int, int]
 # The red of each changed pixel of a difference and of the frames around the changes,
 # as the visual checks of the repositories draw it.
 RED = (220, 38, 38)
-# A difference shows the new picture in its own colors behind a light veil of white,
-# this share of each pixel, so that the picture and its text stay clear and the red
-# of the changes still stands out.
+# A difference shows the new picture in its own colors behind a thin veil of its own
+# average color, this share of each pixel: it softens the picture a little, so that
+# the red of the changes stands out, while a dark page stays dark, a light one light,
+# and the picture and its text stay clear.
 VEIL = 0.2
 # About the width at which a phone, or Telegram, shows a picture: the frames around the
 # changes of a difference keep their size in such pixels, so that a change of a
@@ -679,8 +680,8 @@ def most_changed(before: bytes, after: bytes) -> Most | None:
 def difference(before: bytes, after: bytes) -> bytes | None:
     """A picture of what changed between two pictures of the same size and frames, as
     a PNG: each changed pixel in red over the new picture in its own colors behind a
-    light veil, of the pair of frames with the most changed pixels for an animation.
-    A red frame around each place of change keeps a change of a single pixel in sight
+    thin veil of its own average color, of the pair of frames with the most changed
+    pixels for an animation. A red frame around each place of change keeps a change of a single pixel in sight
     when a phone shows the picture scaled down to about SHOWN pixels wide. None when
     the sizes or numbers of frames differ or no pixel changed."""
     most = most_changed(before, after)
@@ -746,9 +747,9 @@ def drawing(most: Most) -> bytes:
     that changes found with the most changed pixels."""
     from PIL import Image
 
-    drawn = Image.blend(
-        flattened(most.size, most.after), Image.new("RGB", most.size, "white"), VEIL
-    )
+    shown = flattened(most.size, most.after)
+    average = shown.resize((1, 1), Image.Resampling.BOX).getpixel((0, 0))
+    drawn = Image.blend(shown, Image.new("RGB", most.size, average), VEIL)
     drawn.paste(RED, mask=most.mask)
     longest = max(most.size)
     framed(drawn, regions(most.mask, scaled(NEAR, longest)), longest)
@@ -1599,7 +1600,7 @@ def drawn_differences(found: Kept) -> str:
         "frames, in `comparison/` the place of the change before and after in one "
         "picture, in its own colors and cut to the changes, with a red frame around "
         "each change on both sides, and in `diff/` the whole picture with every "
-        "changed pixel in red, behind a light veil. Both show the same frame: for an "
+        "changed pixel in red, behind a thin veil. Both show the same frame: for an "
         "animation the one with the most changes, which the table names.\n"
     )
 
