@@ -65,7 +65,7 @@ Diese Art bringt diese Schritte dazu:
 
 <!-- --8<-- [start:real-repository] -->
 
-Diese öffentlichen Repositories dieser Art sind aus dem Blueprint entstanden:
+Diese öffentlichen Repositorys dieser Art sind aus dem Blueprint entstanden:
 
 - **[Paperless Sync](https://github.com/Dennis-Otto/paperless-sync)**: die Dokumente von Paperless-ngx in Nextcloud Files, nach Korrespondent, Typ und Jahr.
 - **[Paperless Unified Search](https://github.com/Dennis-Otto/paperless-unified-search)**: die Volltextsuche von Paperless-ngx in der Suche von Nextcloud.

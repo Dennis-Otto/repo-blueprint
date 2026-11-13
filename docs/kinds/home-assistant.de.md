@@ -51,7 +51,7 @@ Nach jedem Release, und jede Woche für das neueste, prüft `verify-release.yml`
 Diese Art bringt diese Schritte dazu:
 
 - Dem Repository die Beschreibung und die Topics geben, die HACS anzeigt und seine Prüfung braucht: Die Antwort `topics` nennt sie in `.github/repository.toml`, und `settings apply` setzt sie.
-- Das Repository bei den Default-Repositories von HACS einreichen: <https://github.com/hacs/default>.
+- Das Repository bei den Default-Repositorys von HACS einreichen: <https://github.com/hacs/default>.
 
 ## Ein echtes Repository
 

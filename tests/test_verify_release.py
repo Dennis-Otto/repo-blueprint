@@ -166,6 +166,7 @@ def verify(
     pinned: str | None = None,
     downloads: Sequence[int] = (0,),
     tag_type: str = "tag",
+    tag_name: str | None = None,
     fetched: int = 0,
     npm_has: str | None = None,
 ) -> StepResult:
@@ -175,7 +176,8 @@ def verify(
     None for one that is missing, and what curl gets by its URL in served, with None for
     what fails. A planned answer goes before those of a complete release. gitsign ends
     with signature, against the checksum pinned or its own, git cat-file names the type
-    of the tag and git fetch ends with fetched, and npm has the integrity npm_has.
+    of the tag and the name inside it, tag_name or the tag's own, git fetch ends with
+    fetched, and npm has the integrity npm_has.
     The downloads of gitsign end with the codes of downloads, one after the other, the
     last for every one after; an error is GitHub's 504."""
     version = tag.removeprefix("v")
@@ -270,7 +272,10 @@ def verify(
                 "git",
                 '[[ "$1" != init ]] || mkdir -p "${@: -1}"\n'
                 f'[[ "$*" != *" fetch "* ]] || exit {fetched}\n'
-                f'[[ "$*" != *" cat-file -t "* ]] || echo {tag_type}',
+                f'[[ "$*" != *" cat-file -t "* ]] || echo {tag_type}\n'
+                f'[[ "$*" != *" cat-file tag "* ]] ||'
+                f" printf 'object {COMMIT}\\ntype commit\\ntag %s\\n\\nThe release\\n'"
+                f" {tag_name or tag}",
             ),
             "npm": recording(
                 "npm",
@@ -486,6 +491,11 @@ PROBLEMS: dict[str, tuple[dict[str, Any], str]] = {
     "a tag that another signed": (
         {"signature": 1},
         f"The signature of the tag {TAG} isn't one of the release workflow.",
+    ),
+    # A new ref at the signed tag of an older release, whose signature holds.
+    "a signed tag of another version": (
+        {"tag_name": "v1.2.2"},
+        f"The tag {TAG} is the signed tag v1.2.2 of another version.",
     ),
     "a gitsign with another checksum": (
         {"pinned": "0" * 64},
@@ -761,6 +771,7 @@ WEEKLY_PROBLEMS = (
     "a release that isn't immutable",
     "an unsigned commit",
     "a tag that another signed",
+    "a signed tag of another version",
     "an asset without a provenance",
     "no SBOM",
 )
