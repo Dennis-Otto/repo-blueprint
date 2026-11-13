@@ -5,7 +5,7 @@ config:
 ---
 flowchart TB
     accTitle: The larger steps of the blueprint
-    accDescr: 0.1 to 0.8 brought seven kinds of projects, the settings as code, the release bot, the websites and SLSA Build Level 3; 0.9 to 0.13 the Rollout of every release, the PR coach and the blueprint for any owner; 1.0 made it stable, with a policy of versions; 1.1 to 1.5 brought the Chrome extension, the settings app and one list of the repositories; 1.6 to 1.9 titles and lock files that fix themselves, several further languages and the accessibility check at the width of a phone; 1.10 to 1.13 the Cloudflare Worker, /fix on forks and container images at SLSA Build Level 3. Next come visual changes and commands in pull requests, more kinds of projects and a website that shows the blueprint.
+    accDescr: 0.1 to 0.8 brought seven kinds of projects, the settings as code, the release bot, the websites and SLSA Build Level 3; 0.9 to 0.13 the Rollout of every release, the PR coach and the blueprint for any owner; 1.0 made it stable, with a policy of versions; 1.1 to 1.5 brought the Chrome extension, the settings app and one list of the repositories; 1.6 to 1.9 titles and lock files that fix themselves, several further languages and the accessibility check at the width of a phone; 1.10 to 1.13 the Cloudflare Worker, /fix on forks and container images at SLSA Build Level 3; 1.14 to 1.17 a social preview that draws the kind of project, the steps Binary files and Records of decisions, and a refresh of the lock files that merges by itself. Next come the pictures of a visual change in the report of a pull request, commands in pull requests, more kinds of projects and a website that shows the blueprint.
 
     subgraph done ["Done"]
         direction TB
@@ -14,14 +14,15 @@ flowchart TB
         stable["`**1.0**<br>stable<br>a policy of versions`"]
         kinds["`**1.1 – 1.5**<br>Chrome extension<br>settings app<br>one list of the repositories`"]
         heal["`**1.6 – 1.9**<br>titles and lock files that fix themselves<br>several further languages<br>accessibility on a phone`"]
-        latest["`**1.10 – 1.13**<br>Cloudflare Worker<br>/fix on forks<br>SLSA Build Level 3 images`"]
-        early --> rollout --> stable --> kinds --> heal --> latest
+        worker["`**1.10 – 1.13**<br>Cloudflare Worker<br>/fix on forks<br>SLSA Build Level 3 images`"]
+        latest["`**1.14 – 1.17**<br>a social preview of the kind<br>binary files, records of decisions<br>lock refresh that merges itself`"]
+        early --> rollout --> stable --> kinds --> heal --> worker --> latest
     end
 
-    next(["`**Next**<br>visual changes in pull requests<br>commands in pull requests<br>more kinds of projects<br>a website that shows the blueprint`"])
+    next(["`**Next**<br>visual changes in the report<br>commands in pull requests<br>more kinds of projects<br>a website that shows the blueprint`"])
     done --> next
 
     classDef done fill:#16a34a2e,stroke:#16a34a,stroke-width:2px
     classDef plan fill:#526cfe2e,stroke:#526cfe,stroke-width:2px,stroke-dasharray:6 4
-    class early,rollout,stable,kinds,heal,latest done
+    class early,rollout,stable,kinds,heal,worker,latest done
     class next plan

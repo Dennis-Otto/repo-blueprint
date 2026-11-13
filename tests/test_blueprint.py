@@ -40,7 +40,7 @@ from blueprint.checklist import (
     social_preview,
     social_preview_uploaded,
 )
-from blueprint.github import Api, GitHubError, Response
+from blueprint.github import Api, GitHubError, Response, current_repo
 from blueprint.settings import (
     BATCH,
     MAIN_ONLY,
@@ -3840,6 +3840,42 @@ def test_a_list_that_can_not_be_read(
         Api(runner).get_all("repos/x/labels")
 
 
+def test_the_help_shows_the_commands_of_a_person_apart_from_the_steps_of_the_bots(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as stop:
+        cli.parser().parse_args(["--help"])
+
+    assert stop.value.code == 0
+    shown = capsys.readouterr().out
+    usage, description = shown.split("\n\n")[:2]
+    assert usage == (
+        "usage: blueprint.py [-h] [--repo OWNER/NAME] [--config CONFIG] COMMAND ..."
+    )
+    for command in ("create", "doctor", "app", "settings", "checklist"):
+        assert re.search(rf"\b{command}\b", description), command
+    persons, bots = shown.split("\nsteps of the bots and the workflows:\n")
+    persons = persons.split("\ncommands for a person:\n")[1]
+
+    def listed(block: str) -> list[str]:
+        return re.findall(r"^  (\S+) +\S", block, re.MULTILINE)
+
+    assert listed(persons) == list(cli.PERSON_COMMANDS)
+    assert {"update-commit", "next-branch", "stale-runs", "annotate"} <= set(
+        listed(bots)
+    )
+    # Each command once, in one of the two groups.
+    every = listed(persons) + listed(bots)
+    assert len(every) == len(set(every)) > 30
+    # Every line in the width of a console, with the words of each in one column.
+    assert max(len(line) for line in (persons + bots).splitlines()) <= cli.HELP_WIDTH
+    assert all(
+        line.startswith(" " * cli.HELP_COLUMN) or re.match(r"^  \S+ +\S", line)
+        for line in (persons + bots).splitlines()
+        if line
+    )
+
+
 def test_a_folder_without_a_repository(
     root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -3849,7 +3885,33 @@ def test_a_folder_without_a_repository(
         return subprocess.CompletedProcess(arguments, 1, "", "no git remotes")
 
     assert cli.main(["settings", "check"], api=Api(runner), root=root) == 2
-    assert "--repo OWNER/NAME" in capsys.readouterr().err
+    said = capsys.readouterr().err
+    assert "no git remotes" in said
+    assert "--repo OWNER/NAME" in said
+
+
+@pytest.mark.parametrize(
+    ("stderr", "shown"),
+    [
+        (
+            "To get started with GitHub CLI, please run:  gh auth login\n",
+            "gh auth login",
+        ),
+        ("", "gh repo view ended with 4"),
+    ],
+    ids=["signed out", "silent"],
+)
+def test_a_failed_repo_view_names_what_gh_said(stderr: str, shown: str) -> None:
+    def runner(
+        arguments: Sequence[str], body: str | None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(arguments, 4, "", stderr)
+
+    with pytest.raises(GitHubError) as raised:
+        current_repo(Api(runner))
+
+    assert shown in raised.value.message
+    assert "--repo OWNER/NAME" in raised.value.message
 
 
 def test_a_missing_configuration(
@@ -4163,12 +4225,14 @@ def test_create_goes_on_with_the_settings_after_a_run_that_stopped_there(
     )
 
 
-def test_a_python_without_tomllib_is_named_before_the_import(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("minor", [10, 11])
+def test_a_python_below_3_12_is_named_before_the_import(
+    minor: int, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # The import of the package would stop with a traceback on Python 3.10: the
-    # script says so first, in words that every Python can write.
-    monkeypatch.setattr("sys.version_info", (3, 10, 14, "final", 0))
+    # The import of the package would stop with a traceback on Python 3.10, and the
+    # tools need 3.12 (MINIMUM_PYTHON of blueprint/bootstrap.py): the script says so
+    # first, in words that every Python can write, on 3.11 as well.
+    monkeypatch.setattr("sys.version_info", (3, minor, 14, "final", 0))
     monkeypatch.setattr("sys.argv", ["blueprint.py", "doctor"])
     # The script sets it; the setattr puts it back after the test.
     monkeypatch.setattr("sys.dont_write_bytecode", sys.dont_write_bytecode)
@@ -4180,7 +4244,8 @@ def test_a_python_without_tomllib_is_named_before_the_import(
 
     assert stop.value.code == 1
     assert capsys.readouterr().err == (
-        "Python 3.10: the tools of the new repository need Python 3.12 or later\n"
+        f"Python 3.{minor}: the tools of the new repository need Python 3.12 or"
+        " later\n"
         "    install Python 3.12 or later: https://www.python.org/downloads/"
         " (on Windows, py -3 runs it)\n"
     )

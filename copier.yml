@@ -136,7 +136,7 @@ project_slug:
   help: The name of the repository; owner.github.io, such as dennis-otto.github.io, for the website of the owner itself
   default: "{= project_name | lower | regex_replace('[^a-z0-9]+', '-') | trim('-') =}"
   validator: >-
-    [% if not (project_slug | regex_search('^[a-z0-9][a-z0-9-]*[a-z0-9]$') or (project_slug.endswith('.github.io') and project_slug[:-10] | regex_search('^[a-z0-9][a-z0-9-]*[a-z0-9]$'))) %]Use lowercase letters, digits and hyphens, or the name of the website of an owner, such as dennis-otto.github.io.[% endif %]
+    [% if not (project_slug | regex_search('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') or (project_slug.endswith('.github.io') and project_slug[:-10] | regex_search('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'))) %]Use lowercase letters, digits and hyphens, or the name of the website of an owner, such as dennis-otto.github.io.[% endif %]
 
 description:
   type: str
@@ -202,10 +202,12 @@ license:
     GPL 3.0 or later: GPL-3.0-or-later
     AGPL 3.0 or later: AGPL-3.0-or-later
 
+# A name of Python starts with a letter: py_ before a slug that starts with a digit,
+# such as py_2fa_helper for 2FA Helper.
 python_package:
   type: str
   help: The name of the Python package or module
-  default: "{= project_slug | replace('-', '_') =}"
+  default: "{= ('py_' if project_slug | regex_search('^[0-9]') else '') ~ project_slug | replace('-', '_') =}"
   when: "{= project_type in ['python-package', 'github-action', 'home-assistant'] =}"
   validator: >-
     [% if not (python_package | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
@@ -219,19 +221,23 @@ ha_domain:
     [% if not (ha_domain | regex_search('^[a-z_][a-z0-9_]*$')) %]Use lowercase letters, digits and underscores.[% endif %]
 
 # The App Store takes an id of 32 characters at most, from a lowercase letter to a
-# letter or a digit, as the schema of appinfo/info.xml says.
+# letter or a digit, as the schema of appinfo/info.xml says: app_ before a slug that
+# starts with a digit or has one character only, such as app_2fa_helper.
 nextcloud_app_id:
   type: str
   help: The id of the Nextcloud app, 32 characters at most
-  default: "{= (project_slug | replace('-', '_'))[:32] | trim('_') =}"
+  default: "{= (('' if project_slug | regex_search('^[a-z][a-z0-9-]*[a-z0-9]$') else 'app_') ~ project_slug | replace('-', '_'))[:32] | trim('_') =}"
   when: "{= project_type == 'nextcloud-app' =}"
   validator: >-
     [% if not (nextcloud_app_id | regex_search('^[a-z][a-z0-9_]*[a-z0-9]$')) or nextcloud_app_id | length > 32 %]Use 2 to 32 lowercase letters, digits and underscores, from a letter to a letter or a digit, as the App Store takes them.[% endif %]
 
+# Each word with a capital first letter, and its other letters as they are:
+# PaperlessSync stays PaperlessSync and iCal Sync becomes ICalSync, where the filter
+# title would lower the inner capitals; App before a name that starts with a digit.
 nextcloud_namespace:
   type: str
   help: The PHP namespace of the app, under OCA
-  default: "{= project_name | regex_replace('[^A-Za-z0-9]+', ' ') | title | replace(' ', '') =}"
+  default: "[% for word in (project_name | regex_replace('[^A-Za-z0-9]+', ' ')).split() %][% if loop.first and word | regex_search('^[0-9]') %]App[% endif %]{= word[:1] | upper ~ word[1:] =}[% endfor %]"
   when: "{= project_type == 'nextcloud-app' =}"
   validator: >-
     [% if not (nextcloud_namespace | regex_search('^[A-Z][A-Za-z0-9_]*$')) %]Use a name of PHP in CamelCase, such as PaperlessSync or Files_Sharing: a capital letter, then letters, digits and underscores.[% endif %]

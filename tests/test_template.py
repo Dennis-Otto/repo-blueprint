@@ -2647,6 +2647,27 @@ def test_someone_sets_every_label(projects: dict[str, Path]) -> None:
         assert "dependabot" not in setters, project
 
 
+@pytest.mark.parametrize("page", ["docs/guide.md", "docs/guide.de.md"])
+def test_the_guide_names_the_labels_that_the_bots_set(
+    projects: dict[str, Path], page: str
+) -> None:
+    # An existing repository gives its labels.toml the labels of the bots by hand, as
+    # the guide lists them: the group release, maintenance and no-bot-fixes, and no
+    # label that the template no longer has, such as docker.
+    text = (projects["generic"] / ".github/labels.toml").read_text(encoding="utf-8")
+    labels = tomllib.loads(text)["label"]
+    bots = {label["name"] for label in labels if label["group"] == "release"}
+    step = next(
+        line
+        for line in (ROOT / page).read_text(encoding="utf-8").splitlines()
+        if line.startswith("3. ") and "labels.toml.jinja" in line
+    )
+    named = set(re.findall(r"`([^`]+)`", step.partition("labels.toml.jinja)")[2]))
+
+    assert named == {*bots, "maintenance", "no-bot-fixes"}
+    assert named <= {label["name"] for label in labels}
+
+
 def test_the_composer_lock_belongs_to_the_composer_json(
     projects: dict[str, Path],
 ) -> None:
@@ -3000,7 +3021,9 @@ def test_the_settings_tool_runs_in_every_repository(
     assert "The settings of a repository as code" in result.stdout
     # Every copy brings create and its preflight alone, for the folder that copier
     # copy wrote, and what registers its release app after them.
-    assert ",app,create,doctor," in result.stdout
+    persons = result.stdout.partition("\nsteps of the bots")[0]
+    for name in ("app", "create", "doctor"):
+        assert f"\n  {name} " in persons
     for action in ("register", "connect"):
         command = subprocess.run(
             [sys.executable, ".github/blueprint.py", "app", action, "--help"],
@@ -3285,6 +3308,218 @@ def test_hassfest_shows_its_errors_as_annotations(
     assert error[pattern["severity"]] == "ERROR"
     assert error[pattern["message"]].startswith("[MANIFEST] Invalid manifest: ")
     assert not re.match(pattern["regexp"], "Integrations: 1")
+
+
+OLDEST = "Load the integration on the oldest Home Assistant"
+
+
+def a_home_assistant(folder: Path, refused: str) -> Path:
+    """A package homeassistant of 2026.8.0, as the image of that release has it, whose
+    install_package writes each requirement down and refuses the one refused."""
+    package = folder / "homeassistant"
+    (package / "util").mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "util/__init__.py").write_text("", encoding="utf-8")
+    (package / "util/package.py").write_text(
+        "import os\n\n\n"
+        "def install_package(package, upgrade=True, target=None, constraints=None):\n"
+        '    with open(os.environ["INSTALLED"], "a", encoding="utf-8") as log:\n'
+        "        print(package, upgrade, os.path.basename(constraints), file=log)\n"
+        f"    return package != {refused!r}\n",
+        encoding="utf-8",
+    )
+    metadata = folder / "homeassistant-2026.8.0.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: homeassistant\nVersion: 2026.8.0\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def run_on_the_oldest(
+    tmp_path: Path, project: Path, files: Mapping[str, str], refused: str = ""
+) -> tuple[workflow_steps.StepResult, list[str]]:
+    """The step of the oldest Home Assistant of the project, with a docker that runs
+    the Python it gets on this machine, in the checkout, with a fake Home Assistant;
+    with the requirements that it installed."""
+    packages = a_home_assistant(tmp_path / "packages", refused)
+    installed = tmp_path / "installed.txt"
+    installed.touch()
+    result = workflow_steps.run_step(
+        tmp_path,
+        "ci.yml",
+        "home-assistant",
+        OLDEST,
+        root=project,
+        files=files,
+        stubs={
+            "docker": workflow_steps.recording("docker", 'exec "$PYTHON" -X utf8 -')
+        },
+        env={
+            "PYTHON": Path(sys.executable).as_posix(),
+            "PYTHONPATH": str(packages),
+            "INSTALLED": str(installed),
+        },
+    )
+    return result, installed.read_text(encoding="utf-8").splitlines()
+
+
+INTEGRATION = {
+    "hacs.json": '{"name": "Example", "homeassistant": "2026.8.0"}\n',
+    "custom_components/__init__.py": "",
+    "custom_components/example/manifest.json": '{"domain": "example"}\n',
+    "custom_components/example/__init__.py": "DOMAIN = 'example'\n",
+    "custom_components/example/sensor.py": "from . import DOMAIN\n",
+    "custom_components/example/helpers/__init__.py": "",
+    "custom_components/example/helpers/time.py": "import datetime\n",
+}
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_an_integration_loads_on_the_oldest_home_assistant_of_its_hacs_json(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    result, installed = run_on_the_oldest(
+        tmp_path, projects["home-assistant"], INTEGRATION
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The image of the release that hacs.json names, with the checkout read-only.
+    [docker] = result.stubbed
+    assert docker.startswith("docker run --rm --interactive --volume ")
+    assert docker.endswith(
+        ":/github/workspace:ro --workdir /github/workspace --entrypoint python3"
+        " ghcr.io/home-assistant/home-assistant:2026.8.0 -"
+    )
+    assert "Home Assistant 2026.8.0 on Python " in result.stdout
+    # Every module, a package by its own name; a manifest without requirements
+    # installs nothing.
+    assert re.findall(r"^(\S+) imports\.$", result.stdout, re.M) == [
+        "custom_components.example",
+        "custom_components.example.helpers",
+        "custom_components.example.helpers.time",
+        "custom_components.example.sensor",
+    ]
+    assert installed == []
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_an_integration_that_needs_a_newer_home_assistant_fails_on_its_oldest(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    files = {
+        **INTEGRATION,
+        "custom_components/example/manifest.json": (
+            '{"domain": "example", "requirements": ["good==1.0", "bad==2.0"]}\n'
+        ),
+        # Something that came with a newer Home Assistant than the minimum.
+        "custom_components/example/sensor.py": (
+            "from homeassistant.helpers.newer import Thing\n"
+        ),
+    }
+
+    result, installed = run_on_the_oldest(
+        tmp_path, projects["home-assistant"], files, refused="bad==2.0"
+    )
+
+    assert result.returncode == 1
+    # The requirements of the manifest install as Home Assistant installs them, with
+    # its constraints, and each one that doesn't is an error of the manifest.
+    assert installed == [
+        "good==1.0 False package_constraints.txt",
+        "bad==2.0 False package_constraints.txt",
+    ]
+    assert (
+        "::error file=custom_components/example/manifest.json,title=A requirement"
+        " that doesn't install::bad==2.0 doesn't install on the oldest Home Assistant."
+    ) in result.stdout
+    # The module that needs more, at its file and with its error; the others load.
+    assert (
+        "::error file=custom_components/example/sensor.py,title=Not on the oldest"
+        " Home Assistant::custom_components.example.sensor doesn't import:"
+        " ModuleNotFoundError: No module named 'homeassistant.helpers'"
+    ) in result.stdout
+    assert "Traceback" in result.stderr
+    assert "custom_components.example.helpers.time imports." in result.stdout
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+@pytest.mark.parametrize(
+    ("hacs", "code", "said"),
+    [
+        (None, 0, "There is no hacs.json to name the oldest Home Assistant"),
+        ('{"name": "Example"}', 0, "hacs.json names no oldest Home Assistant"),
+        (
+            '{"name": "Example", "homeassistant": "2026.8.x"}',
+            1,
+            "::error file=hacs.json,title=No release of Home Assistant::hacs.json"
+            " names 2026.8.x as the oldest Home Assistant",
+        ),
+    ],
+)
+def test_the_oldest_home_assistant_is_the_one_that_hacs_json_names(
+    projects: dict[str, Path],
+    tmp_path: Path,
+    hacs: str | None,
+    code: int,
+    said: str,
+) -> None:
+    files = {key: value for key, value in INTEGRATION.items() if key != "hacs.json"}
+    if hacs is not None:
+        files["hacs.json"] = hacs + "\n"
+
+    result, _ = run_on_the_oldest(tmp_path, projects["home-assistant"], files)
+
+    assert result.returncode == code
+    assert said in result.stdout
+    # Without a release to run, no image.
+    assert result.stubbed == []
+
+
+@pytest.mark.skipif(
+    BASH is None or workflow_steps.JQ is None, reason="the step runs in bash, with jq"
+)
+def test_a_minimum_without_a_patch_number_is_the_first_release_of_its_month(
+    projects: dict[str, Path], tmp_path: Path
+) -> None:
+    # HACS reads 2026.8 as 2026.8.0, so the step runs that image.
+    files = {
+        **INTEGRATION,
+        "hacs.json": '{"name": "Example", "homeassistant": "2026.8"}\n',
+    }
+
+    result, _ = run_on_the_oldest(tmp_path, projects["home-assistant"], files)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    [docker] = result.stubbed
+    assert docker.endswith(" ghcr.io/home-assistant/home-assistant:2026.8.0 -")
+
+
+def test_the_example_promises_a_home_assistant_no_newer_than_it_tests(
+    projects: dict[str, Path],
+) -> None:
+    # The step runs the example on a release, and the lock file of its tests is no
+    # older than that minimum.
+    project = projects["home-assistant"]
+    hacs = json.loads((project / "hacs.json").read_text(encoding="utf-8"))
+    minimum = hacs["homeassistant"]
+    assert re.fullmatch(r"\d{4}\.\d{1,2}\.\d+", minimum)
+    lock = (project / "requirements-test.txt").read_text(encoding="utf-8")
+    locked = re.search(r"^homeassistant==(\d+)\.(\d+)\.(\d+)", lock, re.M)
+    assert locked
+    assert tuple(map(int, minimum.split("."))) <= tuple(map(int, locked.groups()))
+    ci = (project / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    step = step_in(job_in(ci, "home-assistant"), OLDEST)
+    assert condition_of(step) == (
+        "${{ !cancelled() && steps.checkout.outcome == 'success' }}"
+    )
 
 
 HADOLINT = re.compile(r"ghcr\.io/hadolint/hadolint:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}")
@@ -13883,6 +14118,75 @@ def test_answers_that_would_break_a_file_are_refused(
             )
 
 
+@pytest.mark.parametrize(
+    ("name", "kind", "expected"),
+    [
+        # The filter title lowered the inner capitals: Paperlesssync and IcalSync.
+        (
+            "PaperlessSync",
+            "nextcloud-app",
+            {
+                "nextcloud_namespace": "PaperlessSync",
+                "nextcloud_app_id": "paperlesssync",
+            },
+        ),
+        (
+            "iCal Sync",
+            "nextcloud-app",
+            {"nextcloud_namespace": "ICalSync", "nextcloud_app_id": "ical_sync"},
+        ),
+        # A digit at the start, which no name of Python, the App Store or PHP takes.
+        (
+            "2FA Helper",
+            "nextcloud-app",
+            {
+                "project_slug": "2fa-helper",
+                "nextcloud_app_id": "app_2fa_helper",
+                "nextcloud_namespace": "App2FAHelper",
+            },
+        ),
+        (
+            "2FA Helper",
+            "home-assistant",
+            {"python_package": "py_2fa_helper", "ha_domain": "py_2fa_helper"},
+        ),
+        ("2FA Helper", "python-package", {"python_package": "py_2fa_helper"}),
+        # One character, which the App Store doesn't take as an id.
+        ("X", "generic", {"project_slug": "x"}),
+        ("X", "python-package", {"project_slug": "x", "python_package": "x"}),
+        (
+            "X",
+            "nextcloud-app",
+            {"nextcloud_app_id": "app_x", "nextcloud_namespace": "X"},
+        ),
+    ],
+)
+def test_the_defaults_of_a_name_pass_their_own_questions(
+    tmp_path: Path, name: str, kind: str, expected: dict[str, str]
+) -> None:
+    # copier copy --defaults asks nothing, so a default that its validator refuses
+    # stopped the copy on a question that nobody answered.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        worker = run_copy(
+            str(Template.folder),
+            tmp_path / "project",
+            data={
+                "owner": "octo-org",
+                "project_name": name,
+                "description": "A demo.",
+                "project_type": kind,
+            },
+            defaults=True,
+            vcs_ref="HEAD",
+            pretend=True,
+            quiet=True,
+        )
+
+    answers = worker.answers.combined
+    assert {question: answers[question] for question in expected} == expected
+
+
 def test_a_namespace_may_hold_underscores_as_those_of_nextcloud_do(
     tmp_path: Path,
 ) -> None:
@@ -13994,9 +14298,10 @@ def test_names_with_quotes_and_markup_render_files_that_parse(
         assert (info.findtext("description") or "").strip() == HOSTILE_DESCRIPTION
         # The id of a long name, cut to the 32 characters that the App Store takes.
         assert info.findtext("id") == "demo_quoted_tagged_user_project"
+        # Each word keeps its capitals, such as USER of $USER.
         assert (
             info.findtext("namespace")
-            == "DemoQuotedTaggedUserProjectOfPaperlessDocuments"
+            == "DemoQuotedTaggedUSERProjectOfPaperlessDocuments"
         )
         composer = json.loads((project / "composer.json").read_text(encoding="utf-8"))
         assert composer["description"] == HOSTILE_DESCRIPTION
@@ -15171,7 +15476,7 @@ PARTS = {
         "ownership",
     ],
     "conventional title": ["conventional title", "changelog"],
-    "home-assistant": ["hacs", "hassfest"],
+    "home-assistant": ["hacs", "hassfest", "oldest-home-assistant"],
     "dependency-review": ["dependency-review", "age of the refresh"],
 }
 

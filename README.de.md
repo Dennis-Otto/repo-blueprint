@@ -160,7 +160,7 @@ Jede Gruppe hat eine eigene Seite, mit dem, was läuft, den Dateien, die es ausf
 ### [Abhängigkeiten und Updates](docs/features/updates.de.md)
 
 - **Abhängigkeiten:** Renovate aktualisiert die Abhängigkeiten ein paar Mal am Tag, als Release-App des Eigentümers.
-- **Updates:** Direkt nach jedem Release des Blueprints, und jede Woche, öffnet der Blueprint-Bot einen Pull Request mit `copier update`.
+- **Updates:** Innerhalb eines Tages nach jedem Release des Blueprints, und jede Woche, öffnet der Blueprint-Bot einen Pull Request mit `copier update`.
 - **Upstream:** Eine Nextcloud-App bekommt einen Pull Request, der `max-version` anhebt, sobald eine neue Hauptversion von Nextcloud jede Prüfung besteht.
 
 ### [Bots, ihre Kosten und das Dashboard](docs/features/bots.de.md)
