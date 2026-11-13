@@ -555,7 +555,12 @@ def checklist(
         Step(
             f"No classic branch protection of {BRANCH}, only the rulesets",
             not classic,
-            "\n".join(f"it requires {item.have}: {item.manual}" for item in classic),
+            "\n".join(
+                # A protection whose switches are all off requires nothing in words.
+                ("it exists" if item.have == "present" else f"it requires {item.have}")
+                + f": {item.manual}"
+                for item in classic
+            ),
         ),
         installed,
         DEPENDABOT_ALERTS,

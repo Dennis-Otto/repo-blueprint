@@ -5254,5 +5254,13 @@ def test_the_checklist_names_a_classic_branch_protection(
         .strip()
         .startswith("it requires 1 approving review: the rulesets protect main")
     )
+    # A protection whose switches are all off still exists, and the line says so.
+    github.protection = {"required_signatures": {"enabled": False}}
+
+    assert run(github, root, "checklist") == 1
+
+    lines = capsys.readouterr().out.splitlines()
+    step = lines.index("  ✘ No classic branch protection of main, only the rulesets")
+    assert lines[step + 1].strip().startswith("it exists: the rulesets protect main")
     # Not a part of the settings that settings apply could set.
     assert "  ✔ Settings as code applied" in lines
