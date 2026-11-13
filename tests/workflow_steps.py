@@ -370,24 +370,35 @@ def run_step(
         **given,
     }
     options = shell_options(workflow_name, job_id, found, root)
-    done = subprocess.run(
-        in_bash(*options, (github / "step.sh").as_posix()),
-        cwd=folders["workspace"] / found.get("working-directory", "."),
-        env=environment,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        encoding="utf-8",
-        timeout=120,
-        check=False,
-    )
+    # The output of the step goes into files, never into a pipe of the test. On Windows
+    # such a pipe is one of Windows, which Git Bash shares with the programs of Windows
+    # that the step starts, such as Python for the fake gh, and a write of bash into it
+    # once broke there: bash ended at once by SIGPIPE, with code 141 and without a word
+    # of the steps after it (#868). A write into a file can't break that way.
+    written = {name: github / f"{name}.txt" for name in ("stdout", "stderr")}
+    with (
+        written["stdout"].open("wb") as stdout,
+        written["stderr"].open("wb") as stderr,
+    ):
+        returncode = subprocess.run(
+            in_bash(*options, (github / "step.sh").as_posix()),
+            cwd=folders["workspace"] / found.get("working-directory", "."),
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            timeout=120,
+            check=False,
+        ).returncode
+    output = {name: path.read_text(encoding="utf-8") for name, path in written.items()}
     logged = [
         json.loads(line)
         for line in paths["calls"].read_text(encoding="utf-8").splitlines()
     ]
     return StepResult(
-        returncode=done.returncode,
-        stdout=done.stdout,
-        stderr=done.stderr,
+        returncode=returncode,
+        stdout=output["stdout"],
+        stderr=output["stderr"],
         calls=[call["args"] for call in logged],
         read=[call["read"] for call in logged],
         stubbed=paths["stubbed"].read_text(encoding="utf-8").splitlines(),

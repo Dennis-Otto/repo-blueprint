@@ -636,6 +636,10 @@ def test_the_workflows_are_the_blueprints_own(
             watched = r"    # The (?:workflows of the )?checks of this repository.*\n(?:    # .*\n)*    workflows: \[.*\]\n"
             source = re.sub(watched, "", source)
             text = re.sub(watched, "", text)
+            # The report of flaky tests leaves out Downstream, which only the blueprint
+            # has.
+            assert source.count('["Downstream", "CodeQL"') == 1
+            source = source.replace('["Downstream", "CodeQL"', '["CodeQL"')
         if name == "after-checks.yml" and (
             "renovate.yml" not in workflows(projects[kind])
         ):
@@ -15396,10 +15400,14 @@ def test_the_flaky_test_bot_leaves_the_other_required_checks_alone() -> None:
     # Their checks fail the same way again, or, as the changelog, pass once the pull
     # request changed: no flaky test either way, and neither are the rules of
     # Renovate. The release has a bot of its own.
-    for job in ("rerun", "report"):
-        assert left_alone_by_the_flaky_test_bot(after_the_checks_job(job)) == (
-            OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
-        ), job
+    left_alone = OTHER_CHECKS | SCANNER_WORKFLOWS | {"Renovate", "Release"}
+    assert left_alone_by_the_flaky_test_bot(after_the_checks_job("rerun")) == left_alone
+    # Downstream updates the repositories as they are: one that changed in between, as
+    # player-switch-for-autodarts merged what a pull request needed between the two
+    # attempts of a run (#868), lets it pass at its second, with no flaky test.
+    assert left_alone_by_the_flaky_test_bot(after_the_checks_job("report")) == (
+        left_alone | {"Downstream"}
+    )
 
 
 EXPLAIN_COMMENT = (
